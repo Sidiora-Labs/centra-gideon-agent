@@ -6,16 +6,29 @@ import { Button } from '../../shared/ui/Button'
 import { Checkbox } from '../../shared/ui/forms'
 import { InlineError } from '../../shared/ui/InlineError'
 import { fvs } from '../../shared/theme/fontWeight'
-import { hasApiCode, type RetrievalArmContribution, type RetrievalBenchView, type RetrievalStoreReport } from '../../shared/data/api'
+import { hasApiCode, isFeatureOff, isReportNotRun, type RetrievalArmContribution, type RetrievalBenchView, type RetrievalStoreReport, type FeatureOffEnvelope, type ReportNotRunEnvelope } from '../../shared/data/api'
 import { EvalsOff } from './EvalsOff'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 
 export function RetrievalBenchPanel({ bench, error, onRetry }: {
-  bench: RetrievalBenchView | undefined
+  bench: RetrievalBenchView | FeatureOffEnvelope | ReportNotRunEnvelope | undefined
   error: unknown
   onRetry: () => void
 }) {
 
+  if (isFeatureOff(bench)) {
+    return <section className={learningPanelClass} aria-labelledby="retrieval-bench-heading"><Heading /><EvalsOff what="retrieval benchmark" /></section>
+  }
+  if (isReportNotRun(bench)) {
+    return (
+      <section className={learningPanelClass} aria-labelledby="retrieval-bench-heading">
+        <Heading />
+        <p className="text-on-surface-low text-[0.8125rem]">No retrieval benchmark has run yet.</p>
+        <p className="text-on-surface-low text-[0.8125rem]">{bench.next_action}</p>
+          <LabelCards stores={['knowledge', 'memory']} />
+      </section>
+    )
+  }
   if (bench === undefined) {
     if (!error) return null
     if (hasApiCode(error, 'evals_disabled')) {

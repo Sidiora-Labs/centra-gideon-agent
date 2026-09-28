@@ -1,5 +1,5 @@
 import { RefreshCw, Scissors } from 'lucide-react'
-import { api, evaluationArmExecutions } from '../../shared/data/api'
+import { api, evaluationArmExecutions, isFeatureOff, isReportNotRun, type FeatureOffEnvelope, type ReportNotRunEnvelope } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
 import { LoadError, ListSkeleton } from '../../shared/ui/ListScaffold'
 import { PageTitle } from '../../shared/ui/PageTitle'
@@ -26,7 +26,11 @@ export function EvalsPage() {
       />
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto flex flex-col gap-xl px-l py-l pb-2xl" style={{ maxWidth: 'var(--content-width)' }}>
-          {data === undefined && error ? (
+          {data !== undefined && isFeatureOff(data) ? (
+            <section className="rounded-xl border border-outline-variant/30 bg-surface-container p-l" role="status"><h2 data-type="title-m" className="text-on-surface">Evaluations are off</h2><p className="text-on-surface-low text-[0.8125rem]">Evaluation reports are unavailable while evaluations are disabled.</p></section>
+          ) : data !== undefined && isReportNotRun(data) ? (
+            <section className="rounded-xl border border-outline-variant/30 bg-surface-container p-l" role="status"><h2 data-type="title-m" className="text-on-surface">No evaluation run yet</h2><p className="text-on-surface-low text-[0.8125rem]">{data.next_action}</p></section>
+          ) : data === undefined && error ? (
             <LoadError what="evaluation runs" error={error} onRetry={refresh} />
           ) : data === undefined ? (
             <ListSkeleton rows={3} what="evaluation arms" />
@@ -39,7 +43,7 @@ export function EvalsPage() {
   )
 }
 
-function EvaluationArms({ view }: { view: Awaited<ReturnType<typeof api.ablation>> }) {
+function EvaluationArms({ view }: { view: Exclude<Awaited<ReturnType<typeof api.ablation>>, FeatureOffEnvelope | ReportNotRunEnvelope> }) {
   const rows = evaluationArmExecutions(view.report)
   return (
     <section className="flex flex-col gap-m rounded-xl border border-outline-variant/30 bg-surface-container p-l" aria-labelledby="evaluation-arms-heading">

@@ -2,14 +2,17 @@ import { LearningHeading, LearningTable, learningPanelClass, signedMeasurement }
 import { ArrowLeftRight, TrendingDown, TrendingUp } from 'lucide-react'
 import { LoadError } from '../../shared/ui/ListScaffold'
 import { StatusPill } from '../../shared/ui/StatusPill'
-import { api, hasApiCode, type FieldMetricsRow } from '../../shared/data/api'
+import { api, hasApiCode, isFeatureOff, type FieldMetricsRow, type FeatureOffEnvelope } from '../../shared/data/api'
 import { EvalsOff } from './EvalsOff'
 
 export function FieldMetricsPanel({ rows, error, onRetry }: {
-  rows: FieldMetricsRow[] | undefined
+  rows: FieldMetricsRow[] | FeatureOffEnvelope | undefined
   error: unknown
   onRetry: () => void
 }) {
+  if (isFeatureOff(rows)) {
+    return <section className={learningPanelClass} aria-labelledby="field-metrics-heading"><Heading /><EvalsOff what="lab-vs-field table" /></section>
+  }
   if (rows === undefined) {
     if (!error) return null
     if (hasApiCode(error, 'evals_disabled')) {

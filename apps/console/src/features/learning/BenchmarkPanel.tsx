@@ -4,19 +4,37 @@ import { ExternalLink, FlaskConical, ShieldAlert } from 'lucide-react'
 import { LoadError } from '../../shared/ui/ListScaffold'
 import { StatusPill } from '../../shared/ui/StatusPill'
 import { fvs } from '../../shared/theme/fontWeight'
-import { hasApiCode } from '../../shared/data/api'
+import { hasApiCode, isFeatureOff, isReportNotRun } from '../../shared/data/api'
 import { UNRECORDED_LABEL, provenanceRecorded, tokensUnrecorded } from '../../shared/data/unrecorded'
 import { EvalsOff } from './EvalsOff'
 import type {
   BenchmarkArmAggregate, BenchmarkProviderBinding, BenchmarkReport, BenchmarkTaskRow,
-  BenchmarkView,
+  BenchmarkView, FeatureOffEnvelope, ReportNotRunEnvelope,
 } from '../../shared/data/api'
 
 export function BenchmarkPanel({ view, error, onRetry }: {
-  view: BenchmarkView | undefined
+  view: BenchmarkView | FeatureOffEnvelope | ReportNotRunEnvelope | undefined
   error: unknown
   onRetry: () => void
 }) {
+  if (isFeatureOff(view)) {
+    return (
+      <section className={learningPanelClass} aria-labelledby="skillbench-heading">
+        <Heading />
+        <EvalsOff what="benchmark" />
+      </section>
+    )
+  }
+  if (isReportNotRun(view)) {
+    return (
+      <section className={learningPanelClass} aria-labelledby="skillbench-heading">
+        <Heading />
+        <p className="text-on-surface-low text-[0.8125rem]">No skill-impact benchmark has run yet.</p>
+        <p className="text-on-surface-low text-[0.8125rem]">{view.next_action}</p>
+        <MethodologyLink doc="docs/reference/LEARNING_BENCHMARK_PROTOCOL.md" />
+      </section>
+    )
+  }
   if (view === undefined) {
     if (!error) return null
     if (hasApiCode(error, 'evals_disabled')) {

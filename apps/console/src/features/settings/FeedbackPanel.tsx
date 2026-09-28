@@ -1,10 +1,12 @@
 import { LoadError, ListSkeleton } from '../../shared/ui/ListScaffold'
 import { useState } from 'react'
 import { ThumbsUp, ThumbsDown, BellOff, RotateCcw } from 'lucide-react'
-import { api, type FeedbackProducerRow } from '../../shared/data/api'
+import { api, isFeatureOff, requireWriteAccepted, type FeedbackProducerRow } from '../../shared/data/api'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { Button } from '../../shared/ui/Button'
 import { PanelHeader, Section } from './settingsUI'
+import { Switch } from './bento'
+import { notify } from '../../app/shell/appSdk'
 
 export function FeedbackPanel() {
   const { data, error: loadErr, refresh } = useQuery(
@@ -13,6 +15,7 @@ export function FeedbackPanel() {
     { persist: false },
   )
   const [busy, setBusy] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const act = async (fn: () => Promise<unknown>, tag: string) => {
     setBusy(tag)
@@ -21,7 +24,19 @@ export function FeedbackPanel() {
     finally { setBusy('') }
   }
 
-  const rows = data?.producers ?? []
+  const rows = data && !isFeatureOff(data) ? data.producers : []
+  const turnOn = async () => {
+    setSaving(true)
+    try {
+      await api.patchConfig('feedback.enabled', true).then(requireWriteAccepted)
+      invalidateKeys('settings:feedback-producers')
+      refresh()
+    } catch (error) {
+      notify(`Couldn't turn on feedback: ${String((error as Error)?.message || error)}`, 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div>
@@ -29,8 +44,16 @@ export function FeedbackPanel() {
         hint="Every 👍/👎 you leave on an AI judgment (inbox triage, drafts, digests, loop findings) is attributed to the source that produced it — the bound prompt, judge, or rule. A source that keeps being wrong asks to be reviewed; where that kind of source has a surfacing gate (today, skills) it also stops surfacing. Everything here is deterministic counting; nothing leaves this machine." />
 
       <Section title="Judgment sources"
-        hint={data ? `Rolling ${data.window_days}-day window · accuracy shown after ${data.min_n} verdicts. History restarts when you rebind a prompt (a new prompt is a new source).` : undefined}>
-        {loadErr ? <LoadError what="feedback sources" error={loadErr} onRetry={refresh} /> : !data ? <ListSkeleton rows={3} what="feedback sources" /> : rows.length === 0 ? (
+        hint={data && !isFeatureOff(data) ? `Rolling ${data.window_days}-day window · accuracy shown after ${data.min_n} verdicts. History restarts when you rebind a prompt (a new prompt is a new source).` : undefined}>
+        {loadErr ? <LoadError what="feedback sources" error={loadErr} onRetry={refresh} /> : !data ? <ListSkeleton rows={3} what="feedback sources" /> : isFeatureOff(data) ? (
+          <div className="rounded-lg bg-surface-container px-3 py-3">
+            <div data-type="body-s" className="text-on-surface">Feedback is off, so no 👍/👎 are shown</div>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-s">
+              <span data-type="caption" className="text-on-surface-low">Turn on Collect feedback under Tuning below</span>
+              <Switch on={false} disabled={saving} label="Collect feedback" onToggle={turnOn} />
+            </div>
+          </div>
+        ) : rows.length === 0 ? (
           <div data-type="body-s" className="rounded-lg bg-surface-container px-3 py-3 text-on-surface-low">
             No feedback yet — 👍/👎 appear on inbox classifications, drafted replies, digests, and loop findings. Verdicts collect here per judgment source.
           </div>

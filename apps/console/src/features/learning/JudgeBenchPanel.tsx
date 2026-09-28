@@ -2,16 +2,28 @@ import { LearningHeading, LearningTable, learningPanelClass, measurement, measur
 import { Gavel, ShieldAlert } from 'lucide-react'
 import { LoadError } from '../../shared/ui/ListScaffold'
 import { fvs } from '../../shared/theme/fontWeight'
-import { hasApiCode } from '../../shared/data/api'
+import { hasApiCode, isFeatureOff, isReportNotRun, type FeatureOffEnvelope, type ReportNotRunEnvelope } from '../../shared/data/api'
 import type { JudgeBenchRecommendation, JudgeBenchRow, JudgeBenchView } from '../../shared/data/api'
 import { EvalsOff } from './EvalsOff'
 
 export function JudgeBenchPanel({ bench, error, onRetry }: {
-  bench: JudgeBenchView | undefined
+  bench: JudgeBenchView | FeatureOffEnvelope | ReportNotRunEnvelope | undefined
   error: unknown
   onRetry: () => void
 }) {
 
+  if (isFeatureOff(bench)) {
+    return <section className={learningPanelClass} aria-labelledby="judge-bench-heading"><Heading /><EvalsOff what="judge benchmark" /></section>
+  }
+  if (isReportNotRun(bench)) {
+    return (
+      <section className={learningPanelClass} aria-labelledby="judge-bench-heading">
+        <Heading />
+        <p className="text-on-surface-low text-[0.8125rem]">No judge benchmark has run yet.</p>
+        <p className="text-on-surface-low text-[0.8125rem]">{bench.next_action}</p>
+      </section>
+    )
+  }
   if (bench === undefined) {
     if (!error) return null
     if (hasApiCode(error, 'evals_disabled')) {

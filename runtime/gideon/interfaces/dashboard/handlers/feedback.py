@@ -223,7 +223,7 @@ async def api_feedback_producers(request: web.Request) -> web.Response:
     honest-counts rule: nothing is shown before the sample is meaningful).
     """
     if not _enabled():
-        return _disabled_response()
+        return web.json_response({"enabled": False})
     try:
         window_days = int(request.query.get("window_days", 0)) or None
     except ValueError:

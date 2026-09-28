@@ -3,6 +3,24 @@ import { gatewayHeaders as SK, gatewayRequest, requestJson, requestDelete, readJ
 import { emitTaskListCreated } from './taskListCount'
 export { ApiError, hasApiCode } from './gatewayRequest'
 
+export type FeatureOffEnvelope = { enabled: false }
+export type ReportNotRunEnvelope = { state: 'not_run'; next_action: string }
+
+export function isFeatureOff(value: unknown): value is FeatureOffEnvelope {
+  if (!value || typeof value !== 'object') return false
+  const row = value as Record<string, unknown>
+  return row.enabled === false && Object.keys(row).length === 1
+}
+
+export function isReportNotRun(value: unknown): value is ReportNotRunEnvelope {
+  if (!value || typeof value !== 'object') return false
+  const row = value as Record<string, unknown>
+  return row.state === 'not_run'
+    && typeof row.next_action === 'string'
+    && Object.keys(row).length === 2
+    && Object.hasOwn(row, 'next_action')
+}
+
 const get = <T>(path: string) => requestJson<T>(path)
 const post = <T>(path: string, body?: unknown) => requestJson<T>(path, 'POST', body)
 const put = <T>(path: string, body?: unknown) => requestJson<T>(path, 'PUT', body)
@@ -3789,7 +3807,7 @@ export const api = {
   autonomyUndo: (id: string) =>
     post<{ ok: boolean; code: string; action_type: string; demoted: boolean; detail?: string }>('/api/autonomy/undo', { id }),
 
-  doctor: () => get<DoctorReport>('/api/doctor'),
+  doctor: () => get<DoctorReport | FeatureOffEnvelope>('/api/doctor'),
   doctorCapability: (capability: string) =>
     get<{ capability: string; ok: boolean; probes: DoctorProbe[]; unknown?: boolean }>(
       `/api/doctor/${encodeURIComponent(capability)}`,
@@ -4529,7 +4547,7 @@ export const api = {
     if (opts?.tier) q.set('tier', opts.tier)
     if (opts?.flagged) q.set('flagged', '1')
     const qs = q.toString()
-    return get<LearningInbox>(`/api/learning/proposals${qs ? `?${qs}` : ''}`)
+    return get<LearningInbox | FeatureOffEnvelope>(`/api/learning/proposals${qs ? `?${qs}` : ''}`)
   },
   learningProposal: (id: string) =>
     get<Record<string, unknown>>(`/api/learning/proposals/${encodeURIComponent(id)}`),
@@ -4538,29 +4556,29 @@ export const api = {
   rejectLearningProposal: (id: string) =>
     del(`/api/learning/proposals/${encodeURIComponent(id)}`),
   learningStagingWeek: (days = 7) =>
-    get<StagingWeek>(`/api/learning/staging/week?days=${days}`),
+    get<StagingWeek | FeatureOffEnvelope>(`/api/learning/staging/week?days=${days}`),
   learningHealth: (days = 7) =>
-    get<LearningHealth>(`/api/learning/health?days=${days}`),
+    get<LearningHealth | FeatureOffEnvelope>(`/api/learning/health?days=${days}`),
   identityReport: (days?: number) =>
-    get<IdentityReportView>(`/api/learning/identity-report${days === undefined ? '' : `?days=${days}`}`),
+    get<IdentityReportView | FeatureOffEnvelope>(`/api/learning/identity-report${days === undefined ? '' : `?days=${days}`}`),
   deliverIdentityReport: (days?: number) =>
     post<IdentityReportDelivery>(
       `/api/learning/identity-report${days === undefined ? '' : `?days=${days}`}`,
       {},
     ),
-  judgeBench: () => get<JudgeBenchView>('/api/evals/judge-bench'),
-  ablation: () => get<AblationView>('/api/evals/ablation'),
-  learningBenchmark: () => get<BenchmarkView>('/api/evals/learning-benchmark'),
-  retrievalBench: () => get<RetrievalBenchView>('/api/evals/retrieval'),
+  judgeBench: () => get<JudgeBenchView | FeatureOffEnvelope | ReportNotRunEnvelope>('/api/evals/judge-bench'),
+  ablation: () => get<AblationView | FeatureOffEnvelope | ReportNotRunEnvelope>('/api/evals/ablation'),
+  learningBenchmark: () => get<BenchmarkView | FeatureOffEnvelope | ReportNotRunEnvelope>('/api/evals/learning-benchmark'),
+  retrievalBench: () => get<RetrievalBenchView | FeatureOffEnvelope | ReportNotRunEnvelope>('/api/evals/retrieval'),
   retrievalLabelCard: (store: string) =>
     get<RetrievalLabelCard>(`/api/evals/retrieval/card?store=${encodeURIComponent(store)}`),
   saveRetrievalLabels: (store: string, labels: Record<string, string[]>) =>
     post<{ ok: boolean; store: string; queries: number; hand_labelled: number }>(
       '/api/evals/retrieval/labels', { store, labels }),
-  evalStudies: () => get<{ studies: StudyRow[] }>('/api/evals/studies'),
+  evalStudies: () => get<{ studies: StudyRow[] } | FeatureOffEnvelope>('/api/evals/studies'),
   evalStudy: (studyId: string) =>
     get<StudyView>(`/api/evals/studies/${encodeURIComponent(studyId)}`),
-  evalFieldMetrics: () => get<{ subjects: FieldMetricsRow[] }>('/api/evals/field-metrics'),
+  evalFieldMetrics: () => get<{ subjects: FieldMetricsRow[] } | FeatureOffEnvelope>('/api/evals/field-metrics'),
   pendingSkillProposalCount: () =>
     get<SkillProposalFeed>('/api/skills/proposals').then((feed) => feed.proposals.length),
   skillProposals: () => get<SkillProposalFeed>('/api/skills/proposals'),
@@ -5009,7 +5027,7 @@ export const api = {
   feedbackTarget: (kind: FeedbackTargetKind, id: string) =>
     get<{ verdict: 'up' | 'down' | null; reason?: string }>(`/api/feedback/target/${kind}/${encodeURIComponent(id)}`),
   feedbackProducers: (windowDays?: number) =>
-    get<FeedbackProducersResponse>(`/api/feedback/producers${windowDays ? `?window_days=${windowDays}` : ''}`),
+    get<FeedbackProducersResponse | FeatureOffEnvelope>(`/api/feedback/producers${windowDays ? `?window_days=${windowDays}` : ''}`),
   feedbackSnooze: (producer: FeedbackProducer) => post<{ ok: boolean }>('/api/feedback/producers/snooze', producer),
   feedbackClear: (producer: FeedbackProducer) => post<{ ok: boolean }>('/api/feedback/producers/clear', producer),
   investigate: (body: { kind: string; id: string; back_link?: string }) =>

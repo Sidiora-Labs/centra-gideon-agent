@@ -112,7 +112,7 @@ def _attach_embedding_index_doctor_row(report: dict, row: dict | None) -> dict:
 async def api_doctor(request: web.Request) -> web.Response:
     """GET /api/doctor — all probes, grouped by capability, cached 30s."""
     if not _resilience_cfg().doctor_enabled:
-        return json_error("doctor_disabled", status=404)
+        return web.json_response({"enabled": False})
     global _doctor_cache, _doctor_cache_ts
     now = time.monotonic()
     if _doctor_cache is not None and now - _doctor_cache_ts < _DOCTOR_TTL:
@@ -172,7 +172,7 @@ async def _run_degraded(state: object) -> list[dict]:
 async def api_doctor_fixes(request: web.Request) -> web.Response:
     """GET /api/doctor/fixes — the fix catalog with read-only dry-previews."""
     if not _resilience_cfg().doctor_enabled:
-        return json_error("doctor_disabled", status=404)
+        return web.json_response({"enabled": False})
     from gideon.operations.resilience import fixes as _fixes
 
     def _catalog() -> list[dict]:
@@ -660,7 +660,7 @@ async def api_doctor_remediation(request: web.Request) -> web.Response:
     """GET /api/doctor/remediation — current health score, a dry-run plan preview, and
     the recent remediation-run ledger."""
     if not _resilience_cfg().doctor_enabled:
-        return json_error("doctor_disabled", status=404)
+        return web.json_response({"enabled": False})
 
     def _snapshot() -> dict:
         import time as _t

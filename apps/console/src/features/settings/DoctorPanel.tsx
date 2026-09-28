@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { RefreshCw, ChevronRight, CheckCircle2, AlertTriangle, XCircle, Wrench, FlaskConical } from 'lucide-react'
 import {
-  api, type DoctorReport, type DoctorCapability, type DoctorProbe, type RemediationSnapshot,
+  api, isFeatureOff, requireWriteAccepted, type FeatureOffEnvelope,
+  type DoctorReport, type DoctorCapability, type DoctorProbe, type RemediationSnapshot,
   type SurfacingCandidate, type AutomationWouldExecute, type Trigger,
 } from '../../shared/data/api'
 import { notify } from '../../app/shell/appSdk'
@@ -19,8 +20,9 @@ function capLabel(key: string): string {
 }
 
 export function DoctorPanel() {
-  const [report, setReport] = useState<DoctorReport | null>(null)
+  const [report, setReport] = useState<DoctorReport | FeatureOffEnvelope | null>(null)
   const [busy, setBusy] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   const refresh = useCallback(() => {
     setBusy(true)
@@ -29,6 +31,31 @@ export function DoctorPanel() {
   useEffect(() => { refresh() }, [refresh])
 
   if (report === null && busy) return <FormSkeleton sections={2} />
+
+  if (isFeatureOff(report)) {
+    const turnOn = async () => {
+      setSaving(true)
+      try {
+        await api.patchConfig('resilience.doctor_enabled', true).then(requireWriteAccepted)
+        refresh()
+      } catch (error) {
+        notify(`Couldn't turn on the Doctor: ${String((error as Error)?.message || error)}`, 'error')
+      } finally {
+        setSaving(false)
+      }
+    }
+    return (
+      <div>
+        <PanelHeader title="Doctor" hint="Health probing is read-only. Fix and Run now are the only controls here that mutate; they repair harness state, never your content. A degraded capability never means the gateway is down; only a core failure does." />
+        <Section title="Doctor is off">
+          <div className="rounded-lg bg-surface-container px-4 py-3">
+            <p data-type="body-s" className="text-on-surface-low">Health checks are paused until you turn the Doctor on.</p>
+            <Button className="mt-3" variant="secondary" size="sm" loading={saving} onClick={turnOn}>Turn the Doctor on</Button>
+          </div>
+        </Section>
+      </div>
+    )
+  }
 
   const caps = report ? Object.entries(report.capabilities) : []
   caps.sort(([, a], [, b]) => Number(a.ok) - Number(b.ok))

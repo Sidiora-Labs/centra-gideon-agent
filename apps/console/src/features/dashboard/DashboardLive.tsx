@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { reportingWrite } from '../../app/shell/reportingWrite'
 import { useChatSocket, type WsMessage } from '../../shared/data/useChatSocket'
 import { useVisiblePoll } from '../../shared/data/useVisiblePoll'
-import { api } from '../../shared/data/api'
+import { api, isFeatureOff } from '../../shared/data/api'
 import type {
   PendingApproval, DashboardStatus, InboxItem, SkillProposal,
   Loop, TaskItem, ScheduleRun, NotificationItem, SystemInfo, DiscoverResponse, DoctorReport,
@@ -120,7 +120,15 @@ export function DashboardLiveProvider({ children }: { children: ReactNode }) {
       .catch((e) => guard(setDiscoverErr)(e))
   }, [])
   const loadDoctor = useCallback(() => {
-    api.doctor().then((d) => { guard(setDoctor)(d); guard(setDoctorErr)(null) })
+    api.doctor().then((d) => {
+      if (isFeatureOff(d)) {
+        guard(setDoctor)(null)
+        guard(setDoctorErr)(null)
+        return
+      }
+      guard(setDoctor)(d)
+      guard(setDoctorErr)(null)
+    })
       .catch((e) => guard(setDoctorErr)(e))
   }, [])
 

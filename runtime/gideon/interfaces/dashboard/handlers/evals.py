@@ -14,9 +14,9 @@ one would hold a request open for minutes and spend real money on a click. So th
 preflight — and this route publishes what it produced. That is also §6's posture verbatim:
 the harness recommends, the human rebinds on the existing Models panel.
 
-404 when nothing has run, with a distinct code from "evals disabled": "no benchmark yet"
-and "the feature is off" send a user to two different places, and one code for both would
-make the panel's empty state a guess.
+Report reads answer a switched-off surface with ``{"enabled": false}`` and a missing
+run with ``{"state": "not_run", "next_action": ...}``; unreadable artifacts remain
+failures. These decided 200s keep state, absence, and failure separate for the client.
 """
 
 from __future__ import annotations
@@ -56,12 +56,7 @@ async def api_evals_judge_bench(request: web.Request) -> web.Response:
     harness, and the copy shipping the permissive answer would be the UI.
     """
     if not _enabled():
-        return json_error(
-            "evals_disabled",
-            message="The eval substrate is off. Turn on `evals.enabled` to publish "
-            "benchmark results.",
-            status=404,
-        )
+        return web.json_response({"enabled": False})
     from gideon.assurance.evals.judge_bench import latest_bench_view
 
     try:
@@ -74,12 +69,10 @@ async def api_evals_judge_bench(request: web.Request) -> web.Response:
             status=500,
         )
     if view is None:
-        return json_error(
-            "judge_bench_absent",
-            message="No judge benchmark has run yet. Run `gideon judge-bench` "
-            "to produce one.",
-            status=404,
-        )
+        return web.json_response({
+            "state": "not_run",
+            "next_action": "Run `gideon judge-bench` to produce one.",
+        })
     _audit(request, "evals_judge_bench", "read", f"bench_id={view.get('bench_id')}")
     return web.json_response(view)
 
@@ -93,12 +86,7 @@ async def api_evals_studies(request: web.Request) -> web.Response:
     deliberate invocation; this publishes what they produced.
     """
     if not _enabled():
-        return json_error(
-            "evals_disabled",
-            message="The eval substrate is off. Turn on `evals.enabled` to publish "
-            "study results.",
-            status=404,
-        )
+        return web.json_response({"enabled": False})
     from gideon.assurance.evals.studies import study_index
 
     try:
@@ -182,12 +170,7 @@ async def api_evals_ablation(request: web.Request) -> web.Response:
     surface a ``keep``/``lighten`` verdict has at all.
     """
     if not _enabled():
-        return json_error(
-            "evals_disabled",
-            message="The eval substrate is off. Turn on `evals.enabled` to publish "
-            "ablation reports.",
-            status=404,
-        )
+        return web.json_response({"enabled": False})
     from gideon.assurance.evals.ablation import latest_ablation_view
 
     try:
@@ -200,12 +183,10 @@ async def api_evals_ablation(request: web.Request) -> web.Response:
             status=500,
         )
     if view is None:
-        return json_error(
-            "ablation_absent",
-            message="No ablation has run yet. Register a component in "
-            "`evals/ablation_registry.json` and run `gideon ablation --force`.",
-            status=404,
-        )
+        return web.json_response({
+            "state": "not_run",
+            "next_action": "Register a component in `evals/ablation_registry.json` and run `gideon ablation --force`.",
+        })
     _audit(
         request,
         "evals_ablation",
@@ -234,12 +215,7 @@ async def api_evals_learning_benchmark(request: web.Request) -> web.Response:
     places: the config switch, the runner, and a broken artifact.
     """
     if not _enabled():
-        return json_error(
-            "evals_disabled",
-            message="The eval substrate is off. Turn on `evals.enabled` to publish "
-            "benchmark reports.",
-            status=404,
-        )
+        return web.json_response({"enabled": False})
     from gideon.assurance.evals import learning_bench
 
     try:
@@ -252,12 +228,10 @@ async def api_evals_learning_benchmark(request: web.Request) -> web.Response:
             status=500,
         )
     if report is None:
-        return json_error(
-            "learning_benchmark_absent",
-            message="No skill-impact benchmark has run yet. Run "
-            "`python tooling/scripts/learning_benchmark.py --preflight` and then `--run`.",
-            status=404,
-        )
+        return web.json_response({
+            "state": "not_run",
+            "next_action": "Run `python tooling/scripts/learning_benchmark.py --preflight` and then `--run`.",
+        })
     _audit(
         request, "evals_learning_benchmark", "read", f"run_id={report.get('run_id')}"
     )
@@ -289,12 +263,7 @@ async def api_evals_retrieval(request: web.Request) -> web.Response:
     boundary forbids.
     """
     if not _enabled():
-        return json_error(
-            "evals_disabled",
-            message="The eval substrate is off. Turn on `evals.enabled` to publish "
-            "retrieval ablation reports.",
-            status=404,
-        )
+        return web.json_response({"enabled": False})
     from gideon.assurance.evals import retrieval_bench as rb
 
     try:
@@ -310,12 +279,10 @@ async def api_evals_retrieval(request: web.Request) -> web.Response:
         kind: data.get("run") or "" for kind, data in (view.get("stores") or {}).items()
     }
     if not any(runs.values()):
-        return json_error(
-            "retrieval_absent",
-            message="No retrieval benchmark has run yet. Run "
-            "`gideon retrieval-eval` to score both stores.",
-            status=404,
-        )
+        return web.json_response({
+            "state": "not_run",
+            "next_action": "Run `gideon retrieval-eval` to score both stores.",
+        })
     _audit(request, "evals_retrieval", "read", f"runs={runs}")
     return web.json_response(view)
 
@@ -437,12 +404,7 @@ async def api_evals_field_metrics(request: web.Request) -> web.Response:
     threaded.
     """
     if not _enabled():
-        return json_error(
-            "evals_disabled",
-            message="The eval substrate is off. Turn on `evals.enabled` to publish "
-            "lab-vs-field rows.",
-            status=404,
-        )
+        return web.json_response({"enabled": False})
     import asyncio
 
     from gideon.assurance.evals import field_metrics as fm

@@ -1,5 +1,5 @@
 import { useMemo, useReducer, useRef } from 'react'
-import { api, type LearningRow } from '../../shared/data/api'
+import { api, isFeatureOff, type LearningRow } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
 import { FIELD_METRICS_KEY, fetchFieldMetrics } from './FieldMetricsPanel'
 import { kindLabel } from './learningMeta'
@@ -26,17 +26,22 @@ function reviewState(state: ReviewState, action: ReviewAction): ReviewState {
 export function useLearningPage() {
   const [state, dispatch] = useReducer(reviewState, { kind: '', error: '', pending: new Set<string>() })
   const active = useRef(new Set<string>())
-  const proposals = useQuery(proposalsKey(state.kind), () => api.learningProposals(state.kind ? { kind: state.kind } : undefined))
-  const week = useQuery(WEEK_KEY, () => api.learningStagingWeek(7))
-  const health = useQuery(HEALTH_KEY, () => api.learningHealth(7))
+  const proposalsRead = useQuery(proposalsKey(state.kind), () => api.learningProposals(state.kind ? { kind: state.kind } : undefined))
+  const weekRead = useQuery(WEEK_KEY, () => api.learningStagingWeek(7))
+  const healthRead = useQuery(HEALTH_KEY, () => api.learningHealth(7))
   const attention = useQuery(ATTENTION_KEY, () => api.workflowAttention())
   const field = useQuery(FIELD_METRICS_KEY, fetchFieldMetrics)
   const judge = useQuery(JUDGE_BENCH_KEY, () => api.judgeBench())
   const studies = useQuery(STUDIES_KEY, () => api.evalStudies())
   const retrieval = useQuery(RETRIEVAL_BENCH_KEY, () => api.retrievalBench())
-  const identity = useQuery(IDENTITY_REPORT_KEY, () => api.identityReport())
+  const identityRead = useQuery(IDENTITY_REPORT_KEY, () => api.identityReport())
   const ablation = useQuery(ABLATION_KEY, () => api.ablation())
   const benchmark = useQuery(BENCHMARK_KEY, () => api.learningBenchmark())
+  const learningOff = [proposalsRead.data, weekRead.data, healthRead.data, identityRead.data].some(isFeatureOff)
+  const proposals = { ...proposalsRead, data: isFeatureOff(proposalsRead.data) ? undefined : proposalsRead.data }
+  const week = { ...weekRead, data: isFeatureOff(weekRead.data) ? undefined : weekRead.data }
+  const health = { ...healthRead, data: isFeatureOff(healthRead.data) ? undefined : healthRead.data }
+  const identity = { ...identityRead, data: isFeatureOff(identityRead.data) ? undefined : identityRead.data }
   const facets = useMemo(() => {
     const inbox = proposals.data
     const items = [{ key: '', label: inbox ? `All (${inbox.total})` : 'All' }]
@@ -69,7 +74,7 @@ export function useLearningPage() {
   }
 
   return {
-    state, facets, proposals, week, health, attention, field, judge, studies, retrieval,
+    state, learningOff, facets, proposals, week, health, attention, field, judge, studies, retrieval,
     identity, ablation, benchmark, decide, refresh,
     setKind: (value: string) => dispatch({ type: 'kind', value }),
     clearError: () => dispatch({ type: 'error', value: '' }),

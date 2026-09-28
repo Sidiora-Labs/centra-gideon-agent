@@ -28,6 +28,7 @@ import { useLearningPage } from './learningPageState'
 import { learningPanelClass } from './learningDisplay'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 import { useHashRoute } from '../../app/shell/useHashRoute'
+import { isFeatureOff } from '../../shared/data/api'
 
 export function LearningPage() {
   const page = useLearningPage()
@@ -40,14 +41,15 @@ export function LearningPage() {
     () => api.pendingSkillProposalCount(),
     { persist: false },
   )
+  const learningOff = page.learningOff
   const rows = inbox?.rows ?? []
   const reports = [
     <IdentityReportPanel key="identity" report={page.identity.data} error={page.identity.error} onRetry={page.identity.refresh} onDelivered={page.identity.refresh} />,
     <HealthPanel key="health" health={page.health.data} error={page.health.error} onRetry={page.health.refresh} />,
     <AttentionPanel key="attention" scopes={page.attention.data?.scopes} error={page.attention.error} onRetry={page.attention.refresh} />,
-    <FieldMetricsPanel key="field" rows={page.field.data?.subjects} error={page.field.error} onRetry={page.field.refresh} />,
+    <FieldMetricsPanel key="field" rows={isFeatureOff(page.field.data) ? page.field.data : page.field.data?.subjects} error={page.field.error} onRetry={page.field.refresh} />,
     <JudgeBenchPanel key="judge" bench={page.judge.data} error={page.judge.error} onRetry={page.judge.refresh} />,
-    <StudiesPanel key="studies" studies={page.studies.data?.studies} error={page.studies.error} onRetry={page.studies.refresh} />,
+    <StudiesPanel key="studies" studies={isFeatureOff(page.studies.data) ? page.studies.data : page.studies.data?.studies} error={page.studies.error} onRetry={page.studies.refresh} />,
     <RetrievalBenchPanel key="retrieval" bench={page.retrieval.data} error={page.retrieval.error} onRetry={page.retrieval.refresh} />,
     <AblationPanel key="ablation" view={page.ablation.data} error={page.ablation.error} onRetry={page.ablation.refresh} />,
     <BenchmarkPanel key="benchmark" view={page.benchmark.data} error={page.benchmark.error} onRetry={page.benchmark.refresh} />,
@@ -74,6 +76,7 @@ export function LearningPage() {
 
       <div tabIndex={0} role="group" aria-label="Capture and proposals" className="flex-1 overflow-y-auto focus-visible:-outline-offset-2">
         <div className="mx-auto flex flex-col gap-xl px-l py-l pb-2xl" style={{ maxWidth: 'var(--content-width)' }}>
+          {learningOff ? <section className={learningPanelClass} role="status"><h2 data-type="title-m" className="text-on-surface">Learning is off</h2><p className="text-on-surface-low text-[0.8125rem]">Learning reports and proposal capture are unavailable while learning is disabled in this instance.</p></section> : <>
           {err && <InlineError icon onDismiss={page.clearError}>{err}</InlineError>}
 
           {page.week.data === undefined && page.week.error
@@ -126,6 +129,7 @@ export function LearningPage() {
               </div>
             )}
           </div>
+          </>}
         </div>
       </div>
     </div>

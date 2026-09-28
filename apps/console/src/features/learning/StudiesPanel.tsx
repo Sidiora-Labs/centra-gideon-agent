@@ -4,17 +4,20 @@ import { ChevronDown, ChevronRight, FlaskConical, ShieldAlert } from 'lucide-rea
 import { LoadError } from '../../shared/ui/ListScaffold'
 import { QuietButton } from '../../shared/ui/QuietButton'
 import { useQuery } from '../../shared/data/data'
-import { api, hasApiCode, type StudyRow, type StudyView } from '../../shared/data/api'
+import { api, hasApiCode, isFeatureOff, type StudyRow, type StudyView, type FeatureOffEnvelope } from '../../shared/data/api'
 import { EvalsOff } from './EvalsOff'
 import { studyDetailKey } from './proposalCache'
 
 export function StudiesPanel({ studies, error, onRetry }: {
-  studies: StudyRow[] | undefined
+  studies: StudyRow[] | FeatureOffEnvelope | undefined
   error: unknown
   onRetry: () => void
 }) {
   const [open, toggleStudy] = useReducer((current: string, selected: string) => current === selected ? '' : selected, '')
 
+  if (isFeatureOff(studies)) {
+    return <section className={learningPanelClass} aria-labelledby="studies-heading"><Heading /><EvalsOff what="study" /></section>
+  }
   if (studies === undefined) {
     if (!error) return null
     if (hasApiCode(error, 'evals_disabled')) {

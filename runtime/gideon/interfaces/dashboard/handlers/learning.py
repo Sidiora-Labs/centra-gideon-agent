@@ -215,7 +215,7 @@ async def api_learning_proposals(request: web.Request) -> web.Response:
     is empty is worse than no chip.
     """
     if not _enabled():
-        return web.json_response({"error": "learning is disabled"}, status=404)
+        return web.json_response({"enabled": False})
 
     from gideon.cognition.learning import proposals as store
     from gideon.cognition.learning.inbox import build_view
@@ -327,7 +327,7 @@ async def api_learning_staging_week(request: web.Request) -> web.Response:
     staging tier exists to expose.
     """
     if not _enabled():
-        return web.json_response({"error": "learning is disabled"}, status=404)
+        return web.json_response({"enabled": False})
 
     from gideon.cognition.learning.staging import StagingStore
 
@@ -427,7 +427,7 @@ async def api_learning_health(request: web.Request) -> web.Response:
     generate traffic.
     """
     if not _enabled():
-        return web.json_response({"error": "learning is disabled"}, status=404)
+        return web.json_response({"enabled": False})
 
     from gideon.cognition.learning import measure
     from gideon.cognition.learning.staging import StagingStore
@@ -536,7 +536,7 @@ async def api_learning_summary(request: web.Request) -> web.Response:
     same caller. The skill and proposal groups are not memory and stay visible.
     """
     if not _enabled():
-        return web.json_response({"error": "learning is disabled"}, status=404)
+        return web.json_response({"enabled": False})
 
     from gideon.cognition.learning_summary import (
         MAX_WINDOW_DAYS,
@@ -640,7 +640,7 @@ async def api_learning_identity_report(request: web.Request) -> web.Response:
     that module owns (measured — it reddens `test_wire_error_envelope_census`'s `Call` pin).
     """
     if not _enabled():
-        return json_error("learning_disabled", status=404)
+        return web.json_response({"enabled": False})
 
     from gideon.cognition.learning_report import identity_report_payload
 

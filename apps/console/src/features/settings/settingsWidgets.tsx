@@ -8,13 +8,13 @@ import { verifiedScope } from './AuditPanel'
 import type { LucideIcon } from 'lucide-react'
 import { notify } from '../../app/shell/appSdk'
 import {
-  api, requireWriteAccepted, type SecurityStats, type SecretsVaultState, type MemoryStats, type AgentRuntime, type DashboardConfig,
+  api, isFeatureOff, requireWriteAccepted, type SecurityStats, type SecretsVaultState, type MemoryStats, type AgentRuntime, type DashboardConfig,
   type SettingsProvider, type NotificationSettings, type UpdateCheck,
   type SelVerify, type SavedAgent,
   type ToolsSavings, type DeviceRec, type ChannelTrust,
 } from '../../shared/data/api'
 import { fmtInterval } from '../knowledge/sourceMeta'
-import { useQuery, invalidateSpecs, type CacheKeySpec } from '../../shared/data/data'
+import { useQuery, invalidateKeys, invalidateSpecs, type CacheKeySpec } from '../../shared/data/data'
 import { useIdentity } from '../../app/shell/identity'
 import { useAppearance } from '../../app/shell/appearance'
 import { useMode } from '../../app/shell/theme'
@@ -36,6 +36,14 @@ export interface SettingsWidget {
 }
 
 const shortModel = (ref: string) => { const i = ref.indexOf(':'); return i >= 0 ? ref.slice(i + 1) : ref }
+const saveOwnedBoolean = async (path: string, cacheKey: string, value: boolean, label: string) => {
+  try {
+    await api.patchConfig(path, value).then(requireWriteAccepted)
+    invalidateKeys(cacheKey)
+  } catch (error) {
+    notify(`Couldn't save ${label}: ${String((error as Error)?.message || error)}`, 'error')
+  }
+}
 
 const useSecurity = () => useQuery('settings:security', () => api.securityStats().catch(() => null as SecurityStats | null), { persist: true })
 const useSecretsVault = () => useQuery('settings:secrets-card', () => api.secrets().catch(() => null as SecretsVaultState | null), { persist: true })
@@ -707,6 +715,7 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
     description: 'Health probing is read-only; Fix and Run now are the only controls that mutate.',
     useSearchText() {
       const { data: d } = useDoctor()
+      if (isFeatureOff(d)) return 'doctor health diagnostics off disabled'
       const failed = d ? Object.entries(d.capabilities).filter(([, c]) => !c.ok).map(([k]) => k).join(' ') : ''
       return `doctor health probes diagnostics memory channels local models apps serving symlink breakers ${d ? (d.ok ? 'healthy ok' : `degraded ${failed}`) : ''}`
     },
@@ -716,6 +725,11 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
         <BentoCard icon={Stethoscope} title="Doctor" query={query} onClick={() => go('doctor')} loading={d === undefined && !dErr} stale={dStale}>
           {!d && dErr
             ? <StatusPill label="Couldn't check" tone="warn" />
+            : isFeatureOff(d)
+              ? <>
+                  <StatusPill label="Off — nothing is probing health" tone="muted" />
+                  <div className="mt-2"><Switch on={false} label="Doctor enabled" onToggle={(value) => saveOwnedBoolean('resilience.doctor_enabled', 'settings:doctor', value, 'Doctor')} /></div>
+                </>
             : d && (d.ok
             ? <StatusPill label="All systems healthy" tone="ok" />
             : !d.core_ok
@@ -909,17 +923,22 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
     description: 'Per-source accuracy from your 👍/👎 on AI judgments — weak skills stop surfacing; other sources get a retire proposal.',
     useSearchText() {
       const { data } = useFeedbackProducers()
-      const rows = data?.producers ?? []
+      const rows = data && !isFeatureOff(data) ? data.producers : []
       return `feedback thumbs accuracy judgment verdict up down retire suppress ${rows.map((r) => r.producer_id).join(' ')}`
     },
     render(query, go) {
       const { data, error: feedbackErr, stale: isStalePaint } = useFeedbackProducers()
-      const rows = data?.producers ?? []
+      const rows = data && !isFeatureOff(data) ? data.producers : []
       const rated = rows.filter((r) => !r.collecting)
       const suppressed = rows.filter((r) => r.producer_kind === 'skill_synthesis' && r.suppressed).length
       return (
         <BentoCard icon={ThumbsUp} title="AI feedback" query={query} onClick={() => go('feedback')} loading={data === undefined && !feedbackErr} stale={isStalePaint}>
-          {feedbackErr ? <div role="alert" data-type="caption" className="text-on-surface-low">Couldn&rsquo;t load feedback sources.</div> : rows.length === 0
+          {feedbackErr ? <div role="alert" data-type="caption" className="text-on-surface-low">Couldn&rsquo;t load feedback sources.</div> : isFeatureOff(data)
+            ? <>
+                <StatusPill label="Off — no 👍/👎 are shown" tone="muted" />
+                <div className="mt-2"><Switch on={false} label="Collect feedback" onToggle={(value) => saveOwnedBoolean('feedback.enabled', 'settings:feedback-producers', value, 'feedback')} /></div>
+              </>
+            : rows.length === 0
             ? <div data-type="body-s" className="text-on-surface-low">👍/👎 on inbox triage, drafts, digests, and loop findings collect here per judgment source. Weak skills stop surfacing; other sources get a retire proposal.</div>
             : <><BigStat value={rows.length} caption={rows.length === 1 ? 'judgment source' : 'judgment sources'} />
                 <div data-type="body-s" className="mt-1 text-on-surface-low">

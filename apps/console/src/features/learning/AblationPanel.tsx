@@ -2,18 +2,35 @@ import { LearningHeading, LearningTable, learningPanelClass, measurement, signed
 import { Scissors, ShieldAlert } from 'lucide-react'
 import { LoadError } from '../../shared/ui/ListScaffold'
 import { fvs } from '../../shared/theme/fontWeight'
-import { hasApiCode } from '../../shared/data/api'
+import { hasApiCode, isFeatureOff, isReportNotRun } from '../../shared/data/api'
 import type {
-  AblationHistoryEntry, AblationRegistryRow, AblationView,
+  AblationHistoryEntry, AblationRegistryRow, AblationView, FeatureOffEnvelope, ReportNotRunEnvelope,
 } from '../../shared/data/api'
 import { EvalsOff } from './EvalsOff'
 
 export function AblationPanel({ view, error, onRetry }: {
-  view: AblationView | undefined
+  view: AblationView | FeatureOffEnvelope | ReportNotRunEnvelope | undefined
   error: unknown
   onRetry: () => void
 }) {
 
+  if (isFeatureOff(view)) {
+    return (
+      <section className={learningPanelClass} aria-labelledby="ablation-heading">
+        <Heading />
+        <EvalsOff what="ablation" />
+      </section>
+    )
+  }
+  if (isReportNotRun(view)) {
+    return (
+      <section className={learningPanelClass} aria-labelledby="ablation-heading">
+        <Heading />
+        <p className="text-on-surface-low text-[0.8125rem]">No ablation has run yet.</p>
+        <p className="text-on-surface-low text-[0.8125rem]">{view.next_action}</p>
+      </section>
+    )
+  }
   if (view === undefined) {
     if (!error) return null
     if (hasApiCode(error, 'evals_disabled')) {

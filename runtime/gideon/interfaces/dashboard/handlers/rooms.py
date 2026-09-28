@@ -68,8 +68,10 @@ async def api_enable_rooms(request: web.Request) -> web.Response:
 
 async def api_rooms(request: web.Request) -> web.Response:
     config = AppConfig.load().rooms
-    store = request.app[_STORE]
     room_id = request.match_info.get("room_id", "")
+    if not config.enabled and not room_id and request.method == "GET":
+        return web.json_response({"enabled": False})
+    store = request.app[_STORE]
     action = request.match_info.route.name or ""
     try:
         if not room_id and request.method == "GET":

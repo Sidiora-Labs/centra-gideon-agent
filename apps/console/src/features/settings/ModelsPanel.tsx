@@ -6,7 +6,7 @@ import {
   Moon, Network, RefreshCcw, ArrowUp, ArrowDown, X, AlertTriangle, Wrench,
   Trash2, Gavel, KeyRound, Wifi, CheckCircle2, type LucideIcon,
 } from 'lucide-react'
-import { api, type AvailableModel, type DownloadJob, type JudgeBenchRecommendation, type LocalModelTokenStatus, type ProviderHealth } from '../../shared/data/api'
+import { api, isFeatureOff, isReportNotRun, type AvailableModel, type DownloadJob, type JudgeBenchRecommendation, type LocalModelTokenStatus, type ProviderHealth } from '../../shared/data/api'
 import {
   occupantDetail, pressureDetail, pressureTone, reclaimableCount, sortOccupants,
 } from '../../shared/data/residency'
@@ -199,7 +199,7 @@ export function ModelsPanel() {
   const { data: health } = useQuery('settings:models-health', () =>
     api.modelsHealth().then((h) => h.providers).catch(() => [] as ProviderHealth[]), { persist: false })
   const { data: judgeRecs } = useQuery('settings:judge-bench-recs', () =>
-    api.judgeBench().then((v) => v.recommendations).catch(() => [] as JudgeBenchRecommendation[]),
+    api.judgeBench().then((value) => isFeatureOff(value) || isReportNotRun(value) ? [] : value.recommendations).catch(() => [] as JudgeBenchRecommendation[]),
     { persist: false })
   const allModels = data?.allModels
   const active = data?.active ?? {}
