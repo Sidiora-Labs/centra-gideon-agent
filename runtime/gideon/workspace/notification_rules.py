@@ -60,7 +60,7 @@ def config_dir() -> Path:
 
 logger = logging.getLogger(__name__)
 
-TARGETS: tuple[str, ...] = ("dashboard", "push", "native")
+TARGETS: tuple[str, ...] = ("dashboard", "push", "native", "channel_dm")
 DEFAULT_TARGETS: tuple[str, ...] = ("dashboard",)
 
 SOUND_CUES: tuple[str, ...] = (

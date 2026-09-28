@@ -537,3 +537,44 @@ def owner_reachable() -> ChannelDelivery | None:
 def registered_providers() -> list[str]:
     """Return a stable inventory of the currently connected providers."""
     return sorted(_REGISTRY)
+
+
+def approval_channel() -> str:
+    """Configured explicit approval channel, or the empty owner-default choice."""
+    from gideon.core.config.loader import AppConfig
+
+    return str(getattr(AppConfig.load().agent, "approval_channel", "") or "").strip()
+
+
+def approval_delivery(origin: str = "") -> tuple[str, ChannelDelivery] | None:
+    """Resolve approval delivery: captured origin first, then the explicit choice.
+
+    An unavailable explicit choice is terminal. It must never send an approval prompt
+    through a different channel that the owner did not select.
+    """
+    from gideon.core.config.credentials import owner_id_for
+    from gideon.integrations.channel_transports import get_transport
+
+    snapshot = _QUEUES
+
+    def usable(provider: str) -> ChannelDelivery | None:
+        delivery = snapshot.get(provider)
+        transport = get_transport(provider)
+        if (
+            delivery is None
+            or not owner_id_for(provider)
+            or (transport is not None and not transport.connected)
+        ):
+            return None
+        return delivery
+
+    if origin and (delivery := usable(origin)) is not None:
+        return origin, delivery
+    explicit = approval_channel()
+    if explicit:
+        delivery = usable(explicit)
+        return (explicit, delivery) if delivery is not None else None
+    for provider in sorted(snapshot):
+        if (delivery := usable(provider)) is not None:
+            return provider, delivery
+    return None

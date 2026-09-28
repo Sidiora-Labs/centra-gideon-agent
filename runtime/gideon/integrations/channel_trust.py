@@ -51,6 +51,7 @@ def _default_provider() -> dict[str, Any]:
         for key in (
             "allowed_senders",
             "tracked_channels",
+            "seen_channels",
             "pairing",
             "policies",
             "rate",
@@ -224,14 +225,65 @@ def is_tracked_channel(provider: str, channel_id: str) -> bool:
 
 def track(provider: str, channel_id: str, name: str = "") -> None:
     _update_directory(provider, "tracked_channels", channel_id, _entry(name))
+    _emit_sel("channel_tracked", "owner", provider, channel_id)
 
 
 def untrack(provider: str, channel_id: str) -> None:
     _update_directory(provider, "tracked_channels", channel_id, None)
+    _emit_sel("channel_untracked", "owner", provider, channel_id)
 
 
 def trust_policies(provider: str) -> dict[str, str]:
     return dict(_lookup(provider, "policies"))
+
+
+def set_trust_policies(
+    provider: str, *, dm: str | None = None, group: str | None = None,
+    confirm_open: bool = False,
+) -> dict[str, str]:
+    """Persist provider-scoped trust choices; opening DMs requires explicit consent."""
+    if dm is not None and dm not in DM_POLICIES:
+        raise ValueError("invalid_dm_policy")
+    if group is not None and group not in GROUP_POLICIES:
+        raise ValueError("invalid_group_policy")
+    if dm == "open" and not confirm_open:
+        raise PermissionError("open_dm_requires_confirmation")
+    with _editing(provider) as change:
+        if dm is not None:
+            change.record["policies"]["dm"] = dm
+        if group is not None:
+            change.record["policies"]["group"] = group
+        change.commit()
+        result = dict(change.record["policies"])
+    _emit_sel("trust_policy_changed", "updated", provider)
+    return result
+
+
+def note_seen_channel(provider: str, channel_id: str, name: str = "") -> None:
+    """Remember a bounded, non-secret projection of groups observed on this provider."""
+    if not channel_id:
+        return
+    with _editing(provider) as change:
+        seen = change.record["seen_channels"]
+        seen[channel_id] = _entry(name)
+        while len(seen) > 1000:
+            del seen[next(iter(seen))]
+        change.commit()
+
+
+def list_seen_channels(provider: str) -> list[dict[str, str]]:
+    return _directory_projection(_lookup(provider, "seen_channels"), "channel_id", ("name", "added_at"))
+
+
+def cancel_pairing_code(provider: str) -> bool:
+    with _editing(provider) as change:
+        active = bool(change.record["pairing"].get("code_hash"))
+        if active:
+            change.record["pairing"] = {}
+            change.commit()
+    if active:
+        _emit_sel("pairing_code_cancelled", "cancelled", provider)
+    return active
 
 
 def list_providers() -> list[str]:
@@ -597,6 +649,14 @@ def _claim_contact(provider: str, sender_id: str) -> bool:
             except (ValueError, TypeError):
                 pass
         rate[sender_id] = _iso(now)
+        while len(rate) > 4096:
+            oldest = min(rate, key=lambda key: str(rate.get(key, "")))
+            if oldest == sender_id and len(rate) > 1:
+                oldest = min(
+                    (key for key in rate if key != sender_id),
+                    key=lambda key: str(rate.get(key, "")),
+                )
+            del rate[oldest]
         change.commit()
         return True
 
@@ -660,6 +720,8 @@ def guard_inbound(
     text: str = "",
 ) -> TrustVerdict:
     context = _InboundContext(provider, sender_id, channel_id, is_dm)
+    if not is_dm and channel_id:
+        note_seen_channel(provider, channel_id, channel_id)
     policy = context.policy()
     candidate = (text or "").strip()
     if (
@@ -693,7 +755,11 @@ def guard_inbound(
             decision = TrustVerdict(
                 False,
                 "unknown_sender",
-                canned_reply="" if policy == "owner_only" else CANNED_PAIRING_REPLY,
+                canned_reply=(
+                    CANNED_PAIRING_REPLY
+                    if announced and policy != "owner_only"
+                    else ""
+                ),
                 fired_notification=announced,
             )
     return report_inbound_verdict(

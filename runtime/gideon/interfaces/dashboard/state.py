@@ -32,6 +32,71 @@ from gideon.interfaces.dashboard.approval_state import (
 from gideon.interfaces.dashboard.sse import SseRegistry
 from gideon.interfaces.dashboard.ws_state import NOTE_TYPE_NOTIFICATION, WebSocketState
 from gideon.security import trust_mode
+
+
+async def _deliver_named_channel(
+    provider: str, target: str, title: str, body: str, note: dict[str, Any]
+) -> None:
+    from gideon.core.config.credentials import owner_id_for
+    from gideon.integrations.channel_delivery import delivery_for
+    from gideon.integrations.channel_transports import get_transport
+
+    transport = get_transport(provider)
+    delivery = delivery_for(provider)
+    if transport is None or delivery is None:
+        logger.warning("scheduled channel provider is unavailable")
+        return
+    if target:
+        problem = transport.validate_target(target)
+        if problem:
+            logger.warning("scheduled channel target refused by its provider: %s", problem)
+            return
+        await delivery.deliver_text(target, _channel_notification_text(title, body, note))
+        return
+    owner = owner_id_for(provider)
+    if not owner:
+        logger.warning("scheduled channel has no configured owner destination")
+        return
+    destination = await delivery.open_dm(owner)
+    if destination:
+        await delivery.deliver_notification(
+            destination, title, _channel_notification_text(title, body, note)
+        )
+
+async def _deliver_owner_channel_dm(
+    title: str, body: str, note: dict[str, Any]
+) -> None:
+    from gideon.core.config.credentials import owner_id_for
+    from gideon.integrations.channel_delivery import approval_delivery
+
+    selected = approval_delivery()
+    if selected is None:
+        return
+    provider, delivery = selected
+    owner = owner_id_for(provider)
+    if not owner:
+        return
+    destination = await delivery.open_dm(owner)
+    if destination:
+        await delivery.deliver_notification(
+            destination, title, _channel_notification_text(title, body, note)
+        )
+
+def _channel_notification_text(title: str, body: str, note: dict[str, Any]) -> str:
+    from gideon.security.security import redact_for_display
+
+    parts = [redact_for_display(title), redact_for_display(body)]
+    link = str(note.get("statusUrl") or "").strip()
+    if link:
+        parts.append(link)
+    return "\n".join(part for part in parts if part)
+
+def _log_channel_send_failure(task: Any) -> None:
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error:
+        logger.warning("channel notification delivery failed", exc_info=error)
 from gideon.security.guardrails.loop_breaker import LoopBreaker
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
 from gideon.security.sel import sel
@@ -1297,7 +1362,8 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         _persist_notification(note)
 
     def notify(
-        self, kind: str, title: str, body: str, *, meta: dict | None = None
+        self, kind: str, title: str, body: str, *, meta: dict | None = None,
+        destination: str = "",
     ) -> None:
         """Push a notification to ALL connected SSE clients and persist to disk.
 
@@ -1417,6 +1483,48 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         self._broadcast(note)
         if rule is not None and "push" in rule.targets:
             self._push_target(kind, note)
+        if destination.startswith("channel:"):
+            self._schedule_channel_target(destination, title, body, note)
+        elif (
+            rule is not None
+            and "channel_dm" in rule.targets
+            and not note.get("sent_to_channel")
+        ):
+            self._schedule_owner_channel_dm(title, body, note)
+
+    def _schedule_channel_target(
+        self, destination: str, title: str, body: str, note: dict[str, Any]
+    ) -> None:
+        import asyncio
+        from gideon.integrations.channel_transports import list_transports
+
+        try:
+            provider, separator, target = destination[len("channel:"):].partition(":")
+            if not provider or provider not in list_transports():
+                logger.warning("scheduled channel destination provider is unavailable")
+                return
+            if separator and not target:
+                logger.warning("scheduled channel target is empty")
+                return
+            task = asyncio.get_running_loop().create_task(
+                _deliver_named_channel(provider, target if separator else "", title, body, note),
+                name=f"schedule-channel:{provider}",
+            )
+            task.add_done_callback(_log_channel_send_failure)
+        except RuntimeError:
+            logger.warning("scheduled channel delivery requires the active event loop")
+    def _schedule_owner_channel_dm(
+        self, title: str, body: str, note: dict[str, Any]
+    ) -> None:
+        import asyncio
+
+        try:
+            asyncio.get_running_loop().create_task(
+                _deliver_owner_channel_dm(title, body, note),
+                name="notification-channel-dm",
+            ).add_done_callback(_log_channel_send_failure)
+        except RuntimeError:
+            logger.debug("channel DM target skipped outside the event loop")
 
     _PUSH_ITEM_KEYS: tuple[str, ...] = ("item_id", "inbox_item", "session")
 

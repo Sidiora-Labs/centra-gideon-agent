@@ -37,9 +37,20 @@ logger = logging.getLogger(__name__)
 
 async def api_channel_trust(request: web.Request) -> web.Response:
     """GET /api/channels/trust — the whole sender-trust posture, per provider."""
+    denied = _owner_request(request)
+    if denied:
+        return denied
+    from gideon.integrations.channel_transports import list_transports
+
+    providers = sorted(
+        set(channel_trust.list_providers())
+        | {name for name in list_transports() if _registered_inbound(name)}
+    )
     providers = [
-        channel_trust.provider_trust(p) for p in channel_trust.list_providers()
+        channel_trust.provider_trust(p) for p in providers
     ]
+    for row in providers:
+        row["seen_channels"] = channel_trust.list_seen_channels(row["provider"])
     return web.json_response(
         {
             "providers": providers,
@@ -58,6 +69,9 @@ async def api_channel_trust_revoke(request: web.Request) -> web.Response:
     may legitimately contain characters (an email address, say) that must be escaped in a
     path segment.
     """
+    denied = _owner_request(request)
+    if denied:
+        return denied
     provider = request.match_info["provider"]
     sender_id = unquote(request.match_info["sender_id"])
 
@@ -67,6 +81,104 @@ async def api_channel_trust_revoke(request: web.Request) -> web.Response:
     channel_trust.deny_sender(provider, sender_id)
     logger.info("channel trust: revoked sender on provider=%s", provider)
     return web.json_response({"ok": True, "provider": provider, "sender_id": sender_id})
+
+
+def _owner_request(request: web.Request) -> web.Response | None:
+    if request.get("app"):
+        return json_error("owner_required", status=403)
+    return None
+
+
+def _registered_inbound(provider: str) -> bool:
+    from gideon.integrations.channel_transports import get_transport
+
+    transport = get_transport(provider)
+    capability = getattr(transport, "capabilities", lambda: None)() if transport else None
+    return bool(transport and getattr(capability, "inbound", False))
+
+
+async def api_channel_trust_policy(request: web.Request) -> web.Response:
+    denied = _owner_request(request)
+    if denied:
+        return denied
+    provider = request.match_info["provider"]
+    if not _registered_inbound(provider):
+        return json_error("channel_provider_unavailable", status=404)
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError
+        dm, group = body.get("dm"), body.get("group")
+        if dm is not None and not isinstance(dm, str):
+            raise ValueError
+        if group is not None and not isinstance(group, str):
+            raise ValueError
+        policies = channel_trust.set_trust_policies(
+            provider, dm=dm, group=group, confirm_open=body.get("confirm_open") is True
+        )
+    except PermissionError as exc:
+        return json_error(str(exc), status=409)
+    except (ValueError, TypeError):
+        return json_error("invalid_channel_trust_policy", status=400)
+    return web.json_response({"ok": True, "provider": provider, "policies": policies})
+
+
+async def api_channel_trust_track(request: web.Request) -> web.Response:
+    denied = _owner_request(request)
+    if denied:
+        return denied
+    provider = request.match_info["provider"]
+    if not _registered_inbound(provider):
+        return json_error("channel_provider_unavailable", status=404)
+    try:
+        body = await request.json()
+        channel_id = str(body.get("channel_id") or "").strip()
+        name = str(body.get("name") or "").strip()
+        if not channel_id or len(channel_id) > 256 or len(name) > 128:
+            raise ValueError
+    except (ValueError, TypeError, AttributeError):
+        return json_error("invalid_channel", status=400)
+    channel_trust.track(provider, channel_id, name)
+    return web.json_response({"ok": True, "provider": provider, "channel_id": channel_id})
+
+
+async def api_channel_trust_untrack(request: web.Request) -> web.Response:
+    denied = _owner_request(request)
+    if denied:
+        return denied
+    provider = request.match_info["provider"]
+    channel_id = unquote(request.match_info["channel_id"])
+    if not _registered_inbound(provider):
+        return json_error("channel_provider_unavailable", status=404)
+    if not channel_trust.is_tracked_channel(provider, channel_id):
+        return json_error("channel_trust_channel_unknown", status=404)
+    channel_trust.untrack(provider, channel_id)
+    return web.json_response({"ok": True, "provider": provider, "channel_id": channel_id})
+
+
+async def api_channel_trust_pairing(request: web.Request) -> web.Response:
+    denied = _owner_request(request)
+    if denied:
+        return denied
+    provider = request.match_info["provider"]
+    if not _registered_inbound(provider):
+        return json_error("channel_provider_unavailable", status=404)
+    code = channel_trust.create_pairing_code(provider)
+    response = web.json_response({"code": code, "expires_in": channel_trust.PAIRING_CODE_TTL_SECS})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+async def api_channel_trust_pairing_cancel(request: web.Request) -> web.Response:
+    denied = _owner_request(request)
+    if denied:
+        return denied
+    provider = request.match_info["provider"]
+    if not _registered_inbound(provider):
+        return json_error("channel_provider_unavailable", status=404)
+    if not channel_trust.cancel_pairing_code(provider):
+        return json_error("channel_pairing_not_active", status=404)
+    return web.json_response({"ok": True, "provider": provider})
 
 
 async def api_telegram_pairing(request: web.Request) -> web.Response:

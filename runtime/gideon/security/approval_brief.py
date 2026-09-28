@@ -255,6 +255,37 @@ def compose_approval_brief(event: Any) -> dict[str, Any] | None:
     return brief
 
 
+def channel_approval_brief(event: Any) -> str:
+    """Render one masked, compact approval explanation for channel surfaces."""
+    import json
+
+    from gideon.security.security import redact_for_display, redact_values_for_display
+
+    brief = compose_approval_brief(event)
+    if brief is None:
+        return ""
+    raw_input = getattr(event, "tool_input", None)
+    if raw_input not in (None, ""):
+        masked_input = redact_values_for_display(raw_input)
+        arguments = (
+            masked_input if isinstance(masked_input, str)
+            else json.dumps(masked_input, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        )
+        arguments = redact_for_display(arguments)[:1200]
+    else:
+        arguments = ""
+    purpose = redact_for_display(str(getattr(event, "tool_purpose", "") or ""))[:500]
+    lines = [f"Tool: {redact_for_display(str(brief['tool']))}"]
+    if arguments:
+        lines.append(f"Arguments: {arguments}")
+    if purpose:
+        lines.append(f"Purpose: {purpose}")
+    lines.append(f"Risk: {brief['risk']}")
+    if brief.get("blastRadiusLine"):
+        lines.append(f"Touches: {brief['blastRadiusLine']}")
+    return "\n".join(lines)
+
+
 def attach_approval_brief(event: Any) -> dict[str, Any] | None:
     """Stamp the brief onto ``event.tool_meta`` as additive meta; return it (or ``None``).
 

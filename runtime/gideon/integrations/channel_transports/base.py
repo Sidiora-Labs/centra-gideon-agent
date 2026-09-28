@@ -111,6 +111,23 @@ class ChannelTransportProvider(ABC):
         Adapters override to declare threads/attachments/reactions/edits/etc."""
         return ChannelCapabilities()
 
+    def validate_target(self, target: str) -> str:
+        """Validate an opaque destination id before core routes a scheduled send.
+
+        Adapters with stricter native identifier formats should override this method.
+        The shared contract rejects empty, oversized, whitespace, control and delimiter
+        values so a destination cannot escape its provider-owned route.
+        """
+        value = str(target or "")
+        if (
+            not value
+            or len(value) > 256
+            or any(character.isspace() or ord(character) < 32 for character in value)
+            or ":" in value
+        ):
+            return "This channel destination id is not valid."
+        return ""
+
     def receive(self) -> AsyncIterator[ChannelMessage]:
         """Optional inbound seam (#40): yield normalized :class:`ChannelMessage`s.
 

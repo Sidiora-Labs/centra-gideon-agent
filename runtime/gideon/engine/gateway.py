@@ -490,7 +490,19 @@ class ApprovalExchange:
         approved = None
         attach_approval_brief(self.event)
         try:
-            approved = await flow.coordinator._channel_delivery.request_approval(
+            from gideon.integrations import channel_delivery
+
+            state = flow.coordinator.dashboard_state
+            origin = (
+                state.channel_provider_for(parent_session_key)
+                if state is not None and parent_session_key
+                else ""
+            )
+            selected = channel_delivery.approval_delivery(origin)
+            if selected is None:
+                return None
+            _, delivery = selected
+            approved = await delivery.request_approval(
                 self.event,
                 source=flow.source,
                 parent_session_key=parent_session_key,

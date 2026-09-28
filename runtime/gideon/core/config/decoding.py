@@ -233,6 +233,7 @@ RECORDS = {
     "config.agent.AgentConfig": Record(
         "AgentConfig",
         {
+            "approval_channel": Value(("agent", "approval_channel"), "", lambda value: str(value or "").strip()),
             "approval_mode": Value(("agent", "approval_mode"), "auto"),
             "approval_timeout_minutes": Value(
                 ("agent", "approval_timeout_minutes"),

@@ -9,6 +9,7 @@ import { PanelHeader, Section, RowGroup } from './settingsUI'
 import { Button } from '../../shared/ui/Button'
 import { EmptyState, FormSkeleton, ListRow, LoadError } from '../../shared/ui/ListScaffold'
 import { ChannelOwnerSection } from './ChannelOwnerSection'
+import { ApprovalChannelSection } from './ApprovalChannelSection'
 
 const CACHE_KEY = 'settings:sender-trust'
 
@@ -94,6 +95,7 @@ export function SenderTrustPanel() {
       />
 
       <ChannelOwnerSection />
+      <ApprovalChannelSection />
 
       {providers.length === 0 ? (
         <EmptyState
@@ -102,7 +104,7 @@ export function SenderTrustPanel() {
           hint="A channel appears here once someone messages it or you pair a sender. Run `gideon pair <channel>` to mint an 8-digit code."
         />
       ) : (
-        providers.map((p) => <ProviderSection key={p.provider} p={p} revoking={revoking} onRevoke={revoke} />)
+        providers.map((p) => <ProviderSection key={p.provider} p={p} revoking={revoking} onRevoke={revoke} refresh={refresh} />)
       )}
 
       {
@@ -113,13 +115,39 @@ export function SenderTrustPanel() {
   )
 }
 
-function ProviderSection({ p, revoking, onRevoke }: {
+function ProviderSection({ p, revoking, onRevoke, refresh }: {
   p: ChannelTrustProvider
   revoking: string | null
   onRevoke: (provider: string, sender: ChannelTrustSender) => void
+  refresh: () => void
 }) {
+  const [busy, setBusy] = useState(false)
+  const [pairCode, setPairCode] = useState('')
   const label = providerLabel(p.provider)
   const senders = p.allowed_senders
+  const seenChannels = p.seen_channels ?? []
+  const updatePolicy = async (field: 'dm' | 'group', value: string) => {
+    if (field === 'dm' && value === 'open') {
+      const accepted = await confirm({ title: `Allow any ${label} user to message?`, body: 'Anyone who can reach this channel may start a conversation with your agent. This is broader than pairing or owner-only access.', confirmLabel: 'Open direct messages' })
+      if (!accepted) return
+    }
+    setBusy(true)
+    try {
+      await api.setChannelTrustPolicies(p.provider, { [field]: value, ...(field === 'dm' && value === 'open' ? { confirm_open: true } : {}) })
+      refresh()
+      notify(`${label} trust policy updated.`, 'success')
+    } catch (error) { notify(`Couldn't update ${label} trust: ${msg(error)}`, 'error') }
+    finally { setBusy(false) }
+  }
+  const pairing = async () => {
+    setBusy(true)
+    try {
+      if (p.pairing_active) { await api.cancelChannelPairing(p.provider); setPairCode('') }
+      else { const result = await api.createChannelPairing(p.provider); setPairCode(result.code) }
+      refresh()
+    } catch (error) { notify(`Couldn't update ${label} pairing: ${msg(error)}`, 'error') }
+    finally { setBusy(false) }
+  }
   return (
     <Section
       title={`${label}${senders.length ? ` (${senders.length})` : ''}`}
@@ -128,6 +156,31 @@ function ProviderSection({ p, revoking, onRevoke }: {
       hint={`${dmPolicyLabel(p.policies.dm)}. ${groupPolicyLabel(p.policies.group)}.`}
     >
       <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="flex flex-col gap-1" data-type="caption"><span>Direct messages</span>
+            <select aria-label={`${label} direct message trust`} disabled={busy} value={p.policies.dm} onChange={event => void updatePolicy('dm', event.currentTarget.value)} className="min-h-9 rounded-md border border-outline-low bg-surface px-2 text-on-surface">
+              <option value="pairing">Pairing required</option><option value="owner_only">Owner only</option><option value="open">Anyone may message</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1" data-type="caption"><span>Groups</span>
+            <select aria-label={`${label} group trust`} disabled={busy} value={p.policies.group} onChange={event => void updatePolicy('group', event.currentTarget.value)} className="min-h-9 rounded-md border border-outline-low bg-surface px-2 text-on-surface">
+              <option value="tracked_only">Tracked groups only</option><option value="off">Ignore group messages</option>
+            </select>
+          </label>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button size="xs" onClick={() => void pairing()} loading={busy}>{p.pairing_active ? 'Cancel sender code' : 'Create sender code'}</Button>
+          {pairCode ? <span role="status" className="select-all font-mono text-on-surface">{pairCode}</span> : null}
+          {pairCode ? <span data-type="caption" className="text-on-surface-low">Shown once; expires in ten minutes.</span> : null}
+        </div>
+        {seenChannels.length ? <div className="space-y-2"><p data-type="caption" className="text-on-surface-low">Groups seen on {label}</p>
+          <RowGroup>{seenChannels.map((channel, i) => {
+            const tracked = p.tracked_channels.some(item => item.channel_id === channel.channel_id)
+            return <ListRow key={channel.channel_id} index={i} label={channel.name || channel.channel_id}>
+              <Button size="xs" variant={tracked ? 'danger' : 'secondary'} loading={busy} onClick={async () => { setBusy(true); try { tracked ? await api.untrackChannel(p.provider, channel.channel_id) : await api.trackChannel(p.provider, channel.channel_id, channel.name); refresh() } catch (error) { notify(`Couldn't update tracked groups: ${msg(error)}`, 'error') } finally { setBusy(false) } }}>{tracked ? 'Untrack' : 'Track'}</Button>
+            </ListRow>
+          })}</RowGroup>
+        </div> : null}
         {p.pairing_active && (
           <div data-type="body-s" className="flex items-center gap-2 text-on-surface-low">
             <KeyRound size={16} className="shrink-0" aria-hidden="true" />

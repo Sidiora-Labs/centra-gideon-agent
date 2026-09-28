@@ -495,6 +495,7 @@ export interface ChannelTrustProvider {
   policies: { dm: string; group: string }
   allowed_senders: ChannelTrustSender[]
   tracked_channels: ChannelTrustChannel[]
+  seen_channels?: ChannelTrustChannel[]
   pairing_active: boolean
   pairing_expires_at: string
 }
@@ -4148,6 +4149,16 @@ export const api = {
   cancelChannelOwnerPairing: (provider: string) => del(`/api/channels/${encodeURIComponent(provider)}/owner/pairing`),
   revokeChannelSender: (provider: string, senderId: string) =>
     del(`/api/channels/trust/${encodeURIComponent(provider)}/senders/${encodeURIComponent(senderId)}`),
+  setChannelTrustPolicies: (provider: string, body: { dm?: string; group?: string; confirm_open?: boolean }) =>
+    put<{ ok: boolean; provider: string; policies: { dm: string; group: string } }>(`/api/channels/trust/${encodeURIComponent(provider)}/policies`, body),
+  trackChannel: (provider: string, channelId: string, name = '') =>
+    post<{ ok: boolean }>(`/api/channels/trust/${encodeURIComponent(provider)}/channels`, { channel_id: channelId, name }),
+  untrackChannel: (provider: string, channelId: string) =>
+    del(`/api/channels/trust/${encodeURIComponent(provider)}/channels/${encodeURIComponent(channelId)}`),
+  createChannelPairing: (provider: string) =>
+    post<{ ok: boolean; provider: string; code: string; expires_in: number }>(`/api/channels/trust/${encodeURIComponent(provider)}/pairing`),
+  cancelChannelPairing: (provider: string) =>
+    del(`/api/channels/trust/${encodeURIComponent(provider)}/pairing`),
 
   tasksBulk: (op: 'create' | 'update' | 'delete', items: Array<Record<string, unknown>>) =>
     post<{ total: number; succeeded: number; failed: number; results?: unknown[]; errors?: unknown[] }>('/api/tasks/bulk', { op, items }),

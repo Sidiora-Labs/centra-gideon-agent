@@ -57,7 +57,10 @@ class Delivery:
         for key, value in (("trigger_id", self.trigger_id), ("run_id", self.run_id)):
             if value:
                 metadata[key] = value
-        return dict(kind=self.kind, title=self.title, body=self.body, meta=metadata)
+        return dict(
+            kind=self.kind, title=self.title, body=self.body, meta=metadata,
+            destination=self.destination,
+        )
 
     def to_text(self) -> str:
         return "\n".join(

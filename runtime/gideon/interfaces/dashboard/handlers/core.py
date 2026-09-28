@@ -677,6 +677,7 @@ def _scratchpad_path_sanitizer(value: str) -> str:
 
 _EDITABLE_CONFIG: dict[str, dict] = {
     **EDITABLE_CONFIG_FIELDS,
+    "agent.approval_channel": {"type": "str", "max_len": 64},
     "agent.approval_mode": {
         "type": "enum",
         "values": ["auto", "interactive", "trust_reads"],

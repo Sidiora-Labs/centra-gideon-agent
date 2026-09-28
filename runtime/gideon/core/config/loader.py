@@ -288,6 +288,13 @@ class SelfQaConfig:
 
 @dataclass
 class AgentConfig:
+    approval_channel: str = field(
+        default="",
+        metadata=_meta(
+            "Approval Channel",
+            "Preferred registered channel for approval prompts; empty uses the source channel then owner default.",
+        ),
+    )
     approval_mode: str = field(
         default="auto",
         metadata=_meta(
