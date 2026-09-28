@@ -9,7 +9,7 @@ import { CommentLayer } from '../../../features/files/comments/CommentLayer'
 import type { CommentTarget } from './commentTarget'
 import { type ContentType, isCommentable } from './contentTypes'
 import type { IterationTarget } from '../widget/useArtifactIteration'
-import { contentPermissions, useContentDraft, useContentScroll, useContentTools } from './contentSurfaceState'
+import { contentPermissions, useContentDraft, useContentScroll, useContentTools, type DraftAuthority } from './contentSurfaceState'
 
 const MonacoEditor = lazy(() => import('@monaco-editor/react'))
 
@@ -30,11 +30,17 @@ interface ContentSurfaceProps {
   docId: string
   path?: string
   readOnly?: boolean
-  onSave?: (draft: string) => void | Promise<void>
+  onSave?: (draft: string, base: DraftAuthority) => void | Promise<void>
   commentTarget?: CommentTarget
   compact?: boolean
   initialView?: 'preview' | 'edit' | 'split'
-  draftStore?: Map<string, { draft: string; base: string; warned?: boolean }>
+  draftStore?: Map<string, { draft: string; base: string; revision?: string; validator?: string; warned?: boolean }>
+  revision?: string
+  validator?: string
+  requireRevision?: boolean
+  requireValidator?: boolean
+  readCurrent?: () => Promise<DraftAuthority>
+  onRebased?: (authority: DraftAuthority) => void
   truncated?: boolean
   actions?: ContentAction[]
   onDirtyChange?: (dirty: boolean) => void
@@ -48,10 +54,10 @@ interface ContentSurfaceProps {
 }
 
 export const ContentSurface = forwardRef<ContentSurfaceHandle, ContentSurfaceProps>(function ContentSurface(props, ref) {
-  const { type, content, title, docId, path, readOnly, onSave, commentTarget, compact = false, initialView, draftStore, truncated, actions, onDirtyChange, onDraftChange, confirmSave, language, headerLeft, headerExtras, banner, iterate } = props
+  const { type, content, title, docId, path, readOnly, onSave, commentTarget, compact = false, initialView, draftStore, revision, validator, requireRevision, requireValidator, readCurrent, onRebased, truncated, actions, onDirtyChange, onDraftChange, confirmSave, language, headerLeft, headerExtras, banner, iterate } = props
   const { mode } = useMode()
   const capability = contentPermissions(type, readOnly, truncated, onSave)
-  const state = useContentDraft({ id: docId, content, previewable: capability.previewable, editable: capability.draftEditable, initialView, cache: draftStore, save: onSave, confirm: confirmSave, onDirty: onDirtyChange, onDraft: onDraftChange })
+  const state = useContentDraft({ id: docId, content, previewable: capability.previewable, editable: capability.draftEditable, initialView, cache: draftStore, revision, validator, requireRevision, requireValidator, readCurrent, onRebased, save: onSave, confirm: confirmSave, onDirty: onDirtyChange, onDraft: onDraftChange })
   const { draft, view, dirty, saving } = state
   const tools = useContentTools(draft)
   const scroll = useContentScroll()
@@ -96,8 +102,8 @@ export const ContentSurface = forwardRef<ContentSurfaceHandle, ContentSurfacePro
           </>}
         </div>}
         {capability.draftEditable && <>
-          <SquareIconButton icon={RotateCcw} label="Revert unsaved changes" disabled={!dirty} iconSize={13} onClick={() => state.setDraft(content)} />
-          <button type="button" onClick={dirty ? state.save : undefined} disabled={saving} aria-busy={saving || undefined} aria-disabled={(!dirty && !saving) || undefined}
+          <SquareIconButton icon={RotateCcw} label="Revert unsaved changes" disabled={!dirty} iconSize={13} onClick={() => state.setDraft(state.base)} />
+          <button type="button" onClick={dirty ? state.save : undefined} disabled={saving || state.baseMissing} aria-busy={saving || undefined} aria-disabled={(!dirty && !saving) || state.baseMissing || undefined}
             className="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-xs disabled:opacity-40 aria-disabled:opacity-40"
             style={{ background: dirty ? 'var(--color-primary)' : 'var(--color-surface-high)', color: dirty ? 'var(--color-on-primary)' : 'var(--color-on-surface-low)' }} title={dirty ? 'Save (⌘S)' : 'Save (⌘S) — no changes to save'}>
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}{!compact && 'Save'}
@@ -109,6 +115,11 @@ export const ContentSurface = forwardRef<ContentSurfaceHandle, ContentSurfacePro
           </button>)}
         </>}
       </div>
+    </div>}
+    {state.baseError && <div role="alert" className="border-b border-error/30 bg-error/10 px-m py-2 text-xs text-error">{state.baseError}</div>}
+    {state.baseMissing && <div role="alert" className="flex items-center justify-between gap-2 border-b border-warning/30 bg-warning/10 px-m py-2 text-xs text-on-surface">
+      <span>This saved draft has no matching version. Refresh and rebase it before saving.</span>
+      {readCurrent && <button type="button" onClick={() => void state.rebaseMissing()} disabled={saving} className="rounded-md border border-outline/50 px-2 py-1 font-medium hover:bg-surface-high">Refresh and rebase draft</button>}
     </div>}
     {banner}
     <div className="min-h-0 flex-1 overflow-hidden">

@@ -1,41 +1,69 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import type { ContentType } from './contentTypes'
 import { copyText } from '../../../app/shell/clipboard'
+import { mergeText } from '../../data/staleWrite'
 
 export type ContentView = 'preview' | 'edit' | 'split'
-export type DraftCache = Map<string, { draft: string; base: string; warned?: boolean }>
-export interface DraftState { id: string; draft: string; base: string; view: ContentView; customDirty: boolean }
+export interface DraftCacheEntry { draft: string; base: string; revision?: string; validator?: string; warned?: boolean }
+export type DraftCache = Map<string, DraftCacheEntry>
+export interface DraftAuthority { content: string; revision?: string; validator?: string }
+export interface DraftState { id: string; draft: string; base: string; baseRevision?: string; baseValidator?: string; view: ContentView; customDirty: boolean }
 export function contentPermissions(type: ContentType, readOnly?: boolean, truncated?: boolean, save?: unknown) {
   const custom = !!type.edit?.render && !readOnly && !truncated
   const editable = !!type.edit && !readOnly && !truncated && (!!save || custom)
   return { custom, editable, draftEditable: editable && !custom, previewable: !!type.preview, splittable: editable && !custom && !!type.preview && !!type.edit?.split }
 }
-export function reconcileContentDraft(state: DraftState, id: string, content: string, previewable: boolean, cache?: DraftCache): DraftState {
-  if (state.id !== id) return { id, draft: cache?.get(id)?.draft ?? content, base: content, view: previewable ? state.view : 'edit', customDirty: false }
-  if (state.base === content) return state
-  return { ...state, base: content, draft: state.draft === state.base ? content : state.draft }
+export function reconcileContentDraft(state: DraftState, id: string, content: string, previewable: boolean, cache?: DraftCache, revision?: string, validator?: string): DraftState {
+  if (state.id !== id) {
+    const cached = cache?.get(id)
+    const preserve = cached && cached.draft !== cached.base && cached.draft !== content ? cached : undefined
+    return {
+      id,
+      draft: preserve?.draft ?? content,
+      base: preserve?.base ?? content,
+      baseRevision: preserve ? preserve.revision : revision,
+      baseValidator: preserve ? preserve.validator : validator,
+      view: previewable ? state.view : 'edit',
+      customDirty: false,
+    }
+  }
+  if (state.draft === state.base || state.draft === content) {
+    if (state.base === content && state.baseRevision === revision && state.baseValidator === validator) return state
+    return { ...state, draft: content, base: content, baseRevision: revision, baseValidator: validator }
+  }
+  // A dirty draft keeps the revision pair it was displayed against. A newer read is
+  // not permission to bind old text to a new revision; the server must refuse it or
+  // the user must explicitly rebase it.
+  return state
 }
-type DraftAction = { type: 'draft'; value: string } | { type: 'view'; value: ContentView } | { type: 'custom'; value: boolean } | { type: 'reconcile'; id: string; content: string; previewable: boolean; cache?: DraftCache }
+type DraftAction = { type: 'draft'; value: string } | { type: 'view'; value: ContentView } | { type: 'custom'; value: boolean } | { type: 'reconcile'; id: string; content: string; previewable: boolean; cache?: DraftCache; revision?: string; validator?: string } | { type: 'rebase'; content: string; draft: string; revision: string; validator?: string }
 function reduceDraft(state: DraftState, action: DraftAction): DraftState {
   switch (action.type) {
     case 'draft': return { ...state, draft: action.value }
     case 'view': return { ...state, view: action.value }
     case 'custom': return state.customDirty === action.value ? state : { ...state, customDirty: action.value }
-    case 'reconcile': return reconcileContentDraft(state, action.id, action.content, action.previewable, action.cache)
+    case 'reconcile': return reconcileContentDraft(state, action.id, action.content, action.previewable, action.cache, action.revision, action.validator)
+    case 'rebase': return { ...state, base: action.content, draft: action.draft, baseRevision: action.revision, baseValidator: action.validator }
   }
 }
 interface DraftOptions {
-  id: string; content: string; previewable: boolean; editable: boolean; initialView?: ContentView; cache?: DraftCache
-  save?: (draft: string) => void | Promise<void>; confirm?: () => boolean | Promise<boolean>
+  id: string; content: string; previewable: boolean; editable: boolean; initialView?: ContentView; cache?: DraftCache; revision?: string; validator?: string; requireRevision?: boolean; requireValidator?: boolean
+  save?: (draft: string, base: DraftAuthority) => void | Promise<void>; confirm?: () => boolean | Promise<boolean>
+  readCurrent?: () => Promise<DraftAuthority>; onRebased?: (authority: DraftAuthority) => void
   onDirty?: (dirty: boolean) => void; onDraft?: (draft: string, dirty: boolean) => void
 }
 export function useContentDraft(options: DraftOptions) {
-  const { id, content, previewable, editable, initialView, cache, save: persist, confirm, onDirty, onDraft } = options
-  const [state, dispatch] = useReducer(reduceDraft, undefined, () => ({ id, draft: cache?.get(id)?.draft ?? content, base: content, view: initialView ?? (previewable ? 'preview' : 'edit'), customDirty: false }))
+  const { id, content, previewable, editable, initialView, cache, revision, validator, requireRevision, requireValidator, save: persist, confirm, readCurrent, onRebased, onDirty, onDraft } = options
+  const [state, dispatch] = useReducer(reduceDraft, undefined, () => {
+    const cached = cache?.get(id)
+    return { id, draft: cached?.draft ?? content, base: cached?.base ?? content, baseRevision: cached ? cached.revision : revision, baseValidator: cached ? cached.validator : validator, view: initialView ?? (previewable ? 'preview' : 'edit'), customDirty: false }
+  })
   const [saving, setSaving] = useState(false)
+  const [baseError, setBaseError] = useState('')
   const lock = useRef(false)
-  const dirty = editable && state.draft !== content
-  useEffect(() => dispatch({ type: 'reconcile', id, content, previewable, cache }), [id, content, previewable, cache])
+  const dirty = editable && state.draft !== state.base
+  const baseMissing = editable && ((requireRevision && !state.baseRevision) || (requireValidator && !state.baseValidator))
+  useEffect(() => dispatch({ type: 'reconcile', id, content, previewable, cache, revision, validator }), [id, content, previewable, cache, revision, validator])
   useEffect(() => {
     if (state.id !== id) return
     onDirty?.(dirty || state.customDirty)
@@ -44,9 +72,9 @@ export function useContentDraft(options: DraftOptions) {
     if (state.id !== id) return
     onDraft?.(state.draft, dirty)
     if (!cache) return
-    if (dirty) cache.set(id, { draft: state.draft, base: content, warned: cache.get(id)?.warned })
+    if (dirty) cache.set(id, { draft: state.draft, base: state.base, revision: state.baseRevision, validator: state.baseValidator, warned: cache.get(id)?.warned })
     else cache.delete(id)
-  }, [state.id, state.draft, id, content, dirty, cache, onDraft])
+  }, [state.id, state.draft, state.base, state.baseRevision, state.baseValidator, id, dirty, cache, onDraft])
   const perform = async (action: () => void | Promise<void>) => {
     if (lock.current) return
     lock.current = true
@@ -56,10 +84,25 @@ export function useContentDraft(options: DraftOptions) {
   const setDraft = useCallback((value: string) => dispatch({ type: 'draft', value }), [])
   const setView = useCallback((value: ContentView) => dispatch({ type: 'view', value }), [])
   const setCustomDirty = useCallback((value: boolean) => dispatch({ type: 'custom', value }), [])
+  const rebaseMissing = async () => {
+    if (!readCurrent) return
+    setBaseError('')
+    try {
+      const current = await readCurrent()
+      if (!current.revision || (requireValidator && !current.validator)) throw new Error('The current version is incomplete. Reload it before rebasing.')
+      const merged = mergeText(state.base, state.draft, current.content)
+      if (merged === null) throw new Error('The edits overlap. Keep this draft and resolve the difference before rebasing.')
+      dispatch({ type: 'rebase', content: current.content, draft: merged, revision: current.revision, validator: current.validator })
+      onRebased?.(current)
+    } catch (error) {
+      setBaseError(error instanceof Error ? error.message : 'Could not rebase this draft.')
+    }
+  }
   return {
-    ...state, dirty, anyDirty: dirty || state.customDirty, saving,
+    ...state, dirty, anyDirty: dirty || state.customDirty, saving, baseMissing, baseError,
     setDraft, setView, setCustomDirty,
-    save: () => dirty && persist ? perform(async () => { if (!confirm || await confirm()) await persist(state.draft) }) : Promise.resolve(),
+    rebaseMissing,
+    save: () => dirty && persist && !baseMissing ? perform(async () => { if (!confirm || await confirm()) await persist(state.draft, { content: state.base, revision: state.baseRevision, validator: state.baseValidator }) }) : Promise.resolve(),
     action: (run: (draft: string) => void | Promise<void>) => perform(() => run(state.draft)),
   }
 }

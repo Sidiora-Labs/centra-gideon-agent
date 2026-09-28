@@ -2998,6 +2998,81 @@ class KnowledgeStore:
             maintenance.mark_dirty(reason="update " + ",".join(sorted(index_changes)))
         return True if expected is not None else None
 
+    def update_item_tags(
+        self, item_id, *, add=(), remove=(), expected: list[str] | None = None
+    ) -> list[str] | None:
+        """Apply tag additions/removals to the current membership in one transaction.
+
+        The operation is intentionally relative to the stored set: two editors adding
+        different tags cannot erase one another's work. Existing memberships and their
+        user/AI provenance are left intact.
+        """
+        additions = _clean_tag_names(add)
+        removals = set(_clean_tag_names(remove))
+        if not additions and not removals:
+            return self._tags_for_item(item_id)
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.db.execute(
+                "SELECT rowid, title, content FROM items WHERE id = ?", (item_id,)
+            ).fetchone()
+            if row is None:
+                self.db.execute("ROLLBACK")
+                return None
+            old_names = self._tags_for_item(item_id)
+            if expected is not None and old_names != sorted(_clean_tag_names(expected)):
+                self.db.execute("ROLLBACK")
+                return None
+            old_set = set(old_names)
+            new_set = (old_set - removals) | set(additions)
+            now = datetime.now().isoformat()
+            if removals:
+                names = sorted(old_set & removals)
+                if names:
+                    placeholders = ",".join("?" for _ in names)
+                    self.db.execute(
+                        "DELETE FROM item_tags WHERE item_id = ? AND tag_id IN "
+                        f"(SELECT id FROM tags WHERE name IN ({placeholders}))",
+                        (item_id, *names),
+                    )
+            for name in additions:
+                if name not in old_set or name in removals:
+                    self.db.execute(
+                        "INSERT OR IGNORE INTO tags (name, created_at) VALUES (?, ?)",
+                        (name, now),
+                    )
+                    tag = self.db.execute(
+                        "SELECT id FROM tags WHERE name = ?", (name,)
+                    ).fetchone()
+                    self.db.execute(
+                        "INSERT OR IGNORE INTO item_tags (item_id, tag_id, source, added_at) "
+                        "VALUES (?, ?, 'user', ?)",
+                        (item_id, tag["id"], now),
+                    )
+            new_names = sorted(new_set)
+            if new_names != old_names:
+                self.db.execute(
+                    "UPDATE items SET updated_at = ? WHERE id = ?", (now, item_id)
+                )
+                self.db.execute(
+                    "INSERT INTO items_fts (items_fts, rowid, title, content, tags) "
+                    "VALUES ('delete', ?, ?, ?, ?)",
+                    (row["rowid"], row["title"], row["content"], _fts_tags(old_names)),
+                )
+                self.db.execute(
+                    "INSERT INTO items_fts (rowid, title, content, tags) VALUES (?, ?, ?, ?)",
+                    (row["rowid"], row["title"], row["content"], _fts_tags(new_names)),
+                )
+            self.db.execute("COMMIT")
+        except Exception:
+            self.db.execute("ROLLBACK")
+            raise
+        if new_names != old_names:
+            from gideon.cognition.knowledge import maintenance
+
+            maintenance.mark_dirty(reason="update tags")
+        return new_names
+
     def _delete_item_cascade(self, item_id):
         """Delete item and its dependents without commit/graph reload (for batch use)."""
         row = self.db.execute(

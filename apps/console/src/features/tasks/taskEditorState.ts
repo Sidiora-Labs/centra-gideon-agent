@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { api, type TaskItem, type TaskComment, type ProjectItem, type TaskListItem } from '../../shared/data/api'
 import { reportingWrite } from '../../app/shell/reportingWrite'
 import { depMap, prereqIds, wouldCycle } from './dag'
-import { isExitComplete } from './taskMeta'
 
 export type TaskDraft = Partial<TaskItem> & { title: string; depends_on?: string[]; project_id?: string }
 export function emptyDraft(): TaskDraft {
@@ -41,12 +40,9 @@ export function dependencyCandidates(tasks: TaskItem[], selfId: string | undefin
   return candidates
 }
 export function taskChecklistPatch(task: TaskItem, kind: 'exit' | 'step', index: number): Record<string, unknown> {
-  if (kind === 'step') return { action_plan: (task.action_plan ?? []).map((entry, position) => position === index ? { ...entry, completed: !entry.completed } : entry) }
-  return { exit_criteria: (task.exit_criteria ?? []).map((entry, position) => {
-    if (position !== index) return entry
-    const met = !isExitComplete(entry)
-    return { ...entry, met, status: met ? 'complete' : 'incomplete' }
-  }) }
+  const entries = kind === 'step' ? task.action_plan ?? [] : task.exit_criteria ?? []
+  if (!Number.isInteger(index) || index < 0 || index >= entries.length) return {}
+  return { checklist_toggle: { kind, index } }
 }
 export class TaskRequestLease {
   private generation = 0

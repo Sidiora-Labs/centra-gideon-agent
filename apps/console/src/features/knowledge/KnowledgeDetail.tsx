@@ -15,6 +15,23 @@ import { GistEditor } from './GistEditor'
 import { confirm } from '../../shared/ui/dialog'
 import { api } from '../../shared/data/api'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
+import { useStaleWriteGuard } from '../../shared/data/useStaleWriteGuard'
+import { mergeRecord } from '../../shared/data/staleWrite'
+import type { Revisioned } from '../../shared/data/staleWrite'
+import { HeldChange, StaleWriteNotice } from '../../shared/ui/StaleWriteNotice'
+
+type KnowledgeDraft = {
+  title: string; content: string; summary: string; tags: string[]
+  item_type: string; gist_language: string; url: string
+}
+
+function knowledgeDraft(item: KnowledgeItem): KnowledgeDraft {
+  return {
+    title: item.title ?? '', content: item.content ?? '', summary: item.summary ?? '',
+    tags: item.tags ?? [], item_type: item.item_type ?? item.type ?? 'note',
+    gist_language: item.gist_language ?? '', url: item.url ?? '',
+  }
+}
 
 function gistFence(code: string, lang?: string): string {
   const longest = Math.max(0, ...(code.match(/`+/g) || []).map((r) => r.length))
@@ -75,21 +92,45 @@ function StaleSynthesisBanner({ item }: { item: KnowledgeItem }) {
 export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShowDetails, detailsOpen, detailsCount, onHeader, reading = false, onToggleReading, annotations = [], onAnnotationsChanged, insightRail }: { item: KnowledgeItem; onChanged: () => void; onDeleted: () => void; onTagClick?: (tag: string) => void; onShowDetails?: () => void; detailsOpen?: boolean; detailsCount?: number; onHeader?: (parts: { wand: React.ReactNode; actions: React.ReactNode; editing: boolean } | null) => void; reading?: boolean; onToggleReading?: () => void; annotations?: KnowledgeAnnotation[]; onAnnotationsChanged?: () => void;   insightRail?: React.ReactNode }) {
   const [full, setFull] = useState<KnowledgeItem>(item)
   const [editing, setEditing] = useState(false)
+  const [editBase, setEditBase] = useState<Revisioned<KnowledgeDraft> | null>(null)
   const [knownTags, setKnownTags] = useState<string[]>([])
   const startEdit = async () => {
     if (!knownTags.length) api.knowledgeTags().then(setKnownTags).catch(() => {})
-    let src = full
-    if (src.content_truncated || item.content_truncated) {
-      const fresh = await getKnowledge(item.id)
-      if (fresh) { src = fresh; setFull(fresh) }
-    }
-    setDraft({ title: src.title ?? '', content: src.content ?? '', summary: src.summary ?? '', tags: src.tags ?? [], item_type: src.item_type ?? src.type ?? 'note', gist_language: src.gist_language ?? '', url: src.url ?? '' })
+    const src = await api.knowledgeItem(item.id)
+    if (!src.revision) { setErr('This item has no current revision. Reload it before editing.'); return }
+    const base = { value: knowledgeDraft(src), revision: src.revision }
+    setFull(src); setDraft(base.value); setEditBase(base); setErr('')
     setEditing(true)
   }
-  const [draft, setDraft] = useState({ title: item.title ?? '', content: item.content ?? '', summary: item.summary ?? '', tags: item.tags ?? [], item_type: item.item_type ?? item.type ?? 'note', gist_language: item.gist_language ?? '', url: item.url ?? '' })
+  const [draft, setDraft] = useState<KnowledgeDraft>(() => knowledgeDraft(item))
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
   const tm = resolveType(full)
+
+  const refreshEditableDocument = async (): Promise<Revisioned<KnowledgeDraft>> => {
+    const current = await api.knowledgeItem(item.id)
+    if (!current.revision) throw new Error('The current item has no revision. Reload it before saving.')
+    const value = knowledgeDraft(current)
+    setFull(current); setDraft(value); setEditBase({ value, revision: current.revision })
+    setProcStatus(current.processing_status ?? '')
+    setEditing(false)
+    return { value, revision: current.revision }
+  }
+  const stale = useStaleWriteGuard<KnowledgeDraft>({
+    read: async () => {
+      const current = await api.knowledgeItem(item.id)
+      if (!current.revision) throw new Error('The current item has no revision. Reload it before saving.')
+      return { value: knowledgeDraft(current), revision: current.revision }
+    },
+    write: async (next, basedOn) => api.updateKnowledgeItem(item.id, {
+      title: next.title, content: next.content, summary: next.summary,
+      tags: next.tags, type: next.item_type, item_type: next.item_type,
+      gist_language: next.gist_language, url: next.url,
+      reingest: reingest,
+    }, basedOn),
+    onSaved: () => { void refreshEditableDocument().catch((e) => setErr(e instanceof Error ? e.message : 'Could not reload the saved item.')) },
+    onDiscard: () => { void refreshEditableDocument().catch((e) => setErr(e instanceof Error ? e.message : 'Could not reload the current item.')) },
+  })
 
   const [itemIntents, setItemIntents] = useState<IntentOutcome[]>([])
   const [nodePhases, setNodePhases] = useState<Record<string, string>>({})
@@ -145,29 +186,27 @@ export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShow
   }
 
   async function save() {
+    if (!editBase?.revision) { setErr('This item has no current revision. Reload it before saving.'); return }
     setSaving(true); setErr('')
     try {
-      const fields: Record<string, unknown> = {}
-      if (draft.title !== (full.title ?? '')) fields.title = draft.title
-      if (draft.content !== (full.content ?? '')) fields.content = draft.content
-      if (draft.url !== (full.url ?? '')) fields.url = draft.url
-      if (draft.summary !== (full.summary ?? '')) fields.summary = draft.summary
-      if (draft.item_type !== (full.item_type ?? full.type)) { fields.type = draft.item_type; fields.item_type = draft.item_type }
-      if ((draft.item_type === 'gist') && draft.gist_language !== (full.gist_language ?? '')) fields.gist_language = draft.gist_language
-      const sameTags = (a: string[], b: string[]) => {
-        if (a.length !== b.length) return false
-        const sortedB = [...b].sort()
-        return [...a].sort().every((t, i) => t === sortedB[i])
+      if (JSON.stringify(draft) === JSON.stringify(editBase.value)) { setEditing(false); return }
+      const sortedTags = (tags: string[]) => [...tags].sort()
+      const tagsOnly = ['title', 'content', 'summary', 'item_type', 'gist_language', 'url']
+        .every((key) => draft[key as keyof KnowledgeDraft] === editBase.value[key as keyof KnowledgeDraft])
+      if (tagsOnly) {
+        if (JSON.stringify(sortedTags(draft.tags)) === JSON.stringify(sortedTags(editBase.value.tags))) { setEditing(false); return }
+        const before = new Set(editBase.value.tags)
+        const after = new Set(draft.tags)
+        await api.updateKnowledgeItem(item.id, {
+          tag_add: sortedTags(draft.tags.filter((tag) => !before.has(tag))),
+          tag_remove: sortedTags(editBase.value.tags.filter((tag) => !after.has(tag))),
+        })
+        await refreshEditableDocument()
+        onChanged()
+        return
       }
-      if (!sameTags(draft.tags ?? [], full.tags ?? [])) fields.tags = draft.tags
-      if (Object.keys(fields).length === 0) { setEditing(false); return }
-      const changedBody = 'content' in fields || 'url' in fields
-      if (changedBody && !reingest) fields.reingest = false
-      await updateKnowledge(item.id, fields)
-      const { reingest: _r, ...applied } = fields
-      setFull((f) => ({ ...f, ...applied }))
-      if (changedBody && reingest) setProcStatus('queued')
-      onChanged(); setEditing(false)
+      const saved = await stale.save(editBase, draft, (theirs) => mergeRecord(editBase.value, draft, theirs))
+      if (saved) onChanged()
     } catch (e) { setErr(e instanceof Error ? e.message : 'Save failed') } finally { setSaving(false) }
   }
   async function del() {
@@ -219,8 +258,8 @@ export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShow
       <HeaderControl icon={Trash2} label="Delete" priority="low" danger onClick={del} />
       {editing ? (
         <>
-          <HeaderControl icon={X} label="Cancel" onClick={() => { setEditing(false); setErr('') }} />
-          <HeaderControl icon={Check} label={saving ? 'Saving…' : 'Save'} variant="primary" priority="primary" onClick={save} disabled={saving} />
+          <HeaderControl icon={X} label="Cancel" onClick={() => { if (stale.conflict) stale.discard(); setEditing(false); setErr('') }} />
+          <HeaderControl icon={Check} label={saving ? 'Saving…' : 'Save'} variant="primary" priority="primary" onClick={save} disabled={saving || stale.conflict !== null} />
         </>
       ) : (
         <HeaderControl icon={Pencil} label="Edit" variant="primary" priority="primary" onClick={startEdit} />
@@ -283,6 +322,8 @@ export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShow
   if (editing) {
     return (
       <>
+      <StaleWriteNotice guard={stale} what="This knowledge item" />
+      <HeldChange guard={stale}>
       <div className="flex h-full min-h-0 flex-col gap-l">
         {err && <FieldError className="shrink-0">{err}</FieldError>}
         {titleEditable && (
@@ -329,6 +370,7 @@ export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShow
         )}
       </div>
       {editBar && <div className="-mx-l shrink-0 border-t border-outline-variant/40 bg-surface/95 px-l py-3">{editBar}</div>}
+      </HeldChange>
       </>
     )
   }

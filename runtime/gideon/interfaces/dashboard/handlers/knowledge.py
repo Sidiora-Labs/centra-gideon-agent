@@ -53,6 +53,18 @@ def _redact(text: str | None) -> str | None:
     return text
 
 
+def _editable_item_projection(item: dict) -> dict:
+    """The whole-document fields presented by KnowledgeDetail, in stable API order."""
+    return {
+        key: item.get(key)
+        for key in (
+            "title", "content", "summary", "tags", "item_type", "url",
+            "url_title", "url_description", "gist_language", "is_pinned",
+            "is_archived",
+        )
+    }
+
+
 def _serialize_entity(row) -> dict:
     """API shape for an entity row: aliases parsed to a real array (not the stored
     JSON string — same contract as item tags), and the LLM-derived description
@@ -589,22 +601,29 @@ async def get_item(request: web.Request) -> web.Response:
                 r["description"] = _redact(r.get("description"))
                 relations.append(r)
 
-    return web.json_response({**item, "entities": entities, "relations": relations})
+    from gideon.stale_write import revision_of
+
+    return web.json_response({
+        **item,
+        "revision": revision_of(_editable_item_projection(item)),
+        "entities": entities,
+        "relations": relations,
+    })
 
 
 async def update_item(request: web.Request) -> web.Response:
     """PATCH /api/knowledge/items/{id} -- update fields."""
     store = _store(request)
     item_id = request.match_info["id"]
-    existing = store.get_item(item_id)
-    if not existing:
-        return web.json_response({"error": "not found"}, status=404)
     try:
         body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
+    existing = store.get_item(item_id)
+    if not existing:
+        return web.json_response({"error": "not found"}, status=404)
     allowed = {
         "tags",
         "item_type",
@@ -620,6 +639,30 @@ async def update_item(request: web.Request) -> web.Response:
         "gist_language",
     }
     fields = {k: v for k, v in body.items() if k in allowed}
+    tag_add = body.get("tag_add", [])
+    tag_remove = body.get("tag_remove", [])
+    if not isinstance(tag_add, list) or not all(isinstance(tag, str) for tag in tag_add):
+        return web.json_response({"error": "tag_add must be a list of strings"}, status=400)
+    if not isinstance(tag_remove, list) or not all(isinstance(tag, str) for tag in tag_remove):
+        return web.json_response({"error": "tag_remove must be a list of strings"}, status=400)
+    if ("tag_add" in body or "tag_remove" in body) and "tags" in fields:
+        return web.json_response({"error": "replace tags or apply tag operations, not both"}, status=400)
+    has_tag_ops = "tag_add" in body or "tag_remove" in body
+    if has_tag_ops and (tag_add or tag_remove) and fields:
+        return web.json_response(
+            {"error": "tag operations must be saved separately from document fields"},
+            status=400,
+        )
+    if fields:
+        from gideon.stale_write import stale_write_refusal
+
+        refusal = stale_write_refusal(
+            request,
+            _editable_item_projection(existing),
+            what="this knowledge item",
+        )
+        if refusal is not None:
+            return refusal
     if "title" in fields:
         try:
             fields["title"] = require_string(fields["title"], "title")
@@ -678,9 +721,31 @@ async def update_item(request: web.Request) -> web.Response:
     for b in ("is_pinned", "is_archived"):
         if b in fields:
             fields[b] = 1 if fields[b] else 0
-    if not fields:
+    if not fields and not (has_tag_ops and (tag_add or tag_remove)):
         return web.json_response({"error": "no valid fields"}, status=400)
-    store.update_item(item_id, **fields)
+    if "tags" in fields:
+        desired_tags = fields["tags"]
+        if not isinstance(desired_tags, list) or not all(isinstance(tag, str) for tag in desired_tags):
+            return web.json_response({"error": "tags must be a list of strings"}, status=400)
+    elif has_tag_ops and (tag_add or tag_remove):
+        updated_tags = store.update_item_tags(item_id, add=tag_add, remove=tag_remove)
+        if updated_tags is None:
+            return web.json_response({"error": "not found"}, status=404)
+    if fields:
+        if not store.update_item(
+            item_id,
+            expected={"updated_at": existing.get("updated_at")},
+            **fields,
+        ):
+            from gideon.stale_write import revision_of
+
+            current = store.get_item(item_id) or {}
+            return json_error(
+                "stale_write",
+                message="this knowledge item changed while it was being saved",
+                status=409,
+                current_revision=revision_of(_editable_item_projection(current)),
+            )
     reingest_requested = body.get("reingest", True) is not False
     reenrich = reingest_requested and ("content" in fields or "url" in fields)
     if reenrich:
@@ -690,7 +755,14 @@ async def update_item(request: web.Request) -> web.Response:
         except Exception:
             logger.debug("re-enrich enqueue failed for %s", item_id, exc_info=True)
     _sel_log("item.update", item_id=item_id, fields=list(fields))
-    return web.json_response({"ok": True, "reenriching": reenrich})
+    from gideon.stale_write import revision_of
+
+    updated = store.get_item(item_id) or {}
+    return web.json_response({
+        "ok": True,
+        "reenriching": reenrich,
+        "revision": revision_of(_editable_item_projection(updated)),
+    })
 
 
 async def delete_item(request: web.Request) -> web.Response:

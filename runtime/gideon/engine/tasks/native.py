@@ -28,6 +28,7 @@ from gideon.engine.tasks.models import (
     TaskPriority,
     TaskStatus,
     WorkflowTaskBinding,
+    normalize_exit_criterion,
 )
 from gideon.engine.tasks.models import coerce_task_field as models_coerce
 from gideon.engine.tasks.provider import TaskProvider
@@ -347,6 +348,30 @@ class TaskMutation:
         )
         return task
 
+    def toggle_checklist_item(self, identifier, kind: str, index: int):
+        with self._mutation_lock():
+            task = self.provider._task_map().get(identifier)
+            if task is None:
+                return None
+            if kind == "step":
+                entries = [dict(item) for item in task.action_plan]
+                if index < 0 or index >= len(entries):
+                    return None
+                entries[index]["completed"] = not bool(entries[index].get("completed"))
+                task.action_plan = entries
+            elif kind == "exit":
+                entries = [normalize_exit_criterion(item) for item in task.exit_criteria]
+                if index < 0 or index >= len(entries):
+                    return None
+                met = not bool(entries[index]["met"])
+                entries[index].update(met=met, status="complete" if met else "incomplete")
+                task.exit_criteria = entries
+            else:
+                raise ValueError("checklist kind must be 'exit' or 'step'")
+            task.updated_at = _next_updated_at(task.updated_at)
+            self.provider._write_task(task)
+            return task
+
     def delete(self, identifier):
         with self._mutation_lock():
             return self._delete_locked(identifier)
@@ -541,6 +566,11 @@ class NativeTaskProvider(TaskProvider):
             emit(TASK_COMPLETED, {"task_id": edited.id, "status": edited.status.value})
             await _fire_task_complete(edited)
         return edited
+
+    async def toggle_checklist_item(self, task_id: str, kind: str, index: int) -> Task | None:
+        return await asyncio.to_thread(
+            TaskMutation(self).toggle_checklist_item, task_id, kind, index
+        )
 
     async def delete_task(self, task_id: str) -> bool:
         return await asyncio.to_thread(TaskMutation(self).delete, task_id)

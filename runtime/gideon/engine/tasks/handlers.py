@@ -40,6 +40,7 @@ def _owner_username() -> str:
 def _with_block_reason(task: Task, task_map: dict[str, Task]) -> dict:
     return {
         **task.to_dict(),
+        "revision": task.updated_at,
         "block_reason": reconcile.block_reason(task, task_map),
         "comment_count": getattr(task, "_comment_count", 0),
     }
@@ -259,6 +260,30 @@ class TaskWrite:
             return json_error(
                 "invalid_request", message=_SUPPLIED_AUTHOR_ERROR, status=400
             )
+        if not create and "checklist_toggle" in body:
+            operation = body.get("checklist_toggle")
+            if (
+                not isinstance(operation, dict)
+                or set(operation) != {"kind", "index"}
+                or operation.get("kind") not in ("exit", "step")
+                or not isinstance(operation.get("index"), int)
+                or isinstance(operation.get("index"), bool)
+                or set(body) - {"checklist_toggle", "provider"}
+            ):
+                return json_error("invalid_request", message="invalid checklist operation", status=400)
+            try:
+                task = await registry.toggle_checklist_item(
+                    task_id or "",
+                    kind=operation["kind"],
+                    index=operation["index"],
+                    provider_name=body.get("provider"),
+                )
+            except ValueError as exc:
+                return json_error("invalid_request", message=str(exc), status=400)
+            if task is None:
+                return json_error("not_found", message="task or checklist item not found", status=404)
+            siblings = {task.id: task}
+            return web.json_response(_with_block_reason(task, siblings))
         if create:
             title = body.get("title")
             if not isinstance(title, str) or not title.strip():
@@ -271,6 +296,18 @@ class TaskWrite:
             not isinstance(expected_revision, str) or not expected_revision
         ):
             return json_error("invalid_request", message="expected_revision must be a nonempty string", status=400)
+        whole_task_fields = {
+            "title", "description", "assignee", "priority", "labels", "due",
+            "due_reminder", "task_list_id", "exit_criteria", "action_plan",
+            "notes", "research_notes", "execution_notes",
+            "agent_instructions_template", "dependencies", "depends_on",
+        }
+        if not create and expected_revision is None and whole_task_fields.intersection(body):
+            return json_error(
+                "revision_required",
+                message="editing a task requires its current revision",
+                status=428,
+            )
         created_task = None
         updated_task = None
         try:
@@ -309,7 +346,10 @@ class TaskWrite:
                 return json_error(
                     "action_failed", message="task creation failed", status=500
                 )
-            return web.json_response(created_task.to_dict(), status=201)
+            return web.json_response(
+                {**created_task.to_dict(), "revision": created_task.updated_at},
+                status=201,
+            )
         if not updated_task:
             return json_error("not_found", message="not found", status=404)
         changed = getattr(updated_task, "_reconciled", [updated_task])
@@ -402,9 +442,7 @@ async def api_tasks_get(request: web.Request) -> web.Response:
         return json_error("invalid_request", message=str(exc), status=400)
     if not task:
         return json_error("not_found", message="not found", status=404)
-    return web.json_response(
-        {**task.to_dict(), "comment_count": getattr(task, "_comment_count", 0)}
-    )
+    return web.json_response(_with_block_reason(task, {task.id: task}))
 
 
 async def api_tasks_create(request: web.Request) -> web.Response:

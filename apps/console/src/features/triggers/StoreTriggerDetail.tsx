@@ -68,7 +68,7 @@ export function StoreTriggerDetail({ trigger, providers = [], editing, onEditing
         pattern,
         ...(draftPattern.matcher ? { [draftPattern.matcher]: matcher.trim() } : {}),
         action: { provider, config: coerced.config },
-      })
+      }, trigger.document_revision)
       changeEditing(false)
       onChanged()
     } catch (error) { setErr(error instanceof Error ? error.message : 'Could not save this trigger') }
@@ -96,7 +96,7 @@ export function StoreTriggerDetail({ trigger, providers = [], editing, onEditing
     setBusy(true)
     setErr('')
     try {
-      await api.updateSchedule(trigger.raw_id, { silent })
+      await api.updateSchedule(trigger.raw_id, { silent }, trigger.document_revision)
       onChanged()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not change delivery for this automation')
@@ -173,7 +173,7 @@ export function StoreTriggerDetail({ trigger, providers = [], editing, onEditing
         delivery: delivery.trim(),
         failure_delivery: failureDelivery.trim(),
         failure_policy: { dedupe_hash: dedupeFailures },
-      })
+      }, trigger.document_revision)
       onChanged()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not save outcome notifications')

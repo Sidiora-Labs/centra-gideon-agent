@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Pencil, Trash2, Check, X, ExternalLink, Lock, CornerDownRight, Send, AlertTriangle, FolderKanban } from 'lucide-react'
 import { rowSubject } from '../../shared/data/rowSubject'
 import { api, type TaskItem, type TaskNote } from '../../shared/data/api'
@@ -18,6 +18,9 @@ import { statusMeta, priorityMeta, dueMeta, relTime, isExitComplete, exitDoneCou
 import { prereqIds } from './dag'
 import { TaskForm, toDraft, draftToPayload, type TaskDraft } from './TaskForm'
 import { taskChecklistPatch, useTaskOperation, useTaskCommentThread } from './taskEditorState'
+import { mergeRecord } from '../../shared/data/staleWrite'
+import { useStaleWriteGuard } from '../../shared/data/useStaleWriteGuard'
+import { HeldChange, StaleWriteNotice } from '../../shared/ui/StaleWriteNotice'
 
 const relationStyle = 'flex min-h-9 items-center gap-s rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-s text-left transition-colors enabled:hover:bg-surface-high disabled:cursor-default'
 const chipStyle = 'inline-flex h-7 items-center gap-1.5 rounded-md px-m'
@@ -27,12 +30,49 @@ export function TaskDetail({ task, onSaved, onDeleted, editing: editingProp, onE
 }) {
   const readOnly = task.provider === 'project'
   const [draft, setDraft] = useState<TaskDraft>(() => toDraft(task))
+  const [base, setBase] = useState({ value: toDraft(task), revision: task.revision ?? '' })
+  const latestRead = useRef(task)
+  const writeResult = useRef<TaskItem | null>(null)
+  latestRead.current = task
   const { busy, error, setError, run } = useTaskOperation(task.id)
-  useEffect(() => { setDraft(toDraft(task)) }, [task.id])
+  const stale = useStaleWriteGuard<TaskDraft>({
+    read: async () => {
+      const current = await api.task(task.id, task.provider)
+      if (!current.revision) throw new Error('The task has no current revision.')
+      latestRead.current = current
+      return { value: toDraft(current), revision: current.revision }
+    },
+    write: async (next, basedOn) => {
+      writeResult.current = await api.updateTask(task.id, draftToPayload(next), basedOn)
+    },
+    onSaved: (saved) => {
+      const updated = writeResult.current
+      if (updated) {
+        onSaved(updated)
+        setBase({ value: toDraft(updated), revision: updated.revision ?? updated.updated_at ?? '' })
+      } else {
+        setBase({ value: saved, revision: base.revision })
+      }
+      setDraft(saved)
+      onEditingChange(false)
+    },
+    onDiscard: () => {
+      const current = latestRead.current
+      setBase({ value: toDraft(current), revision: current.revision ?? current.updated_at ?? '' })
+      setDraft(toDraft(current))
+    },
+  })
+  useEffect(() => {
+    stale.discard()
+    latestRead.current = task
+    setDraft(toDraft(task))
+    setBase({ value: toDraft(task), revision: task.revision ?? task.updated_at ?? '' })
+  }, [task.id])
   const dependents = allTasks.filter(candidate => prereqIds(candidate).includes(task.id))
   const save = () => {
     if (!draft.title.trim()) { setError('Title is required'); return }
-    void run(() => api.updateTask(task.id, draftToPayload(draft)), updated => { onSaved(updated); onEditingChange(false) }, 'Save failed')
+    if (!base.revision) { setError('Reload this task before saving.'); return }
+    void run(() => stale.save(base, draft, (theirs) => mergeRecord(base.value, draft, theirs)), () => {}, 'Save failed')
   }
   const remove = () => void run(async () => {
     const count = dependents.length
@@ -46,11 +86,12 @@ export function TaskDetail({ task, onSaved, onDeleted, editing: editingProp, onE
     void run(() => api.updateTask(task.id, taskChecklistPatch(task, kind, index)), onSaved, kind === 'exit' ? 'Could not update exit criteria' : 'Could not update action plan')
   }
   if (editingProp && !readOnly) return <div className="grid gap-l">
-    <TaskForm draft={draft} onChange={setDraft} compact allTasks={allTasks} />
+        <StaleWriteNotice guard={stale} what="This task" />
+        <HeldChange guard={stale}><TaskForm draft={draft} onChange={setDraft} compact allTasks={allTasks} /></HeldChange>
     {error && <FieldError>{error}</FieldError>}
     <FormFooter>
-      <Button size="sm" variant="ghost" onClick={() => { setDraft(toDraft(task)); setError(''); onEditingChange(false) }}><X size={15} /> Cancel</Button>
-      <Button size="sm" onClick={save} loading={busy} disabled={busy || !draft.title.trim()} disabledReason={!draft.title.trim() ? 'Enter a task title first' : undefined}><Check size={15} /> Save</Button>
+      <Button size="sm" variant="ghost" onClick={() => { stale.discard(); setDraft(toDraft(task)); setError(''); onEditingChange(false) }}><X size={15} /> Cancel</Button>
+      <Button size="sm" onClick={save} loading={busy || stale.busy} disabled={busy || stale.conflict !== null || !draft.title.trim()} disabledReason={stale.conflict ? 'Reapply or discard the held change first' : !draft.title.trim() ? 'Enter a task title first' : undefined}><Check size={15} /> Save</Button>
     </FormFooter>
   </div>
   const sm = statusMeta(task.status)
@@ -64,7 +105,7 @@ export function TaskDetail({ task, onSaved, onDeleted, editing: editingProp, onE
   return <div className="grid gap-l">
     <div className="flex flex-wrap items-center gap-s border-b border-outline-variant/30 pb-m">
       {readOnly ? <span data-type="body-s" className="inline-flex items-center gap-1.5 text-on-surface-low"><Lock size={13} /> Managed by project — read-only</span> : <>
-        <Button size="sm" variant="secondary" onClick={() => { setDraft(toDraft(task)); onEditingChange(true) }}><Pencil size={14} /> Edit</Button>
+        <Button size="sm" variant="secondary" onClick={() => { const next = toDraft(task); setDraft(next); setBase({ value: next, revision: task.revision ?? task.updated_at ?? '' }); onEditingChange(true) }}><Pencil size={14} /> Edit</Button>
         <Button size="sm" variant="ghost" onClick={remove} disabled={busy}><Trash2 size={14} /> Delete</Button>
       </>}
       {task.url && <TextLink href={task.url} external icon={ExternalLink} size="sm" className="ml-auto">Open</TextLink>}

@@ -1254,13 +1254,18 @@ async def api_file_read(request: web.Request) -> web.Response:
                 text="", content_type="text/plain", headers={"X-Binary": "true"}
             )
         content = redact_for_display(raw.decode("utf-8", errors="replace"))
+        from gideon.stale_write import revision_of
+
         _sel().log_tool_invocation(
             session_key="dashboard",
             tool_name="file_read",
             outcome="success",
             resources=path,
         )
-        headers = {"X-Truncated": "true"} if truncated else {"X-Content-Validator": validator}
+        headers = {"X-Truncated": "true"} if truncated else {
+            "X-Content-Validator": validator,
+            "X-Content-Revision": revision_of(content),
+        }
         return web.Response(text=content, content_type="text/plain", headers=headers)
     except Exception:
         logging.getLogger(__name__).exception("file_read failed for %s", path)
@@ -1421,6 +1426,21 @@ async def api_file_write(request: web.Request) -> web.Response:
                     before_content = source.read()
             except (OSError, UnicodeError):
                 before_content = None
+            from gideon.stale_write import stale_write_refusal
+
+            if before_content is None:
+                refusal = stale_write_refusal(request, "", what="this file")
+            else:
+                refusal = stale_write_refusal(
+                    request,
+                    redact_for_display(before_content),
+                    what="this file",
+                )
+            if refusal is not None:
+                _sel().log_tool_invocation(
+                    session_key="dashboard", tool_name="file_write", outcome="conflict", resources=path,
+                )
+                return refusal
             if expected_validator is not None:
                 digest = hashlib.sha256()
                 with open(path, "rb") as source:
@@ -1479,7 +1499,13 @@ async def api_file_write(request: web.Request) -> web.Response:
             _sel().log_tool_invocation(
                 session_key="dashboard", tool_name="file_write", outcome="success", resources=path,
             )
-            return web.json_response({"ok": True, "validator": hashlib.sha256(content.encode("utf-8")).hexdigest()})
+            from gideon.stale_write import revision_of
+
+            return web.json_response({
+                "ok": True,
+                "validator": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                "revision": revision_of(redact_for_display(content)),
+            })
         except Exception:
             logging.getLogger(__name__).exception("file_write failed for %s", path)
             _sel().log_tool_invocation(

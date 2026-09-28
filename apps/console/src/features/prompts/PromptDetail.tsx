@@ -1,5 +1,5 @@
 import { usePromptRequest, useTemplateRender } from './promptEditorState'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toneChipSkin } from '../../shared/theme/accent'
 import { Pencil, Trash2, Check, X, Play, Lock, Code2, Eye, Puzzle, Rocket } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
@@ -10,11 +10,32 @@ import { Skeleton } from '../../shared/ui/ListScaffold'
 import { confirmDelete } from '../../shared/ui/dialog'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { api, type PromptItem, type PromptVariable } from '../../shared/data/api'
+import { useStaleWriteGuard } from '../../shared/data/useStaleWriteGuard'
+import { HeldChange, StaleWriteNotice } from '../../shared/ui/StaleWriteNotice'
 import { Field, FieldError } from '../../shared/ui/forms'
 import { isReadOnly, sourceTone, sourceLabel, promptVars, mergePromptVariables, variableTypeLabel } from './promptMeta'
 import { toDraft, draftToPayload, type PromptDraft } from './PromptForm'
 import { PromptEditFields } from './PromptEditFields'
 import { accentChip } from '../../shared/theme/accent'
+
+type PromptDraftEntry = { draft: PromptDraft; base: PromptDraft; revision?: string }
+const promptDrafts = new Map<string, PromptDraftEntry>()
+const promptDraftEqual = (a: PromptDraft, b: PromptDraft) => JSON.stringify(a) === JSON.stringify(b)
+function retainPromptDraft(name: string, draft: PromptDraft, base: PromptDraft, revision?: string) {
+  if (promptDraftEqual(draft, base)) promptDrafts.delete(name)
+  else promptDrafts.set(name, { draft, base, revision })
+}
+function mergePromptDraft(base: PromptDraft, mine: PromptDraft, theirs: PromptDraft): PromptDraft | null {
+  const merged = { ...base } as PromptDraft
+  for (const key of Object.keys(base) as (keyof PromptDraft)[]) {
+    const b = base[key], m = mine[key], t = theirs[key]
+    const fields = merged as unknown as Record<keyof PromptDraft, unknown>
+    if (JSON.stringify(m) === JSON.stringify(b)) fields[key] = t
+    else if (JSON.stringify(t) === JSON.stringify(b) || JSON.stringify(m) === JSON.stringify(t)) fields[key] = m
+    else return null
+  }
+  return merged
+}
 
 function fillDefaults(content: string, vars: PromptVariable[]): string {
   return vars.reduce((text, variable) => variable.default == null || variable.default === '' ? text : text.replaceAll(`{{${variable.name}}}`, () => String(variable.default)), content)
@@ -33,16 +54,90 @@ export function PromptDetail({ prompt, onSaved, onDeleted, editing: editingProp,
   const editing = editingProp && !readOnly
   const setEditing = onEditingChange
   const [draft, setDraft] = useState<PromptDraft>(() => toDraft(prompt))
+  const [baseDraft, setBaseDraft] = useState<PromptDraft>(() => toDraft(prompt))
+  const [draftName, setDraftName] = useState(prompt.name)
+  const [revision, setRevision] = useState(prompt.revision ?? '')
   const request = usePromptRequest(prompt.name)
   const { busy: saving, error: err, setError: setErr } = request
   const { data: fetched, refresh: refetch } = useQuery<PromptItem | undefined>(`prompt:${prompt.name}`, () => (prompt.content == null ? api.prompt(prompt.name) : Promise.resolve(undefined)), { persist: true })
   const full = prompt.content != null ? prompt : fetched
-
-  useEffect(() => { if (full) setDraft(toDraft(full)) }, [full])
-
+  const authority = useRef<{ draft: PromptDraft; revision: string } | null>(null)
+  const savedAuthority = useRef<{ draft: PromptDraft; revision: string } | null>(null)
+  const stale = useStaleWriteGuard<PromptDraft>({
+    read: async () => {
+      const current = await api.prompt(prompt.name)
+      if (!current.revision) throw new Error('The current prompt has no revision.')
+      const value = { draft: toDraft(current), revision: current.revision }
+      authority.current = value
+      return { value: value.draft, revision: value.revision }
+    },
+    write: async (next, basedOn) => {
+      await api.savePrompt(prompt.name, draftToPayload(next), basedOn)
+      const current = await api.prompt(prompt.name)
+      if (!current.revision) throw new Error('The saved prompt has no revision.')
+      const value = { draft: toDraft(current), revision: current.revision }
+      authority.current = value; savedAuthority.current = value
+    },
+    onSaved: () => {
+      const current = savedAuthority.current
+      if (!current) return
+      setDraft(current.draft); setBaseDraft(current.draft); setRevision(current.revision)
+      retainPromptDraft(prompt.name, current.draft, current.draft, current.revision)
+    },
+    onDiscard: () => {
+      const current = authority.current
+      if (!current) return
+      setDraft(current.draft); setBaseDraft(current.draft); setRevision(current.revision)
+      retainPromptDraft(prompt.name, current.draft, current.draft, current.revision)
+    },
+  })
+  useEffect(() => {
+    if (!full) return
+    const cached = promptDrafts.get(prompt.name)
+    const current = toDraft(full)
+    const preserve = cached && !promptDraftEqual(cached.draft, cached.base) && !promptDraftEqual(cached.draft, current) ? cached : undefined
+    const next = preserve ?? { draft: current, base: current, revision: full.revision }
+    if (cached && !preserve) retainPromptDraft(prompt.name, current, current, full.revision)
+    setDraftName(prompt.name)
+    authority.current = { draft: current, revision: full.revision ?? '' }
+    setDraft(next.draft); setBaseDraft(next.base); setRevision(next.revision ?? '')
+  }, [prompt.name, full])
+  useEffect(() => { if (draftName === prompt.name) retainPromptDraft(prompt.name, draft, baseDraft, revision || undefined) }, [draftName, prompt.name, draft, baseDraft, revision])
+  const baseMissing = !revision && !promptDraftEqual(draft, baseDraft)
+  const rebaseMissing = async () => {
+    setErr('')
+    try {
+      const current = await api.prompt(prompt.name)
+      if (!current.revision) throw new Error('The current prompt has no revision. Reload it before saving.')
+      const merged = mergePromptDraft(baseDraft, draft, toDraft(current))
+      if (!merged) throw new Error('The edits overlap. Keep this draft and resolve the difference before rebasing.')
+      const value = { draft: toDraft(current), revision: current.revision }
+      authority.current = value
+      setDraft(merged); setBaseDraft(value.draft); setRevision(value.revision)
+      retainPromptDraft(prompt.name, merged, value.draft, value.revision)
+    } catch (error) { setErr(error instanceof Error ? error.message : 'Could not rebase this prompt draft.') }
+  }
   const save = () => {
     if (!draft.name.trim()) { setErr('Name is required'); return }
-    void request.run(() => api.savePrompt(prompt.name, draftToPayload(draft)), result => { invalidateKeys(`prompt:${prompt.name}`); refetch(); onSaved(result.prompt?.name ?? prompt.name); setEditing(false) }, 'Save failed')
+    if (!revision) { setErr('This saved draft has no matching revision. Refresh and rebase it before saving.'); return }
+    void request.run(async () => stale.save({ value: baseDraft, revision }, draft, theirs => mergePromptDraft(baseDraft, draft, theirs)), didSave => {
+      if (!didSave) return
+      invalidateKeys(`prompt:${prompt.name}`); refetch()
+      onSaved(savedAuthority.current?.draft.name ?? prompt.name); setEditing(false)
+    }, 'Save failed')
+  }
+  const discardDraft = () => {
+    void request.run(async () => {
+      const current = await api.prompt(prompt.name)
+      if (!current.revision) throw new Error('The current prompt has no revision. Reload it before discarding this draft.')
+      return current
+    }, current => {
+      const value = toDraft(current)
+      authority.current = { draft: value, revision: current.revision! }
+      setDraft(value); setBaseDraft(value); setRevision(current.revision!)
+      retainPromptDraft(prompt.name, value, value, current.revision)
+      setEditing(false); setErr('')
+    }, 'Could not refresh the prompt')
   }
   const del = async () => {
     if (readOnly || deletionBlockedReason || !await confirmDelete('prompt', prompt.name)) return
@@ -58,10 +153,12 @@ export function PromptDetail({ prompt, onSaved, onDeleted, editing: editingProp,
           <span data-type="caption" className="ml-auto inline-flex items-center rounded-md px-m h-6" style={toneChipSkin(sourceTone(prompt.source), 16)}>{sourceLabel(prompt.source, full?.tags)}</span>
         </div>
         {err && <FieldError>{err}</FieldError>}
-        <PromptEditFields draft={draft} onChange={setDraft} Section={Section} />
+        <StaleWriteNotice guard={stale} what="This prompt" />
+        {baseMissing && <div role="alert" className="flex items-center gap-2 text-xs text-warning"><span>This saved draft has no matching revision.</span><Button size="sm" variant="secondary" onClick={() => void rebaseMissing()}>Refresh and rebase draft</Button></div>}
+        <HeldChange guard={stale}><PromptEditFields draft={draft} onChange={setDraft} Section={Section} /></HeldChange>
         <FormFooter>
-          <Button variant="ghost" size="sm" onClick={() => { if (full) setDraft(toDraft(full)); setEditing(false); setErr('') }}><X size={15} /> Cancel</Button>
-          <Button size="sm" onClick={save} loading={saving} disabled={saving || !draft.name.trim()}
+          <Button variant="ghost" size="sm" onClick={discardDraft} loading={saving} disabled={saving}><X size={15} /> Cancel</Button>
+          <Button size="sm" onClick={save} loading={saving} disabled={saving || !draft.name.trim() || baseMissing || stale.conflict !== null}
             disabledReason={!draft.name.trim() ? 'Enter a name first' : undefined}><Check size={15} /> Save</Button>
         </FormFooter>
       </div>

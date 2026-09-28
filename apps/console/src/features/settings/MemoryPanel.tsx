@@ -34,6 +34,9 @@ import { fvs } from '../../shared/theme/fontWeight'
 import { accentChip } from '../../shared/theme/accent'
 import { notify } from '../../app/shell/appSdk'
 import { tabListKeys } from '../../shared/data/tabListKeys'
+import { mergeText } from '../../shared/data/staleWrite'
+import { useStaleWriteGuard } from '../../shared/data/useStaleWriteGuard'
+import { HeldChange, StaleWriteNotice } from '../../shared/ui/StaleWriteNotice'
 
 type Tab = 'studio' | 'recall' | 'health' | 'audit' | 'inspect' | 'settings'
 const TOP_TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
@@ -670,8 +673,8 @@ function StudioMeta({ pairs }: { pairs: [string, string][] }) {
 }
 
 type MemoryDocName = 'preferences' | 'projects' | 'history'
-
-const memoryDocDrafts = new Map<MemoryDocName, string>()
+type MemoryDocDraft = { draft: string; base: string; revision?: string }
+const memoryDocDrafts = new Map<MemoryDocName, MemoryDocDraft>()
 let memoryDocUnloadGuardAttached = false
 
 function guardMemoryDocDrafts(event: BeforeUnloadEvent) {
@@ -691,76 +694,107 @@ function syncMemoryDocUnloadGuard() {
   }
 }
 
-function keepMemoryDocDraft(which: MemoryDocName, draft: string, savedContent: string) {
-  if (draft === savedContent) memoryDocDrafts.delete(which)
-  else memoryDocDrafts.set(which, draft)
+function keepMemoryDocDraft(which: MemoryDocName, draft: string, base: string, revision?: string) {
+  if (draft === base) memoryDocDrafts.delete(which)
+  else memoryDocDrafts.set(which, { draft, base, revision })
   syncMemoryDocUnloadGuard()
 }
 
 export function StudioDocEditor({ which, onSaved }: { which: MemoryDocName; onSaved: () => void }) {
   const [content, setContent] = useState<string | null>(null)
+  const [baseContent, setBaseContent] = useState('')
+  const [revision, setRevision] = useState('')
   const [draft, setDraft] = useState('')
   const draftRef = useRef('')
+  const authority = useRef<{ content: string; revision: string } | null>(null)
+  const savedAuthority = useRef<{ content: string; revision: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState('')
   const [loadErr, setLoadErr] = useState('')
   const [reloads, setReloads] = useState(0)
+  const stale = useStaleWriteGuard<string>({
+    read: async () => {
+      const current = await api.memoryDoc(which)
+      if (!current.revision) throw new Error('The current document has no revision.')
+      authority.current = current
+      return { value: current.content, revision: current.revision }
+    },
+    write: async (next, basedOn) => {
+      await api.saveMemoryDoc(which, next, basedOn)
+      const current = await api.memoryDoc(which)
+      if (!current.revision) throw new Error('The saved document has no revision.')
+      authority.current = current
+      savedAuthority.current = current
+    },
+    onSaved: () => {
+      const current = savedAuthority.current
+      if (!current) return
+      setContent(current.content); setBaseContent(current.content); setRevision(current.revision)
+      draftRef.current = current.content; setDraft(current.content)
+      keepMemoryDocDraft(which, current.content, current.content, current.revision)
+    },
+    onDiscard: () => {
+      const current = authority.current
+      if (!current) return
+      setContent(current.content); setBaseContent(current.content); setRevision(current.revision)
+      draftRef.current = current.content; setDraft(current.content)
+      keepMemoryDocDraft(which, current.content, current.content, current.revision)
+    },
+  })
   useEffect(() => {
     let alive = true
-    setContent(null)
-    setLoadErr('')
-    api.memoryDoc(which)
-      .then((c) => {
-        if (!alive) return
-        const keptDraft = memoryDocDrafts.get(which)
-        setContent(c)
-        draftRef.current = keptDraft ?? c
-        setDraft(draftRef.current)
-        if (keptDraft === c) keepMemoryDocDraft(which, c, c)
-      })
-      .catch((e) => { if (alive) setLoadErr(e instanceof Error ? e.message : 'Could not load this document') })
+    setContent(null); setLoadErr('')
+    api.memoryDoc(which).then((current) => {
+      if (!alive) return
+      authority.current = current
+      const cached = memoryDocDrafts.get(which)
+      const kept = cached && cached.draft !== current.content ? cached : undefined
+      setContent(current.content)
+      setBaseContent(kept?.base ?? current.content)
+      setRevision(kept ? (kept.revision ?? '') : current.revision)
+      draftRef.current = kept?.draft ?? current.content
+      setDraft(draftRef.current)
+      if (cached && !kept) keepMemoryDocDraft(which, current.content, current.content, current.revision)
+    }).catch((e) => { if (alive) setLoadErr(e instanceof Error ? e.message : 'Could not load this document') })
     return () => { alive = false }
   }, [which, reloads])
-  const dirty = content !== null && draft !== content
+  const dirty = content !== null && draft !== baseContent
+  const baseMissing = dirty && !revision
+  const rebaseMissing = async () => {
+    setRefreshing(true); setErr('')
+    try {
+      const current = await api.memoryDoc(which)
+      if (!current.revision) throw new Error('The current document has no revision. Reload it before saving.')
+      const merged = mergeText(baseContent, draft, current.content)
+      if (merged === null) throw new Error('The edits overlap. Keep this draft and resolve the difference before rebasing.')
+      authority.current = current; setContent(current.content); setBaseContent(current.content); setRevision(current.revision)
+      draftRef.current = merged; setDraft(merged); keepMemoryDocDraft(which, merged, current.content, current.revision)
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Could not rebase this draft') }
+    setRefreshing(false)
+  }
   const save = async () => {
     const savedDraft = draft
-    setBusy(true)
-    setErr('')
+    setBusy(true); setErr('')
     try {
-      await api.saveMemoryDoc(which, savedDraft)
-      setContent(savedDraft)
-      keepMemoryDocDraft(which, draftRef.current, savedDraft)
+      if (!revision) throw new Error('This saved draft has no matching revision. Refresh and rebase it before saving.')
+      const didSave = await stale.save({ value: baseContent, revision }, savedDraft, (theirs) => mergeText(baseContent, savedDraft, theirs))
+      if (!didSave) return
+      keepMemoryDocDraft(which, draftRef.current, savedAuthority.current?.content ?? savedDraft, savedAuthority.current?.revision)
       setSaved(true); window.setTimeout(() => setSaved(false), 1800); onSaved()
-    }
-    catch (e) { setErr(e instanceof Error ? e.message : 'Save failed') }
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Save failed') }
     setBusy(false)
   }
-  if (loadErr) return (
-    <div className="flex flex-col items-start gap-2">
-      <p role="alert" data-type="body-s" className="text-danger">Couldn’t load this document, so it isn’t safe to edit — saving now could overwrite what’s on disk. {loadErr}</p>
-      <Button size="sm" onClick={() => setReloads((n) => n + 1)}><RefreshCw size={14} /> Try again</Button>
-    </div>
-  )
+  if (loadErr) return <div className="flex flex-col items-start gap-2"><p role="alert" data-type="body-s" className="text-danger">Couldn’t load this document, so it isn’t safe to edit — saving now could overwrite what’s on disk. {loadErr}</p><Button size="sm" onClick={() => setReloads((n) => n + 1)}><RefreshCw size={14} /> Try again</Button></div>
   if (content === null) return <div data-type="body-s" className="flex items-center gap-2 text-on-surface-low"><Loader2 size={14} className="animate-spin" /> Loading…</div>
-  return (
-    <div className="flex flex-col gap-2">
-      <textarea value={draft} onChange={(e) => {
-        draftRef.current = e.target.value
-        setDraft(e.target.value)
-        keepMemoryDocDraft(which, e.target.value, content)
-      }}
-        aria-label={`${which} memory document`} rows={16} spellCheck={false}
-        data-type="caption" className="w-full resize-y rounded-lg bg-surface-high px-3 py-2 font-mono text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
-        style={{ fontFamily: '"JetBrains Mono", ui-monospace, monospace' }} />
-      <div className="flex items-center gap-2">
-        <Button size="sm" onClick={save} loading={busy} disabled={!dirty || busy} disabledReason={!dirty && !busy ? 'No changes to save' : undefined}><Save size={14} /> Save</Button>
-        {dirty && <span data-type="caption" className="text-on-surface-low">Unsaved changes</span>}
-        {saved && <span data-type="caption" className="text-ok">Saved ✓</span>}
-        {err && <span role="alert" data-type="caption" className="text-danger">{err}</span>}
-      </div>
-    </div>
-  )
+  return <div className="flex flex-col gap-2">
+    <StaleWriteNotice guard={stale} what="Your memory document" /><HeldChange guard={stale}>
+      <textarea value={draft} onChange={(e) => { draftRef.current = e.target.value; setDraft(e.target.value); keepMemoryDocDraft(which, e.target.value, baseContent, revision) }} aria-label={`${which} memory document`} rows={16} spellCheck={false} data-type="caption" className="w-full resize-y rounded-lg bg-surface-high px-3 py-2 font-mono text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary" style={{ fontFamily: '"JetBrains Mono", ui-monospace, monospace' }} />
+    </HeldChange>
+    {baseMissing && <div role="alert" className="flex items-center gap-2 text-xs text-warning"><span>This saved draft has no matching revision.</span><Button size="xs" variant="secondary" onClick={rebaseMissing} loading={refreshing} disabled={refreshing}>Refresh and rebase draft</Button></div>}
+    <div className="flex items-center gap-2"><Button size="sm" onClick={save} loading={busy || stale.busy} disabled={!dirty || busy || stale.busy || baseMissing || stale.conflict !== null} disabledReason={stale.conflict ? 'Reapply or discard the held change first' : baseMissing ? 'Refresh and rebase this draft first' : !dirty && !busy ? 'No changes to save' : undefined}><Save size={14} /> Save</Button>{dirty && <span data-type="caption" className="text-on-surface-low">Unsaved changes</span>}{saved && <span data-type="caption" className="text-ok">Saved ✓</span>}{err && <span role="alert" data-type="caption" className="text-danger">{err}</span>}</div>
+  </div>
 }
 
 function AddLessonForm({ onDone }: { onDone: (created: boolean) => void }) {

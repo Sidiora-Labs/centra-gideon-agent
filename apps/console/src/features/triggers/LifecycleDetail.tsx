@@ -49,7 +49,7 @@ export function LifecycleDetail({ hook, providers, onSaved, onDeleted, editing, 
     const coerced = coerceActionConfig(providers, provider, config)
     if (coerced.error) { setErr(coerced.error); return }
     setSaving(true); setErr('')
-    try { await api.updateHook(hook.id, { name: name.trim(), event, matcher: matcher.trim(), provider, provider_config: coerced.config }); onSaved(); setEditing(false) }
+    try { await api.updateHook(hook.id, { name: name.trim(), event, matcher: matcher.trim(), provider, provider_config: coerced.config }, hook.document_revision); onSaved(); setEditing(false) }
     catch (e) { setErr(e instanceof Error ? e.message : 'Save failed') } finally { setSaving(false) }
   }
   async function del() {

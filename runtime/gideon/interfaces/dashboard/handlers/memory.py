@@ -4,6 +4,7 @@ import asyncio
 import functools
 import json
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from gideon.security.security import (
 )
 
 logger = logging.getLogger(__name__)
+_MEMORY_DOCUMENT_LOCK = threading.RLock()
 
 
 def _sel():
@@ -63,13 +65,24 @@ async def api_memory_preferences(request: web.Request) -> web.Response:
         content = body.get("content", "")
         if not isinstance(content, str):
             return web.json_response({"error": "content must be text"}, status=400)
-        try:
-            content = keep_masked_spans(content, mem.read_preferences() or "")
-        except MaskConflict:
-            return web.json_response({"error": MASK_CONFLICT}, status=409)
-        mem.write_preferences(content)
-        return web.json_response({"ok": True})
-    return web.json_response({"content": redact_for_display(mem.read_preferences() or "")})
+        from gideon.stale_write import revision_of, stale_write_refusal
+
+        with _MEMORY_DOCUMENT_LOCK:
+            current = redact_for_display(mem.read_preferences() or "")
+            refusal = stale_write_refusal(request, current, what="your memory preferences")
+            if refusal is not None:
+                return refusal
+            try:
+                content = keep_masked_spans(content, mem.read_preferences() or "")
+            except MaskConflict:
+                return web.json_response({"error": MASK_CONFLICT}, status=409)
+            mem.write_preferences(content)
+            saved = redact_for_display(mem.read_preferences() or "")
+        return web.json_response({"ok": True, "revision": revision_of(saved)})
+    from gideon.stale_write import revision_of
+
+    content = redact_for_display(mem.read_preferences() or "")
+    return web.json_response({"content": content, "revision": revision_of(content)})
 
 
 async def api_memory_projects(request: web.Request) -> web.Response:
@@ -88,13 +101,24 @@ async def api_memory_projects(request: web.Request) -> web.Response:
         content = body.get("content", "")
         if not isinstance(content, str):
             return web.json_response({"error": "content must be text"}, status=400)
-        try:
-            content = keep_masked_spans(content, mem.read_projects() or "")
-        except MaskConflict:
-            return web.json_response({"error": MASK_CONFLICT}, status=409)
-        mem.write_projects(content)
-        return web.json_response({"ok": True})
-    return web.json_response({"content": redact_for_display(mem.read_projects() or "")})
+        from gideon.stale_write import revision_of, stale_write_refusal
+
+        with _MEMORY_DOCUMENT_LOCK:
+            current = redact_for_display(mem.read_projects() or "")
+            refusal = stale_write_refusal(request, current, what="your memory projects")
+            if refusal is not None:
+                return refusal
+            try:
+                content = keep_masked_spans(content, mem.read_projects() or "")
+            except MaskConflict:
+                return web.json_response({"error": MASK_CONFLICT}, status=409)
+            mem.write_projects(content)
+            saved = redact_for_display(mem.read_projects() or "")
+        return web.json_response({"ok": True, "revision": revision_of(saved)})
+    from gideon.stale_write import revision_of
+
+    content = redact_for_display(mem.read_projects() or "")
+    return web.json_response({"content": content, "revision": revision_of(content)})
 
 
 async def api_memory_history(request: web.Request) -> web.Response:
@@ -113,14 +137,25 @@ async def api_memory_history(request: web.Request) -> web.Response:
         content = body.get("content", "")
         if not isinstance(content, str):
             return web.json_response({"error": "content must be text"}, status=400)
-        try:
-            content = keep_masked_spans(content, mem.read_recent_history() or "")
-        except MaskConflict:
-            return web.json_response({"error": MASK_CONFLICT}, status=409)
-        today_path = mem._today_history_file()
-        atomic_write(today_path, content)
-        return web.json_response({"ok": True})
-    return web.json_response({"content": redact_for_display(mem.read_recent_history() or "")})
+        from gideon.stale_write import revision_of, stale_write_refusal
+
+        with _MEMORY_DOCUMENT_LOCK:
+            current = redact_for_display(mem.read_recent_history() or "")
+            refusal = stale_write_refusal(request, current, what="your recent memory history")
+            if refusal is not None:
+                return refusal
+            try:
+                content = keep_masked_spans(content, mem.read_recent_history() or "")
+            except MaskConflict:
+                return web.json_response({"error": MASK_CONFLICT}, status=409)
+            today_path = mem._today_history_file()
+            atomic_write(today_path, content)
+            saved = redact_for_display(mem.read_recent_history() or "")
+        return web.json_response({"ok": True, "revision": revision_of(saved)})
+    from gideon.stale_write import revision_of
+
+    content = redact_for_display(mem.read_recent_history() or "")
+    return web.json_response({"content": content, "revision": revision_of(content)})
 
 
 _SETTINGS_FIELDS: tuple[str, ...] = (

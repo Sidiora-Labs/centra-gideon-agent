@@ -291,7 +291,7 @@ export function EventTriggerSummary({ t, providers, editing, onEditingChange, on
         pattern,
         ...(editPattern.matcher ? { [editPattern.matcher]: matcher.trim() } : {}),
         action: { provider, config: coerced.config },
-      })
+      }, t.document_revision)
       changeEditing(false)
       onChanged?.()
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save this trigger') }

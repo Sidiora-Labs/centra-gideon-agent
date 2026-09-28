@@ -2,6 +2,7 @@
 
 import logging
 import re
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from gideon.security.security import (
 from gideon.workspace.capabilities.platform.prompt_usage import prompt_usage
 
 logger = logging.getLogger(__name__)
+_PROMPT_DOCUMENT_LOCK = threading.RLock()
 
 MAX_PROMPT_BYTES = 100_000
 
@@ -178,7 +180,8 @@ async def api_prompt_detail(request: web.Request) -> web.Response:
     bare = raw.split("/", 1)[-1] if "/" in raw else raw
 
     provider = _get_default_prompt_provider()
-    tpl = provider.get_prompt(bare) if provider is not None else None
+    with _PROMPT_DOCUMENT_LOCK:
+        tpl = provider.get_prompt(bare) if provider is not None else None
     if tpl is None:
         _sel().log_tool_invocation(
             session_key="",
@@ -207,10 +210,13 @@ async def api_prompt_detail(request: web.Request) -> web.Response:
         outcome="ok",
         metadata={"name": bare, "source": "provider"},
     )
+    from gideon.stale_write import revision_of
+
     return web.json_response(
         {
             **_provider_prompt_to_listing(tpl),
             "content": content,
+            "revision": revision_of(_prompt_revision_values(tpl)),
             "merged_variables": [v.to_dict() for v in merged],
             "includes": included_snippet_names(tpl.content),
             "usage": prompt_usage(provider.name, bare),
@@ -268,6 +274,32 @@ def _stored_snippet_values(snip: Any) -> dict[str, Any]:
         "content": snip.content,
         "variables": [v.to_dict() for v in snip.variables],
         "tags": list(snip.tags),
+    }
+
+
+def _prompt_revision_values(tpl: Any) -> dict[str, Any]:
+    listing = _provider_prompt_to_listing(tpl)
+    return {
+        "name": tpl.name,
+        "kind": tpl.kind,
+        "title": listing["title"],
+        "description": listing["description"],
+        "content": redact_for_display(tpl.content),
+        "variables": listing["variables"],
+        "tags": listing["tags"],
+        "launch_spec": listing.get("launch_spec", {}),
+    }
+
+
+def _snippet_revision_values(snip: Any) -> dict[str, Any]:
+    listing = _snippet_to_listing(snip)
+    return {
+        "name": snip.name,
+        "title": listing["title"],
+        "description": listing["description"],
+        "content": redact_for_display(snip.content),
+        "variables": listing["variables"],
+        "tags": listing["tags"],
     }
 
 
@@ -334,20 +366,29 @@ async def api_prompt_save(request: web.Request) -> web.Response:
     provider = _get_default_prompt_provider()
     if provider is None:
         return web.json_response({"error": "no prompt provider registered"}, status=503)
-    stored = provider.get_prompt(bare)
-    if stored is not None:
+    from gideon.stale_write import revision_of, stale_write_refusal
+
+    with _PROMPT_DOCUMENT_LOCK:
+        stored = provider.get_prompt(bare)
+        if stored is None:
+            return web.json_response({"error": "not found"}, status=404)
+        refusal = stale_write_refusal(
+            request, _prompt_revision_values(stored), what=f"the {bare} prompt"
+        )
+        if refusal is not None:
+            return refusal
         merged = _restore_masked_content(body, _stored_prompt_values(stored))
         if merged is None:
             return web.json_response({"error": MASK_CONFLICT}, status=409)
-        body = merged
-    try:
-        tpl = _build_prompt_template(body, default_name=bare)
-        provider.update_prompt(bare, tpl)
-    except FileNotFoundError:
-        return web.json_response({"error": "not found"}, status=404)
-    except ValueError as exc:
-        return web.json_response({"error": str(exc)}, status=400)
+        try:
+            tpl = _build_prompt_template(merged, default_name=bare)
+            provider.update_prompt(bare, tpl)
+        except FileNotFoundError:
+            return web.json_response({"error": "not found"}, status=404)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
     prompt = {**_provider_prompt_to_listing(tpl), "content": redact_for_display(tpl.content)}
+    prompt["revision"] = revision_of(_prompt_revision_values(tpl))
     return web.json_response({"ok": True, "prompt": prompt})
 
 
@@ -776,10 +817,13 @@ async def api_snippet_detail(request: web.Request) -> web.Response:
     if snip is None:
         return web.json_response({"error": "not found"}, status=404)
     content = redact_for_display(snip.content)
+    from gideon.stale_write import revision_of
+
     return web.json_response(
         {
             **_snippet_to_listing(snip),
             "content": content,
+            "revision": revision_of(_snippet_revision_values(snip)),
             "used_by": _snippet_usages(provider, bare),
         }
     )
@@ -819,20 +863,29 @@ async def api_snippet_save(request: web.Request) -> web.Response:
     provider = _get_default_prompt_provider()
     if provider is None:
         return web.json_response({"error": "no prompt provider registered"}, status=503)
-    stored_snip = provider.get_snippet(bare)
-    if stored_snip is not None:
+    from gideon.stale_write import revision_of, stale_write_refusal
+
+    with _PROMPT_DOCUMENT_LOCK:
+        stored_snip = provider.get_snippet(bare)
+        if stored_snip is None:
+            return web.json_response({"error": "not found"}, status=404)
+        refusal = stale_write_refusal(
+            request, _snippet_revision_values(stored_snip), what=f"the {bare} prompt snippet"
+        )
+        if refusal is not None:
+            return refusal
         merged = _restore_masked_content(body, _stored_snippet_values(stored_snip))
         if merged is None:
             return web.json_response({"error": MASK_CONFLICT}, status=409)
-        body = merged
-    try:
-        snip = _build_snippet(body, default_name=bare)
-        provider.update_snippet(bare, snip)
-    except FileNotFoundError:
-        return web.json_response({"error": "not found"}, status=404)
-    except ValueError as exc:
-        return web.json_response({"error": str(exc)}, status=400)
+        try:
+            snip = _build_snippet(merged, default_name=bare)
+            provider.update_snippet(bare, snip)
+        except FileNotFoundError:
+            return web.json_response({"error": "not found"}, status=404)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
     snippet = {**_snippet_to_listing(snip), "content": redact_for_display(snip.content)}
+    snippet["revision"] = revision_of(_snippet_revision_values(snip))
     return web.json_response({"ok": True, "snippet": snippet})
 
 

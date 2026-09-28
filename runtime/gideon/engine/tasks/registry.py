@@ -229,6 +229,17 @@ async def update_task(
     )
 
 
+async def toggle_checklist_item(
+    task_id: str, *, kind: str, index: int, provider_name: str | None = None
+) -> Task | None:
+    provider = await _resolve_one(task_id, provider_name)
+    if provider is None:
+        return None
+    if provider.name != "native":
+        raise ValueError("checklist operations are supported only for native tasks")
+    return await provider.toggle_checklist_item(task_id, kind, index)
+
+
 async def delete_task(task_id: str, provider_name: str | None = None) -> bool:
     sources = _directory()
     provider = await _resolve_one(task_id, provider_name)

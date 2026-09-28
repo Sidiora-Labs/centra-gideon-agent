@@ -929,6 +929,7 @@ export type ScheduleKind = 'every' | 'cron' | 'at'
 export type ScheduleExecMode = 'agent' | 'script' | 'command' | 'other'
 export interface ScheduleJob {
   id: string; name: string; message: string; enabled: boolean
+  document_revision?: string
   author?: string; read_only?: boolean
   schedule: string
   cron_expr?: string | null
@@ -1021,7 +1022,7 @@ export interface TaskItem {
   author?: string
   labels?: string[]; depends_on?: string[]; due?: string; url?: string
   created_at?: string; updated_at?: string
-  due_reminder?: boolean
+  revision?: string; due_reminder?: boolean
   task_list?: string
   dependencies?: TaskDependency[]
   exit_criteria?: ExitCriterion[]
@@ -1497,13 +1498,13 @@ export interface LaunchSpec {
 export interface PromptItem {
   name: string; kind?: PromptKind; title?: string; description?: string; content?: string
   variables?: PromptVariable[]; tags?: string[]; source?: string; updated_at?: number
-  launch_spec?: LaunchSpec
+  launch_spec?: LaunchSpec; revision?: string
   merged_variables?: PromptVariable[]; includes?: string[]
 }
 export interface PromptSnippet {
   name: string; title?: string; description?: string; content?: string
   variables?: PromptVariable[]; tags?: string[]; source?: string; updated_at?: number
-  used_by?: { prompts: string[]; snippets: string[] }
+  used_by?: { prompts: string[]; snippets: string[] }; revision?: string
 }
 export interface PromptBinding {
   use_case: string; ref: string; effective_ref: string
@@ -1592,6 +1593,7 @@ export interface ToolInvokeResult { ok: boolean; output?: string; error?: string
 export type HookEnforcement = 'enforcing' | 'not_enforcing' | 'advisory'
 export interface HookItem {
   id: string; name: string; event: string; matcher: string; provider: string; provider_config: Record<string, unknown>
+  document_revision?: string
   timeout: number; enabled: boolean; last_run: number; last_status: string; run_count: number; used_by: string[]
   blocking?: boolean; enforcement?: HookEnforcement
 }
@@ -1607,6 +1609,7 @@ export function isOutcomeRoute(value: string): boolean {
 }
 export interface Trigger {
   kind: 'schedule' | 'lifecycle' | 'event' | 'store'; id: string; raw_id: string; name: string; enabled: boolean
+  document_revision?: string
   action: TriggerAction
   delivery?: string; failure_delivery?: string; failure_policy?: Record<string, unknown>
   pattern?: string; sender_glob?: string; address_glob?: string; key_glob?: string; content_re?: string
@@ -1639,6 +1642,7 @@ function _scheduleBodyToWire(body: Record<string, unknown>): Record<string, unkn
 function _triggerToHook(t: Trigger): HookItem {
   return {
     id: t.raw_id, name: t.name, event: t.event ?? '', matcher: t.matcher ?? '',
+    document_revision: t.document_revision,
     provider: t.action.provider, provider_config: t.action.config ?? {},
     timeout: t.timeout ?? 30, enabled: t.enabled, last_run: t.last_run ?? 0,
     last_status: t.last_status ?? '', run_count: t.run_count ?? 0, used_by: t.used_by ?? [],
@@ -2245,7 +2249,7 @@ export interface KnowledgeItem {
   file_metadata?: { width?: number; height?: number; format?: string; page_count?: number; sheet_count?: number; slide_count?: number; row_count?: number; line_count?: number } & Record<string, unknown>
   insights?: Record<string, unknown> | null; ai_summary?: string; ai_title?: string
   processing_status?: string; processing_error?: string
-  content_truncated?: boolean
+  content_truncated?: boolean; content_revision?: string; revision?: string
   has_embedding?: boolean
   entities?: KnowledgeEntity[]; relations?: KnowledgeRelation[]
   score?: number
@@ -4109,8 +4113,8 @@ export const api = {
   memorySlotRetireLine: (name: string, text: string) =>
     post<{ ok: boolean }>(`/api/memory/slots/${encodeURIComponent(name)}/lines/retire`, { text }),
   memoryGraphRebuild: () => post<MemoryGraphRebuild>('/api/memory/graph/rebuild'),
-  memoryDoc: (which: 'preferences' | 'projects' | 'history') => get<{ content: string }>(`/api/memory/${which}`).then((d) => d.content),
-  saveMemoryDoc: (which: 'preferences' | 'projects' | 'history', content: string) => put<{ ok: boolean }>(`/api/memory/${which}`, { content }),
+  memoryDoc: (which: 'preferences' | 'projects' | 'history') => get<{ content: string; revision: string }>(`/api/memory/${which}`),
+  saveMemoryDoc: (which: 'preferences' | 'projects' | 'history', content: string, basedOn: string) => put<{ ok: boolean; revision: string }>(`/api/memory/${which}`, { content }, basedOn),
   memoryMigrate: () => post<Record<string, number>>('/api/memory/migrate'),
   memoryImport: (data: unknown) => post<Record<string, number>>('/api/memory/import', data),
   lessons: () => get<{ lessons: Lesson[] }>('/api/lessons').then((d) => d.lessons),
@@ -4605,8 +4609,8 @@ export const api = {
     event_glob?: string
     max_fires?: number; action: { provider: string; config: Record<string, unknown> }
   }) => post<Trigger & { warning?: string }>('/api/triggers', { trigger_type: 'event', ...body }),
-  updateEventTrigger: (id: string, body: Record<string, unknown>) =>
-    put<{ ok: boolean; trigger: Trigger }>(`/api/triggers/event:${encodeURIComponent(id)}`, body),
+  updateEventTrigger: (id: string, body: Record<string, unknown>, basedOn?: string) =>
+    put<{ ok: boolean; trigger: Trigger }>(`/api/triggers/event:${encodeURIComponent(id)}`, body, basedOn),
   deleteEventTrigger: (id: string) => del(`/api/triggers/event:${encodeURIComponent(id)}`),
   toggleEventTrigger: (id: string, enabled?: boolean) =>
     post<{ ok: boolean; trigger: Trigger }>(`/api/triggers/event:${encodeURIComponent(id)}/toggle`, enabled === undefined ? {} : { enabled }),
@@ -4622,8 +4626,8 @@ export const api = {
     .then((d) => ({ jobs: d.triggers.map((t) => ({ ...t, id: t.raw_id })) as unknown as ScheduleJob[], server_tz: d.server_tz })),
   createSchedule: (body: Record<string, unknown>) =>
     post<{ ok: boolean; trigger: Trigger }>('/api/triggers', { trigger_type: 'schedule', ..._scheduleBodyToWire(body) }),
-  updateSchedule: (id: string, body: Record<string, unknown>) =>
-    put<{ ok: boolean; trigger: Trigger }>(`/api/triggers/schedule:${encodeURIComponent(id)}`, _scheduleBodyToWire(body)),
+  updateSchedule: (id: string, body: Record<string, unknown>, basedOn?: string) =>
+    put<{ ok: boolean; trigger: Trigger }>(`/api/triggers/schedule:${encodeURIComponent(id)}`, _scheduleBodyToWire(body), basedOn),
   deleteSchedule: (id: string) => del(`/api/triggers/schedule:${encodeURIComponent(id)}`),
   runSchedule: (id: string, dryRun = false) =>
     post<TriggerRunResult>(`/api/triggers/schedule:${encodeURIComponent(id)}/run`, dryRun ? { dry_run: true } : undefined),
@@ -4670,7 +4674,7 @@ export const api = {
   task: (id: string, provider?: string) => get<TaskItem>(`/api/tasks/${encodeURIComponent(id)}${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`),
   taskGraph: (provider?: string) => get<TaskGraphData>(`/api/tasks/graph${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`),
   createTask: (body: Record<string, unknown>) => post<TaskItem>('/api/tasks', body),
-  updateTask: (id: string, body: Record<string, unknown>) => put<TaskItem>(`/api/tasks/${encodeURIComponent(id)}`, body),
+  updateTask: (id: string, body: Record<string, unknown>, basedOn?: string) => put<TaskItem>(`/api/tasks/${encodeURIComponent(id)}`, basedOn ? { ...body, expected_revision: body.expected_revision ?? basedOn } : body, basedOn),
   deleteTask: (id: string, provider?: string) => del(`/api/tasks/${encodeURIComponent(id)}${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`),
   taskComments: (id: string, provider?: string) => get<{ comments: TaskComment[] }>(`/api/tasks/${encodeURIComponent(id)}/comments${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`).then((d) => d.comments),
   addTaskComment: (id: string, body: string, provider?: string) => post<TaskComment>(`/api/tasks/${encodeURIComponent(id)}/comments`, { body, provider }),
@@ -4722,7 +4726,7 @@ export const api = {
   prompts: (kind?: PromptKind) => get<PromptItem[]>(`/api/prompts${kind ? `?kind=${kind}` : ''}`),
   prompt: (name: string) => get<PromptItem>(`/api/prompts/${encodeURIComponent(name)}`),
   createPrompt: (body: Record<string, unknown>) => post<{ ok: boolean; name: string; prompt: PromptItem }>('/api/prompts', body),
-  savePrompt: (name: string, body: Record<string, unknown>) => put<{ ok: boolean; prompt: PromptItem }>(`/api/prompts/${encodeURIComponent(name)}`, body),
+  savePrompt: (name: string, body: Record<string, unknown>, basedOn?: string) => put<{ ok: boolean; prompt: PromptItem }>(`/api/prompts/${encodeURIComponent(name)}`, body, basedOn),
   deletePrompt: (name: string) => del(`/api/prompts/${encodeURIComponent(name)}`),
   renderPrompt: (name: string, variables: Record<string, unknown>) => post<{ name: string; rendered: string }>(`/api/prompts/${encodeURIComponent(name)}/render`, { variables }),
   launchCampaignTemplate: (name: string, variables: Record<string, unknown>, projectId?: string) =>
@@ -4733,7 +4737,7 @@ export const api = {
   snippets: () => get<PromptSnippet[]>('/api/prompt-snippets'),
   snippet: (name: string) => get<PromptSnippet>(`/api/prompt-snippets/${encodeURIComponent(name)}`),
   createSnippet: (body: Record<string, unknown>) => post<{ ok: boolean; name: string; snippet: PromptSnippet }>('/api/prompt-snippets', body),
-  saveSnippet: (name: string, body: Record<string, unknown>) => put<{ ok: boolean; snippet: PromptSnippet }>(`/api/prompt-snippets/${encodeURIComponent(name)}`, body),
+  saveSnippet: (name: string, body: Record<string, unknown>, basedOn?: string) => put<{ ok: boolean; snippet: PromptSnippet }>(`/api/prompt-snippets/${encodeURIComponent(name)}`, body, basedOn),
   deleteSnippet: (name: string) => fetch(`/api/prompt-snippets/${encodeURIComponent(name)}`, { method: 'DELETE', headers: { ...SK } }).then(async (r) => { if (!r.ok) throw await apiError(r) }),
   renderSnippet: (name: string, variables: Record<string, unknown>) => post<{ name: string; rendered: string }>(`/api/prompt-snippets/${encodeURIComponent(name)}/render`, { variables }),
   promptBindings: () => get<PromptBindings>('/api/prompts/bindings'),
@@ -4867,11 +4871,11 @@ export const api = {
       trigger_type: 'lifecycle', name: body.name, event: body.event, matcher: body.matcher,
       action: { provider: body.provider, config: body.provider_config ?? {} },
     }).then((r) => ({ ok: r.ok, hook: _triggerToHook(r.trigger) })),
-  updateHook: (id: string, body: Record<string, unknown>) =>
+  updateHook: (id: string, body: Record<string, unknown>, basedOn?: string) =>
     put<{ ok: boolean; trigger: Trigger }>(`/api/triggers/lifecycle:${encodeURIComponent(id)}`,
       'provider' in body || 'provider_config' in body
         ? { ...body, action: { provider: body.provider, config: body.provider_config ?? {} } }
-        : body,
+        : body, basedOn,
     ).then((r) => ({ ok: r.ok, hook: _triggerToHook(r.trigger) })),
   deleteHook: (id: string) => del(`/api/triggers/lifecycle:${encodeURIComponent(id)}`),
   toggleHook: (id: string) => post(`/api/triggers/lifecycle:${encodeURIComponent(id)}/toggle`, {}),
@@ -4884,7 +4888,7 @@ export const api = {
     post(`/api/triggers/store:${encodeURIComponent(rawId)}/toggle`, { enabled }),
   updateStoreTrigger: (rawId: string, body: {
     delivery?: string; failure_delivery?: string; failure_policy?: Record<string, unknown>
-  }) => put<{ ok: boolean; trigger: Trigger }>(`/api/triggers/store:${encodeURIComponent(rawId)}`, body),
+  }, basedOn?: string) => put<{ ok: boolean; trigger: Trigger }>(`/api/triggers/store:${encodeURIComponent(rawId)}`, body, basedOn),
   deleteStoreTrigger: (rawId: string) => del(`/api/triggers/store:${encodeURIComponent(rawId)}`),
   runStoreTrigger: (rawId: string, dryRun = false) =>
     post<TriggerRunResult>(`/api/triggers/store:${encodeURIComponent(rawId)}/run`, dryRun ? { dry_run: true } : {}),
@@ -4987,7 +4991,7 @@ export const api = {
   knowledgeItemIntents: (id: string) =>
     get<{ outcomes: IntentOutcome[] }>(`/api/knowledge/items/${encodeURIComponent(id)}/intents`),
   createKnowledgeItem: (body: Record<string, unknown>) => post<KnowledgeItem>('/api/knowledge/items', body),
-  updateKnowledgeItem: (id: string, body: Record<string, unknown>) => patch<{ ok: boolean }>(`/api/knowledge/items/${encodeURIComponent(id)}`, body),
+  updateKnowledgeItem: (id: string, body: Record<string, unknown>, basedOn?: string) => patch<{ ok: boolean; content_revision?: string; revision?: string }>(`/api/knowledge/items/${encodeURIComponent(id)}`, body, basedOn),
   deleteKnowledgeItem: (id: string) => del(`/api/knowledge/items/${encodeURIComponent(id)}`),
   knowledgeProviders: () => get<{ providers: Array<{ name: string; display_name: string; always_on: boolean; kind: string }> }>('/api/knowledge/providers').then((d) => d.providers),
   knowledgeSources: () => get<SourcesResponse>('/api/knowledge/sources'),
@@ -5293,9 +5297,12 @@ export const api = {
       truncated,
       binary: r.headers.get('X-Binary') === 'true',
       source_revision: truncated ? undefined : r.headers.get('X-Content-Validator') ?? undefined,
+      revision: truncated ? undefined : r.headers.get('X-Content-Revision') ?? undefined,
     }
   }),
-  fileWrite: (path: string, content: string) => post<{ ok: boolean; validator?: string }>('/api/file-write', { path, content }),
+  fileWrite: (path: string, content: string, basedOn: string, expectedValidator?: string) =>
+    requestJson<{ ok: boolean; validator?: string; revision: string }>(
+      '/api/file-write', 'POST', { path, content, ...(expectedValidator ? { expected_validator: expectedValidator } : {}) }, { basedOn }),
   fileCreate: (parent: string, name: string, kind: 'file' | 'dir', content?: string) =>
     post<{ ok: boolean; path: string; is_dir: boolean }>('/api/file-create', { path: parent, name, kind, content }),
   fileMove: (src: string, dest: string) => post<{ ok: boolean; path: string }>('/api/file-move', { src, dest }),

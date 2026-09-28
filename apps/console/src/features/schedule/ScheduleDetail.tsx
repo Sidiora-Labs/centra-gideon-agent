@@ -71,7 +71,7 @@ export function ScheduleDetail({ job, onSaved, onDeleted, onChanged, editing, on
   async function save() {
     if (!draft.name.trim()) { setErr('Name is required'); return }
     setSaving(true); setErr('')
-    try { await api.updateSchedule(job.id, draftToPayload(draft)); onSaved(); setEditing(false) }
+    try { await api.updateSchedule(job.id, draftToPayload(draft), job.document_revision); onSaved(); setEditing(false) }
     catch (e) { setErr(e instanceof Error ? e.message : 'Save failed') } finally { setSaving(false) }
   }
   async function del() {

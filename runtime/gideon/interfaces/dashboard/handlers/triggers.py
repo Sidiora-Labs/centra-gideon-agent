@@ -70,7 +70,26 @@ def _event_store():
     return CanonicalEventStore(config_dir())
 
 
+def _event_editable_projection(t) -> dict[str, Any]:
+    return {
+        "name": t.name or t.id,
+        "enabled": t.enabled,
+        "pattern": t.pattern,
+        "key_glob": _redact(t.key_glob),
+        "content_re": _redact(t.content_re),
+        "sender_glob": _redact(t.sender_glob),
+        "address_glob": _redact(t.address_glob),
+        "event_glob": _redact(t.event_glob),
+        "max_fires": t.max_fires,
+        "action": redact_values_for_display(
+            {"provider": t.action_provider, "config": t.action_config}
+        ),
+    }
+
+
 def _serialize_event(t) -> dict[str, Any]:
+    from gideon.stale_write import revision_of
+
     last_run_ts = float(t.last_fired_at or 0.0) or None
     canonical = getattr(t, "_trigger", None)
     grant_fields = {}
@@ -94,6 +113,7 @@ def _serialize_event(t) -> dict[str, Any]:
                 else ""
             ),
         }
+    editable = _event_editable_projection(t)
     return {
         "kind": _EVENT,
         "id": t.id if str(t.id).startswith(f"{_EVENT}:") else f"{_EVENT}:{t.id}",
@@ -116,6 +136,7 @@ def _serialize_event(t) -> dict[str, Any]:
         "state": t.state,
         "health": _event_health(t),
         "last_error": _redact(t.park_reason or t.last_error),
+        "document_revision": revision_of(editable),
         "broken": [_redact(message) for message in getattr(t, "_issues", [])],
         **grant_fields,
     }
@@ -454,6 +475,8 @@ def _serialize_store(
     required_provider_name = required_provider(trigger)
     revision = action_revision(trigger)
     granted = is_granted(trigger)
+    from gideon.stale_write import revision_of
+
     return {
         "kind": _STORE,
         "store_kind": trigger.kind,
@@ -471,6 +494,7 @@ def _serialize_store(
         "delivery": trigger.delivery,
         "failure_delivery": trigger.failure_delivery,
         "failure_policy": redact_values_for_display(dict(trigger.failure_policy or {})),
+        "document_revision": revision_of(_store_outcome_projection(trigger)),
         "silent": trigger.delivery == "none",
         "health": trigger.health_status,
         "state": trigger.state,
@@ -490,6 +514,14 @@ def _serialize_store(
             else ""
         ),
         **_attribution(trigger, owner=owner),
+    }
+
+
+def _store_outcome_projection(trigger: Any) -> dict[str, Any]:
+    return {
+        "delivery": str(trigger.delivery or ""),
+        "failure_delivery": str(trigger.failure_delivery or ""),
+        "failure_policy": redact_values_for_display(dict(trigger.failure_policy or {})),
     }
 
 
@@ -579,7 +611,22 @@ def _schedule_row_for(
     projected["failure_delivery"] = trigger.failure_delivery
     projected["failure_policy"] = redact_values_for_display(dict(trigger.failure_policy or {}))
     projected.update(_attribution(trigger, owner=owner))
+    from gideon.stale_write import revision_of
+
+    projected["document_revision"] = revision_of(_schedule_editable_projection(projected))
     return projected
+
+
+def _schedule_editable_projection(projected: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: projected.get(key)
+        for key in (
+            "name", "action", "message", "agent", "model", "approval_mode",
+            "script", "command", "cron_expr", "every_secs", "timezone",
+            "skip_dates", "channel", "silent", "strict_schedule", "delivery",
+            "failure_delivery", "failure_policy", "dedupe_hash",
+        )
+    }
 
 
 def _outcome_control_patch(
@@ -610,8 +657,24 @@ def _outcome_control_patch(
     return patch, ""
 
 
+def _lifecycle_editable_projection(hook) -> dict[str, Any]:
+    return {
+        "name": _redact(hook.name),
+        "event": hook.event,
+        "matcher": _redact(hook.matcher),
+        "timeout": hook.timeout,
+        "enabled": hook.enabled,
+        "action": redact_values_for_display(
+            {"provider": hook.provider, "config": hook.provider_config}
+        ),
+    }
+
+
 def _serialize_lifecycle(hook, used_by: list[str]) -> dict[str, Any]:
     from gideon.engine.hooks import BLOCKING_EVENTS, hook_enforcement
+    from gideon.stale_write import revision_of
+
+    editable = _lifecycle_editable_projection(hook)
 
     return {
         "kind": _LIFECYCLE,
@@ -633,6 +696,7 @@ def _serialize_lifecycle(hook, used_by: list[str]) -> dict[str, Any]:
         "enforcement": hook_enforcement(
             hook.event, enabled=bool(hook.enabled), bound=bool(used_by)
         ),
+        "document_revision": revision_of(editable),
     }
 
 
@@ -1162,8 +1226,10 @@ async def api_trigger_detail(request: web.Request) -> web.Response:
     if kind == _EVENT:
         return _update_event(raw, body, request)
     if kind == _LIFECYCLE:
-        return await _update_lifecycle(state, raw, body)
-    return await _update_schedule(state, raw, body, store_response=kind == _STORE)
+        return await _update_lifecycle(state, raw, body, request)
+    return await _update_schedule(
+        state, raw, body, request=request, store_response=kind == _STORE
+    )
 
 
 def _update_event(raw: str, body: dict, request: web.Request) -> web.Response:
@@ -1193,6 +1259,13 @@ def _update_event(raw: str, body: dict, request: web.Request) -> web.Response:
     trigger = next((t for t in store.load() if t.id == raw), None)
     if trigger is None:
         return web.json_response({"error": "not found"}, status=404)
+    from gideon.stale_write import stale_write_refusal
+
+    refusal = stale_write_refusal(
+        request, _event_editable_projection(trigger), what="this event trigger"
+    )
+    if refusal is not None:
+        return refusal
 
     raw_action = body.get("action")
     if raw_action is not None and (
@@ -1284,7 +1357,9 @@ def _update_event(raw: str, body: dict, request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
-async def _update_lifecycle(state: ConsoleState, raw: str, body: dict) -> web.Response:
+async def _update_lifecycle(
+    state: ConsoleState, raw: str, body: dict, request: web.Request
+) -> web.Response:
     from gideon.assurance.validation import (
         HOOK_UPDATE_SCHEMA,
         ValidationError,
@@ -1303,6 +1378,15 @@ async def _update_lifecycle(state: ConsoleState, raw: str, body: dict) -> web.Re
     current = _hook_store(state).get(raw)
     if current is None:
         return web.json_response({"error": "not found"}, status=404)
+    from gideon.stale_write import stale_write_refusal
+
+    refusal = stale_write_refusal(
+        request,
+        _lifecycle_editable_projection(current),
+        what="this lifecycle trigger",
+    )
+    if refusal is not None:
+        return refusal
     try:
         for field in ("name", "matcher"):
             if field in patch and isinstance(patch[field], str):
@@ -1337,7 +1421,12 @@ async def _update_lifecycle(state: ConsoleState, raw: str, body: dict) -> web.Re
 
 
 async def _update_schedule(
-    state: ConsoleState, raw: str, body: dict, *, store_response: bool = False
+    state: ConsoleState,
+    raw: str,
+    body: dict,
+    *,
+    request: web.Request,
+    store_response: bool = False,
 ) -> web.Response:
     from zoneinfo import available_timezones
 
@@ -1386,6 +1475,21 @@ async def _update_schedule(
     store = _trigger_store()
     row = store.get(raw)
     if row is not None:
+        from gideon.stale_write import stale_write_refusal
+
+        store_revision = store_response or row.trigger.kind != "clock"
+        current = (
+            _store_outcome_projection(row.trigger)
+            if store_revision
+            else _schedule_editable_projection(_schedule_row_for(state, row.trigger))
+        )
+        refusal = stale_write_refusal(
+            request,
+            current,
+            what="this automation" if store_revision else "this schedule",
+        )
+        if refusal is not None:
+            return refusal
         try:
             if "name" in kwargs:
                 kwargs["name"] = keep_masked_spans(
