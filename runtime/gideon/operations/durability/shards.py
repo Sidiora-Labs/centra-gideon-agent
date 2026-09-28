@@ -336,6 +336,41 @@ def _export_blobs(root: Path, src_dir: Path) -> int:
     return count
 
 
+def _export_blob(root: Path, src: Path) -> int:
+    """Export the one file named by a file-shaped tree entry, never its parent."""
+    if src.is_symlink() or not src.is_file():
+        return 0
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(src, flags)
+        with os.fdopen(fd, "rb") as source:
+            data = source.read()
+    except OSError:
+        return 0
+
+    digest = _sha256(data)
+    if root.is_symlink() or (root.exists() and not root.is_dir()):
+        return 0
+    blob_root = root / "blobs"
+    if blob_root.is_symlink() or (blob_root.exists() and not blob_root.is_dir()):
+        return 0
+    dest = blob_root / digest[:2] / digest
+    if dest.parent.is_symlink() or (dest.parent.exists() and not dest.parent.is_dir()):
+        return 0
+    if dest.is_symlink():
+        return 0
+    if blob_root.is_dir():
+        for stale in blob_root.rglob("*"):
+            if stale.is_file() and not stale.is_symlink() and stale != dest:
+                stale.unlink(missing_ok=True)
+
+    if dest.exists():
+        return 0
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_bytes(dest, data)
+    return 1
+
+
 def _stage_db_copy(out_dir: Path, entry_id: str, src_copy: Path) -> DbCopy | None:
     """Stage a consistent whole-DB copy under ``db/<entry_id>.db`` for the sync merger.
 
@@ -430,10 +465,12 @@ def export_shards(
                         _write_shard(out_dir, f"{entry.id}/{year}.jsonl", buckets[year])
                     )
             else:
-                if src.is_dir():
+                if src.is_symlink():
+                    continue
+                elif src.is_dir():
                     result.blobs += _export_blobs(out_dir / entry.id, src)
                 else:
-                    result.blobs += _export_blobs(out_dir / entry.id, src.parent)
+                    result.blobs += _export_blob(out_dir / entry.id, src)
 
     result.shards.sort(key=lambda s: s.path)
     if entries is not None:
