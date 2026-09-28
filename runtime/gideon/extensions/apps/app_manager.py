@@ -59,6 +59,7 @@ from gideon.extensions.apps.manager import (
     apps_dir,
 )
 from gideon.extensions.apps.manifest import AppManifest
+from gideon.extensions.apps.staging import UnsafeBundleError, survey as survey_app_tree
 from gideon.security.sel import sel
 from gideon.security.signing import SignatureInfo, SignatureState, verify_bundle
 from gideon.security.supply_chain import ScanReport, TrustTier, Verdict, default_scanner
@@ -636,21 +637,18 @@ def install(
         )
         return InstallResult(ok=False, error=f"source is not a directory: {source}")
 
-    staged_root = _quarantine_dir()
+    staged_root = Path(tempfile.mkdtemp(prefix="install-", dir=_quarantine_dir()))
+    staged = staged_root / "bundle"
     try:
-        manifest_peek = _load_staged_manifest(src)
-    except AppLifecycleError as exc:
+        survey_app_tree(src).copy_to(staged)
+        manifest = _load_staged_manifest(staged)
+    except (AppLifecycleError, UnsafeBundleError, OSError) as exc:
+        shutil.rmtree(staged_root, ignore_errors=True)
         _audit("install", "error", str(source), caller=caller, error=str(exc))
         return InstallResult(ok=False, error=str(exc))
-    name = manifest_peek.name
-    staged = staged_root / name
-    if staged.exists():
-        shutil.rmtree(staged, ignore_errors=True)
-    shutil.copytree(src, staged)
+    name = manifest.name
 
     try:
-        manifest = _load_staged_manifest(staged)
-
         signature, tier = _signature_gate(staged, origin)
         if signature.is_invalid:
             _audit(
@@ -827,7 +825,7 @@ def install(
         _audit("install", "error", name, caller=caller, error=str(exc))
         return InstallResult(ok=False, name=name, error=str(exc))
     finally:
-        shutil.rmtree(staged, ignore_errors=True)
+        shutil.rmtree(staged_root, ignore_errors=True)
         _collect_app_python()
 
 
@@ -1086,26 +1084,24 @@ def update(
     src = Path(source)
     if not src.is_dir():
         return InstallResult(ok=False, error=f"source is not a directory: {source}")
+    staged_root = Path(tempfile.mkdtemp(prefix="update-", dir=_quarantine_dir()))
+    staged = staged_root / "bundle"
     try:
-        peek = _load_staged_manifest(src, action="update")
-    except AppLifecycleError as exc:
-        return InstallResult(ok=False, error=str(exc))
-    name = name or peek.name
+        survey_app_tree(src).copy_to(staged)
+        manifest = _load_staged_manifest(staged, action="update")
+    except (AppLifecycleError, UnsafeBundleError, OSError) as exc:
+        shutil.rmtree(staged_root, ignore_errors=True)
+        return InstallResult(ok=False, name=name or "", error=str(exc))
+    name = name or manifest.name
     if _read_installed(name) is None:
+        shutil.rmtree(staged_root, ignore_errors=True)
         return InstallResult(
             ok=False, name=name, error=f"app {name!r} is not installed (use install)"
         )
 
-    staged_root = _quarantine_dir()
-    staged = staged_root / f"{name}{_ROLLBACK_SUFFIX}.new"
-    if staged.exists():
-        shutil.rmtree(staged, ignore_errors=True)
-    shutil.copytree(src, staged)
-
     live = app_dir(name)
     rollback = _rollback_dir(name)
     try:
-        manifest = _load_staged_manifest(staged, action="update")
         if manifest.name != name:
             return InstallResult(
                 ok=False,
@@ -1254,7 +1250,7 @@ def update(
         _audit("update", "error", name, caller=caller, error=str(exc))
         return InstallResult(ok=False, name=name, error=str(exc))
     finally:
-        shutil.rmtree(staged, ignore_errors=True)
+        shutil.rmtree(staged_root, ignore_errors=True)
         _collect_app_python()
 
 

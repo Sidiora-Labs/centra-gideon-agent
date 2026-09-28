@@ -31,7 +31,9 @@ from __future__ import annotations
 import ast
 import io
 import json
+import os
 import re
+import stat
 import tokenize
 import unicodedata
 from dataclasses import dataclass, field, replace
@@ -195,6 +197,20 @@ _WARNING_SCRIPT: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     ),
     ("crontab_write", re.compile(r"\bcrontab\b")),
 )
+
+_WARNING_RULE_LANGUAGES = {
+    "eval_exec": frozenset({"python", "javascript", "shell", "ruby", "perl", "powershell"}),
+    "pipe_to_shell": frozenset({"shell"}),
+    "curl_network": frozenset({"shell"}),
+    "sudo_use": frozenset({"shell"}),
+    "python_exec": frozenset({"python"}),
+    "crontab_write": frozenset({"shell"}),
+}
+_LANGUAGE_EXTENSIONS = {
+    ".py": "python", ".pyw": "python", ".js": "javascript", ".mjs": "javascript",
+    ".cjs": "javascript", ".sh": "shell", ".bash": "shell", ".zsh": "shell",
+    ".rb": "ruby", ".pl": "perl", ".ps1": "powershell",
+}
 
 _INJECTION_PROSE: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     (
@@ -1575,6 +1591,70 @@ def _scan_native_destruction(text: str, rel: str) -> list[Finding]:
     ]
 
 
+def _scanner_executable(path: Path, rel: str = "") -> bool:
+    return (path.suffix.lower() in _SCRIPT_EXTS or _is_loader_name(path.name)
+            or _is_under_scripts(rel))
+
+
+def _scanner_tree(root: Path) -> tuple[list[tuple[str, tuple[int, int], int]], list[str]]:
+    """Enumerate entries without following links or exempting shipped directories."""
+    files: list[tuple[str, tuple[int, int], int]] = []
+    opaque_dirs: list[str] = []
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    root_fd = os.open(root, flags)
+    def visit(fd: int, prefix: tuple[str, ...]) -> None:
+        try:
+            with os.scandir(fd) as children:
+                rows = [(item.name, item.stat(follow_symlinks=False)) for item in children]
+        except OSError:
+            rel = "/".join(prefix)
+            if rel and _is_under_scripts(rel):
+                opaque_dirs.append(rel)
+            return
+        for name, st in sorted(rows, key=lambda row: row[0]):
+            rel_parts = (*prefix, name)
+            rel = "/".join(rel_parts)
+            if stat.S_ISDIR(st.st_mode):
+                try:
+                    child_fd = os.open(name, flags, dir_fd=fd)
+                except OSError:
+                    if _is_under_scripts(rel):
+                        opaque_dirs.append(rel)
+                    continue
+                try:
+                    opened = os.fstat(child_fd)
+                    if (opened.st_dev, opened.st_ino) != (st.st_dev, st.st_ino):
+                        if _is_under_scripts(rel):
+                            opaque_dirs.append(rel)
+                        continue
+                    visit(child_fd, rel_parts)
+                finally:
+                    os.close(child_fd)
+            elif stat.S_ISREG(st.st_mode):
+                files.append((rel, (st.st_dev, st.st_ino), st.st_size))
+    try:
+        visit(root_fd, ())
+    finally:
+        os.close(root_fd)
+    files.sort(key=lambda row: row[0])
+    return files, opaque_dirs
+
+
+def _open_scanner_file(root: Path, rel: str) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    parts = Path(rel).parts
+    fd = os.open(root, flags)
+    try:
+        for part in parts[:-1]:
+            child = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        file_fd = os.open(parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=fd)
+        return file_fd
+    finally:
+        os.close(fd)
+
+
 class SkillScanner:
     """Static content gate over a STAGED directory (skill or app).
 
@@ -1595,21 +1675,30 @@ class SkillScanner:
         opaque: list[str] = []
 
         if staged_dir.is_dir():
-            for path in sorted(staged_dir.rglob("*")):
-                if not path.is_file():
-                    continue
-                rel_parts = path.relative_to(staged_dir).parts
-                if any(part in _SKIP_DIR_NAMES for part in rel_parts[:-1]):
-                    continue
-                rel = str(path.relative_to(staged_dir))
+            paths, opaque_dirs = _scanner_tree(staged_dir)
+            opaque.extend(opaque_dirs)
+            for rel, identity, size in paths:
+                path = staged_dir / rel
                 text: str | None = None
-                try:
-                    if path.stat().st_size <= _MAX_FILE_BYTES:
-                        text = path.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    text = None
+                if size <= _MAX_FILE_BYTES:
+                    try:
+                        fd = _open_scanner_file(staged_dir, rel)
+                        try:
+                            opened = os.fstat(fd)
+                            if (not stat.S_ISREG(opened.st_mode) or size != opened.st_size
+                                    or (opened.st_dev, opened.st_ino) != identity):
+                                raise OSError("file changed during scan")
+                            with os.fdopen(fd, "r", encoding="utf-8", errors="replace", closefd=False) as stream:
+                                text = stream.read(_MAX_FILE_BYTES + 1)
+                            after = os.fstat(fd)
+                            if (after.st_size, after.st_mtime_ns) != (opened.st_size, opened.st_mtime_ns):
+                                text = None
+                        finally:
+                            os.close(fd)
+                    except OSError:
+                        text = None
                 if text is None:
-                    if path.suffix.lower() == ".py" or _is_loader_name(path.name):
+                    if _scanner_executable(path, rel):
                         opaque.append(rel)
                     continue
                 lname = path.name.lower()
@@ -1632,6 +1721,11 @@ class SkillScanner:
                     surfaces.add(surface)
                     findings.extend(self._scan_text(text, rel, surface))
 
+        findings.extend(
+            Finding("script", Verdict.DANGEROUS, "unscanned_executable", rel,
+                    "executable candidate is oversized or unreadable")
+            for rel in sorted(set(opaque))
+        )
         findings = _scope_by_reachability(
             findings,
             py_texts=py_texts,
@@ -1712,7 +1806,10 @@ class SkillScanner:
                     _evidence(text, sens_raw),
                 )
             )
+        language = _LANGUAGE_EXTENSIONS.get(Path(rel).suffix.lower())
         for rule, pat in _WARNING_SCRIPT:
+            if language not in _WARNING_RULE_LANGUAGES.get(rule, frozenset()):
+                continue
             m = pat.search(text)
             if m:
                 out.append(

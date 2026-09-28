@@ -16,6 +16,7 @@ job, behind the scanner gate.
 from __future__ import annotations
 
 import logging
+import stat
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -60,10 +61,18 @@ def _subdir_app_names(root: Path) -> list[str]:
     installable apps of a multi-app repository (the published apps repo's shape)."""
     out: list[str] = []
     for child in sorted(root.iterdir()):
-        if not child.is_dir() or child.name.startswith("."):
+        try:
+            child_mode = child.lstat().st_mode
+        except OSError:
             continue
-        if (child / APP_MANIFEST_FILENAME).is_file():
-            out.append(child.name)
+        if not stat.S_ISDIR(child_mode) or child.name.startswith("."):
+            continue
+        manifest = child / APP_MANIFEST_FILENAME
+        try:
+            if stat.S_ISREG(manifest.lstat().st_mode):
+                out.append(child.name)
+        except OSError:
+            pass
     return out
 
 
@@ -103,8 +112,8 @@ def resolve(source: str) -> ResolvedSource:
     if _looks_like_git_url(base):
         resolved = _clone_git(base)
         if subdir:
-            target = resolved.path / subdir
-            if not target.is_dir():
+            target = _confined_subdirectory(resolved.path, subdir)
+            if target is None:
                 _rmtree(resolved.path)
                 raise SourceError(f"subdirectory '{subdir}' not found in cloned repo")
             resolved = ResolvedSource(
@@ -147,6 +156,22 @@ def _clone_git(url: str) -> ResolvedSource:
         raise SourceError(f"git clone failed: {tail}")
     _rmtree(tmp / ".git")
     return ResolvedSource(path=tmp, origin="external", cleanup=True)
+
+
+def _confined_subdirectory(root: Path, subdir: str) -> Path | None:
+    """Resolve a URL-selected app folder without following any clone symlink."""
+    parts = Path(subdir).parts
+    if not parts or Path(subdir).is_absolute() or any(part in {"", ".", ".."} for part in parts):
+        return None
+    current = root
+    try:
+        for part in parts:
+            current = current / part
+            if not stat.S_ISDIR(current.lstat().st_mode):
+                return None
+    except OSError:
+        return None
+    return current
 
 
 def _rmtree(path: Path) -> None:
