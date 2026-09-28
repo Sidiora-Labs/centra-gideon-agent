@@ -40,8 +40,8 @@ def _schema_properties(schema: dict[str, Any]) -> dict[str, Any]:
     return props if isinstance(props, dict) else {}
 
 
-def read_config(name: str) -> dict[str, Any]:
-    """Return the persisted config for an app (empty dict if none saved yet)."""
+def read_stored_config(name: str) -> dict[str, Any]:
+    """Return the reference-only persisted config."""
     path = _config_path(name)
     if not path.is_file():
         return {}
@@ -53,6 +53,12 @@ def read_config(name: str) -> dict[str, Any]:
             "app %s config unreadable; treating as empty", name, exc_info=True
         )
         return {}
+
+
+def read_config(name: str) -> dict[str, Any]:
+    """Read an app config with only this app's owned secrets resolved."""
+    from gideon.core.config.secret_refs import app_owner, resolve
+    return resolve(read_stored_config(name), owner=app_owner(name))
 
 
 def validate_config(values: dict[str, Any], schema: dict[str, Any]) -> list[str]:
@@ -92,7 +98,17 @@ def write_config(
     errors = validate_config(values, schema)
     if errors:
         raise AppConfigError("; ".join(errors))
+    from gideon.core.config.secret_refs import app_owner, store
+    from gideon.extensions.apps.secret_fields import sensitive_field_names
     path = _config_path(name)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write(path, json.dumps(values, indent=2, sort_keys=True) + "\n", mode=0o600)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.parent.chmod(0o700)
+    try:
+        owner = app_owner(name)
+        stored = store(values, owner=owner, declared=sensitive_field_names(schema), previous=read_stored_config(name))
+        atomic_write(path, json.dumps(stored, indent=2, sort_keys=True) + "\n", mode=0o600)
+        from gideon.core.config.secret_refs import purge_unused
+        purge_unused(owner, stored)
+    except (ValueError, OSError) as exc:
+        raise AppConfigError(str(exc)) from exc
     return values

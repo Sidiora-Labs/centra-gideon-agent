@@ -31,7 +31,7 @@ class ProviderSettings:
         return app_dir(extension_name) / "data" / "config.json"
 
     @staticmethod
-    def load(extension_name: str) -> dict[str, Any]:
+    def load_stored(extension_name: str) -> dict[str, Any]:
         path = ProviderSettings.config_path(extension_name)
         if not path.is_file():
             return {}
@@ -43,14 +43,23 @@ class ProviderSettings:
             return {}
 
     @staticmethod
+    def load(extension_name: str) -> dict[str, Any]:
+        from gideon.core.config.secret_refs import app_owner, resolve
+        return resolve(ProviderSettings.load_stored(extension_name), owner=app_owner(extension_name))
+
+    @staticmethod
     def save(extension_name: str, config: dict[str, Any]) -> None:
+        from gideon.core.config.secret_refs import app_owner, store
         path = ProviderSettings.config_path(extension_name)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(
-            path,
-            json.dumps({**ProviderSettings.load(extension_name), **config}, indent=2)
-            + "\n",
-        )
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path.parent.chmod(0o700)
+        previous = ProviderSettings.load_stored(extension_name)
+        logical = {**ProviderSettings.load(extension_name), **config}
+        owner = app_owner(extension_name)
+        stored = store(logical, owner=owner, previous=previous)
+        atomic_write(path, json.dumps(stored, indent=2) + "\n", mode=0o600)
+        from gideon.core.config.secret_refs import purge_unused
+        purge_unused(owner, stored)
 
     @staticmethod
     def update(extension_name: str, partial: dict[str, Any]) -> dict[str, Any]:

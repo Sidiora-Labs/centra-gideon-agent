@@ -69,6 +69,8 @@ def list_instances(extension_name: str) -> list[ExtensionInstance]:
             data = json.loads(f.read_text(encoding="utf-8"))
             inst = ExtensionInstance.from_dict(data)
             inst.extension_name = extension_name
+            from gideon.core.config.secret_refs import instance_owner, resolve
+            inst.config = resolve(inst.config, owner=instance_owner(extension_name, inst.id))
             results.append(inst)
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to read instance %s: %s", f, exc)
@@ -84,6 +86,8 @@ def get_instance(extension_name: str, instance_id: str) -> ExtensionInstance | N
         data = json.loads(path.read_text(encoding="utf-8"))
         inst = ExtensionInstance.from_dict(data)
         inst.extension_name = extension_name
+        from gideon.core.config.secret_refs import instance_owner, resolve
+        inst.config = resolve(inst.config, owner=instance_owner(extension_name, instance_id))
         return inst
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Failed to read instance %s: %s", path, exc)
@@ -106,9 +110,15 @@ def create_instance(
         config=config,
         enabled=True,
     )
+    from gideon.core.config.secret_refs import instance_owner, store
+    owner = instance_owner(extension_name, iid)
+    inst.config = store(config, owner=owner)
     path = _instances_dir(extension_name) / f"{iid}.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write(path, json.dumps(inst.to_dict(), indent=2) + "\n")
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.parent.chmod(0o700)
+    atomic_write(path, json.dumps(inst.to_dict(), indent=2) + "\n", mode=0o600)
+    from gideon.core.config.secret_refs import purge_unused
+    purge_unused(owner, inst.config)
     return inst
 
 
@@ -121,17 +131,26 @@ def update_instance(
     enabled: bool | None = None,
 ) -> ExtensionInstance | None:
     """Update an existing instance. Returns None if not found."""
+    path = _instances_dir(extension_name) / f"{instance_id}.json"
+    if not path.is_file():
+        return None
     inst = get_instance(extension_name, instance_id)
     if inst is None:
         return None
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    prior_stored = dict(raw.get("config", {}))
     if display_name is not None:
         inst.display_name = display_name
     if config is not None:
         inst.config = {**inst.config, **config}
     if enabled is not None:
         inst.enabled = enabled
-    path = _instances_dir(extension_name) / f"{instance_id}.json"
-    atomic_write(path, json.dumps(inst.to_dict(), indent=2) + "\n")
+    from gideon.core.config.secret_refs import instance_owner, store
+    owner = instance_owner(extension_name, instance_id)
+    inst.config = store(inst.config, owner=owner, previous=prior_stored)
+    atomic_write(path, json.dumps(inst.to_dict(), indent=2) + "\n", mode=0o600)
+    from gideon.core.config.secret_refs import purge_unused
+    purge_unused(owner, inst.config)
     return inst
 
 
@@ -141,4 +160,6 @@ def delete_instance(extension_name: str, instance_id: str) -> bool:
     if not path.is_file():
         return False
     path.unlink()
+    from gideon.core.config.secret_refs import instance_owner, purge
+    purge([instance_owner(extension_name, instance_id).prefix])
     return True

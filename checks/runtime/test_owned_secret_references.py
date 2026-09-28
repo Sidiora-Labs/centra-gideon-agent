@@ -181,3 +181,68 @@ else:
     )
     assert child.returncode == 0, child.stderr
     assert json.loads((home / "config.json").read_text())["security"]["credential_keychain"] is True
+
+
+def test_owner_reference_rotates_and_purges_only_its_prefix(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    monkeypatch.setenv("GIDEON_CREDENTIAL_BACKEND", "dotenv")
+
+    from gideon.core.config.secret_refs import ForeignSecretReference, app_owner, purge, resolve, store, purge_unused
+
+    owner = app_owner("writer-app")
+    before = store({"api_key": "one-secret", "region": "eu"}, owner=owner)
+    old_key = before["api_key"].removeprefix("{{secret:").removesuffix("}}")
+    after = store({"api_key": "rotated-secret", "region": "eu"}, owner=owner, previous=before)
+    purge_unused(owner, after)
+    assert credentials.get_secret_value(old_key) == ""
+    assert resolve(after, owner=owner)["api_key"] == "rotated-secret"
+    other = app_owner("other-app")
+    other_value = store({"api_key": "other-secret"}, owner=other)
+    with pytest.raises(ForeignSecretReference):
+        resolve({"api_key": other_value["api_key"]}, owner=owner)
+    purge([owner.prefix])
+    assert resolve(other_value, owner=other)["api_key"] == "other-secret"
+
+
+def test_app_owner_purge_keeps_declared_non_secret_setting_portable(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    monkeypatch.setenv("GIDEON_CREDENTIAL_BACKEND", "dotenv")
+
+    from gideon.core.config.secret_refs import app_owner
+    from gideon.extensions.apps import app_config
+
+    app_name = "portable-settings-app"
+    schema = {
+        "type": "object",
+        "properties": {
+            "api_key": {"type": "string", "x-meta": {"sensitive": True}},
+            "region": {"type": "string"},
+        },
+    }
+    app_root = tmp_path / "apps" / app_name
+    app_config.write_config(app_name, {"api_key": "app-secret", "region": "eu"}, schema)
+    path = app_root / "data" / "config.json"
+    stored = json.loads(path.read_text())
+    assert stored["region"] == "eu"
+    assert stored["api_key"].startswith("{{secret:GIDEON_SECRET_APP_")
+    owner_keys = [key for key in credentials.credential_names() if app_owner(app_name).owns(key)]
+    assert len(owner_keys) == 1
+    app_config.write_config(app_name, {"api_key": "", "region": "eu"}, schema)
+    assert not [key for key in credentials.credential_names() if app_owner(app_name).owns(key)]
+
+
+def test_instance_record_is_reference_only_and_delete_purges_owner(tmp_path, monkeypatch):
+    from gideon.extensions.providers.instances import create_instance, delete_instance
+
+    monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    monkeypatch.setenv("GIDEON_CREDENTIAL_BACKEND", "dotenv")
+    instance = create_instance("test-provider", "Main", {"api_key": "instance-secret"}, instance_id="abc123")
+    path = tmp_path / "extensions/test-provider/instances/abc123.json"
+    raw = path.read_text()
+    assert "instance-secret" not in raw
+    assert "{{secret:GIDEON_SECRET_INSTANCE_" in raw
+    assert delete_instance("test-provider", "abc123")
+    assert "instance-secret" not in (tmp_path / ".env").read_text()

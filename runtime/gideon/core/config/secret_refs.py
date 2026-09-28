@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import logging
 import re
 import secrets
@@ -310,3 +311,147 @@ def resolve_config_secrets(document: Mapping[str, Any]) -> dict[str, Any]:
 
 def document_module_credential_field(name: str) -> bool:
     return config_document._credential_field(name)
+
+
+# Record-owned references used by app and provider settings. These helpers deliberately
+# coexist with the core-config transaction mapper above: its prepare/commit protocol
+# remains the authority for config.json writes.
+_OWNER_REFERENCE = re.compile(r"^\{\{secret:([A-Za-z0-9_]+)\}\}$")
+_OWNER_PREFIX = "GIDEON_SECRET"
+
+
+class ForeignSecretReference(ValueError):
+    """A settings record tried to resolve a value held by a different owner."""
+
+
+@dataclass(frozen=True, slots=True)
+class SecretOwner:
+    kind: str
+    name: str
+    instance: str = ""
+
+    @property
+    def prefix(self) -> str:
+        parts = [_OWNER_PREFIX, self.kind.upper(), _owner_segment(self.name)]
+        if self.instance:
+            parts.append(_owner_segment(self.instance))
+        return "_".join(parts) + "__"
+
+    def key(self, field: str) -> str:
+        return self.prefix + _owner_segment(field) + "_" + secrets.token_hex(8).upper()
+
+    def owns(self, key: str) -> bool:
+        return key.startswith(self.prefix)
+
+
+def _owner_segment(value: str) -> str:
+    clean = re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_").upper()[:32].rstrip("_") or "X"
+    return f"{clean}_{hashlib.sha256(value.encode()).hexdigest()[:10].upper()}"
+
+
+def app_owner(name: str) -> SecretOwner:
+    return SecretOwner("APP", name)
+
+
+def provider_owner(name: str) -> SecretOwner:
+    return SecretOwner("PROVIDER", name)
+
+
+def instance_owner(name: str, instance: str) -> SecretOwner:
+    return SecretOwner("INSTANCE", name, instance)
+
+
+def _owned_reference(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = _OWNER_REFERENCE.fullmatch(value)
+    return match.group(1) if match else None
+
+
+def _owned_secret_field(name: str, declared: set[str]) -> bool:
+    return name in declared or config_document._credential_field(name)
+
+
+def _audit_foreign(owner: SecretOwner, field: str, operation: str) -> None:
+    logger.warning("foreign credential reference refused owner=%s field=%s operation=%s", owner.kind.lower(), field, operation)
+    try:
+        from gideon.security.sel import sel
+        sel().log_api_access(caller=f"{owner.kind.lower()}:{owner.name}", operation=operation,
+                             outcome="denied", source="secret_refs", resources="credential-reference",
+                             error="credential reference belongs to another owner")
+    except Exception:
+        logger.debug("credential ownership audit unavailable", exc_info=True)
+
+
+def store(values: dict[str, Any], *, owner: SecretOwner, declared: set[str] | None = None,
+          previous: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Store secret fields and return a record containing owner-bound references only."""
+    if not isinstance(values, dict):
+        raise ValueError("settings must be an object")
+    declared, previous = set(declared or ()), previous or {}
+    result = dict(values)
+    for field, value in values.items():
+        if not _owned_secret_field(str(field), declared):
+            continue
+        old_key = _owned_reference(previous.get(field))
+        new_key = _owned_reference(value)
+        if value in (None, ""):
+            if old_key and not owner.owns(old_key):
+                _audit_foreign(owner, str(field), "clear")
+                raise ForeignSecretReference("credential reference belongs to another owner")
+            result[field] = value
+            continue
+        if new_key is not None:
+            if not owner.owns(new_key) or not credentials.get_secret_value(new_key):
+                _audit_foreign(owner, str(field), "store")
+                raise ForeignSecretReference("credential reference belongs to another owner")
+            result[field] = value
+            continue
+        if not isinstance(value, str):
+            raise ValueError("credential fields must contain strings")
+        if old_key and owner.owns(old_key) and credentials.get_secret_value(old_key) == value:
+            result[field] = "{{secret:" + old_key + "}}"
+            continue
+        key = owner.key(str(field))
+        credentials.put_secret_value(key, value)
+        if credentials.get_secret_value(key) != value:
+            raise OSError("credential backend did not verify the stored value")
+        result[field] = "{{secret:" + key + "}}"
+    return result
+
+
+def resolve(values: dict[str, Any], *, owner: SecretOwner) -> dict[str, Any]:
+    """Resolve references only when their key is in this record's owner namespace."""
+    if not isinstance(values, dict):
+        raise ValueError("settings must be an object")
+    result = dict(values)
+    for field, value in values.items():
+        key = _owned_reference(value)
+        if key is None:
+            continue
+        if not owner.owns(key):
+            _audit_foreign(owner, str(field), "resolve")
+            raise ForeignSecretReference("credential reference belongs to another owner")
+        secret = credentials.get_secret_value(key)
+        if not secret:
+            raise ValueError("owned credential reference is missing")
+        result[field] = secret
+    return result
+
+
+def purge(prefixes: list[str] | tuple[str, ...]) -> int:
+    """Delete exactly the values within the supplied owner namespaces."""
+    removed = 0
+    for key in credentials.credential_names():
+        if key.startswith(tuple(prefixes)) and credentials.delete_secret_value(key):
+            removed += 1
+    return removed
+
+
+def purge_unused(owner: SecretOwner, values: dict[str, Any]) -> int:
+    retained = {_owned_reference(value) for value in values.values()}
+    removed = 0
+    for key in credentials.credential_names():
+        if owner.owns(key) and key not in retained and credentials.delete_secret_value(key):
+            removed += 1
+    return removed

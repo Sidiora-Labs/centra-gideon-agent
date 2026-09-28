@@ -110,7 +110,11 @@ async def test_get_config_masks_sensitive_fields(tmp_path):
             body["config"]["command"] == "gideon"
         ), "a non-sensitive field must pass through"
         assert body["_secret_set"] == ["app_token", "bot_token"]
-        assert _stored(tmp_path)["bot_token"] == _SECRET
+        persisted = _stored(tmp_path)
+        assert "{{secret:GIDEON_SECRET_APP_" in persisted["bot_token"]
+        assert _SECRET not in json.dumps(persisted)
+        from gideon.extensions.providers.settings import ProviderSettings
+        assert ProviderSettings.load("fake-channel")["bot_token"] == _SECRET
 
 
 @pytest.mark.asyncio
@@ -141,7 +145,11 @@ async def test_patching_the_mask_back_preserves_the_stored_secret(tmp_path):
             json={"bot_token": SECRET_MASK, "command": "renamed"},
         )
         assert r.status == 200, await r.text()
-        assert _stored(tmp_path)["bot_token"] == _SECRET
+        persisted = _stored(tmp_path)
+        assert "{{secret:GIDEON_SECRET_APP_" in persisted["bot_token"]
+        assert _SECRET not in json.dumps(persisted)
+        from gideon.extensions.providers.settings import ProviderSettings
+        assert ProviderSettings.load("fake-channel")["bot_token"] == _SECRET
         assert _stored(tmp_path)["command"] == "renamed"
 
 
@@ -153,7 +161,11 @@ async def test_an_empty_sensitive_field_over_a_stored_value_preserves_it(tmp_pat
             "/api/providers/fake-channel/config", json={"bot_token": _SECRET}
         )
         await client.patch("/api/providers/fake-channel/config", json={"bot_token": ""})
-        assert _stored(tmp_path)["bot_token"] == _SECRET
+        persisted = _stored(tmp_path)
+        assert "{{secret:GIDEON_SECRET_APP_" in persisted["bot_token"]
+        assert _SECRET not in json.dumps(persisted)
+        from gideon.extensions.providers.settings import ProviderSettings
+        assert ProviderSettings.load("fake-channel")["bot_token"] == _SECRET
 
 
 @pytest.mark.asyncio
@@ -177,7 +189,9 @@ async def test_a_real_new_value_still_overwrites(tmp_path):
             "/api/providers/fake-channel/config",
             json={"bot_token": "xoxb-ROTATED-fixture"},
         )
-        assert _stored(tmp_path)["bot_token"] == "xoxb-ROTATED-fixture"
+        assert "xoxb-ROTATED-fixture" not in json.dumps(_stored(tmp_path))
+        from gideon.extensions.providers.settings import ProviderSettings
+        assert ProviderSettings.load("fake-channel")["bot_token"] == "xoxb-ROTATED-fixture"
 
 
 def test_the_masking_policy_has_exactly_one_implementation():

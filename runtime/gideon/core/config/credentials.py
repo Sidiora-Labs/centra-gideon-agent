@@ -265,7 +265,6 @@ def save_credential(key: str, value: str) -> None:
     stored = credential_backend() == "keychain" and _keychain_save(key, value)
     if not stored:
         _dotenv_save_credential(key, value)
-    os.environ[key] = value
 
 
 def get_credential(key: str) -> str:

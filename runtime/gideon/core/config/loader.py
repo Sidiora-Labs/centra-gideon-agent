@@ -3140,28 +3140,16 @@ class AppConfig:
         save_config(self)
 
     def load_credentials(self) -> dict[str, str]:
+        """Return trusted core credentials without exporting values process-wide."""
         from gideon.core.config.credentials import (
             _dotenv_credentials,
             _keychain_credentials,
+            is_config_secret_reference_key,
         )
-
-        layers = (
-            _dotenv_credentials(),
-            _keychain_credentials(),
-            {key: os.environ[key] for key in _CREDENTIAL_KEYS if os.environ.get(key)},
-        )
-        from gideon.core.config.credentials import is_config_secret_reference_key
-
-        credentials = {
-            key: value
-            for layer in layers
-            for key, value in layer.items()
-            if not is_config_secret_reference_key(key)
-        }
-        for key in credentials.keys() - os.environ.keys():
-            if credentials[key]:
-                os.environ[key] = credentials[key]
-        return credentials
+        layers = (_dotenv_credentials(), _keychain_credentials(),
+                 {key: os.environ[key] for key in _CREDENTIAL_KEYS if os.environ.get(key)})
+        return {key: value for layer in layers for key, value in layer.items()
+                if not is_config_secret_reference_key(key)}
 
     def create_provider_factory(self) -> Callable:
         from gideon.extensions.providers import provider_bridge
