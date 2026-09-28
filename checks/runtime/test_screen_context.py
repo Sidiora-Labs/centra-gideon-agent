@@ -377,23 +377,62 @@ class TestProviderImagePart:
         assert p.stage_image_part("") is False
         assert p._pending_image == ""
 
-    def test_native_runtime_delegates_and_propagates_refusal(self):
+    def test_native_runtime_keeps_real_image_for_initial_and_post_tool_requests(
+        self, tmp_path
+    ):
         from gideon.engine.agents.native.runtime import NativeAgentRuntime
+        from gideon.engine.agents.provider import AgentRuntimeDefinition
+        from gideon.integrations.llm.credentials import Credential
+        from gideon.integrations.llm.openai import OpenAIProvider
+        from gideon.interfaces.dashboard.attachment_images import image_part_url
 
-        rt = NativeAgentRuntime.__new__(NativeAgentRuntime)
+        image = tmp_path / "uploads" / "diagram.png"
+        image.parent.mkdir()
+        image.write_bytes(_png_bytes())
+        data_url = image_part_url(str(image))
+        assert data_url.startswith("data:image/png;base64,")
 
-        class _Carrier:
-            def stage_image_part(self, url):
-                self.seen = url
-                return True
+        provider = OpenAIProvider(
+            model="gpt-4o",
+            credential=Credential(
+                name="image-delivery-test",
+                kind="api_key",
+                secret="inert-test-credential",
+            ),
+        )
+        runtime = NativeAgentRuntime(
+            definition=AgentRuntimeDefinition(
+                name="image-delivery-test", model="openai:gpt-4o"
+            ),
+            model_provider=provider,
+        )
+        assert runtime.stage_image_part(data_url) is True
+        runtime._messages = [{"role": "user", "content": "Describe this image."}]
+        persisted_before = json.loads(json.dumps(runtime._messages))
 
-        carrier = _Carrier()
-        rt._model = carrier
-        assert rt.stage_image_part("data:image/png;base64,AAA") is True
-        assert carrier.seen == "data:image/png;base64,AAA"
+        initial_messages = runtime._messages_with_staged_images(runtime._messages)
+        initial_request = provider._request(initial_messages, model="gpt-4o")
+        assert initial_request["messages"][0]["content"][1] == {
+            "type": "image_url",
+            "image_url": {"url": data_url},
+        }
+        assert runtime._messages == persisted_before
 
-        rt._model = object()
-        assert rt.stage_image_part("data:image/png;base64,AAA") is False
+        runtime._messages.extend([
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "call-1"}]},
+            {"role": "tool", "tool_call_id": "call-1", "content": "Image dimensions verified."},
+        ])
+        persisted_after_tool = json.loads(json.dumps(runtime._messages))
+        post_tool_messages = runtime._messages_with_staged_images(runtime._messages)
+        post_tool_request = provider._request(post_tool_messages, model="gpt-4o")
+
+        assert post_tool_request["messages"][0]["content"][1] == {
+            "type": "image_url",
+            "image_url": {"url": data_url},
+        }
+        assert post_tool_request["messages"][-1]["content"] == "Image dimensions verified."
+        assert runtime._messages == persisted_after_tool
+        assert runtime.staged_image_parts[0]["image_url"]["url"] == data_url
 
 
 def _screen_app(state):

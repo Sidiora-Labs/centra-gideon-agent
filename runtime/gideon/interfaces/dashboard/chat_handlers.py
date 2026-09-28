@@ -448,7 +448,7 @@ async def _maybe_cancel_and_replace(
         qid = session.queue_append(message)
         state.broadcast_ws(
             "chat_done",
-            {"session": session.key, "superseded": True, "superseded_by": qid},
+            {"session": session.key, **session.stream_cursor(), "superseded": True, "superseded_by": qid},
         )
         sel().log_tool_invocation(
             session_key=_history_key_for(session.key),
@@ -846,7 +846,15 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
             snapshot_seq = max(snapshot_seq, seq)
             if message.get("role") == "chunk" and seq > 0:
                 active_stream_in_snapshot = True
-    if snapshot_running and active_stream_in_snapshot:
+    terminal_stream_in_snapshot = any(
+        message.get("role") == "assistant"
+        and isinstance(message.get("meta"), dict)
+        and message["meta"].get("stream_epoch") == snapshot_epoch
+        and message["meta"].get("stream_turn") == snapshot_turn
+        and message["meta"].get("stream_seq") == snapshot_seq
+        for message in messages
+    )
+    if active_stream_in_snapshot and (snapshot_running or terminal_stream_in_snapshot):
         for message in reversed(prepared):
             if message.get("role") == "streaming":
                 meta = message.get("meta")
@@ -1195,6 +1203,50 @@ async def api_chat_session_stop(request: web.Request) -> web.Response:
         metadata={"session": name, "force": False},
     )
     return web.json_response({"ok": True})
+
+
+async def api_chat_image_input(request: web.Request) -> web.Response:
+    """Describe how one uploaded image will reach this chat's model."""
+    from gideon.extensions.providers.image_input import image_input, image_reader
+    from gideon.extensions.providers.use_cases import active_model_refs
+    from gideon.interfaces.dashboard.attachment_extract import display_name
+    from gideon.interfaces.dashboard.attachment_images import is_image_attachment
+    from gideon.interfaces.dashboard.handlers.files import _upload_dir
+
+    raw_path = request.query.get("path", "").strip()
+    if not raw_path:
+        return web.json_response({"error": "path is required"}, status=400)
+    path = os.path.realpath(os.path.expanduser(raw_path))
+    uploads = str(_upload_dir().resolve())
+    if not path.startswith(uploads + os.sep):
+        return web.json_response({"error": "Access denied"}, status=403)
+    if not os.path.isfile(path):
+        return web.json_response({"error": "Not found"}, status=404)
+    if not is_image_attachment(path):
+        return web.json_response({"error": "Attachment is not an image"}, status=400)
+
+    session_name = request.query.get("session", "").strip()
+    state: ConsoleState = request.app["state"]
+    session = state._sessions.get(session_name) if session_name else None
+    if session_name and session is None:
+        return web.json_response({"error": "not found"}, status=404)
+    model_ref = request.query.get("model", "").strip() or (getattr(session, "model", "") or "").strip()
+    if not model_ref or model_ref.lower() == "auto":
+        refs = active_model_refs("chat")
+        model_ref = refs[0] if refs else ""
+
+    selected = await image_input(model_ref) if model_ref else None
+    if selected is not None and selected.accepted:
+        mode, reason = "pixels", "The selected chat model can receive this image."
+    else:
+        reader = await image_reader()
+        if reader.ref:
+            mode = "text"
+            reason = "The selected chat model cannot receive image pixels; extracted image text will be used."
+        else:
+            mode = "unread"
+            reason = reader.reason or "No image model is set up. The image will not be read."
+    return web.json_response({"name": display_name(path), "mode": mode, "reason": reason})
 
 
 async def api_chat_screen_state(request: web.Request) -> web.Response:

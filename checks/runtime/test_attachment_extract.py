@@ -110,20 +110,40 @@ class TestAttachmentInjectionRoots:
             chat_runner._inject_attachment_content(self._Session(files), "look")
         )
 
-    def test_upload_and_native_screenshot_are_both_inlined(self, monkeypatch, tmp_path):
-        (tmp_path / "uploads").mkdir()
-        (tmp_path / "screenshots").mkdir()
-        up = str(tmp_path / "uploads" / "snip.png")
-        shot = str(tmp_path / "screenshots" / "screenshot_1.png")
-        out = self._inject(
-            monkeypatch,
-            tmp_path,
-            [up, shot],
-            {up: "BROWSER SNIP TEXT", shot: "NATIVE SNIP TEXT"},
-        )
-        assert "BROWSER SNIP TEXT" in out
-        assert "NATIVE SNIP TEXT" in out
-        assert out.endswith("look")
+    def test_upload_and_native_screenshot_are_unread_without_a_reader(
+        self, monkeypatch, tmp_path
+    ):
+        from PIL import Image
+
+        from gideon.interfaces.dashboard import attachment_extract, chat_runner
+        from gideon.interfaces.dashboard.state import _ChatSession
+
+        home = tmp_path / "home"
+        uploads = home / "uploads"
+        screenshots = home / "screenshots"
+        uploads.mkdir(parents=True)
+        screenshots.mkdir()
+        up = uploads / "snip.png"
+        shot = screenshots / "screenshot_1.png"
+        Image.new("RGB", (2, 2), (230, 40, 20)).save(up, format="PNG")
+        Image.new("RGB", (2, 2), (20, 40, 230)).save(shot, format="PNG")
+
+        monkeypatch.setenv("GIDEON_HOME", str(home))
+        extractor = AttachmentExtractor()
+        monkeypatch.setattr(attachment_extract, "_INSTANCE", extractor)
+        session = _ChatSession("attachment-image-no-reader")
+        session.messages.append({
+            "role": "user",
+            "content": "look",
+            "meta": {"files": [str(up), str(shot)]},
+        })
+
+        out = _run(chat_runner._inject_attachment_content(session, "look"))
+
+        assert "snip.png" in out and "screenshot_1.png" in out
+        assert "This image was not read." in out
+        assert "No image model is set up." in out
+        assert extractor._tasks == {}
 
     def test_workspace_mention_is_not_inlined(self, monkeypatch, tmp_path):
         # @-mentioned workspace files stay for the agent's own file tools — inlining

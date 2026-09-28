@@ -1,11 +1,9 @@
 """In-process registry for chat-attachment content extraction.
 
 When a file is attached in chat it's uploaded to ``~/.gideon/uploads`` and
-its extraction (knowledge EXTRACTION graph only — see ``knowledge.extract``)
-starts IMMEDIATELY, while the user is still typing. The result is cached by the
-saved file path. When the chat turn runs, the runner awaits any pending
-extraction for the turn's attached files (so the query blocks on extraction iff
-it isn't done yet) and prepends the extracted text to the prompt context.
+non-image extraction (knowledge EXTRACTION graph only — see ``knowledge.extract``)
+starts while the user is still typing. Image extraction waits until a text preview
+or a text-only chat model needs it. The result is cached by saved file path.
 
 Singleton, keyed by absolute upload path. Bounded so a long session can't grow
 it without bound.
@@ -24,13 +22,22 @@ _MAX_TEXT_CHARS = 200_000
 
 
 class AttachmentExtractor:
-    """Fires-and-tracks extraction tasks keyed by upload path."""
+    """Fires-and-tracks requested extraction tasks keyed by upload path."""
 
     def __init__(self) -> None:
         self._tasks: dict[str, asyncio.Task[str]] = {}
 
     def start(self, path: str, mime: str | None = None) -> None:
-        """Begin extracting *path* now (idempotent). Returns immediately."""
+        """Begin non-image extraction now; images wait until text is requested."""
+        if not path or path in self._tasks:
+            return
+        from gideon.interfaces.dashboard.attachment_images import is_image_attachment
+
+        if is_image_attachment(path):
+            return
+        self._begin(path, mime)
+
+    def _begin(self, path: str, mime: str | None = None) -> None:
         if not path or path in self._tasks:
             return
         if len(self._tasks) >= _MAX_ENTRIES:
@@ -49,20 +56,32 @@ class AttachmentExtractor:
         except Exception:
             logger.warning("attachment extract failed for %s", path, exc_info=True)
             return ""
-        return (text or "")[:_MAX_TEXT_CHARS]
+        cleaned = (text or "").replace(os.path.basename(path), display_name(path))
+        return cleaned[:_MAX_TEXT_CHARS]
 
     async def get(self, path: str, mime: str | None = None) -> str:
         """Await + return the extracted text for *path*. Starts extraction if it
         wasn't already kicked off at upload (so a late/missed start still works).
         Blocks until extraction completes — this is the turn-gating point."""
+        from gideon.interfaces.dashboard.attachment_images import is_image_attachment
+
+        is_image = is_image_attachment(path)
+        if is_image:
+            from gideon.extensions.providers.image_input import image_reader
+
+            reader = await image_reader()
+            if not reader.ref:
+                return f"Image: {display_name(path)} — {reader.reason or 'No image model is set up.'}"
         if path not in self._tasks:
-            self.start(path, mime)
+            self._begin(path, mime)
         task = self._tasks.get(path)
         if task is None:
             from gideon.cognition.knowledge.extract import extract_file_content
 
             try:
-                return (await extract_file_content(path, mime))[:_MAX_TEXT_CHARS]
+                text = await extract_file_content(path, mime)
+                cleaned = (text or "").replace(os.path.basename(path), display_name(path))
+                return cleaned[:_MAX_TEXT_CHARS]
             except Exception:
                 return ""
         try:

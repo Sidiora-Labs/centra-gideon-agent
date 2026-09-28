@@ -26,6 +26,7 @@ interface Props {
   mentionProject?: string
   slashCommands?: boolean
   onLargePaste?: (text: string) => boolean
+  onAttachImages?: (files: File[]) => void
   mobile?: boolean
   sendOnEnter?: boolean
   donorTriggers?: boolean
@@ -144,7 +145,13 @@ export const MarkdownInput = forwardRef<MarkdownInputHandle, Props>(function Mar
           compositionstart: () => { composing.current = true; return false },
           compositionend: () => { composing.current = false; return false },
           paste: event => {
+            const images = pastedImageFiles(event.clipboardData)
             const text = event.clipboardData?.getData('text/plain')
+            if (images.length && !text?.trim()) {
+              event.preventDefault()
+              cb.current.onAttachImages?.(images)
+              return true
+            }
             if (!text || !cb.current.onLargePaste?.(text)) return false
             event.preventDefault(); return true
           },
@@ -226,3 +233,23 @@ export const MarkdownInput = forwardRef<MarkdownInputHandle, Props>(function Mar
       }} />}
   </div>
 })
+
+export function pastedImageFiles(data: DataTransfer | null): File[] {
+  if (!data) return []
+  const files: File[] = []
+  for (const item of Array.from(data.items ?? [])) {
+    if (item.kind !== 'file' || !item.type.startsWith('image/')) continue
+    const file = item.getAsFile()
+    if (file) files.push(file)
+  }
+  return imageFilesForClipboard(files, data.getData('text/plain'))
+}
+
+export function imageFilesForClipboard(files: readonly File[], text: string): File[] {
+  if (text.trim()) return []
+  return files.filter(file => file.type.startsWith('image/')).map(file => {
+    if (file.name) return file
+    const extension = file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png'
+    return new File([file], `pasted-image.${extension}`, { type: file.type, lastModified: file.lastModified })
+  })
+}

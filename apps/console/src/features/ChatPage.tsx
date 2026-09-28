@@ -83,7 +83,8 @@ import { notify } from '../app/shell/appSdk'
 import { spring } from '../shared/theme/motion'
 import { api, type ApprovalMode, type TaskMode, type ReasoningEffort, type ChatSessionSummary, type ChatSessionShare, type ChatSessionShareDetail, type ChatHistoryMsg, type DiscoveredAgent, type MemoryMode, type NudgeLoop, type ChatFolder, type ChatTag, type RetagJob, type RewindFileWire } from '../shared/data/api'
 import { useChatSocket, type WsMessage } from '../shared/data/useChatSocket'
-import { useStreamCoalescer } from './chat/useStreamCoalescer'
+import { useStreamCoalescer, type StreamCursor } from './chat/useStreamCoalescer'
+import { normalizeCompletedSnapshot, SnapshotReplay } from './chat/snapshotReplay'
 import { followupAnnouncement } from './chat/FollowupChips'
 import { CheckWorkChip } from './chat/CheckWorkChip'
 import { SessionMarkerRail } from './chat/SessionMarkerRail'
@@ -112,6 +113,35 @@ import { copyText } from '../app/shell/clipboard'
 import { MoreRow } from '../shared/ui/MoreRow'
 
 type ChatDetail = Awaited<ReturnType<typeof api.chatSessionDetail>>
+type CursorChatDetail = ChatDetail & { stream_cursor?: StreamCursor }
+
+function streamCursorOf(value: unknown): StreamCursor | null {
+  if (!value || typeof value !== 'object') return null
+  const cursor = value as Record<string, unknown>
+  if (typeof cursor.stream_epoch !== 'string' || !cursor.stream_epoch
+    || typeof cursor.stream_turn !== 'number' || !Number.isInteger(cursor.stream_turn) || cursor.stream_turn < 0
+    || typeof cursor.stream_seq !== 'number' || !Number.isInteger(cursor.stream_seq) || cursor.stream_seq < 0) return null
+  return { stream_epoch: cursor.stream_epoch, stream_turn: cursor.stream_turn, stream_seq: cursor.stream_seq }
+}
+
+function transcriptReplayFrame(message: WsMessage): boolean {
+  switch (message.type) {
+    case 'chat_chunk': case 'chat_done': case 'chat_user_message':
+    case 'tool_call': case 'tool_result': case 'approval': case 'approval_resolved':
+    case 'activity_event': case 'chat_thinking': case 'queue_push': case 'queue_pop': case 'queue_cancel':
+      return true
+    case 'chat_message':
+      return message.data.role === 'error'
+    default:
+      return false
+  }
+}
+
+function partialFromSnapshot(detail: CursorChatDetail): string | null {
+  if (!detail.running) return null
+  const partial = [...detail.messages].reverse().find(message => message.role === 'streaming')
+  return partial?.content ?? null
+}
 type TranscriptRender = {
   user: (turn: ChatTurn, index: number) => ReactNode
   assistant: (turn: ChatTurn, index: number) => ReactNode
@@ -460,6 +490,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const [pasteBlocks, setPasteBlocks] = useState<PasteBlock[]>([])
   const pasteSeq = useRef(0)
   const [attachedPaths, setAttachedPaths] = useState<string[]>([])
+  const [imageInputs, setImageInputs] = useState<Record<string, { mode: 'pixels' | 'text' | 'unread' | 'pending'; reason: string }>>({})
   const platform = usePlatform()
   const displayCapture = displayCaptureSupported()
   const captureProvider = chooseCaptureProvider(platform, displayCapture)
@@ -497,6 +528,22 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const ensureInFlightRef = useRef<Promise<string> | null>(null)
   const lastWsActivityRef = useRef<number>(0)
   const [selection, setSelection] = useState<ComposerValue>({ agent: initialAgent, model: 'Auto', approval: 'normal', taskMode: 'agent', reasoning: '' })
+  useEffect(() => {
+    let current = true
+    const paths = [...new Set(attachedPaths)].filter(path => /\.(?:png|jpe?g|webp|gif|bmp|tiff?)$/i.test(path))
+    setImageInputs({})
+    if (paths.length) {
+      const session = sessionRef.current ?? ''
+      const model = selection.model === 'Auto' ? '' : selection.model
+      Promise.all(paths.map(async path => {
+        try { return [path, await api.attachmentImageInput(path, session, model)] as const }
+        catch { return [path, { mode: 'pending' as const, reason: 'Image delivery could not be checked yet.' }] as const }
+      })).then(rows => {
+        if (current) setImageInputs(Object.fromEntries(rows.map(([path, result]) => [path, { mode: result.mode, reason: result.reason }])))
+      })
+    }
+    return () => { current = false }
+  }, [attachedPaths, selection.model, sessionId])
   const sessionBindingRef = useRef<{ agent: string; model: string; acp_provider: string; acp_provider_agent: string; reasoning_effort: string } | null>(null)
   const [bindingNonce, setBindingNonce] = useState(0)
   const [naturalVoice, setNaturalVoice] = useState<{ choice: '' | 'on' | 'off'; effective: boolean; source: string; agentDefault: boolean }>(
@@ -556,6 +603,10 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       return r.segs
     })
   }, { immediate: streamRevealCfg === 'immediate' })
+  const snapshotReplayRef = useRef<SnapshotReplay<WsMessage> | null>(null)
+  if (!snapshotReplayRef.current) snapshotReplayRef.current = new SnapshotReplay<WsMessage>(() => true)
+  const replayingSnapshotFramesRef = useRef(false)
+  const onWsRef = useRef<(message: WsMessage) => void>(() => {})
   const started = turns.length > 0
   const lastTurn = turns[turns.length - 1]
   const showThinking = streaming && (!lastTurn || lastTurn.role === 'user' || lastTurn.segments.length === 0)
@@ -580,25 +631,53 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       return next
     })
 
+  const replaySnapshotFrames = useCallback((frames: WsMessage[]) => {
+    replayingSnapshotFramesRef.current = true
+    try {
+      for (const frame of frames) onWsRef.current(frame)
+    } finally {
+      replayingSnapshotFramesRef.current = false
+    }
+  }, [])
+
+  const loadSnapshot = useCallback(async (key: string, adopt: (detail: CursorChatDetail) => boolean) => {
+    const replay = snapshotReplayRef.current!
+    const generation = replay.begin()
+    try {
+      const detail = normalizeCompletedSnapshot(await api.chatSessionDetail(key) as CursorChatDetail)
+      const frames = replay.settle(generation, () => sessionRef.current === key && adopt(detail))
+      replaySnapshotFrames(frames)
+      return detail
+    } catch (error) {
+      replaySnapshotFrames(replay.settle(generation, null))
+      throw error
+    }
+  }, [replaySnapshotFrames])
+
   useEffect(() => {
     sessionRef.current = sessionId
+    snapshotReplayRef.current = new SnapshotReplay<WsMessage>(() => true)
     setContextPct(undefined)
     setContextUsage(undefined)
-    coalescer.reset(); coalescing.current = false
+    coalescer.clear(); coalescing.current = false
     setQueued([])
     setSubagents([])
     setBranchedFrom(null)
     if (!sessionId) { setTurns([]); setLoadingHistory(false); return }
     let alive = true
     if (!seededDetail) setLoadingHistory(true)
-    api.chatSessionDetail(sessionId).then((d) => {
-      if (!alive) return
+    void loadSnapshot(sessionId, (d) => {
+      if (!alive) return false
       writeCachedDetail(sessionId, d)
       setAppOrigin(d.created_by_app_name?.trim() && d.created_by_app_route?.trim()
         ? { key: sessionId, name: d.created_by_app_name, destination: d.created_by_app_route }
         : null)
       const hydrated = hydrateTurns(d.messages || [], d.running)
-      setTurns((prev) => (hydrated.length >= prev.length ? hydrated : prev))
+      const partial = partialFromSnapshot(d)
+      coalescer.resume(partial, streamCursorOf(d.stream_cursor))
+      coalescing.current = partial !== null
+      breakText.current = !d.running || partial === null
+      setTurns(hydrated)
       setQueued(Array.isArray(d.queue) ? d.queue.filter((q) => q && q.id).map((q) => ({ id: q.id, content: q.content })) : [])
       setPromptHistory(hydrated.reduce<string[]>((acc, t) => {
         if (t.role !== 'user') return acc
@@ -640,11 +719,11 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         sideOpenedRef.current = true
       }
       markStreaming(!!d.running)
-      if (d.running) breakText.current = true
       setLoadingHistory(false)
+      return true
     }).catch(() => { if (alive) setLoadingHistory(false) })
     return () => { alive = false }
-  }, [sessionId])
+  }, [sessionId, loadSnapshot])
 
   useEffect(() => {
     const b = sessionBindingRef.current
@@ -664,13 +743,15 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     const d = m.data || {}
     if (!s || (d.session !== s && d.session !== undefined)) return
     lastWsActivityRef.current = Date.now()
+    if (!replayingSnapshotFramesRef.current && transcriptReplayFrame(m)
+      && snapshotReplayRef.current?.hold(m)) return
     switch (m.type) {
       case 'chat_chunk': {
         if (d.session !== sessionRef.current) break
         setStatusText('')
         const chunk = String(d.content ?? '')
         if (breakText.current) { coalescer.reset(); coalescing.current = false; breakText.current = false }
-        coalescer.push(chunk)
+        coalescer.push(chunk, streamCursorOf(d) ?? undefined)
         break
       }
       case 'chat_status': setStatusText(String(d.status ?? '')); break
@@ -688,7 +769,9 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         if (d.role === 'error') {
           coalescer.flushNow()
           markStreaming(false); setStatusText(''); setLatestActivity(null)
-          patchLastAssistant((segs) => [...segs, { kind: 'error', text: String(d.content ?? 'The model returned an error.') }])
+          const text = String(d.content ?? 'The model returned an error.')
+          patchLastAssistant((segs) => segs.some((segment) => segment.kind === 'error' && segment.text === text)
+            ? segs : [...segs, { kind: 'error', text }])
         }
         break
       }
@@ -775,12 +858,15 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         if (d.superseded) setStatusText('Superseded by your new message…')
         const sk = sessionRef.current
         refreshSessionCost(sk)
-        if (sk) api.chatSessionDetail(sk).then((d) => {
+        if (sk) void loadSnapshot(sk, (d) => {
           writeCachedDetail(sk, d)
-          if (sk !== sessionRef.current) return
-          coalescer.reset(); coalescing.current = false; breakText.current = true
+          const partial = partialFromSnapshot(d)
+          coalescer.resume(partial, streamCursorOf(d.stream_cursor))
+          coalescing.current = partial !== null
+          breakText.current = !d.running || partial === null
           setTurns(hydrateTurns(d.messages || [], d.running))
           markStreaming(!!d.running)
+          return true
         }).catch(() => {})
         break
       }
@@ -834,9 +920,14 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       case 'chat_rewound': {
         if (d.session !== sessionRef.current) break
         const sk = sessionRef.current
-        if (sk) api.chatSessionDetail(sk).then((det) => {
+        if (sk) void loadSnapshot(sk, (det) => {
           writeCachedDetail(sk, det)
+          const partial = partialFromSnapshot(det)
+          coalescer.resume(partial, streamCursorOf(det.stream_cursor))
+          coalescing.current = partial !== null
+          breakText.current = !det.running || partial === null
           setTurns(hydrateTurns(det.messages || [], det.running))
+          return true
         }).catch(() => {})
         break
       }
@@ -846,7 +937,9 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         if (!content) break
         breakText.current = true
         setFollowups([])
-        setTurns((prev) => [...prev, userTurn(content, d.ts ? String(d.ts) : undefined)])
+        const ts = d.ts ? String(d.ts) : undefined
+        setTurns((prev) => prev.some((turn) => turn.role === 'user'
+          && (ts ? turn.ts === ts : turnText(turn) === content)) ? prev : [...prev, userTurn(content, ts)])
         break
       }
       case 'subagent_spawn': {
@@ -890,18 +983,22 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         break
       }
     }
-  }, [])
+  }, [loadSnapshot])
+  onWsRef.current = onWs
   const resyncOnReconnect = useCallback(() => {
     const s = sessionRef.current
     if (!s) return
-    api.chatSessionDetail(s).then((d) => {
-      if (sessionRef.current !== s) return
-      coalescer.reset(); coalescing.current = false; breakText.current = true
+    void loadSnapshot(s, (d) => {
+      const partial = partialFromSnapshot(d)
+      coalescer.resume(partial, streamCursorOf(d.stream_cursor))
+      coalescing.current = partial !== null
+      breakText.current = !d.running || partial === null
       setTurns(hydrateTurns(d.messages || [], d.running))
       markStreaming(!!d.running)
       if (!d.running) setStatusText('')
+      return true
     }).catch(() => {})
-  }, [])
+  }, [loadSnapshot])
   useChatSocket(onWs, resyncOnReconnect, setWsConnected)
 
   useEffect(() => {
@@ -912,17 +1009,20 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       if (Date.now() - lastWsActivityRef.current < 3500) return
       const showingApproval = turns.some((t) => t.segments.some((sg) => sg.kind === 'approval' && !(sg as ApprovalSegment).resolved))
       if (showingApproval) return
-      api.chatSessionDetail(s).then((d) => {
-        if (sessionRef.current !== s) return
+      void loadSnapshot(s, (d) => {
         coalescer.flushNow()
-        coalescer.reset(); coalescing.current = false; breakText.current = true
+        const partial = partialFromSnapshot(d)
+        coalescer.resume(partial, streamCursorOf(d.stream_cursor))
+        coalescing.current = partial !== null
+        breakText.current = !d.running || partial === null
         setTurns(hydrateTurns(d.messages || [], d.running))
         if (!d.running) { markStreaming(false); setStatusText(''); setLatestActivity(null) }
         lastWsActivityRef.current = Date.now()
+        return true
       }).catch(() => {})
     }, 2000)
     return () => window.clearInterval(iv)
-  }, [streaming, turns])
+  }, [streaming, turns, loadSnapshot])
 
   // Global "/" shortcut → focus the composer (GitHub/Slack-style), unless the
   useEffect(() => {
@@ -1170,11 +1270,19 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     }
     catch (e) {
       const sid = acceptedSession
-      const detail = sid ? await api.chatSessionDetail(sid).catch(() => null) : null
-      const accepted = !!detail?.messages?.some((m) => m.role === 'user' && m.ts === clientTs)
+      let accepted = false
+      const detail = sid ? await loadSnapshot(sid, (snapshot) => {
+        accepted = !!snapshot.messages?.some((m) => m.role === 'user' && m.ts === clientTs)
+        if (!accepted) return false
+        const partial = partialFromSnapshot(snapshot)
+        coalescer.resume(partial, streamCursorOf(snapshot.stream_cursor))
+        coalescing.current = partial !== null
+        breakText.current = !snapshot.running || partial === null
+        setTurns(hydrateTurns(snapshot.messages || [], snapshot.running))
+        markStreaming(!!snapshot.running)
+        return true
+      }).catch(() => null) : null
       if (accepted && detail) {
-        setTurns(hydrateTurns(detail.messages || [], detail.running))
-        markStreaming(!!detail.running)
         if (sid && !sessionId) navigate(`chat/${sid}`, { replace: true })
       } else {
         markStreaming(false)
@@ -1262,9 +1370,16 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     if (!s) return
     try {
       const r = await api.undoChat(s, n)
-      const d = await api.chatSessionDetail(s)
-      const rehydrated = hydrateTurns(d.messages || [], false)
-      setTurns([...rehydrated, assistantTurn(r.notice)])
+      await loadSnapshot(s, (d) => {
+        const partial = partialFromSnapshot(d)
+        coalescer.resume(partial, streamCursorOf(d.stream_cursor))
+        coalescing.current = partial !== null
+        breakText.current = !d.running || partial === null
+        setTurns(hydrateTurns(d.messages || [], d.running))
+        markStreaming(!!d.running)
+        return true
+      })
+      setTurns((prev) => [...prev, assistantTurn(r.notice)])
     } catch {   }
   }
   async function rewindToTurn(turn: number, confirm: boolean) {
@@ -1439,12 +1554,19 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     markStreaming(true); breakText.current = true
     try { await api.editResend(s, t, turn?.ts, turnIndex, newTs, rewind) }
     catch (e) {
-      const detail = await api.chatSessionDetail(s).catch(() => null)
-      const accepted = !!detail?.messages?.some((m) => m.role === 'user' && m.ts === newTs)
-      if (accepted && detail) {
-        setTurns(hydrateTurns(detail.messages || [], detail.running))
-        markStreaming(!!detail.running)
-      } else {
+      let accepted = false
+      const detail = await loadSnapshot(s, (snapshot) => {
+        accepted = !!snapshot.messages?.some((m) => m.role === 'user' && m.ts === newTs)
+        if (!accepted) return false
+        const partial = partialFromSnapshot(snapshot)
+        coalescer.resume(partial, streamCursorOf(snapshot.stream_cursor))
+        coalescing.current = partial !== null
+        breakText.current = !snapshot.running || partial === null
+        setTurns(hydrateTurns(snapshot.messages || [], snapshot.running))
+        markStreaming(!!snapshot.running)
+        return true
+      }).catch(() => null)
+      if (!accepted || !detail) {
         markStreaming(false)
         setTurns(previousTurns)
         setInput(t)
@@ -1853,7 +1975,16 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     await attach([file])
   }
 
-  const composerAttachments = [...new Set([...mentionedFiles, ...attachedPaths])].map((path) => ({ id: path, name: path.split('/').pop() || path, state: 'done' as const }))
+  const composerAttachments = [...new Set([...mentionedFiles, ...attachedPaths])].map((path) => {
+    const name = (path.split('/').pop() || path).replace(/^[0-9a-f]{32}_/, '')
+    const image = /\.(?:png|jpe?g|webp|gif|bmp|tiff?)$/i.test(name)
+    const delivery = imageInputs[path]
+    return { id: path, name, state: 'done' as const, ...(image ? {
+      kind: 'image' as const,
+      delivery: delivery?.mode ?? 'pending' as const,
+      reason: delivery?.reason ?? 'Image delivery will be checked for the selected model.',
+    } : {}) }
+  })
   const stage = (
     <div data-tour="chat" className="w-full" style={{ maxWidth: 'var(--gideon-chat-reading-width)' }}>
       {
@@ -2067,7 +2198,8 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
               {isLast && streaming && <div ref={glowAnchorRef} aria-hidden className="pointer-events-none absolute left-1/2 -top-2 size-px -translate-x-1/2"/>}
               {editingTurn === index ? <UserEditor initial={text} discardedReplies={turns.slice(index + 1).filter((later) => later.role === 'assistant').length} onCancel={() => setEditingTurn(null)} onSubmit={(value) => editResend(index, value)}/> : <div className="group/msg">
                 <MessageUser fromComposer={isLast} timestamp={stampOf(turn)} onFileClick={setOpenFile} pastes={turn.pastes} optimized={turn.optimized}>{text}</MessageUser>
-                {turn.files?.length ? <TurnAttachments paths={turn.files} onOpenFile={setOpenFile}/> : null}
+                {turn.files?.length ? <TurnAttachments paths={turn.files} onOpenFile={setOpenFile}
+                  imageDelivery={turn.imageDelivery} imageDeliveryReason={turn.imageDeliveryReason}/> : null}
                 {turn.rewound?.length ? <RewindDivider snapshots={turn.rewound} canFork={memoryMode === 'persistent'} onFork={(snapshot) => forkRewound(index, snapshot)}/> : null}
                 {!streaming && <UserActions text={text} canFork={memoryMode === 'persistent'} canRewind={!isLast} onRewind={() => rewindTo(index)} onEdit={() => setEditingTurn(index)} onFork={() => forkAt(index)}/>}
               </div>}
@@ -2356,7 +2488,12 @@ function AnimatePresenceFilePanel({ path, onClose, commentTarget, contextTurns }
   )
 }
 
-function TurnAttachments({ paths, onOpenFile }: { paths: string[]; onOpenFile: (p: string) => void }) {
+function TurnAttachments({ paths, onOpenFile, imageDelivery, imageDeliveryReason }: {
+  paths: string[]
+  onOpenFile: (p: string) => void
+  imageDelivery?: Record<string, 'pixels' | 'text' | 'unread'>
+  imageDeliveryReason?: Record<string, string>
+}) {
   const [peek, setPeek] = useState<string | null>(null)
   const base = (p: string) => (p.replace(/\/+$/, '').split('/').pop() || p).replace(/^[0-9a-f]{32}_/, '')
   return (
@@ -2365,7 +2502,12 @@ function TurnAttachments({ paths, onOpenFile }: { paths: string[]; onOpenFile: (
         <button key={p} type="button" onClick={() => setPeek(p)} title={`Preview ${base(p)}`}
           className="inline-flex items-center gap-1.5 rounded-pill border border-outline-variant/50 bg-surface-container px-2.5 py-1 text-[0.75rem] text-on-surface-var transition-colors hover:bg-surface-high hover:text-on-surface">
           <Paperclip size={11} className="shrink-0 text-on-surface-low" />
-          <span className="max-w-[200px] truncate">{base(p)}</span>
+          <span className="flex min-w-0 flex-col text-left"><span className="max-w-[200px] truncate">{base(p)}</span>
+            {/\.(?:png|jpe?g|webp|gif|bmp|tiff?)$/i.test(p) && <span className="max-w-[200px] truncate text-[10px] text-on-surface-low">
+              {imageDeliveryReason?.[p] || (imageDelivery?.[p] === 'pixels' ? 'Sent as pixels'
+                : imageDelivery?.[p] === 'text' ? 'Sent as extracted text'
+                  : imageDelivery?.[p] === 'unread' ? 'Image was not read' : 'Image delivery not recorded')}
+            </span>}</span>
         </button>
       ))}
       {peek && <AttachmentPeekModal path={peek} name={base(peek)} onOpenFile={onOpenFile} onClose={() => setPeek(null)} />}

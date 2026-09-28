@@ -32,7 +32,31 @@ async def complete_text(
         )
         return ""
 
-    messages = _build_messages(prompt, images)
+    image_provider = None
+    if images:
+        try:
+            from gideon.extensions.providers.image_input import (
+                image_reader,
+                resolve_image_reader,
+            )
+
+            reader = await image_reader()
+            if not reader.ref:
+                logger.info("knowledge node: image input skipped because no reader is bound")
+                return ""
+            messages = _build_messages(prompt, images)
+            if not any(
+                block.get("type") == "image_url"
+                for block in messages[0].get("content", [])
+                if isinstance(block, dict)
+            ):
+                return ""
+            image_provider = await resolve_image_reader()
+        except Exception:
+            logger.warning("knowledge node image-reader resolution failed", exc_info=True)
+            return ""
+    else:
+        messages = _build_messages(prompt, images)
     partial = ""
 
     async def _complete(provider) -> str:
@@ -48,7 +72,11 @@ async def complete_text(
         return "".join(parts).strip()
 
     try:
-        result = await execute_with_fallback_chain(use_case, _complete)
+        result = (
+            await _complete(image_provider)
+            if image_provider is not None
+            else await execute_with_fallback_chain(use_case, _complete)
+        )
     except Exception:
         logger.warning(
             "knowledge node completion failed (use-case %s)", use_case, exc_info=True
@@ -70,21 +98,17 @@ def _build_messages(prompt: str, images: list[str] | None) -> list[dict]:
     if not images:
         return [{"role": "user", "content": prompt}]
     blocks: list[dict] = [{"type": "text", "text": prompt}]
+    from gideon.interfaces.dashboard.attachment_images import image_part_url
+
     for path in images:
-        data_url = _image_data_url(path)
+        data_url = image_part_url(path)
         if data_url:
             blocks.append({"type": "image_url", "image_url": {"url": data_url}})
     return [{"role": "user", "content": blocks}]
 
 
 def _image_data_url(path: str) -> str:
-    import base64
-    import mimetypes
+    """Compatibility wrapper for existing knowledge image consumers."""
+    from gideon.interfaces.dashboard.attachment_images import image_part_url
 
-    try:
-        with open(path, "rb") as f:
-            raw = f.read()
-        mime = mimetypes.guess_type(path)[0] or "image/png"
-        return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
-    except OSError:
-        return ""
+    return image_part_url(path)

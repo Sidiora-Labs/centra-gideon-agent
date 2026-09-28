@@ -1026,6 +1026,7 @@ async def start_dashboard(
     app.router.add_delete("/api/mcp/servers/{name}", handlers.api_mcp_server_detail)
 
     app.router.add_post("/api/chat", chat.api_chat)
+    app.router.add_get("/api/chat/image-input", chat.api_chat_image_input)
     app.router.add_get("/api/chat/sessions", chat.api_chat_sessions)
     app.router.add_post("/api/chat/sessions", chat.api_chat_session_create)
     app.router.add_post("/api/chat/sessions/cleanup", chat.api_chat_sessions_cleanup)

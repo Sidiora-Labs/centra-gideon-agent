@@ -1102,20 +1102,180 @@ def _expand_prompt_mention(
     return expanded, "ok"
 
 
+def _attachment_image_paths(session: _ChatSession) -> list[str]:
+    import os as _os
+
+    from gideon.core.config.loader import config_dir
+
+    files: list[str] = []
+    for row in reversed(session.messages):
+        if row.get("role") == "user":
+            raw = (row.get("meta") or {}).get("files")
+            if isinstance(raw, list):
+                files = [str(path) for path in raw if isinstance(path, str) and path]
+            break
+    roots = tuple(
+        str((config_dir() / name).resolve()) + _os.sep
+        for name in ("uploads", "screenshots")
+    )
+    from gideon.interfaces.dashboard.attachment_images import is_image_attachment
+
+    return list(dict.fromkeys(
+        path
+        for path in files
+        if _os.path.realpath(path).startswith(roots) and is_image_attachment(path)
+    ))
+
+
+def _image_ref(session: _ChatSession, client: object | None = None) -> str:
+    selected = (getattr(session, "model", "") or "").strip()
+    if selected and selected.lower() != "auto" and ":" in selected:
+        return selected
+    runtime = client
+    if runtime is not None and not callable(getattr(runtime, "stage_image_part", None)):
+        runtime = getattr(runtime, "runtime", runtime)
+    for candidate in (
+        getattr(runtime, "_active_fallback", ""),
+        getattr(runtime, "_preferred_model_ref", ""),
+        getattr(getattr(runtime, "_model", None), "served_model_ref", ""),
+    ):
+        if isinstance(candidate, str) and ":" in candidate:
+            return candidate
+    try:
+        from gideon.extensions.providers.use_cases import active_model_refs
+
+        refs = active_model_refs("chat")
+        if refs:
+            return refs[0]
+    except Exception:
+        logger.debug("Could not resolve the active image model", exc_info=True)
+    return ""
+
+
+def _set_image_delivery(
+    session: _ChatSession, path: str, mode: str, reason: str = ""
+) -> None:
+    for row in reversed(session.messages):
+        if row.get("role") != "user":
+            continue
+        meta = row.get("meta")
+        if not isinstance(meta, dict):
+            meta = {}
+            row["meta"] = meta
+        deliveries = meta.get("image_delivery")
+        if not isinstance(deliveries, dict):
+            deliveries = {}
+            meta["image_delivery"] = deliveries
+        deliveries[path] = mode
+        reasons = meta.get("image_delivery_reason")
+        if not isinstance(reasons, dict):
+            reasons = {}
+            meta["image_delivery_reason"] = reasons
+        if reason:
+            reasons[path] = reason
+        else:
+            reasons.pop(path, None)
+        if not reasons:
+            meta.pop("image_delivery_reason", None)
+        return
+
+
+async def _stage_attachment_images(
+    session: _ChatSession, client: object, message: str
+) -> str:
+    paths = _attachment_image_paths(session)
+    if not paths:
+        return message
+    from gideon.extensions.providers.image_input import image_input, image_reader
+    from gideon.interfaces.dashboard.attachment_extract import (
+        display_name,
+        get_extractor,
+    )
+    from gideon.interfaces.dashboard.attachment_images import image_part_url
+
+    ref = _image_ref(session, client)
+    stage = getattr(client, "stage_image_part", None)
+    unread: list[tuple[str, str]] = []
+    for path in paths:
+        meta = next(
+            (row.get("meta") for row in reversed(session.messages) if row.get("role") == "user"),
+            None,
+        )
+        delivered = meta.get("image_delivery") if isinstance(meta, dict) else None
+        if isinstance(delivered, dict) and delivered.get(path) in {"text", "unread"}:
+            continue
+        try:
+            supported = await image_input(ref) if ref else None
+        except Exception:
+            logger.warning("Could not check image compatibility", exc_info=True)
+            supported = None
+        if supported is not None and supported.accepted:
+            data_url = image_part_url(path)
+            pixel_data_valid = bool(data_url)
+            try:
+                if data_url and callable(stage) and stage(data_url):
+                    _set_image_delivery(session, path, "pixels")
+                    continue
+            except Exception:
+                logger.warning("Native runtime refused an image part", exc_info=True)
+            reason = (
+                "The image could not be validated for pixel delivery."
+                if not data_url
+                else "The chat runtime could not accept this image."
+            )
+        else:
+            pixel_data_valid = False
+            reason = (
+                supported.reason
+                if supported is not None and supported.reason
+                else "The selected chat model cannot receive image pixels."
+            )
+
+        try:
+            reader = await image_reader()
+        except Exception:
+            logger.warning("Could not resolve an image reader", exc_info=True)
+            reader = None
+        name = display_name(path)
+        if (
+            pixel_data_valid
+            and reader is not None
+            and reader.ref
+            and supported is not None
+            and supported.accepted
+        ):
+            import mimetypes as _mt
+
+            text = await get_extractor().get(path, _mt.guess_type(path)[0])
+            if text and not text.startswith(f"Image: {name} —"):
+                reason = "The image was read as text because pixel delivery was unavailable."
+                _set_image_delivery(session, path, "text", reason)
+                unread.append((name, f"### Attached image: {name}\n\n{text}"))
+                continue
+        if reader is not None and not reader.ref and reason in {
+            "The selected chat model cannot receive image pixels.",
+            "The chat runtime could not accept this image.",
+        }:
+            reason = reader.reason or "No image model is set up. The image was not read."
+        _set_image_delivery(session, path, "unread", reason)
+        unread.append((name, f"### Attached image: {name}\n\nThis image was not read. {reason}"))
+    if not unread:
+        return message
+    notes = "\n\n".join(block for _, block in unread)
+    return f"{notes}\n\n---\n\n{message}" if message else notes
+
+
 async def _inject_attachment_content(session: _ChatSession, message: str) -> str:
     """Prepend extracted attachment content to *message* for this turn.
 
-    Reads the turn's attached file paths from the most-recent user message's
-    ``meta.files`` (set by api_chat from the composer), AWAITS each file's
-    content extraction (started at upload), and prepends a labelled block so the
-    model answers against the file. Files that yield no text (extraction failed /
-    empty) are noted so the model doesn't silently pretend they had content.
+    Text files are extracted as before. An image goes to the selected chat model
+    as pixels when its provider and model both accept images; otherwise a named
+    image reader supplies text, or the turn says the image was not read.
     """
     files: list[str] = []
     for m in reversed(session.messages):
         if m.get("role") == "user":
-            meta = m.get("meta") or {}
-            raw = meta.get("files")
+            raw = (m.get("meta") or {}).get("files")
             if isinstance(raw, list):
                 files = [str(p) for p in raw if isinstance(p, str) and p]
             break
@@ -1138,17 +1298,41 @@ async def _inject_attachment_content(session: _ChatSession, message: str) -> str
 
     extractor = get_extractor()
     blocks: list[str] = []
+    image_ref = _image_ref(session)
+    from gideon.extensions.providers.image_input import image_input, image_reader
+
     for p in attached:
         import mimetypes as _mt
 
-        text = await extractor.get(p, _mt.guess_type(p)[0])
+        from gideon.interfaces.dashboard.attachment_images import is_image_attachment
+
         name = display_name(p)
+        if is_image_attachment(p):
+            accepted = await image_input(image_ref) if image_ref else None
+            if accepted is not None and accepted.accepted:
+                continue
+            reader = await image_reader()
+        text = await extractor.get(p, _mt.guess_type(p)[0])
         if text:
-            blocks.append(f"### Attached file: {name}\n\n{text}")
+            if is_image_attachment(p):
+                unread_prefix = f"Image: {name} —"
+                if reader.ref and not text.startswith(unread_prefix):
+                    reason = "The selected chat model cannot receive image pixels; extracted text was included."
+                    _set_image_delivery(session, p, "text", reason)
+                    blocks.append(f"### Attached image: {name}\n\n{text}")
+                else:
+                    reason = reader.reason or "No image model is set up. The image was not read."
+                    _set_image_delivery(session, p, "unread", reason)
+                    blocks.append(f"### Attached image: {name}\n\nThis image was not read. {reason}")
+            else:
+                blocks.append(f"### Attached file: {name}\n\n{text}")
         else:
-            blocks.append(
-                f"### Attached file: {name}\n\n(No extractable text content.)"
-            )
+            if is_image_attachment(p):
+                reason = reader.reason or "The configured image reader returned no text."
+                _set_image_delivery(session, p, "unread", reason)
+                blocks.append(f"### Attached image: {name}\n\nThis image was not read. {reason}")
+            else:
+                blocks.append(f"### Attached file: {name}\n\n(No extractable text content.)")
     if not blocks:
         return message
     header = (
@@ -2466,6 +2650,13 @@ async def run_chat(
         )
 
         if not is_slash:
+            if _prompt_depth == 0:
+                try:
+                    full_message = await _stage_attachment_images(
+                        session, client, full_message
+                    )
+                except Exception:
+                    logger.warning("attachment image delivery failed", exc_info=True)
             try:
                 full_message = await _apply_screen_frame(
                     session, client, full_message, _bound_model_id(session, client)
@@ -3779,7 +3970,7 @@ async def run_chat(
         if first_word == "/compact" and not saw_compaction and not slash_substituted:
             session.messages = [m for m in session.messages if m.get("role") != "chunk"]
             assistant_text = ""
-            state.broadcast_ws("chat_done", {"session": session.key})
+            state.broadcast_ws("chat_done", {"session": session.key, **session.stream_cursor()})
             logger.info("Deferred compaction: waiting for compaction result")
             state.broadcast_ws(
                 "chat_message",
@@ -4227,7 +4418,7 @@ async def run_chat(
             session.append("done", "", "done")
             session.task = None
             state.push_sessions_update()
-            state.broadcast_ws("chat_done", {"session": session.key})
+            state.broadcast_ws("chat_done", {"session": session.key, **session.stream_cursor()})
             state.push_refresh("history")
             if not session._titled:
                 t = asyncio.create_task(_maybe_auto_title(state, session))

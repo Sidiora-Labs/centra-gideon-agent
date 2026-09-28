@@ -81,6 +81,10 @@ export interface MemoryCitation { n: number; id: string | null; preview?: string
 
 export interface SkillUsed { name: string; state: string; loaded_tokens: number }
 
+export type ImageDeliveryMode = 'pixels' | 'text' | 'unread'
+export type ImageDeliveryMap = Record<string, ImageDeliveryMode>
+export type ImageDeliveryReasonMap = Record<string, string>
+
 export function skillsUsedLabel(skills: SkillUsed[]): string {
   const n = skills.length
   if (!n) return ''
@@ -126,6 +130,8 @@ export interface ChatTurn {
   skillsUsed?: SkillUsed[]
   pastes?: { seq: number; lines: number; content: string }[]
   files?: string[]
+  imageDelivery?: ImageDeliveryMap
+  imageDeliveryReason?: ImageDeliveryReasonMap
   optimized?: string
   summary?: string
   variantCount?: number
@@ -141,7 +147,7 @@ export interface StopOutcome {
   outcome?: 'soft' | 'hard'
 }
 
-export const userTurn = (text: string, ts?: string, pastes?: ChatTurn['pastes'], files?: string[], optimized?: string): ChatTurn => ({ role: 'user', segments: [{ kind: 'text', text }], ts, pastes, files: files?.length ? files : undefined, optimized: optimized || undefined })
+export const userTurn = (text: string, ts?: string, pastes?: ChatTurn['pastes'], files?: string[], optimized?: string, imageDelivery?: ImageDeliveryMap, imageDeliveryReason?: ImageDeliveryReasonMap): ChatTurn => ({ role: 'user', segments: [{ kind: 'text', text }], ts, pastes, files: files?.length ? files : undefined, imageDelivery, imageDeliveryReason, optimized: optimized || undefined })
 export const assistantTurn = (text = ''): ChatTurn => ({ role: 'assistant', segments: text ? [{ kind: 'text', text }] : [] })
 
 export function turnText(t: ChatTurn): string {
@@ -211,7 +217,7 @@ export function deriveActivity(turns: ChatTurn[]): ChatActivity {
   return { files: [...files.values()], links: [...links.values()] }
 }
 
-export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { kind?: string; id?: string; state?: string; outcome?: string | null; tool_call_id?: string; approval_id?: string; tool_kind?: string; can_revise?: boolean; input?: string; tool_input?: string; purpose?: string; risk?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[]; file_changes?: ChatFileChange[] } }
+export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { kind?: string; id?: string; state?: string; outcome?: string | null; tool_call_id?: string; approval_id?: string; tool_kind?: string; can_revise?: boolean; input?: string; tool_input?: string; purpose?: string; risk?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; image_delivery?: ImageDeliveryMap; image_delivery_reason?: ImageDeliveryReasonMap; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[]; file_changes?: ChatFileChange[] } }
 
 export function stopOutcomeForMessage(message: HistMsg): StopOutcome | null {
   const meta = message.meta
@@ -274,7 +280,8 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       const primary = uiLabel ?? original ?? m.content
       const display = pastes?.length ? recollapsePastes(primary, pastes) : primary
       const files = Array.isArray(m.meta?.files) ? m.meta!.files : undefined
-      const ut = userTurn(display, m.ts, pastes?.length ? pastes : undefined, files, original ? m.content : undefined)
+      const ut = userTurn(display, m.ts, pastes?.length ? pastes : undefined, files,
+        original ? m.content : undefined, m.meta?.image_delivery, m.meta?.image_delivery_reason)
       if (Array.isArray(m.rewound) && m.rewound.length) ut.rewound = m.rewound
       ut.visibleIndex = visible
       turns.push(ut)

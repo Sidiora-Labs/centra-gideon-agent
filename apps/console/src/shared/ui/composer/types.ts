@@ -43,7 +43,7 @@ export interface ComposerProps {
   selection?: ComposerValue
   onSelect?: (patch: Partial<ComposerValue>) => void
   onAttach?: (files: File[]) => void
-  attachments?: readonly { id: string; name: string; meta?: string; kind?: 'image' | 'text' | 'archive'; state?: 'uploading' | 'done' | 'error'; progress?: number }[]
+  attachments?: readonly { id: string; name: string; meta?: string; kind?: 'image' | 'text' | 'archive'; state?: 'uploading' | 'done' | 'error'; progress?: number; delivery?: 'pixels' | 'text' | 'unread' | 'pending'; reason?: string }[]
   onRemoveAttachment?: (id: string) => void
   onOpenAttachment?: (id: string) => void
   draftKey?: string

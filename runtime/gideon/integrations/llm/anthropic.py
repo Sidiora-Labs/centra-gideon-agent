@@ -107,6 +107,22 @@ def _hinted_content(content: Any) -> Any:
     return blocks
 
 
+def _translate_image_parts(content: Any) -> Any:
+    if not isinstance(content, list):
+        return content
+    translated: list[Any] = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "image_url":
+            translated.append(block)
+            continue
+        image_url = block.get("image_url")
+        url = image_url.get("url") if isinstance(image_url, dict) else ""
+        image = _image_block(url) if isinstance(url, str) else None
+        if image is not None:
+            translated.append(image)
+    return translated
+
+
 def _tool_use_block(call: dict) -> dict:
     function = call.get("function", {})
     arguments = function.get("arguments") or ""
@@ -165,6 +181,7 @@ class _MessageEnvelope:
 
     def _ordinary(self, message: dict) -> None:
         role, content = message.get("role"), message.get("content")
+        content = _translate_image_parts(content)
         if role == "assistant" and message.get("tool_calls"):
             blocks = [{"type": "text", "text": str(content)}] if content else []
             blocks.extend(_tool_use_block(call) for call in message["tool_calls"])

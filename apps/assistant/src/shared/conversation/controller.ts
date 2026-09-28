@@ -314,7 +314,7 @@ export class ConversationController {
         || event.type === 'approval' || event.type === 'approval_resolved'
         || event.type === 'activity_event' || event.type === 'chat_thinking'
         || (event.type === 'chat_message' && event.data.role === 'error')) {
-        if (this.queuedLiveEvents.length < 256) this.queuedLiveEvents.push(event)
+        this.queuedLiveEvents.push(event)
       }
       return
     }

@@ -553,6 +553,7 @@ export interface DiscoveredAgent {
   supported_efforts?: { value: string; label: string }[]
 }
 export interface ModelItem { name: string; model_name: string; description: string; provider: string }
+export interface AttachmentImageInput { name: string; mode: 'pixels' | 'text' | 'unread'; reason: string }
 
 export interface AppPermissionsWire {
   api?: string[]; events?: string[]; mcpTools?: string[]
@@ -5056,6 +5057,8 @@ export const api = {
     post<{ session_key: string; context: InvestigateOrigin & { snapshot: string; opening_prompt?: string } }>('/api/investigate', body),
 
   attachmentExtract: (path: string) => get<{ name: string; text: string }>(`/api/attachment-extract?path=${encodeURIComponent(path)}`),
+  attachmentImageInput: (path: string, session = '', model = '') => get<AttachmentImageInput>(
+    `/api/chat/image-input?path=${encodeURIComponent(path)}${session ? `&session=${encodeURIComponent(session)}` : ''}${model ? `&model=${encodeURIComponent(model)}` : ''}`),
   uploadFiles: async (
     files: File[],
     onProgress?: (fileIndex: number, p: { loaded: number; total: number; pct: number }) => void,

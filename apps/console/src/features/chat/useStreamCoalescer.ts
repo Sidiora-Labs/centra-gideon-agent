@@ -9,14 +9,38 @@ export const MAX_BUDGET = 400
 export const MAX_LAG = 1200
 const EMA_ALPHA = 0.3
 
+export type StreamCursor = Readonly<{
+  stream_epoch: string
+  stream_turn: number
+  stream_seq: number
+}>
+
 export class CoalescerCore {
   private pending = ''
   private revealed = 0
   private emitted = 0
   private ema = 0
   private drain = 1
+  private cursor: StreamCursor | null = null
 
-  push(chunk: string): void { this.pending += chunk }
+  push(chunk: string, cursor?: StreamCursor): boolean {
+    if (cursor && this.cursor && cursor.stream_epoch === this.cursor.stream_epoch) {
+      if (cursor.stream_turn < this.cursor.stream_turn) return false
+      if (cursor.stream_turn === this.cursor.stream_turn && cursor.stream_seq <= this.cursor.stream_seq) return false
+    }
+    this.pending += chunk
+    if (cursor) this.cursor = cursor
+    return true
+  }
+
+  resume(partial: string | null, cursor: StreamCursor | null): void {
+    this.pending = partial ?? ''
+    this.revealed = this.pending.length
+    this.emitted = this.revealed
+    this.cursor = cursor
+    this.ema = 0
+    this.drain = 1
+  }
 
   backlog(): number { return this.pending.length - this.revealed }
 
@@ -32,6 +56,8 @@ export class CoalescerCore {
   drainAll(): string { this.revealed = this.pending.length; return this.pending }
 
   reset(): void { this.pending = ''; this.revealed = 0; this.emitted = 0; this.ema = 0; this.drain = 1 }
+
+  clear(): void { this.reset(); this.cursor = null }
 
   tick(speed: number): string {
     const backlog = this.backlog()
@@ -66,10 +92,12 @@ export class CoalescerCore {
 }
 
 export interface StreamCoalescer {
-  push: (chunk: string) => void
+  push: (chunk: string, cursor?: StreamCursor) => boolean
+  resume: (partial: string | null, cursor: StreamCursor | null) => void
   /** Drain the backlog and emit only new progress. Safe across consecutive boundaries. */
   flushNow: () => void
   reset: () => void
+  clear: () => void
 }
 
 export function useStreamCoalescer(
@@ -112,14 +140,19 @@ export function useStreamCoalescer(
   }, [])
 
   const reset = useCallback(() => { stop(); lastTsRef.current = 0; coreRef.current!.reset() }, [])
+  const resume = useCallback((partial: string | null, cursor: StreamCursor | null) => {
+    stop(); lastTsRef.current = 0; coreRef.current!.resume(partial, cursor)
+  }, [])
+  const clear = useCallback(() => { stop(); lastTsRef.current = 0; coreRef.current!.clear() }, [])
 
-  const push = useCallback((chunk: string) => {
-    coreRef.current!.push(chunk)
-    if (isImmediate()) { flushNow(); return }
+  const push = useCallback((chunk: string, cursor?: StreamCursor) => {
+    if (!coreRef.current!.push(chunk, cursor)) return false
+    if (isImmediate()) { flushNow(); return true }
     if (!rafRef.current) rafRef.current = requestAnimationFrame(frame)
+    return true
   }, [frame, flushNow])
 
   useEffect(() => () => stop(), [])
 
-  return { push, flushNow, reset }
+  return { push, resume, flushNow, reset, clear }
 }

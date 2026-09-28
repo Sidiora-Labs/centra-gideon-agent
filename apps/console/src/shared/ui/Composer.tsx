@@ -20,8 +20,6 @@ import { MicCaptureChip } from './MicCaptureChip'
 import {
   Composer as AssistantComposer,
   ComposerActions as AssistantComposerActions,
-  ComposerAttachmentChip as AssistantComposerAttachmentChip,
-  ComposerAttachments as AssistantComposerAttachments,
   ComposerContext as AssistantComposerContext,
   ComposerBar as AssistantComposerBar,
   ComposerSend as AssistantComposerSend,
@@ -39,6 +37,7 @@ import { ReasoningEffort as AssistantReasoningEffort } from '../vendor/assistant
 import type { ReasoningEffort as GideonReasoningEffort } from '../data/api'
 import { activeMention, activeSlash } from './composer/editorState'
 import { filterSlashCommands } from './composer/SlashMenu'
+import { AttachmentChips } from '../../features/chat/AttachmentChips'
 import { searchMentions, type MentionRow } from './composer/mentionSearch'
 import './chat/chatPresentation.css'
 
@@ -293,6 +292,7 @@ export function Composer(props: ComposerProps) {
   const renderEditor = (onCursorChange?: (position: number) => void, onTriggerKeyDown?: (event: KeyboardEvent) => boolean, donorAria?: Unstable_TriggerPopoverAriaProps) => <MarkdownInput ref={input} value={value} onChange={onChange} onSend={surface.submit} canSend={surface.draftReady}
     placeholder={props.placeholder ?? 'Ask anything'} minHeight={surface.height} maxHeight={COMPOSER_HEIGHT.max}
     onFocusChange={surface.focus} onOptimize={optimizing ? undefined : onOptimize} history={props.history}
+    onAttachImages={props.onAttach}
     onMentionFile={props.onMentionFile} onMentionKnowledge={props.onMentionKnowledge} mentionProject={props.mentionProject}
     slashCommands={!!controls.slash} onLargePaste={props.onLargePaste} mobile={mobile} sendOnEnter={sendOnEnter}
     donorTriggers={props.auiModelSelector !== undefined} onCursorChange={onCursorChange} onTriggerKeyDown={onTriggerKeyDown} donorAria={donorAria} />
@@ -321,15 +321,7 @@ export function Composer(props: ComposerProps) {
       {savedDraft && <DraftRestore draft={savedDraft.draft} savedAt={savedDraft.savedAt}
         onRestore={() => { onChange(savedDraft.draft); setSavedDraft(null) }}
         onDiscard={() => { try { localStorage.removeItem(savedDraft.key) } catch { setSavedDraft(null) }; setSavedDraft(null) }} />}
-      {!!props.attachments?.length && <AssistantComposerAttachments aria-label="Attached files">
-        {props.attachments.map(attachment => <div key={attachment.id} className="flex items-center gap-1">
-          <AssistantComposerAttachmentChip
-            attachment={{ name: attachment.name, meta: attachment.meta ?? 'Attached', state: attachment.state ?? 'done', kind: attachment.kind, progress: attachment.progress }}
-            onRemove={props.onRemoveAttachment ? () => props.onRemoveAttachment?.(attachment.id) : undefined} />
-          {props.onOpenAttachment && (attachment.state ?? 'done') === 'done' && <button type="button" aria-label={`Open ${attachment.name}`}
-            onClick={() => props.onOpenAttachment?.(attachment.id)} className="rounded-lg px-2 py-1 text-xs text-primary hover:bg-primary/10">Open</button>}
-        </div>)}
-      </AssistantComposerAttachments>}
+      <AttachmentChips attachments={props.attachments ?? []} onRemove={props.onRemoveAttachment} onOpen={props.onOpenAttachment} />
       {contextBreakdown && <ContextBreakdown {...contextBreakdown} />}
       {dictation && !listening && <div role="group" aria-label="Review speech transcription" className="rounded-lg border border-outline-variant/50 bg-surface-high p-3">
         <div className="mb-2 flex items-center justify-between gap-2"><span data-type="label-s">Review what Gideon heard</span>
