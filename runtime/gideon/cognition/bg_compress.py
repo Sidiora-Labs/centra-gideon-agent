@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 
 from gideon.cognition.context_segmentation import Segment, segment_messages
-from gideon.cognition.history import ConversationLog
+from gideon.cognition.history import ConversationLog, model_view, span_digest
 
 logger = logging.getLogger(__name__)
 _MIN_TRANSCRIPT_CHARS = 8_000
@@ -36,18 +36,6 @@ def _collect_raw_refs(messages: list[dict]) -> list[str]:
     return list(dict.fromkeys(occurrences))
 
 
-def _reduce_middle(seg: Segment) -> list[dict]:
-    dialogue = []
-    for message in seg.messages:
-        if message.get("role", "") in ("user", "assistant"):
-            body = str(message.get("content", ""))
-            excerpt = (
-                body[:_MIDDLE_MSG_CAP] + " …" if len(body) > _MIDDLE_MSG_CAP else body
-            )
-            dialogue.append(dict(message, content=excerpt))
-    return dialogue
-
-
 class _EarlierConversation:
     def __init__(self, segments):
         self.messages = [
@@ -73,18 +61,14 @@ class _EarlierConversation:
                 f'tool_result_get(result_id="{handle}")' for handle in handles[:20]
             ]
             appendix = "\nRecoverable raw outputs: " + ", ".join(calls)
-        return {
-            "role": "system",
-            "content": (
-                "[CONTEXT ECONOMY — background-compressed earlier conversation, reference only. "
-                "Older turns were archived (recoverable) and summarized below.]\n"
-                f"{summary}{appendix}"
-            ),
-            "cls": "bg_compress_summary",
-        }
+        return (
+            "[CONTEXT ECONOMY — background-compressed earlier conversation, reference only. "
+            "The authoritative transcript remains available in chat history.]\n"
+            f"{summary}{appendix}"
+        )
 
 
-async def _summarize_oldest(segments: list[Segment]) -> dict | None:
+async def _summarize_oldest(segments: list[Segment]) -> str | None:
     return await _EarlierConversation(segments).summarize()
 
 
@@ -96,14 +80,11 @@ class _CompressionTiers:
         boundary = max(1, len(earlier) // 2)
         self.oldest, self.middle = earlier[:boundary], earlier[boundary:]
 
-    async def rebuild(self):
+    async def build(self):
         summary = await _summarize_oldest(self.oldest)
-        rebuilt = [] if summary is None else [summary]
-        for segment in self.middle:
-            rebuilt.extend(_reduce_middle(segment))
-        for segment in self.recent:
-            rebuilt.extend(segment.messages)
-        return rebuilt
+        summarized = sum(len(segment.messages) for segment in self.oldest)
+        reduced = summarized + sum(len(segment.messages) for segment in self.middle)
+        return summary, summarized, reduced
 
 
 class _JournalCompression:
@@ -114,17 +95,38 @@ class _JournalCompression:
         messages = self.log._read_messages(self.key)
         if not messages:
             return None
+        if self.log.read_summary(self.key, messages) is not None:
+            return None
         before = _transcript_chars(messages)
         if before < _MIN_TRANSCRIPT_CHARS:
             return None
         segments = segment_messages(messages, embed_fn=embed)
         if len(segments) <= _KEEP_RECENT_SEGMENTS + 1:
             return None
-        replacement = await _CompressionTiers(segments).rebuild()
-        after = _transcript_chars(replacement)
-        if not replacement or after >= before:
+        summary, summarized, reduced = await _CompressionTiers(segments).build()
+        if not summary or summarized <= 0 or reduced <= summarized:
             return None
-        self.log.rewrite_session(self.key, replacement, reason="bg_compress")
+        record = {
+            "summary": summary,
+            "summarized": summarized,
+            "reduced": reduced,
+            "reduced_cap": _MIDDLE_MSG_CAP,
+        }
+        preview = model_view(
+            messages,
+            {**record, "digest": span_digest(messages[:reduced])},
+        )
+        after = _transcript_chars(preview)
+        if after >= before:
+            return None
+        self.log.write_summary(
+            self.key,
+            summary=summary,
+            summarized=summarized,
+            reduced=reduced,
+            reduced_cap=_MIDDLE_MSG_CAP,
+            messages=messages,
+        )
         _record_savings(before, after)
         logger.info(
             "bg-compress: session %s %d→%d chars (%d segments)",
@@ -180,11 +182,18 @@ async def run_bg_compression_pass(
     except Exception:
         logger.debug("bg-compress: config load failed — skipping pass", exc_info=True)
         return []
+    for path in log._dir.glob("*.summary.json"):
+        key = path.name[: -len(".summary.json")]
+        if not log._path(key).exists():
+            path.unlink(missing_ok=True)
     eligible = _eligible_keys(log, age, time.time())
     if not eligible:
         return []
     results = []
-    for key in eligible[: max(1, max_sessions)]:
+    limit = max(1, max_sessions)
+    for key in eligible:
+        if len(results) >= limit:
+            break
         outcome = await compress_session(log, key, embed_fn=embed_fn)
         if outcome is not None:
             results.append(outcome)

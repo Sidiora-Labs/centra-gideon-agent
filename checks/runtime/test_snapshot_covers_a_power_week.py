@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import json
 import shutil
 import tarfile
+import zipfile
 from pathlib import Path
 
 from gideon.operations.durability import inventory
@@ -113,3 +115,38 @@ def test_power_week_state_is_audited_snapshotted_and_restored(tmp_path, monkeypa
         assert restored.is_file(), rel
         assert restored.read_text(encoding="utf-8") == body, rel
     assert json.loads((home / "incident.json").read_text())["active"] is True
+
+
+def test_transcript_summaries_are_rebuilt_instead_of_backed_up(tmp_path, monkeypatch):
+    from gideon.cognition.history import ConversationLog
+    from gideon.workspace.portability import create_export_zip
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIDEON_HOME", str(home))
+    monkeypatch.setenv("GIDEON_WORKSPACE", str(home / "workspace"))
+    log = ConversationLog(home / "sessions")
+    log.init()
+    log.append("durable-session", "user", "Remember the project")
+    log.append("durable-session", "assistant", "I recorded the project")
+    log.write_summary("durable-session", summary="A project was recorded", summarized=2, reduced=2)
+    assert log.read_summary("durable-session") is not None
+    transcript = (home / "sessions" / "durable-session.jsonl").read_bytes()
+    summary = log.summary_path("durable-session")
+    assert summary.is_file()
+    out = tmp_path / "snapshots"
+    assert snapshot_main([str(out)]) == 0
+    (archive,) = out.glob("gideon-snapshot-*.tar.gz")
+    with tarfile.open(archive) as tar:
+        members = {item.name.split("/", 1)[1]: item for item in tar.getmembers()
+                   if item.isfile() and "/" in item.name}
+        assert "sessions/durable-session.summary.json" not in members
+        assert tar.extractfile(members["sessions/durable-session.jsonl"]).read() == transcript
+    export, _ = create_export_zip()
+    with zipfile.ZipFile(io.BytesIO(export)) as zipped:
+        members = {name.split("/", 1)[1]: name for name in zipped.namelist() if "/" in name}
+        assert "sessions/durable-session.summary.json" not in members
+        assert zipped.read(members["sessions/durable-session.jsonl"]) == transcript
+    assert summary.is_file()
+    assert (home / "sessions" / "durable-session.jsonl").read_bytes() == transcript

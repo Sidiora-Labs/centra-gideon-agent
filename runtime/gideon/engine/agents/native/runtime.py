@@ -1437,8 +1437,6 @@ class NativeAgentRuntime(AgentProvider):
             meta.update(unasked_outcome="invoked", decided_by="no_approval_needed")
         return False
 
-    _COMPACT_THRESHOLD_PCT = 70.0
-
     def _estimated_context_pct(self) -> float | None:
         from gideon.cognition.context_compaction import total_chars
         from gideon.integrations.model_windows import model_context_window
@@ -1459,11 +1457,12 @@ class NativeAgentRuntime(AgentProvider):
 
     def _maybe_compact(self) -> None:
         from gideon.cognition import context_compaction
+        from gideon.engine.session import live_autocompact_pct
 
         occupancy = self._last_context_pct
         if occupancy is None:
             occupancy = self._estimated_context_pct()
-        if occupancy is None or occupancy < self._COMPACT_THRESHOLD_PCT:
+        if occupancy is None or occupancy < live_autocompact_pct():
             return
         if not context_compaction.should_compact(self._compaction_saves):
             return

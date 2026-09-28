@@ -1,6 +1,7 @@
 """Conversation journals and separately scheduled memory consolidation."""
 
 import asyncio
+import hashlib
 import json
 import logging
 import math
@@ -168,6 +169,60 @@ def _cleanup_old_archives(
 
 def _safe_key(key: str) -> str:
     return re.sub(r"[^\w\-.]", "_", key)
+
+
+def span_digest(messages: list[dict]) -> str:
+    """Fingerprint the transcript content covered by a derived model summary."""
+    canonical = [
+        [str(message.get("role", "")), str(message.get("content", ""))]
+        for message in messages
+    ]
+    payload = json.dumps(
+        canonical, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def summary_holds(record: dict | None, messages: list[dict]) -> bool:
+    if not isinstance(record, dict):
+        return False
+    try:
+        summarized = int(record["summarized"])
+        reduced = int(record["reduced"])
+        reduced_cap = int(record.get("reduced_cap", 600))
+        digest = str(record["digest"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return (
+        0 < summarized <= reduced <= len(messages)
+        and reduced_cap > 0
+        and bool(record.get("summary"))
+        and digest == span_digest(messages[:reduced])
+    )
+
+
+def model_view(messages: list[dict], record: dict | None) -> list[dict]:
+    """Apply a current summary without changing the authoritative transcript."""
+    if not summary_holds(record, messages):
+        return [dict(message) for message in messages]
+    summarized = int(record["summarized"])
+    reduced = int(record["reduced"])
+    cap = max(1, int(record.get("reduced_cap", 600)))
+    view = [
+        dict(
+            role="summary",
+            content=str(record["summary"]),
+        )
+    ]
+    for message in messages[summarized:reduced]:
+        if message.get("role") not in ("user", "assistant"):
+            continue
+        content = str(message.get("content", ""))
+        if len(content) > cap:
+            content = content[:cap] + " …"
+        view.append(dict(message, content=content))
+    view.extend(dict(message) for message in messages[reduced:])
+    return view
 
 
 class _SessionSummary:
@@ -338,6 +393,62 @@ class ConversationLog:
 
     def _path(self, key: str) -> Path:
         return self._dir.joinpath(_safe_key(key) + ".jsonl")
+
+    def summary_path(self, key: str) -> Path:
+        return self._dir.joinpath(_safe_key(key) + ".summary.json")
+
+    def read_summary(
+        self, key: str, messages: list[dict] | None = None
+    ) -> dict | None:
+        path = self.summary_path(key)
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        transcript = self._read_messages(key) if messages is None else messages
+        return record if summary_holds(record, transcript) else None
+
+    def write_summary(
+        self,
+        key: str,
+        *,
+        summary: str,
+        summarized: int,
+        reduced: int,
+        reduced_cap: int = 600,
+        messages: list[dict] | None = None,
+    ) -> dict:
+        transcript = self._read_messages(key) if messages is None else messages
+        record = {
+            "stamp": None,
+            "turns": len(transcript),
+            "summary": summary,
+            "summarized": int(summarized),
+            "reduced": int(reduced),
+            "reduced_cap": int(reduced_cap),
+            "digest": span_digest(transcript[: int(reduced)]),
+            "created_at": datetime.now().isoformat(),
+        }
+        path = self._path(key)
+        try:
+            stat = path.stat()
+            record["stamp"] = [stat.st_mtime_ns, stat.st_size]
+        except OSError:
+            pass
+        if not summary_holds(record, transcript):
+            raise ValueError("summary range does not match the transcript")
+        atomic_write(
+            self.summary_path(key),
+            json.dumps(record, ensure_ascii=False, separators=(",", ":")),
+            fsync=True,
+        )
+        return record
+
+    def model_view(
+        self, key: str, messages: list[dict] | None = None
+    ) -> list[dict]:
+        transcript = self._read_messages(key) if messages is None else messages
+        return model_view(transcript, self.read_summary(key, transcript))
 
     def has_log(self, key: str) -> bool:
         return self._path(key).exists()
@@ -523,8 +634,10 @@ class ConversationLog:
     def delete_session(self, key: str) -> bool:
         path = self._path(key)
         if not path.exists():
+            self.summary_path(key).unlink(missing_ok=True)
             return False
         path.unlink()
+        self.summary_path(key).unlink(missing_ok=True)
         self._invalidate_cache(key)
         self.invalidate_tab_id_cache()
         self._forget_search_rows(key)

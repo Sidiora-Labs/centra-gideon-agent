@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import math
 import os
 import signal
 import time
@@ -15,7 +16,7 @@ from typing import Any, Literal
 from gideon import shutdown_event
 from gideon.cognition.context_management import cleanup_stale_sessions
 from gideon.core.config import AppConfig
-from gideon.core.config.loader import default_workspace_dir
+from gideon.core.config.loader import config_path, default_workspace_dir
 from gideon.engine.session_map import SessionMap as SessionMap
 from gideon.engine.session_pid import (
     _cleanup_orphaned_mcp_servers,
@@ -65,6 +66,22 @@ _BG_RECYCLE_PCT = 70.0
 _BG_BLIND_RECYCLE_PROMPTS = 40
 ProviderFactory = Callable[..., ModelProvider]
 StopOutcome = Literal["soft", "hard", "idle"]
+
+
+def live_autocompact_pct(fallback: float = 90.0) -> float:
+    """Read the current shared threshold so open sessions honor Settings changes."""
+    try:
+        session = json.loads(config_path().read_text(encoding="utf-8")).get(
+            "session", {}
+        )
+        threshold = session.get("autocompact_pct")
+        if isinstance(threshold, (int, float)) and not isinstance(threshold, bool):
+            numeric = float(threshold)
+            if math.isfinite(numeric) and 5.0 <= numeric <= 90.0:
+                return numeric
+    except Exception:
+        pass
+    return float(fallback)
 
 
 def _retains_history(key: str) -> bool:
@@ -872,7 +889,10 @@ class ConversationDirectory:
         if entry is not None:
             entry.prompt_count += 1
         if usage is not None:
-            if usage >= self._cfg.session.autocompact_pct:
+            if (
+                usage >= live_autocompact_pct(self._cfg.session.autocompact_pct)
+                and not bool(getattr(provider, "compacts_in_process", False))
+            ):
                 self._trigger_compaction(key, f"context at {usage:.0f}%", usage)
             else:
                 log = logger.warning if usage >= _CONTEXT_WARN_PCT else logger.info

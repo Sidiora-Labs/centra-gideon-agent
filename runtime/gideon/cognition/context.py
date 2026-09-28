@@ -708,11 +708,28 @@ class PromptAssembler:
         recent_first: bool = False,
         compress_assistant: bool = False,
     ) -> list[str]:
+        summaries = [
+            message for message in messages if message.get("role") == "summary"
+        ]
+        transcript = [
+            message for message in messages if message.get("role") != "summary"
+        ]
         selected = []
         remaining = budget
-        sequence = reversed(messages) if recent_first else iter(messages)
+        summary_lines = []
+        for message in summaries:
+            content = _MODE_IDENTITY_RE.sub("", str(message.get("content", "")))
+            if len(content) > _PER_MESSAGE_CAP:
+                content = content[:_PER_MESSAGE_CAP] + "…[truncated]"
+            line = f"Summary: {content}"
+            if len(line) > remaining:
+                line = line[:remaining]
+            if line:
+                summary_lines.append(line)
+                remaining -= len(line)
+        sequence = reversed(transcript) if recent_first else iter(transcript)
         for message in sequence:
-            content = _MODE_IDENTITY_RE.sub("", message["content"])
+            content = _MODE_IDENTITY_RE.sub("", str(message.get("content", "")))
             if compress_assistant and message["role"] == "assistant":
                 content = _compress_assistant_message(content)
             if len(content) > _PER_MESSAGE_CAP:
@@ -722,7 +739,9 @@ class PromptAssembler:
                 break
             selected.append(line)
             remaining -= len(line)
-        return selected[::-1] if recent_first else selected
+        if recent_first:
+            selected = selected[::-1]
+        return summary_lines + selected
 
     def _thread_block(
         self,
@@ -739,8 +758,13 @@ class PromptAssembler:
 
         header = render_snippet_block("thread-history-header") + "\n"
         if prior_transcript is not None:
+            model_messages = (
+                self.conversation_log.model_view(key, prior_transcript)
+                if self.conversation_log is not None
+                else prior_transcript
+            )
             lines = self._conversation_lines(
-                prior_transcript,
+                model_messages,
                 budget=_HISTORY_BUDGET_CHARS,
                 recent_first=True,
                 compress_assistant=True,
@@ -753,7 +777,11 @@ class PromptAssembler:
         else:
             if self.conversation_log is None:
                 return ""
-            recent = self.conversation_log.recent(key, roles={"user", "assistant"})
+            recent = [
+                message
+                for message in self.conversation_log.model_view(key)
+                if message.get("role") in ("user", "assistant", "summary")
+            ]
             lines = self._conversation_lines(
                 recent,
                 budget=_HISTORY_BUDGET_CHARS,
