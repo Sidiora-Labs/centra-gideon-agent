@@ -65,6 +65,18 @@ def _retire_profiles(config) -> bool:
     return bool(retired)
 
 
+def _retire_seeded_native_prompt(config) -> bool:
+    """Remove only the retired built-in prompt from the selected native profile."""
+    from gideon.engine.agents.defaults import DEFAULT_NATIVE_SYSTEM_PROMPT
+
+    profile = (config.agents or {}).get(config.default_agent)
+    if profile is None or profile.system_prompt != DEFAULT_NATIVE_SYSTEM_PROMPT:
+        return False
+    profile.system_prompt = ""
+    logger.info("Config migration: retired seeded native system prompt")
+    return True
+
+
 def _repair_selection(config) -> bool:
     if config.default_agent and config.default_agent in config.agents:
         return False
@@ -76,7 +88,13 @@ def _repair_selection(config) -> bool:
     return True
 
 
-_UPGRADES = (_native_default, _seed_profiles, _retire_profiles, _repair_selection)
+_UPGRADES = (
+    _native_default,
+    _seed_profiles,
+    _retire_profiles,
+    _repair_selection,
+    _retire_seeded_native_prompt,
+)
 
 
 def apply_config_migrations(cfg: AppConfig) -> bool:

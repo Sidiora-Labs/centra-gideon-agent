@@ -891,3 +891,76 @@ def _build_history_prefix(session: _ChatSession) -> str:
         + "\n".join(lines)
         + "\n[End of history]\n\n"
     )
+
+
+_TURN_DISPATCH_ROLES = frozenset({"user", "inject", "subagent", "nudge"})
+
+
+def prior_turns_transcript(
+    session: _ChatSession, in_flight: str, *, nested: bool = False
+) -> list[dict[str, str]]:
+    """Return completed prior turns from this live session, excluding this dispatch.
+
+    Dashboard appends its user row before run_chat starts. A new runtime therefore
+    needs the resident session buffer, cut before the current dispatch, rather than
+    a second read of the disk log. Resolved stop events identify turns whose partial
+    assistant output must not become prior context; ordinary completion markers do
+    not have this stop-event shape.
+    """
+    messages = session.messages
+    cut = len(messages)
+    last_assistant = next(
+        (i for i in range(len(messages) - 1, -1, -1) if messages[i].get("role") == "assistant"),
+        -1,
+    )
+    dispatches = [
+        i
+        for i in range(last_assistant + 1, len(messages))
+        if messages[i].get("role") in _TURN_DISPATCH_ROLES
+    ]
+    if dispatches:
+        matching = next(
+            (
+                i
+                for i in reversed(dispatches)
+                if messages[i].get("content", "") == in_flight
+            ),
+            None,
+        )
+        cut = dispatches[-1] if nested or matching is None else matching
+
+    transcript: list[dict[str, str]] = []
+    current_user: int | None = None
+    current_assistant: int | None = None
+    for message in messages[:cut]:
+        role = message.get("role", "")
+        if role in _TURN_DISPATCH_ROLES:
+            if role == "user":
+                transcript.append({"role": "user", "content": message.get("content", "")})
+                current_user = len(transcript) - 1
+                current_assistant = None
+            continue
+        if role == "assistant":
+            transcript.append({"role": "assistant", "content": message.get("content", "")})
+            current_assistant = len(transcript) - 1
+            continue
+        if role != "system":
+            continue
+        try:
+            stop = json.loads(message.get("content", ""))
+        except (TypeError, ValueError):
+            continue
+        if not (
+            isinstance(stop, dict)
+            and stop.get("kind") == "stop_event"
+            and stop.get("state") in {"stopped", "stop_failed_reset"}
+            and stop.get("outcome") in {"soft", "hard"}
+        ):
+            continue
+        if current_user is not None:
+            del transcript[current_user:]
+        elif current_assistant is not None:
+            del transcript[current_assistant:]
+        current_user = None
+        current_assistant = None
+    return transcript

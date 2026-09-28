@@ -57,9 +57,8 @@ class AgentBindingPlan:
             "effective_memory_config": self.merge_memory(memory, overrides),
             "provider_agent": profile.provider_agent,
             "acp_mode": getattr(profile, "acp_mode", ""),
-            "system_prompt": self.compose_voice(
-                getattr(profile, "voice", ""), profile.system_prompt
-            ),
+            "system_prompt": profile.system_prompt,
+            "voice": getattr(profile, "voice", ""),
             "approval_mode": profile.approval_mode,
             "provider": getattr(profile, "provider", "") or self.config.agent.provider,
         }

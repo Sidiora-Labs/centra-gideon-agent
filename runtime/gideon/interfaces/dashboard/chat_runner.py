@@ -56,6 +56,7 @@ from gideon.interfaces.dashboard.chat_followups import (
 )
 from gideon.interfaces.dashboard.chat_persistence import (
     _build_history_prefix,
+    prior_turns_transcript,
     save_session_to_history,
 )
 from gideon.interfaces.dashboard.chat_title import _maybe_auto_title
@@ -1661,6 +1662,13 @@ async def run_chat(
     still a contract — the door's injected `turn_runner` calls it by that shape —
     while `_prompt_depth` stays private as this function's own recursion counter.
     """
+    _in_flight_text = message
+    _prior_history_key = _history_key_for(session.key)
+    _prior_transcript = (
+        prior_turns_transcript(session, _in_flight_text, nested=_prompt_depth > 0)
+        if _prior_history_key.startswith("dashboard:")
+        else None
+    )
     if _prompt_depth == 0:
         session.begin_stream()
     session._last_turn_errored = False
@@ -1961,6 +1969,7 @@ async def run_chat(
         provider_agent: str | None = None
         memory_store: str | None = None
         agent_system_prompt: str = ""
+        agent_voice: str = ""
         provider_kind: str = ""
         acp_mode: str = ""
         try:
@@ -1970,6 +1979,7 @@ async def run_chat(
             acp_mode = getattr(bindings, "acp_mode", "") or ""
             memory_store = bindings.memory_store_name
             agent_system_prompt = bindings.system_prompt
+            agent_voice = bindings.voice
             provider_kind = getattr(bindings, "provider", "") or ""
         except Exception:
             logger.warning(
@@ -2174,7 +2184,11 @@ async def run_chat(
         elif state.context_builder:
 
             compressed: str | None = None
-            if _restoring_history and _restore_log is not None:
+            if (
+                _restoring_history
+                and _restore_log is not None
+                and not session_key.startswith("dashboard:")
+            ):
                 from gideon.cognition.context import compress_thread_history
 
                 compressed = await compress_thread_history(
@@ -2300,12 +2314,14 @@ async def run_chat(
                 cwd=session.workspace_dir or None,
                 memory_store=memory_store,
                 compressed_history=compressed,
+                prior_transcript=_prior_transcript,
                 mode=session.mode,
                 blocks_reads=session.blocks_reads,
                 blocks_writes=session.is_restricted,
                 active_recall=getattr(session, "_app", "") not in ("loop", "code"),
                 system_prompt_override=agent_system_prompt,
                 system_prompt_suffix=_tm_framing,
+                agent_voice=agent_voice,
                 resolved_agent_id=_resolve_agent_id(
                     session.agent or None, provider_kind, provider_agent
                 ),
@@ -2364,7 +2380,7 @@ async def run_chat(
         else:
             full_message = message
 
-        if is_new and session.messages:
+        if is_new and session.messages and not session_key.startswith("dashboard:"):
             _last_stop_soft = False
             for m in reversed(session.messages):
                 cls_val = m.get("cls", "")

@@ -229,7 +229,7 @@ class _NativeProfileTemplate:
 
 def make_default_native_profile(profile_cls: type) -> Any:
     return _NativeProfileTemplate(
-        DEFAULT_NATIVE_SYSTEM_PROMPT,
+        "",
         "Built-in native agent. Inference governed by Settings → Models.",
     ).create(profile_cls)
 

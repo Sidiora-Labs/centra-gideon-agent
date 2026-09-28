@@ -724,15 +724,35 @@ class PromptAssembler:
             remaining -= len(line)
         return selected[::-1] if recent_first else selected
 
-    def _thread_block(self, key: str, resumed: bool, compressed: str | None) -> str:
-        if not key or self.conversation_log is None or resumed:
+    def _thread_block(
+        self,
+        key: str,
+        resumed: bool,
+        compressed: str | None,
+        prior_transcript: list[dict[str, str]] | None = None,
+    ) -> str:
+        if not key or resumed:
+            return ""
+        if self.conversation_log is None and prior_transcript is None and not compressed:
             return ""
         from gideon.integrations.prompt_providers.runtime import render_snippet_block
 
         header = render_snippet_block("thread-history-header") + "\n"
-        if compressed:
+        if prior_transcript is not None:
+            lines = self._conversation_lines(
+                prior_transcript,
+                budget=_HISTORY_BUDGET_CHARS,
+                recent_first=True,
+                compress_assistant=True,
+            )
+            if not lines:
+                return ""
+            text = _redact_context("\n".join(lines))
+        elif compressed:
             text = _MODE_IDENTITY_RE.sub("", _redact_context(compressed))
         else:
+            if self.conversation_log is None:
+                return ""
             recent = self.conversation_log.recent(key, roles={"user", "assistant"})
             lines = self._conversation_lines(
                 recent,
@@ -812,17 +832,7 @@ class PromptAssembler:
         if self.conversation_log is None:
             return sections
         if key.startswith("dashboard:"):
-            others = self.conversation_log.recent_from_source(
-                "dashboard:", exclude_key=key, max_messages=10
-            )
-            lines = self._conversation_lines(others, budget=_CROSS_TAB_BUDGET_CHARS)
-            if lines:
-                sections.append(
-                    render_snippet_block(
-                        "cross-tab-context", {"cross_lines": "\n".join(lines)}
-                    )
-                    + "\n\n"
-                )
+            return sections
         origins = self.conversation_log.recent_with_provenance(key)
         if origins:
             lines = [
@@ -843,10 +853,18 @@ class PromptAssembler:
         mode: str = "",
         blocks_reads: bool = False,
         dropped_out: list[str] | None = None,
+        prior_transcript: list[dict[str, str]] | None = None,
     ) -> str:
         from gideon.integrations.prompt_providers.runtime import render_snippet_block
 
-        custom = bool(agent and agent != "gideon")
+        from gideon.engine.agents.defaults import (
+            DEFAULT_NATIVE_AGENT_NAME,
+            normalize_agent_name,
+        )
+
+        custom = bool(
+            agent and normalize_agent_name(agent) != DEFAULT_NATIVE_AGENT_NAME
+        )
         sections = [render_snippet_block("critical-rules") + "\n\n"]
         captured = datetime.now(get_local_tz()[1])
         if session_key:
@@ -866,7 +884,9 @@ class PromptAssembler:
                 + "\n\n"
             )
         sections.append(
-            self._thread_block(session_key or "", resumed, compressed_history)
+            self._thread_block(
+                session_key or "", resumed, compressed_history, prior_transcript
+            )
         )
         if session_key and self.conversation_log:
             sections.append(_build_stop_event_notes(self.conversation_log, session_key))
@@ -930,33 +950,50 @@ class PromptAssembler:
         use_case: str,
         override: str,
         suffix: str,
+        agent_voice: str = "",
     ) -> str:
         rendered = False
         if override.strip():
             prompt = override
-        elif agent and agent != "gideon":
-            prompt = self._load_agent_prompt(agent)
         else:
-            from gideon.integrations.prompt_providers.runtime import (
-                render_use_case_prompt,
+            from gideon.engine.agents.defaults import (
+                DEFAULT_NATIVE_AGENT_NAME,
+                normalize_agent_name,
             )
 
-            prompt = (
-                render_use_case_prompt(
-                    _prompt_use_case_for(key, use_case),
-                    {
-                        "bot_name": self._bot_name,
-                        "widget_block": self._widget_block(key or ""),
-                    },
+            prompt = ""
+            if agent and normalize_agent_name(agent) != DEFAULT_NATIVE_AGENT_NAME:
+                prompt = self._load_agent_prompt(agent)
+            if not prompt:
+                from gideon.integrations.prompt_providers.runtime import (
+                    render_use_case_prompt,
                 )
-                or ""
-            )
-            rendered = bool(prompt)
+                prompt = (
+                    render_use_case_prompt(
+                        _prompt_use_case_for(key, use_case),
+                        {
+                            "bot_name": self._bot_name,
+                            "widget_block": self._widget_block(key or ""),
+                        },
+                    )
+                    or ""
+                )
+                rendered = bool(prompt)
             if not prompt:
                 try:
                     prompt = _shipped_prompt().read_text(encoding="utf-8")
                 except OSError:
                     prompt = ""
+        if agent_voice.strip() and prompt:
+            from gideon.integrations.prompt_providers.runtime import render_snippet_block
+
+            voice_layer = render_snippet_block(
+                "agent-voice-layer",
+                {"voice": agent_voice, "system_prompt": prompt},
+            )
+            prompt = voice_layer or "\n".join(
+                ("[VOICE — speak and decide as this persona]", agent_voice.strip(), "", prompt)
+            )
         if suffix.strip():
             prompt = "\n\n".join(filter(None, (prompt, suffix)))
         if not prompt:
@@ -964,6 +1001,32 @@ class PromptAssembler:
         if not rendered or suffix.strip():
             return self._apply_runtime_vars(prompt, key or "")
         return prompt
+
+    def _identity_part(
+        self,
+        parts: _Parts,
+        *,
+        key: str | None,
+        agent: str | None,
+        use_case: str,
+        override: str,
+        suffix: str,
+        agent_voice: str,
+    ) -> None:
+        from gideon.integrations.prompt_providers.runtime import render_snippet_block
+
+        prompt = self._identity_prompt(
+            agent, key, use_case, override, suffix, agent_voice
+        )
+        if prompt:
+            parts.add(
+                render_snippet_block(
+                    "agent-system-prompt-wrapper", {"agent_prompt": prompt}
+                )
+                + "\n\n",
+                name="system prompt",
+                compressible=False,
+            )
 
     def _startup_parts(
         self,
@@ -975,25 +1038,26 @@ class PromptAssembler:
         cwd: str | None,
         memory_store: str | None,
         compressed_history: str | None,
+        prior_transcript: list[dict[str, str]] | None,
         mode: str,
         blocks_reads: bool,
         use_case: str,
         override: str,
         suffix: str,
+        agent_voice: str,
         notices: list[str] | None,
     ) -> None:
         from gideon.integrations.prompt_providers.runtime import render_snippet_block
 
-        prompt = self._identity_prompt(agent, key, use_case, override, suffix)
-        if prompt:
-            parts.add(
-                render_snippet_block(
-                    "agent-system-prompt-wrapper", {"agent_prompt": prompt}
-                )
-                + "\n\n",
-                name="system prompt",
-                compressible=False,
-            )
+        self._identity_part(
+            parts,
+            key=key,
+            agent=agent,
+            use_case=use_case,
+            override=override,
+            suffix=suffix,
+            agent_voice=agent_voice,
+        )
         context = self.build_session_context(
             key,
             agent=agent,
@@ -1001,6 +1065,7 @@ class PromptAssembler:
             cwd=cwd,
             memory_store=memory_store,
             compressed_history=compressed_history,
+            prior_transcript=prior_transcript,
             mode=mode,
             blocks_reads=blocks_reads,
             dropped_out=notices,
@@ -1190,6 +1255,8 @@ class PromptAssembler:
         components_out: list[Component] | None = None,
         notices_out: list[str] | None = None,
         skill_decisions_out: list["SkillDecision"] | None = None,
+        agent_voice: str = "",
+        prior_transcript: list[dict[str, str]] | None = None,
     ) -> tuple[str, HookResult]:
         result = self.hooks.on_message(text)
         parts = _Parts()
@@ -1202,12 +1269,24 @@ class PromptAssembler:
                 cwd=cwd,
                 memory_store=memory_store,
                 compressed_history=compressed_history,
+                prior_transcript=prior_transcript,
                 mode=mode,
                 blocks_reads=blocks_reads,
                 use_case=prompt_use_case,
                 override=system_prompt_override,
                 suffix=system_prompt_suffix,
+                agent_voice=agent_voice,
                 notices=notices_out,
+            )
+        else:
+            self._identity_part(
+                parts,
+                key=session_key,
+                agent=agent,
+                use_case=prompt_use_case,
+                override=system_prompt_override,
+                suffix=system_prompt_suffix,
+                agent_voice=agent_voice,
             )
         self._channel_parts(parts, channel_id, thread_ts, thread_parent_text)
         if is_new_session and not blocks_reads:
