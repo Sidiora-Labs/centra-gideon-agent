@@ -58,6 +58,7 @@ class ClockCadence:
 
     def cron(self) -> float:
         from croniter import croniter
+        from gideon.automation.triggers.cron_clock import next_fire
 
         expression = str(self.spec.get("expr") or "").strip()
         if not expression:
@@ -67,8 +68,17 @@ class ClockCadence:
                 "trigger %s has an invalid cron expr %r", self.trigger.id, expression
             )
             return 0.0
-        origin = datetime.fromtimestamp(self.now, tz=_trigger_tz(self.trigger))
-        return float(croniter(expression, origin).get_next(float))
+        last_fire = self.last_fire
+        if last_fire <= 0:
+            from gideon.automation.triggers.service import to_epoch
+
+            last_fire = to_epoch(str(getattr(self.trigger, "last_fired_at", "") or ""))
+        return next_fire(
+            expression,
+            after=self.now,
+            zone=_trigger_tz(self.trigger),
+            last_fire=last_fire,
+        )
 
     def interval(self) -> float:
         seconds = _positive(self.spec.get("interval_secs"))
@@ -216,8 +226,6 @@ def _min_cron_gap_secs(expr: str) -> float:
 
 
 def _cron_fires_on_date(expr: str, day: date, tz_name: str) -> bool:
-    from croniter import croniter
-
     from gideon.core.timezones import UnknownTimeZone, resolve_zone
 
     try:
@@ -225,11 +233,17 @@ def _cron_fires_on_date(expr: str, day: date, tz_name: str) -> bool:
     except UnknownTimeZone:
         return True
     try:
+        from gideon.automation.triggers.cron_clock import next_fire
+
         midnight = datetime.combine(day, datetime.min.time(), tzinfo=zone)
-        first = croniter(expr, midnight - timedelta(seconds=1)).get_next(datetime)
+        first = next_fire(
+            expr, after=(midnight - timedelta(seconds=1)).timestamp(), zone=zone
+        )
+        if first <= 0:
+            return False
     except Exception:
         return True
-    return first.astimezone(zone).strftime("%Y-%m-%d") == day.isoformat()
+    return datetime.fromtimestamp(first, tz=zone).strftime("%Y-%m-%d") == day.isoformat()
 
 
 class ClockDiagnostics:
