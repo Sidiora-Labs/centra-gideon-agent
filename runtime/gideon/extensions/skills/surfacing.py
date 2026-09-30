@@ -32,6 +32,8 @@ import json
 import logging
 import math
 import re
+import statistics
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, overload
 
@@ -41,11 +43,57 @@ from gideon.extensions.skills.loader import skills_dir
 logger = logging.getLogger(__name__)
 
 DEFAULT_SEMANTIC_THRESHOLD = 0.55
+SEMANTIC_LEAD = 0.75
+MIN_SCORED_FOR_LEAD = 5
 
 # Keyword fallback gate — must match ProcedureLibrary._MIN_TRIGGER_OVERLAP so the
 _KEYWORD_GATE = 0.7
 
 _EMBED_CACHE_FILE = ".skill_embeddings.json"
+
+
+@dataclass(frozen=True)
+class _Standout:
+    key: str
+    closest: str
+    lead: float | None
+    why: str
+
+
+def _semantic_standout(scores: list[tuple[str, float]], floor: float) -> _Standout:
+    """Pick a semantic-only skill only when its lead is clear across the library."""
+    if len(scores) < MIN_SCORED_FOR_LEAD:
+        return _Standout(
+            key="",
+            closest="",
+            lead=None,
+            why=(
+                f"only {len(scores)} skill(s) could be scored, too few to tell a clear match "
+                f"on meaning (needs {MIN_SCORED_FOR_LEAD})"
+            ),
+        )
+    ranked = sorted(scores, key=lambda pair: (-pair[1], pair[0]))
+    (top_key, top), (next_key, runner_up) = ranked[:2]
+    spread = statistics.pstdev(score for _key, score in ranked)
+    lead = (top - runner_up) / spread if spread else 0.0
+    if top >= floor and lead >= SEMANTIC_LEAD:
+        return _Standout(
+            key=top_key,
+            closest=top_key,
+            lead=lead,
+            why=(
+                f"it leads the next skill, {next_key}, by {lead:.2f} spreads "
+                f"(≥ {SEMANTIC_LEAD})"
+            ),
+        )
+    if top < floor:
+        why = f"no skill clears the {floor} floor on meaning (closest: {top_key}, {top:.2f})"
+    else:
+        why = (
+            f"{top_key} is closest and leads {next_key} by only {lead:.2f} spreads "
+            f"(needs {SEMANTIC_LEAD}), so meaning singles out no skill"
+        )
+    return _Standout(key="", closest=top_key, lead=lead, why=why)
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -207,7 +255,7 @@ def surface_skills(
 
     With ``explain=True`` (the Doctor surfacing simulator, PLATFORM-RESILIENCE §3.1)
     it returns instead a per-candidate breakdown — ``[{key, kw_score, sem_score,
-    threshold_kw, threshold_sem, negated, included, reason}, …]`` for EVERY candidate
+    threshold_kw, threshold_sem, lead, threshold_lead, negated, included, reason}, …]`` for EVERY candidate
     (including excluded ones, so the user sees WHY something was excluded — a withheld
     skill is surfaced with a suppression reason, never dropped silently), sorted the
     same way. Pure deterministic scoring, zero LLM calls — the same arms the real turn
@@ -230,7 +278,7 @@ def surface_skills(
             query_vec = None
     cache = embed_cache or _EmbedCache()
 
-    scored: list[tuple[float, int, str]] = []
+    candidates: list[tuple[dict, float, float | None]] = []
     explained: list[dict] = []
     for s in skills:
         key = s.get("key", "")
@@ -283,7 +331,7 @@ def surface_skills(
 
         kw_hit = kw_score >= _KEYWORD_GATE
 
-        sem_score = 0.0
+        sem_score: float | None = None
         if query_vec is not None:
             desc = (s.get("description", "") or s.get("name", "")).strip()
             embed_text = f"{desc}\n{triggers}".strip() if triggers else desc
@@ -296,8 +344,20 @@ def surface_skills(
             )
             if vec is not None:
                 sem_score = _cosine(query_vec, vec)
-        sem_hit = sem_score >= semantic_threshold
+        candidates.append((s, kw_score, sem_score))
 
+    cache.flush()
+    standout = _semantic_standout(
+        [(s.get("key", ""), score) for s, _kw, score in candidates if score is not None],
+        semantic_threshold,
+    )
+
+    scored: list[tuple[float, int, str]] = []
+    for s, kw_score, sem_value in candidates:
+        key = s.get("key", "")
+        sem_score = sem_value or 0.0
+        kw_hit = kw_score >= _KEYWORD_GATE
+        sem_hit = standout.key == key
         matched = kw_hit or sem_hit
         withheld = matched and ("skill_synthesis", key) in suppressed
         included = matched and not withheld
@@ -311,15 +371,26 @@ def surface_skills(
                 why = (
                     f"keyword {kw_score:.2f} ≥ {_KEYWORD_GATE}"
                     if kw_hit
-                    else f"semantic {sem_score:.2f} ≥ {semantic_threshold}"
+                    else f"semantic {sem_score:.2f} ≥ {semantic_threshold}, and {standout.why}"
                 )
                 reason = f"included ({why})"
             elif query_vec is None:
                 reason = f"excluded (keyword {kw_score:.2f} < {_KEYWORD_GATE}; no embedder for semantic)"
-            else:
+            elif sem_score < semantic_threshold:
                 reason = (
                     f"excluded (keyword {kw_score:.2f} < {_KEYWORD_GATE}, "
                     f"semantic {sem_score:.2f} < {semantic_threshold})"
+                )
+            elif standout.key:
+                reason = (
+                    f"excluded (keyword {kw_score:.2f} < {_KEYWORD_GATE}; semantic "
+                    f"{sem_score:.2f} clears {semantic_threshold}, but meaning picks "
+                    f"{standout.key}, the clear closest)"
+                )
+            else:
+                reason = (
+                    f"excluded (keyword {kw_score:.2f} < {_KEYWORD_GATE}; semantic "
+                    f"{sem_score:.2f} clears {semantic_threshold}, but {standout.why})"
                 )
             explained.append(
                 _explain_row(
@@ -330,6 +401,7 @@ def surface_skills(
                     False,
                     included,
                     reason,
+                    lead=standout.lead if key == standout.closest else None,
                 )
             )
         if not included:
@@ -338,7 +410,6 @@ def surface_skills(
         use_count = int(s.get("use_count", 0) or 0)
         scored.append((score, use_count, s["key"]))
 
-    cache.flush()
     if explain:
         explained.sort(
             key=lambda r: (
@@ -360,6 +431,8 @@ def _explain_row(
     negated: bool,
     included: bool,
     reason: str,
+    *,
+    lead: float | None = None,
 ) -> dict:
     return {
         "key": key,
@@ -367,6 +440,8 @@ def _explain_row(
         "sem_score": round(sem_score, 3),
         "threshold_kw": _KEYWORD_GATE,
         "threshold_sem": threshold_sem,
+        "lead": None if lead is None else round(lead, 2),
+        "threshold_lead": SEMANTIC_LEAD,
         "negated": negated,
         "included": included,
         "reason": reason,
