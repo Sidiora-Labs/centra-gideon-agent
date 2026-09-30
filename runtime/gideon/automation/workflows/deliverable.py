@@ -47,8 +47,12 @@ absence, so a later session cannot add one without meeting the finding.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import os
 import re
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -74,6 +78,13 @@ ROOT_WORKSPACE = "workspace"
 ROOT_RUN_DIR = "run_dir"
 
 MAX_DOC_BYTES = 512 * 1024
+
+STEP_DOCUMENTS_DIR = "step-documents"
+STEP_DOCUMENT_MANIFEST = "manifest.json"
+MAX_STEP_DOCUMENTS = 40
+MAX_STEP_DOCUMENT_TOTAL_BYTES = 4 * 1024 * 1024
+MAX_STEP_MANIFEST_BYTES = 32 * 1024
+_STEP_DOCUMENT_SUFFIXES = frozenset({".md", ".txt", ".rst", ".adoc"})
 
 MAX_TOKEN_CHARS = 512
 
@@ -261,6 +272,19 @@ def run_roots(run: Any) -> Roots:
     from gideon.automation.workflows import provisioning, store
 
     entries: list[Root] = []
+    run_id = str(getattr(run, "id", "") or "")
+    if run_id:
+        run_path = store.run_dir(run_id)
+        try:
+            run_root = run_path.resolve(strict=True)
+            if (
+                not run_path.is_symlink()
+                and run_root.parent == store.runs_root().resolve()
+            ):
+                path = str(run_root / STEP_DOCUMENTS_DIR)
+                entries.append(Root(STEP_DOCUMENTS_DIR, path, _is_dir(path)))
+        except (OSError, RuntimeError):
+            pass
     try:
         workspace = str((provisioning.workspace_state(run) or {}).get("path", "") or "")
     except Exception:  # pragma: no cover — a malformed record must not 500 a read
@@ -268,11 +292,252 @@ def run_roots(run: Any) -> Roots:
         workspace = ""
     if workspace:
         entries.append(Root(ROOT_WORKSPACE, workspace, _is_dir(workspace)))
-    run_id = str(getattr(run, "id", "") or "")
     if run_id:
         path = str(store.run_dir(run_id))
         entries.append(Root(ROOT_RUN_DIR, path, _is_dir(path)))
     return Roots(entries)
+
+
+def _document_signature(info: os.stat_result) -> tuple[int, int, int]:
+    return info.st_mtime_ns, info.st_size, info.st_ino
+
+
+def _safe_step_document_name(name: str) -> bool:
+    candidate = Path(name)
+    return (
+        bool(name)
+        and candidate.name == name
+        and name not in {".", "..", STEP_DOCUMENT_MANIFEST}
+        and not name.startswith(".")
+        and candidate.suffix.lower() in _STEP_DOCUMENT_SUFFIXES
+    )
+
+
+def step_document_snapshot(workspace: str | Path) -> dict[str, tuple[int, int, int]]:
+    """Take a bounded metadata snapshot of direct-child text documents before a step."""
+    try:
+        root = Path(workspace).resolve(strict=True)
+        if not root.is_dir():
+            return {}
+        from gideon.security.security import is_sensitive_path
+
+        if is_sensitive_path(str(root)):
+            return {}
+        entries = sorted(root.iterdir(), key=lambda path: path.name)
+    except (OSError, RuntimeError, ValueError):
+        return {}
+    snapshot: dict[str, tuple[int, int, int]] = {}
+    for path in entries:
+        if not _safe_step_document_name(path.name) or path.is_symlink():
+            continue
+        try:
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_DOC_BYTES:
+                continue
+            resolved = path.resolve(strict=True)
+            if (
+                resolved.parent != root
+                or is_sensitive_path(str(path))
+                or is_sensitive_path(str(resolved))
+            ):
+                continue
+            snapshot[path.name] = _document_signature(info)
+            if len(snapshot) >= MAX_STEP_DOCUMENTS:
+                break
+        except (OSError, RuntimeError, ValueError):
+            continue
+    return snapshot
+
+
+def retain_step_documents(
+    run_id: str,
+    workspace: str | Path,
+    before: dict[str, tuple[int, int, int]],
+    step: str,
+) -> list[dict[str, Any]]:
+    """Copy only changed direct-child documents into this run's bounded private artifact area."""
+    if not run_id or not workspace:
+        return []
+    try:
+        root = Path(workspace).resolve(strict=True)
+        if not root.is_dir():
+            return []
+        from gideon.security.security import is_sensitive_path, redact_for_display
+
+        if is_sensitive_path(str(root)):
+            return []
+        candidates = step_document_snapshot(root)
+        if not candidates:
+            return []
+        from gideon.automation.workflows import store
+        from gideon.core.atomic_write import atomic_write
+
+        run_path = store.run_dir(run_id)
+        if run_path.is_symlink():
+            return []
+        run_root = run_path.resolve(strict=True)
+        if run_root.parent != store.runs_root().resolve():
+            return []
+        target_root = run_root / STEP_DOCUMENTS_DIR
+        target_root.mkdir(parents=True, exist_ok=True)
+        if target_root.is_symlink() or target_root.resolve().parent != run_root:
+            return []
+        manifest_path = target_root / STEP_DOCUMENT_MANIFEST
+        try:
+            info = manifest_path.lstat()
+            if (
+                manifest_path.is_symlink()
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_size > MAX_STEP_MANIFEST_BYTES
+            ):
+                rows = []
+            else:
+                current = json.loads(manifest_path.read_text(encoding="utf-8"))
+                rows = current.get("documents", []) if isinstance(current, dict) else []
+        except (OSError, ValueError, TypeError):
+            rows = []
+        manifest: dict[str, dict[str, Any]] = {}
+        for row in rows[:MAX_STEP_DOCUMENTS] if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("name", "") or "")
+            try:
+                size = int(row.get("bytes", 0))
+                modified_at = float(row.get("modified_at", 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if _safe_step_document_name(name) and 0 <= size <= MAX_DOC_BYTES:
+                manifest[name] = {
+                    "name": name,
+                    "bytes": size,
+                    "sha256": str(row.get("sha256", ""))[:64],
+                    "modified_at": modified_at,
+                    "step": str(row.get("step", ""))[:200],
+                }
+        changed: list[dict[str, Any]] = []
+        for name, signature in sorted(candidates.items()):
+            if before.get(name) == signature:
+                continue
+            source = root / name
+            if source.is_symlink() or is_sensitive_path(str(source)):
+                continue
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            try:
+                descriptor = os.open(source, flags)
+                with os.fdopen(descriptor, "rb") as stream:
+                    first = os.fstat(stream.fileno())
+                    if (
+                        not stat.S_ISREG(first.st_mode)
+                        or _document_signature(first) != signature
+                    ):
+                        continue
+                    raw = stream.read(MAX_DOC_BYTES + 1)
+                    last = os.fstat(stream.fileno())
+            except (OSError, RuntimeError):
+                continue
+            if len(raw) > MAX_DOC_BYTES or _document_signature(last) != signature:
+                continue
+            clipped, _count = _clip_blobs(raw.decode("utf-8", errors="replace"))
+            content = redact_for_display(clipped)
+            data = content.encode("utf-8")
+            if len(data) > MAX_DOC_BYTES:
+                continue
+            atomic_write(target_root / name, content)
+            row = {
+                "name": name,
+                "bytes": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "modified_at": last.st_mtime,
+                "step": str(step or "")[:200],
+            }
+            manifest[name] = row
+            changed.append(row)
+
+        ordered = sorted(
+            manifest.values(),
+            key=lambda row: (
+                float(row.get("modified_at", 0) or 0),
+                str(row.get("name", "")),
+            ),
+        )[-MAX_STEP_DOCUMENTS:]
+        kept: list[dict[str, Any]] = []
+        total = 0
+        for row in reversed(ordered):
+            size = int(row.get("bytes", 0) or 0)
+            if (
+                size < 0
+                or size > MAX_DOC_BYTES
+                or total + size > MAX_STEP_DOCUMENT_TOTAL_BYTES
+            ):
+                continue
+            kept.append(row)
+            total += size
+        kept.reverse()
+        kept_names = {row["name"] for row in kept}
+        for name in set(manifest).difference(kept_names):
+            path = target_root / name
+            if not path.is_symlink():
+                path.unlink(missing_ok=True)
+        atomic_write(
+            manifest_path,
+            json.dumps({"version": 1, "documents": kept}, ensure_ascii=False),
+        )
+        return [row for row in kept if row in changed]
+    except (OSError, RuntimeError, ValueError, TypeError):
+        logger.warning(
+            "run %s: step documents could not be retained", run_id, exc_info=True
+        )
+        return []
+
+
+def read_step_documents(run_id: str) -> list[dict[str, Any]]:
+    """Read only manifest-listed documents under the selected run's own artifact root."""
+    if not run_id:
+        return []
+    from gideon.automation.workflows import store
+
+    run_path = store.run_dir(run_id)
+    if run_path.is_symlink():
+        return []
+    try:
+        run_root = run_path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return []
+    if run_root.parent != store.runs_root().resolve():
+        return []
+    directory = run_root / STEP_DOCUMENTS_DIR
+    if directory.is_symlink() or not _is_dir(str(directory)):
+        return []
+    try:
+        manifest_path = directory / STEP_DOCUMENT_MANIFEST
+        info = manifest_path.lstat()
+        if (
+            manifest_path.is_symlink()
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_size > MAX_STEP_MANIFEST_BYTES
+        ):
+            return []
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        rows = manifest.get("documents", []) if isinstance(manifest, dict) else []
+    except (OSError, ValueError, TypeError):
+        return []
+    root = Roots([Root(STEP_DOCUMENTS_DIR, str(directory), True)])
+    documents = []
+    total = 0
+    for row in rows[:MAX_STEP_DOCUMENTS] if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name", "") or "")
+        if not _safe_step_document_name(name):
+            continue
+        document = read_document(root, name)
+        if document.present:
+            size = int(document.bytes or 0)
+            if size < 0 or total + size > MAX_STEP_DOCUMENT_TOTAL_BYTES:
+                continue
+            total += size
+            documents.append(document.to_dict())
+    return documents
 
 
 def _is_dir(path: str) -> bool:
@@ -305,12 +570,18 @@ def read_document(roots: Roots, name: str, *, reason: str = "") -> Document:
     if not readable:
         return Document(name=name, absent_reason=NO_ROOT)
     for root in readable:
+        candidate = Path(root.path) / name
+        try:
+            if candidate.is_symlink() or not stat.S_ISREG(candidate.lstat().st_mode):
+                continue
+        except OSError:
+            continue
         target = _confined(root.path, name)
         if target is None or not target.is_file():
             continue
         try:
             raw = target.read_bytes()
-            stat = target.stat()
+            file_stat = target.stat()
         except OSError:
             logger.warning(
                 "run document %s unreadable under %s", name, root.kind, exc_info=True
@@ -324,7 +595,7 @@ def read_document(roots: Roots, name: str, *, reason: str = "") -> Document:
             present=True,
             content=_redact(body),
             bytes=len(raw),
-            modified_at=stat.st_mtime,
+            modified_at=file_stat.st_mtime,
             truncated=len(raw) > MAX_DOC_BYTES,
             clipped_blobs=clipped,
             found_in=root.kind,

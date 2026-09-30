@@ -54,6 +54,7 @@ export function DeliverablePanel({ runId }: { runId: string }) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [slot, setSlot] = useState<'report' | 'log'>('report')
+  const [stepDocumentName, setStepDocumentName] = useState<string | null>(null)
 
   const load = useCallback(() => {
     let live = true
@@ -75,6 +76,11 @@ export function DeliverablePanel({ runId }: { runId: string }) {
 
   const doc = slot === 'report' ? data.report : data.log
   const declared = data.derivation.declared_by
+  const stepDocuments = (
+    data as WorkflowRunDeliverable & { step_documents?: WorkflowDeliverableDoc[] }
+  ).step_documents ?? []
+  const selectedStepDocument =
+    stepDocuments.find((item) => item.name === stepDocumentName) ?? stepDocuments[0]
 
   return (
     <section className="flex flex-col gap-s" aria-labelledby="run-deliverable-heading">
@@ -137,6 +143,30 @@ export function DeliverablePanel({ runId }: { runId: string }) {
         <p data-type="caption" className="flex items-center gap-xs text-on-surface-low">
           <NotebookPen size={12} aria-hidden /> The working log has content — switch to Log.
         </p>
+      )}
+
+      {selectedStepDocument && (
+        <section className="flex flex-col gap-s" aria-labelledby="run-step-documents-heading">
+          <h3 id="run-step-documents-heading" data-type="label-m" className="text-on-surface-var">
+            Step documents
+          </h3>
+          <div className="flex flex-wrap gap-xs" role="group" aria-label="Run step documents">
+            {stepDocuments.map((item) => (
+              <button
+                key={item.name}
+                type="button"
+                aria-pressed={selectedStepDocument.name === item.name}
+                className="rounded-full bg-surface-high px-m py-xs text-on-surface-var aria-pressed:bg-primary-container aria-pressed:text-on-primary-container"
+                onClick={() => setStepDocumentName(item.name)}
+              >
+                {item.name}
+              </button>
+            ))}
+          </div>
+          {selectedStepDocument.present && selectedStepDocument.content !== null && (
+            <DocSurface>{selectedStepDocument.content}</DocSurface>
+          )}
+        </section>
       )}
     </section>
   )

@@ -245,6 +245,8 @@ class _InFlight:
     last_progress: float
     cache_key: CacheKey
     calls: CallLog = field(default_factory=CallLog)
+    document_root: str = ""
+    document_snapshot: dict[str, tuple[int, int, int]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -2735,9 +2737,16 @@ class RunController:
             self._pending_owner_reentry.pop(item.path, None)
         else:
             task = asyncio.create_task(self._execute(item, ctx, calls))
+        document_snapshot: dict[str, tuple[int, int, int]] = {}
+        if self.services.cwd:
+            from gideon.automation.workflows import deliverable
+
+            document_snapshot = deliverable.step_document_snapshot(self.services.cwd)
         self._inflight[item.path] = _InFlight(
             task=task, ready=item, started=now, last_progress=now, cache_key=key,
             calls=calls,
+            document_root=self.services.cwd,
+            document_snapshot=document_snapshot,
         )
 
     def _effect_key(self, item: ReadyNode, inst: NodeInstance) -> str:
@@ -3529,6 +3538,15 @@ class RunController:
                 )
 
         if result.state in SUCCESS_STATES:
+            if entry.document_root:
+                from gideon.automation.workflows import deliverable
+
+                deliverable.retain_step_documents(
+                    self.run.id,
+                    entry.document_root,
+                    entry.document_snapshot,
+                    item.node.id or item.path,
+                )
             ref, preview = self.journal.store_output(item.path, result.output)
             inst.output_ref = ref
             if item.node.id:

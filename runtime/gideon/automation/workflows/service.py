@@ -1763,11 +1763,13 @@ def run_deliverable(run_id: str) -> dict[str, Any]:
     roots = deliverable_mod.run_roots(run)
     report = deliverable_mod.read_document(roots, resolved.name, reason=resolved.reason)
     log = deliverable_mod.read_document(roots, loop_store.LOG_NAME)
+    step_documents = deliverable_mod.read_step_documents(run_id)
     return _ok(
         run_id=run_id,
         workflow=workflow,
         report=report.to_dict(),
         log=log.to_dict(),
+        step_documents=step_documents,
         derivation=resolved.to_dict(),
         roots=roots.to_dict(),
         instructed=deliverable_mod.instructed_by_spec(
