@@ -295,10 +295,13 @@ async def _attach_agent_callable_projection(
 
     projections = await agent_callable_status(servers)
     for row in rows:
+        health_status = row.get("status")
         projection = projections.get(str(row.get("name") or ""))
         if projection is None:
             continue
         row.update(projection)
+        if health_status in {"unknown", "probing", "outdated"}:
+            row["status"] = health_status
         if row.get("enabled") is False:
             row.update(
                 status="disabled",
@@ -309,6 +312,27 @@ async def _attach_agent_callable_projection(
 _mcp_probe_ts: float = 0.0
 _MCP_PROBE_CACHE_SECS = 600
 _mcp_probe_in_progress = False
+
+
+def _invalidate_mcp_probe(name: str) -> None:
+    """Forget both projections of a server result after its definition or grant changes."""
+    global _mcp_probe_ts
+    _mcp_probe_cache[:] = [row for row in _mcp_probe_cache if row.get("name") != name]
+    from gideon.integrations.mcp_discovery import forget_probe
+
+    forget_probe(name)
+    _mcp_probe_ts = 0.0
+
+
+def _schedule_mcp_probe(request: web.Request) -> None:
+    """Start the existing bounded background probe under the dashboard task owner."""
+    global _mcp_probe_in_progress
+    if _mcp_probe_in_progress:
+        return
+    _mcp_probe_in_progress = True
+    task = asyncio.create_task(_bg_mcp_probe())
+    request.app["state"]._background_tasks.add(task)
+    task.add_done_callback(request.app["state"]._background_tasks.discard)
 
 
 def _server_in_agent_config(name: str) -> bool:
@@ -532,7 +556,8 @@ async def api_mcp_servers(request: web.Request) -> web.Response:
 
     if not should_reprobe and not _mcp_probe_in_progress:
         for srv in servers:
-            if srv.name not in cached_by_name:
+            cached = cached_by_name.get(srv.name)
+            if cached is None or cached.get("definitionRevision") != srv.to_dict().get("definitionRevision"):
                 should_reprobe = True
                 break
 
@@ -553,7 +578,11 @@ async def api_mcp_servers(request: web.Request) -> web.Response:
     for s in servers:
         d = s.to_dict()
         cached = cached_by_name.get(s.name)
-        if cached and d["status"] in ("outdated", "unknown"):
+        if (
+            cached
+            and cached.get("definitionRevision") == d.get("definitionRevision")
+            and d["status"] in ("outdated", "unknown")
+        ):
             d["status"] = cached.get("status", d["status"])
             d["tools"] = cached.get("tools", d["tools"])
             d["error"] = cached.get("error", d["error"])
@@ -710,11 +739,19 @@ async def api_mcp_probe_cached(request: web.Request) -> web.Response:
         task = asyncio.create_task(_bg_mcp_probe())
         state._background_tasks.add(task)
         task.add_done_callback(state._background_tasks.discard)
-    rows = [dict(row) for row in _mcp_probe_cache]
-    if rows:
-        from gideon.integrations.mcp_discovery import list_servers
+    from gideon.integrations.mcp_discovery import list_servers
 
-        await _attach_agent_callable_projection(rows, list_servers())
+    servers = list_servers()
+    revisions = {server.name: server.to_dict().get("definitionRevision") for server in servers}
+    rows = [
+        dict(row) for row in _mcp_probe_cache
+        if revisions.get(str(row.get("name") or "")) == row.get("definitionRevision")
+    ]
+    if rows:
+        row_names = {str(row.get("name") or "") for row in rows}
+        await _attach_agent_callable_projection(
+            rows, [server for server in servers if server.name in row_names]
+        )
     return web.json_response(_redact_mcp_projection(rows))
 
 
@@ -874,6 +911,9 @@ async def api_mcp_toggle(request: web.Request) -> web.Response:
         async with _get_config_lock():
             _sync_mcp_to_agent(name, enabled)
 
+    _invalidate_mcp_probe(name)
+    if enabled:
+        _schedule_mcp_probe(request)
     return web.json_response(
         {"ok": True, "name": name, "enabled": enabled, "applied": True}
     )
@@ -1017,6 +1057,10 @@ async def api_mcp_toggle_all(request: web.Request) -> web.Response:
         async with _get_config_lock():
             _sync_mcp_to_agent_batch(toggled, enabled)
 
+    for name in toggled:
+        _invalidate_mcp_probe(name)
+    if enabled:
+        _schedule_mcp_probe(request)
     return web.json_response({"ok": True, "enabled": enabled, "count": len(servers)})
 
 
@@ -1070,6 +1114,7 @@ async def api_mcp_remove(request: web.Request) -> web.Response:
             except (TypeError, ValueError):
                 pass
         _purge_mcp_credentials(name, removed_spec if isinstance(removed_spec, dict) else None)
+        _invalidate_mcp_probe(name)
 
     return web.json_response({"ok": True, "name": name, "removed": removed})
 
@@ -1143,6 +1188,7 @@ async def api_mcp_server_detail(request: web.Request) -> web.Response:
                 except (TypeError, ValueError):
                     pass
             _purge_mcp_credentials(name, removed_spec if isinstance(removed_spec, dict) else None)
+            _invalidate_mcp_probe(name)
             from gideon.integrations.mcp_client import get_mcp_client_registry
 
             get_mcp_client_registry()
@@ -1261,6 +1307,7 @@ async def api_mcp_server_detail(request: web.Request) -> web.Response:
     from gideon.integrations.mcp_client import get_mcp_client_registry
 
     get_mcp_client_registry()
+    _invalidate_mcp_probe(name)
     return web.json_response({"ok": True, "name": name, "server": row}, status=200)
 
 
@@ -1313,6 +1360,8 @@ async def api_mcp_server_allow(request: web.Request) -> web.Response:
         await asyncio.to_thread(rebuild_agent_config)
     except Exception:
         logger.warning("MCP owner grant saved but agent config refresh failed", exc_info=True)
+    _invalidate_mcp_probe(name)
+    _schedule_mcp_probe(request)
     return web.json_response(
         {"ok": True, "name": name, "allowed": True, "revision": revision}
     )

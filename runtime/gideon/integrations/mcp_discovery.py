@@ -88,21 +88,54 @@ class _ProbeResult:
     tools: list[dict[str, Any]]
     error: str
     probed_at: float
+    definition_revision: str
 
 
 _probe_cache: dict[str, _ProbeResult] = {}
+_probing: dict[str, dict[str, int]] = {}
 
 
-def _get_cached(name: str) -> tuple[str, list[dict[str, Any]], str]:
+def _definition_revision(server: "McpServerInfo") -> str:
+    """Fingerprint the exact executable definition and its owner grant state."""
+    from gideon.security import mcp_grants
+
+    try:
+        revision = mcp_grants.revision(server)
+    except (mcp_grants.McpGrantDefinitionError, TypeError, ValueError):
+        # Invalid definitions still need a distinct cache identity so a prior good
+        # result can never be projected onto them.
+        material = {
+            key: getattr(server, key)
+            for key in (
+                "name", "source", "command", "args", "env", "cwd", "url",
+                "transport", "headers", "oauth", "allowElicitation", "poolable",
+            )
+        }
+        revision = json.dumps(material, sort_keys=True, default=str, separators=(",", ":"))
+    return f"{revision}:{'allowed' if mcp_grants.allowed(server) else 'waiting'}"
+
+
+def _get_cached(server: "McpServerInfo | str") -> tuple[str, list[dict[str, Any]], str]:
     """Return (status, tools, error) from cache.
 
     If within TTL: returns original status + tools.
     If expired: returns "outdated" + tools (tools always preserved).
     If not cached: returns ("unknown", [], "").
     """
-    cached = _probe_cache.get(name)
+    # Keep the old name lookup for diagnostic callers; all runtime projections
+    # pass the current server object and therefore require an exact revision.
+    if isinstance(server, str):
+        cached = _probe_cache.get(server)
+        if cached is None:
+            return "unknown", [], ""
+        age = time.monotonic() - cached.probed_at
+        return (cached.status, cached.tools, cached.error) if age <= _PROBE_TTL_SECS else ("outdated", cached.tools, "")
+    revision = _definition_revision(server)
+    cached = _probe_cache.get(server.name)
+    if cached is not None and cached.definition_revision != revision:
+        cached = None
     if cached is None:
-        return "unknown", [], ""
+        return ("probing" if _probing.get(server.name, {}).get(revision) else "unknown"), [], ""
     age = time.monotonic() - cached.probed_at
     if age <= _PROBE_TTL_SECS:
         return cached.status, cached.tools, cached.error
@@ -116,7 +149,30 @@ def _cache_probe(server: "McpServerInfo") -> None:
         tools=list(server.tools),
         error=server.error,
         probed_at=time.monotonic(),
+        definition_revision=_definition_revision(server),
     )
+
+
+def forget_probe(name: str) -> None:
+    """Remove the cached result for a server after its definition is changed or removed."""
+    _probe_cache.pop(name, None)
+
+
+def _probe_error_copy(error: str, url: str) -> str:
+    """Turn transport failures into useful, credential-free card text."""
+    from urllib.parse import urlsplit
+
+    host = urlsplit(url).hostname or "the MCP server"
+    lower = error.lower()
+    if any(marker in lower for marker in ("name or service not known", "temporary failure in name resolution", "getaddrinfo failed", "nodename nor servname")):
+        return f"Could not resolve the MCP server host {host}. Check the server URL and network DNS."
+    if "connection refused" in lower or "actively refused" in lower:
+        return f"The MCP server at {host} refused the connection. Check that it is running and reachable."
+    if "timed out" in lower or "timeout" in lower:
+        return f"The MCP server at {host} timed out before responding."
+    if "401" in lower or "unauthorized" in lower:
+        return "The MCP server requires authorization. Add the required credentials or configure its advertised OAuth sign-in."
+    return error[:200]
 
 
 @dataclass
@@ -208,6 +264,7 @@ class McpServerInfo:
             "allowed": allowed,
             "allowRevision": allow_revision,
             "allowQuestion": allow_question,
+            "definitionRevision": _definition_revision(self),
         }
         if self.url:
             d["url"] = safe_url
@@ -454,7 +511,7 @@ def list_servers() -> list[McpServerInfo]:
         }
 
     for s in servers.values():
-        status, tools, error = _get_cached(s.name)
+        status, tools, error = _get_cached(s)
         s.status = status
         s.tools = tools
         s.error = error
@@ -508,7 +565,7 @@ async def _probe_remote(server: McpServerInfo) -> McpServerInfo:
         tools = await conn.list_tools()
         if conn.error:
             server.status = "error"
-            server.error = conn.error[:200]
+            server.error = _probe_error_copy(conn.error, server.url)
         else:
             server.tools = [
                 {"name": tool.name, "description": tool.description, "inputSchema": tool.input_schema}
@@ -521,11 +578,11 @@ async def _probe_remote(server: McpServerInfo) -> McpServerInfo:
         server.status = "ok"
     except asyncio.TimeoutError:
         server.status = "error"
-        server.error = "timeout"
+        server.error = _probe_error_copy("timeout", server.url)
         logger.warning("MCP probe failed [%s]: timeout", server.name)
     except Exception as exc:
         server.status = "error"
-        server.error = str(exc)[:200]
+        server.error = _probe_error_copy(str(exc), server.url)
         logger.warning("MCP probe failed [%s]: %s", server.name, server.error)
     finally:
         if conn is not None:
@@ -557,7 +614,7 @@ async def _drain_stderr_reason(proc: Any) -> str:
     return f"server exited: {reason[:200]}"
 
 
-async def probe_server(server: McpServerInfo) -> McpServerInfo:
+async def _probe_server(server: McpServerInfo) -> McpServerInfo:
     """Probe a single MCP server by spawning it and sending initialize.
 
     Updates server.status and server.tools in place and returns it.
@@ -571,6 +628,7 @@ async def probe_server(server: McpServerInfo) -> McpServerInfo:
         server.status = "error"
         server.error = "no command"
         logger.warning("MCP probe failed [%s]: no command configured", server.name)
+        _cache_probe(server)
         return server
 
     server.status = "probing"
@@ -717,6 +775,23 @@ async def probe_server(server: McpServerInfo) -> McpServerInfo:
 
     _cache_probe(server)
     return server
+
+
+async def probe_server(server: McpServerInfo) -> McpServerInfo:
+    """Probe a server while exposing progress only for its current definition."""
+    revision = _definition_revision(server)
+    active = _probing.setdefault(server.name, {})
+    active[revision] = active.get(revision, 0) + 1
+    try:
+        return await _probe_server(server)
+    finally:
+        remaining = active.get(revision, 0) - 1
+        if remaining > 0:
+            active[revision] = remaining
+        else:
+            active.pop(revision, None)
+        if not active:
+            _probing.pop(server.name, None)
 
 
 def _server_allowed(server: McpServerInfo) -> bool:

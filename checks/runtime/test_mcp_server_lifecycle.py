@@ -161,3 +161,43 @@ async def test_masked_provider_card_round_trip_preserves_owner_secret(tmp_path, 
     ).to_dict()
     assert secret not in json.dumps(url_projection)
     provider_registry.reset_provider_registry()
+
+
+def test_probe_status_is_bound_to_current_server_definition(tmp_path, monkeypatch):
+    home = tmp_path / "gideon-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIDEON_HOME", str(home))
+
+    from gideon.integrations.mcp_discovery import (
+        McpServerInfo,
+        _cache_probe,
+        _get_cached,
+        _probe_cache,
+    )
+    from gideon.security.approval_answer import OWNER, Principal
+    from gideon.security.mcp_grants import give, revoke
+
+    _probe_cache.clear()
+    original = McpServerInfo(
+        name="definition-bound",
+        command="python",
+        args=["server.py"],
+        source="mcp.json",
+    )
+    give(original, Principal(OWNER, "mcp-definition-test-owner"))
+    original.status = "ok"
+    original.tools = [{"name": "current_tool", "description": ""}]
+    _cache_probe(original)
+    try:
+        assert _get_cached(original) == ("ok", original.tools, "")
+        changed = McpServerInfo(
+            name=original.name,
+            command="python",
+            args=["different-server.py"],
+            source="mcp.json",
+        )
+        assert _get_cached(changed) == ("unknown", [], "")
+    finally:
+        revoke(original)
+        _probe_cache.clear()
