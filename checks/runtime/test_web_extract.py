@@ -7,6 +7,8 @@ hit the network — extraction is pure over an HTML string.
 
 from __future__ import annotations
 
+import pytest
+
 from gideon.integrations.web import extract as ex
 from gideon.integrations.web.extract import (
     ExtractedDoc,
@@ -98,6 +100,48 @@ def test_fallback_title_from_title_tag(monkeypatch):
 
 def test_sanitize_fallback_without_nh3(monkeypatch):
     monkeypatch.setattr(ex, "_nh3", None)
-    out = sanitize_html("<p>ok</p><script>bad()</script>")
-    assert "bad()" not in out
-    assert "ok" in out
+    with pytest.raises(ex.SanitizerUnavailable, match="html_sanitizer_unavailable"):
+        sanitize_html("<p>ok</p><script>bad()</script>")
+
+
+def test_sanitizer_failure_withholds_markup_from_all_consumers(monkeypatch):
+    unsafe = (
+        '<article><h1>Safe title for humans</h1><p onclick="steal()">body</p>'
+        '<a href="javascript:steal()">open</a><script>steal()</script></article>'
+    )
+    if ex._nh3 is not None:
+        clean = sanitize_html(unsafe)
+        assert "onclick" not in clean
+        assert "javascript:" not in clean
+        assert "steal()" not in clean
+
+    monkeypatch.setattr(ex, "_nh3", None)
+    with pytest.raises(ex.SanitizerUnavailable, match="html_sanitizer_unavailable"):
+        sanitize_html(unsafe)
+
+    doc = extract_main_content(unsafe)
+    assert not doc.ok
+    assert doc.extractor == "withheld"
+    assert doc.error == "html_sanitizer_unavailable: nh3 is not installed"
+    assert doc.text == ""
+    assert "steal" not in doc.text
+
+    from gideon.integrations.knowledge_providers.html_dom import parse_html
+    from gideon.integrations.knowledge_providers.web_source import (
+        _extract_field,
+        apply_post_process,
+    )
+
+    with pytest.raises(ex.SanitizerUnavailable, match="html_sanitizer_unavailable"):
+        apply_post_process(
+            unsafe,
+            [{"name": "sanitize_html"}],
+            page_url="https://example.com",
+        )
+    with pytest.raises(ex.SanitizerUnavailable, match="html_sanitizer_unavailable"):
+        _extract_field(
+            parse_html(unsafe),
+            {"extractor": "html", "selector": "article"},
+            page_url="https://example.com",
+            sanitize_default=True,
+        )

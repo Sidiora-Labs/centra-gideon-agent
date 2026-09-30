@@ -39,6 +39,12 @@ class ExtractedDoc:
     title: str = ""
     char_count: int = 0
     extractor: str = ""
+    ok: bool = True
+    error: str = ""
+
+
+class SanitizerUnavailable(RuntimeError):
+    """Required HTML sanitization could not be completed safely."""
 
 
 class _MetaRefreshParser(HTMLParser):
@@ -74,20 +80,17 @@ def meta_refresh_target(html: str) -> str:
 
 
 def sanitize_html(html: str) -> str:
-    """Strip scripts/styles/dangerous markup from untrusted HTML before extraction.
-
-    nh3 (ammonia) drops ``<script>``/``<style>``/event handlers and unsafe URLs. When
-    nh3 is unavailable, a minimal regex strips the two highest-risk tags so we never
-    feed raw script into a downstream parser.
-    """
+    """Strip dangerous markup with nh3, refusing input when it cannot sanitize it."""
     if not html:
         return ""
-    if _nh3 is not None:
+    if _nh3 is None:
+        raise SanitizerUnavailable("html_sanitizer_unavailable: nh3 is not installed")
+    try:
         return _nh3.clean(html)
-    out = re.sub(
-        r"<(script|style)\b[^>]*>.*?</\1>", "", html, flags=re.IGNORECASE | re.DOTALL
-    )
-    return out
+    except Exception as exc:
+        raise SanitizerUnavailable(
+            f"html_sanitizer_failed: {type(exc).__name__}"
+        ) from exc
 
 
 def extract_main_content(html: str, *, url: str = "") -> ExtractedDoc:
@@ -100,7 +103,17 @@ def extract_main_content(html: str, *, url: str = "") -> ExtractedDoc:
     if not html:
         return ExtractedDoc(text="", title="", char_count=0, extractor="raw")
 
-    clean = sanitize_html(html)
+    try:
+        clean = sanitize_html(html)
+    except SanitizerUnavailable as exc:
+        return ExtractedDoc(
+            text="",
+            title="",
+            char_count=0,
+            extractor="withheld",
+            ok=False,
+            error=str(exc),
+        )
     title = _title(html, url)
 
     if _trafilatura is not None:

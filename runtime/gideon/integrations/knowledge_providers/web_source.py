@@ -458,7 +458,11 @@ def apply_post_process(value: str, steps: list[dict], *, page_url: str) -> str:
                 out = out[start : int(end)] if end is not None else out[start:]
             elif name == "template":
                 out = str(step.get("string") or "").replace("{value}", out)
-        except Exception:  # noqa: BLE001 — see the docstring: one field, not the poll
+        except Exception as exc:  # noqa: BLE001 — failed sanitization must not return raw input
+            from gideon.integrations.web.extract import SanitizerUnavailable
+
+            if isinstance(exc, SanitizerUnavailable):
+                raise
             logger.debug("post_process step %r failed", name, exc_info=True)
     return out
 
@@ -1057,10 +1061,19 @@ class WebSourceProvider(KnowledgeSourceProvider):
                 detector=detector,
                 cursor_state=cursor_state,
             )
-        browsed_dom = parse_html(str(getattr(browsed, "html", "") or ""))
-        detector, items = await self._detect(
-            browsed_dom, page_url=url, spec=spec, budget=budget, policy=policy
-        )
+        browsed_html = str(getattr(browsed, "html", "") or "")
+        try:
+            sanitize_markup(browsed_html)
+            browsed_dom = parse_html(browsed_html)
+            detector, items = await self._detect(
+                browsed_dom, page_url=url, spec=spec, budget=budget, policy=policy
+            )
+        except Exception as exc:  # noqa: BLE001 — fail closed on sanitizer errors
+            from gideon.integrations.web.extract import SanitizerUnavailable
+
+            if isinstance(exc, SanitizerUnavailable):
+                return _Collected(error=str(exc), detector=detector, cursor_state=cursor_state)
+            raise
         return _Collected(
             items=items,
             detector=detector,
@@ -1263,10 +1276,18 @@ class WebSourceProvider(KnowledgeSourceProvider):
             return _Collected(error=f"page returned HTTP {status}")
         html = getattr(resp, "text", "") or ""
         cursor_state = conditional_get.validators_from(getattr(resp, "headers", None))
-        dom = parse_html(html)
-        detector, items = await self._detect(
-            dom, page_url=url, spec=spec, budget=budget, policy=policy
-        )
+        try:
+            sanitize_markup(html)
+            dom = parse_html(html)
+            detector, items = await self._detect(
+                dom, page_url=url, spec=spec, budget=budget, policy=policy
+            )
+        except Exception as exc:  # noqa: BLE001 — fail closed on sanitizer errors
+            from gideon.integrations.web.extract import SanitizerUnavailable
+
+            if isinstance(exc, SanitizerUnavailable):
+                return _Collected(error=str(exc), cursor_state=cursor_state)
+            raise
         if items:
             return _Collected(items=items, detector=detector, cursor_state=cursor_state)
 
@@ -1323,10 +1344,18 @@ class WebSourceProvider(KnowledgeSourceProvider):
                 cursor_state=cursor_state,
             )
         rendered_html = str(getattr(rendered, "html", "") or "")
-        rendered_dom = parse_html(rendered_html)
-        detector, items = await self._detect(
-            rendered_dom, page_url=url, spec=spec, budget=budget, policy=policy
-        )
+        try:
+            sanitize_markup(rendered_html)
+            rendered_dom = parse_html(rendered_html)
+            detector, items = await self._detect(
+                rendered_dom, page_url=url, spec=spec, budget=budget, policy=policy
+            )
+        except Exception as exc:  # noqa: BLE001 — fail closed on sanitizer errors
+            from gideon.integrations.web.extract import SanitizerUnavailable
+
+            if isinstance(exc, SanitizerUnavailable):
+                return _Collected(error=str(exc), detector=detector, cursor_state=cursor_state)
+            raise
         if items:
             return _Collected(
                 items=items,
