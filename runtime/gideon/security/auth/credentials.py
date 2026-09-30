@@ -212,8 +212,14 @@ def totp_secret() -> str:
 
 
 def disable_totp() -> None:
-    """Turn TOTP off. The secret is left in the credential store for deliberate re-enable."""
+    """Turn TOTP off and remove its secret from persistent and process storage."""
+    from gideon.core.config.credentials import delete_credential, get_credential
+
+    delete_credential(TOTP_SECRET_KEY)
+    if get_credential(TOTP_SECRET_KEY) or os.environ.get(TOTP_SECRET_KEY):
+        raise CredentialError("could not remove the TOTP secret from the credential store")
     _set_flag("totp_enabled", False)
+    _audit("totp_disabled", "owner", "ok")
 
 
 def _set_flag(name: str, value: bool) -> None:

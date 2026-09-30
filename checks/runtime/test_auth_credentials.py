@@ -243,17 +243,49 @@ def test_totp_secret_never_lands_in_the_credential_json(monkeypatch) -> None:
     assert creds.status()["totp_enabled"] is True
 
 
-def test_disable_totp_clears_the_flag_but_keeps_the_secret(monkeypatch) -> None:
-    saved: dict[str, str] = {}
+def test_disable_totp_deletes_and_audits_seed(_isolated_home, monkeypatch) -> None:
+    from gideon.security.auth import totp
+    from gideon.security.sel import SecurityEventLog, sel
 
-    monkeypatch.setattr(
-        cred_store, "save_credential", lambda k, v: saved.update({k: v})
-    )
+    monkeypatch.setattr(cred_store._loader, "config_dir", lambda: _isolated_home)
+    monkeypatch.setenv("GIDEON_CREDENTIAL_BACKEND", "dotenv")
+    monkeypatch.setenv("GIDEON_HOME", str(_isolated_home))
+    monkeypatch.setattr(SecurityEventLog, "_instance", None)
+
+    old_seed = "JBSWY3DPEHPK3PXP"
     creds.set_password("jordan", GOOD_PASSWORD)
-    creds.set_totp_secret("JBSWY3DPEHPK3PXP")
+    monkeypatch.setenv(creds.TOTP_SECRET_KEY, old_seed)
+    creds.set_totp_secret(old_seed)
+    old_code = totp.code_now(old_seed, at=1_700_000_000)
+
     creds.disable_totp()
     assert creds.status()["totp_enabled"] is False
-    assert saved[creds.TOTP_SECRET_KEY] == "JBSWY3DPEHPK3PXP"
+    assert creds.totp_secret() == ""
+    assert cred_store.get_credential(creds.TOTP_SECRET_KEY) == ""
+    assert creds.TOTP_SECRET_KEY not in cred_store.credential_names()
+    assert creds.verify_password("jordan", GOOD_PASSWORD) is True
+    assert totp.verify_code(creds.totp_secret(), old_code, at=1_700_000_000) is False
+
+    new_seed = totp.new_secret()
+    while totp.code_now(new_seed, at=1_700_000_000) == old_code:
+        new_seed = totp.new_secret()
+    creds.set_totp_secret(new_seed)
+    monkeypatch.setenv(creds.TOTP_SECRET_KEY, new_seed)
+    assert creds.status()["totp_enabled"] is True
+    assert cred_store.get_credential(creds.TOTP_SECRET_KEY) == new_seed
+    assert totp.verify_code(creds.totp_secret(), old_code, at=1_700_000_000) is False
+    assert totp.verify_code(
+        creds.totp_secret(), totp.code_now(new_seed, at=1_700_000_000), at=1_700_000_000
+    ) is True
+
+    audit_text = sel()._path.read_text(encoding="utf-8")
+    events = [json.loads(line) for line in audit_text.splitlines()]
+    disabled = [event for event in events if event["operation"] == "totp_disabled"]
+    assert len(disabled) == 1
+    assert disabled[0]["outcome"] == "ok"
+    assert disabled[0]["source"] == "auth"
+    assert old_seed not in audit_text
+    assert new_seed not in audit_text
 
 
 def test_setting_a_new_password_preserves_the_totp_flag(monkeypatch) -> None:
