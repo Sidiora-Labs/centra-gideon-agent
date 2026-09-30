@@ -22,6 +22,43 @@ TIMEOUT_GRACE_SECS = 0.5
 _PIPE_FDS = (0, 1, 2)
 
 
+def _consume_task_exception(task: asyncio.Task[Any], label: str) -> None:
+    if task.cancelled():
+        return
+    try:
+        error = task.exception()
+    except asyncio.CancelledError:
+        return
+    if error is not None:
+        logger.error(
+            "%s stopped with an error",
+            label,
+            exc_info=(type(error), error, error.__traceback__),
+        )
+
+
+async def cancel_task_bounded(
+    task: asyncio.Task[Any] | None, *, timeout: float, label: str
+) -> None:
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    done, pending = await asyncio.wait({task}, timeout=max(0.0, timeout))
+    if pending:
+        logger.warning(
+            "%s task %s did not stop within %.1fs",
+            label,
+            task.get_name(),
+            timeout,
+        )
+        task.add_done_callback(
+            lambda completed: _consume_task_exception(completed, label)
+        )
+    elif done:
+        _consume_task_exception(task, label)
+
+
 @dataclass
 class StopReport:
     reason: str = ""

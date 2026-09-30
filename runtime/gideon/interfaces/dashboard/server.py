@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from aiohttp import web
 
 from gideon.cognition.suggestions import api_suggestions
+from gideon.core.cancellation import cancel_task_bounded
 from gideon.core.config import config_dir
 from gideon.core.layout import package_path
 from gideon.engine.hooks import ScriptHookStore, set_global_hook_store
@@ -1880,26 +1881,14 @@ async def start_dashboard(
         except Exception:
             logger.debug("app watchdog shutdown failed", exc_info=True)
 
-        async def _cancel_task(task: asyncio.Task | None, label: str) -> None:
-            if task is None:
-                return
-            if not task.done():
-                task.cancel()
-            try:
-                await asyncio.wait_for(task, timeout=5.0)
-            except asyncio.CancelledError:
-                pass
-            except asyncio.TimeoutError:
-                logger.warning("%s did not stop within 5s", label)
-            except Exception:
-                logger.debug("%s stopped with an error", label, exc_info=True)
-
         for attr, label in (
             ("_terminal_reaper", "terminal reaper"),
             ("_sel_prune_task", "SEL prune task"),
             ("_upload_sweep_task", "upload sweep task"),
         ):
-            await _cancel_task(getattr(state, attr, None), label)
+            await cancel_task_bounded(
+                getattr(state, attr, None), timeout=5.0, label=label
+            )
 
         service = getattr(state, "_durability_svc", None)
         if service is not None:
