@@ -186,7 +186,9 @@ class TestCasRetry:
         tr = FakeTransport(cas_returns=[False, False, False, False, False, False])
 
         def reload():
-            return Registry()
+            remote = Registry()
+            remote.bump("peer", manifest_sha="peer", now="t")
+            return remote
 
         report = publish_export(
             tr,
