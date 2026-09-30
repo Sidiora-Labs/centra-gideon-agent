@@ -25,6 +25,7 @@ import copy
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
@@ -635,6 +636,16 @@ class NativeAgentRuntime(AgentProvider):
         self._next_reasoning_effort: str | None = None
         self._cwd = Path(cwd) if cwd else None
         self._session_key = session_key
+        from gideon.integrations.mcp_shared import leaf_lineage
+
+        lineage = leaf_lineage(os.environ)
+        try:
+            has_leaf_run = bool(lineage.get("__wf_run_id", "").strip()) and int(
+                lineage.get("__wf_depth", "0") or "0"
+            ) > 0
+        except ValueError:
+            has_leaf_run = False
+        self._leaf_lineage = lineage if has_leaf_run else {}
         self._max_turns = max_turns
         self._tool_providers = list(tool_providers or ())
         self._max_tool_concurrency = max(1, int(max_tool_concurrency or 1))
@@ -1663,7 +1674,9 @@ class NativeAgentRuntime(AgentProvider):
 
         from gideon.engine.agents.native import builtin_tools
         from gideon.integrations import mcp_core
+        from gideon.integrations import mcp_shared
 
+        lineage = mcp_shared.bind_leaf_lineage(self._leaf_lineage)
         session = mcp_core.set_current_session_key(self._session_key)
         agent = mcp_core.set_current_agent_id(self._agent_id)
         workspace = builtin_tools.bind_tool_context(
@@ -1671,6 +1684,7 @@ class NativeAgentRuntime(AgentProvider):
         )
         scope = cancellation.bind_scope(self._cancel)
         with ExitStack() as release:
+            release.callback(mcp_shared.reset_leaf_lineage, lineage)
             release.callback(builtin_tools.reset_tool_context, workspace)
             release.callback(mcp_core.reset_current_agent_id, agent)
             release.callback(mcp_core.reset_current_session_key, session)

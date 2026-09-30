@@ -49,6 +49,13 @@ def _mapping(value) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _core_effect(title: str, kind: str, tool_input: object) -> tuple[str, dict[str, bool]]:
+    from gideon.integrations.acp.mcp_servers import core_tool_declaration
+
+    risk, tells_owner = core_tool_declaration(title, kind, tool_input)
+    return risk, {"tells_owner": True} if tells_owner else {}
+
+
 def _update(message: JsonRpcMessage) -> dict:
     return _mapping(_mapping(message.params).get("update"))
 
@@ -191,6 +198,7 @@ def extract_tool_event(
     kind = _safe_display(update.get("kind", "unknown"))
     purpose = _safe_display(_mapping(raw).get("__tool_use_purpose", ""))
     display = _safe_display(opening.display_input(call_id, raw))
+    risk_level, tool_meta = _core_effect(title, kind, raw)
     if call_id:
         tool_call_seen[call_id] = SeenToolCall(kind, title)
         if display:
@@ -201,10 +209,12 @@ def extract_tool_event(
         title=title,
         tool_kind=kind,
         tool_purpose=purpose,
+        risk_level=risk_level,
         tool_input=display,
         tool_input_obj=raw if isinstance(raw, dict) else None,
         file_change=_change_from(_first_diff(update)),
         tool_call_id=call_id,
+        tool_meta=tool_meta,
     )
 
 
@@ -328,15 +338,20 @@ def build_permission_event(
     if not display:
         raw = _ToolOpening(declaration).raw_input
         display = _formatted(raw) if raw else ""
+    else:
+        raw = display
+    risk_level, tool_meta = _core_effect(title, kind, raw)
     logger.info("Permission requested for tool: %s (req=%s)", title, request_id)
     return AcpEvent(
         kind=EVENT_PERMISSION_REQUEST,
         request_id=request_id,
         title=title,
         tool_kind=kind,
+        risk_level=risk_level,
         options=options,
         tool_input=display,
         tool_call_id=call_id,
+        tool_meta=tool_meta,
     )
 
 

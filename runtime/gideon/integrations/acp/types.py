@@ -83,6 +83,7 @@ class AcpEvent:
     title: str = ""
     tool_kind: str = ""
     tool_purpose: str = ""
+    risk_level: str = ""
     context_usage_pct: float | None = None
     stop_reason: str = ""
     request_id: str | int = ""

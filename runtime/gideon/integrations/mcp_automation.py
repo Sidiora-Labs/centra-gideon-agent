@@ -295,19 +295,18 @@ def _http_runner(payload: dict[str, Any]) -> Any:
 def _resolve_resume_target(args: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     """The `workflow.resume` target a set_*_task call asked for, or (None, "") when it did not.
 
-    `resume_run_id: "self"` resolves from the leaf lineage env (`__wf_run_id`) — the same
-    process-local seam `mcp_shared.leaf_tool_denial` reads, because a workflow stage's
-    in-process tools run inside the leaf's own subprocess. Resolved HERE, at creation, rather
-    than stored symbolically: a persisted "self" would be re-resolved at fire time by whatever
-    process the scheduler runs in, which is never the run it meant.
+    `resume_run_id: "self"` resolves from the current request's lineage binding, or a spawned
+    MCP server's inherited environment. Resolved HERE, at creation, rather than stored
+    symbolically: a persisted "self" would be re-resolved at fire time by whatever process the
+    scheduler runs in, which is never the run it meant.
     """
     raw = str(args.get("resume_run_id") or "").strip()
     if not raw:
         return None, ""
     if raw.lower() == "self":
-        import os
+        from gideon.integrations.mcp_shared import leaf_run_id
 
-        run_id = str(os.environ.get("__wf_run_id", "") or "").strip()
+        run_id = leaf_run_id()
         if not run_id:
             return None, (
                 "Error: resume_run_id='self' only works from inside a workflow run — this "

@@ -11,7 +11,6 @@ so a spawn's completions inject back into the parent session — plus ``_get`` /
 is owned by ``mcp_core`` and reused here.
 """
 
-import os
 import re
 import time
 from typing import Any
@@ -22,18 +21,16 @@ from gideon.integrations.mcp_core import _get, _post, _resolve_session_key
 
 
 def _wf_depth() -> int:
-    """This process's workflow depth, from the env `lineage_env` threads into a leaf.
+    """The active tool call's workflow depth, whether native or server-side.
 
     Read from the environment rather than passed as a tool argument on purpose: a depth the
     CALLER supplies is a depth a leaf can understate, and `depth_lint` refusing a nested batch
-    would then be advisory. The engine writes it (``engine.WF_DEPTH_KEY``); a leaf inherits it.
+    would then be advisory. The engine writes it; native calls bind that trusted lineage around
+    the invocation and spawned MCP servers read their inherited environment.
     """
-    from gideon.automation.workflows.engine_support import WF_DEPTH_KEY
+    from gideon.integrations.mcp_shared import leaf_depth
 
-    try:
-        return int(os.environ.get(WF_DEPTH_KEY, "0") or "0")
-    except ValueError:
-        return 0
+    return leaf_depth()
 
 
 def _leaf_specs(tasks: list[Any]) -> list[tuple[str, dict[str, Any]]]:

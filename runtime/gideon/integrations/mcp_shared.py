@@ -8,6 +8,8 @@ import subprocess
 import sys
 import time
 import urllib.request
+from collections.abc import Mapping
+from contextvars import ContextVar, Token
 from pathlib import Path
 from typing import Any, Callable
 
@@ -213,6 +215,76 @@ def respond(req_id: Any, result: Any, error: dict | None = None) -> None:
 
 _LINEAGE_KEYS = ("__wf_depth", "__wf_run_id", "__wf_project_id", "__wf_node_id")
 
+LEAF_READ_ONLY_KEY = "__wf_read_only"
+LEAF_KEYS = (*_LINEAGE_KEYS, LEAF_READ_ONLY_KEY)
+_BOUND_LINEAGE: ContextVar[dict[str, str] | None] = ContextVar(
+    "gideon_leaf_lineage", default=None
+)
+
+
+def leaf_lineage(source: Mapping[str, Any] | None) -> dict[str, str]:
+    """Copy workflow identity and posture fields from a trusted request environment."""
+    return {
+        key: str(source[key])
+        for key in LEAF_KEYS
+        if source is not None and key in source
+    }
+
+
+def current_leaf_lineage() -> dict[str, str]:
+    """Snapshot the active request lineage, or the inherited child-server environment."""
+    bound = _BOUND_LINEAGE.get()
+    return leaf_lineage(bound if bound is not None else os.environ)
+
+
+def bind_leaf_lineage(lineage: Mapping[str, Any] | None) -> Token:
+    """Bind one tool call's lineage; an empty mapping explicitly means non-leaf."""
+    return _BOUND_LINEAGE.set(leaf_lineage(lineage))
+
+
+def reset_leaf_lineage(token: Token) -> None:
+    _BOUND_LINEAGE.reset(token)
+
+
+def leaf_value(key: str) -> str:
+    """Return one lineage field from this call, or from a spawned server's environment."""
+    bound = _BOUND_LINEAGE.get()
+    source: Mapping[str, Any] = bound if bound is not None else os.environ
+    return str(source.get(key, "") or "")
+
+
+def leaf_depth() -> int:
+    from gideon.automation.workflows.engine_support import WF_DEPTH_KEY
+
+    try:
+        return int(leaf_value(WF_DEPTH_KEY) or "0")
+    except ValueError:
+        return 0
+
+
+def leaf_run_id() -> str:
+    return leaf_value("__wf_run_id").strip()
+
+
+def only_tells_the_owner(allowed_fields: tuple[str, ...], tool_input: object) -> bool:
+    """Whether a valid object sets only the fields declared owner-directed by its caller."""
+    args = tool_input
+    if isinstance(args, str):
+        try:
+            args = json.loads(args) if args.strip() else {}
+        except ValueError:
+            return False
+    if not isinstance(args, dict) or not allowed_fields:
+        return False
+    allowed = frozenset(allowed_fields)
+    return all(
+        key in allowed
+        for key, value in args.items()
+        if value is not None
+        and value is not False
+        and not (isinstance(value, (str, list, dict)) and not value)
+    )
+
 
 def leaf_env(parent_env: dict[str, str], lineage: dict[str, str]) -> dict[str, str]:
     """The env a compiled batch leaf runs with: the parent's, minus credentials, plus lineage.
@@ -255,7 +327,7 @@ def leaf_tool_denial(name: str) -> str:
     if denial:
         return denial
 
-    depth = _leaf_depth()
+    depth = leaf_depth()
     if depth <= 0:
         return ""
     if name in batch_compile.ORCHESTRATION_TOOLS:
@@ -263,28 +335,12 @@ def leaf_tool_denial(name: str) -> str:
             f"{name!r} is an orchestration tool and is denied to a batch leaf at every depth "
             "— a leaf that can fan out again spawns without a budget"
         )
-    if _leaf_is_read_only() and batch_compile.is_write_tool(name):
+    if leaf_value(LEAF_READ_ONLY_KEY) == "1" and batch_compile.is_write_tool(name):
         return (
             f"{name!r} is a write tool and this leaf is capability=research (read-only) "
             "— declare capability=mutating on the leaf if it must write"
         )
     return ""
-
-
-def _leaf_depth() -> int:
-    from gideon.automation.workflows.engine_support import WF_DEPTH_KEY
-
-    try:
-        return int(os.environ.get(WF_DEPTH_KEY, "0") or "0")
-    except ValueError:
-        return 0
-
-
-LEAF_READ_ONLY_KEY = "__wf_read_only"
-
-
-def _leaf_is_read_only() -> bool:
-    return os.environ.get(LEAF_READ_ONLY_KEY, "") == "1"
 
 
 def call_tool_with_logging(
