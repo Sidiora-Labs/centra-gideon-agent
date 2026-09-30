@@ -47,7 +47,8 @@ from gideon.integrations.llm.base import (
     EVENT_TOOL_CALL_UPDATE,
     EVENT_TOOL_RESULT,
 )
-from gideon.integrations.llm.events import ContextUsage
+from gideon.integrations.llm.events import AgentEvent, ContextUsage
+from gideon.integrations.channel_delivery import ChannelTaskStatus
 from gideon.integrations.llm_helpers import (
     PromptBusyExhaustedError,
     humanize_provider_error,
@@ -166,6 +167,25 @@ def is_empty_turn(
         or is_loop
     )
     return not benign
+
+
+def _channel_task_terminal_status(event: AgentEvent, *, agent_error: bool = False) -> ChannelTaskStatus:
+    """Map the real tool result event to the status mirrored to a channel."""
+    if event.kind != EVENT_TOOL_RESULT:
+        raise ValueError("channel task outcomes require a tool result event")
+    meta = event.tool_meta or {}
+    if str(meta.get("unasked_outcome") or "") == "denied":
+        return "rejected"
+    if meta.get("ok") is False or agent_error:
+        return "failed"
+    return "complete"
+
+
+def _unfinished_channel_task_status(event: AgentEvent) -> ChannelTaskStatus:
+    """Classify work still open when the agent turn ends."""
+    if event.kind != EVENT_COMPLETE:
+        raise ValueError("unfinished channel tasks require a complete event")
+    return "cancelled" if is_cancelled_stop(event.stop_reason) else "failed"
 
 
 def learning_decision_for_turn(session, user_message: str, tool_calls: int, cfg=None):
@@ -2180,12 +2200,32 @@ async def run_chat(
     _acquired = False
     _mirror_stream_ts: str = ""
     _mirror_chan: str | None = ""
-    _mirror_active_task = ""
-    _mirror_active_task_title = ""
+    _mirror_tasks: dict[str, tuple[str, str]] = {}
     _mirror_thread: str | None = ""
     _mirror_task_counter = 0
     _mirror_delivery: Any = None
     _turn_tool_call_count = 0
+
+    async def _update_mirrored_task(
+        call_id: str, status: ChannelTaskStatus
+    ) -> None:
+        task = _mirror_tasks.get(call_id)
+        if task is None or not _mirror_stream_ts or not _mirror_delivery or not _mirror_chan:
+            return
+        task_id, title = task
+        try:
+            await _mirror_delivery.append_stream_task(
+                _mirror_chan,
+                _mirror_stream_ts,
+                task_id,
+                title,
+                status,
+            )
+        except Exception:
+            logger.debug("Mirror tool outcome update failed", exc_info=True)
+        if status != "in_progress":
+            _mirror_tasks.pop(call_id, None)
+
     try:
         provider_agent: str | None = None
         memory_store: str | None = None
@@ -2914,25 +2954,20 @@ async def run_chat(
                 )
                 if _mirror_stream_ts and _mirror_delivery:
                     try:
-                        if _mirror_active_task:
-                            await _mirror_delivery.append_stream_task(
-                                _mirror_chan,
-                                _mirror_stream_ts,
-                                _mirror_active_task,
-                                _mirror_active_task_title,
-                                "complete",
-                            )
                         _mirror_task_counter += 1
-                        _mirror_active_task = f"tool_{_mirror_task_counter}"
+                        _mirror_task_id = f"tool_{_mirror_task_counter}"
                         _task_title = event.tool_purpose or _title
                         _task_title, _ = redact_exfiltration_urls(_task_title)
                         _task_title, _ = redact_credentials(_task_title)
                         _task_title = _task_title[:75]
-                        _mirror_active_task_title = _task_title
+                        _mirror_call_id = str(
+                            event.tool_call_id or event.request_id or _mirror_task_id
+                        )
+                        _mirror_tasks[_mirror_call_id] = (_mirror_task_id, _task_title)
                         await _mirror_delivery.append_stream_task(
                             _mirror_chan,
                             _mirror_stream_ts,
-                            _mirror_active_task,
+                            _mirror_task_id,
                             _task_title,
                             "in_progress",
                         )
@@ -3013,6 +3048,12 @@ async def run_chat(
                 _agent_error = _payload.get("agent_error")
                 unasked_outcome = str(_tmeta.get("unasked_outcome") or "")
                 decided_by = str(_tmeta.get("decided_by") or "")
+                _mirror_call_id = str(event.tool_call_id or event.request_id or "")
+                if _mirror_call_id:
+                    _mirror_status = _channel_task_terminal_status(
+                        event, agent_error=bool(_agent_error)
+                    )
+                    await _update_mirrored_task(_mirror_call_id, _mirror_status)
                 if (
                     unasked_outcome in {"denied", "auto_approved", "invoked"}
                     and decided_by
@@ -3327,6 +3368,13 @@ async def run_chat(
                         )
                     except ValueError as e:
                         await client.reject_tool(event.request_id)
+                        _mirror_call_id = str(
+                            event.tool_call_id or event.request_id or ""
+                        )
+                        if _mirror_call_id:
+                            await _update_mirrored_task(
+                                _mirror_call_id, "rejected"
+                            )
                         session.append(
                             "tool", f"{event.title} (invalid: {e})", "msg msg-tool"
                         )
@@ -3357,6 +3405,13 @@ async def run_chat(
                         )
                     except Exception as hook_exc:
                         await client.reject_tool(event.request_id)
+                        _mirror_call_id = str(
+                            event.tool_call_id or event.request_id or ""
+                        )
+                        if _mirror_call_id:
+                            await _update_mirrored_task(
+                                _mirror_call_id, "failed"
+                            )
                         session.append(
                             "tool", f"{event.title} (hook error)", "msg msg-tool"
                         )
@@ -3373,6 +3428,13 @@ async def run_chat(
                         continue
                     if any(r.startswith("BLOCKED:") for r in pre_hook_results):
                         await client.reject_tool(event.request_id)
+                        _mirror_call_id = str(
+                            event.tool_call_id or event.request_id or ""
+                        )
+                        if _mirror_call_id:
+                            await _update_mirrored_task(
+                                _mirror_call_id, "rejected"
+                            )
                         _blk = next(
                             (r for r in pre_hook_results if r.startswith("BLOCKED:")),
                             "",
@@ -3738,10 +3800,21 @@ async def run_chat(
                         )
                         approval_answered = True
                 except asyncio.TimeoutError:
-                    outcome = "rejected"
+                    outcome = "expired"
                     state.end_approval(
                         f"{session.key}:{event.request_id}", outcome="expired"
                     )
+                except asyncio.CancelledError:
+                    outcome = "cancelled"
+                    state.end_approval(
+                        f"{session.key}:{event.request_id}", outcome="cancelled"
+                    )
+                    _mirror_call_id = str(
+                        event.tool_call_id or event.request_id or ""
+                    )
+                    if _mirror_call_id:
+                        await _update_mirrored_task(_mirror_call_id, "cancelled")
+                    raise
                 finally:
                     session._approval_futures.pop(str(event.request_id), None)
                     if mirrored_item:
@@ -3760,6 +3833,17 @@ async def run_chat(
                 if outcome == "approved_trust_reads":
                     session._trust_reads = True
                     outcome = "approved"
+                if outcome != "approved":
+                    _mirror_call_id = str(
+                        event.tool_call_id or event.request_id or ""
+                    )
+                    _mirror_status = (
+                        outcome if outcome in {"expired", "cancelled"} else "rejected"
+                    )
+                    if _mirror_call_id:
+                        await _update_mirrored_task(
+                            _mirror_call_id, _mirror_status
+                        )
                 if outcome == "approved":
                     try:
                         validated_tool = _validate_tool_name(
@@ -4440,13 +4524,12 @@ async def run_chat(
             logger.debug("file-change flush failed", exc_info=True)
         if _mirror_stream_ts and _mirror_delivery and _mirror_chan:
             try:
-                if _mirror_active_task:
-                    await _mirror_delivery.append_stream_task(
-                        _mirror_chan,
-                        _mirror_stream_ts,
-                        _mirror_active_task,
-                        _mirror_active_task_title,
-                        "complete",
+                _unfinished_status = _unfinished_channel_task_status(
+                    AgentEvent(kind=EVENT_COMPLETE, stop_reason=_stop_reason)
+                )
+                for _mirror_call_id in tuple(_mirror_tasks):
+                    await _update_mirrored_task(
+                        _mirror_call_id, _unfinished_status
                     )
             except Exception:
                 logger.debug("Task append cleanup failed", exc_info=True)

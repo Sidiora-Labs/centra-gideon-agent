@@ -32,10 +32,12 @@ import logging
 from typing import Any
 
 from gideon.sdk.channel import (
+    is_allowed_sender,
     is_tracked_channel,
     redact_credentials,
     redact_exfiltration_urls,
 )
+from gideon.security.approval_answer import on_channel
 
 from discord_desk.api import (
     BUTTON_STYLE_DANGER,
@@ -52,9 +54,6 @@ logger = logging.getLogger(__name__)
 # Discord's per-channel message bucket is roughly 5 requests / 5 seconds, and edits
 # spend from the same budget as the sends around them, so 1.1s leaves headroom.
 _EDIT_MIN_INTERVAL = 1.1
-# Approval prompts wait this long for the owner's button press before defaulting to
-# rejected (mirrors Slack + Telegram's 2h ceiling).
-_APPROVAL_TIMEOUT = 7200
 # custom_id prefixes. Discord caps custom_id at 100 chars; a request id is short.
 _APPROVE = "approve"
 _DENY = "deny"
@@ -97,24 +96,87 @@ def _safe(text: str) -> str:
 class _StreamState:
     """Bookkeeping for one edit-streamed message."""
 
-    __slots__ = ("channel_id", "message_id", "last_edit", "last_text", "pending_text")
+    __slots__ = (
+        "channel_id", "message_id", "last_edit", "last_text", "pending_text",
+        "base_text", "task_lines",
+    )
 
-    def __init__(self, channel_id: str, message_id: str) -> None:
+    def __init__(self, channel_id: str, message_id: str, initial_text: str) -> None:
         self.channel_id = channel_id
         self.message_id = message_id
         self.last_edit = 0.0
-        self.last_text = ""
+        self.last_text = initial_text
         self.pending_text = ""
+        self.base_text = initial_text
+        self.task_lines: dict[str, tuple[str, str]] = {}
 
 
 class _PendingApproval:
-    __slots__ = ("future", "channel_id", "message_id", "request_id")
+    __slots__ = ("future", "channel_id", "message_id", "request_id", "answerer")
 
     def __init__(self, request_id: str, channel_id: str, message_id: str) -> None:
         self.future: asyncio.Future = asyncio.get_event_loop().create_future()
         self.channel_id = channel_id
         self.message_id = message_id
         self.request_id = request_id
+        self.answerer = None
+
+
+def _apply_verified_interaction(
+    interaction: dict[str, Any], pending: _PendingApproval | None, owner_id: str
+) -> bool:
+    """Apply only a correctly bound, allowlisted owner decision; performs no I/O."""
+    if int(interaction.get("type", 0) or 0) != INTERACTION_TYPE_COMPONENT:
+        return False
+    custom_id = str((interaction.get("data") or {}).get("custom_id", ""))
+    action, _, request_id = custom_id.partition(":")
+    if action not in (_APPROVE, _DENY) or not request_id:
+        return False
+    actor = (interaction.get("member") or {}).get("user") or interaction.get("user") or {}
+    actor_id = str(actor.get("id", ""))
+    message = interaction.get("message") or {}
+    channel_id = str(interaction.get("channel_id", ""))
+    if pending is None or pending.future.done() or (
+        actor.get("bot")
+        or not owner_id
+        or actor_id != owner_id
+        or not is_allowed_sender("discord", actor_id)
+        or channel_id != pending.channel_id
+        or str(message.get("id", "")) != pending.message_id
+        or request_id != pending.request_id
+    ):
+        return False
+    pending.answerer = on_channel("discord", actor_id)
+    pending.future.set_result("approved" if action == _APPROVE else "rejected")
+    return True
+
+
+def _approval_ending(outcome: str) -> str:
+    return {
+        "approved": "✅ Approved",
+        "rejected": "🚫 Rejected",
+        "expired": "⌛ Expired",
+        "cancelled": "↩️ Cancelled",
+        "failed": "⚠️ Could not confirm",
+    }.get(str(outcome), "🚫 Rejected")
+
+
+def _render_stream_tasks(
+    base_text: str, task_lines: dict[str, tuple[str, str]]
+) -> str:
+    marks = {
+        "in_progress": "⏳",
+        "complete": "✅",
+        "failed": "❌",
+        "rejected": "🚫",
+        "expired": "⌛",
+        "cancelled": "↩️",
+    }
+    lines = [
+        f"{marks.get(status, '⏳')} {title}"
+        for title, status in task_lines.values()
+    ]
+    return "\n".join([base_text, *lines]).strip()
 
 
 class DiscordDeskDelivery:
@@ -347,7 +409,7 @@ class DiscordDeskDelivery:
         mid = str(msg.get("id", ""))
         if not mid:
             return ""
-        st = _StreamState(channel, mid)
+        st = _StreamState(channel, mid, text)
         st.last_edit = self._now()
         st.last_text = text
         self._streams[f"{channel}:{mid}"] = st
@@ -365,8 +427,8 @@ class DiscordDeskDelivery:
         st = self._streams.get(f"{channel}:{stream_ts}")
         if st is None:
             return
-        mark = "✅" if status in ("complete", "completed", "done") else "⏳"
-        st.pending_text = f"{st.last_text}\n{mark} {title}".strip()
+        st.task_lines[task_id] = (title, status)
+        st.pending_text = _render_stream_tasks(st.base_text, st.task_lines)
         await self._maybe_edit(st, force=False)
 
     async def stop_stream(self, channel: str, stream_ts: str) -> None:
@@ -426,22 +488,35 @@ class DiscordDeskDelivery:
         self._pending[f"{channel_id}:{message_id}"] = pending
         # Index by request_id too so resolve_interaction can find it from custom_id.
         self._pending[f"req:{request_id}"] = pending
+        shared_timeout = False
         if on_prompted:
             try:
-                on_prompted(pending)
+                shared_timeout = bool(on_prompted(pending))
             except Exception:
                 logger.debug("discord: on_prompted hook failed", exc_info=True)
 
+        from gideon.security.approval_grants import approval_window_secs
+
+        outcome = "cancelled"
+        cancelled = False
         try:
-            outcome = await asyncio.wait_for(pending.future, timeout=_APPROVAL_TIMEOUT)
+            if shared_timeout:
+                outcome = await pending.future
+            else:
+                outcome = await asyncio.wait_for(
+                    pending.future, timeout=approval_window_secs()
+                )
         except asyncio.TimeoutError:
-            outcome = "rejected"
+            outcome = "expired"
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            cancelled = True
         finally:
             self._pending.pop(f"{channel_id}:{message_id}", None)
             self._pending.pop(f"req:{request_id}", None)
 
         approved = outcome == "approved"
-        status = "✅ Approved" if approved else "🚫 Rejected"
+        status = _approval_ending(str(outcome))
         try:
             # components=[] strips the buttons: a decided request must not leave a
             # clickable Approve behind.
@@ -450,6 +525,8 @@ class DiscordDeskDelivery:
             )
         except Exception:
             logger.debug("discord: approval finalize edit failed", exc_info=True)
+        if cancelled:
+            raise asyncio.CancelledError
         return approved
 
     async def resolve_interaction(self, interaction: dict[str, Any]) -> None:
@@ -464,8 +541,7 @@ class DiscordDeskDelivery:
         action, _, request_id = custom_id.partition(":")
         if action in (_APPROVE, _DENY) and request_id:
             pending = self._pending.get(f"req:{request_id}")
-            if pending is not None and not pending.future.done():
-                pending.future.set_result("approved" if action == _APPROVE else "rejected")
+            _apply_verified_interaction(interaction, pending, self._owner_id)
         iid = str(interaction.get("id", ""))
         itoken = str(interaction.get("token", ""))
         if iid and itoken:

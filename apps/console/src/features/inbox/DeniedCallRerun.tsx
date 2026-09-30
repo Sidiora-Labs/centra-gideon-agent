@@ -158,6 +158,7 @@ export function DeniedCallRerun({ item, onChanged, navigate }: Props) {
 
   const retryableStep = isRetryableWorkflowStep(run, nodeId)
   const unresolved = item.status === 'pending' || item.status === 'seen'
+  const expired = refs.reason === 'expired'
 
   if (!refs.auto_denied) return null
   return (
@@ -165,7 +166,7 @@ export function DeniedCallRerun({ item, onChanged, navigate }: Props) {
       <div className="flex items-start gap-s">
         <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" aria-hidden="true" />
         <div className="min-w-0">
-          <h3 data-type="label-m" className="text-on-surface">This call ended without an owner answer</h3>
+          <h3 data-type="label-m" className="text-on-surface">{expired ? 'Approval expired without an owner answer' : 'This call was blocked while Gideon was unattended'}</h3>
           <p data-type="body-s" className="mt-1 text-on-surface-var">Re-entry uses the recorded origin. The server verifies the live owner, trigger, run, and step before acting.</p>
         </div>
       </div>

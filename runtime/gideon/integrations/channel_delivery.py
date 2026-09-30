@@ -6,12 +6,16 @@ from dataclasses import dataclass, is_dataclass, replace
 import logging
 from copy import copy
 from threading import RLock
-from typing import Any, Callable, Protocol, runtime_checkable
+from typing import Any, Callable, Literal, Protocol, runtime_checkable
 
 from gideon.integrations.outbound_queue import QueuedDelivery
 from gideon.security.security import redact_for_display, redact_values_for_display
 
 logger = logging.getLogger(__name__)
+
+ChannelTaskStatus = Literal[
+    "in_progress", "complete", "failed", "rejected", "expired", "cancelled"
+]
 
 
 @runtime_checkable
@@ -141,11 +145,11 @@ class ChannelDelivery(Protocol):
         stream_ts: str,
         task_id: str,
         title: str,
-        status: str,
+        status: ChannelTaskStatus,
     ) -> None:
         """Append/update a progress item on an in-flight stream started by
-        start_stream. ``status`` is a generic progress state ("in_progress" /
-        "complete"). Channels without task-animation may no-op."""
+        start_stream. ``status`` is one of the typed progress and terminal states.
+        Channels without task-animation may no-op."""
         ...
 
     async def stop_stream(self, channel: str, stream_ts: str) -> None:
@@ -159,7 +163,7 @@ class ChannelDelivery(Protocol):
         source: str,
         parent_session_key: str = "",
         sessions: "object | None" = None,
-        on_prompted: "Callable[[object], None] | None" = None,
+        on_prompted: "Callable[[object], bool | None] | None" = None,
     ) -> "bool | None":
         """Prompt the owner to approve a tool call on this channel.
 
@@ -168,7 +172,9 @@ class ChannelDelivery(Protocol):
         dashboard. Implementations own the channel-specific approval UI + the wait
         for the owner's response, and should coordinate with the dashboard via the
         ``on_prompted`` hook (invoked with the pending record) when provided by the
-        caller. ``sessions`` is the live ConversationDirectory for cross-surface reconcile.
+        caller. It returns true when the shared dashboard approval controller owns the
+        timeout; otherwise this delivery uses the configured approval window.
+        ``sessions`` is the live ConversationDirectory for cross-surface reconcile.
 
         **The approval brief (additive meta).** ``event.tool_meta`` carries the core-
         composed brief under

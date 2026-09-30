@@ -422,20 +422,33 @@ class ApprovalExchange:
             asked_by=asker.label,
         )
 
-    def on_prompted(self, pending: Any) -> None:
+    def on_prompted(self, pending: Any) -> bool:
         self.channel_pending = pending
         if not self.flow.coordinator.dashboard_state:
-            return
+            return False
         self.dashboard_future = asyncio.ensure_future(self.dashboard())
 
         def relay(completed: asyncio.Future) -> None:
-            if completed.cancelled() or completed.exception():
+            if completed.cancelled():
+                if not pending.future.done():
+                    pending.future.set_result("cancelled")
                 return
-            decision = "approved" if completed.result() else "rejected"
+            if completed.exception():
+                if not pending.future.done():
+                    pending.future.set_result("failed")
+                return
+            state = self.flow.coordinator.dashboard_state
+            outcome = state.ended_as(self.request_id) if state is not None else ""
+            decision = (
+                outcome
+                if outcome in {"expired", "cancelled"}
+                else "approved" if completed.result() else "rejected"
+            )
             if not pending.future.done():
                 pending.future.set_result(decision)
 
         self.dashboard_future.add_done_callback(relay)
+        return True
 
     def finish_channel_decision(self, decision: bool | None) -> bool | None:
         if decision is None:

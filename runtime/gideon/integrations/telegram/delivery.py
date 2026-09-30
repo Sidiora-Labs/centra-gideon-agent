@@ -23,6 +23,16 @@ def safe_text(text):
     return redact_credentials(redact_exfiltration_urls(str(text))[0])[0]
 
 
+def _approval_ending(outcome: str) -> str:
+    return {
+        "approved": "✅ Approved",
+        "rejected": "🚫 Rejected",
+        "expired": "⌛ Expired",
+        "cancelled": "↩️ Cancelled",
+        "failed": "⚠️ Could not confirm",
+    }.get(str(outcome), "🚫 Rejected")
+
+
 def thread_options(thread):
     pieces = str(thread).split(":")
     if len(pieces) == 4 and pieces[0] == "telegram":
@@ -550,15 +560,34 @@ class TelegramDelivery:
             chat_id=owner, message_id=int(msg["message_id"]), owner=owner
         )
         self.pending[key] = pending
-        if on_prompted:
-            on_prompted(pending)
+        shared_timeout = bool(on_prompted(pending)) if on_prompted else False
+        outcome = "cancelled"
         try:
-            result = await asyncio.wait_for(pending.future, 7200)
-            return result == "approved"
+            if shared_timeout:
+                outcome = await pending.future
+            else:
+                from gideon.security.approval_grants import approval_window_secs
+
+                outcome = await asyncio.wait_for(
+                    pending.future, timeout=approval_window_secs()
+                )
         except asyncio.TimeoutError:
-            return False
+            outcome = "expired"
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
         finally:
             self.pending.pop(key, None)
+            ending = _approval_ending(str(outcome))
+            try:
+                await self.api.call(
+                    "editMessageText",
+                    chat_id=owner,
+                    message_id=pending.message_id,
+                    text=f"{source}: {title}\n{ending}",
+                )
+            except TelegramError:
+                pass
             try:
                 await self.api.call(
                     "editMessageReplyMarkup",
@@ -568,6 +597,7 @@ class TelegramDelivery:
                 )
             except TelegramError:
                 pass
+        return outcome == "approved"
 
     def authorize_callback(self, cq):
         action, _, key = str(cq.get("data", "")).partition(":")
