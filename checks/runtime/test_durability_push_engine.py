@@ -25,7 +25,8 @@ from gideon.operations.durability.outbox import (
     entry_id,
 )
 from gideon.operations.durability.push_engine import publish_export
-from gideon.operations.durability.registry import Registry, shard_prefix
+from gideon.operations.durability.registry import REGISTRY_KEY, Registry, shard_prefix
+from gideon.operations.durability.sync_cycle import read_registry
 
 
 class FakeTransport(SyncTransportProvider):
@@ -46,10 +47,21 @@ class FakeTransport(SyncTransportProvider):
         return PushResult(pushed=0, outcome=self._push_outcome, detail="simulated")
 
     def list_remote(self, prefix: str = ""):
-        return [RemoteRef(key=k) for k in self.objects if k.startswith(prefix)]
+        keys = list(self.objects)
+        if self.registry_bytes is not None:
+            keys.append(REGISTRY_KEY)
+        return [RemoteRef(key=k) for k in keys if k.startswith(prefix)]
 
-    def pull(self, refs):  # pragma: no cover
-        return [SyncObject(key=r.key, data=self.objects[r.key]) for r in refs]
+    def pull(self, refs):
+        return [
+            SyncObject(
+                key=r.key,
+                data=self.registry_bytes if r.key == REGISTRY_KEY else self.objects[r.key],
+            )
+            for r in refs
+            if r.key == REGISTRY_KEY and self.registry_bytes is not None
+            or r.key in self.objects
+        ]
 
     def cas_registry(self, expected_sha, data):
         self.cas_calls.append(expected_sha)
@@ -186,3 +198,46 @@ class TestCasRetry:
         )
         assert not report.registry_committed
         assert report.cas_attempts == 5
+
+
+def test_unlanded_registry_write_retries_as_create(tmp_path):
+    tr = FakeTransport(cas_returns=[False, True])
+    export = _export_dir(tmp_path)
+    report = publish_export(
+        tr,
+        export,
+        Registry(),
+        Outbox(tmp_path / "s"),
+        self_id="me",
+        manifest_sha="s",
+        now="t",
+        reload_registry=lambda: read_registry(tr),
+    )
+
+    assert report.registry_committed and report.cas_attempts == 2
+    assert tr.cas_calls == [None, None]
+    assert Registry.loads(tr.registry_bytes).seq_of("me") == report.seq == 1
+    assert len([key for key in tr.objects if key.startswith(shard_prefix("me", 1))]) == 2
+
+    class LandedWithoutAcknowledgement(FakeTransport):
+        def cas_registry(self, expected_sha, data):
+            self.cas_calls.append(expected_sha)
+            self.registry_bytes = data
+            return False
+
+    ambiguous = LandedWithoutAcknowledgement()
+    ambiguous_report = publish_export(
+        ambiguous,
+        export,
+        Registry(),
+        Outbox(tmp_path / "ambiguous"),
+        self_id="me",
+        manifest_sha="s",
+        now="t",
+        reload_registry=lambda: read_registry(ambiguous),
+    )
+
+    assert ambiguous_report.registry_committed
+    assert ambiguous_report.cas_attempts == 1
+    assert ambiguous.cas_calls == [None]
+    assert Registry.loads(ambiguous.registry_bytes).seq_of("me") == 1

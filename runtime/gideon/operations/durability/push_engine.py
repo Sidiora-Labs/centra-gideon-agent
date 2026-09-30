@@ -8,7 +8,7 @@ it publishes that export as this machine's next seq and announces it in the shar
     outbox.enqueue(target, seq, …)                              # 6c-ii-b — durable obligation
     drain: transport.push(objects) → outbox.record_outcome(...) # never-drop outcomes
     CAS:   transport.cas_registry(expected_sha, registry.to_bytes())
-             on a lost race → re-pull the registry, re-bump on top, retry (idempotent)
+    on a lost race → re-pull the registry and retry without changing the published seq
 
 Every step composes a piece already shipped and tested in isolation; this module owns only the
 orchestration and the CAS-retry loop. Insert-only object keys (seq-numbered, never rewritten)
@@ -128,24 +128,49 @@ def publish_export(
 def _commit_registry(
     transport, registry, self_id, manifest_sha, now, reload_registry, report
 ) -> bool:
-    """CAS-update the shared registry with our new seq, re-pulling + re-bumping on a lost race.
-
-    Insert-only object writes are idempotent, so a retry is free: on a CAS miss we re-pull the
-    remote registry, re-apply our bump on top of the peers' latest, and try again. Bounded so a
-    pathological race can't spin forever — a give-up leaves the objects pushed (a peer can still
-    discover them once someone's registry write wins) and the outbox entry delivered.
-    """
+    """CAS-update the shared registry without announcing an uncertain shard sequence twice."""
     expected: str | None = None
-    for attempt in range(1, _MAX_CAS_ATTEMPTS + 1):
-        report.cas_attempts = attempt
+    create_retry_used = False
+    while report.cas_attempts < _MAX_CAS_ATTEMPTS:
+        report.cas_attempts += 1
         if transport.cas_registry(expected, registry.to_bytes()):
             return True
         if reload_registry is None:
             report.detail = "registry CAS lost and no reloader provided"
             return False
         remote = reload_registry()
+
+        # A transport may lose the acknowledgement after the conditional write landed.
+        # Read-back is authoritative: recognize our exact announcement and never push it
+        # again. If this machine advanced past our seq, its shard ownership is ambiguous;
+        # stop rather than risk announcing a second shard set.
+        remote_self = remote.machines.get(self_id)
+        if remote_self is not None and remote_self.seq >= report.seq:
+            if remote_self.seq == report.seq and remote_self.manifest_sha == manifest_sha:
+                return True
+            report.detail = "registry read-back advanced this machine; refusing a duplicate shard announcement"
+            return False
+
+        # Some providers can reject an update-style write against a registry that is still
+        # absent. Only a read-back with no registry state proves this create is safe to
+        # retry, and it gets exactly one retry with the absent-object precondition.
+        if not remote.machines and not remote.ancestors:
+            if create_retry_used:
+                report.detail = "registry create retry remained unlanded"
+                return False
+            create_retry_used = True
+            expected = None
+            continue
+
         merged = Registry.loads(remote.to_bytes())
-        merged.bump(self_id, manifest_sha=manifest_sha, now=now)
+        # The shard objects already use report.seq. Preserve that exact sequence while
+        # incorporating the latest peers; bumping from a stale remote could announce a
+        # different prefix and make the published shard set undiscoverable.
+        local_self = registry.machines.get(self_id)
+        if local_self is None or local_self.seq != report.seq:
+            report.detail = "local registry sequence no longer matches the published shard set"
+            return False
+        merged.machines[self_id] = local_self
         for mid, e in registry.machines.items():
             if mid != self_id and e.seq > merged.seq_of(mid):
                 merged.machines[mid] = e
@@ -154,7 +179,7 @@ def _commit_registry(
         registry.machines = merged.machines
         registry.ancestors = merged.ancestors
         expected = remote.sha()
-    report.detail = f"registry CAS lost after {_MAX_CAS_ATTEMPTS} attempts"
+    report.detail = f"registry CAS lost after {report.cas_attempts} attempts"
     return False
 
 
