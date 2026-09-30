@@ -459,6 +459,10 @@ class CodeKind(LoopKindStrategy):
         if loop.attended:
             lines += [
                 "",
+                "**Tool approvals (attended):** approval-required actions pause until "
+                "the owner approves them through Gideon's existing loop/chat approval "
+                "surface. Do not retry by changing tools or approval settings.",
+                "",
                 "**Clarification allowed (attended):** if the task is genuinely ambiguous "
                 "in a way that would change your direction, you MAY write "
                 '{"question", "why"} to questions.json in the loop files dir and end '
@@ -467,6 +471,10 @@ class CodeKind(LoopKindStrategy):
             ]
         else:
             lines += [
+                "",
+                "**Tool approvals (unattended):** no owner is available to answer "
+                "approval prompts. Stay within the existing grants and operator "
+                "ceilings; approval-required actions fail closed.",
                 "",
                 "**Unattended:** do NOT pause to ask the user. Investigate ambiguities "
                 "yourself, pick the best-reasoned answer, record the assumption in your "

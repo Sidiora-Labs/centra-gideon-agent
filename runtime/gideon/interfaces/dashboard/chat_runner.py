@@ -3389,7 +3389,9 @@ async def run_chat(
                 yolo_active = yolo_active and approval_grants.stands(
                     approval_grants.YOLO, caller=session_key, subject=event.title
                 )
-                posture = profile_for_session(session_key)
+                posture = profile_for_session(
+                    session_key, unattended=_unattended_turn
+                )
                 tool_denial = tool_grant_denial(
                     event.title, posture.tool_grants, posture.tool_allowlist
                 )

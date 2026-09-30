@@ -236,6 +236,20 @@ class DashboardApprovalState:
         for prefix in (f"loop-{loop_id}", f"loop-plan-{loop_id}", f"code-plan-{loop_id}"):
             self.cancel_approvals(session_prefix=prefix, reason=reason)
 
+    def rearm_loop_approval_posture(self, loop_id: str, *, attended: bool) -> int:
+        """Withdraw pending owner prompts when a loop is re-armed unattended.
+
+        A prompt created by an earlier attended run must not remain actionable after
+        the persisted loop mode changes. The normal dashboard approval path remains
+        the only way to answer prompts for currently attended workers.
+        """
+        if attended:
+            return 0
+        return self.cancel_approvals(
+            session_prefix=f"loop-{loop_id}",
+            reason="the loop was re-armed without an attending owner",
+        )
+
     def cancel_subagent_approvals(self, agent_id: str, *, reason: str) -> int:
         prefixes = (f"spawn:{agent_id}", f"subagent:{agent_id}:")
         ids = [
@@ -250,13 +264,51 @@ class DashboardApprovalState:
         entry = self._pending_approvals.get(approval_id)
         if entry is None:
             return ""
+        checked_entry, loop_reason = self._current_attended_loop_approval_entry(entry)
+        if loop_reason:
+            entry["owner_reason"] = loop_reason
+            self.cancel_approval(approval_id, reason=loop_reason)
+            return loop_reason
         from gideon.interfaces.dashboard.approval_owner import owner_ended
 
-        reason = owner_ended(entry, state=self)
+        reason = owner_ended(checked_entry, state=self)
         if reason:
             entry["owner_reason"] = reason
             self.cancel_approval(approval_id, reason=reason)
         return reason
+
+    @staticmethod
+    def _current_attended_loop_approval_entry(
+        entry: dict[str, Any],
+    ) -> tuple[dict[str, Any], str]:
+        """Map a main or parallel loop-worker approval to its persisted owner row.
+
+        The owner-ending check understands the main ``loop-<id>`` key. Parallel
+        workers append a task id, so resolve only that exact current-home worker
+        prefix, require its persisted attended mode, and check loop liveness against
+        the main key. Missing or unreadable rows fail closed.
+        """
+        session = str(entry.get("session") or "").removeprefix("dashboard:")
+        if not session.startswith("loop-") or session.startswith(
+            ("loop-plan-", "code-plan-")
+        ):
+            return entry, ""
+        try:
+            from gideon.automation.loop import manager, store
+
+            for loop in store.list_all():
+                main_key = manager.session_key(loop.id)
+                if session != main_key and not session.startswith(f"{main_key}-"):
+                    continue
+                if getattr(loop, "attended", None) is not True:
+                    return {}, "the loop is no longer attended by its owner"
+                checked = dict(entry)
+                checked["session"] = main_key
+                checked["request_id"] = ""
+                return checked, ""
+        except Exception:
+            return {}, "the loop approval owner could not be verified"
+        return {}, "the loop approval owner could not be verified"
 
     def approval_asked_by(self, approval_id: str, session: Any = None) -> str:
         pending = self._pending_approvals.get(approval_id)

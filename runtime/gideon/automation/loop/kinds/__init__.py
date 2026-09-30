@@ -47,6 +47,31 @@ class CycleContext:
     complete: Callable[[str, str], Awaitable[None]]
 
 
+@dataclass(frozen=True)
+class WorkerApprovalPosture:
+    """Approval-related worker state derived only from the current loop mode."""
+
+    trust: bool
+    unattended: bool
+    acp_mode: str
+    approval_policy: str
+
+
+def worker_approval_posture(loop: Loop) -> WorkerApprovalPosture:
+    """Return the one approval posture shared by main and parallel loop workers.
+
+    Unattended workers retain their existing bounded trust path; an attended worker
+    receives no loop-granted consent and uses Gideon's ordinary human approval flow.
+    """
+    unattended = getattr(loop, "attended", False) is not True
+    return WorkerApprovalPosture(
+        trust=unattended,
+        unattended=unattended,
+        acp_mode="bypassPermissions" if unattended else "",
+        approval_policy="auto" if unattended else "",
+    )
+
+
 @runtime_checkable
 class LoopKindStrategy(Protocol):
     """The behavior contract for one loop kind. The engine calls these; the

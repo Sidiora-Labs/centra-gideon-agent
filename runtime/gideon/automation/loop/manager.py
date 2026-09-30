@@ -138,6 +138,25 @@ def write_brief(loop: Loop) -> None:
     loop_files.write_brief(loop.id, body)
 
 
+def _arm_worker_approval_posture(state, session, loop: Loop) -> None:
+    """Reset reusable worker approval state from the loop's current persisted mode."""
+    posture = kinds.worker_approval_posture(loop)
+    session._trust = posture.trust
+    session._trust_reads = False
+    session._agent_floor_seeded = False
+    session._unattended = posture.unattended
+    session.acp_mode = posture.acp_mode
+    try:
+        state.sessions.set_approval_policy(session.key, posture.approval_policy)
+    except Exception:
+        logger.warning(
+            "loop: failed to set approval posture for %s", session.key, exc_info=True
+        )
+    refresh_approvals = getattr(state, "rearm_loop_approval_posture", None)
+    if callable(refresh_approvals):
+        refresh_approvals(loop.id, attended=not posture.unattended)
+
+
 async def start(state, svc, loop_id: str) -> Loop:
     """Start (or resume) a loop: write the brief, arm the worker session, grant
     per-session trust, and arm the autonudge loop. Used for both ``start`` and
@@ -193,21 +212,7 @@ async def start(state, svc, loop_id: str) -> Loop:
         session.acp_provider = loop.provider
         session.acp_provider_agent = loop.provider_agent
         session.reasoning_effort = loop.reasoning_effort
-        if not loop.attended:
-            session.acp_mode = "bypassPermissions"
-
-    # onto the ConversationDirectory approval_policy ("auto") — the same field a chat's
-    session._trust = True
-    try:
-        state.sessions.set_approval_policy(session.key, "auto")
-    except Exception:
-        logger.warning(
-            "loop: failed to set auto approval_policy for %s",
-            session.key,
-            exc_info=True,
-        )
-    if not loop.attended:
-        session._unattended = True
+    _arm_worker_approval_posture(state, session, loop)
     state.push_sessions_update()
 
     msg = _build_nudge_message(strat, loop, d)
@@ -475,17 +480,7 @@ async def spawn_task_worker(
         session.acp_provider = loop.provider
         session.acp_provider_agent = loop.provider_agent
         session.reasoning_effort = loop.reasoning_effort
-        if not loop.attended:
-            session.acp_mode = "bypassPermissions"
-    session._trust = True
-    try:
-        state.sessions.set_approval_policy(session.key, "auto")
-    except Exception:
-        logger.warning(
-            "loop: failed to set auto approval_policy for %s",
-            session.key,
-            exc_info=True,
-        )
+    _arm_worker_approval_posture(state, session, loop)
     d = loop_files.loop_dir(loop.id)
     roots = [str(d)] if d is not None else []
     ctx = _context_dir(loop)
@@ -495,7 +490,7 @@ async def spawn_task_worker(
         session._extra_tool_roots = roots
     state.push_sessions_update()
     msg = _task_cycle_nudge(loop, task, worktree_dir, str(d) if d else "")
-    if not loop.attended:
+    if kinds.worker_approval_posture(loop).unattended:
         from gideon.cognition.autonomous_framing import with_autonomous_framing
 
         msg = with_autonomous_framing(msg)

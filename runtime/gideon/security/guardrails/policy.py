@@ -20,12 +20,15 @@ for the unattended paths that exist today.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from gideon.core.constants import DASHBOARD_SESSION_PREFIX
 from gideon.security.guardrails.autonomy import RUNG_AUTO_WITH_UNDO, RUNG_AUTONOMOUS
 from gideon.security.guardrails.budgets import Budget
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from gideon.integrations.llm_helpers import ToolApprovalPolicy
@@ -141,10 +144,11 @@ _LOOP_PREFIXES = ("loop-", "loop:")
 INBOUND_PREFIX = "inbound:"
 
 _EXTRA_UNATTENDED_PREFIXES = (
-    *_LOOP_PREFIXES,
     UNATTENDED_DISPATCH_PREFIX,
     INBOUND_PREFIX,
 )
+
+_DASHBOARD_WRAPPER = DASHBOARD_SESSION_PREFIX
 
 
 def unattended_dispatch_key(origin: str) -> str:
@@ -157,18 +161,41 @@ def unattended_dispatch_key(origin: str) -> str:
     return f"{UNATTENDED_DISPATCH_PREFIX}{(origin or 'unknown').strip()}"
 
 
-_DASHBOARD_WRAPPER = DASHBOARD_SESSION_PREFIX
+def _persisted_attended_loop_worker(session_key: str) -> bool:
+    """Whether this key belongs to an explicitly attended loop in the active home.
+
+    The persisted row is the only exception to the fail-closed ``loop-`` headless
+    default. A missing, malformed, or unreadable row never grants attended routing.
+    """
+    key = (session_key or "").removeprefix(_DASHBOARD_WRAPPER)
+    if not key.startswith("loop-"):
+        return False
+    try:
+        from gideon.automation.loop import manager, store
+
+        for loop in store.list_all():
+            if getattr(loop, "attended", None) is not True:
+                continue
+            main_key = manager.session_key(loop.id)
+            if key == main_key or key.startswith(f"{main_key}-"):
+                return True
+    except Exception:
+        logger.debug(
+            "could not resolve attended loop worker from the active loop store",
+            exc_info=True,
+        )
+    return False
 
 
 def is_unattended_session(session_key: str) -> bool:
     """True when ``session_key`` names an unattended run (cron/subagent/channel/inbox/
     side/loop worker, an ``inbound:`` access surface, a sessionless ``unattended:``
     dispatch, or the ``_bg`` background key) — the keys that resolve through HEADLESS by
-    construction.
+    construction. A loop worker is attended only when its current active-home row says
+    ``attended is True``; every missing or unreadable row remains HEADLESS.
 
-    Accepts either the bare session key or the dashboard-wrapped provider form of an
-    inbound key (see ``_DASHBOARD_WRAPPER``), so the posture does not depend on which
-    layer is asking.
+    Accepts either the bare session key or a dashboard-wrapped provider key (see
+    ``_DASHBOARD_WRAPPER``), so the posture does not depend on which layer is asking.
     """
     from gideon.engine.session import _STATELESS_PREFIXES, BACKGROUND_KEY
 
@@ -177,18 +204,25 @@ def is_unattended_session(session_key: str) -> bool:
         return True
     if key.startswith(_DASHBOARD_WRAPPER + INBOUND_PREFIX):
         key = key[len(_DASHBOARD_WRAPPER) :]
+    loop_key = key.removeprefix(_DASHBOARD_WRAPPER)
+    if loop_key.startswith(_LOOP_PREFIXES):
+        return not _persisted_attended_loop_worker(loop_key)
     return any(
         key.startswith(p) for p in (*_STATELESS_PREFIXES, *_EXTRA_UNATTENDED_PREFIXES)
     )
 
 
-def profile_for_session(session_key: str) -> SafetyProfile:
+def profile_for_session(
+    session_key: str, *, unattended: bool | None = None
+) -> SafetyProfile:
     """Resolve the safety profile for a session key BY CONSTRUCTION.
 
     An unattended session (cron/subagent/channel/inbox/side/loop, or a sessionless
     ``unattended:`` dispatch) resolves to ``HEADLESS`` (read-only default, config-layered
-    budget + scan); everything else is the human-watched ``INTERACTIVE`` posture. This is
-    the single object the gateway's approval pick consults, replacing the ad-hoc
+    budget + scan); a loop is human-watched only when its current active-home row says
+    ``attended is True``. ``unattended=True`` preserves an explicit caller restriction;
+    false never bypasses key-based classification. This is the single object the
+    gateway's approval pick consults, replacing the ad-hoc
     AUTO_APPROVE/HOOK_BASED branch. Operator config is layered in via
     ``safety_profile_for``.
 
@@ -199,7 +233,8 @@ def profile_for_session(session_key: str) -> SafetyProfile:
     denylist, the tool-approval pick, egress), so one call site makes the ceiling live
     everywhere at once and leaves no seam that reads a profile the ceiling never bounded.
     A corrupt ceiling raises out of here, which fails the dispatch CLOSED."""
-    base = HEADLESS if is_unattended_session(session_key) else INTERACTIVE
+    is_unattended = bool(unattended) or is_unattended_session(session_key)
+    base = HEADLESS if is_unattended else INTERACTIVE
     layered = safety_profile_for(base)
     if (session_key or "").removeprefix(_DASHBOARD_WRAPPER).startswith(
         "room:"

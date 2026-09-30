@@ -264,6 +264,10 @@ class GoalKind(LoopKindStrategy):
         if loop.attended:
             lines += [
                 "",
+                "**Tool approvals (attended):** approval-required actions pause until "
+                "the owner approves them through Gideon's existing loop/chat approval "
+                "surface. Do not retry by changing tools or approval settings.",
+                "",
                 "**Clarification allowed (attended):** if the goal is genuinely "
                 "ambiguous in a way that would change your direction, you MAY ask ONE "
                 'high-leverage question — write {"question", "why"} to '
@@ -272,6 +276,10 @@ class GoalKind(LoopKindStrategy):
             ]
         else:
             lines += [
+                "",
+                "**Tool approvals (unattended):** no owner is available to answer "
+                "approval prompts. Stay within the existing grants and operator "
+                "ceilings; approval-required actions fail closed.",
                 "",
                 "**Unattended:** do NOT pause to ask the user. Investigate ambiguities "
                 "yourself, record the assumption in your cycle finding, and proceed. "
