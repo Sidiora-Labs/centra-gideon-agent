@@ -19,7 +19,7 @@ from gideon.cognition.knowledge.pipeline import (
     ensure_nodes_registered,
     graph_for,
 )
-from gideon.cognition.knowledge.pipeline.executor import PipelineExecutor
+from gideon.cognition.knowledge.pipeline.executor import ExecutionResult, PipelineExecutor
 from gideon.cognition.knowledge.pipeline.types import NodeContext
 from gideon.integrations.knowledge_providers.base import ENRICHMENT_FULL, ENRICHMENT_RAW
 
@@ -130,23 +130,7 @@ async def ingest_item(
             _cleanup_orphaned_artifacts(item_id)
             return "deleted"
 
-        store.clear_extracted_contents(item_id)
-        for out in result.pooled_outputs():
-            store.add_extracted_content(
-                item_id,
-                out.node_type,
-                backend=out.backend,
-                text=out.text,
-                metadata=out.metadata,
-            )
-        for row in result.pool_rows():
-            store.add_extracted_content(
-                item_id,
-                row.node_type,
-                backend=row.backend,
-                text=row.text,
-                metadata=row.metadata,
-            )
+        _persist_extracted_contents(store, item_id, result)
 
         _persist_structural_metadata(store, item_id, item, result)
 
@@ -226,30 +210,7 @@ async def ingest_item(
         _emit("ingest_failed", error=str(exc))
         return "failed"
 
-    status = result.status
-    proc_error = None
-    document_read = result.outputs.get("document_read")
-    document_meta = getattr(document_read, "metadata", None) or {}
-    if document_meta.get("extraction_partial") and status == "done":
-        status = "partial"
-        proc_error = str(document_meta.get("extraction_warning") or "Document extraction was incomplete")[:500]
-    if status in ("failed", "partial") and result.failed:
-        msgs = []
-        for nt in result.failed:
-            fout = result.outputs.get(nt)
-            err = (getattr(fout, "error", "") or "").strip() if fout else ""
-            msgs.append(f"{nt}: {err}" if err else nt)
-        proc_error = "; ".join(msgs)[:500]
-        if status == "failed":
-            scrape = result.outputs.get("bookmark_scrape")
-            scrape_meta = getattr(scrape, "metadata", None) or {} if scrape else {}
-            only_scrape_failed = result.failed == ["bookmark_scrape"]
-            if only_scrape_failed and scrape_meta.get("error_kind") == "unreachable":
-                status = "unreachable"
-    elif status == "partial" and result.skipped:
-        proc_error = "Skipped (optional steps unavailable): " + ", ".join(
-            result.skipped[:12]
-        )
+    status, proc_error = _processing_outcome(result)
     if not insights_ok:
         if status == "done":
             status = "partial"
@@ -296,6 +257,54 @@ async def ingest_item(
     if status in ("done", "partial"):
         emit_platform_event(KNOWLEDGE_INGESTED, {"item_id": item_id, "status": status})
     return status
+
+
+def _persist_extracted_contents(store, item_id: str, result: ExecutionResult) -> None:
+    store.clear_extracted_contents(item_id)
+    for out in result.pooled_outputs():
+        store.add_extracted_content(
+            item_id,
+            out.node_type,
+            backend=out.backend,
+            text=out.text,
+            metadata=out.metadata,
+        )
+    for row in result.pool_rows():
+        store.add_extracted_content(
+            item_id,
+            row.node_type,
+            backend=row.backend,
+            text=row.text,
+            metadata=row.metadata,
+        )
+
+
+def _processing_outcome(result: ExecutionResult) -> tuple[str, str | None]:
+    status = result.status
+    proc_error = None
+    document_read = result.outputs.get("document_read")
+    document_meta = getattr(document_read, "metadata", None) or {}
+    if document_meta.get("extraction_partial") and status == "done":
+        status = "partial"
+        proc_error = str(document_meta.get("extraction_warning") or "Document extraction was incomplete")[:500]
+    if status in ("failed", "partial") and result.failed:
+        msgs = []
+        for nt in result.failed:
+            fout = result.outputs.get(nt)
+            err = (getattr(fout, "error", "") or "").strip() if fout else ""
+            msgs.append(f"{nt}: {err}" if err else nt)
+        proc_error = "; ".join(msgs)[:500]
+        if status == "failed":
+            scrape = result.outputs.get("bookmark_scrape")
+            scrape_meta = getattr(scrape, "metadata", None) or {} if scrape else {}
+            only_scrape_failed = result.failed == ["bookmark_scrape"]
+            if only_scrape_failed and scrape_meta.get("error_kind") == "unreachable":
+                status = "unreachable"
+    elif status == "partial" and result.skipped:
+        proc_error = "Skipped (optional steps unavailable): " + ", ".join(
+            result.skipped[:12]
+        )
+    return status, proc_error
 
 
 def _structural_descriptor(item: dict) -> str:

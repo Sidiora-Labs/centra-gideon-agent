@@ -24,6 +24,7 @@ from gideon.cognition.knowledge.pipeline.nodes._llm import complete_text
 from gideon.cognition.knowledge.pipeline.registry import register_node
 from gideon.cognition.knowledge.pipeline.types import NodeContext, NodeOutput
 from gideon.cognition.knowledge.readers import OcrProvider
+from gideon.integrations.stt.provider import SttError, TranscriptResult
 
 logger = logging.getLogger(__name__)
 
@@ -199,24 +200,38 @@ class TranscriptionNode:
 
             bias_terms = await _lexicon_bias_terms(ctx)
             result = await transcribe_audio_detailed(audio, bias_terms=bias_terms)
-        except Exception as exc:
+            return _transcription_output(result)
+        except SttError as exc:
             return NodeOutput(
                 node_type=self.node_type,
                 backend=self.backend,
                 success=False,
                 error=str(exc),
+                metadata={"error_code": exc.code},
             )
-        if result is None:
-            return NodeOutput(node_type=self.node_type, backend=self.backend, text="")
-        metadata: dict = {}
-        if result.segments:
-            metadata["transcript"] = result.to_dict()
-        return NodeOutput(
-            node_type=self.node_type,
-            backend=self.backend,
-            text=result.text or "",
-            metadata=metadata,
-        )
+        except Exception:
+            logger.debug("transcription failed", exc_info=True)
+            return NodeOutput(
+                node_type=self.node_type,
+                backend=self.backend,
+                success=False,
+                error=str(SttError("provider_failed")),
+                metadata={"error_code": "provider_failed"},
+            )
+
+
+def _transcription_output(result: TranscriptResult) -> NodeOutput:
+    if not isinstance(result, TranscriptResult) or not isinstance(result.text, str):
+        raise SttError("no_transcript")
+    metadata: dict = {}
+    if result.segments:
+        metadata["transcript"] = result.to_dict()
+    return NodeOutput(
+        node_type="transcription",
+        backend="stt",
+        text=result.text,
+        metadata=metadata,
+    )
 
 
 class LexiconCorrectionNode:

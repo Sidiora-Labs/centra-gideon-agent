@@ -326,6 +326,81 @@ def test_video_classify_propagates_frames_to_vision_ocr(monkeypatch):
     assert vision.text == "described"
 
 
+def test_recording_without_transcript_is_incomplete_and_keeps_ocr(store, tmp_path):
+    import wave
+
+    from gideon.cognition.knowledge.pipeline.executor import ExecutionResult
+    from gideon.cognition.knowledge.pipeline.nodes.media_nodes import (
+        _transcription_output,
+    )
+    from gideon.cognition.knowledge.pipeline.runner import (
+        _persist_extracted_contents,
+        _processing_outcome,
+    )
+    from gideon.extensions.providers.use_cases import (
+        save_active_models,
+        save_use_case_settings,
+    )
+    from gideon.integrations.stt.provider import SttError, TranscriptResult
+
+    recording = tmp_path / "recording.wav"
+    with wave.open(str(recording), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(b"\x00\x00" * 160)
+    iid = store.create_typed_item(item_type="audio", title="Recording")
+    ctx = NodeContext(item_id=iid, item_type="audio", file_path=str(recording))
+    ocr = NodeOutput(node_type="ocr", backend="vision-llm", text="Quarterly revenue")
+    save_active_models({})
+    ensure_nodes_registered()
+    graph = _graph(
+        [NodeSpec("transcription", backend="stt"), NodeSpec("ocr", backend="vision-llm")],
+        [],
+    )
+
+    for enabled, code in ((False, "disabled"), (True, "no_model")):
+        save_use_case_settings("stt", {"enabled": enabled})
+        result = ExecutionResult(outputs={"ocr": ocr}, ran=["ocr"])
+        _run(PipelineExecutor(graph)._run_subset(["transcription"], ctx, result))
+        transcription = result.outputs["transcription"]
+        assert transcription.success is False
+        assert transcription.text == ""
+        assert transcription.error == str(SttError(code))
+        assert transcription.metadata["error_code"] == code
+        assert result.failed == ["transcription"]
+        _persist_extracted_contents(store, iid, result)
+        status, error = _processing_outcome(result)
+        assert status == "partial"
+        assert error == f"transcription: {SttError(code)}"
+        store.update_item(
+            iid, processing_status=status, processing_error=error, touch=False
+        )
+        store.db.commit()
+        item = store.get_item(iid)
+        assert item["processing_status"] == "partial"
+        assert item["processing_error"] == error
+        rows = store.get_extracted_contents(iid)
+        assert [(row["node_type"], row["text"]) for row in rows] == [
+            ("ocr", "Quarterly revenue")
+        ]
+
+    for text in ("", "   "):
+        silence = _transcription_output(TranscriptResult(text=text))
+        assert silence.success is True
+        assert silence.text == text
+        assert silence.error == ""
+        result = ExecutionResult(
+            outputs={"transcription": silence, "ocr": ocr},
+            ran=["transcription", "ocr"],
+        )
+        assert _processing_outcome(result) == ("done", None)
+
+    with pytest.raises(SttError) as missing:
+        _transcription_output(None)
+    assert missing.value.code == "no_transcript"
+
+
 def test_runner_passthrough_note(store):
     ensure_nodes_registered()
     iid = store.create_typed_item(item_type="note", title="N", content="the body text")
