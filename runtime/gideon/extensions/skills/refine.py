@@ -102,16 +102,9 @@ def _blockquote(text: str) -> str:
     flat = re.sub(r"\s+", " ", text or "").strip()[:_QUOTE_MAX]
     if not flat:
         return "> (the correction was empty)"
-    try:
-        from gideon.security.security import (
-            redact_credentials,
-            redact_exfiltration_urls,
-        )
+    from gideon.security.security import redact_field
 
-        flat, _ = redact_exfiltration_urls(flat)
-        flat, _ = redact_credentials(flat)
-    except Exception:  # pragma: no cover - redaction must never block the proposal
-        logger.debug("refine: redaction failed", exc_info=True)
+    flat = redact_field(flat)
     return f"> {flat}"
 
 
@@ -204,7 +197,14 @@ def propose_refinement(
     "the stumble arm is broken" must not be the same observation.
     """
     at = now or _now()
-    body = refinement_body(trigger, detail=detail, quote=user_message, now=at)
+    try:
+        from gideon.security.security import redact_field
+
+        safe_excerpt = redact_field(str(user_message or "")[:4000])
+        body = refinement_body(trigger, detail=detail, quote=safe_excerpt, now=at)
+    except Exception:
+        logger.warning("refine: redaction failed; proposal withheld")
+        return None
     if not body:
         logger.info(
             "refine: no body template for trigger %r; proposing nothing", trigger
@@ -229,5 +229,5 @@ def propose_refinement(
         kind="refine",
         refine_target=skill,
         trigger=trigger,
-        source_excerpt=f"[stumble: {trigger}] {user_message}",
+        source_excerpt=f"[stumble: {trigger}] {safe_excerpt}",
     )

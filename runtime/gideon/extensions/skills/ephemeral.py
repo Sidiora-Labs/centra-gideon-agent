@@ -82,15 +82,12 @@ def remember(
     if not title or not body:
         return None
     try:
-        from gideon.security.security import (
-            redact_credentials,
-            redact_exfiltration_urls,
-        )
+        from gideon.security.security import redact_field
 
-        body, _ = redact_exfiltration_urls(body)
-        body, _ = redact_credentials(body)
+        body = redact_field(body)
     except Exception:
-        logger.debug("ephemeral remember redaction skipped", exc_info=True)
+        logger.warning("ephemeral remember redaction failed; draft withheld")
+        return None
     sdir = _session_dir(session_key)
     if sdir.is_dir() and len(list(sdir.glob("*.json"))) >= _MAX_DRAFTS_PER_SESSION:
         existing = _load_by_title(session_key, title)
