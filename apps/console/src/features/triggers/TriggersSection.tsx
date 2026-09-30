@@ -4,7 +4,7 @@ import type { RouteProps } from '../../app/shell/useQueryState'
 
 export function TriggersSection({ sub, navigate, query, setQuery, navEpoch }: RouteProps) {
   if ((sub || '').split('/')[0] === 'new')
-    return <TriggerCreatePage onBack={() => navigate('triggers')} onCreated={() => navigate('triggers')} query={query} setQuery={setQuery} />
+    return <TriggerCreatePage key={query.preset ?? 'blank'} onBack={() => navigate('triggers')} onCreated={() => navigate('triggers')} query={query} setQuery={setQuery} />
   return (
     <TriggersListPage
       key={navEpoch}

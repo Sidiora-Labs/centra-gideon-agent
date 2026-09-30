@@ -13,7 +13,8 @@ import { PageTitle } from '../../shared/ui/PageTitle'
 import { ScheduleForm, emptyDraft as emptySchedule, type ScheduleDraft } from '../schedule/ScheduleForm'
 import { scheduleWhenMet } from '../schedule/scheduleMeta'
 import { ActionConfig, coerceActionConfig, seedActionConfig } from './ActionConfig'
-import { findTriggerPreset, prefillDraft } from './triggerPresets'
+import { findTriggerPreset, prefillDraft, TRIGGER_PRESETS } from './triggerPresets'
+import { PresetEmptyState } from '../../shared/ui/PresetEmptyState'
 import { schemaProps } from '../tools/schema'
 import { Toggle } from '../../shared/ui/Toggle'
 import {
@@ -131,6 +132,16 @@ export function TriggerCreatePage({ onBack, onCreated, query, setQuery }: {
         <div className="mx-auto px-l py-l pb-2xl flex flex-col gap-xl" style={{ maxWidth: 'var(--content-width)' }}>
           {
 }
+          {!seed && (
+            <div role="group" aria-label="Start from a preset" className="rounded-xl border border-outline-variant/40 bg-surface-container/30">
+              <PresetEmptyState
+                title="Start from a preset"
+                hint="Choose a starting point, then review and adjust the trigger before saving."
+                presets={TRIGGER_PRESETS}
+                onPick={(prefill) => setQuery({ kind: 'schedule', preset: prefill.id })}
+              />
+            </div>
+          )}
           {seed && (
             <p className="text-on-surface-low text-[0.8125rem]">
               Filled in from the <span style={fvs(600)}>{seed.name}</span> preset — change anything before saving.
