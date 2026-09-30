@@ -730,6 +730,8 @@ async def start_dashboard(
         api_agent_provider_agents,
         api_agent_providers_list,
         api_agent_runners_list,
+        runner_grant_tenant_middleware,
+        register_runner_routes,
         api_provider_create,
         api_provider_delete,
         api_provider_model_delete,
@@ -748,6 +750,7 @@ async def start_dashboard(
     app.router.add_get("/api/agent-providers", api_agent_providers_list)
     app.router.add_get("/api/agent-providers/{id}/agents", api_agent_provider_agents)
     app.router.add_get("/api/agent-runners", api_agent_runners_list)
+    register_runner_routes(app)
     app.router.add_post("/api/model-providers", api_provider_create)
     app.router.add_put("/api/model-providers/{name}", api_provider_update)
     app.router.add_delete("/api/model-providers/{name}", api_provider_delete)
@@ -2128,7 +2131,7 @@ async def start_dashboard(
         no_cache_middleware,
         api_version_middleware(),
         *(
-            [_dev_user_middleware]
+            [_dev_user_middleware, runner_grant_tenant_middleware]
             if _no_auth
             else [
                 csrf_middleware,
@@ -2157,6 +2160,7 @@ async def start_dashboard(
                     port=port,
                     local_only=local_only,
                 ),
+                runner_grant_tenant_middleware,
             ]
         ),
         app_permission_middleware,

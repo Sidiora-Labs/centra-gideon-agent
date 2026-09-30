@@ -103,6 +103,7 @@ _OWNER_ONLY_PREFIXES: dict[str, str] = {
     "/api/autonomy": "your autonomy grants",
     "/api/external-access": "credentials for reaching this gateway",
     "/api/agent/config": "the tools and servers your agent may run",
+    "/api/agent-runners": "custom agent runner definitions and owner consent",
     "/api/triggers": "automations and their approval settings",
     "/api/workflows": "workflows and their approval settings",
     "/api/loops": "autonomous work and its approval settings",
@@ -169,6 +170,7 @@ ROUTE_AUTHORITY: dict[str, OwnerOnly | AppMay] = {
     "PUT /api/providers/{name}/instances/{id}": AppMay("writing its own provider instance", OwnedTarget("name")),
     "DELETE /api/providers/{name}/instances/{id}": AppMay("deleting its own provider instance", OwnedTarget("name")),
     "POST /api/providers/{name}/instances/{id}/test": AppMay("testing its own provider instance", OwnedTarget("name")),
+    "POST /api/agent-runners/{id}/grant": OwnerOnly("allowing a custom agent runner to execute"),
 }
 
 

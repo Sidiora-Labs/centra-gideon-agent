@@ -84,6 +84,23 @@ class AcpConnectionPool:
     async def _ready(self, runtime_id: str) -> bool:
         if self._closed:
             return False
+        try:
+            from gideon.engine.agents import runners
+
+            definition = runners.definition_for_runtime(runtime_id)
+            if (
+                definition is not None
+                and definition.source == "user"
+                and not runners.owner_grant_allowed(definition)
+            ):
+                return False
+        except Exception:
+            logger.warning(
+                "custom ACP runner consent could not be checked; refusing %s",
+                runtime_id,
+                exc_info=True,
+            )
+            return False
         if self._readiness_check is None:
             return True
         try:

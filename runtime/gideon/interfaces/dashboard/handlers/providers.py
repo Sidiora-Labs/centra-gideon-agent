@@ -28,6 +28,48 @@ _READINESS_TTL_SECS = 300.0
 _readiness_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
+def _runner_consent_refusal(runtime_id: str, tenant: Any = None) -> str:
+    """Return a refusal before readiness or discovery can start a custom CLI."""
+    from gideon.engine.agents import runners
+
+    definition = runners.definition_for_runtime(runtime_id)
+    if definition is None or definition.source != "user":
+        return ""
+    if runners.owner_grant_allowed(definition, tenant=tenant):
+        return ""
+    return "owner approval required for this custom runner definition"
+
+
+def _runner_owner_principal(request: web.Request):
+    from gideon.security.approval_answer import OWNER, of_request
+
+    principal = of_request(request)
+    if principal.kind != OWNER or not principal.name:
+        return None
+    tenant = principal.tenant or request.get("tenant_id") or ""
+    if tenant and tenant != principal.tenant:
+        from gideon.security.approval_answer import Principal
+
+        return Principal(principal.kind, principal.name, str(tenant))
+    return principal
+
+
+def _runner_tenant_scope(request: web.Request):
+    principal = _runner_owner_principal(request)
+    if principal is not None:
+        return principal
+    return request.get("tenant_id")
+
+
+@web.middleware
+async def runner_grant_tenant_middleware(request: web.Request, handler):
+    """Carry authenticated tenant scope through real session and ACP startup work."""
+    from gideon.security.runner_grants import tenant_scope
+
+    with tenant_scope(_runner_tenant_scope(request)):
+        return await handler(request)
+
+
 def _provider_document(path) -> dict[str, Any]:
     import json
 
@@ -198,6 +240,18 @@ async def api_agent_providers_list(request: web.Request) -> web.Response:
                 **status_d,
             }
 
+        tenant_scope = _runner_tenant_scope(request)
+        refusal = _runner_consent_refusal(entry.name, tenant_scope)
+        if refusal:
+            return _row(
+                {
+                    "ready": False,
+                    "state": "needs_owner_approval",
+                    "detail": refusal,
+                    "login_command": None,
+                }
+            )
+
         if _pool is not None and _pool.is_warmed(entry.name):
             return _row(
                 {
@@ -267,7 +321,12 @@ async def warm_readiness_cache() -> int:
     entries = [
         e for e in get_default_registry().list_entries() if e.type == "acp_agent"
     ]
-    targets = [e for e in entries if not (pool is not None and pool.is_warmed(e.name))]
+    targets = [
+        e
+        for e in entries
+        if not (pool is not None and pool.is_warmed(e.name))
+        and not _runner_consent_refusal(e.name)
+    ]
     if not targets:
         return 0
 
@@ -339,6 +398,11 @@ async def api_agent_provider_agents(request: web.Request) -> web.Response:
         return web.json_response(
             {"agents": [], "permission_modes": [], "cached": False}
         )
+
+    tenant_scope = _runner_tenant_scope(request)
+    refusal = _runner_consent_refusal(runtime_id, tenant_scope)
+    if refusal:
+        return web.json_response({"error": refusal}, status=409)
 
     if not refresh:
         cached = _cached_discovery(runtime_id)
@@ -416,6 +480,9 @@ async def _compute_discovery(runtime_id: str, entry: Any) -> dict[str, Any] | No
     failures yield an empty agent list (never raises) so callers never break.
     """
     import time as _time
+
+    if _runner_consent_refusal(runtime_id):
+        return None
 
     from gideon.engine.agents.registry import get_agent_provider_class
 
@@ -1086,8 +1153,87 @@ async def api_agent_runners_list(request: web.Request) -> web.Response:
     from gideon.engine.agents import runners as runner_catalog
 
     probe = request.query.get("probe") in ("1", "true", "yes")
+    tenant = _runner_tenant_scope(request)
     loop = asyncio.get_running_loop()
     rows = await loop.run_in_executor(
-        None, lambda: runner_catalog.runner_rows(probe=probe)
+        None, lambda: runner_catalog.runner_rows(probe=probe, tenant=tenant)
     )
-    return web.json_response({"runners": [row.to_dict() for row in rows]})
+    from gideon.security.runner_grants import allowed, revision
+
+    projected = []
+    for row in rows:
+        item = row.to_dict()
+        definition = row.definition
+        if definition.source == "user":
+            try:
+                item["owner_grant"] = {
+                    "required": True,
+                    "allowed": allowed(definition, tenant),
+                    "revision": revision(definition, tenant),
+                }
+            except Exception:
+                item["owner_grant"] = {
+                    "required": True,
+                    "allowed": False,
+                    "revision": "",
+                }
+        else:
+            item["owner_grant"] = {"required": False, "allowed": True}
+        projected.append(item)
+    return web.json_response({"runners": projected})
+
+
+async def api_agent_runner_grant(request: web.Request) -> web.Response:
+    """POST /api/agent-runners/{id}/grant for an authenticated owner decision."""
+    principal = _runner_owner_principal(request)
+    if principal is None:
+        return web.json_response(
+            {"error": "Only the authenticated owner may grant a custom runner."},
+            status=403,
+        )
+    try:
+        body = await read_json_body(request)
+    except Exception:
+        body = None
+    if (
+        not isinstance(body, dict)
+        or set(body) != {"approved", "expected_revision"}
+        or body.get("approved") is not True
+        or not isinstance(body.get("expected_revision"), str)
+        or not body["expected_revision"]
+    ):
+        return web.json_response(
+            {"error": "explicit approval and expected_revision are required"},
+            status=400,
+        )
+
+    from gideon.engine.agents import runners
+    from gideon.security import runner_grants
+
+    definition = runners.catalog().get(request.match_info.get("id", ""))
+    if definition is None or definition.source != "user":
+        return web.json_response({"error": "custom runner not found"}, status=404)
+    try:
+        granted = runner_grants.grant(
+            definition,
+            principal=principal,
+            expected_revision=body["expected_revision"],
+        )
+    except (OSError, TypeError, ValueError, PermissionError):
+        logger.warning("custom runner owner grant could not be saved", exc_info=True)
+        return web.json_response(
+            {"error": "custom runner grant could not be saved"}, status=500
+        )
+    if not granted:
+        return web.json_response(
+            {"error": "runner definition changed; review the current definition again"},
+            status=409,
+        )
+    _readiness_cache.pop(definition.runtime_id, None)
+    _discovery_cache.pop(definition.runtime_id, None)
+    return web.json_response({"ok": True, "runner": definition.id}, status=200)
+
+
+def register_runner_routes(app: web.Application) -> None:
+    """Register owner runner-consent mutations alongside the runner catalog read."""
+    app.router.add_post("/api/agent-runners/{id}/grant", api_agent_runner_grant)

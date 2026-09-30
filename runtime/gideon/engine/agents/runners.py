@@ -59,6 +59,10 @@ class UnverifiedAdapterError(RuntimeError):
     """The configured admission policy rejected an unattended adapter."""
 
 
+class RunnerConsentRequiredError(RuntimeError):
+    """The owner has not allowed the exact current custom runner definition."""
+
+
 @dataclass(frozen=True)
 class AdapterPin:
     npm_pkg: str
@@ -430,7 +434,23 @@ class _VersionReading:
         )
 
 
-def probe_runner(defn: RunnerDefinition, *, persist: bool = True) -> HealthEvidence:
+def probe_runner(
+    defn: RunnerDefinition,
+    *,
+    persist: bool = True,
+    tenant: Any = None,
+) -> HealthEvidence:
+    if defn.source == "user" and not owner_grant_allowed(defn, tenant=tenant):
+        return _finish(
+            defn,
+            HealthEvidence(
+                ok=False,
+                probe="owner-consent",
+                checked_at=_now_iso(),
+                error="owner approval required before probing this custom runner",
+            ),
+            persist,
+        )
     argv = resolve_runner_command(defn)
     if argv:
         reading = _VersionReading(tuple(argv), time.monotonic())
@@ -655,6 +675,12 @@ def runtime_id_for_agent(agent: str | None) -> str:
 
 
 def guard_unattended_spawn(runtime_id: str, *, unattended: bool) -> None:
+    if runtime_id:
+        definition = definition_for_runtime(runtime_id)
+        if definition is not None and definition.source == "user" and not owner_grant_allowed(definition):
+            raise RunnerConsentRequiredError(
+                f"Runner {definition.display_name!r} is waiting for owner approval of its current definition."
+            )
     if unattended and runtime_id:
         try:
             from gideon.core.config.loader import AppConfig
@@ -665,6 +691,21 @@ def guard_unattended_spawn(runtime_id: str, *, unattended: bool) -> None:
             return
         if enabled:
             _require_verified_runtime(runtime_id)
+
+
+def owner_grant_allowed(
+    definition: RunnerDefinition, *, tenant: Any = None
+) -> bool:
+    """Consult the durable exact-definition grant only for custom catalog entries."""
+    if definition.source != "user":
+        return True
+    try:
+        from gideon.security.runner_grants import allowed
+
+        return allowed(definition, tenant)
+    except Exception:
+        logger.warning("custom runner grant lookup failed; refusing %s", definition.id, exc_info=True)
+        return False
 
 
 def _require_verified_runtime(runtime_id):
@@ -714,8 +755,12 @@ class _RunnerPresentation:
         return result
 
     @staticmethod
-    def assemble(definition, probe):
-        evidence = probe_runner(definition) if probe else load_evidence(definition.id)
+    def assemble(definition, probe, tenant):
+        evidence = (
+            probe_runner(definition, tenant=tenant)
+            if probe
+            else load_evidence(definition.id)
+        )
         try:
             adapter = verify_adapter(definition)
         except Exception:
@@ -735,6 +780,6 @@ class _RunnerPresentation:
         )
 
 
-def runner_rows(*, probe: bool = False) -> list[RunnerRow]:
+def runner_rows(*, probe: bool = False, tenant: Any = None) -> list[RunnerRow]:
     definitions = sorted(catalog().values(), key=lambda row: row.display_name.lower())
-    return [_RunnerPresentation.assemble(row, probe) for row in definitions]
+    return [_RunnerPresentation.assemble(row, probe, tenant) for row in definitions]
