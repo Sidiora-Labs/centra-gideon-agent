@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 _LOOP_ID_RE = re.compile(r"^[a-f0-9]{8}$")
 _TASK_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 STOP_SENTINEL = "STOP"
+PLANNER_SENTINELS = frozenset({"plan_steps.json", "step_artifact.json"})
 
 
 def _loops_root() -> Path:
@@ -82,6 +83,19 @@ def safe_loop_dir(loop_id: str) -> Path | None:
     if not d.is_relative_to(root) or not d.exists():
         return None
     return d
+
+
+def planner_sentinel_path(loop_id: str, sentinel: str) -> Path | None:
+    """Return a planner's exact output path inside its loop directory.
+
+    Planning scratch has a deliberately closed filename set. This keeps a model-facing
+    path from turning the loop directory into an arbitrary path join while making the
+    destination explicit in the planner brief.
+    """
+    if sentinel not in PLANNER_SENTINELS:
+        return None
+    d = loop_dir(loop_id)
+    return (d / sentinel) if d is not None else None
 
 
 def _ledger_filename(node_path: str) -> str:

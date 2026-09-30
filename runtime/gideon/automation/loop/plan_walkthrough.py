@@ -21,6 +21,7 @@ walkthrough (general/design today) returns ``None`` from ``Loop`` strategy's
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from gideon.automation.loop import files as loop_files
@@ -109,6 +110,41 @@ def planner_session_key(loop_id: str) -> str:
     return f"loop-plan-{loop_id}"
 
 
+def _planner_brief_for_loop(brief: str, sentinel: str, destination: Path) -> str:
+    """Replace the shared-cwd instruction with this loop's explicit output path."""
+    named_file = f"`{sentinel}`"
+    return brief.replace(
+        f"{named_file} in your current directory", f"`{destination}`"
+    ).replace(named_file, f"`{destination}`")
+
+
+def _planner_session(state, loop, agent_name: str, files_dir: str):
+    """Bind planner tools to the loop folder and its configured project workspace."""
+    workspace_dir = (loop.workspace_dir or "").strip()
+    workspace_root = ""
+    if workspace_dir and Path(workspace_dir).is_dir():
+        workspace_root = str(Path(workspace_dir).resolve())
+
+    session = state.get_or_create_session(
+        name=planner_session_key(loop.id),
+        agent=agent_name,
+        model=getattr(loop, "model", ""),
+        workspace_dir=files_dir,
+        app="loops",
+        project_id=getattr(loop, "tasks_project_id", "")
+        or getattr(loop, "project_id", "")
+        or "",
+    )
+    # The loop folder is the planner's cwd; the only additional root is the loop's
+    # already-bound project workspace. Replacing stale roots matters when a session
+    # survives a workspace change.
+    session.workspace_dir = files_dir
+    session._extra_tool_roots = (
+        [workspace_root] if workspace_root and workspace_root != files_dir else []
+    )
+    return session
+
+
 def seed_steps(session: PlanSession, steps: list[dict]) -> PlanSession:
     """Populate a session's ordered steps with stable ids (``step-0``, …)."""
     session.steps = [
@@ -136,16 +172,23 @@ async def _run_pass(
     """One planner pass via the shared runner, resolving the loop's primitives."""
     from gideon.cognition.planning import runner
 
-    files_dir = str(loop_files.loop_dir(loop.id) or "")
+    loop_path = loop_files.loop_dir(loop.id)
+    if loop_path is None:
+        return None
+    files_dir = str(loop_path)
+    sentinel_path = loop_files.planner_sentinel_path(loop.id, sentinel)
+    if sentinel_path is None:
+        return None
+    _planner_session(state, loop, wt.planner_agent, files_dir)
     return await runner.run_planner_pass(
         state,
         svc,
         session_key=planner_session_key(loop.id),
         agent_name=wt.planner_agent,
-        workspace_dir=loop.workspace_dir or "",
+        workspace_dir=files_dir,
         files_dir=files_dir,
         sentinel=sentinel,
-        brief=brief,
+        brief=_planner_brief_for_loop(brief, sentinel, sentinel_path),
         app="loops",
         model=getattr(loop, "model", ""),
         provider=getattr(loop, "provider", ""),
