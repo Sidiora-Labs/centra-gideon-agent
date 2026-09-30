@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast, get_args
 
+from packaging.version import InvalidVersion, Version
+
 logger = logging.getLogger(__name__)
 
 InstallKind = Literal["git", "pip", "container", "desktop"]
@@ -151,6 +153,29 @@ def version_tuple(v: str) -> tuple[int, ...]:
         return tuple(map(int, core.split(".")))
     except (ValueError, AttributeError):
         return (0,)
+
+
+def parse_version(v: str) -> Version | None:
+    try:
+        return Version(normalize_version(v))
+    except InvalidVersion:
+        return None
+
+
+def is_newer(candidate: str, current: str) -> bool:
+    new, now = parse_version(candidate), parse_version(current)
+    return new is not None and now is not None and new > now
+
+
+def same_version(a: str, b: str) -> bool:
+    version = parse_version(a)
+    return version is not None and version == parse_version(b)
+
+
+def moves_to(target: str, current: str, pin: str = "") -> bool:
+    if (pin or "").strip():
+        return same_version(target, pin) and not same_version(target, current)
+    return is_newer(target, current)
 
 
 def _cache_path() -> Path:
@@ -384,8 +409,9 @@ async def fetch_releases() -> list[dict[str, object]]:
 
 
 def _is_prerelease(release: dict[str, object]) -> bool:
-    return bool(release.get("prerelease")) or "-" in normalize_version(
-        str(release.get("tag") or "")
+    version = parse_version(str(release.get("tag") or ""))
+    return bool(release.get("prerelease")) or (
+        version is not None and version.is_prerelease
     )
 
 
@@ -398,12 +424,11 @@ class ReleaseSelection:
     def choose(self):
         pin = (self.pin or "").strip()
         if pin:
-            desired = normalize_version(pin)
             return next(
                 (
                     str(row.get("tag") or "")
                     for row in self.releases
-                    if row.get("tag") and normalize_version(str(row["tag"])) == desired
+                    if same_version(str(row.get("tag") or ""), pin)
                 ),
                 "",
             )
@@ -412,13 +437,14 @@ class ReleaseSelection:
         candidates = [
             row
             for row in self.releases
-            if row.get("tag") and (self.channel == "beta" or not _is_prerelease(row))
+            if parse_version(str(row.get("tag") or "")) is not None
+            and (self.channel == "beta" or not _is_prerelease(row))
         ]
         if not candidates:
             return ""
         selected = max(
             candidates,
-            key=lambda row: (version_tuple(str(row["tag"])), not _is_prerelease(row)),
+            key=lambda row: parse_version(str(row["tag"])),
         )
         return str(selected["tag"])
 
@@ -446,12 +472,13 @@ class UpdateStatus:
             "kind": self.kind,
             "current": normalize_version(self.current),
             "latest": latest,
-            "update_available": bool(latest)
-            and version_tuple(latest) > version_tuple(self.current),
+            "update_available": moves_to(latest, self.current),
             "commits_behind": self.behind,
             "apply_method": _APPLY_METHOD.get(self.kind, "instructions"),
             "instructions": (
-                container_instructions() if self.kind == "container" else []
+                container_instructions()
+                if self.kind == "container" and moves_to(latest, self.current)
+                else []
             ),
             "release_name": str(self.release.get("name") or ""),
             "release_notes": str(self.release.get("body") or ""),

@@ -170,12 +170,7 @@ async def _do_update_check() -> None:
             )
             if m:
                 remote_version = m.group(1)
-            available = (
-                self_update.version_tuple(remote_version)
-                > self_update.version_tuple(_local_version)
-                if remote_version
-                else False
-            )
+            available = self_update.is_newer(remote_version, _local_version)
 
         changes = ""
         if available:
@@ -299,7 +294,11 @@ async def _apply_pip_update(request: web.Request, state: ConsoleState) -> web.Re
         status = await self_update.build_update_status(_local_version)
     except Exception:
         status = {}
-    spec = self_update.upgrade_spec(str(status.get("latest") or ""))
+    latest = str(status.get("latest") or "")
+    if latest and not self_update.moves_to(latest, _local_version):
+        _apply_in_flight = False
+        return web.json_response({"ok": True, "status": "up_to_date", "kind": "pip"})
+    spec = self_update.upgrade_spec(latest)
     try:
         self_update.begin_update("pip", _local_version, str(status.get("latest") or ""))
     except Exception:
@@ -582,9 +581,7 @@ async def api_update_apply(request: web.Request) -> web.Response:
             _cached_tag = self_update.normalize_version(
                 str(self_update.read_release_cache().get("tag") or "")
             )
-            if _cached_tag and self_update.version_tuple(
-                _cached_tag
-            ) <= self_update.version_tuple(_local_version):
+            if _cached_tag and not self_update.moves_to(_cached_tag, _local_version):
                 _on_latest_tag = True
         except Exception:
             _on_latest_tag = False

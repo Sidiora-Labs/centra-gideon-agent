@@ -523,6 +523,10 @@ def _update_container() -> None:
     configured, and the command did the only thing it can do here — say exactly
     how to become current.
     """
+    latest = _latest_release_version()
+    if _is_current(latest):
+        print(f"\n✅ Already on the latest release (v{latest}).")
+        return
     print("  📦 This is a container install — the image is replaced, not patched.")
     print("  Run these on the host:\n")
     for cmd in self_update.container_instructions():
@@ -557,9 +561,7 @@ def _is_current(latest: str) -> bool:
     An UNKNOWN latest (offline, or no release ever published) is deliberately not
     "current": the update proceeds rather than claiming a state it cannot see.
     """
-    return bool(latest) and self_update.version_tuple(
-        latest
-    ) <= self_update.version_tuple(__version__)
+    return bool(latest) and not self_update.moves_to(latest, __version__)
 
 
 def _latest_release_version() -> str:
