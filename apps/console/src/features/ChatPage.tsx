@@ -689,6 +689,24 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       next[i] = { ...next[i], segments: fn([...next[i].segments]) }
       return next
     })
+  const patchAssistantForTurn = (turnId: string, fn: (segs: Segment[]) => Segment[]) =>
+    setTurns((prev) => {
+      let i = turnId ? prev.findIndex((turn) => turn.role === 'assistant' && turn.turnId === turnId) : -1
+      const next = [...prev]
+      if (i < 0) {
+        if (!turnId) {
+          const list = ensureAssistant(prev)
+          i = list.length - 1
+          return list.map((turn, index) => index === i ? { ...turn, segments: fn([...turn.segments]) } : turn)
+        }
+        const turn = assistantTurn()
+        turn.turnId = turnId
+        next.push(turn)
+        i = next.length - 1
+      }
+      next[i] = { ...next[i], segments: fn([...next[i].segments]) }
+      return next
+    })
 
   const replaySnapshotFrames = useCallback((frames: WsMessage[]) => {
     replayingSnapshotFramesRef.current = true
@@ -849,6 +867,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         setStatusText('')
         const chunk = String(d.content ?? '')
         if (breakText.current) { coalescer.reset(); coalescing.current = false; breakText.current = false }
+        if (d.turn_id) patchAssistantForTurn(String(d.turn_id), (segs) => segs)
         coalescer.push(chunk, streamCursorOf(d) ?? undefined)
         break
       }
@@ -858,7 +877,8 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         const chunk = String(d.content ?? '')
         if (!chunk) break
         coalescer.flushNow()
-        patchLastAssistant((segs) => appendThinking(segs, chunk))
+        if (d.turn_id) patchAssistantForTurn(String(d.turn_id), (segs) => appendThinking(segs, chunk))
+        else patchLastAssistant((segs) => appendThinking(segs, chunk))
         breakText.current = true
         break
       }
@@ -878,14 +898,35 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         const text = String(d.text ?? '')
         if (kind === 'status' || kind === 'session' || !text) break
         setLatestActivity(text)
+        if (kind === 'skills_selected' && d.turn_id) {
+          const turnId = String(d.turn_id)
+          const skills = Array.isArray(d.skills) ? d.skills.filter((skill): skill is SkillUsed =>
+            !!skill && typeof skill === 'object' && typeof skill.name === 'string' && typeof skill.state === 'string'
+              && typeof skill.loaded_tokens === 'number') : []
+          setTurns((prev) => {
+            const i = prev.findIndex((turn) => (turn.turnId || turn.ts) === turnId)
+            const next = [...prev]
+            if (i >= 0) next[i] = { ...next[i], skillsUsed: skills, skillNotice: text }
+            else {
+              const assistant = assistantTurn()
+              assistant.turnId = turnId
+              assistant.skillsUsed = skills
+              assistant.skillNotice = text
+              next.push(assistant)
+            }
+            return next
+          })
+          break
+        }
         const origin = String(d.origin ?? '')
-        patchLastAssistant((segs) => stampActivityOrigin(segs, insertActivity(segs, text, kind, coalescing.current), origin))
+        if (d.turn_id) patchAssistantForTurn(String(d.turn_id), (segs) => stampActivityOrigin(segs, insertActivity(segs, text, kind, coalescing.current), origin))
+        else patchLastAssistant((segs) => stampActivityOrigin(segs, insertActivity(segs, text, kind, coalescing.current), origin))
         break
       }
       case 'tool_call': {
         coalescer.flushNow()
         const id = String(d.tool_call_id ?? '')
-        patchLastAssistant((segs) => {
+        const patchTool = (segs: Segment[]) => {
           const existing = segs.find((sg) => sg.kind === 'tool' && sg.id === id) as ToolSegment | undefined
           if (existing) {
             if (d.input_preview) existing.input = String(d.input_preview)
@@ -899,21 +940,26 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
             inputObj: (d.input !== undefined && d.input !== null) ? d.input : undefined,
             purpose: String(d.purpose ?? ''), auto: !!d.auto, done: false })
           return segs
-        })
+        }
+        if (d.turn_id) patchAssistantForTurn(String(d.turn_id), patchTool)
+        else patchLastAssistant(patchTool)
         breakText.current = true
         break
       }
       case 'tool_result':
-        patchLastAssistant((segs) => applyLiveToolResult(segs, d))
+        if (d.turn_id) patchAssistantForTurn(String(d.turn_id), (segs) => applyLiveToolResult(segs, d))
+        else patchLastAssistant((segs) => applyLiveToolResult(segs, d))
         break
       case 'approval':
         coalescer.flushNow()
-        patchLastAssistant((segs) => {
+        const patchApproval = (segs: Segment[]) => {
           const id = String(d.id ?? '')
           if (segs.some((sg) => sg.kind === 'approval' && sg.id === id)) return segs
           segs.push({ kind: 'approval', id, tool: String(d.tool ?? 'tool'), toolKind: String(d.tool_kind ?? ''), canRevise: d.can_revise === true, input: String(d.tool_input ?? ''), purpose: String(d.tool_purpose ?? ''), risk: (d.risk ? String(d.risk) : undefined) as ApprovalSegment['risk'] })
           return segs
-        })
+        }
+        if (d.turn_id) patchAssistantForTurn(String(d.turn_id), patchApproval)
+        else patchLastAssistant(patchApproval)
         breakText.current = true
         break
       case 'approval_resolved':
@@ -1038,8 +1084,12 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         breakText.current = true
         setFollowups([])
         const ts = d.ts ? String(d.ts) : undefined
-        setTurns((prev) => prev.some((turn) => turn.role === 'user'
-          && (ts ? turn.ts === ts : turnText(turn) === content)) ? prev : [...prev, userTurn(content, ts)])
+        setTurns((prev) => {
+          if (prev.some((turn) => turn.role === 'user' && (ts ? turn.ts === ts : turnText(turn) === content))) return prev
+          const turn = userTurn(content, ts)
+          turn.turnId = String(d.turn_id ?? ts ?? '') || undefined
+          return [...prev, turn]
+        })
         break
       }
       case 'subagent_spawn': {
@@ -1350,7 +1400,9 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     const turnPastes = pruneBlocks(t, blocks).map((b) => ({ seq: b.seq, lines: b.lines, content: b.content }))
     const clientTs = new Date().toISOString()
     const uiLabel = opts?.uiLabel?.trim() || undefined
-    setTurns((prev) => [...prev, userTurn(uiLabel ?? original ?? t, clientTs, turnPastes.length ? turnPastes : undefined, files, original ? t : undefined)])
+    const pendingTurn = userTurn(uiLabel ?? original ?? t, clientTs, turnPastes.length ? turnPastes : undefined, files, original ? t : undefined)
+    pendingTurn.turnId = clientTs
+    setTurns((prev) => [...prev, pendingTurn])
     if (!uiLabel) setPromptHistory((prev) => { const h = original ?? t; return (prev[prev.length - 1] === h ? prev : [...prev, h]).slice(-50) })
     const knowledgeIds = mentionedKnowledge.map((k) => k.id)
     const artifactSlugs = mentionedArtifacts.map((a) => a.slug)
@@ -2334,6 +2386,9 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
               {isLast && streaming && <div ref={glowAnchorRef} aria-hidden className="pointer-events-none absolute left-1/2 -top-2 size-px -translate-x-1/2"/>}
               {editingTurn === index ? <UserEditor initial={text} discardedReplies={turns.slice(index + 1).filter((later) => later.role === 'assistant').length} onCancel={() => setEditingTurn(null)} onSubmit={(value) => editResend(index, value)}/> : <div className="group/msg">
                 <MessageUser fromComposer={isLast} timestamp={stampOf(turn)} onFileClick={setOpenFile} pastes={turn.pastes} optimized={turn.optimized}>{text}</MessageUser>
+                {turn.skillNotice && <div className="mt-1 flex items-center gap-1.5 text-on-surface-low text-[0.75rem]" data-chat-selected-skills={turn.turnId || turn.ts}>
+                  <Sparkles size={11} className="shrink-0 opacity-70" /><span>{turn.skillNotice}</span>
+                </div>}
                 {turn.files?.length ? <TurnAttachments paths={turn.files} onOpenFile={setOpenFile}
                   imageDelivery={turn.imageDelivery} imageDeliveryReason={turn.imageDeliveryReason}/> : null}
                 {turn.rewound?.length ? <RewindDivider snapshots={turn.rewound} canFork={memoryMode === 'persistent'} onFork={(snapshot) => forkRewound(index, snapshot)}/> : null}
@@ -2355,6 +2410,9 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
                     if (verdict === 'up') void saveFeedback(turn.visibleIndex!, 'up')
                     else { setFeedbackTarget(turn.visibleIndex!); setFeedbackError(null) }
                   }}/>}>
+                {turn.skillNotice && <div className="mb-1 flex items-center gap-1.5 text-on-surface-low text-[0.75rem]" data-chat-selected-skills={turn.turnId || turn.ts}>
+                  <Sparkles size={11} className="shrink-0 opacity-70" /><span>{turn.skillNotice}</span>
+                </div>}
                 <AssistantSegments segments={turn.segments} isLast={isLast} messageTs={turn.ts} streaming={isLast && streaming} onApprove={approve} onSwitchToAgent={switchToAgentAndRun} onOpenFile={setOpenFile} onSetupModel={() => navigate(MODELS_PATH)} chatSessionKey={sessionRef.current ?? undefined} citations={turn.citations} skillsUsed={turn.skillsUsed}/>
                 {speakingTurn === index && <ReadAloud words={turnText(turn).split(/\s+/).filter(Boolean)} playing showText={false} onToggle={() => speak(turnText(turn), index)}/>}
               </MessageAssistant>

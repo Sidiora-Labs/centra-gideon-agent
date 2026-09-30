@@ -125,6 +125,8 @@ export interface ChatTurn {
   role: 'user' | 'assistant'
   segments: Segment[]
   ts?: string
+  turnId?: string
+  skillNotice?: string
 
   citations?: MemoryCitation[]
   skillsUsed?: SkillUsed[]
@@ -217,7 +219,7 @@ export function deriveActivity(turns: ChatTurn[]): ChatActivity {
   return { files: [...files.values()], links: [...links.values()] }
 }
 
-export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { kind?: string; id?: string; state?: string; outcome?: string | null; tool_call_id?: string; approval_id?: string; tool_kind?: string; can_revise?: boolean; input?: string; tool_input?: string; purpose?: string; risk?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; image_delivery?: ImageDeliveryMap; image_delivery_reason?: ImageDeliveryReasonMap; turn_telemetry?: { line?: string }; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[]; file_changes?: ChatFileChange[] } }
+export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { kind?: string; id?: string; state?: string; outcome?: string | null; tool_call_id?: string; turn_id?: string; turn_origin?: string; approval_id?: string; tool_kind?: string; can_revise?: boolean; input?: string; tool_input?: string; purpose?: string; risk?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; image_delivery?: ImageDeliveryMap; image_delivery_reason?: ImageDeliveryReasonMap; turn_telemetry?: { line?: string }; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[]; file_changes?: ChatFileChange[] } }
 
 export function stopOutcomeForMessage(message: HistMsg): StopOutcome | null {
   const meta = message.meta
@@ -261,10 +263,14 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
 
   let visible = -1
 
-  const lastAssistant = (): ChatTurn => {
+  const lastAssistant = (turnId?: string): ChatTurn => {
+    if (turnId) {
+      const matching = [...turns].reverse().find((turn) => turn.role === 'assistant' && turn.turnId === turnId)
+      if (matching) return matching
+    }
     const t = turns[turns.length - 1]
-    if (t && t.role === 'assistant') return t
-    const nt = assistantTurn(); turns.push(nt); return nt
+    if (!turnId && t && t.role === 'assistant') return t
+    const nt = assistantTurn(); nt.turnId = turnId; turns.push(nt); return nt
   }
 
   for (const m of messages) {
@@ -283,12 +289,18 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       const ut = userTurn(display, m.ts, pastes?.length ? pastes : undefined, files,
         original ? m.content : undefined, m.meta?.image_delivery, m.meta?.image_delivery_reason)
       if (Array.isArray(m.rewound) && m.rewound.length) ut.rewound = m.rewound
+      ut.turnId = m.meta?.turn_id || m.ts
+      if (Array.isArray(m.meta?.skills_used) && m.meta.skills_used.length) {
+        ut.skillsUsed = m.meta.skills_used
+        const names = m.meta.skills_used.filter((skill) => skill.state === 'admitted' || skill.state === 'reduced').map((skill) => skill.name).filter(Boolean)
+        if (names.length) ut.skillNotice = `Selected skills for this turn: ${names.join(', ')}`
+      }
       ut.visibleIndex = visible
       turns.push(ut)
       lastUserText = text; lastUserTs = m.ts; assistantTextSinceUser = false
     } else if (m.role === 'assistant' || m.role === 'streaming') {
       visible += 1
-      const at = lastAssistant()
+      const at = lastAssistant(m.meta?.turn_id)
       at.visibleIndex = visible
       if (m.ts && !Number.isNaN(new Date(m.ts).getTime())) at.ts = m.ts
       at.segments.push({ kind: 'text', text: m.content })
@@ -313,8 +325,10 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       }
       assistantTextSinceUser = true
     } else if (m.role === 'tool') {
-      const id = m.meta?.tool_call_id || `auto-${turns.length}-${lastAssistant().segments.length}`
-      const existing = toolIndex.get(id)
+      const at = lastAssistant(m.meta?.turn_id)
+      const id = m.meta?.tool_call_id || `auto-${turns.length}-${at.segments.length}`
+      const toolKey = `${m.meta?.turn_id ?? ''}\u0000${id}`
+      const existing = toolIndex.get(toolKey)
       if (existing) {
         if (m.meta?.output != null) existing.output = m.meta.output
         if (m.meta?.done) existing.done = true
@@ -329,12 +343,12 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
         if (m.meta?.ok === false) existing.ok = false
       } else {
         const seg: ToolSegment = { kind: 'tool', id, tool: toolName(m.meta, m.content), toolKind: m.meta?.kind || undefined, detail: m.meta?.detail, input: m.meta?.input, output: m.meta?.output, purpose: m.meta?.purpose, done: !!m.meta?.done, contentType: m.meta?.content_type, rawRef: m.meta?.raw_ref, truncated: m.meta?.truncated, originalLength: m.meta?.original_length, recoveryHints: m.meta?.recovery_hints, agentError: m.meta?.agent_error, ok: m.meta?.ok === false ? false : undefined }
-        toolIndex.set(id, seg)
-        lastAssistant().segments.push(seg)
+        toolIndex.set(toolKey, seg)
+        at.segments.push(seg)
       }
     } else if (m.role === 'permission') {
       const resolved = m.meta?.resolved || undefined
-      lastAssistant().segments.push({ kind: 'approval', id: m.meta?.approval_id || m.meta?.tool_call_id || `perm-${turns.length}`, tool: toolName(m.meta, m.content), toolKind: m.meta?.tool_kind, canRevise: m.meta?.can_revise === true, input: m.meta?.input || m.meta?.tool_input, purpose: m.meta?.purpose, risk: m.meta?.risk as ApprovalSegment['risk'], resolved })
+      lastAssistant(m.meta?.turn_id).segments.push({ kind: 'approval', id: m.meta?.approval_id || m.meta?.tool_call_id || `perm-${turns.length}`, tool: toolName(m.meta, m.content), toolKind: m.meta?.tool_kind, canRevise: m.meta?.can_revise === true, input: m.meta?.input || m.meta?.tool_input, purpose: m.meta?.purpose, risk: m.meta?.risk as ApprovalSegment['risk'], resolved })
     } else if (m.role === 'error') {
       lastAssistant().segments.push({ kind: 'error', text: m.content })
     } else if (m.role === 'system') {

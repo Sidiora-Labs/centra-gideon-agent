@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -57,8 +58,10 @@ from gideon.interfaces.dashboard.chat_followups import (
 )
 from gideon.interfaces.dashboard.chat_persistence import (
     _build_history_prefix,
+    in_flight_index,
     prior_turns_transcript,
     save_session_to_history,
+    tag_turn_message,
 )
 from gideon.interfaces.dashboard.chat_title import _maybe_auto_title
 from gideon.interfaces.dashboard.chat_utils import (
@@ -909,6 +912,7 @@ def _flush_segment(
     assistant_text: str,
     *,
     broadcast: bool = True,
+    turn_id: str = "",
 ) -> None:
     """Finalize current text block as a segment and persist it."""
 
@@ -941,6 +945,8 @@ def _flush_segment(
         logger.warning("Credential redacted in chat segment: %s", w)
     session.append("assistant", redacted, "msg msg-a", meta=session.stream_cursor())
     last_msg: dict = session.messages[-1]
+    if turn_id:
+        tag_turn_message(last_msg, turn_id)
     if session._memory_citations:
         meta = last_msg.get("meta")
         if not isinstance(meta, dict):
@@ -1851,6 +1857,7 @@ async def run_chat(
     regenerate_hint: str = "",
     persona_snippet: str = "",
     arrived_from_channel: bool = False,
+    _origin_message: dict | None = None,
 ) -> None:
     """Stream LLM response into *session*.  Survives browser disconnect.
 
@@ -1863,14 +1870,16 @@ async def run_chat(
     still a contract — the door's injected `turn_runner` calls it by that shape —
     while `_prompt_depth` stays private as this function's own recursion counter.
     """
-    _retry_user_message = next(
-        (
-            row
-            for row in reversed(session.messages)
-            if row.get("role") == "user" and row.get("content") == message
-        ),
-        None,
-    )
+    if _origin_message is None:
+        _origin_index = in_flight_index(session, message)
+        if _origin_index is not None:
+            _origin_message = session.messages[_origin_index]
+    _origin_meta = _origin_message.setdefault("meta", {}) if _origin_message is not None else {}
+    _turn_id = str(_origin_meta.get("turn_id") or (_origin_message or {}).get("ts") or uuid.uuid4().hex)
+    if _origin_message is not None:
+        tag_turn_message(_origin_message, _turn_id)
+        _origin_meta["turn_origin"] = str(_origin_message.get("role") or "")
+    _retry_user_message = _origin_message if _origin_message and _origin_message.get("role") == "user" else None
     _in_flight_text = message
     _prior_history_key = _history_key_for(session.key)
     _prior_transcript = (
@@ -2076,6 +2085,7 @@ async def run_chat(
                     expanded,
                     _prompt_depth=1,
                     persona_snippet=persona_snippet,
+                    _origin_message=_origin_message,
                 )
             elif status == "blocked":
                 sel().log_tool_invocation(
@@ -2578,6 +2588,27 @@ async def run_chat(
                     for _d in _decisions
                     if isinstance(_d, dict) and _d.get("state") in _SKILL_USED_STATES
                 ]
+            if _origin_message is not None:
+                _origin_meta["skills_used"] = session._skills_used
+                session._dirty = True
+            if session._skills_used:
+                _skill_names = [
+                    str(skill.get("name") or "").strip()
+                    for skill in session._skills_used
+                    if str(skill.get("name") or "").strip()
+                ]
+                if _skill_names:
+                    state.broadcast_ws(
+                        "activity_event",
+                        {
+                            "session": session.key,
+                            "kind": "skills_selected",
+                            "text": f"Selected skills for this turn: {', '.join(_skill_names)}",
+                            "skills": session._skills_used,
+                            "turn_id": _turn_id,
+                            "turn_ts": str((_origin_message or {}).get("ts") or ""),
+                        },
+                    )
             if is_new:
                 ctx_len = _assembled.injected_chars
                 state.broadcast_ws(
@@ -2765,7 +2796,7 @@ async def run_chat(
             if event.kind == EVENT_TEXT_CHUNK:
                 if in_tool_group:
                     if assistant_text:
-                        _flush_segment(state, session, assistant_text)
+                        _flush_segment(state, session, assistant_text, turn_id=_turn_id)
                         assistant_text = ""
                     else:
                         state.broadcast_ws("chat_segment", {"session": session.key})
@@ -2782,6 +2813,7 @@ async def run_chat(
                                         "session": session.key,
                                         "tool_call_id": tcid,
                                         "output": "",
+                                        "turn_id": _turn_id,
                                     },
                                 )
                         elif m.get("role") not in ("tool", "permission", "chunk"):
@@ -2794,7 +2826,7 @@ async def run_chat(
                 session.append("chunk", safe_chunk, "chunk", meta=cursor)
                 state.broadcast_ws(
                     "chat_chunk",
-                    {"session": session.key, "content": safe_chunk, **cursor,
+                    {"session": session.key, "content": safe_chunk, "turn_id": _turn_id, **cursor,
                      "seq": cursor["stream_seq"]},
                 )
             elif event.kind == EVENT_THINKING_CHUNK:
@@ -2806,11 +2838,11 @@ async def run_chat(
                     logger.warning("Credential redacted in thinking: %s", w)
                 state.broadcast_ws(
                     "chat_thinking",
-                    {"session": session.key, "content": safe_text},
+                    {"session": session.key, "content": safe_text, "turn_id": _turn_id},
                 )
             elif event.kind == EVENT_TOOL_CALL:
                 if not in_tool_group and assistant_text:
-                    _flush_segment(state, session, assistant_text, broadcast=False)
+                    _flush_segment(state, session, assistant_text, broadcast=False, turn_id=_turn_id)
                     assistant_text = ""
                 in_tool_group = True
                 _title, _ = redact_exfiltration_urls(event.title)
@@ -2841,6 +2873,7 @@ async def run_chat(
                         "tool": _title,
                         "kind": _kind,
                         "tool_call_id": event.tool_call_id,
+                        "turn_id": _turn_id,
                         "purpose": _purpose,
                         "input_preview": _input_preview,
                         "input": _input_obj,
@@ -2854,6 +2887,7 @@ async def run_chat(
                     purpose=_purpose,
                     input_preview=_input_preview,
                 )
+                tag_turn_message(session.messages[-1], _turn_id)
                 _capture_file_change(session, event.title, event.tool_input)
                 _capture_declared_file_change(session, event.file_change)
                 if event.title == "AskUserQuestion":
@@ -2941,6 +2975,7 @@ async def run_chat(
                                     "session": session.key,
                                     "tool": _name,
                                     "tool_call_id": event.tool_call_id,
+                                    "turn_id": _turn_id,
                                     "input_preview": _meta.get("input", ""),
                                     "input": _u_input_obj,
                                     "detail": _meta.get("detail", ""),
@@ -2952,7 +2987,7 @@ async def run_chat(
                 _out = (event.tool_output or "")[:8000]
                 _out, _ = redact_exfiltration_urls(_out)
                 _out, _ = redact_credentials(_out)
-                _payload = _tool_result_payload(session.key, event, _out)
+                _payload = {**_tool_result_payload(session.key, event, _out), "turn_id": _turn_id}
                 _content_type = _payload["content_type"]
                 _raw_ref = _payload["raw_ref"]
                 _truncated = _payload["truncated"]
@@ -3171,7 +3206,7 @@ async def run_chat(
                     _ungated_candidates.pop(event.tool_call_id, None)
                 in_tool_group = False
                 if assistant_text:
-                    _flush_segment(state, session, assistant_text)
+                    _flush_segment(state, session, assistant_text, turn_id=_turn_id)
                     assistant_text = ""
                 _task_mode = getattr(session, "_task_mode", "agent")
                 _tm_deny, _policy_reason = _permission_policy_denial(session, event)
@@ -3632,6 +3667,7 @@ async def run_chat(
                 perm_meta = {
                     "request_id": str(event.request_id),
                     "tool_call_id": event.tool_call_id or "",
+                    "turn_id": _turn_id,
                     "tool_kind": event.tool_kind or "",
                     "can_revise": callable(getattr(client, "revise_tool", None)),
                 }
@@ -3667,6 +3703,7 @@ async def run_chat(
                         "tool_input": perm_meta.get("tool_input", ""),
                         "tool_purpose": event.tool_purpose or "",
                         "tool_kind": event.tool_kind or "",
+                        "turn_id": _turn_id,
                         "risk": effective_risk,
                         "can_revise": perm_meta["can_revise"],
                         "_call_fingerprint": _call_fingerprint,
@@ -4121,7 +4158,7 @@ async def run_chat(
             session._empty_response_retries = 0
 
         if assistant_text:
-            _flush_segment(state, session, assistant_text, broadcast=False)
+            _flush_segment(state, session, assistant_text, broadcast=False, turn_id=_turn_id)
             _persist_turn_summary(session, assistant_text)
         if _turn_model_substitutions:
             last_assistant = next(

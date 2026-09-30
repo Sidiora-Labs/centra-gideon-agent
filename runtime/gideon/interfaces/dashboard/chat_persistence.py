@@ -904,6 +904,32 @@ def _build_history_prefix(session: _ChatSession) -> str:
 _TURN_DISPATCH_ROLES = frozenset({"user", "inject", "subagent", "nudge"})
 
 
+def in_flight_index(session: _ChatSession, message: str) -> int | None:
+    """Locate the dispatch row that owns the active turn in the live transcript.
+
+    Only dispatches after the last completed assistant row are eligible. Matching
+    from newest to oldest mirrors the session's prior-turn cut when duplicate text
+    is queued, while retaining the exact row for metadata updates.
+    """
+    messages = session.messages
+    last_assistant = next(
+        (i for i in range(len(messages) - 1, -1, -1) if messages[i].get("role") == "assistant"),
+        -1,
+    )
+    for i in range(len(messages) - 1, last_assistant, -1):
+        row = messages[i]
+        if row.get("role") in _TURN_DISPATCH_ROLES and row.get("content", "") == message:
+            return i
+    return None
+
+
+def tag_turn_message(message: dict, turn_id: str) -> None:
+    """Persist the owning dispatch ID on a transcript row."""
+    if not turn_id:
+        return
+    message.setdefault("meta", {})["turn_id"] = turn_id
+
+
 def prior_turns_transcript(
     session: _ChatSession, in_flight: str, *, nested: bool = False
 ) -> list[dict[str, str]]:
