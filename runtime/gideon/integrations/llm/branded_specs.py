@@ -152,19 +152,7 @@ def registered_spec(provider: str) -> BrandedProviderSpec | None:
     requested = str(provider or "").strip()
     if not requested:
         return None
-    if requested in _REGISTERED_SPECS:
-        return _REGISTERED_SPECS[requested]
-    folded = requested.lower()
-    partial = []
-    for identifier, candidate in _REGISTERED_SPECS.items():
-        key = identifier.lower()
-        if key == folded:
-            return candidate
-        if key and key in folded:
-            partial.append(candidate)
-    if len(partial) == 1:
-        return partial.pop()
-    return None
+    return _REGISTERED_SPECS.get(requested)
 
 
 def spec_pricing(provider: str) -> dict[str, dict[str, float]]:

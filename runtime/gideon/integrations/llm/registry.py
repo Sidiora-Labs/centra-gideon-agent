@@ -104,9 +104,15 @@ class ProviderRegistry:
         self._entries: dict[str, ProviderEntry] = {}
         self._catalog_factories: dict[str, CatalogFactory] = {}
         self._readiness: dict[str, ReadinessProbe] = {}
+        self._in_process_types: set[str] = set()
 
     def register_type(
-        self, cap: ProviderCapability, factory: ProviderFactory, *, readiness: ReadinessProbe | None = None
+        self,
+        cap: ProviderCapability,
+        factory: ProviderFactory,
+        *,
+        readiness: ReadinessProbe | None = None,
+        in_process: bool = False,
     ) -> None:
         if cap.type in self._factories:
             raise ProviderResolutionError(
@@ -116,6 +122,8 @@ class ProviderRegistry:
         self._capabilities.update({cap.type: cap})
         if readiness is not None:
             self._readiness[cap.type] = readiness
+        if in_process:
+            self._in_process_types.add(cap.type)
 
     def register_entry(self, entry: ProviderEntry) -> None:
         if entry.name not in self._entries:
@@ -240,6 +248,72 @@ def canonical_provider_type(ptype: str) -> str:
     return _CONFIG_TYPE_MAP.get(ptype, ptype)
 
 
+def serving_entry(provider: str) -> ProviderEntry | None:
+    """Resolve the configured serving entry by its exact user-facing name."""
+    try:
+        return get_default_registry().get_entry(str(provider or ""))
+    except Exception:
+        return None
+
+
+def serving_endpoint(entry: ProviderEntry) -> str:
+    """Mirror the selected provider factory's endpoint precedence."""
+    options = entry.options if isinstance(entry.options, dict) else {}
+    if entry.type == "ollama":
+        return str(
+            options.get("endpoint")
+            or options.get("base_url")
+            or "http://localhost:11434"
+        ).strip()
+    from gideon.integrations.llm.branded_specs import registered_spec
+
+    spec = registered_spec(entry.type)
+    return str(
+        options.get("base_url")
+        or options.get("endpoint")
+        or (spec.default_base_url if spec is not None else "")
+    ).strip()
+
+
+def serving_is_local(
+    provider: str | ProviderEntry, *, actual_provider: ModelProvider | None = None
+) -> bool:
+    """Use the selected entry's actual endpoint, or an explicit in-process declaration.
+
+    A concrete endpoint always takes precedence over provider-family and implementation
+    hints. This keeps a local-family entry aimed at a remote service treated as remote.
+    """
+    registry = get_default_registry()
+    entry = provider if isinstance(provider, ProviderEntry) else serving_entry(provider)
+    endpoint = serving_endpoint(entry) if entry is not None else ""
+    if actual_provider is not None:
+        endpoint = str(
+            getattr(actual_provider, "endpoint", "")
+            or getattr(actual_provider, "_base_url", "")
+            or endpoint
+        ).strip()
+    if endpoint:
+        from gideon.integrations.model_windows import is_local_endpoint
+
+        return is_local_endpoint(endpoint)
+    if entry is not None and entry.type in registry._in_process_types:
+        return True
+    return bool(
+        actual_provider is not None and getattr(actual_provider, "is_local", False)
+    )
+
+
+def serving_type(provider: str) -> str:
+    """Return the exact provider type bound to an entry; accept exact type IDs too."""
+    entry = serving_entry(provider)
+    if entry is not None:
+        return entry.type
+    requested = str(provider or "").strip()
+    if requested in get_default_registry()._factories:
+        return requested
+    return canonical_provider_type(requested)
+
+
 SCRIPTED_PROVIDER_TYPE = "scripted"
 SCRIPTED_PROVIDER_ENV = "GIDEON_SCRIPTED_MODEL_SCRIPT"
 SCRIPTED_PROVIDER_ENTRY_NAME = "Scripted"
@@ -277,7 +351,9 @@ def register_scripted_provider_type() -> bool:
     if enabled:
         registry = get_default_registry()
         if SCRIPTED_PROVIDER_TYPE not in registry._factories:
-            registry.register_type(SCRIPTED_PROVIDER_CAPABILITY, _scripted_factory)
+            registry.register_type(
+                SCRIPTED_PROVIDER_CAPABILITY, _scripted_factory, in_process=True
+            )
         registry.register_entry(
             ProviderEntry(
                 name=SCRIPTED_PROVIDER_ENTRY_NAME,

@@ -647,18 +647,15 @@ class ModelCallGuard(ModelProvider):
 
 
 def _is_local_provider(provider: ModelProvider) -> bool:
-    """Best-effort: is ``provider`` local-only (content never leaves the machine)?
+    """Use the same resolved endpoint locality as rates and routing."""
+    try:
+        from gideon.integrations.llm.registry import serving_is_local
 
-    Ollama and a base_url pointing at loopback/private are local — their outbound
-    scan is forced to ``warn`` (§2.2: local content stays on the machine, so a hard
-    block/redact would be pointless friction). Unknown → treat as REMOTE (the
-    conservative default: a hosted provider gets the real scan mode)."""
-    base_url = str(getattr(provider, "_base_url", "") or "").lower()
-    if base_url:
-        if any(h in base_url for h in ("localhost", "127.0.0.1", "0.0.0.0", "::1")):
-            return True
-    type_name = type(provider).__name__.lower()
-    return "ollama" in type_name
+        reference = str(getattr(provider, "served_model_ref", "") or "")
+        name = reference.partition(":")[0] if reference else ""
+        return serving_is_local(name, actual_provider=provider)
+    except Exception:
+        return False
 
 
 def wrap_model_call_guard(

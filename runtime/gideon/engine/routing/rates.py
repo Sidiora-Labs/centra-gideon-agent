@@ -265,9 +265,14 @@ class RateLookup:
 
     def candidates(self):
         yield _overlay_rate(self.provider, self.model, self.home)
-        if is_local_provider_type(self.provider):
+        from gideon.integrations.llm.registry import serving_is_local, serving_type
+
+        provider_type = serving_type(self.provider)
+        if provider_type != self.provider:
+            yield _overlay_rate(provider_type, self.model, self.home)
+        if serving_is_local(self.provider):
             yield ModelRate(0.0, 0.0, source="local")
-        yield _app_default_rate(self.provider, self.model)
+        yield _app_default_rate(provider_type, self.model)
         yield _builtin_rate(self.model)
 
     def resolve(self):

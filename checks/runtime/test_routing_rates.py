@@ -87,8 +87,24 @@ def test_absent_is_none_not_a_free_model(tmp_path):
 
 
 def test_local_provider_prices_zero_and_is_not_absent(tmp_path):
-    """SC #7: a local provider's price is a KNOWN 0.0, distinguishable from an absent rate."""
-    rate = rate_for("ollama-models", "qwen3:8b", home=tmp_path)
+    """A locally resolved endpoint is a KNOWN zero; a provider name alone is insufficient."""
+    from gideon.integrations.llm.registry import (
+        ProviderEntry,
+        ProviderRegistry,
+        get_default_registry,
+        set_default_registry,
+    )
+
+    original = get_default_registry()
+    registry = ProviderRegistry()
+    registry.register_entry(
+        ProviderEntry(name="ollama-models", type="ollama", model="qwen3:8b")
+    )
+    set_default_registry(registry)
+    try:
+        rate = rate_for("ollama-models", "qwen3:8b", home=tmp_path)
+    finally:
+        set_default_registry(original)
 
     assert rate == ModelRate(0.0, 0.0)
     assert rate is not None and rate.source == "local"

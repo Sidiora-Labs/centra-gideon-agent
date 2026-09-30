@@ -185,9 +185,13 @@ def model_of(ref: str) -> str:
 
 def _local_provider_keys() -> set[str]:
     try:
-        from gideon.integrations.local_models.registry import registered
+        from gideon.integrations.llm.registry import get_default_registry, serving_is_local
 
-        return set(_norm(key) for key, _ in registered() if key)
+        return {
+            _norm(entry.name)
+            for entry in get_default_registry().list_entries()
+            if entry.name and serving_is_local(entry)
+        }
     except Exception:
         return set()
 
@@ -197,15 +201,7 @@ def is_local_ref(ref: str, *, local_keys: set[str] | None = None) -> bool:
     if not provider:
         return False
     keys = _local_provider_keys() if local_keys is None else local_keys
-
-    def matches(key):
-        return (
-            key == provider
-            or (len(provider) >= 4 and key.startswith(provider))
-            or (len(key) >= 4 and provider.startswith(key))
-        )
-
-    return any(matches(key) for key in keys if key)
+    return provider in keys
 
 
 def _structured_providers() -> set[str]:
