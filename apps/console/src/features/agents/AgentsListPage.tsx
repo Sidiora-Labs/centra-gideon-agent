@@ -1,5 +1,5 @@
-import { useMemo, type ReactNode } from 'react'
-import { Plus, Search, Star, Users, Lock, Cpu, Wrench, Sparkles, Zap, RefreshCw } from 'lucide-react'
+import { useMemo, useState, type ReactNode } from 'react'
+import { Plus, Search, Star, Users, Lock, Cpu, Wrench, Sparkles, Zap, RefreshCw, Download } from 'lucide-react'
 import { fvs } from '../../shared/theme/fontWeight'
 import { TopBar } from '../../shared/ui/TopBar'
 import { WorkbenchLayout } from '../../shared/ui/WorkbenchLayout'
@@ -18,14 +18,17 @@ import { useChatSocket } from '../../shared/data/useChatSocket'
 import { useQueryParam, useEditFlag, type RouteProps } from '../../app/shell/useQueryState'
 import { PageTitle } from '../../shared/ui/PageTitle'
 import { agentMatcher, decodeAgentAddress, encodeAgentAddress, useAgentLibraryActions, type AgentAddress } from './agentLibraryState'
+import { ExportAgentsDialog } from './ExportAgentsDialog'
 
 export function AgentsListPage({ onCreate, query, setQuery }: { onCreate: () => void } & Pick<RouteProps, 'query' | 'setQuery'>) {
   const { groups, error, loaded, loading, reload } = useAgentsData()
   const [q, setQ] = useQueryParam(query, setQuery, 'q', '', { replace: true })
   const [editing, setEditing] = useEditFlag(query, setQuery)
+  const [exporting, setExporting] = useState<string[] | null | undefined>(undefined)
   const open = decodeAgentAddress(query.open ?? '')
   const setOpen = (address: AgentAddress | null) => setQuery({ open: encodeAgentAddress(address), edit: null })
   const native = groups.find((group): group is NativeGroup => group.kind === 'native')
+  const exportable = native?.exportEnabled ? native.agents.filter(agent => !isReservedAgent(agent) && agent.name !== native.defaultAgent && ['local', 'gideon'].includes(agent.source ?? '')) : []
   const discovered = groups.filter((group): group is DiscoveredGroup => group.kind === 'discovered')
   const matches = useMemo(() => agentMatcher(q), [q])
   const n = q.trim().toLowerCase()
@@ -38,7 +41,7 @@ export function AgentsListPage({ onCreate, query, setQuery }: { onCreate: () => 
   let panel: ReactNode = null
   if (open?.kind === 'native' && native) {
     const agent = native.agents.find(candidate => candidate.name === open.name)
-    if (agent) panel = <SidePanel key={`n:${agent.name}`} fillHeight storeKey="agent-panel-w" icon={<Users size={18} className="text-primary" />} title={agent.name} onClose={() => setOpen(null)}><NativeAgentDetail agent={agent} isDefault={native.defaultAgent === agent.name} editing={editing} onEditingChange={setEditing} onSaved={reload} onDeleted={() => { setOpen(null); reload() }} onSetDefault={() => { void setDefault(agent.name) }} /></SidePanel>
+    if (agent) panel = <SidePanel key={`n:${agent.name}`} fillHeight storeKey="agent-panel-w" icon={<Users size={18} className="text-primary" />} title={agent.name} onClose={() => setOpen(null)}><NativeAgentDetail agent={agent} isDefault={native.defaultAgent === agent.name} editing={editing} onEditingChange={setEditing} onSaved={reload} onDeleted={() => { setOpen(null); reload() }} onSetDefault={() => { void setDefault(agent.name) }} onExport={native.exportEnabled ? () => setExporting([agent.name]) : undefined} /></SidePanel>
   } else if (open?.kind === 'discovered') {
     const group = discovered.find(candidate => candidate.providerId === open.providerId)
     const agent = group?.agents.find(candidate => candidate.id === open.id)
@@ -55,11 +58,14 @@ export function AgentsListPage({ onCreate, query, setQuery }: { onCreate: () => 
       {group.ready && (items.length ? <div className="grid gap-s">{items.map((agent, index) => <DiscoveredRow key={agent.id} agent={agent} index={index} tone={provider.tone} icon={provider.icon} onClick={() => setOpen({ kind: 'discovered', providerId: group.providerId, id: agent.id })} />)}</div> : <p data-type="body-s" className="text-on-surface-low">{n ? 'No matching agents.' : 'No agents discovered.'}</p>)}
     </GroupSection>)
   }
-  return <WorkbenchLayout
-    topBar={<TopBar keepCornerPadding left={<PageTitle>Agents</PageTitle>} right={<HeaderActions><HeaderControl icon={RefreshCw} label={syncing ? 'Syncing…' : 'Sync agents'} priority="low" onClick={syncAgents} /><HeaderControl icon={Plus} label="New agent" variant="primary" priority="primary" onClick={onCreate} /></HeaderActions>} />}
+  return <>
+  <WorkbenchLayout
+    topBar={<TopBar keepCornerPadding left={<PageTitle>Agents</PageTitle>} right={<HeaderActions>{exportable.length > 0 && <HeaderControl icon={Download} label="Export to Claude Code" priority="low" onClick={() => setExporting(null)} />}<HeaderControl icon={RefreshCw} label={syncing ? 'Syncing…' : 'Sync agents'} priority="low" onClick={syncAgents} /><HeaderControl icon={Plus} label="New agent" variant="primary" priority="primary" onClick={onCreate} /></HeaderActions>} />}
     controls={<ListControls search={{ value: q, onChange: setQ, placeholder: 'Search agents', label: 'Search agents' }} results={{ count: shownCount, noun: 'agents', active: !!n && !(loading && groups.length === 0) }} />} panel={panel}>
     <div className="mx-auto grid gap-xl px-l py-l" style={{ maxWidth: 'var(--content-width)' }}>{!loaded && error ? <LoadError what="agents" error={error} onRetry={reload} /> : loading && !groups.length ? <ListSkeleton rows={6} what="agents" /> : sections}</div>
   </WorkbenchLayout>
+  {exporting !== undefined && native && <ExportAgentsDialog agents={native.agents} defaultAgent={native.defaultAgent} initialNames={exporting ?? undefined} onClose={() => setExporting(undefined)} />}
+  </>
 }
 function GroupSection({ title, icon: Icon, tone, subtitle, count, ready = true, children }: { title: string; icon: typeof Users; tone: string; subtitle: string; count: number; ready?: boolean; children: ReactNode }) {
   return <section className="rounded-lg border border-outline-variant/30 bg-surface-container/15 p-m"><header className="mb-m grid gap-s border-b border-outline-variant/25 pb-m"><div className="flex items-center gap-s"><Icon size={16} style={{ color: tone }} /><h2 data-type="label-m" className="text-on-surface">{title}</h2><span data-type="caption" className="text-on-surface-low tabular-nums">{count}</span>{!ready && <span data-type="caption" className="inline-flex items-center gap-1 text-on-surface-low"><Lock size={11} /> unavailable</span>}</div><p data-type="caption" className="text-on-surface-low">{subtitle}</p></header>{children}</section>

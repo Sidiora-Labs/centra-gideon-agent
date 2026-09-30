@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Pencil, Trash2, Check, X, Star, Lock, Cpu, ShieldCheck, ChevronDown, VolumeX, RefreshCw, ExternalLink } from 'lucide-react'
+import { Pencil, Trash2, Check, X, Star, Lock, Cpu, ShieldCheck, ChevronDown, VolumeX, RefreshCw, ExternalLink, Download } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
 import { TextArea, FieldError } from '../../shared/ui/forms'
 import { FormFooter } from '../../shared/ui/FormFooter'
@@ -19,8 +19,8 @@ import { documentationUrl } from '../../app/shell/config'
 
 const badgeClass = 'inline-flex min-h-7 items-center gap-1 rounded-md px-m text-[0.8125rem]'
 
-export function NativeAgentDetail({ agent, isDefault, onSaved, onDeleted, onSetDefault, editing: editingProp, onEditingChange }: {
-  agent: SavedAgent; isDefault: boolean; onSaved: () => void; onDeleted: () => void; onSetDefault: () => void; editing: boolean; onEditingChange: (value: boolean) => void
+export function NativeAgentDetail({ agent, isDefault, onSaved, onDeleted, onSetDefault, onExport, editing: editingProp, onEditingChange }: {
+  agent: SavedAgent; isDefault: boolean; onSaved: () => void; onDeleted: () => void; onSetDefault: () => void; onExport?: () => void; editing: boolean; onEditingChange: (value: boolean) => void
 }) {
   const reserved = isReservedAgent(agent)
   const [draft, setDraft] = useState(() => toDraft(agent))
@@ -51,6 +51,7 @@ export function NativeAgentDetail({ agent, isDefault, onSaved, onDeleted, onSetD
         <Button size="sm" variant="secondary" onClick={() => { setDraft(toDraft(agent)); onEditingChange(true) }}><Pencil size={14} /> Edit</Button>
         {!isDefault && <Button size="sm" variant="ghost" onClick={onSetDefault}><Star size={14} /> Set default</Button>}
         <Button size="sm" variant="ghost" onClick={remove} disabled={operation.busy}><Trash2 size={14} /> Delete</Button>
+        {!isDefault && ['local', 'gideon'].includes(agent.source ?? '') && onExport && <Button size="sm" variant="ghost" onClick={onExport}><Download size={14} /> Export</Button>}
       </>}
       {isDefault && <span data-type="caption" className="ml-auto inline-flex items-center gap-1 text-primary"><Star size={12} fill="currentColor" /> Default</span>}
     </div>

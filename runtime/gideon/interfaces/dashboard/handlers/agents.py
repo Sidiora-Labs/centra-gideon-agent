@@ -2,9 +2,13 @@
 
 import asyncio
 import dataclasses
+import hashlib
 import json
 import logging
+import os
 import re
+import secrets
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -817,8 +821,278 @@ async def api_gideon_agents(request: web.Request) -> web.Response:
         {
             "agents": agents,
             "default_agent": cfg.default_agent,
+            "agent_export_enabled": (
+                os.environ.get("GIDEON_HOSTED", "").strip() != "1"
+                and not request.get("tenant_id")
+            ),
         }
     )
+
+
+_AGENT_EXPORT_PREVIEW_TTL = 300
+_AGENT_EXPORT_PREVIEW_LIMIT = 64
+_agent_export_previews: dict[str, dict[str, Any]] = {}
+
+
+def register_agent_export_routes(app: web.Application) -> None:
+    """Expose owner-home export routes only in the OSS/self-hosted dashboard."""
+    if os.environ.get("GIDEON_HOSTED", "").strip() == "1":
+        return
+    app.router.add_post("/api/agents/export/preview", api_agent_export_preview)
+    app.router.add_post("/api/agents/export", api_agent_export_write)
+
+
+def _agent_export_owner_only(request: web.Request) -> web.Response | None:
+    """Keep filesystem writes out of hosted, tenant, and app-scoped requests."""
+    if os.environ.get("GIDEON_HOSTED", "").strip() == "1" or request.get("tenant_id"):
+        return web.json_response(
+            {"error": "Claude Code export is available only in the OSS console"},
+            status=404,
+        )
+    if request.get("app"):
+        return web.json_response(
+            {"error": "Only the console owner may export agents"}, status=403
+        )
+    if not request.get("user"):
+        return web.json_response({"error": "Owner authentication is required"}, status=401)
+    return None
+
+
+def _agent_export_entities(names: list[str]):
+    """Resolve only editable, owner-originated profiles from the current config."""
+    from gideon.engine.agents.defaults import is_reserved_agent
+    from gideon.engine.agents.marketplace import AgentDefinition
+
+    cfg = AppConfig.load()
+    if not isinstance(names, list) or not names or len(names) > 100:
+        raise ValueError("Choose between 1 and 100 owner-created agents")
+    if any(not isinstance(name, str) or not name or len(name) > 63 for name in names):
+        raise ValueError("Agent selection is invalid")
+    if len(set(names)) != len(names):
+        raise ValueError("Agent selection contains duplicates")
+    entities = []
+    for name in names:
+        profile = cfg.agents.get(name)
+        if (
+            profile is None
+            or name == cfg.default_agent
+            or is_reserved_agent(name)
+            or profile.source not in {"local", "gideon"}
+        ):
+            raise ValueError(f"'{name}' is not an exportable owner-created agent")
+        entities.append(
+            AgentDefinition(
+                name=name,
+                description=profile.description,
+                model=profile.model,
+                system_prompt=profile.system_prompt,
+                voice=profile.voice,
+                natural_voice=profile.natural_voice,
+                skills=list(profile.skills),
+                provider=profile.provider,
+                specialty=profile.specialty,
+                route_hints=profile.route_hints,
+                source=profile.source,
+            )
+        )
+    return cfg, entities
+
+
+def _agent_export_content_digest(files) -> str:
+    rows = [(file.relpath, file.text) for file in files]
+    payload = json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _agent_export_destination(value: Any) -> tuple[Path, tuple[Any, ...]]:
+    from gideon.extensions.packs.external_formats import ExportPathRefused
+
+    if not isinstance(value, str) or not value.strip() or len(value) > 4096:
+        raise ExportPathRefused("A destination directory is required")
+    home = Path.home().resolve()
+    destination = Path(value).expanduser()
+    resolved = destination.resolve()
+    if resolved != home and home not in resolved.parents:
+        raise ExportPathRefused("Destination must remain inside the current user's home")
+    try:
+        stat = resolved.stat()
+    except FileNotFoundError:
+        identity: tuple[Any, ...] = (str(resolved), False)
+    except OSError as exc:
+        raise ExportPathRefused("Destination cannot be inspected") from exc
+    else:
+        if not resolved.is_dir():
+            raise ExportPathRefused("Destination is not a directory")
+        identity = (str(resolved), True, stat.st_dev, stat.st_ino, stat.st_mtime_ns)
+    return resolved, identity
+
+
+def _agent_export_prune_previews(now: float) -> None:
+    for token, preview in list(_agent_export_previews.items()):
+        if preview["expires"] <= now:
+            _agent_export_previews.pop(token, None)
+    while len(_agent_export_previews) >= _AGENT_EXPORT_PREVIEW_LIMIT:
+        oldest = min(_agent_export_previews, key=lambda token: _agent_export_previews[token]["created"])
+        _agent_export_previews.pop(oldest, None)
+
+
+async def api_agent_export_preview(request: web.Request) -> web.Response:
+    """Preview an OSS-only Claude Code export without creating files."""
+    denied = _agent_export_owner_only(request)
+    if denied is not None:
+        return denied
+    from gideon.extensions.packs.external_formats import (
+        CLAUDE_CODE_AGENTS,
+        ExportPathRefused,
+        ExportRefused,
+        PROVENANCE_MARKER,
+        _resolve_target,
+        default_dest_dir,
+        export_preview,
+    )
+
+    try:
+        body = await read_json_body(request)
+    except Exception:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+    if not isinstance(body, dict):
+        return web.json_response({"error": "JSON body must be an object"}, status=400)
+    try:
+        _cfg, entities = _agent_export_entities(body.get("agents"))
+        raw_dest = body.get("destination")
+        if raw_dest is None:
+            raw_dest = str(default_dest_dir(CLAUDE_CODE_AGENTS) or "")
+        destination, identity = _agent_export_destination(raw_dest)
+        preview = export_preview(CLAUDE_CODE_AGENTS, entities)
+        files = CLAUDE_CODE_AGENTS.render(entities)
+        snapshots: dict[str, str | None] = {}
+        conflicts: list[str] = []
+        for rendered in files:
+            target = _resolve_target(destination, rendered.relpath)
+            if not target.exists():
+                snapshots[rendered.relpath] = None
+                status = "new"
+            else:
+                try:
+                    current = target.read_bytes()
+                except OSError:
+                    current = b""
+                    status = "foreign"
+                    snapshots[rendered.relpath] = hashlib.sha256(current).hexdigest()
+                else:
+                    current_text = current.decode("utf-8", errors="replace")
+                    owned = PROVENANCE_MARKER in current_text
+                    snapshots[rendered.relpath] = hashlib.sha256(current).hexdigest()
+                    if not owned:
+                        status = "foreign"
+                    elif current == rendered.text.encode("utf-8"):
+                        status = "same"
+                    else:
+                        status = "replace"
+            if status == "foreign":
+                conflicts.append(rendered.relpath)
+            row = next(item for item in preview["files"] if item["path"] == rendered.relpath)
+            row["status"] = status
+        preview["destination"] = str(destination)
+        preview["conflicts"] = conflicts
+        if preview["blocked"] or conflicts:
+            preview["preview_token"] = None
+            return web.json_response(preview)
+        now = time.monotonic()
+        _agent_export_prune_previews(now)
+        token = secrets.token_urlsafe(32)
+        _agent_export_previews[token] = {
+            "owner": str(request.get("user", "dashboard")),
+            "agents": list(body["agents"]),
+            "destination": str(destination),
+            "destination_identity": identity,
+            "destination_files": snapshots,
+            "content_digest": _agent_export_content_digest(files),
+            "created": now,
+            "expires": now + _AGENT_EXPORT_PREVIEW_TTL,
+        }
+        preview["preview_token"] = token
+        preview["expires_in"] = _AGENT_EXPORT_PREVIEW_TTL
+        return web.json_response(preview)
+    except (ValueError, ExportPathRefused) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    except ExportRefused as exc:
+        return web.json_response({"error": str(exc)}, status=422)
+
+
+async def api_agent_export_write(request: web.Request) -> web.Response:
+    """Write exactly the still-current owner export from an unexpired preview."""
+    denied = _agent_export_owner_only(request)
+    if denied is not None:
+        return denied
+    from gideon.extensions.packs.external_formats import (
+        CLAUDE_CODE_AGENTS,
+        ExportClobberRefused,
+        ExportPathRefused,
+        PROVENANCE_MARKER,
+        _resolve_target,
+        export_entities,
+    )
+    try:
+        body = await read_json_body(request)
+    except Exception:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+    if not isinstance(body, dict) or not isinstance(body.get("preview_token"), str):
+        return web.json_response({"error": "A valid preview is required before export"}, status=400)
+    token = body["preview_token"]
+    now = time.monotonic()
+    _agent_export_prune_previews(now)
+    preview = _agent_export_previews.pop(token, None)
+    if preview is None or preview["owner"] != str(request.get("user", "dashboard")):
+        return web.json_response({"error": "Preview expired or is no longer available; preview again"}, status=409)
+    try:
+        _cfg, entities = _agent_export_entities(preview["agents"])
+        files = CLAUDE_CODE_AGENTS.render(entities)
+        destination, identity = _agent_export_destination(preview["destination"])
+        if (
+            str(destination) != preview["destination"]
+            or identity != preview["destination_identity"]
+            or _agent_export_content_digest(files) != preview["content_digest"]
+        ):
+            return web.json_response({"error": "Agent content or destination changed after preview; preview again"}, status=409)
+        for rendered in files:
+            target = _resolve_target(destination, rendered.relpath)
+            expected = preview["destination_files"].get(rendered.relpath)
+            if target.exists() != (expected is not None):
+                return web.json_response({"error": "Destination changed after preview; preview again"}, status=409)
+            if expected is not None:
+                try:
+                    actual = hashlib.sha256(target.read_bytes()).hexdigest()
+                except OSError:
+                    return web.json_response({"error": "Destination changed after preview; preview again"}, status=409)
+                if actual != expected or PROVENANCE_MARKER not in target.read_text(encoding="utf-8", errors="replace"):
+                    return web.json_response({"error": "Destination changed after preview; preview again"}, status=409)
+        result = export_entities(
+            CLAUDE_CODE_AGENTS,
+            entities,
+            destination,
+            confirm_dest=True,
+            overwrite=True,
+            expected_existing=preview["destination_files"],
+        )
+        _sel().log_api_access(
+            caller=str(request.get("user", "dashboard")),
+            operation="agent.export.claude_code",
+            outcome="success",
+            source="dashboard",
+            resources=",".join(preview["agents"]),
+        )
+        unchanged = [
+            rendered.relpath
+            for rendered in files
+            if preview["destination_files"].get(rendered.relpath)
+            == hashlib.sha256(rendered.text.encode("utf-8")).hexdigest()
+        ]
+        return web.json_response(
+            {"ok": True, "files": [path.name for path in result.written], "unchanged": unchanged}
+        )
+    except (ValueError, ExportPathRefused, ExportClobberRefused) as exc:
+        return web.json_response({"error": str(exc)}, status=409)
 
 
 _config_lock: asyncio.Lock | None = None

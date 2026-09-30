@@ -2,7 +2,7 @@ import { api, type SavedAgent, type DiscoveredAgent } from '../../shared/data/ap
 import { loadAcpDiscovered } from '../../shared/data/agents'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 
-export interface NativeGroup { kind: 'native'; agents: SavedAgent[]; defaultAgent: string }
+export interface NativeGroup { kind: 'native'; agents: SavedAgent[]; defaultAgent: string; exportEnabled: boolean }
 export interface DiscoveredGroup { kind: 'discovered'; providerId: string; ready: boolean; detail: string; agents: DiscoveredAgent[] }
 export type AgentGroup = NativeGroup | DiscoveredGroup
 export interface AgentsData { groups: AgentGroup[]; error: unknown; loaded: boolean; loading: boolean; reload: () => void }
@@ -12,7 +12,7 @@ async function fetchAgentGroups(): Promise<AgentGroup[]> {
   const runtimes = providers.filter(provider => provider.type !== 'native')
   const discoveries = await loadAcpDiscovered(runtimes.filter(provider => provider.ready))
   return [
-    { kind: 'native', agents: native.agents, defaultAgent: native.default_agent },
+    { kind: 'native', agents: native.agents, defaultAgent: native.default_agent, exportEnabled: native.agent_export_enabled === true },
     ...runtimes.map((provider): DiscoveredGroup => ({ kind: 'discovered', providerId: provider.provider_id, ready: provider.ready, detail: provider.detail, agents: discoveries[provider.provider_id] ?? [] })),
   ]
 }

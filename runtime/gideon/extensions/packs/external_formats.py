@@ -31,6 +31,9 @@ pins that promise per format.
 from __future__ import annotations
 
 import re
+import hashlib
+import os
+import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -386,6 +389,7 @@ def export_entities(
     *,
     confirm_dest: bool = False,
     overwrite: bool = False,
+    expected_existing: dict[str, str | None] | None = None,
 ) -> ExportResult:
     """Render ``entities`` through ``fmt`` and write them under ``dest_dir``.
 
@@ -417,7 +421,27 @@ def export_entities(
         raise ExportBlocked(blocked)
 
     for target, rf in targets:
-        if target.exists() and not (overwrite and _is_ours(target)):
+        if expected_existing is not None and rf.relpath not in expected_existing:
+            raise ExportClobberRefused(
+                f"preview did not include destination {rf.relpath}"
+            )
+        expected = expected_existing.get(rf.relpath) if expected_existing is not None else None
+        if expected_existing is not None:
+            exists = target.exists()
+            if exists != (expected is not None):
+                raise ExportClobberRefused(
+                    f"destination changed after preview: {target}"
+                )
+            if exists:
+                if not overwrite or not _is_ours(target):
+                    raise ExportClobberRefused(f"refusing to overwrite {target} (not written by gideon)")
+                try:
+                    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+                except OSError as exc:
+                    raise ExportClobberRefused(f"destination changed after preview: {target}") from exc
+                if digest != expected:
+                    raise ExportClobberRefused(f"destination changed after preview: {target}")
+        elif target.exists() and not (overwrite and _is_ours(target)):
             hint = (
                 "not written by gideon"
                 if not _is_ours(target)
@@ -426,10 +450,55 @@ def export_entities(
             raise ExportClobberRefused(f"refusing to overwrite {target} ({hint})")
 
     result = ExportResult(fmt.name, root)
-    for target, rf in targets:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(rf.text, encoding="utf-8")
-        result.written.append(target)
+    created: list[Path] = []
+    try:
+        for target, rf in targets:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            expected = expected_existing.get(rf.relpath) if expected_existing is not None else None
+            if expected_existing is not None and expected is not None:
+                current = target.read_bytes()
+                if hashlib.sha256(current).hexdigest() != expected:
+                    raise ExportClobberRefused(
+                        f"destination changed after preview: {target}"
+                    )
+                rendered = rf.text.encode("utf-8")
+                if current == rendered:
+                    continue
+                with tempfile.NamedTemporaryFile(
+                    mode="wb", dir=target.parent, prefix=f".{target.name}.",
+                    suffix=".tmp", delete=False,
+                ) as stream:
+                    staged = Path(stream.name)
+                    stream.write(rendered)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                try:
+                    os.replace(staged, target)
+                finally:
+                    staged.unlink(missing_ok=True)
+            elif overwrite and expected_existing is None and target.exists():
+                target.write_text(rf.text, encoding="utf-8")
+            else:
+                # O_EXCL semantics close the check/write race: a file created after the
+                # earlier clobber scan is refused instead of being truncated.
+                with target.open("x", encoding="utf-8") as stream:
+                    created.append(target)
+                    stream.write(rf.text)
+            result.written.append(target)
+    except ExportClobberRefused:
+        for path in reversed(created):
+            path.unlink(missing_ok=True)
+        raise
+    except FileExistsError as exc:
+        for path in reversed(created):
+            path.unlink(missing_ok=True)
+        raise ExportClobberRefused(
+            f"refusing to overwrite {target} (destination changed during export)"
+        ) from exc
+    except OSError:
+        for path in reversed(created):
+            path.unlink(missing_ok=True)
+        raise
     return result
 
 

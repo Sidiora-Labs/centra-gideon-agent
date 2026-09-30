@@ -1111,6 +1111,9 @@ async def start_dashboard(
     app.router.add_get("/api/agents", handlers.api_gideon_agents)
     app.router.add_post("/api/agents", handlers.api_gideon_agents_create)
     app.router.add_post("/api/agents/sync", handlers.api_gideon_agents_sync)
+    from gideon.interfaces.dashboard.handlers.agents import register_agent_export_routes
+
+    register_agent_export_routes(app)
     from gideon.interfaces.dashboard.handlers.routing import (
         api_routing_dismiss,
         api_routing_status,

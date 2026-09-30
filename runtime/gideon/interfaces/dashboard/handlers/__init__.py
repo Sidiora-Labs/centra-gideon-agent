@@ -273,6 +273,7 @@ from gideon.interfaces.dashboard.handlers.messaging import (
     api_channel_profile,
     api_notification_ack,
     api_notification_delete,
+    api_notification_trust,
     api_notification_unack,
     api_notifications,
     api_notifications_ack_all,

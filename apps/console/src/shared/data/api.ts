@@ -3258,6 +3258,24 @@ export interface SavedAgent {
   active_sessions?: number; running_sessions?: number
 }
 
+export interface AgentExportPreview {
+  format: 'claude-code-agents'
+  installKind: 'per-agent'
+  dest: string
+  destination: string
+  files: Array<{ path: string; bytes: number; status: 'new' | 'same' | 'replace' | 'foreign' }>
+  blocked: Array<{ path: string; reason: string; categories: string[] }>
+  conflicts: string[]
+  preview_token?: string
+  expires_in?: number
+}
+
+export interface AgentExportReceipt {
+  ok: true
+  files: string[]
+  unchanged: string[]
+}
+
 
 export type GoalType = 'verifiable' | 'open_ended' | 'monitor'
 export type Granularity = 'quick' | 'balanced' | 'exhaustive' | 'forever'
@@ -3878,7 +3896,9 @@ export const api = {
   compareExperimentReplay: (id: string, candidateRun?: string) => get<ExperimentReplay>(`/api/experiments/replays/${encodeURIComponent(id)}${candidateRun ? `?candidate_run=${encodeURIComponent(candidateRun)}` : ''}`),
   agentsInstalled: () => get<AgentDef[]>('/api/agents/installed'),
   savedAgents: () => get<{ agents: Array<{ name: string; description?: string; model?: string }> }>('/api/agents').then((d) => d.agents),
-  agents: () => get<{ agents: SavedAgent[]; default_agent: string }>('/api/agents'),
+  agents: () => get<{ agents: SavedAgent[]; default_agent: string; agent_export_enabled?: boolean }>('/api/agents'),
+  previewAgentExport: (body: { agents: string[]; destination?: string }) => post<AgentExportPreview>('/api/agents/export/preview', body),
+  writeAgentExport: (previewToken: string) => post<AgentExportReceipt>('/api/agents/export', { preview_token: previewToken }),
   createAgent: (body: Record<string, unknown>) => post<{ ok: boolean }>('/api/agents', body),
   updateAgent: (name: string, body: Record<string, unknown>) => put<{ ok: boolean }>(`/api/agents/${encodeURIComponent(name)}`, body),
   deleteAgent: (name: string) => del(`/api/agents/${encodeURIComponent(name)}`),
