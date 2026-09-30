@@ -90,8 +90,80 @@ class StateEntry:
     derived: bool = False
     tombstones: bool = False
     db_container: bool = False
+    machine_local: bool = False
     help: str = ""
     derived_within: tuple[str, ...] = field(default_factory=tuple)
+    machine_local_fields: tuple[str, ...] = field(default_factory=tuple)
+    arrival_defaults: tuple[tuple[str, object], ...] = field(default_factory=tuple)
+    records_field: str = ""
+
+
+def shared_value(entry: StateEntry, value):
+    """Return the shareable projection of a row, omitting machine-local fields."""
+    if not entry.machine_local_fields:
+        return value
+    if isinstance(value, dict):
+        wrapped = isinstance(value.get("data"), dict)
+        payload = value["data"] if wrapped else value
+        if wrapped or "id" in payload or "name" in payload:
+            if not wrapped:
+                return {key: child for key, child in value.items() if key not in entry.machine_local_fields}
+            return {**value, "data": {
+                key: child
+                for key, child in payload.items()
+                if key not in entry.machine_local_fields
+            }}
+        return {
+            key: shared_value(entry, child)
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [shared_value(entry, child) for child in value]
+    return value
+
+
+def apply_machine_local_fields(entry: StateEntry, incoming, local=None):
+    """Merge a shared value while retaining this machine's authority and runtime fields."""
+    if not entry.machine_local_fields:
+        return incoming
+    defaults = dict(entry.arrival_defaults)
+
+    def visit(value, previous):
+        if isinstance(value, dict):
+            wrapped = isinstance(value.get("data"), dict)
+            payload = value["data"] if wrapped else value
+            prior = previous if isinstance(previous, dict) else {}
+            if wrapped or "id" in payload or "name" in payload:
+                prior_payload = prior.get("data") if isinstance(prior.get("data"), dict) else prior
+                local_fields = {}
+                for name in entry.machine_local_fields:
+                    if name in prior_payload:
+                        local_fields[name] = prior_payload[name]
+                    elif name in defaults:
+                        local_fields[name] = defaults[name]
+                if not wrapped:
+                    return {**value, **local_fields}
+                return {**value, "data": {**payload, **local_fields}}
+            result = {key: visit(child, prior.get(key)) for key, child in value.items()}
+            return result
+        if isinstance(value, list):
+            prior_rows = {
+                str(row.get("id")): row
+                for row in previous
+                if isinstance(row, dict) and row.get("id") is not None
+            } if isinstance(previous, list) else {}
+            return [
+                visit(
+                    child,
+                    prior_rows.get(str(child.get("id")))
+                    if isinstance(child, dict) and child.get("id") is not None
+                    else None,
+                )
+                for child in value
+            ]
+        return value
+
+    return visit(incoming, local)
 
 
 INVENTORY: tuple[StateEntry, ...] = (
@@ -682,6 +754,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         path="loop/loops.db",
         domain=DOMAIN_WORK,
         merge=MERGE_SQLITE_ATTACH_IGNORE,
+        machine_local=True,
         help="autonomous run records",
     ),
     StateEntry(
@@ -690,6 +763,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         path="loop",
         domain=DOMAIN_WORK,
         merge=MERGE_UNION_BY_ID,
+        machine_local=True,
         help="autonomous run findings, verdicts, per-run files",
         derived_within=("loops.db",),
     ),
@@ -724,6 +798,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         path="subagents",
         domain=DOMAIN_WORK,
         merge=MERGE_UNION_BY_ID,
+        machine_local=True,
         help="subagent run records",
     ),
     StateEntry(
@@ -759,6 +834,14 @@ INVENTORY: tuple[StateEntry, ...] = (
         domain=DOMAIN_AUTOMATION,
         merge=MERGE_UNION_BY_ID,
         help="the one trigger store (automations, event triggers, hooks)",
+        machine_local_fields=(
+            "enabled", "next_fire_at", "last_run_id", "run_owner_pid", "run_count",
+            "last_success_at", "last_failure_at", "last_fired_at", "park_retry_after",
+            "last_alert_hash", "last_alert_at", "health_status", "last_error_summary",
+            "state",
+        ),
+        arrival_defaults=(("enabled", False),),
+        records_field="triggers",
     ),
     StateEntry(
         id="crons",
@@ -767,6 +850,9 @@ INVENTORY: tuple[StateEntry, ...] = (
         domain=DOMAIN_AUTOMATION,
         merge=MERGE_UNION_BY_ID,
         help="scheduled jobs (legacy; read-only, absorbed by triggers.json)",
+        machine_local_fields=("enabled", "next_fire_at", "run_count", "last_run", "last_fired_at"),
+        arrival_defaults=(("enabled", False),),
+        records_field="$root",
     ),
     StateEntry(
         id="cron_scripts",
@@ -791,6 +877,12 @@ INVENTORY: tuple[StateEntry, ...] = (
         domain=DOMAIN_AUTOMATION,
         merge=MERGE_UNION_BY_ID,
         help="lifecycle triggers",
+        machine_local_fields=(
+            "enabled", "approved", "consent", "run_count", "last_run", "last_run_id",
+            "last_status", "last_error", "last_fired_at", "next_fire_at", "state",
+        ),
+        arrival_defaults=(("enabled", False),),
+        records_field="hooks",
     ),
     StateEntry(
         id="event_triggers",
@@ -799,6 +891,12 @@ INVENTORY: tuple[StateEntry, ...] = (
         domain=DOMAIN_AUTOMATION,
         merge=MERGE_UNION_BY_ID,
         help="event-pattern triggers",
+        machine_local_fields=(
+            "enabled", "approved", "consent", "fire_count", "run_count", "last_fired_at",
+            "last_status", "last_error", "park_reason", "park_retry_after", "state",
+        ),
+        arrival_defaults=(("enabled", False),),
+        records_field="$root",
     ),
     StateEntry(
         id="trigger_spool",
@@ -834,6 +932,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         path="cron-history",
         domain=DOMAIN_AUTOMATION,
         merge=MERGE_APPEND_DEDUP,
+        machine_local=True,
         help="scheduled-run history",
     ),
     StateEntry(
@@ -843,6 +942,11 @@ INVENTORY: tuple[StateEntry, ...] = (
         domain=DOMAIN_AUTOMATION,
         merge=MERGE_UNION_BY_ID,
         help="workflows and SOPs",
+        machine_local_fields=(
+            "enabled", "approved", "consent", "run_count", "last_run", "last_status",
+            "last_run_id", "execution_grants", "auto_run", "autostart",
+        ),
+        arrival_defaults=(("enabled", False),),
     ),
     StateEntry(
         id="skills",
@@ -860,6 +964,15 @@ INVENTORY: tuple[StateEntry, ...] = (
         domain=DOMAIN_PLATFORM,
         merge=MERGE_UNION_BY_ID,
         help="agent definitions",
+        machine_local_fields=(
+            "enabled", "approved", "consent", "execution_grants", "permissions",
+            "allowed_tools", "tool_allowlist", "tools", "capabilities", "auto_approve",
+            "run_count", "last_run",
+        ),
+        arrival_defaults=(
+            ("enabled", False), ("allowed_tools", []), ("tool_allowlist", []),
+            ("tools", []), ("capabilities", []),
+        ),
     ),
     StateEntry(
         id="prompts",
@@ -1065,6 +1178,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         path="workflows/runs.db",
         domain=DOMAIN_AUTOMATION,
         merge=MERGE_SQLITE_ATTACH_IGNORE,
+        machine_local=True,
         help="the workflow run ledger",
     ),
     StateEntry(
@@ -1082,6 +1196,15 @@ INVENTORY: tuple[StateEntry, ...] = (
         domain=DOMAIN_WORK,
         merge=MERGE_UNION_BY_ID,
         help="per-agent metadata records",
+        machine_local_fields=(
+            "enabled", "approved", "consent", "permissions", "allowed_tools",
+            "tool_allowlist", "tools", "capabilities", "execution_grants", "run_count",
+            "last_run",
+        ),
+        arrival_defaults=(
+            ("enabled", False), ("allowed_tools", []), ("tool_allowlist", []),
+            ("tools", []), ("capabilities", []),
+        ),
     ),
     StateEntry(
         id="learning_proposals",
@@ -1707,7 +1830,9 @@ def export_entries() -> tuple[StateEntry, ...]:
     """Entries a PORTABLE EXPORT may contain — the projection that replaces
     `portability.EXPORT_EXCLUDE`: neither secrets (they must never leave the
     machine) nor derived data (rebuildable)."""
-    return tuple(e for e in INVENTORY if not e.secret and not e.derived)
+    return tuple(
+        e for e in INVENTORY if not e.secret and not e.derived and not e.machine_local
+    )
 
 
 def secret_paths() -> tuple[str, ...]:

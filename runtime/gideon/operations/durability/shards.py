@@ -166,6 +166,24 @@ def _json_rows_from_file(path: Path) -> list[dict]:
     return [{"id": path.name, "data": data}]
 
 
+def _json_record_rows_from_file(path: Path, records_field: str) -> list[dict]:
+    """Extract one stable-id row per record from a JSON collection store."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    records = value if records_field == "$root" else (
+        value.get(records_field) if isinstance(value, dict) else None
+    )
+    if not isinstance(records, list):
+        return []
+    return [
+        {"id": str(record["id"]), "data": record}
+        for record in records
+        if isinstance(record, dict) and record.get("id") is not None
+    ]
+
+
 def _year_of(row: dict) -> str:
     """Best-effort year for an append-only row, for year sharding.
 
@@ -457,6 +475,7 @@ def export_shards(
                             result.databases.append(staged)
                 elif entry.kind == inv.KIND_JSON_ENTITY_DIR:
                     rows = _json_rows_from_entity_dir(src, entry_path=entry.path) if src.is_dir() else []
+                    rows = [inv.shared_value(entry, row) for row in rows]
                     if entry.tombstones and src.is_dir():
                         from gideon.operations.durability.tombstones import merge_into_rows
 
@@ -465,7 +484,15 @@ def export_shards(
                         _write_shard(out_dir, f"{path_id}/entities.jsonl", rows)
                     )
                 elif entry.kind == inv.KIND_JSON_FILE:
-                    rows = _json_rows_from_file(src) if src.is_file() else []
+                    if entry.records_field:
+                        rows = (
+                            _json_record_rows_from_file(src, entry.records_field)
+                            if src.is_file()
+                            else []
+                        )
+                    else:
+                        rows = _json_rows_from_file(src) if src.is_file() else []
+                    rows = [inv.shared_value(entry, row) for row in rows]
                     result.shards.extend(
                         _write_shard(out_dir, f"{path_id}/value.jsonl", rows)
                     )
@@ -474,7 +501,9 @@ def export_shards(
                     buckets: dict[str, list[dict]] = {}
                     for path in files:
                         for year, rows in _jsonl_rows_by_year(path).items():
-                            buckets.setdefault(year, []).extend(rows)
+                            buckets.setdefault(year, []).extend(
+                                inv.shared_value(entry, row) for row in rows
+                            )
                     for year in sorted(buckets):
                         result.shards.extend(
                             _write_shard(out_dir, f"{path_id}/{year}.jsonl", buckets[year])

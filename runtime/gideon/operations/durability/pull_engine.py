@@ -169,6 +169,12 @@ def _pull_one_seq(
                 out.deferred_db.append(entry_id)
                 continue
             out.entries += 1
+            if entry.machine_local:
+                logger.info(
+                    "pull: consuming legacy shard for machine-local entry %s without applying it",
+                    entry.id,
+                )
+                continue
             if reconcile.handles_kind(entry.kind):
                 res = reconcile.reconcile_entry(
                     home,

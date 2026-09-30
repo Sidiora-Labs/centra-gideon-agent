@@ -23,6 +23,7 @@ row shapes on both sides — the invariant that makes convergence hold (criterio
 from __future__ import annotations
 
 import logging
+import json
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import Path
@@ -32,10 +33,11 @@ from gideon.operations.durability import conflicts as conflicts_mod
 from gideon.operations.durability import inventory as inv
 from gideon.operations.durability import writeback
 from gideon.operations.durability.cursor import CONSUMED, PAYLOAD_BAD
-from gideon.operations.durability.merge import merge_rows
+from gideon.operations.durability.merge import MergeResult, merge_rows
 from gideon.operations.durability.shards import (
     _json_rows_from_entity_dir,
     _json_rows_from_file,
+    _json_record_rows_from_file,
     _jsonl_rows_by_year,
 )
 
@@ -77,6 +79,12 @@ def read_local_rows(entry: inv.StateEntry, src: Path) -> list[dict]:
     if entry.kind == inv.KIND_JSON_ENTITY_DIR:
         return _json_rows_from_entity_dir(src) if src.is_dir() else []
     if entry.kind == inv.KIND_JSON_FILE:
+        if entry.records_field:
+            return (
+                _json_record_rows_from_file(src, entry.records_field)
+                if src.is_file()
+                else []
+            )
         return _json_rows_from_file(src) if src.is_file() else []
     if entry.kind == inv.KIND_JSONL_APPEND:
         files = (
@@ -90,6 +98,24 @@ def read_local_rows(entry: inv.StateEntry, src: Path) -> list[dict]:
                 rows.extend(bucket)
         return rows
     return []
+
+
+def rows_for_store(entry: inv.StateEntry, dest: Path, rows: list[dict]) -> list[dict]:
+    """Wrap record-shaped collection rows back into their native JSON file envelope."""
+    if entry.kind != inv.KIND_JSON_FILE or not entry.records_field:
+        return rows
+    field = entry.records_field
+    if field == "$root":
+        document = [row.get("data", {}) for row in rows]
+    else:
+        try:
+            document = json.loads(dest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            document = {}
+        if not isinstance(document, dict):
+            document = {}
+        document[field] = [row.get("data", {}) for row in rows]
+    return [{"id": dest.name, "data": document}]
 
 
 def handles_kind(kind: str) -> bool:
@@ -123,6 +149,13 @@ def reconcile_entry(
     still ``consumed`` — the divergence is durably recorded, so re-pulling the same seq
     forever would add nothing and would wedge the cursor.
     """
+    if entry.machine_local:
+        return ReconcileResult(
+            entry.id,
+            handled=True,
+            verdict=CONSUMED,
+            detail="machine-local state is never reconciled from a peer",
+        )
     if not handles_kind(entry.kind):
         return ReconcileResult(
             entry.id, handled=False, detail=f"non-row kind {entry.kind}"
@@ -130,22 +163,36 @@ def reconcile_entry(
     dest = Path(home) / entry.path
     try:
         local = read_local_rows(entry, dest)
+        shared_local = [inv.shared_value(entry, row) for row in local]
+        shared_remote = [inv.shared_value(entry, row) for row in remote_rows]
         held, recorded = _record_conflicts(
-            entry, local, remote_rows, ancestors, queue, now
+            entry, shared_local, shared_remote, ancestors, queue, now
         )
         effective_remote = (
-            [r for r in remote_rows if conflicts_mod.row_id(r) not in held]
+            [r for r in shared_remote if conflicts_mod.row_id(r) not in held]
             if held
-            else remote_rows
+            else shared_remote
         )
-        merged = merge_rows(
-            entry.merge,
-            local,
-            effective_remote,
-            tombstones=entry.tombstones,
-            dedup_key="id",
+        if entry.records_field or entry.machine_local_fields:
+            merged = _merge_shared_records(shared_local, effective_remote)
+        else:
+            merged = merge_rows(
+                entry.merge,
+                local,
+                effective_remote,
+                tombstones=entry.tombstones,
+                dedup_key="id",
+            )
+        local_by_id = {conflicts_mod.row_id(row): row for row in local}
+        merged.rows = [
+            inv.apply_machine_local_fields(
+                entry, row, local_by_id.get(conflicts_mod.row_id(row))
+            )
+            for row in merged.rows
+        ]
+        applied = writeback.apply_rows(
+            entry.kind, dest, rows_for_store(entry, dest, merged.rows)
         )
-        applied = writeback.apply_rows(entry.kind, dest, merged.rows)
     except (
         Exception
     ) as exc:  # noqa: BLE001 — one bad entry must not abort the whole pull
@@ -162,8 +209,31 @@ def reconcile_entry(
         removed=applied.removed,
         detail=detail,
         conflicts=recorded,
-        new_ancestors=_agreed_shas(effective_remote, merged.rows, held),
+        new_ancestors=_agreed_shas(
+            effective_remote,
+            [inv.shared_value(entry, row) for row in merged.rows],
+            held,
+        ),
     )
+
+
+def _merge_shared_records(local: list[dict], remote: list[dict]) -> MergeResult:
+    """Merge collection records independently; the pulled shared version wins absent conflict."""
+    by_id = {conflicts_mod.row_id(row): row for row in local}
+    result = MergeResult(rows=[])
+    for row in remote:
+        rid = conflicts_mod.row_id(row)
+        if not rid:
+            continue
+        previous = by_id.get(rid)
+        if previous is None:
+            result.added += 1
+        elif previous != row:
+            result.updated += 1
+        by_id[rid] = row
+    result.rows = [by_id[rid] for rid in sorted(by_id)]
+    result.kept = max(0, len(local) - result.updated - result.added)
+    return result
 
 
 def _agreed_shas(

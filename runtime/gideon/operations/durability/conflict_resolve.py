@@ -210,6 +210,11 @@ def _write_chosen_row(
     one the conflict was detected in, so a resolution cannot reshape the store.
     """
     rows = reconcile.read_local_rows(entry, dest)
+    existing = next((r for r in rows if conflicts_mod.row_id(r) == entity_id), None)
+    shared_row = inv.shared_value(entry, row)
+    preserved = inv.apply_machine_local_fields(entry, shared_row, existing)
     out = [r for r in rows if conflicts_mod.row_id(r) != entity_id]
-    out.append(row)
-    return writeback.apply_rows(entry.kind, dest, out)
+    out.append(preserved)
+    return writeback.apply_rows(
+        entry.kind, dest, reconcile.rows_for_store(entry, dest, out)
+    )
