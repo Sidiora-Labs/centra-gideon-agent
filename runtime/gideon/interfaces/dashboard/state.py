@@ -307,6 +307,7 @@ class _ChatSession:
         "_channel_linked",
         "_channel_id",
         "_channel_thread_ts",
+        "_channel_provider",
         "folder_id",
         "pinned",
         "tags",
@@ -419,6 +420,7 @@ class _ChatSession:
         self._channel_linked: bool = False
         self._channel_id: str = ""
         self._channel_thread_ts: str = ""
+        self._channel_provider: str = ""
         self.folder_id: str = ""
         self.pinned: bool = False
         self.tags: list[str] = []  # assigned tag ids (see ConsoleState._tags)
@@ -921,7 +923,28 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             or self._sessions.get(history_key.removeprefix("dashboard:"))
             or self._sessions.get(history_key)
         )
-        return str(getattr(session, "_app", "") or "") if session is not None else ""
+        if session is not None:
+            provider = str(
+                getattr(session, "_channel_provider", "")
+                or getattr(session, "_app", "")
+                or ""
+            )
+            if provider:
+                return provider
+        if self.sessions is None:
+            return ""
+        thread_ts, channel = self.sessions.get_channel_link(history_key)
+        if not (thread_ts and channel):
+            return ""
+        from gideon.integrations.channel_delivery import delivery_for, registered_providers
+
+        matches = [
+            provider
+            for provider in registered_providers()
+            if (delivery := delivery_for(provider)) is not None
+            and delivery.is_tracked_channel(channel)
+        ]
+        return matches[0] if len(matches) == 1 else ""
 
     _LAST_SPOKEN_MAX_SESSIONS = 32
     _LAST_SPOKEN_MAX_CHARS = 4000
@@ -966,6 +989,16 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             except Exception:
                 logging.getLogger(__name__).exception(
                     "Failed to broadcast context_usage for session %s", session_name
+                )
+            try:
+                from gideon.interfaces.dashboard.chat_utils import (
+                    schedule_linked_channel_notice,
+                )
+
+                schedule_linked_channel_notice(self, session, message)
+            except Exception:
+                logging.getLogger(__name__).debug(
+                    "Failed to schedule linked compaction notice", exc_info=True
                 )
 
         self.sessions.set_compact_callback(_on_compacted)
@@ -1907,7 +1940,9 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
                 return s
         return None
 
-    def link_channel(self, session_name: str, thread_ts: str, channel_id: str) -> None:
+    def link_channel(
+        self, session_name: str, thread_ts: str, channel_id: str, provider: str = ""
+    ) -> None:
         """Update a session's channel link state and persist to SessionStore."""
         session = self._sessions.get(session_name)
         if not session:
@@ -1922,6 +1957,7 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
                 old_session._channel_linked = False
                 old_session._channel_thread_ts = ""
                 old_session._channel_id = ""
+                old_session._channel_provider = ""
             if self.sessions:
                 from gideon.interfaces.dashboard.chat import _history_key_for
 
@@ -1929,6 +1965,9 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         session._channel_linked = True
         session._channel_id = channel_id
         session._channel_thread_ts = thread_ts
+        if provider:
+            session._channel_provider = provider
+            session._app = provider
         self._channel_to_session[thread_ts] = session_name
         if self.sessions:
             from gideon.interfaces.dashboard.chat import _history_key_for
@@ -1999,6 +2038,7 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
                 if _ts and _ch:
                     session._channel_id = _ch
                     session._channel_thread_ts = _ts
+                    self._channel_to_session[_ts] = name
         except Exception:
             pass
         self._sessions[name] = session

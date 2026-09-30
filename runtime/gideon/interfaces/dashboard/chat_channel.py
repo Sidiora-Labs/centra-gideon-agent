@@ -26,13 +26,14 @@ async def api_chat_session_channel_link(request: web.Request) -> web.Response:
     session = state.get_session(name) or state._sessions.get(name)
     if not session:
         return web.json_response({"error": "not found"}, status=404)
-    delivery = state.channel_delivery
-    if not delivery:
-        return web.json_response({"error": "Channel not connected"}, status=503)
     session_key = _history_key_for(name)
 
     existing_ts, existing_chan = state.sessions.get_channel_link(session_key)
     if existing_ts and existing_chan:
+        provider = state.channel_provider_for(session_key)
+        delivery = state.delivery_for(provider)
+        if delivery is None:
+            return web.json_response({"error": "Channel not connected"}, status=503)
         try:
             await delivery.deliver_text(
                 existing_chan,
@@ -59,6 +60,25 @@ async def api_chat_session_channel_link(request: web.Request) -> web.Response:
     opening = f"\U0001f9f5 *{title}*\nSession linked from dashboard."
     selected: dict[str, object] = {}
     if raw_channel and raw_channel != "dm":
+        from gideon.integrations.channel_delivery import delivery_for, registered_providers
+
+        providers = [
+            provider
+            for provider in registered_providers()
+            if (candidate := delivery_for(provider)) is not None
+            and candidate.is_tracked_channel(raw_channel)
+        ]
+        if len(providers) != 1:
+            return web.json_response(
+                {
+                    "error": "channel destination is ambiguous"
+                    if providers
+                    else "channel destination is not authorized"
+                },
+                status=409 if providers else 403,
+            )
+        selected["provider"] = providers[0]
+        delivery = state.delivery_for(providers[0])
         target_channel = raw_channel
         thread_ts = await delivery.deliver_text(target_channel, opening)
     else:
@@ -85,10 +105,16 @@ async def api_chat_session_channel_link(request: web.Request) -> web.Response:
     if not thread_ts:
         return web.json_response({"error": "failed to create thread"}, status=500)
 
-    state.sessions.set_channel_link(session_key, thread_ts, target_channel)
-    session._channel_linked = True
-    session._channel_id = target_channel
-    session._channel_thread_ts = thread_ts
+    provider = str(selected.get("provider") or "")
+    if provider:
+        session._channel_provider = provider
+        session._app = provider
+    try:
+        save_session_to_history(state, session)
+    except Exception:
+        logger.warning("Could not persist linked chat provider identity", exc_info=True)
+        return web.json_response({"error": "failed to persist channel link"}, status=500)
+    state.link_channel(name, thread_ts, target_channel, provider)
 
     for m in session.messages[-5:]:
         role = m.get("role", "")

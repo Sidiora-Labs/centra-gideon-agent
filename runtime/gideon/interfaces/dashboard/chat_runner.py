@@ -69,9 +69,11 @@ from gideon.interfaces.dashboard.chat_utils import (
     _apply_incognito_prefix,
     _broadcast_auto_tool,
     _broadcast_compaction_result,
+    compaction_result_notice,
     _dequeue_next_message,
     _extract_bash_command,
     _history_key_for,
+    linked_terminal_notice,
     _maybe_consolidate,
     _normalize_model,
     _project_context_preamble,
@@ -4063,23 +4065,23 @@ async def run_chat(
             )
             compaction_result = await client.wait_for_compaction(timeout=120.0)
             logger.info("Deferred compaction result: %s", compaction_result)
-            if compaction_result["type"] == "completed":
-                summary, _ = redact_credentials(compaction_result.get("summary", ""))
-                summary, _ = redact_exfiltration_urls(summary)
-                msg = (
-                    f"Conversation compacted: {summary}"
-                    if summary
-                    else "Conversation compacted."
-                )
-            elif compaction_result["type"] == "failed":
-                msg = "Compaction failed."
-            else:
+            result_type = str(compaction_result.get("type", "timeout"))
+            result_detail = str(
+                compaction_result.get("summary")
+                or compaction_result.get("error")
+                or ""
+            )
+            msg = compaction_result_notice(result_type, result_detail)
+            if not msg:
                 msg = "Compaction timed out."
             session.append("assistant", msg, "msg msg-a")
             state.broadcast_ws(
                 "chat_message",
                 {"session": session.key, "role": "assistant", "content": msg},
             )
+            from gideon.interfaces.dashboard.chat_utils import schedule_linked_channel_notice
+
+            schedule_linked_channel_notice(state, session, msg)
             pct = client.context_usage_pct()
             state.broadcast_ws(
                 "context_usage",
@@ -4256,6 +4258,14 @@ async def run_chat(
                 redact_credentials(redact_exfiltration_urls(assistant_text)[0])[0],
                 "msg msg-a",
             )
+        if not session._stopping:
+            timeout_notice = "Turn timed out before a reply was completed; please retry."
+            session.append("error", timeout_notice, "msg msg-err")
+            state.broadcast_ws(
+                "chat_message",
+                {"session": session.key, "role": "error", "content": timeout_notice},
+            )
+            session._last_turn_errored = True
     except AcpProcessDied as exc:
         logger.warning(
             "ACP process died in session %s: %s — resetting session", session.key, exc
@@ -4268,6 +4278,13 @@ async def run_chat(
                 redact_credentials(redact_exfiltration_urls(assistant_text)[0])[0],
                 "msg msg-a",
             )
+        reset_notice = "Connection lost; the session was reset before a reply completed. Please retry."
+        session.append("error", reset_notice, "msg msg-err")
+        state.broadcast_ws(
+            "chat_message",
+            {"session": session.key, "role": "error", "content": reset_notice},
+        )
+        session._last_turn_errored = True
         if _prompt_depth == 0:
             session._acp_pipe_death_retries += 1
             if session._acp_pipe_death_retries <= 3:
@@ -4565,6 +4582,18 @@ async def run_chat(
                     terminal_row["meta"] = metadata
                 metadata["last_turn_outcome"] = outcome
                 session._dirty = True
+            if _prompt_depth == 0 and outcome in {"error", "stopped"}:
+                detail = (
+                    str(terminal_row.get("content") or "").strip()
+                    if terminal_row is not None and terminal_row.get("role") == "error"
+                    else ""
+                )
+                terminal_notice = linked_terminal_notice(outcome, detail)
+                from gideon.interfaces.dashboard.chat_utils import (
+                    schedule_linked_channel_notice,
+                )
+
+                schedule_linked_channel_notice(state, session, terminal_notice)
             try:
                 save_session_to_history(state, session)
             except Exception:

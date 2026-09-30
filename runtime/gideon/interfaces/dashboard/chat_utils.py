@@ -4,6 +4,7 @@ Redaction, model normalization, queue operations, stream chunk building,
 persona injection, and other helpers used across chat_*.py modules.
 """
 
+import asyncio
 import functools
 import json
 import logging
@@ -410,33 +411,85 @@ def _broadcast_compaction_result(
     state: ConsoleState, session: _ChatSession, event: "LLMEvent"
 ) -> str | None:
     """Broadcast compaction completed/failed to the session. Returns message text or None."""
-    status_type = event.text
-    if status_type == "completed":
-        summary, _ = redact_credentials(event.title)
-        summary, _ = redact_exfiltration_urls(summary)
-        msg_text = (
-            f"Conversation compacted: {summary}"
-            if summary
-            else "Conversation compacted."
-        )
-    elif status_type == "failed":
-        error, _ = redact_credentials(event.title or "unknown error")
-        error, _ = redact_exfiltration_urls(error)
-        msg_text = f"Compaction failed: {error}"
-    elif status_type == "noop":
-        summary, _ = redact_credentials(event.title)
-        summary, _ = redact_exfiltration_urls(summary)
-        msg_text = "Conversation is too short to compact; nothing changed."
-        if summary:
-            msg_text += f" ({summary})"
-    else:
+    msg_text = compaction_result_notice(event.text, event.title)
+    if not msg_text:
         return None
     session.append("assistant", msg_text, "msg msg-a")
     state.broadcast_ws(
         "chat_message",
         {"session": session.key, "role": "assistant", "content": msg_text},
     )
+    schedule_linked_channel_notice(state, session, msg_text)
     return msg_text
+
+
+def compaction_result_notice(status: str, detail: str = "") -> str:
+    """Format native and deferred compaction outcomes for chat and linked threads."""
+    safe, _ = redact_credentials(detail)
+    safe, _ = redact_exfiltration_urls(safe)
+    if status == "completed":
+        return f"Conversation compacted: {safe}" if safe else "Conversation compacted."
+    if status == "failed":
+        return f"Compaction failed: {safe or 'unknown error'}"
+    if status == "noop":
+        return (
+            f"Conversation is too short to compact; nothing changed. ({safe})"
+            if safe
+            else "Conversation is too short to compact; nothing changed."
+        )
+    if status == "timeout":
+        return "Compaction timed out."
+    return ""
+
+
+def schedule_linked_channel_notice(
+    state: ConsoleState, session: _ChatSession, message: str
+) -> None:
+    """Send one redacted status to the session's exact linked channel asynchronously."""
+    from gideon.interfaces.dashboard.chat import _history_key_for
+
+    session_key = _history_key_for(session.key)
+    provider = state.channel_provider_for(session_key)
+    thread_ts, channel = state.sessions.get_channel_link(session_key)
+    delivery = state.delivery_for(provider)
+    if not (provider and delivery and thread_ts and channel and message):
+        return
+
+    safe, _ = redact_exfiltration_urls(message)
+    safe, _ = redact_credentials(safe)
+
+    async def deliver() -> None:
+        try:
+            await asyncio.wait_for(
+                delivery.deliver_text(channel, safe, thread_ts), timeout=5.0
+            )
+        except Exception:
+            logger.debug("Failed to deliver linked chat status", exc_info=True)
+
+    try:
+        task = asyncio.get_running_loop().create_task(deliver())
+    except RuntimeError:
+        logger.debug("No event loop for linked chat status delivery")
+        return
+    tasks = getattr(state, "_background_tasks", None)
+    if tasks is not None:
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+
+
+def linked_terminal_notice(outcome: str, detail: str = "") -> str:
+    """Return the concise channel status for a stopped or failed turn."""
+    if outcome == "stopped":
+        return "Turn stopped at your request."
+    if outcome == "error":
+        safe, _ = redact_exfiltration_urls(detail.strip())
+        safe, _ = redact_credentials(safe)
+        return (
+            f"Turn ended without a reply: {safe[:240]}"
+            if safe
+            else "Turn ended without a reply because of a runtime error. Please retry."
+        )
+    return ""
 
 
 def _emit_agent_assignment(
