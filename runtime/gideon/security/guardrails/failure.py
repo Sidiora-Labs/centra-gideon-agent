@@ -30,6 +30,7 @@ class FailureMode(str, Enum):
     BUDGET_EXCEEDED = "budget_exceeded"
     TOKEN_OVERFLOW = "token_overflow"
     TIMEOUT = "timeout"
+    FIRST_TOKEN_TIMEOUT = "first_token_timeout"
     CIRCUIT_OPEN = "circuit_open"
     PROVIDER_ERROR = "provider_error"
 
@@ -40,6 +41,7 @@ NON_RETRYABLE: frozenset[FailureMode] = frozenset(
         FailureMode.SECRET_LEAK,
         FailureMode.BUDGET_EXCEEDED,
         FailureMode.CIRCUIT_OPEN,
+        FailureMode.FIRST_TOKEN_TIMEOUT,
     }
 )
 
@@ -85,6 +87,23 @@ class ModelCallTimeout(GuardError):
     """A single model-call attempt exceeded its hard wall-clock timeout."""
 
     mode = FailureMode.TIMEOUT
+
+
+class FirstTokenTimeout(GuardError):
+    """The provider exhausted startup time; repeating the same input cannot help."""
+
+    mode = FailureMode.FIRST_TOKEN_TIMEOUT
+
+    def __init__(self, *, model: str, provider: str, waited_secs: float) -> None:
+        self.model = model
+        self.provider = provider
+        self.waited_secs = waited_secs
+        super().__init__(
+            f"{' '.join(model.split())} on {' '.join(provider.split())} "
+            f"did not start answering within {waited_secs:g} "
+            "seconds. Raise Request Timeout in the provider settings, or choose "
+            "a faster model."
+        )
 
 
 class CircuitOpenError(GuardError):

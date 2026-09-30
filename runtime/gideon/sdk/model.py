@@ -58,10 +58,12 @@ from gideon.integrations.model_windows import (
     declared_context_window,
     model_context_window,
 )
+from gideon.security.guardrails.failure import FirstTokenTimeout
 from gideon.sdk.provider_helpers import register_branded_app  # noqa: F401
 
 __all__ = [
     "ModelProvider",
+    "FirstTokenTimeout",
     "LLMEvent",
     "CancelOutcome",
     "EVENT_COMPLETE",

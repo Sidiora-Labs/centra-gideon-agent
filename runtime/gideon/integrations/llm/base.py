@@ -73,6 +73,15 @@ class ModelProvider(ABC):
     served_model_ref: str = ""
 
     @property
+    def first_token_timeout_secs(self) -> float | None:
+        """Provider-owned startup deadline, when the provider enforces one."""
+        return None
+
+    async def served_context_window(self) -> int | None:
+        """Capacity of this request-bound provider/model, or unknown."""
+        return None
+
+    @property
     def sampling_temperature(self) -> float | None:
         """The sampling temperature this provider sends, when it can report one."""
         return None

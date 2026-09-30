@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import math
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -20,6 +23,7 @@ from gideon.sdk.model import (
     LOCAL_SERVED_CONTEXT_WINDOW,
     Capability,
     ConnectionResult,
+    FirstTokenTimeout,
     LLMEvent,
     ModelCatalog,
     ModelInfo,
@@ -33,6 +37,9 @@ from gideon.sdk.model import (
     infer_capabilities,
     model_context_window,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
@@ -52,12 +59,12 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
         nested_window = self.options.pop("context_window", None)
         self._declared_context_window = declared_context_window(
             cfg.get("context_window", nested_window)
-        )
+        ) or declared_context_window(self.options.get("num_ctx"))
         self.context_window = (
             self._declared_context_window or LOCAL_SERVED_CONTEXT_WINDOW
         )
         self.timeout_secs = float(cfg.get("timeout_secs") or 120)
-        if self.timeout_secs <= 0:
+        if not math.isfinite(self.timeout_secs) or self.timeout_secs <= 0:
             raise ValueError("timeout_secs must be positive")
         self._last_context_pct: float | None = None
         self._reported_context_window: int | None = None
@@ -66,28 +73,41 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
     async def start(self) -> None:
         if self._client is None:
             self._client = httpx.AsyncClient(
-                base_url=self.endpoint, timeout=self.timeout_secs, trust_env=False
+                base_url=self.endpoint, timeout=httpx.Timeout(self.timeout_secs, connect=10.0), trust_env=False
             )
 
-    async def _served_context_window(self, model: str) -> int:
+    @property
+    def first_token_timeout_secs(self) -> float:
+        return self.timeout_secs
+
+    @staticmethod
+    def _loaded_context_window(response: dict[str, Any], model: str) -> int | None:
+        if not model:
+            return None
+        rows = response.get("models")
+        if not isinstance(rows, list):
+            return None
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("name") or row.get("model") or "")
+            if name.removesuffix(":latest") == model.removesuffix(":latest"):
+                return declared_context_window(row.get("context_length"))
+        return None
+
+    async def served_context_window(self) -> int | None:
+        return await self._served_context_window(self.model)
+
+    async def _served_context_window(self, model: str) -> int | None:
         if self._declared_context_window is not None:
-            self._reported_context_window = self._declared_context_window
             return self._declared_context_window
-        self._reported_context_window = None
         try:
-            response = await self._request("GET", "/api/ps")
-            for row in response.get("models", []):
-                name = str(row.get("name") or row.get("model") or "")
-                if name == model or name.removesuffix(":latest") == model.removesuffix(
-                    ":latest"
-                ):
-                    served = declared_context_window(row.get("context_length"))
-                    if served is not None:
-                        self._reported_context_window = served
-                        return served
+            response = await self._request(
+                "GET", "/api/ps", timeout=httpx.Timeout(10.0)
+            )
+            return self._loaded_context_window(response, model)
         except (httpx.HTTPError, ValueError, RuntimeError):
-            pass
-        return LOCAL_SERVED_CONTEXT_WINDOW
+            return None
 
     async def shutdown(self) -> None:
         if self._client is not None:
@@ -96,7 +116,7 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         async with httpx.AsyncClient(
-            base_url=self.endpoint, timeout=self.timeout_secs, trust_env=False
+            base_url=self.endpoint, timeout=httpx.Timeout(self.timeout_secs, connect=10.0), trust_env=False
         ) as client:
             response = await client.request(method, path, **kwargs)
             response.raise_for_status()
@@ -201,80 +221,100 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
         }
         if tools:
             payload["tools"] = tools
-        if self.options:
-            payload["options"] = self.options
+        if self.options or self._declared_context_window is not None:
+            payload["options"] = dict(self.options)
+            if self._declared_context_window is not None:
+                payload["options"]["num_ctx"] = self._declared_context_window
         if response_format:
             payload["format"] = response_format.get("json_schema", {}).get(
                 "schema", "json"
             )
         await self.start()
         assert self._client is not None
-        async with self._client.stream("POST", "/api/chat", json=payload) as response:
-            response.raise_for_status()
-            call_index = 0
-            async for line in response.aiter_lines():
-                if not line:
-                    continue
-                row = json.loads(line)
-                if row.get("error"):
-                    raise RuntimeError(str(row["error"]))
-                message = row.get("message") or {}
-                for field, kind in (
-                    ("thinking", EVENT_THINKING_CHUNK),
-                    ("content", EVENT_TEXT_CHUNK),
-                ):
-                    if message.get(field):
-                        yield LLMEvent(kind=kind, text=message[field])
-                for call in message.get("tool_calls") or []:
-                    function = call["function"]
-                    arguments = function.get("arguments", {})
-                    yield LLMEvent(
-                        kind=EVENT_TOOL_CALL,
-                        tool_call_id=str(call.get("id") or f"ollama-{call_index}"),
-                        title=function["name"],
-                        tool_input=json.dumps(arguments),
-                        tool_input_obj=arguments,
-                    )
-                    call_index += 1
-                if row.get("done"):
-                    self.context_window = await self._served_context_window(selected)
-                    prompt_tokens = int(row.get("prompt_eval_count", 0))
-                    self._last_context_pct = (
-                        100.0
-                        * prompt_tokens
-                        / model_context_window(
-                            selected,
-                            override=self.context_window,
-                            local=True,
-                        )
-                        if prompt_tokens > 0
-                        else None
-                    )
-                    reported_prompt = row.get("prompt_eval_count")
-                    measured_prompt = (
-                        reported_prompt
-                        if type(reported_prompt) is int and reported_prompt >= 0
-                        else None
-                    )
-                    yield LLMEvent(
-                        kind=EVENT_COMPLETE,
-                        context_usage_pct=self._last_context_pct,
-                        input_tokens=int(row.get("prompt_eval_count", 0)),
-                        output_tokens=int(row.get("eval_count", 0)),
-                        context_usage=(
-                            ContextUsage(
-                                input_tokens=measured_prompt,
-                                total_input_tokens=measured_prompt,
-                                context_window_tokens=self._reported_context_window,
+        answering = False
+        try:
+            async with asyncio.timeout(self.timeout_secs) as startup_deadline:
+                async with self._client.stream("POST", "/api/chat", json=payload) as response:
+                    response.raise_for_status()
+                    call_index = 0
+                    async for line in response.aiter_lines():
+                        if not line:
+                            continue
+                        row = json.loads(line)
+                        if row.get("error"):
+                            raise RuntimeError(str(row["error"]))
+                        message = row.get("message") or {}
+                        if row.get("done") or any(
+                            message.get(field) for field in ("content", "thinking", "tool_calls")
+                        ):
+                            answering = True
+                            startup_deadline.reschedule(None)
+                        for field, kind in (
+                            ("thinking", EVENT_THINKING_CHUNK),
+                            ("content", EVENT_TEXT_CHUNK),
+                        ):
+                            if message.get(field):
+                                yield LLMEvent(kind=kind, text=message[field])
+                        for call in message.get("tool_calls") or []:
+                            function = call["function"]
+                            arguments = function.get("arguments", {})
+                            yield LLMEvent(
+                                kind=EVENT_TOOL_CALL,
+                                tool_call_id=str(call.get("id") or f"ollama-{call_index}"),
+                                title=function["name"],
+                                tool_input=json.dumps(arguments),
+                                tool_input_obj=arguments,
                             )
-                            if measured_prompt is not None
-                            or self._reported_context_window is not None
-                            else None
-                        ),
-                        stop_reason=str(row.get("done_reason") or "stop"),
-                    )
-                    return
-            raise RuntimeError("Ollama chat stream ended before completion")
+                            call_index += 1
+                        if row.get("done"):
+                            reported_window = await self._served_context_window(selected)
+                            self._reported_context_window = reported_window
+                            self.context_window = reported_window or LOCAL_SERVED_CONTEXT_WINDOW
+                            prompt_tokens = int(row.get("prompt_eval_count", 0))
+                            self._last_context_pct = (
+                                100.0
+                                * prompt_tokens
+                                / model_context_window(
+                                    selected,
+                                    override=self.context_window,
+                                    local=True,
+                                )
+                                if prompt_tokens > 0
+                                else None
+                            )
+                            reported_prompt = row.get("prompt_eval_count")
+                            measured_prompt = (
+                                reported_prompt
+                                if type(reported_prompt) is int and reported_prompt >= 0
+                                else None
+                            )
+                            yield LLMEvent(
+                                kind=EVENT_COMPLETE,
+                                context_usage_pct=self._last_context_pct,
+                                input_tokens=int(row.get("prompt_eval_count", 0)),
+                                output_tokens=int(row.get("eval_count", 0)),
+                                context_usage=(
+                                    ContextUsage(
+                                        input_tokens=measured_prompt,
+                                        total_input_tokens=measured_prompt,
+                                        context_window_tokens=reported_window,
+                                    )
+                                    if measured_prompt is not None
+                                    or reported_window is not None
+                                    else None
+                                ),
+                                stop_reason=str(row.get("done_reason") or "stop"),
+                            )
+                            return
+                    raise RuntimeError("Ollama chat stream ended before completion")
+        except (TimeoutError, httpx.ReadTimeout):
+            if answering:
+                raise
+            error = FirstTokenTimeout(
+                model=selected, provider=self.display_name, waited_secs=self.timeout_secs
+            )
+            logger.warning("%s", error)
+            raise error from None
 
     async def approve_tool(self, request_id: str | int) -> None:
         raise RuntimeError("Tool approval is owned by the Gideon agent runtime")

@@ -33,6 +33,9 @@ from pathlib import Path
 
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
+    EVENT_TEXT_CHUNK,
+    EVENT_THINKING_CHUNK,
+    EVENT_TOOL_CALL,
     CancelOutcome,
     LLMEvent,
     ModelProvider,
@@ -56,6 +59,7 @@ from gideon.security.guardrails.failure import (
     BudgetExceededError,
     CircuitOpenError,
     FailureMode,
+    FirstTokenTimeout,
     ModelCallTimeout,
     PromptInjectionBlocked,
     SecretLeakBlocked,
@@ -167,6 +171,12 @@ class ModelCallGuard(ModelProvider):
         self._query_class = ""
         self._routed = bool(routed)
         self._routed_fallback = bool(routed_fallback)
+
+    def _stream_deadline(self, now: float, *, startup: bool = False) -> float | None:
+        if self._timeout_secs <= 0:
+            return None
+        startup_secs = (self._inner.first_token_timeout_secs or 0.0) if startup else 0.0
+        return now + self._timeout_secs + startup_secs
 
     def _classify(self, text: str) -> None:
         """Set ``self._query_class`` for the current call from the pure classifier.
@@ -328,7 +338,9 @@ class ModelCallGuard(ModelProvider):
                 raise BudgetExceededError("run", dim, float(lim), float(spent))
 
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._timeout_secs if self._timeout_secs > 0 else None
+        startup_timeout = self._inner.first_token_timeout_secs or 0.0
+        deadline = self._stream_deadline(loop.time(), startup=True)
+        awaiting_first_token = startup_timeout > 0
         started = now_ms()
         tokens_in = tokens_out = 0
         recorded = False
@@ -351,6 +363,12 @@ class ModelCallGuard(ModelProvider):
                         event = await source.__anext__()
                     except StopAsyncIteration:
                         break
+                if awaiting_first_token and (
+                    event.kind in {EVENT_TEXT_CHUNK, EVENT_THINKING_CHUNK, EVENT_TOOL_CALL, EVENT_COMPLETE}
+                    and (event.text or event.kind in {EVENT_TOOL_CALL, EVENT_COMPLETE})
+                ):
+                    awaiting_first_token = False
+                    deadline = self._stream_deadline(loop.time())
                 if event.kind == EVENT_COMPLETE and not recorded:
                     tokens_in = int(getattr(event, "input_tokens", 0) or 0)
                     tokens_out = int(getattr(event, "output_tokens", 0) or 0)
@@ -408,13 +426,13 @@ class ModelCallGuard(ModelProvider):
         except (asyncio.CancelledError, GeneratorExit):
             await self._aclose(source)
             raise
-        except Exception:
+        except Exception as error:
             if not recorded:
                 self._breaker.record_failure()
                 self._audit(
                     audit_id,
                     1,
-                    FailureMode.PROVIDER_ERROR,
+                    error.mode if isinstance(error, FirstTokenTimeout) else FailureMode.PROVIDER_ERROR,
                     now_ms() - started,
                     tokens_in,
                     tokens_out,
@@ -556,6 +574,13 @@ class ModelCallGuard(ModelProvider):
 
     def context_usage_pct(self) -> float | None:
         return self._inner.context_usage_pct()
+
+    @property
+    def first_token_timeout_secs(self) -> float | None:
+        return self._inner.first_token_timeout_secs
+
+    async def served_context_window(self) -> int | None:
+        return await self._inner.served_context_window()
 
     @property
     def session_id(self) -> str:
