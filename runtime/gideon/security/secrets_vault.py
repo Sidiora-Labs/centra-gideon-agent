@@ -69,7 +69,11 @@ PROJECT_KEY_PREFIX = "PCPROJ_"
 
 PROJECT_KEY_SEP = "__"
 
-RESERVED_KEY_PREFIXES: tuple[str, ...] = ("BROWSE_PROFILE_KEY_",)
+RESERVED_KEY_PREFIXES: tuple[str, ...] = (
+    "BROWSE_PROFILE_KEY_",
+    "GIDEON_SECRET_",
+    "gideon-config-secret:v1:",
+)
 
 
 def is_reserved_key(key: str) -> bool:

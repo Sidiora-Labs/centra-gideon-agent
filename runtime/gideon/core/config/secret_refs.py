@@ -455,3 +455,19 @@ def purge_unused(owner: SecretOwner, values: dict[str, Any]) -> int:
         if owner.owns(key) and key not in retained and credentials.delete_secret_value(key):
             removed += 1
     return removed
+
+
+def resolve_native_tool_secret(name: str) -> str:
+    """Resolve a user-named native shell secret, never a gateway or owner-bound secret."""
+    from gideon.core.config.credentials import credential_names, get_credential
+    from gideon.security.secrets_vault import is_reserved_key
+
+    if not isinstance(name, str) or not name or is_reserved_key(name):
+        return ""
+    try:
+        if name not in credential_names():
+            return ""
+        return get_credential(name)
+    except Exception:  # noqa: BLE001 - an unavailable store must fail closed
+        logger.debug("native tool credential lookup failed for %r", name, exc_info=True)
+        return ""

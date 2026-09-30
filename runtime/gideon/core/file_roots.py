@@ -8,6 +8,14 @@ from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 MAX_NAME_BYTES = 255
+CONTROL_CHARS = frozenset(chr(code) for code in (*range(0x20), 0x7F))
+
+
+def control_character_in(text: str) -> str:
+    for char in text:
+        if char in CONTROL_CHARS:
+            return f"U+{ord(char):04X}"
+    return ""
 
 
 def _is_system_root(path: str) -> bool:
@@ -92,6 +100,8 @@ def within(canonical: str, roots: Iterable[str]) -> bool:
 
 def admit(raw: str, roots: Iterable[str]) -> str | None:
     """Canonicalize and admit a path under roots, rejecting sensitive aliases."""
+    if not isinstance(raw, str) or control_character_in(raw):
+        return None
     from gideon.engine.hooks import validate_file_path
     from gideon.security.security import HOME_SECRET_FILE_BASENAMES, OWN_SECRET_BASENAMES
 

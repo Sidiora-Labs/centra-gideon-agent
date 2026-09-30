@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
+import os
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
@@ -245,6 +246,103 @@ def _denied_bash_reason(command: str) -> str | None:
     return denied_command_reason(command)
 
 
+def _safe_command_output(text: str, values: list[str]) -> str:
+    from gideon.security.security import redact_for_display
+
+    redacted = redact_for_display(text)
+    for value in sorted({item for item in values if item}, key=len, reverse=True):
+        redacted = redacted.replace(value, "[REDACTED: owner credential]")
+    return redacted
+
+
+def _stored_secret(key: str) -> str:
+    from gideon.core.config.secret_refs import resolve_native_tool_secret
+
+    return resolve_native_tool_secret(key)
+
+
+def _unfilled_secret_error(key: str) -> str:
+    from gideon.security.secrets_vault import is_reserved_key
+
+    reference = "{{secret:" + key + "}}"
+    if is_reserved_key(key):
+        return (
+            f"The command refers to {reference}, which belongs to another Gideon setting. "
+            "Nothing was run."
+        )
+    return (
+        f"The command refers to {reference}, which is not in the user's Secrets store. "
+        "Nothing was run."
+    )
+
+
+def _environment_credentials() -> list[str]:
+    from gideon.automation.workflows.secrets import matches_secret_hint
+    from gideon.core.config.credentials import credential_names
+    from gideon.security.secrets_vault import is_reserved_key
+
+    try:
+        stored = set(credential_names())
+    except Exception:  # noqa: BLE001 - hints still mask obvious gateway values
+        stored = set()
+    return [
+        value
+        for name, value in os.environ.items()
+        if value
+        and (
+            name in stored
+            or is_reserved_key(name)
+            or matches_secret_hint(name)
+        )
+    ]
+
+
+def _native_child_env() -> dict[str, str]:
+    from gideon.automation.workflows.secrets import matches_secret_hint
+    from gideon.core.config.credentials import credential_names
+    from gideon.security.sandbox import build_child_env
+    from gideon.security.secrets_vault import is_reserved_key
+
+    try:
+        stored = set(credential_names())
+    except Exception:  # noqa: BLE001 - an unreadable store yields a narrower child env
+        stored = set()
+    return {
+        name: value
+        for name, value in build_child_env(site="native-tool").items()
+        if name not in stored
+        and not is_reserved_key(name)
+        and not matches_secret_hint(name)
+    }
+
+
+def _safe_pattern(pattern: str, argument: str) -> ToolResult | None:
+    from gideon.core.file_roots import control_character_in
+
+    bad = control_character_in(pattern)
+    parts = pattern.replace("\\", "/").split("/")
+    if bad:
+        return ToolResult(
+            success=False, error=f"{argument} contains a control character ({bad})"
+        )
+    if (
+        pattern.startswith(("/", "~", "\\"))
+        or ".." in parts
+        or Path(pattern).is_absolute()
+    ):
+        return ToolResult(
+            success=False,
+            error=(
+                f"{argument} {pattern!r} leaves the workspace; use a relative pattern "
+                "without `..`"
+            ),
+            recovery_hints=[
+                "Use a pattern relative to the workspace, such as 'src/**/*.py'."
+            ],
+        )
+    return None
+
+
 class NativeBuiltinToolProvider(ToolProvider):
     """Workspace file/code/shell tools for the native agent loop."""
 
@@ -329,7 +427,36 @@ class NativeBuiltinToolProvider(ToolProvider):
         return self._display
 
     def _resolve(self, rel: str) -> Path:
-        return WorkspaceDefaults.resolve(self._cwd, self._extra_roots, rel)
+        from gideon.core.file_roots import admit, control_character_in, within
+
+        raw = str(rel)
+        if bad := control_character_in(raw):
+            raise ValueError(f"path {raw!r} contains a control character ({bad})")
+        roots = [
+            str(self._cwd.resolve()),
+            *(str(root.resolve()) for root in self._extra_roots),
+        ]
+        expanded = os.path.expanduser(raw) if raw == "~" or raw.startswith("~/") else raw
+        candidate = Path(expanded)
+        canonical = os.path.realpath(
+            str(candidate if candidate.is_absolute() else self._cwd / candidate)
+        )
+        if not within(canonical, roots):
+            raise ValueError(f"path {raw!r} escapes the workspace root")
+        if admit(canonical, roots) is None:
+            raise ValueError(
+                f"path {raw!r} is a credential or secret path this tool cannot access"
+            )
+        return Path(canonical)
+
+    def _admit_path(self, path: Path | str) -> str | None:
+        from gideon.core.file_roots import admit
+
+        roots = [
+            str(self._cwd.resolve()),
+            *(str(root.resolve()) for root in self._extra_roots),
+        ]
+        return admit(str(path), roots)
 
     def _owner_only_path_reason(self, path: str) -> str:
         from gideon.security.owner_only import owner_only_path_reason
@@ -866,12 +993,21 @@ class NativeBuiltinToolProvider(ToolProvider):
         return await asyncio.get_event_loop().run_in_executor(None, persist)
 
     async def _t_list_dir(self, a: dict) -> ToolResult:
-        if reason := self._owner_only_path_reason(str(a.get("path") or ".")):
+        requested = str(a.get("path") or ".")
+        if reason := self._owner_only_path_reason(requested):
             return ToolResult(success=False, error=reason)
-        directory = self._resolve(str(a.get("path") or "."))
-        listing = await asyncio.get_event_loop().run_in_executor(
-            None, partial(WorkspaceTree.directory, directory)
-        )
+        directory = self._resolve(requested)
+
+        def list_admitted() -> str | None:
+            if not directory.is_dir():
+                return None
+            names = []
+            for item in directory.iterdir():
+                if self._admit_path(item) is not None:
+                    names.append(item.name + ("/" if item.is_dir() else ""))
+            return "\n".join(sorted(names)) or "(empty)"
+
+        listing = await asyncio.get_event_loop().run_in_executor(None, list_admitted)
         if listing is not None:
             return _ok_capped(listing, session_key=self._session_key)
         return ToolResult(
@@ -883,8 +1019,23 @@ class NativeBuiltinToolProvider(ToolProvider):
         )
 
     async def _t_glob(self, a: dict) -> ToolResult:
-        tree = WorkspaceTree(self._cwd.resolve(), self._SKIP_DIRS)
-        scan = partial(tree.glob_listing, str(a["pattern"]))
+        pattern = str(a["pattern"])
+        if refusal := _safe_pattern(pattern, "pattern"):
+            return refusal
+        root = self._cwd.resolve()
+        tree = WorkspaceTree(root, self._SKIP_DIRS)
+
+        def scan() -> str:
+            paths = sorted(
+                str(path.relative_to(root))
+                for path in tree.matching_files(pattern)
+                if self._admit_path(path) is not None
+            )
+            rows = paths[:500]
+            if len(paths) > 500:
+                rows.append(f"…[showing 500 of {len(paths)} matches — narrow the pattern to see the rest]")
+            return "\n".join(rows) or "(no matches)"
+
         output = await asyncio.get_event_loop().run_in_executor(None, scan)
         return _ok_capped(output, session_key=self._session_key)
 
@@ -894,6 +1045,8 @@ class NativeBuiltinToolProvider(ToolProvider):
         tree = WorkspaceTree(self._cwd.resolve(), self._SKIP_DIRS)
         query = str(a["query"])
         pattern = str(a.get("glob") or "**/*")
+        if refusal := _safe_pattern(pattern, "glob"):
+            return refusal
         limit = int(a.get("max_results") or 200)
         try:
             expression = re.compile(query) if bool(a.get("regex")) else None
@@ -905,16 +1058,63 @@ class NativeBuiltinToolProvider(ToolProvider):
                     "Fix the pattern, or drop regex=true to search for the literal text."
                 ],
             )
-        scan = partial(tree.search, query, pattern, limit, expression)
+        def scan() -> str:
+            rows = []
+            for path in tree.matching_files(pattern):
+                canonical = self._admit_path(path)
+                if canonical is None:
+                    continue
+                safe_path = Path(canonical)
+                relative = path.relative_to(tree.root)
+                if self._SKIP_DIRS.intersection(relative.parts):
+                    continue
+                try:
+                    lines = safe_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+                    for number, line in enumerate(lines, 1):
+                        matched = expression.search(line) if expression else query in line
+                        if not matched:
+                            continue
+                        rows.append(f"{relative}:{number}: {line.strip()[:200]}")
+                        if len(rows) >= limit:
+                            rows.append(
+                                f"…[stopped at max_results={limit} — more matches may exist; narrow `glob` or raise `max_results`]"
+                            )
+                            return "\n".join(rows)
+                except (OSError, UnicodeDecodeError):
+                    continue
+            return "\n".join(rows) or "(no matches)"
+
         output = await asyncio.get_event_loop().run_in_executor(None, scan)
         return _ok_capped(output, session_key=self._session_key)
 
     async def _t_repo_map(self, a: dict) -> ToolResult:
         root = self._resolve(str(a["path"])) if a.get("path") else self._cwd
-        outline = partial(
-            WorkspaceTree(root.resolve(), self._SKIP_DIRS).outline,
-            int(a.get("max_files") or 200),
-        )
+        tree = WorkspaceTree(root.resolve(), self._SKIP_DIRS)
+        limit = int(a.get("max_files") or 200)
+
+        def outline() -> str:
+            sources = []
+            for path in tree.source_paths():
+                if self._admit_path(path) is None:
+                    continue
+                sources.append(path)
+                if len(sources) >= limit:
+                    break
+            if not sources:
+                return "(no source files found under this path)"
+            rows = [f"# Repo map — {tree.root.name}/  ({len(sources)} source files)", ""]
+            for path in sources:
+                try:
+                    source = path.read_text(encoding="utf-8", errors="ignore")
+                except OSError:
+                    continue
+                from gideon.engine.agents.native.workspace_access import _source_symbols
+
+                symbols = _source_symbols(path, source)
+                suffix = "\n    " + " · ".join(symbols) if symbols else ""
+                rows.append(f"{path.relative_to(tree.root)}{suffix}")
+            return "\n".join(rows)
+
         output = await asyncio.get_event_loop().run_in_executor(None, outline)
         return _ok_capped(output, session_key=self._session_key)
 
@@ -929,6 +1129,21 @@ class NativeBuiltinToolProvider(ToolProvider):
                 requested = _BASH_TIMEOUT
             timeout = max(1.0, min(requested, _BASH_TIMEOUT_MAX))
         command = str(a["command"])
+        from gideon.automation.triggers.secrets import UnresolvedSecret, resolve as resolve_references
+
+        handed: list[str] = []
+
+        def resolve_owned(key: str) -> str:
+            value = _stored_secret(key)
+            if value:
+                handed.append(value)
+            return value
+
+        try:
+            command = resolve_references(command, resolver=resolve_owned)
+        except UnresolvedSecret as missing:
+            return ToolResult(success=False, error=_unfilled_secret_error(missing.key))
+        handed.extend(_environment_credentials())
         from gideon.security.owner_only import owner_only_command_reason
 
         if reason := owner_only_command_reason(command, cwd=self._cwd):
@@ -977,6 +1192,7 @@ class NativeBuiltinToolProvider(ToolProvider):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 start_new_session=True,
+                env=_native_child_env(),
             )
             try:
                 captured = await ShellCapture.collect(process, timeout)
@@ -996,15 +1212,18 @@ class NativeBuiltinToolProvider(ToolProvider):
                     pass
         if captured.returncode == 0:
             return _ok_capped(
-                captured.output, content_type="log", session_key=self._session_key
+                _safe_command_output(captured.output, handed),
+                content_type="log",
+                session_key=self._session_key,
             )
+        safe_output = _safe_command_output(captured.output, handed)
         projection = project_output(
-            captured.output, cap=_MAX_OUTPUT_CHARS, content_type="log"
+            safe_output, cap=_MAX_OUTPUT_CHARS, content_type="log"
         )
         metadata = {"content_type": projection.content_type}
         if projection.truncated and self._session_key:
             reference = result_store.store_result(
-                self._session_key, captured.output, content_type="log"
+                self._session_key, safe_output, content_type="log"
             )
             if reference:
                 metadata["raw_ref"] = reference
