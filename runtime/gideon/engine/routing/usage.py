@@ -187,12 +187,17 @@ def fold_turn_row(
     return TurnAccumulator(fold, look or _rate_lookup(None)).accept(row)
 
 
-def audit_census(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def audit_census(
+    rows: list[dict[str, Any]], *, ledgered_audit_ids: set[str] | frozenset[str] = frozenset()
+) -> dict[str, Any]:
     calls = 0
     dollars_est = 0.0
     by_use_case: dict[str, int] = {}
     days: dict[str, int] = {}
     for row in rows:
+        audit_id = str(row.get("audit_id", "") or "").strip()
+        if audit_id and audit_id in ledgered_audit_ids:
+            continue
         calls += 1
         dollars_est = round(dollars_est + float(row.get("dollars_est", 0.0) or 0.0), 6)
         _count(by_use_case, str(row.get("use_case", "") or "(blank)"))
@@ -246,9 +251,18 @@ def fold_files(
     audit, ledger = _default_paths(audit_path, ledger_path)
     fold = empty_fold()
     accumulator = TurnAccumulator(fold, _rate_lookup(home))
-    turns = sum(accumulator.accept(row) for row in _iter_json_lines(ledger))
+    ledger_rows = _iter_json_lines(ledger)
+    turns = sum(accumulator.accept(row) for row in ledger_rows)
+    ledgered_audit_ids = frozenset(
+        str(row.get("audit_id", "") or "").strip()
+        for row in ledger_rows
+        if str(row.get("audit_id", "") or "").strip()
+    )
     fold.update(
-        uncounted=audit_census(_iter_json_lines(audit)), sources={"usage_ledger": turns}
+        uncounted=audit_census(
+            _iter_json_lines(audit), ledgered_audit_ids=ledgered_audit_ids
+        ),
+        sources={"usage_ledger": turns},
     )
     return fold
 

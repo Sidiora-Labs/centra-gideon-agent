@@ -56,6 +56,7 @@ class TurnUsage:
     import_source_name: str | None = None
     import_file_sha256: str | None = None
     import_record_id: str | None = None
+    audit_id: str | None = None
 
 
 def _path() -> Path:
@@ -508,6 +509,7 @@ class EventAccounting:
             model_calls=calls,
             usage_status=status,
             duration_ms=int(getattr(self.event, "duration_ms", 0) or 0),
+            audit_id=str(metadata.get("audit_id") or "").strip()[:128] or None,
         )
 
 
@@ -521,6 +523,11 @@ def record_from_event(
     model: str = "",
     estimate_if_missing: bool = True,
 ) -> None:
+    metadata = getattr(event, "tool_meta", None)
+    metadata = metadata if isinstance(metadata, dict) else {}
+    source = str(source or metadata.get("usage_source") or "")
+    session_key = str(session_key or metadata.get("usage_session_key") or "")
+    agent = str(agent or metadata.get("usage_agent") or "")
     served_ref = str(getattr(event, "served_model_ref", "") or "").strip()
     if served_ref:
         if ":" in served_ref:

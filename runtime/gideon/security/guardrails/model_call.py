@@ -395,6 +395,14 @@ class ModelCallGuard(ModelProvider):
                         estimated=price.estimated,
                     )
                     recorded = True
+                if event.kind == EVENT_COMPLETE:
+                    metadata = (
+                        dict(event.tool_meta)
+                        if isinstance(getattr(event, "tool_meta", None), dict)
+                        else {}
+                    )
+                    metadata["audit_id"] = audit_id
+                    event.tool_meta = metadata
                 _workflow_stream_observation(
                     "event",
                     audit_id,

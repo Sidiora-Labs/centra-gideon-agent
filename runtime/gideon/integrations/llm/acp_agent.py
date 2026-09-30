@@ -19,7 +19,12 @@ from gideon.integrations.llm.acp_provider_runtime import (
     launch_arguments,
     relay_events,
 )
-from gideon.integrations.llm.base import CancelOutcome, LLMEvent, ModelProvider
+from gideon.integrations.llm.base import (
+    EVENT_COMPLETE,
+    CancelOutcome,
+    LLMEvent,
+    ModelProvider,
+)
 from gideon.integrations.llm.capabilities import Capability, ProviderCapability
 from gideon.integrations.llm.registry import (
     ProviderEntry,
@@ -220,12 +225,23 @@ class AcpAgentProvider(AcpToolOutcomesMixin, ModelProvider, AgentProvider):
 
         return acp_event_to_agent_event(event)
 
+    def _stamp_usage_attribution(self, event: LLMEvent) -> None:
+        if event.kind != EVENT_COMPLETE or not self._unattended:
+            return
+        metadata = dict(event.tool_meta) if isinstance(event.tool_meta, dict) else {}
+        metadata.setdefault("usage_source", "background")
+        metadata.setdefault("usage_session_key", self._session_key or "")
+        metadata.setdefault("usage_agent", self._agent_name or "")
+        event.tool_meta = metadata
+
     async def stream(self, message: str) -> AsyncIterator[LLMEvent]:
         async for event in relay_events(self, self._client.stream_events, message):
+            self._stamp_usage_attribution(event)
             yield event
 
     async def stream_command(self, command: str) -> AsyncIterator[LLMEvent]:
         async for event in relay_events(self, self._client.stream_command, command):
+            self._stamp_usage_attribution(event)
             yield event
 
     @property

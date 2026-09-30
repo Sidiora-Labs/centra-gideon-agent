@@ -339,3 +339,76 @@ class TestEveryLadderExitNamesAMappedVerdict:
             atr._LADDER_VERDICT_LEVEL
         ), f"unmapped verdict(s): {sorted(returned - set(atr._LADDER_VERDICT_LEVEL))}"
         assert set(atr._LADDER_VERDICT_LEVEL) - returned == {"internal_error"}
+
+
+def test_ledgered_audit_id_is_excluded_from_uncounted_census(tmp_path, monkeypatch):
+    """Successful guarded usage moves into the turn ledger once; failed calls remain visible."""
+    from time import time
+
+    from gideon.engine.routing.usage import fold_files
+    from gideon.integrations.llm.base import EVENT_COMPLETE, LLMEvent
+    from gideon.operations.usage_ledger import _iter_rows, record_from_event
+    from gideon.security.guardrails.audit import AttemptRecord, _audit_path, record_attempt
+
+    monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+    audit_id = "guarded-success-01"
+    now = time()
+    record_attempt(
+        AttemptRecord(
+            audit_id=audit_id,
+            ts=now,
+            use_case="background",
+            provider="acp",
+            model="agent-model",
+            attempt=1,
+            tokens_in=40,
+            tokens_out=12,
+            dollars_est=0.02,
+            passed=True,
+        )
+    )
+    record_attempt(
+        AttemptRecord(
+            audit_id="guarded-failure-02",
+            ts=now,
+            use_case="background",
+            provider="acp",
+            model="agent-model",
+            attempt=1,
+            failure_mode="provider_error",
+            passed=False,
+        )
+    )
+    event = LLMEvent(
+        kind=EVENT_COMPLETE,
+        input_tokens=40,
+        output_tokens=12,
+        cost_usd=0.02,
+        duration_ms=850,
+        tool_meta={"audit_id": audit_id},
+    )
+    record_from_event(
+        event,
+        source="subagent",
+        session_key="dashboard:parent",
+        agent="researcher",
+        provider="acp",
+        model="agent-model",
+    )
+
+    rows = _iter_rows()
+    assert len(rows) == 1
+    assert rows[0]["audit_id"] == audit_id
+    assert rows[0]["source"] == "subagent"
+    assert rows[0]["session_key"] == "dashboard:parent"
+    assert rows[0]["agent"] == "researcher"
+    assert not {"prompt", "messages", "response"}.intersection(rows[0])
+
+    fold = fold_files(
+        home=tmp_path,
+        audit_path=_audit_path(),
+        ledger_path=tmp_path / "usage" / "turns.jsonl",
+    )
+    assert fold["sources"]["usage_ledger"] == 1
+    assert fold["uncounted"]["calls"] == 1
+    assert fold["uncounted"]["by_use_case"] == {"background": 1}

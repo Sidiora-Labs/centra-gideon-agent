@@ -26,6 +26,7 @@ class UsageWitness:
             event,
             source="background",
             session_key=BACKGROUND_KEY,
+            agent=str(getattr(self.client, "agent_name", "") or ""),
             provider="acp",
             model=self.model,
         )

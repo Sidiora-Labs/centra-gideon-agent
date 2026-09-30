@@ -303,6 +303,7 @@ class CompletionDelivery:
                 event,
                 source=source,
                 session_key=self.parent,
+                agent=str(getattr(client, "agent_name", "") or ""),
                 provider="acp",
                 model=model if isinstance(model, str) and model != "auto" else "",
             )
