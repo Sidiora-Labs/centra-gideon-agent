@@ -19,6 +19,7 @@ def _list_tools() -> list[dict[str, Any]]:
     return [
         {
             "name": "memory_remember",
+            "annotations": {"readOnlyHint": False},
             "description": (
                 "Save a learned correction or preference that persists across all "
                 "future sessions. MUST be called when the user corrects you, says "
@@ -93,23 +94,32 @@ def _list_tools() -> list[dict[str, Any]]:
             },
         },
         {
-            "name": "triage_rules",
+            "name": "approval_rules_list",
+            "annotations": {"readOnlyHint": True},
             "description": (
-                "List, add, or revoke the triage approval rules — what the proactive "
-                "digest may do without asking again. action='list' shows every rule "
-                "with its hit count and where it came from; action='add' needs a "
-                "pattern (like 'archive:sender:noreply.github.com') and a verdict "
-                "('approve' or 'deny'); action='revoke' needs the rule id from list. "
-                "A deny rule always beats an approve rule, so adding a deny is the "
-                "safe way to stop a class of proposal."
+                "List the triage approval rules — what the proactive digest may do "
+                "without asking again. Shows each rule's verdict, pattern, hit count, "
+                "scope, expiry, and id used to revoke it."
+            ),
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "triage_rules",
+            "annotations": {"readOnlyHint": False},
+            "description": (
+                "Add or revoke a triage approval rule. action='add' needs a pattern "
+                "and verdict='deny'; action='revoke' needs the rule id from "
+                "approval_rules_list. A deny rule always beats an approve rule. "
+                "Only the owner may teach an approve rule by answering the digest; "
+                "an agent cannot approve work ahead of time."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["list", "add", "revoke"],
-                        "description": "list | add | revoke",
+                        "enum": ["add", "revoke"],
+                        "description": "add | revoke",
                     },
                     "pattern": {
                         "type": "string",
@@ -120,12 +130,12 @@ def _list_tools() -> list[dict[str, Any]]:
                     },
                     "verdict": {
                         "type": "string",
-                        "enum": ["approve", "deny"],
-                        "description": "approve = auto-execute, deny = silently skip (add only)",
+                        "enum": ["deny"],
+                        "description": "deny = silently skip matching proposals (add only)",
                     },
                     "id": {
                         "type": "string",
-                        "description": "The rule id (user.approval.*) to revoke",
+                        "description": "The rule id (user.approval.*) to revoke, from approval_rules_list",
                     },
                     "scope": {
                         "type": "string",
@@ -156,6 +166,8 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
             if not ws:
                 return "Error: workspace name is required when scope='workspace'"
             payload["workspace"] = ws
+        if args.get("negative"):
+            payload["negative"] = args["negative"]
         d = _post("/api/lessons", payload)
         err_val = d.get("error")
         if err_val:
@@ -207,49 +219,32 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
     if name == "triage_rules":
         return _triage_rules(args)
 
+    if name == "approval_rules_list":
+        return _triage_rules_list()
+
     return f"Unknown tool: {name}"
 
 
 def _triage_rules(args: dict[str, Any]) -> str:
-    """The approval-memory management surface (PROACTIVE-ASSISTANT §4).
+    """Add or revoke an approval-memory rule (PROACTIVE-ASSISTANT §4).
 
-    Every branch is explicit and an unknown action is an error, not a fallthrough
-    to `list` — a mistyped action must not silently read as the harmless one, or a
-    typo'd `add` reports success while teaching nothing.
+    Every branch is explicit; a typo'd write action never reports success while
+    teaching nothing.
     """
     action = str(args.get("action") or "").strip().lower()
-
-    if action == "list":
-        d = _get("/api/memory/approval-rules")
-        if d.get("error"):
-            return f"Error: {d['error']}"
-        rules = d.get("rules") or []
-        if not rules:
-            return "No triage approval rules. The digest asks about everything."
-        lines = []
-        for r in rules:
-            provenance = r.get("created_from_digest") or "manual"
-            expiry = f", expires {r['expires_at']}" if r.get("expires_at") else ""
-            send = ", send-capable" if r.get("send_capable") else ""
-            lines.append(
-                f"[{r.get('verdict')}] {r.get('pattern')} — {r.get('hit_count', 0)} hits, "
-                f"from {provenance}, scope {r.get('scope', 'global')}{expiry}{send} "
-                f"(id: {r.get('key')})"
-            )
-        unreadable = d.get("unreadable") or []
-        if unreadable:
-            lines.append(
-                f"({len(unreadable)} unreadable rule row(s) ignored: {unreadable})"
-            )
-        return "\n".join(lines)
 
     if action == "add":
         pattern = str(args.get("pattern") or "").strip()
         verdict = str(args.get("verdict") or "").strip().lower()
         if not pattern:
             return "Error: pattern is required to add a rule"
-        if verdict not in ("approve", "deny"):
-            return "Error: verdict must be 'approve' or 'deny'"
+        if verdict == "approve":
+            return (
+                "Error: only the owner may teach an approve rule by answering the "
+                "digest; an agent cannot approve work ahead of time"
+            )
+        if verdict != "deny":
+            return "Error: verdict must be 'deny'"
         payload: dict[str, Any] = {
             "pattern": pattern,
             "verdict": verdict,
@@ -267,13 +262,36 @@ def _triage_rules(args: dict[str, Any]) -> str:
     if action == "revoke":
         rule_id = str(args.get("id") or "").strip()
         if not rule_id:
-            return "Error: id is required to revoke a rule (get it from action='list')"
+            return "Error: id is required to revoke a rule (get it from approval_rules_list)"
         d = _delete(f"/api/memory/approval-rules/{urllib.parse.quote(rule_id)}", {})
         if d.get("error"):
             return f"Error: {d['error']}"
         return f"Revoked rule {rule_id}"
 
-    return f"Error: unknown action {action!r} — use list, add, or revoke"
+    return f"Error: unknown action {action!r} — use add or revoke"
+
+
+def _triage_rules_list() -> str:
+    """Return only the rule fields meant for model-visible inspection."""
+    d = _get("/api/memory/approval-rules")
+    if d.get("error"):
+        return f"Error: {d['error']}"
+    rules = d.get("rules") or []
+    if not rules:
+        return "No triage approval rules. The digest asks about everything."
+    lines = []
+    for rule in rules:
+        expiry = f", expires {rule['expires_at']}" if rule.get("expires_at") else ""
+        send = ", send-capable" if rule.get("send_capable") else ""
+        lines.append(
+            f"[{rule.get('verdict')}] {rule.get('pattern')} — "
+            f"{rule.get('hit_count', 0)} hits, scope {rule.get('scope', 'global')}"
+            f"{expiry}{send} (id: {rule.get('key')})"
+        )
+    unreadable = d.get("unreadable") or []
+    if unreadable:
+        lines.append(f"({len(unreadable)} unreadable rule row(s) ignored)")
+    return "\n".join(lines)
 
 
 def _validate_args(name: str, args: dict[str, Any]) -> dict[str, Any]:

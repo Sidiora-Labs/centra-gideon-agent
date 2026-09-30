@@ -334,6 +334,10 @@ LEARN_ADD_SCHEMA = ToolSchema(
             "category", str, allowed=ALLOWED_LESSON_CATEGORIES, default="knowledge"
         ),
         FieldSpec("negative", str, max_len=MAX_SHORT_STRING),
+        FieldSpec(
+            "scope", str, allowed=frozenset({"global", "workspace"}), default="global"
+        ),
+        FieldSpec("workspace", str, max_len=MAX_MEDIUM_STRING),
     ],
 )
 

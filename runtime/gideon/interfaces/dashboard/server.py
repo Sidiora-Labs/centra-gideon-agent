@@ -2155,6 +2155,9 @@ async def start_dashboard(
                             "/api/triggers",
                         }
                     ),
+                    mixed_internal_routes=frozenset(
+                        {("GET", "/api/memory/approval-rules")}
+                    ),
                     internal_secret=_internal_secret,
                     port=port,
                     local_only=local_only,

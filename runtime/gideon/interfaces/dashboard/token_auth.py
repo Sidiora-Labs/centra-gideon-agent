@@ -931,6 +931,7 @@ def token_auth_middleware(
     *,
     internal_paths: frozenset[str] = frozenset(),
     mixed_internal_paths: frozenset[str] = frozenset(),
+    mixed_internal_routes: frozenset[tuple[str, str]] = frozenset(),
     internal_secret: str = "",
     port: int = _DEFAULT_PORT,
     local_only: bool = True,
@@ -952,6 +953,10 @@ def token_auth_middleware(
     of hard-denying, so DCV/SSH-forwarded browsers polling these routes
     (e.g. ``/api/spawn`` every 5s) don't trigger false session-expired
     banners.  Use this for any internal-path that the browser polls.
+
+    *mixed_internal_routes* applies the same behavior to exact ``(method,
+    path)`` pairs. Use it when internal access must be limited to a specific
+    method; other methods on that path continue through normal token auth.
 
     """
     from gideon.security.exposure import public_proxy_bypass_warning
@@ -1080,6 +1085,9 @@ def token_auth_middleware(
         _matches_mixed = mixed_internal_paths and (
             path in mixed_internal_paths
             or any(path.startswith(p + "/") for p in mixed_internal_paths)
+        )
+        _matches_mixed = bool(
+            _matches_mixed or (request.method, path) in mixed_internal_routes
         )
         if not local_only and _matches_strict and not _matches_mixed:
             _matches_mixed = True
@@ -1304,6 +1312,7 @@ def auth_middleware(
     *,
     internal_paths: frozenset[str] = frozenset(),
     mixed_internal_paths: frozenset[str] = frozenset(),
+    mixed_internal_routes: frozenset[tuple[str, str]] = frozenset(),
     internal_secret: str = "",
     port: int = _DEFAULT_PORT,
     local_only: bool = True,
@@ -1345,6 +1354,7 @@ def auth_middleware(
         return token_auth_middleware(
             internal_paths=internal_paths,
             mixed_internal_paths=mixed_internal_paths,
+            mixed_internal_routes=mixed_internal_routes,
             internal_secret=internal_secret,
             port=port,
             local_only=local_only,
