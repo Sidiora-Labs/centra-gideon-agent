@@ -1371,3 +1371,91 @@ class TestImportReadsTheWidenedExport:
         conn = sqlite3.connect(f"file:{imported}?mode=ro", uri=True)
         assert conn.execute("SELECT count(*) FROM runs").fetchone()[0] == 500
         conn.close()
+
+
+def test_archive_merge_uses_peer_arrival_policy_and_preserves_local_runtime_state(
+    tmp_path
+):
+    target = tmp_path / "arrival-home"
+    target.mkdir()
+    local_trigger = {
+        "id": "local-id",
+        "name": "local-work",
+        "message": "local definition",
+        "enabled": True,
+        "run_count": 14,
+        "last_run_id": "local-run",
+        "run_owner_pid": 7331,
+        "state": "running",
+    }
+    (target / "triggers.json").write_text(
+        json.dumps({"triggers": [local_trigger]})
+    )
+    archive = tmp_path / "foreign-export.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr(
+            "export/triggers.json",
+            json.dumps(
+                {
+                    "triggers": [
+                        {
+                            "id": "local-id",
+                            "name": "local-work",
+                            "message": "restored definition",
+                            "enabled": True,
+                            "run_count": 900,
+                            "last_run_id": "foreign-run",
+                            "run_owner_pid": 9912,
+                            "state": "running",
+                        },
+                        {
+                            "id": "foreign-id",
+                            "name": "foreign-work",
+                            "message": "new imported work",
+                            "enabled": True,
+                            "run_count": 901,
+                            "last_run_id": "foreign-in-flight",
+                            "run_owner_pid": 9913,
+                            "state": "running",
+                        },
+                    ]
+                }
+            ),
+        )
+
+    with patch("gideon.workspace.portability.config_dir", return_value=target):
+        with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
+            apply_import_zip(archive, mode="merge")
+
+    merged = json.loads((target / "triggers.json").read_text())["triggers"]
+    by_name = {row["name"]: row for row in merged}
+    assert by_name["local-work"]["run_count"] == 14
+    assert by_name["local-work"]["last_run_id"] == "local-run"
+    assert by_name["local-work"]["run_owner_pid"] == 7331
+    assert by_name["local-work"]["state"] == "running"
+    imported = by_name["foreign-work"]
+    assert imported["message"] == "new imported work"
+    assert imported["enabled"] is False
+    assert not {"run_count", "last_run_id", "run_owner_pid", "state"} & imported.keys()
+
+    with patch("gideon.workspace.portability.config_dir", return_value=target):
+        with patch.dict(os.environ, {"GIDEON_HOME": str(target)}):
+            apply_import_zip(archive, mode="replace")
+
+    replaced = json.loads((target / "triggers.json").read_text())["triggers"]
+    by_name = {row["name"]: row for row in replaced}
+    assert by_name["local-work"]["message"] == "restored definition"
+    assert by_name["local-work"]["run_count"] == 14
+    assert by_name["local-work"]["last_run_id"] == "local-run"
+    assert by_name["local-work"]["run_owner_pid"] == 7331
+    assert by_name["local-work"]["state"] == "running"
+    imported = by_name["foreign-work"]
+    assert imported["enabled"] is False
+    assert not {"run_count", "last_run_id", "run_owner_pid", "state"} & imported.keys()
+
+    backups = list(target.glob("pre-restore-*"))
+    assert len(backups) == 1
+    backed_up = json.loads((backups[0] / "triggers.json").read_text())["triggers"]
+    assert backed_up[0]["run_count"] == 14
+    assert backed_up[0]["last_run_id"] == "local-run"
+    assert backed_up[0]["run_owner_pid"] == 7331

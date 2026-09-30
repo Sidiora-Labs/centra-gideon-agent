@@ -473,7 +473,58 @@ def _copy_tree_no_overwrite(
             target.mkdir(parents=True, exist_ok=True)
         elif item.is_file() and not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(item), str(target))
+            if entry_path and item.suffix == ".json":
+                _copy_json_with_arrival_policy(
+                    item, target, f"{entry_path}/{rel.as_posix()}"
+                )
+            else:
+                shutil.copy2(str(item), str(target))
+
+
+def _arrival_policy(entry_path: str, incoming, local=None):
+    """Apply the durability inventory's peer-arrival projection to restored data."""
+    from gideon.operations.durability import inventory as inv
+
+    entry = inv.claim_for(entry_path)
+    if entry is None or not (entry.machine_local or entry.machine_local_fields):
+        return incoming
+    if entry.machine_local:
+        return local
+    return inv.apply_machine_local_fields(
+        entry, inv.shared_value(entry, incoming), local
+    )
+
+
+def _read_optional_json(path: Path):
+    if not path.is_file() or path.is_symlink():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _copy_json_with_arrival_policy(
+    src: Path, dst: Path, entry_path: str, *, local_path: Path | None = None
+) -> None:
+    incoming = _read_optional_json(src)
+    local = _read_optional_json(local_path) if local_path is not None else None
+    restored = _arrival_policy(entry_path, incoming, local)
+    if restored is None:
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(dst, json.dumps(restored, indent=2))
+
+
+def _apply_arrival_policy_to_tree(root: Path, entry_path: str, local_root: Path) -> None:
+    """Reconcile machine-local fields after a replace has retained its recovery tree."""
+    for path in root.rglob("*.json"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        rel = path.relative_to(root)
+        local_path = local_root / rel
+        local = _read_optional_json(local_path)
+        incoming = _read_optional_json(path)
+        restored = _arrival_policy(f"{entry_path}/{rel.as_posix()}", incoming, local)
+        if restored is not None:
+            atomic_write(path, json.dumps(restored, indent=2))
 
 
 def snapshot_main(
@@ -943,6 +994,7 @@ def _merge_crons(src_path: Path, dst_path: Path) -> None:
         job["id"] = hashlib.md5(
             f"{name}-imported".encode(), usedforsecurity=False
         ).hexdigest()[:8]
+        job = _arrival_policy("crons.json", job)
         dst.setdefault("jobs", []).append(job)
         imported += 1
     atomic_write(dst_path, json.dumps(dst, indent=2))
@@ -969,8 +1021,6 @@ def _merge_triggers(src_path: Path, dst_path: Path) -> None:
     never performed. An imported trigger arrives UNARMED and the boot sweep arms it here — which is
     also why importing cannot resurrect a fire that should have happened during the move.
     """
-    from gideon.automation.triggers.store import RUNTIME_FIELDS
-
     src = json.loads(src_path.read_text())
     dst = json.loads(dst_path.read_text())
     existing_names = {str(t.get("name") or "") for t in dst.get("triggers", [])}
@@ -981,8 +1031,6 @@ def _merge_triggers(src_path: Path, dst_path: Path) -> None:
         if not name or name in existing_names:
             continue
         row = dict(trigger)
-        for field in RUNTIME_FIELDS:
-            row.pop(field, None)
         base = str(row.get("id") or "") or "imported"
         candidate = base
         n = 2
@@ -990,7 +1038,7 @@ def _merge_triggers(src_path: Path, dst_path: Path) -> None:
             candidate = f"{base}-{n}"
             n += 1
         row["id"] = candidate
-        row["enabled"] = False
+        row = _arrival_policy("triggers.json", row)
         existing_ids.add(candidate)
         existing_names.add(name)
         dst.setdefault("triggers", []).append(row)
@@ -1021,7 +1069,7 @@ def _merge_event_triggers(src_path: Path, dst_path: Path) -> None:
         if not pattern or pattern in existing:
             continue
         row = dict(trigger)
-        row["enabled"] = False
+        row = _arrival_policy("event_triggers.json", row)
         dst_rows.append(row)
         existing.add(pattern)
         imported += 1
@@ -1056,7 +1104,7 @@ def _merge_notifications(src_path: Path, dst_path: Path) -> None:
 
 
 def _merge_json_collection(
-    src: Path, dst: Path, *, wrapper: str | None, key: str
+    src: Path, dst: Path, *, wrapper: str | None, key: str, entry_path: str = ""
 ) -> int:
     """Union an id-bearing JSON collection, live rows winning on a key collision (S181).
 
@@ -1095,6 +1143,8 @@ def _merge_json_collection(
     ]
     if not added:
         return 0
+    if entry_path:
+        added = [_arrival_policy(entry_path, row) for row in added]
     merged = dst_rows + added
     if wrapper is None:
         out: object = merged
@@ -1481,7 +1531,9 @@ def _backup_and_copy(pc: Path, backup: Path, snap: Path, component: str) -> None
             elif src.is_file():
                 _replace_config_from_snapshot(src, pc / f, backup / f)
             continue
-        if (pc / f).is_file():
+        local_path = pc / f
+        local = _read_optional_json(local_path) if f.endswith(".json") else None
+        if local_path.is_file():
             if os.path.islink(pc / f):
                 print(f"⚠️  Skipping symlinked core file during backup: {pc / f}")
                 continue
@@ -1490,9 +1542,16 @@ def _backup_and_copy(pc: Path, backup: Path, snap: Path, component: str) -> None
             if os.path.islink(snap / f):
                 print(f"⚠️  Skipping symlinked file from snapshot: {snap / f}")
                 continue
-            shutil.copy2(str(snap / f), str(pc / f))
+            if f.endswith(".json"):
+                incoming = _read_optional_json(snap / f)
+                restored = _arrival_policy(f, incoming, local)
+                if restored is not None:
+                    atomic_write(pc / f, json.dumps(restored, indent=2))
+            else:
+                shutil.copy2(str(snap / f), str(pc / f))
             if component == "security":
-                os.chmod(str(pc / f), 0o600)
+                if (pc / f).is_file():
+                    os.chmod(str(pc / f), 0o600)
 
 
 def _do_replace(snap: Path, pc: Path, components: list[str] | None) -> None:
@@ -1535,14 +1594,24 @@ def _do_replace(snap: Path, pc: Path, components: list[str] | None) -> None:
             if not _store_selected(components, rel):
                 continue
             src, live = snap / rel, pc / rel
+            local = _read_optional_json(live) if src.is_file() and rel.endswith(".json") else None
             if live.exists() and not live.is_symlink():
                 (backup / rel).parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(live), str(backup / rel))
             if src.is_dir():
                 _copytree_safe(src, live, ignore=_restore_ignore(rel, src))
+                _apply_arrival_policy_to_tree(live, rel, backup / rel)
             elif src.is_file():
                 live.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(src), str(live))
+                if rel.endswith(".json"):
+                    _copy_json_with_arrival_policy(
+                        src,
+                        live,
+                        rel,
+                        local_path=backup / rel if local is not None else None,
+                    )
+                else:
+                    shutil.copy2(str(src), str(live))
         print("  ✅ stores")
 
     try:
@@ -1729,21 +1798,21 @@ def _do_merge(snap: Path, pc: Path, components: list[str] | None) -> None:
             if dt.is_file():
                 _merge_triggers(st, dt)
             else:
-                shutil.copy2(str(st), str(dt))
+                _copy_json_with_arrival_policy(st, dt, "triggers.json")
                 print("  Automations: copied (no existing store)")
         se, de = snap / "event_triggers.json", pc / "event_triggers.json"
         if se.is_file():
             if de.is_file():
                 _merge_event_triggers(se, de)
             else:
-                shutil.copy2(str(se), str(de))
+                _copy_json_with_arrival_policy(se, de, "event_triggers.json")
                 print("  Event triggers: copied (none existing)")
         sc, dc = snap / "crons.json", pc / "crons.json"
         if sc.is_file():
             if dc.is_file():
                 _merge_crons(sc, dc)
             else:
-                shutil.copy2(str(sc), str(dc))
+                _copy_json_with_arrival_policy(sc, dc, "crons.json")
                 print("  Legacy crons: copied (no existing crons)")
         print("  ✅ automations")
 
@@ -1820,7 +1889,13 @@ def _do_merge(snap: Path, pc: Path, components: list[str] | None) -> None:
             ("inbox.json", "items", "id"),
             ("tags.json", None, "id"),
         ):
-            n = _merge_json_collection(snap / rel, pc / rel, wrapper=wrapper, key=key)
+            n = _merge_json_collection(
+                snap / rel,
+                pc / rel,
+                wrapper=wrapper,
+                key=key,
+                entry_path=rel,
+            )
             if n:
                 print(f"  {rel}: {n} imported")
         for rel, wrapper in (
@@ -1846,7 +1921,10 @@ def _do_merge(snap: Path, pc: Path, components: list[str] | None) -> None:
                 restored.append(rel)
             elif src.is_file() and not dst.exists():
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(src), str(dst))
+                if rel.endswith(".json"):
+                    _copy_json_with_arrival_policy(src, dst, rel)
+                else:
+                    shutil.copy2(str(src), str(dst))
                 restored.append(rel)
         if restored:
             print(

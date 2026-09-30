@@ -44,6 +44,7 @@ from gideon.core.config import loader as config_loader
 from gideon.core.sqlite_compat import sqlite3
 from gideon.security.security import is_sensitive_path
 from gideon.workspace.snapshot import (
+    _copy_json_with_arrival_policy,
     _copy_tree_no_overwrite,
     _do_replace,
     _merge_crons,
@@ -858,7 +859,9 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
                     _merge_triggers(snap / "triggers.json", pc / "triggers.json")
                     summary["items"].append("automations (merged)")
                 else:
-                    shutil.copy2(str(snap / "triggers.json"), str(pc / "triggers.json"))
+                    _copy_json_with_arrival_policy(
+                        snap / "triggers.json", pc / "triggers.json", "triggers.json"
+                    )
                     summary["items"].append("automations (copied)")
 
             if (snap / "event_triggers.json").is_file():
@@ -868,9 +871,10 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
                     )
                     summary["items"].append("event triggers (merged)")
                 else:
-                    shutil.copy2(
-                        str(snap / "event_triggers.json"),
-                        str(pc / "event_triggers.json"),
+                    _copy_json_with_arrival_policy(
+                        snap / "event_triggers.json",
+                        pc / "event_triggers.json",
+                        "event_triggers.json",
                     )
                     summary["items"].append("event triggers (copied)")
 
@@ -879,12 +883,16 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
                     _merge_crons(snap / "crons.json", pc / "crons.json")
                     summary["items"].append("crons (merged)")
                 else:
-                    shutil.copy2(str(snap / "crons.json"), str(pc / "crons.json"))
+                    _copy_json_with_arrival_policy(
+                        snap / "crons.json", pc / "crons.json", "crons.json"
+                    )
                     summary["items"].append("crons (copied)")
 
             if (snap / "hooks.json").is_file():
                 if not (pc / "hooks.json").is_file():
-                    shutil.copy2(str(snap / "hooks.json"), str(pc / "hooks.json"))
+                    _copy_json_with_arrival_policy(
+                        snap / "hooks.json", pc / "hooks.json", "hooks.json"
+                    )
                     summary["items"].append("hooks (copied)")
                 else:
                     summary["items"].append("hooks (skipped, already exists)")
