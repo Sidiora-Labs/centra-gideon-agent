@@ -55,6 +55,61 @@ def loop_id_from_session_key(key: str) -> str:
     return key[len("loop-") :] if key.startswith("loop-") else ""
 
 
+def recorded_session_process(session_name: str) -> bool | None:
+    """Read the existing PID-to-session note without reaping or signalling it.
+
+    True means a provider process for this exact session is alive, False means at
+    least one recorded process exists and every matching PID is dead, and None means
+    the runtime has no reliable record. A missing in-memory session is not a death
+    certificate when its provider process may still be writing a worktree.
+    """
+    from gideon.engine import session_pid
+
+    try:
+        notes = session_pid.config_dir().glob("session_pid_*.txt")
+    except OSError:
+        return None
+    found = False
+    uncertain = False
+    for note in notes:
+        try:
+            if note.read_text(encoding="utf-8").strip() != session_name:
+                continue
+            pid = int(note.stem.removeprefix("session_pid_"))
+        except (OSError, ValueError):
+            continue
+        found = True
+        alive = session_pid._probe(pid)
+        if alive is True:
+            return True
+        if alive is None:
+            uncertain = True
+    if uncertain or not found:
+        return None
+    return False
+
+
+async def worker_is_drained(state, svc, session_name: str, *, stop_nudge: bool) -> bool:
+    """Prove no current turn or scheduled nudge can keep this worker writing."""
+    nudge = svc.get_by_session(session_name)
+    if nudge is not None:
+        active = getattr(nudge, "active", None)
+        if not isinstance(active, bool):
+            return False
+        if active:
+            if not stop_nudge:
+                return False
+            await svc.update(nudge.id, active=False)
+            nudge = svc.get_by_session(session_name)
+            if nudge is None or getattr(nudge, "active", None) is not False:
+                return False
+    session = state._sessions.get(session_name)
+    if session is None:
+        return recorded_session_process(session_name) is False
+    running = getattr(session, "running", None)
+    return running is False and recorded_session_process(session_name) is False
+
+
 def _context_dir(loop: Loop) -> str:
     """The loop's containing-project shared context dir (or '' if none/unresolvable)."""
     if not loop.project_id:
@@ -185,6 +240,39 @@ async def start(state, svc, loop_id: str) -> Loop:
         except Exception:
             logger.debug("seed_phase_tasks failed for %s", loop_id, exc_info=True)
 
+    restart_reason = ""
+    parallel_pending = bool(
+        (loop.kind_config or {}).get("parallel_stage_stood_down")
+    )
+    ownership = getattr(strat, "parallel_restart_ownership", None)
+    if callable(ownership):
+        restart_reason, has_parallel_ownership = await ownership(loop, state, svc)
+        parallel_pending = parallel_pending or has_parallel_ownership
+    prior_main_session = state._sessions.get(session_key(loop.id))
+    if not restart_reason and prior_main_session is None and loop.started_at:
+        process_alive = recorded_session_process(session_key(loop.id))
+        if process_alive is not False:
+            restart_reason = (
+                "The previous stage worker has no current session and its provider "
+                "process cannot be proven stopped. Stop or inspect that worker, then "
+                "resume this loop."
+            )
+    if restart_reason:
+        loop_files.write_question(loop.id, restart_reason)
+        updated = store.update_status(loop_id, LoopStatus.NEEDS_INPUT)
+        logger.warning("loop: held %s for writer recovery: %s", loop_id, restart_reason)
+        return updated
+
+    existing_main_nudge = svc.get_by_session(session_key(loop.id))
+    if parallel_pending and existing_main_nudge is None:
+        reason = (
+            "Parallel task ownership is being recovered, but the stage worker's "
+            "paused nudge record is missing. Inspect the task worktrees and restore "
+            "the stage worker before resuming."
+        )
+        loop_files.write_question(loop.id, reason)
+        return store.update_status(loop_id, LoopStatus.NEEDS_INPUT)
+
     write_brief(loop)
     updated = store.update_status(loop_id, LoopStatus.RUNNING)
 
@@ -216,14 +304,26 @@ async def start(state, svc, loop_id: str) -> Loop:
     state.push_sessions_update()
 
     msg = _build_nudge_message(strat, loop, d)
-    await svc.add(
-        session_name=session.key,
-        message=msg,
-        idle_secs=loop.idle_secs or cfg.default_idle_secs,
-        max_cycles=loop.max_cycles,
-        stop_sentinel_path=str(d / loop_files.STOP_SENTINEL) if d else "",
-        first_idle_secs=_FIRST_CYCLE_IDLE_SECS,
-    )
+    if parallel_pending:
+        updated_nudge = await svc.update(
+            existing_main_nudge.id, message=msg, active=False
+        )
+        if updated_nudge is None or getattr(updated_nudge, "active", None) is not False:
+            reason = (
+                "The stage worker could not remain paused while parallel task "
+                "ownership is recovered. Inspect the task worktrees before resuming."
+            )
+            loop_files.write_question(loop.id, reason)
+            return store.update_status(loop_id, LoopStatus.NEEDS_INPUT)
+    else:
+        await svc.add(
+            session_name=session.key,
+            message=msg,
+            idle_secs=loop.idle_secs or cfg.default_idle_secs,
+            max_cycles=loop.max_cycles,
+            stop_sentinel_path=str(d / loop_files.STOP_SENTINEL) if d else "",
+            first_idle_secs=_FIRST_CYCLE_IDLE_SECS,
+        )
     logger.info(
         "loop: started %s (kind=%s) on session %s", loop_id, loop.kind, session.key
     )

@@ -1142,6 +1142,18 @@ class LoopWatchdog:
                     logger.info("loop %s stalled: %s", cid, why)
                     self._publish(cid, "stagnant", {"loop_id": cid, "reason": why})
             else:
+                # A parallel code loop deliberately pauses its stage worker while
+                # task worktrees own the source tree. Keep supervising that handoff
+                # even though the paused stage worker can no longer emit findings.
+                strat = kinds.get_or_none(loop.kind)
+                maintenance = getattr(strat, "parallel_maintenance", None)
+                if callable(maintenance) and (
+                    (loop.kind_config or {}).get("parallel_stage_stood_down")
+                ):
+                    await maintenance(loop, self._cycle_ctx())
+                    fresh = store.get(cid)
+                    if fresh is None or fresh.status != LoopStatus.RUNNING.value:
+                        continue
                 if session is None or not getattr(session, "running", False):
                     if self._loop_exhausted(cid, loop.max_cycles):
                         if count > 0:

@@ -164,6 +164,123 @@ class CodeKind(LoopKindStrategy):
             if svc.get_by_session(task_session_key(loop.id, tid)) is not None
         ]
 
+    async def parallel_restart_ownership(self, loop: Loop, state, svc) -> tuple[str, bool]:
+        """Recompute queued worker ownership before a previously-run loop is re-armed.
+
+        The task row and a surviving worktree identify unfinished work, not whether its
+        former provider child is still writing. Use the existing session PID note for
+        that distinction; absent or unreadable evidence fails closed.
+        """
+        if not self._is_parallel(loop):
+            return "", False
+        from gideon.automation.loop import manager, worktree
+
+        pending = bool((loop.kind_config or {}).get("parallel_stage_stood_down"))
+        for task_id in (loop.kind_config or {}).get("queued_task_ids", []) or []:
+            task = await self._get_task(task_id)
+            if task is None:
+                return (
+                    f"Task {task_id} cannot be read while parallel ownership is being "
+                    "recovered. Inspect its provider state before resuming.",
+                    True,
+                )
+            key = manager.task_session_key(loop.id, task_id)
+            session = state._sessions.get(key)
+            nudge = svc.get_by_session(key)
+            active = getattr(nudge, "active", None) if nudge is not None else False
+            if not isinstance(active, bool):
+                return f"Task {task_id} has an unreadable worker state; inspect it before resuming.", True
+            status = str(getattr(task.status, "value", task.status))
+            try:
+                has_worktree = os.path.isdir(
+                    worktree.worktree_path(loop.workspace_dir, task_id, loop.tasks_project_id)
+                ) or worktree.branch_exists(loop.workspace_dir, task_id)
+            except (OSError, ValueError):
+                return f"Task {task_id} has an unsafe or unreadable worktree state; inspect it before resuming.", True
+            has_owner = status == "in_progress" or active or has_worktree
+            if not has_owner:
+                continue
+            pending = True
+            if session is not None:
+                if not isinstance(getattr(session, "running", None), bool):
+                    return f"Task {task_id} has an unreadable session state; inspect it before resuming.", True
+                continue
+            if manager.recorded_session_process(key) is not False:
+                return (
+                    f"Task {task_id} has no current session and its provider process "
+                    "cannot be proven stopped. Stop or inspect that worker before resuming.",
+                    True,
+                )
+        return "", pending
+
+    @staticmethod
+    def _workspace_clean(worktree, workspace: str) -> bool | None:
+        rc, output = worktree._git(
+            workspace, "status", "--porcelain", "--untracked-files=all"
+        )
+        if rc != 0:
+            return None
+        return not output.strip()
+
+    @staticmethod
+    def _hold_for_writer_recovery(loop: Loop, ctx, reason: str) -> None:
+        from gideon.automation.loop import store
+
+        loop_files.write_question(loop.id, reason)
+        store.update_status(loop.id, LoopStatus.NEEDS_INPUT)
+        ctx.publish(loop.id, "needs_input", {"loop_id": loop.id, "reason": reason})
+
+    async def _stand_down_stage_worker(self, loop: Loop, workspace: str, ctx, *, clean_first: bool) -> bool:
+        from gideon.automation.loop import manager, store, worktree
+
+        main_key = manager.session_key(loop.id)
+        if clean_first and self._workspace_clean(worktree, workspace) is not True:
+            return False
+        store.merge_kind_config(loop.id, {"parallel_stage_stood_down": True})
+        if not await manager.worker_is_drained(
+            ctx.state, ctx.svc, main_key, stop_nudge=True
+        ):
+            return False
+        clean = self._workspace_clean(worktree, workspace)
+        if clean is None or (clean_first and not clean):
+            self._hold_for_writer_recovery(
+                loop,
+                ctx,
+                "The shared project tree could not be verified clean after the stage "
+                "worker stopped. Resolve its Git state before parallel tasks continue.",
+            )
+            return False
+        return True
+
+    async def _rearm_stage_worker(self, loop: Loop, ctx) -> bool:
+        from gideon.automation.loop import manager, store
+
+        if not (loop.kind_config or {}).get("parallel_stage_stood_down"):
+            return True
+        main_key = manager.session_key(loop.id)
+        if not await manager.worker_is_drained(
+            ctx.state, ctx.svc, main_key, stop_nudge=False
+        ):
+            return False
+        nudge = ctx.svc.get_by_session(main_key)
+        if nudge is None or getattr(nudge, "active", None) is not False:
+            self._hold_for_writer_recovery(
+                loop,
+                ctx,
+                "The stage worker's paused nudge record is missing or changed. "
+                "Inspect task ownership before re-arming it.",
+            )
+            return False
+        await manager.rearm_nudge_message(ctx.svc, loop.id)
+        updated = await ctx.svc.update(nudge.id, active=True)
+        if updated is None or getattr(updated, "active", None) is not True:
+            self._hold_for_writer_recovery(
+                loop, ctx, "The stage worker could not be safely re-armed after task drain."
+            )
+            return False
+        store.merge_kind_config(loop.id, {"parallel_stage_stood_down": False})
+        return True
+
     def default_kind_config(self) -> dict:
         return {
             "entry_stage": "ideation",
@@ -1338,12 +1455,19 @@ class CodeKind(LoopKindStrategy):
         then fill free slots with ready tasks. Returns True iff the loop paused
         (NEEDS_INPUT on a merge conflict that couldn't auto-resolve). Ported from
         code/watchdog._schedule_parallel onto the Loop entity + ctx."""
-        from gideon.automation.loop import store, tasks_link, worktree
+        from gideon.automation.loop import manager, store, tasks_link, worktree
         from gideon.automation.loop.manager import (
             spawn_task_worker,
             task_session_key,
             teardown_task_worker,
         )
+
+        # The stage worker owns the shared checkout. Stop its nudge and wait for
+        # the current turn to drain before creating any task worktrees.
+        if not await self._stand_down_stage_worker(
+            loop, ws, ctx, clean_first=False
+        ):
+            return True
 
         for tid in list((loop.kind_config or {}).get("queued_task_ids", []) or []):
             skey = task_session_key(loop.id, tid)
@@ -1355,7 +1479,25 @@ class CodeKind(LoopKindStrategy):
                     and tasks_link._is_done(task.status)
                     and worktree.branch_exists(ws, tid)
                 ):
+                    if not await manager.worker_is_drained(
+                        ctx.state, ctx.svc, skey, stop_nudge=True
+                    ):
+                        self._hold_for_writer_recovery(
+                            loop,
+                            ctx,
+                            f'Task "{task.title}" has no session, but its worker cannot be proven stopped. Inspect its process before merging.',
+                        )
+                        return True
+                    await teardown_task_worker(ctx.svc, loop.id, tid)
                     if await self._reap_merge_done(loop, tid, task, ws, ctx):
+                        return True
+                elif task is not None and str(getattr(task.status, "value", task.status)) == "in_progress":
+                    if manager.recorded_session_process(skey) is not False:
+                        self._hold_for_writer_recovery(
+                            loop,
+                            ctx,
+                            f'Task "{task.title}" has no current session and its provider process cannot be proven stopped. Inspect it before resuming.',
+                        )
                         return True
                 continue
             task = await self._get_task(tid)
@@ -1375,6 +1517,10 @@ class CodeKind(LoopKindStrategy):
                     ctx.publish(loop.id, "needs_input", {"loop_id": loop.id})
                     return True
             if task is not None and tasks_link._is_done(task.status):
+                if not await manager.worker_is_drained(
+                    ctx.state, ctx.svc, skey, stop_nudge=True
+                ):
+                    continue
                 await teardown_task_worker(ctx.svc, loop.id, tid)
                 if await self._reap_merge_done(loop, tid, task, ws, ctx):
                     return True
@@ -1384,12 +1530,21 @@ class CodeKind(LoopKindStrategy):
             return False
         ready = await tasks_link.ready_queued_tasks(loop, phase_key)
         if not ready or not worktree.ensure_base_commit(ws):
+            if not self._live_task_workers(loop, ctx.svc):
+                await self._rearm_stage_worker(loop, ctx)
             return False
         batch = [
             t
             for t in ready[:slots]
             if ctx.svc.get_by_session(task_session_key(loop.id, t.id)) is None
         ]
+        if batch and self._workspace_clean(worktree, ws) is not True:
+            self._hold_for_writer_recovery(
+                loop,
+                ctx,
+                "The shared project tree is not clean; resolve its Git state before parallel tasks start.",
+            )
+            return True
         specs = [
             (t.id, worktree.scope_for_task(ws, *_task_scope_texts(t))) for t in batch
         ]
@@ -1405,6 +1560,17 @@ class CodeKind(LoopKindStrategy):
                 {"loop_id": loop.id, "task_id": t.id, "title": t.title},
             )
         return False
+
+    async def parallel_maintenance(self, loop: Loop, ctx) -> None:
+        """Advance a paused stage/task handoff even when no new stage finding lands."""
+        if not (loop.kind_config or {}).get("parallel_stage_stood_down"):
+            return
+        idx = self.active_stage_index(loop)
+        if idx < 0:
+            return
+        await self._schedule_parallel(
+            loop, self.phase_key((loop.plan or [])[idx]), loop.workspace_dir or "", ctx
+        )
 
     async def _reap_merge_done(self, loop: Loop, tid: str, task, ws: str, ctx) -> bool:
         """Merge a done task's branch into base. Clean → unqueue + task_done. Conflict
