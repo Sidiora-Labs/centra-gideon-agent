@@ -218,8 +218,12 @@ class BackendSupervisor:
             if name in self._held:
                 return None
             existing = self._procs.get(name)
-            if existing and existing.is_alive():
-                return existing
+            if existing:
+                if existing.is_alive():
+                    return existing
+                # poll() reaps an exited child; don't rotate while its old signer
+                # could still be paired with a live backend process.
+                self._procs.pop(name, None)
 
             root = app_dir(name)
             entry = (root / backend.entryPoint).resolve()
@@ -248,10 +252,10 @@ class BackendSupervisor:
             storage_ok = checker is not None and checker.can_use_storage()
             data_dir = app_data_dir(name) if storage_ok else None
 
-            from gideon.extensions.apps.app_secret import ensure_app_secret
+            from gideon.extensions.apps.app_secret import rotate_app_secret
             from gideon.sdk.security import APP_SECRET_ENV
 
-            proxy_secret = ensure_app_secret(name)
+            proxy_secret = rotate_app_secret(name)
             if not proxy_secret:
                 logger.warning(
                     "app %s backend: proxy secret unavailable; refusing to start unprotected",

@@ -7,10 +7,11 @@ reverse-proxy forwards is signed with an HMAC over a per-app secret, and the bac
 SDK middleware refuses anything unsigned (fail-closed). This module owns that secret's
 one true storage shape so the two call sites agree:
 
-- :func:`ensure_app_secret` — used by the backend supervisor at ``start()`` to mint
-  (once) and read the secret, then inject it into the child env as
-  ``GIDEON_APP_SECRET``. Fail-closed: returns ``None`` if the secret cannot be
-  written/read, so the supervisor declines to start an unprotected backend.
+- :func:`rotate_app_secret` — used by the backend supervisor at ``start()`` to mint
+  a fresh secret after any previous child has exited, then inject it into the child
+  env as ``GIDEON_APP_SECRET``. Fail-closed: returns ``None`` if replacement fails.
+- :func:`ensure_app_secret` — compatibility helper to mint only when absent and read
+  the secret; it is not used for backend launches.
 - :func:`read_app_secret` — used by the proxy handler at forward time to sign. The
   supervisor already minted it; the proxy just reads (returns ``None`` if absent →
   the proxy fails closed rather than forwarding unsigned).
@@ -26,10 +27,10 @@ value is NEVER logged.
 from __future__ import annotations
 
 import logging
-import os
 import secrets
 from pathlib import Path
 
+from gideon.core.atomic_write import atomic_write
 from gideon.extensions.apps.manager import app_dir
 
 logger = logging.getLogger(__name__)
@@ -43,21 +44,6 @@ def secret_path(name: str) -> Path:
     return app_dir(name) / APP_SECRET_FILENAME
 
 
-def _write_0600(path: Path, value: str) -> None:
-    """Write ``value`` to ``path`` with mode 0600, enforced even under a loose umask.
-
-    ``os.open`` honors the mode arg only modulo the umask, so a permissive umask could
-    leave the fresh file group/other-readable. We fchmod after creating to pin 0600
-    regardless — the secret must never be world-readable.
-    """
-    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        os.fchmod(fd, 0o600)
-        os.write(fd, value.encode("ascii"))
-    finally:
-        os.close(fd)
-
-
 def ensure_app_secret(name: str) -> str | None:
     """Mint (if absent) and return app ``name``'s proxy secret. ``None`` on failure.
 
@@ -67,7 +53,7 @@ def ensure_app_secret(name: str) -> str | None:
     """
     path = secret_path(name)
     try:
-        if path.exists():
+        if path.exists() and not path.is_symlink():
             existing = path.read_text(encoding="ascii").strip()
             if existing:
                 try:
@@ -75,11 +61,27 @@ def ensure_app_secret(name: str) -> str | None:
                 except OSError:
                     pass
                 return existing
-        token = secrets.token_hex(_SECRET_BYTES)
-        _write_0600(path, token)
-        return token
+        return rotate_app_secret(name)
     except OSError as exc:
         logger.warning("app %s: could not mint/read proxy secret: %s", name, exc)
+        return None
+
+
+def rotate_app_secret(name: str) -> str | None:
+    """Atomically replace app ``name``'s proxy secret with a fresh 0600 token.
+
+    ``atomic_write`` stages beside the destination and uses ``os.replace``, so an
+    existing secret or planted symlink is replaced as a directory entry instead of
+    being opened through the link. A failed replacement returns ``None`` so callers
+    can refuse to launch an unprotected backend.
+    """
+    path = secret_path(name)
+    token = secrets.token_hex(_SECRET_BYTES)
+    try:
+        atomic_write(path, token, mode=0o600, fsync=True)
+        return token
+    except OSError as exc:
+        logger.warning("app %s: could not rotate proxy secret: %s", name, exc)
         return None
 
 

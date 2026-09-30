@@ -286,6 +286,141 @@ async def test_end_to_end_proxy_signed_and_direct_refused(tmp_path, monkeypatch)
                 assert h.status == 200
 
 
+@pytest.mark.asyncio
+async def test_backend_restart_rotates_proxy_secret_safely(tmp_path, monkeypatch):
+    import asyncio
+    import json
+    from contextlib import asynccontextmanager
+    from unittest.mock import patch
+
+    import aiohttp
+
+    from gideon.extensions.apps import backend_runtime, manager
+    from gideon.extensions.apps.manifest import AppManifest
+    from gideon.interfaces.dashboard.handlers.apps import register_app_routes
+
+    monkeypatch.delenv("GIDEON_SKIP_APP_BACKENDS", raising=False)
+
+    @asynccontextmanager
+    async def _proxy_client():
+        with (
+            patch("gideon.core.config.loader.config_dir", return_value=tmp_path),
+            patch.object(manager, "config_dir", return_value=tmp_path),
+        ):
+            backend_runtime._supervisor = backend_runtime.BackendSupervisor()
+            app = web.Application()
+            register_app_routes(app)
+            async with TestClient(TestServer(app)) as client:
+                try:
+                    yield client
+                finally:
+                    backend_runtime.get_backend_supervisor().stop_all()
+
+    source = tmp_path / "src" / "svc"
+    (source / "backend").mkdir(parents=True)
+    manifest_data = {
+        "name": "svc",
+        "version": "1.0.0",
+        "displayName": "Svc",
+        "description": "x",
+        "backend": {
+            "entryPoint": "backend/server.py",
+            "type": "python",
+            "healthCheck": "/health",
+        },
+    }
+    (source / "app.json").write_text(json.dumps(manifest_data), encoding="utf-8")
+    (source / "backend" / "server.py").write_text(_BACKEND_SRC, encoding="utf-8")
+
+    async with _proxy_client() as client:
+        preview = await client.post("/api/apps", json={"source": str(source)})
+        assert preview.status == 409
+        review = await preview.json()
+        installed = await client.post(
+            "/api/apps",
+            json={"source": str(source), "review_digest": review["review_digest"]},
+        )
+        assert installed.status == 201
+        got = None
+        for _ in range(50):
+            resp = await client.get("/apps/svc/api/ping")
+            if resp.status == 200:
+                got = await resp.json()
+                break
+            await asyncio.sleep(0.1)
+        assert got is not None, "first signed proxy request never got through"
+
+        supervisor = backend_runtime.get_backend_supervisor()
+        first_backend = supervisor.get("svc")
+        assert first_backend is not None
+        first_secret = app_secret.read_app_secret("svc")
+        assert first_secret
+        secret_file = app_secret.secret_path("svc")
+        assert secret_file.stat().st_mode & 0o777 == 0o600
+
+        # A planted link is replaced as a path entry, leaving its target untouched.
+        supervisor.stop("svc")
+        assert not first_backend.is_alive()
+        planted_target = tmp_path / "outside-secret"
+        planted_target.write_text("must-not-be-overwritten", encoding="ascii")
+        secret_file.unlink()
+        secret_file.symlink_to(planted_target)
+
+        second_backend = supervisor.start(AppManifest.from_dict(manifest_data))
+        assert second_backend is not None
+        second_secret = app_secret.read_app_secret("svc")
+        assert second_secret and second_secret != first_secret
+        assert not secret_file.is_symlink()
+        assert secret_file.stat().st_mode & 0o777 == 0o600
+        assert planted_target.read_text(encoding="ascii") == "must-not-be-overwritten"
+
+        async with aiohttp.ClientSession() as session:
+            ready = False
+            for _ in range(50):
+                try:
+                    async with session.get(f"{second_backend.base_url}/health") as health:
+                        if health.status == 200:
+                            ready = True
+                            break
+                except aiohttp.ClientError:
+                    pass
+                await asyncio.sleep(0.1)
+            assert ready, "restarted backend never became ready"
+            stale_signature = sign_proxy_request(first_secret, "GET", "/ping", b"")
+            async with session.get(
+                f"{second_backend.base_url}/ping",
+                headers={PROXY_SIGNATURE_HEADER: stale_signature},
+            ) as stale:
+                assert stale.status == 401
+
+        # The live proxy reads the newly rotated key, which the active backend accepts.
+        current = await client.get("/apps/svc/api/ping")
+        assert current.status == 200
+
+    # An unwritable secret parent keeps rotation fail-closed without a test double.
+    from gideon.extensions.apps import app_secret as app_secret_module
+
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("occupied", encoding="ascii")
+    monkeypatch.setattr(
+        app_secret_module, "app_dir", lambda name: blocker / name
+    )
+    assert app_secret_module.rotate_app_secret("blocked") is None
+    blocked_root = tmp_path / "apps" / "blocked"
+    (blocked_root / "backend").mkdir(parents=True)
+    (blocked_root / "backend" / "server.py").write_text(
+        _BACKEND_SRC, encoding="utf-8"
+    )
+    blocked_manifest = AppManifest.from_dict(
+        {
+            **manifest_data,
+            "name": "blocked",
+        }
+    )
+    assert backend_runtime.get_backend_supervisor().start(blocked_manifest) is None
+    assert backend_runtime.get_backend_supervisor().get("blocked") is None
+
+
 _RAW = "Cannot connect to host 127.0.0.1:41733 ssl:default [LEAK_MARKER]"
 
 _UNREACHABLE_COPY = (
