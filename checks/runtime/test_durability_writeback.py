@@ -9,10 +9,12 @@ propagate and non-row kinds raise.
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
 from gideon.operations.durability import inventory as inv
+from gideon.operations.durability import record_files
 from gideon.operations.durability import writeback
 from gideon.operations.durability.shards import (
     _json_rows_from_entity_dir,
@@ -136,3 +138,81 @@ class TestGuards:
     def test_unknown_kind_raises(self, tmp_path):
         with pytest.raises(ValueError, match="unknown inventory kind"):
             writeback.apply_rows("nonsense", tmp_path / "x", [])
+
+
+def test_record_arrival_waits_for_lock_and_writes_only_changed_safe_paths(tmp_path):
+    store = tmp_path / "tasks"
+    importer_started = threading.Event()
+    importer_finished = threading.Event()
+    importer_errors = []
+
+    def import_peer_record():
+        importer_started.set()
+        try:
+            writeback.apply_rows(
+                inv.KIND_JSON_ENTITY_DIR,
+                store,
+                [{"id": "peer", "data": {"title": "from peer"}}],
+            )
+        except BaseException as exc:  # propagate worker-thread failures to the test
+            importer_errors.append(exc)
+        finally:
+            importer_finished.set()
+
+    with record_files.locked_store(store) as locked:
+        importer = threading.Thread(target=import_peer_record)
+        importer.start()
+        assert importer_started.wait(2)
+        assert not importer_finished.wait(0.1)
+        record_files.write_text_locked(
+            locked, "local.json", '{"title":"local write"}\n'
+        )
+
+    importer.join(timeout=5)
+    assert not importer.is_alive()
+    assert importer_errors == []
+    assert importer_finished.is_set()
+    assert json.loads((store / "local.json").read_text()) == {"title": "local write"}
+    peer = store / "peer.json"
+    assert json.loads(peer.read_text()) == {"title": "from peer"}
+    unchanged_mtime = peer.stat().st_mtime_ns
+    writeback.apply_rows(
+        inv.KIND_JSON_ENTITY_DIR,
+        store,
+        [{"id": "peer", "data": {"title": "from peer"}}],
+    )
+    assert peer.stat().st_mtime_ns == unchanged_mtime
+
+    escaped = tmp_path / "escape.json"
+    with pytest.raises(ValueError, match="unsafe record id path"):
+        writeback.apply_rows(
+            inv.KIND_JSON_ENTITY_DIR,
+            store,
+            [{"id": "../escape", "data": {"owned": True}}],
+        )
+    assert not escaped.exists()
+
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"keep":true}\n', encoding="utf-8")
+    symlink = store / "linked.json"
+    symlink.symlink_to(outside)
+    with pytest.raises(ValueError, match="symlink"):
+        writeback.apply_rows(
+            inv.KIND_JSON_FILE,
+            symlink,
+            [{"id": "linked.json", "data": {"owned": True}}],
+        )
+    assert outside.read_text(encoding="utf-8") == '{"keep":true}\n'
+
+    before_peer = peer.read_bytes()
+    with pytest.raises(ValueError, match="not valid JSON data"):
+        writeback.apply_rows(
+            inv.KIND_JSON_ENTITY_DIR,
+            store,
+            [
+                {"id": "safe", "data": {"would_write": True}},
+                {"id": "malformed", "data": {"unsupported": object()}},
+            ],
+        )
+    assert not (store / "safe.json").exists()
+    assert peer.read_bytes() == before_peer
