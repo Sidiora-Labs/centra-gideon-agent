@@ -72,12 +72,16 @@ def read_registry(transport: SyncTransportProvider) -> Registry:
     refs = transport.list_remote(REGISTRY_KEY)
     if not refs:
         return Registry.empty()
-    exact = [r for r in refs if r.key == REGISTRY_KEY] or [RemoteRef(key=REGISTRY_KEY)]
+    exact = [r for r in refs if r.key == REGISTRY_KEY]
+    if not exact:
+        raise FileNotFoundError(
+            "registry listing advertised objects, but not the registry object"
+        )
     objs = transport.pull(exact)
     for obj in objs:
         if obj.key == REGISTRY_KEY:
             return Registry.loads(obj.data)
-    return Registry.empty()
+    raise FileNotFoundError("registry was advertised but unavailable on read-back")
 
 
 def run_sync_cycle(

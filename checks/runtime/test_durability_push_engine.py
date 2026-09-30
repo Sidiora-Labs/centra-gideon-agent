@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from test_durability_convergence_e2e import FolderTransport
+
 from gideon.integrations.sync_transports.base import (
     ConnectionResult,
     PushResult,
@@ -200,7 +202,7 @@ class TestCasRetry:
         assert report.cas_attempts == 5
 
 
-def test_unlanded_registry_write_retries_as_create(tmp_path):
+def test_unlanded_registry_write_retries_as_create(tmp_path, monkeypatch):
     tr = FakeTransport(cas_returns=[False, True])
     export = _export_dir(tmp_path)
     report = publish_export(
@@ -241,3 +243,34 @@ def test_unlanded_registry_write_retries_as_create(tmp_path):
     assert ambiguous_report.cas_attempts == 1
     assert ambiguous.cas_calls == [None]
     assert Registry.loads(ambiguous.registry_bytes).seq_of("me") == 1
+
+    remote_root = tmp_path / "advertised-but-missing"
+    filesystem_transport = FolderTransport(remote_root)
+    registry_path = remote_root / REGISTRY_KEY
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_bytes(Registry().to_bytes())
+    list_remote = filesystem_transport.list_remote
+
+    def advertise_then_remove(prefix):
+        refs = list_remote(prefix)
+        if any(ref.key == REGISTRY_KEY for ref in refs):
+            registry_path.unlink()
+        return refs
+
+    monkeypatch.setattr(filesystem_transport, "list_remote", advertise_then_remove)
+    unreadable_report = publish_export(
+        filesystem_transport,
+        export,
+        Registry(),
+        Outbox(tmp_path / "unreadable"),
+        self_id="me",
+        manifest_sha="s",
+        now="t",
+        reload_registry=lambda: read_registry(filesystem_transport),
+    )
+
+    assert not unreadable_report.registry_committed
+    assert unreadable_report.cas_attempts == 1
+    assert "read-back unavailable" in unreadable_report.detail
+    assert not registry_path.exists()
+    assert len(filesystem_transport.list_remote(shard_prefix("me", 1))) == 2

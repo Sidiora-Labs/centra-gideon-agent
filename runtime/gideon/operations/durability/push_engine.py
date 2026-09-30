@@ -138,7 +138,11 @@ def _commit_registry(
         if reload_registry is None:
             report.detail = "registry CAS lost and no reloader provided"
             return False
-        remote = reload_registry()
+        try:
+            remote = reload_registry()
+        except FileNotFoundError as exc:
+            report.detail = f"registry read-back unavailable; refusing retry: {exc}"
+            return False
 
         # A transport may lose the acknowledgement after the conditional write landed.
         # Read-back is authoritative: recognize our exact announcement and never push it
