@@ -142,6 +142,14 @@ function transcriptReplayFrame(message: WsMessage): boolean {
   }
 }
 
+export function chatSessionOwns(sessionRef: { current: string | null }, key: string): boolean {
+  return !!key && sessionRef.current === key
+}
+
+export function releaseClosedChatSession(sessionRef: { current: string | null }, key: string | null): void {
+  if (!key || sessionRef.current === key) sessionRef.current = null
+}
+
 function partialFromSnapshot(detail: CursorChatDetail): string | null {
   if (!detail.running) return null
   const partial = [...detail.messages].reverse().find(message => message.role === 'streaming')
@@ -697,7 +705,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     try {
       const detail = normalizeCompletedSnapshot(await api.chatSessionDetail(key) as CursorChatDetail)
       const frames = replay.settle(generation, () => {
-        if (sessionRef.current !== key || !adopt(detail)) return false
+        if (!chatSessionOwns(sessionRef, key) || !adopt(detail)) return false
         setLastTurnOutcome(detail.last_turn_outcome ?? null)
         if (!detail.running) announceTurnEnd(key, detail.stream_cursor, detail.last_turn_outcome)
         return true
@@ -808,7 +816,10 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       setLoadingHistory(false)
       return true
     }).catch(() => { if (alive) setLoadingHistory(false) })
-    return () => { alive = false }
+    return () => {
+      alive = false
+      releaseClosedChatSession(sessionRef, sessionId)
+    }
   }, [sessionId, loadSnapshot])
 
   useEffect(() => {
@@ -827,7 +838,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const onWs = useCallback((m: WsMessage) => {
     const s = sessionRef.current
     const d = m.data || {}
-    if (!s || (d.session !== s && d.session !== undefined)) return
+    if (!s || (d.session !== undefined && !chatSessionOwns(sessionRef, String(d.session)))) return
     lastWsActivityRef.current = Date.now()
     if (!replayingSnapshotFramesRef.current && transcriptReplayFrame(m)
       && snapshotReplayRef.current?.hold(m)) return
@@ -1095,7 +1106,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   useChatSocket(onWs, resyncOnReconnect, setWsConnected)
 
   useEffect(() => {
-    if (!streaming) return
+    if (!sessionId || !streaming) return
     const iv = window.setInterval(() => {
       const s = sessionRef.current
       if (!s) return
@@ -1115,7 +1126,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       }).catch(() => {})
     }, 2000)
     return () => window.clearInterval(iv)
-  }, [streaming, turns, loadSnapshot])
+  }, [sessionId, streaming, turns, loadSnapshot])
 
   // Global "/" shortcut → focus the composer (GitHub/Slack-style), unless the
   useEffect(() => {
@@ -1730,7 +1741,8 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     activeSpeechRequestIdRef.current = requestId
     setSpeakingTurn(turnIndex)
     return api.voiceSynthesize(text, s ?? '', requestId).catch((e: Error) => {
-      if (activeSpeechRequestIdRef.current === requestId) activeSpeechRequestIdRef.current = null
+      if (activeSpeechRequestIdRef.current !== requestId) return
+      activeSpeechRequestIdRef.current = null
       setSpeakingTurn((cur) => (cur === turnIndex ? null : cur))
       const msg = /TTS voice|no.*voice|Settings/i.test(e.message)
         ? 'Text-to-speech needs a voice — choose one in Settings → Models.'
@@ -1739,8 +1751,15 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       window.setTimeout(() => setMicError(null), 6000)
     })
   }
+  useEffect(() => () => {
+    speakGenRef.current++
+    activeSpeechRequestIdRef.current = null
+    for (const source of audioSourcesRef.current) { try { source.stop() } catch {   } }
+    audioSourcesRef.current = []
+    audioPlayHeadRef.current = 0
+  }, [])
   useEffect(() => {
-    const sid = sessionRef.current
+    const sid = sessionId ?? sessionRef.current
     if (!sid) return
     const userIndex = turns.map((turn) => turn.role).lastIndexOf('user')
     const ownerTs = userIndex >= 0 ? turns[userIndex].ts : undefined
@@ -1764,7 +1783,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     const reply = turnText(assistant).trim()
     if (!reply || !claimCompletedReplySpeech(storage, sid, ownerTs, assistant.ts, lastTurnOutcome)) return
     if (speakingTurn !== assistantIndex) void speak(reply, assistantIndex)
-  }, [lastTurnOutcome, turns, ttsSettings, speakingTurn])
+  }, [sessionId, lastTurnOutcome, turns, ttsSettings, speakingTurn])
   async function enqueueAudio(b64: string) {
     const ctx = getAudioCtx()
     if (!ctx) return
