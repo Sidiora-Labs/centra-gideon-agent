@@ -76,6 +76,9 @@ _CC_FILES: list[str] = [
 _SENSITIVE_ENV_PREFIXES: list[str] = [
     "AWS_SECRET",
     "AWS_SESSION",
+    "HF_TOKEN",
+    "HUGGING_FACE_HUB_TOKEN",
+    "HF_TOKEN_PATH",
     "SSH_AUTH_SOCK",
     "GNUPGHOME",
     "GIT_ASKPASS",
@@ -113,6 +116,16 @@ CHILD_ENV_BASE_NAMES: frozenset[str] = frozenset(
         "USER",
         "LOGNAME",
         "XDG_CACHE_HOME",
+        "HF_HOME",
+        "HF_HUB_CACHE",
+        "HUGGINGFACE_HUB_CACHE",
+        "TRANSFORMERS_CACHE",
+        "HF_XET_CACHE",
+        "HF_ASSETS_CACHE",
+        "HF_HUB_DISABLE_IMPLICIT_TOKEN",
+        "HF_HUB_DISABLE_TELEMETRY",
+        "DO_NOT_TRACK",
+        "TREE_SITTER_LANGUAGE_PACK_CACHE_DIR",
         "XDG_CONFIG_HOME",
         "XDG_DATA_HOME",
         "XDG_RUNTIME_DIR",
@@ -260,6 +273,9 @@ def build_child_env(
     script.
     """
     src = dict(os.environ) if source is None else dict(source)
+    from gideon.core.library_environment import library_environment
+
+    src.update(library_environment(source=src))
     installer_name = (installer or "").strip().lower()
     installer_names = (
         _PIP_CHILD_SETTINGS

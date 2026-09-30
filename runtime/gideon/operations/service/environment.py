@@ -8,6 +8,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from gideon.core.config.document import _credential_field
+from gideon.core.library_environment import library_environment
 from gideon.security.sandbox import env_name_is_sensitive
 from gideon.security.security import redact_credentials
 
@@ -20,6 +21,13 @@ SERVICE_ENVIRONMENT_ALLOWLIST: frozenset[str] = frozenset(
         "GIDEON_PROFILE",
         "GIDEON_CACHE_DIR",
         "XDG_CACHE_HOME",
+        "HF_HUB_CACHE",
+        "HF_XET_CACHE",
+        "HF_ASSETS_CACHE",
+        "HF_HUB_DISABLE_IMPLICIT_TOKEN",
+        "HF_HUB_DISABLE_TELEMETRY",
+        "DO_NOT_TRACK",
+        "TREE_SITTER_LANGUAGE_PACK_CACHE_DIR",
         "HF_HOME",
         "HUGGINGFACE_HUB_CACHE",
         "TRANSFORMERS_CACHE",
@@ -73,6 +81,7 @@ def resolve_service_environment(
     name only so service status can explain their exclusion without disclosing data.
     """
     inherited = os.environ if source is None else source
+    inherited = {**inherited, **library_environment(source=inherited)}
     values: dict[str, str] = {}
     excluded: set[str] = set()
 

@@ -243,8 +243,14 @@ def _get_parser(language: str):
     from two threads at once.
     """
     try:
-        from tree_sitter_language_pack import get_parser
+        from gideon.core.library_environment import configure_library_environment
 
+        settings = configure_library_environment()
+        from tree_sitter_language_pack import PackConfig, configure, get_parser
+
+        configure(
+            PackConfig(cache_dir=settings["TREE_SITTER_LANGUAGE_PACK_CACHE_DIR"])
+        )
         parser = get_parser(language)  # type: ignore[arg-type]
     except Exception as exc:
         _record_load_failure(language, exc)

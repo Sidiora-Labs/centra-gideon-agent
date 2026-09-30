@@ -10,6 +10,10 @@ cafile may be missing, so the cached context ends up with zero CA
 certs and every HTTPS connection fails with CERTIFICATE_VERIFY_FAILED.
 """
 
+from gideon.core.library_environment import configure_library_environment
+
+configure_library_environment()
+
 from gideon.core._ssl_compat import _ensure_ssl_certs
 
 _ensure_ssl_certs()
