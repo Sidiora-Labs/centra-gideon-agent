@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +18,13 @@ class GrantQuestion:
     provider: str
     revision: str
     sentence: str
+
+
+@dataclass(frozen=True)
+class AgentStartApproval:
+    trigger_id: str
+    revision: str
+    nonce: str
 
 
 def _book() -> Any:
@@ -106,6 +114,69 @@ def is_granted(trigger: Any) -> bool:
         and seal.get("revision") == revision
         and provider in (capabilities.get("providers") or [])
         and _owner_recorded(trigger, revision)
+    )
+
+
+def agent_start_approval(
+    trigger_id: str, action_config: dict[str, Any]
+) -> AgentStartApproval | None:
+    """Return a one-start permit for the current, owner-granted invoke-agent action."""
+    if not trigger_id or not isinstance(action_config, dict):
+        return None
+    try:
+        from gideon.automation.triggers.store import TriggerStore
+
+        row = TriggerStore().get(trigger_id)
+    except Exception:
+        return None
+    if row is None or not row.ok or str(getattr(row.trigger, "id", "")) != trigger_id:
+        return None
+    trigger = row.trigger
+    provider, action = _action(trigger)
+    config = action.get("config")
+    try:
+        from gideon.automation.triggers import secrets
+
+        resolved_config = secrets.resolve(config) if isinstance(config, dict) else None
+    except Exception:
+        return None
+    revision = action_revision(trigger)
+    if (
+        provider != "invoke-agent"
+        or required_provider(trigger) != "invoke-agent"
+        or not isinstance(resolved_config, dict)
+        or resolved_config != action_config
+        or not revision
+        or not is_granted(trigger)
+    ):
+        return None
+    return AgentStartApproval(trigger_id, revision, uuid.uuid4().hex)
+
+
+def allows_agent_start(approval: AgentStartApproval) -> bool:
+    """Revalidate a start permit when the subagent actually leaves its queue."""
+    if (
+        not isinstance(approval, AgentStartApproval)
+        or not approval.trigger_id
+        or not approval.nonce
+    ):
+        return False
+    try:
+        from gideon.automation.triggers.store import TriggerStore
+
+        row = TriggerStore().get(approval.trigger_id)
+    except Exception:
+        return False
+    if row is None or not row.ok:
+        return False
+    trigger = row.trigger
+    provider, _ = _action(trigger)
+    return bool(
+        str(getattr(trigger, "id", "")) == approval.trigger_id
+        and provider == "invoke-agent"
+        and required_provider(trigger) == "invoke-agent"
+        and action_revision(trigger) == approval.revision
+        and is_granted(trigger)
     )
 
 

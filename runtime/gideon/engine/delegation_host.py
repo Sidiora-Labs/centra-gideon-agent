@@ -39,10 +39,17 @@ class DelegationHost:
             default_timeout=options.subagent_timeout_secs,
             on_tool_approval=self.approval,
             on_spawn_approval=self.approve_spawn,
+            validate_trigger_start_approval=self.validate_trigger_start_approval,
             is_yolo=self.yolo,
             on_event=self.event,
         )
         runtime.subagent_mgr.start_reaper()
+
+    @staticmethod
+    def validate_trigger_start_approval(approval: Any) -> bool:
+        from gideon.automation.triggers.grants import allows_agent_start
+
+        return allows_agent_start(approval)
 
     def session_for(self, request: str) -> str:
         identity = request.removeprefix("spawn:")

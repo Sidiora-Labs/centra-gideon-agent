@@ -43,7 +43,12 @@ class _Invocation:
 
     @classmethod
     def prepare(
-        cls, config: dict[str, Any], ctx: ActionContext, task: str
+        cls,
+        config: dict[str, Any],
+        ctx: ActionContext,
+        task: str,
+        *,
+        trigger_start_approval: Any = None,
     ) -> _Invocation:
         agent = (config.get("agent") or "").strip()
         model = (config.get("model") or "").strip() or None
@@ -60,7 +65,12 @@ class _Invocation:
                 agent=agent,
                 max_turns=turns,
                 model=model,
-                approval_mode=_approval_for(config),
+                approval_mode=(
+                    None
+                    if trigger_start_approval is not None
+                    else _approval_for(config)
+                ),
+                trigger_start_approval=trigger_start_approval,
                 capability_class=str(config.get("capability") or "").strip().lower()
                 or None,
                 silent=False,
@@ -133,7 +143,24 @@ class InvokeAgentActionProvider(ActionProvider):
                 False,
                 error=f"invoke-agent capacity reached ({_HOOK_INVOKE_MAX_CONCURRENT} in flight)",
             )
-        invocation = _Invocation.prepare(action_config, ctx, task)
+        payload = ctx.payload if isinstance(ctx.payload, dict) else {}
+        trigger_id = str(payload.get("trigger_id") or "").strip()
+        trigger_start_approval = None
+        if trigger_id:
+            from gideon.automation.triggers.grants import agent_start_approval
+
+            trigger_start_approval = agent_start_approval(trigger_id, action_config)
+            if trigger_start_approval is None:
+                return ActionResult(
+                    False,
+                    error="invoke-agent: the current trigger action has no matching owner Allow",
+                )
+        invocation = _Invocation.prepare(
+            action_config,
+            ctx,
+            task,
+            trigger_start_approval=trigger_start_approval,
+        )
         await semaphore.acquire()
         _SpawnReservation(semaphore).schedule(services, invocation)
         return ActionResult(

@@ -224,6 +224,7 @@ class SubagentInfo:
     cancelled: bool = False
     _outcome_noted: bool = False
     memory_receipt: dict = field(default_factory=lambda: {"status": "pending", "count": 0})
+    trigger_start_approval: Any = None
 
 
 @dataclass
@@ -272,6 +273,7 @@ class DelegationSupervisor:
         on_event: SubagentEventCallback | None = None,
         run_lane_cap: int = 0,
         delivery_coalesce_secs: float = 0.05,
+        validate_trigger_start_approval: Callable[[Any], bool] | None = None,
     ):
         self._sessions, self._ctx_builder = sessions, ctx_builder
         self._on_done, self._on_event = on_done, on_event
@@ -285,6 +287,8 @@ class DelegationSupervisor:
         self._on_tool_approval = on_tool_approval
         self._on_tool_approval_factory = on_tool_approval_factory
         self._on_spawn_approval, self._is_yolo = on_spawn_approval, is_yolo
+        self._validate_trigger_start_approval = validate_trigger_start_approval
+        self._consumed_trigger_start_approvals: set[str] = set()
         self._running_count = 0
         self._running_by_fanout: dict[str, int] = {}
         self._fanout_failures: dict[str, int] = {}
@@ -442,6 +446,7 @@ class DelegationSupervisor:
         parent_run: str = "",
         sandbox: str = "none",
         extra_env: dict[str, str] | None = None,
+        trigger_start_approval: Any = None,
     ) -> SubagentInfo | None:
         public_task = _redact(task)
         rejected = self._host_admission(public_task, agent, parent_session_key)
@@ -476,6 +481,7 @@ class DelegationSupervisor:
             model=model or "",
             cwd=directory,
             approval_mode=approval_mode or "",
+            trigger_start_approval=trigger_start_approval,
             capability_class=capability_class or "",
             silent=silent,
             dry_run=dry_run,
@@ -527,7 +533,43 @@ class DelegationSupervisor:
     def _dispatch_run(self, info: SubagentInfo) -> None:
         info.queued = False
         self._inc_running(info)
+        trigger_start_approved = False
+        if info.trigger_start_approval is not None:
+            try:
+                nonce = str(
+                    getattr(info.trigger_start_approval, "nonce", "") or ""
+                )
+                trigger_start_approved = bool(
+                    nonce
+                    and nonce not in self._consumed_trigger_start_approvals
+                    and self._validate_trigger_start_approval
+                    and self._validate_trigger_start_approval(
+                        info.trigger_start_approval
+                    )
+                )
+            except Exception:
+                logger.warning(
+                    "Trigger start Allow could not be revalidated for %s",
+                    info.id,
+                    exc_info=True,
+                )
+            if not trigger_start_approved:
+                info.done = True
+                info.error = (
+                    "spawn refused: the trigger start Allow is stale, invalid, or already used"
+                )
+                self._spawn_audit(
+                    info.parent_session_key,
+                    "refused_trigger_action_allow_changed",
+                    subagent_id=info.id,
+                )
+                self._dec_running(info)
+                self._drain_queue()
+                return
+            self._consumed_trigger_start_approvals.add(nonce)
         reason = self._spawn_permission(info)
+        if trigger_start_approved and reason is None:
+            reason = "trigger_action_allow"
         if reason is not None:
             self._tasks[info.id] = asyncio.create_task(self._run(info))
             self._log_spawned(info)
