@@ -2,30 +2,41 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import re
 from dataclasses import dataclass, field
 
+from gideon.engine.agents.native.tool_vectors import (
+    bound_embedder,
+    default_path,
+    tool_text,
+    tool_vectors,
+)
+from gideon.core.token_estimate import NOMINAL_CHARS_PER_TOKEN
+
 logger = logging.getLogger(__name__)
 DEFAULT_K = 48
 DEFAULT_SEMANTIC_THRESHOLD = 0.55
 _KEYWORD_GATE = 0.5
+SCHEMA_WINDOW_FRACTION = 0.125
 _STRUCTURAL_HINTS = (
-    (r"https?://|www\.|\.com\b|\.org\b", ("web", "fetch", "url", "search", "browse")),
+    (r"https?://|www\.|\.com\b|\.org\b", ("web", "fetch", "url", "browse")),
     (
-        r"\bschedul|\bremind|\bcron\b|every (day|week|hour)|daily|weekly",
-        ("schedule", "cron", "trigger"),
+        r"\bschedul|\bremind|\bcron\b|\bdaily\b|\bweekly\b|\bmonthly\b|\bhourly\b|\bevery\s+(day|week|weekday|hour|minute|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b(message|text|ping|notify)\s+me\b",
+        ("schedule", "cron", "trigger", "onetime", "recurring", "automation_create"),
     ),
+    (r"\bwhen(ever)?\b[^.?!\n]{0,80}\b(lands?|arrives?|appears?|changes?|fails?|completes?)\b|\bautomat(e|es|ed|ion|ions|ically)\b", ("automation_create",)),
     (
         r"/|\.py\b|\.ts\b|\.md\b|\bfile\b|\bdirectory\b|\bfolder\b",
-        ("read", "write", "edit", "file", "dir", "glob", "grep"),
+        (),
     ),
     (
         r"\bshell\b|\bbash\b|\bcommand\b|\bterminal\b|\bexecute\b|\brun\b|\$\s"
         r"|\b(npm|pip|make|cargo|go|node|python|pytest|ls|cat|echo|chmod|mkdir|curl)\b"
         r"|\bgit\b|commit|diff|branch|stage|\btest|\bpytest|\bspec\b|assert|lint|build",
-        ("bash", "shell", "exec", "run", "command", "terminal"),
+        ("bash", "shell", "exec", "command", "terminal"),
     ),
     (r"\bremember|\brecall|\bmemor|\blesson", ("memory", "recall", "lesson")),
     (r"\btask\b|\btodo\b|\bbacklog", ("task",)),
@@ -74,31 +85,55 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return sum(left * right for left, right in zip(a, b)) / (length_a * length_b)
 
 
-def _active_embedder():
-    try:
-        from gideon.extensions.skills.surfacing import _active_embedder as resolve
+def schema_budget_chars(window_tokens: int | None) -> int | None:
+    if not window_tokens or window_tokens <= 0:
+        return None
+    return int(window_tokens * SCHEMA_WINDOW_FRACTION * NOMINAL_CHARS_PER_TOKEN)
 
-        return resolve()
-    except Exception:
-        return None, ""
+
+def _schema_chars(definition) -> int:
+    schema = {
+        "type": "function",
+        "function": {
+            "name": getattr(definition, "name", ""),
+            "description": getattr(definition, "description", "") or "",
+            "parameters": getattr(definition, "parameters", None)
+            or {"type": "object", "properties": {}},
+        },
+    }
+    try:
+        return len(json.dumps(schema, default=str))
+    except (TypeError, ValueError):
+        return len(str(schema))
+
+
+def _name_words(name: str) -> set[str]:
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
+    return {word for word in re.split(r"[^a-z0-9]+", spaced.lower()) if word}
+
+
+def _names_fragment(name: str, fragment: str) -> bool:
+    label = name.lower()
+    if fragment in (label, re.split(r"/|__", label)[-1]):
+        return True
+    words = _name_words(name)
+    return fragment in words or f"{fragment}s" in words or f"{fragment}es" in words
 
 
 @dataclass(slots=True)
 class _QueryScores:
     text: str
-    vector: list[float] | None
+    semantic: dict[str, float] = field(default_factory=dict)
     words: set[str] = field(init=False)
 
     def __post_init__(self) -> None:
         self.words = set(re.findall(r"\w+", self.text.lower()))
 
-    def score(self, name: str, definition, vector, *, threshold: float | None) -> float:
+    def score(self, name: str, definition, *, threshold: float | None) -> float:
         content = f"{name} {getattr(definition, 'description', '') or ''}".lower()
         overlap = self.words.intersection(re.findall(r"\w+", content))
         lexical = len(overlap) / len(self.words) if self.words else 0.0
-        semantic = (
-            _cosine(self.vector, vector) if self.vector is not None and vector else 0.0
-        )
+        semantic = self.semantic.get(name, 0.0)
         if threshold is None:
             substring = 0.5 if self.text and self.text.lower() in content else 0.0
             return max(lexical, semantic, substring)
@@ -152,67 +187,71 @@ class ToolRetriever:
             name for name, item in self._by_name.items() if _is_core(name, item)
         }
         self._sticky: set[str] = set()
-        self._embed_model = ""
-        self._embed_cache: dict[str, list[float] | None] = {}
+        self._carried: set[str] = set()
         self._last_surfaced = len(self._defs)
+        self._texts = {
+            name: tool_text(name, getattr(item, "description", "") or "")
+            for name, item in self._by_name.items()
+        }
+        self._chars = {name: _schema_chars(item) for name, item in self._by_name.items()}
+
+    def warm(self) -> None:
+        """Queue missing tool vectors on the index's background worker."""
+        try:
+            embedder = bound_embedder()
+            if embedder is not None:
+                tool_vectors().want(default_path(), embedder, self._texts.values())
+        except Exception:
+            logger.debug("tool retrieval warm failed", exc_info=True)
 
     def mark_used(self, tool_name: str) -> None:
         self._sticky.update({tool_name}.intersection(self._by_name))
 
     def _structural(self, query: str) -> set[str]:
-        fragments = {
-            fragment
-            for pattern, hints in _STRUCTURAL_HINTS
-            if re.search(pattern, query.lower())
-            for fragment in hints
-        }
         return {
             name
             for name in self._by_name
-            if any(part in name.lower() for part in fragments)
+            if any(
+                _names_fragment(name, fragment)
+                for pattern, hints in _STRUCTURAL_HINTS
+                if hints and re.search(pattern, query.lower())
+                for fragment in hints
+            )
         }
 
-    def _ensure_embeddings(self, embed_fn, model: str) -> None:
-        if self._embed_model != model:
-            self._embed_model = model
-            self._embed_cache.clear()
-        missing = self._by_name.keys() - self._embed_cache.keys()
-        for name in self._by_name:
-            if name not in missing:
-                continue
-            description = getattr(self._by_name[name], "description", "") or ""
-            try:
-                vector = embed_fn(f"{name}: {description}".strip())
-            except Exception:
-                vector = None
-            self._embed_cache[name] = vector
+    def _semantic(self, text: str, names: set[str]) -> dict[str, float]:
+        if not text or not names:
+            return {}
+        embedder = bound_embedder()
+        if embedder is None:
+            return {}
+        path = default_path()
+        index = tool_vectors()
+        texts = {name: self._texts[name] for name in names if name in self._texts}
+        known = index.vectors(path, embedder.model, texts.values())
+        if not known:
+            return {}
+        try:
+            query_vector = embedder.one(text)
+        except Exception:
+            query_vector = None
+        if not query_vector:
+            return {}
+        return {
+            name: _cosine(query_vector, known[tool_text_value])
+            for name, tool_text_value in texts.items()
+            if tool_text_value in known
+        }
 
-    def _query_scores(self, text: str, *, tolerate_cache_error: bool) -> _QueryScores:
-        embed, model = _active_embedder()
-        vector = None
-        if embed is not None and text:
-            try:
-                vector = embed(text)
-            except Exception:
-                pass
-            if vector is not None:
-                try:
-                    self._ensure_embeddings(embed, model)
-                except Exception:
-                    if not tolerate_cache_error:
-                        raise
-                    vector = None
-        return _QueryScores(text, vector)
+    def _query_scores(self, text: str, names: set[str]) -> _QueryScores:
+        return _QueryScores(text, self._semantic(text, names))
 
-    def _rank(
-        self, query: _QueryScores, names, *, selection: bool
-    ) -> list[tuple[float, str]]:
+    def _rank(self, query: _QueryScores, names, *, selection: bool) -> list[tuple[float, str]]:
         ranked = []
         for name in names:
             score = query.score(
                 name,
                 self._by_name[name],
-                self._embed_cache.get(name),
                 threshold=self._threshold if selection else None,
             )
             if score > 0 or (not selection and not query.text):
@@ -226,34 +265,82 @@ class ToolRetriever:
             if restrict is None or getattr(definition, "name", "") in restrict
         ]
 
-    def select(self, query: str, *, restrict: set[str] | None = None) -> list:
+    def select(
+        self,
+        query: str,
+        *,
+        restrict: set[str] | None = None,
+        budget_chars: int | None = None,
+    ) -> list:
         try:
-            return self._select(query, restrict=restrict)
+            return self._select(query, restrict=restrict, budget_chars=budget_chars)
         except Exception:
             logger.debug(
                 "tool retrieval failed — surfacing full catalog", exc_info=True
             )
             return self._pool(restrict)
 
-    def _select(self, query: str, *, restrict: set[str] | None = None) -> list:
+    def _select(
+        self,
+        query: str,
+        *,
+        restrict: set[str] | None = None,
+        budget_chars: int | None = None,
+    ) -> list:
         pool = self._pool(restrict)
-        if len(pool) <= self._k:
+        pool_names = {getattr(item, "name", "") for item in pool}
+        total = len(pool)
+        within_budget = budget_chars is None or sum(
+            self._chars.get(name, 0) for name in pool_names
+        ) <= budget_chars
+        if total <= self._k and within_budget:
+            self._carried = self._structural((query or "").strip())
             return pool
         text = (query or "").strip()
-        available = {getattr(item, "name", "") for item in pool}
-        chosen = available.intersection(
-            self._core | self._sticky | self._structural(text)
-        )
-        scores = self._query_scores(text, tolerate_cache_error=False)
-        candidates = (
-            name for name in self._by_name if name in available and name not in chosen
-        )
-        ranked = self._rank(scores, candidates, selection=True)
-        chosen.update(name for _, name in ranked[: max(0, self._k - len(chosen))])
-        self._last_surfaced = min(len(chosen), len(pool))
-        if len(chosen) >= len(pool):
+        core = self._core & pool_names
+        sticky = (self._sticky & pool_names) - core
+        hinted = self._structural(text)
+        carried, self._carried = self._carried, hinted
+        structural = ((hinted or carried) & pool_names) - core - sticky
+        scores = self._query_scores(text, pool_names - core)
+
+        def ranked(names):
+            return [name for _, name in self._rank(scores, names, selection=True)]
+
+        selected = set(core)
+        used = sum(self._chars.get(name, 0) for name in core)
+
+        def admit(name: str) -> bool:
+            nonlocal used
+            size = self._chars.get(name, 0)
+            if budget_chars is not None and used + size > budget_chars:
+                return False
+            selected.add(name)
+            used += size
+            return True
+
+        required = sticky | structural
+        for name in sorted(
+            required,
+            key=lambda item: (
+                -scores.score(item, self._by_name[item], threshold=None),
+                item,
+            ),
+        ):
+            admit(name)
+        room = max(0, self._k - len(selected))
+        tried = core | sticky | structural
+        for name in ranked(pool_names - tried):
+            if room <= 0:
+                break
+            if admit(name):
+                room -= 1
+
+        if len(selected) >= total:
+            self._last_surfaced = total
             return pool
-        return [self._by_name[name] for name in self._by_name if name in chosen]
+        self._last_surfaced = len(selected)
+        return [self._by_name[name] for name in self._by_name if name in selected]
 
     def reduced(self) -> bool:
         return self._k < len(self._defs)
@@ -263,7 +350,7 @@ class ToolRetriever:
         return max(len(self._defs) - surfaced, 0)
 
     def search(self, query: str, limit: int = 20) -> list[dict]:
-        scores = self._query_scores((query or "").strip(), tolerate_cache_error=True)
+        scores = self._query_scores((query or "").strip(), set(self._by_name))
         ranked = self._rank(scores, self._by_name, selection=False)
         return [
             {

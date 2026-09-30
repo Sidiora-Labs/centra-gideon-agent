@@ -668,6 +668,7 @@ class NativeAgentRuntime(AgentProvider):
         self._tool_sanitized_index: dict[str, str] = {}
         self._tool_wire_to_canonical: dict[str, str] = {}
         self._tool_retriever: ToolRetriever | None = None
+        self._tool_vector_warm_task: asyncio.Task | None = None
         self._tool_search_def: ToolDefinition | None = None
         self._tool_schema_def: ToolDefinition | None = None
         self._reset_tools_def: ToolDefinition | None = None
@@ -715,6 +716,9 @@ class NativeAgentRuntime(AgentProvider):
             for definition in self._tool_defs
         }
         self._tool_retriever = ToolRetriever(self._tool_defs)
+        self._tool_vector_warm_task = asyncio.create_task(
+            asyncio.to_thread(self._tool_retriever.warm)
+        )
         self._tool_search_def, self._tool_schema_def, self._reset_tools_def = (
             _discovery_tools()
         )
@@ -1029,7 +1033,14 @@ class NativeAgentRuntime(AgentProvider):
         self._steers_injected = 0
         self._steer_pending.clear()
         self._messages.append({"role": "user", "content": message})
-        tools, annotation = self._prepare_turn_tools(message)
+        served_window = None
+        try:
+            served_window = await self._model.served_context_window()
+        except Exception:
+            logger.debug("Could not resolve the request-bound model window", exc_info=True)
+        tools, annotation = await asyncio.to_thread(
+            self._prepare_turn_tools, message, served_window
+        )
         if annotation:
             self._messages.append(
                 {"role": "system", "content": annotation, "_volatile": True}
@@ -1100,14 +1111,22 @@ class NativeAgentRuntime(AgentProvider):
             self._staged_images.clear()
             self._cancel.end_turn()
 
-    def _prepare_turn_tools(self, message: str) -> tuple[list[dict] | None, str]:
+    def _prepare_turn_tools(
+        self, message: str, served_window: int | None = None
+    ) -> tuple[list[dict] | None, str]:
+        from gideon.engine.agents.native.tool_retrieval import schema_budget_chars
+
         grouped = self._active_groups is not None
         available = self._active_defs if grouped else self._tool_defs
         restrict = (
             {getattr(entry, "name", "") for entry in available} if grouped else None
         )
         selected = (
-            self._tool_retriever.select(message, restrict=restrict)
+            self._tool_retriever.select(
+                message,
+                restrict=restrict,
+                budget_chars=schema_budget_chars(served_window),
+            )
             if self._tool_retriever
             else available
         )

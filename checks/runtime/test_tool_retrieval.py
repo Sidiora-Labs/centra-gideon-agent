@@ -176,6 +176,33 @@ def test_shell_structural_hint_surfaces_bash():
     assert "some_exec_tool" in names
 
 
+def test_structural_names_match_words_not_substrings():
+    defs = _catalog(80)
+    defs += [
+        _Def(name="task_ready", description="check readiness"),
+        _Def(name="mcp/notes/read_text_file", description="read note text"),
+        _Def(name="web_fetch", description="fetch a URL"),
+    ]
+    r = ToolRetriever(defs, k=10)
+    names = {d.name for d in r.select("Look at ~/Notes/Garden/kitchen.md")}
+    assert "task_ready" not in names
+    assert "mcp/notes/read_text_file" not in names
+
+
+def test_request_structural_hint_carries_for_one_answer_turn():
+    defs = _catalog(80)
+    defs += [
+        _Def(name="automation_create", description="create an automation"),
+        _Def(name="web_fetch", description="fetch a URL"),
+    ]
+    r = ToolRetriever(defs, k=10)
+    first = {d.name for d in r.select("When a new PDF lands, set that up as an automation")}
+    second = {d.name for d in r.select("It's ~/Notes/Garden/kitchen.md")}
+    third = {d.name for d in r.select("Thanks, that is all")}
+    assert "automation_create" in first and "automation_create" in second
+    assert "automation_create" not in third
+
+
 @dataclass
 class _ProvDef:
     name: str
