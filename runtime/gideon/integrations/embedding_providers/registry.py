@@ -156,7 +156,10 @@ class _DirectBinding:
     def many(self, operation: Callable, texts: list[str]) -> list[list[float] | None]:
         request = partial(operation, texts, model=self.model_id)
         result = run_embed_sync(request, timeout=max(60.0, len(texts) * 5.0))
-        return list(result or [])
+        vectors = list(result) if result is not None else []
+        if len(vectors) < len(texts):
+            vectors.extend([None] * (len(texts) - len(vectors)))
+        return vectors[: len(texts)]
 
 
 @dataclass(frozen=True)

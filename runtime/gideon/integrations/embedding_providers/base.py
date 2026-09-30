@@ -75,7 +75,7 @@ def run_embed_sync(
     try:
         caller_loop = asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(factory())
+        caller_loop = None
     worker_loop = sync_bridge_loop()
     if caller_loop is worker_loop:
         raise RuntimeError(
@@ -122,7 +122,7 @@ class EmbeddingProvider(ABC):
     @abstractmethod
     async def embed_batch(
         self, texts: list[str], model: str = ""
-    ) -> list[list[float]]: ...
+    ) -> list[list[float] | None]: ...
 
     def _embed_sync(self, text: str, *, model: str) -> list[float] | None:
         return run_embed_sync(partial(self.embed, text, model), timeout=30)
