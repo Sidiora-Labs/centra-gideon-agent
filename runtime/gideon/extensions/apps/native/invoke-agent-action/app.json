@@ -37,6 +37,13 @@
             "help": "Child agent name (e.g. code-reviewer). Empty uses the default agent."
           }
         },
+        "cwd": {
+          "type": "string",
+          "x-meta": {
+            "label": "Working Directory",
+            "help": "Optional absolute folder for the child agent, within the configured allowed roots. Empty uses the default working directory."
+          }
+        },
         "max_turns": {
           "type": "integer",
           "x-meta": {

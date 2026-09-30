@@ -64,6 +64,7 @@ class _Invocation:
                 capability_class=str(config.get("capability") or "").strip().lower()
                 or None,
                 silent=False,
+                **({"cwd": config["cwd"]} if config.get("cwd") else {}),
             )
         )
 
