@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, ApiError, type SkillProposal, type SkillProposalDetail, type SkillSearchResult } from '../../shared/data/api'
+import { api, ApiError, type SkillCatalogueFailure, type SkillProposal, type SkillProposalDetail, type SkillSearchResult } from '../../shared/data/api'
 import { useMutation } from '../../shared/data/data'
 
 export function useSkillRequest(identity: string) {
@@ -18,20 +18,31 @@ export function useSkillRequest(identity: string) {
 }
 export function useSkillSearch(query: string, marketplace: string) {
   const [revision, setRevision] = useState(0)
-  const [state, setState] = useState({ results: null as SkillSearchResult[] | null, counts: {} as Record<string, number>, installableSources: null as number | null, loading: false, searchErr: null as unknown })
+  const [state, setState] = useState({ results: null as SkillSearchResult[] | null, counts: {} as Record<string, number>, installableSources: null as number | null, unreachable: [] as SkillCatalogueFailure[], loading: false, searchErr: null as unknown })
   useEffect(() => {
     let current = true
     const term = query.trim()
-    if (!term) { setState({ results: null, counts: {}, installableSources: null, loading: false, searchErr: null }); return }
-    setState(previous => ({ ...previous, loading: true, searchErr: null }))
+    if (!term) { setState({ results: null, counts: {}, installableSources: null, unreachable: [], loading: false, searchErr: null }); return }
+    setState(previous => ({ ...previous, unreachable: [], loading: true, searchErr: null }))
     const timer = setTimeout(() => {
       api.searchSkillsCounted(term, marketplace || undefined).then(result => {
-        if (current) setState({ results: result.results, counts: result.counts, installableSources: result.installableSources, loading: false, searchErr: null })
-      }).catch(failure => { if (current) setState({ results: null, counts: {}, installableSources: null, loading: false, searchErr: failure }) })
+        if (current) setState({ results: result.results, counts: result.counts, installableSources: result.installableSources, unreachable: result.unreachable ?? [], loading: false, searchErr: null })
+      }).catch(failure => { if (current) setState({ results: null, counts: {}, installableSources: null, unreachable: [], loading: false, searchErr: failure }) })
     }, 300)
     return () => { current = false; clearTimeout(timer) }
   }, [query, marketplace, revision])
   return { ...state, search: () => setRevision(value => value + 1) }
+}
+export type SkillSearchCatalogueState = 'idle' | 'results' | 'empty' | 'unconfigured' | 'unavailable'
+export function skillSearchCatalogueState(
+  results: SkillSearchResult[] | null,
+  installableSources: number | null,
+  unreachable: SkillCatalogueFailure[],
+): SkillSearchCatalogueState {
+  if (results === null) return 'idle'
+  if (unreachable.length > 0) return 'unavailable'
+  if (results.length > 0) return 'results'
+  return installableSources === 0 ? 'unconfigured' : 'empty'
 }
 export function useProposalReview(proposal: SkillProposal) {
   const [open, setOpen] = useState(false)

@@ -1,4 +1,4 @@
-import { useSkillRequest, useSkillSearch, matchesSkill } from './skillLibraryState'
+import { skillSearchCatalogueState, useSkillRequest, useSkillSearch, matchesSkill } from './skillLibraryState'
 import { useMemo, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
 import { Sparkles, Search, Zap, Store, Download, Loader2, Plus, ShieldCheck, ShieldAlert, Lightbulb } from 'lucide-react'
@@ -191,7 +191,8 @@ function Browse({ onBack, query, setQuery }: { onInstalled: () => void; onBack: 
   )
   const [marketplace, setMarketplace] = useQueryParam(query, setQuery, 'mkt', '')
   const [q, setQ] = useQueryParam(query, setQuery, 'q', '', { replace: true })
-  const { results, counts, installableSources, loading, searchErr, search } = useSkillSearch(q, marketplace)
+  const { results, counts, installableSources, unreachable, loading, searchErr, search } = useSkillSearch(q, marketplace)
+  const catalogueState = skillSearchCatalogueState(results, installableSources, unreachable)
   const [installedIds, setInstalledIds] = useState<Set<string>>(() => new Set())
   const [openIdRaw, setOpenId] = useQueryParam(query, setQuery, 'open', '')
   const openId = openIdRaw || null
@@ -223,12 +224,24 @@ function Browse({ onBack, query, setQuery }: { onInstalled: () => void; onBack: 
       )}
     >
       <div className="mx-auto px-l py-l" style={{ maxWidth: 'var(--content-width)' }}>
+        {!loading && !searchErr && unreachable.length > 0 && (
+          <section role="status" aria-live="polite" className="mb-l grid gap-s rounded-lg border border-warn/30 bg-warn/10 p-m">
+            {unreachable.map((catalogue) => (
+              <div key={catalogue.source}>
+                <p className="text-on-surface">Couldn't search {catalogue.source}, so its skills are missing here.</p>
+                <p className="mt-1 text-on-surface-low text-[0.8125rem]">{catalogue.reason}</p>
+              </div>
+            ))}
+            <div><Button variant="secondary" size="sm" onClick={search}>Try again</Button></div>
+          </section>
+        )}
         {loading ? <div className="flex items-center gap-2 text-on-surface-low text-[0.8125rem]"><Loader2 size={15} className="animate-spin" /> Searching…</div>
           : searchErr ? <LoadError what="skill search results" error={searchErr} onRetry={search} />
           : results === null ? <EmptyState icon={Store} title="Browse skills" hint={`Search ${marketplace || 'all marketplaces'} for skills to install — the agent loads them when relevant.`} />
-          : results.length === 0 && installableSources === 0
+          : catalogueState === 'unavailable' && results.length === 0 ? null
+          : catalogueState === 'unconfigured'
             ? <EmptyState icon={Store} title="No skill catalogue configured" hint="The store installs skills from a catalogue, and none is set up yet — so there is nothing to search. Install a skill-source app to add one. Your own skills and the bundled ones are unaffected." />
-          : results.length === 0 ? <EmptyState icon={Search} title="No results" hint="Try a different search term or marketplace." />
+          : catalogueState === 'empty' ? <EmptyState icon={Search} title="No results" hint="Try a different search term or marketplace." />
           : (
             <div className="grid gap-s">
               {results.map((r, i) => {

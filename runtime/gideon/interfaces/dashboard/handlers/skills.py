@@ -17,7 +17,11 @@ from typing import Any
 from aiohttp import web
 
 from gideon.core.http_request import read_json_body, string_field
-from gideon.extensions.providers.failure_copy import relayed_failure_copy
+from gideon.extensions.providers.failure_copy import (
+    UNEXPECTED_FAILURE_COPY,
+    connectivity_guidance,
+    relayed_failure_copy,
+)
 from gideon.http_errors import json_error
 
 logger = logging.getLogger(__name__)
@@ -248,9 +252,15 @@ async def api_skills_search(request: web.Request) -> web.Response:
     """
     query = request.rel_url.query.get("q", "").strip()
     if not query:
-        return web.json_response({"error": "q parameter required"}, status=400)
+        return json_error("bad_request", message="q parameter required", status=400)
     marketplace_name = request.rel_url.query.get("marketplace", "")
-    limit = min(int(request.rel_url.query.get("limit", "20")), 200)
+    try:
+        requested_limit = int(request.rel_url.query.get("limit", "20"))
+    except (TypeError, ValueError):
+        return json_error("invalid_limit", status=400)
+    if requested_limit < 1:
+        return json_error("invalid_limit", status=400)
+    limit = min(requested_limit, 200)
 
     from gideon.extensions.skills.marketplace import get_default_skills_registry
 
@@ -260,8 +270,9 @@ async def api_skills_search(request: web.Request) -> web.Response:
         try:
             mp = registry.get(marketplace_name)
         except KeyError:
-            return web.json_response(
-                {"error": f"Marketplace '{marketplace_name}' not registered"},
+            return json_error(
+                "not_found",
+                message=f"No skill catalogue named {marketplace_name!r} is set up here.",
                 status=404,
             )
         try:
@@ -271,21 +282,71 @@ async def api_skills_search(request: web.Request) -> web.Response:
                     "results": [r.to_dict() for r in results],
                     "counts": {marketplace_name: len(results)},
                     "installable_sources": 1,
+                    "unreachable": [],
                 }
             )
         except Exception as exc:
             logger.warning("skills search failed for %s: %s", marketplace_name, exc)
-            return web.json_response({"error": relayed_failure_copy(exc)}, status=500)
+            reason = _safe_catalogue_failure(exc)
+            return json_error(
+                "upstream_failed",
+                message=f"Couldn't search {marketplace_name}. {reason}",
+                status=500,
+            )
 
-    results, counts = search_marketplaces_counted(query, limit=limit)
+    results, counts, unreachable = _search_marketplaces_with_unreachable(
+        query, limit=limit
+    )
     catalogues = [m for m in registry.info() if m.get("type") != "native"]
     return web.json_response(
         {
             "results": [r.to_dict() for r in results],
             "counts": counts,
             "installable_sources": len(catalogues),
+            "unreachable": unreachable,
         }
     )
+
+
+def _safe_catalogue_failure(exc: BaseException) -> str:
+    """Return catalogue failure guidance without relaying arbitrary exception text."""
+    return connectivity_guidance(exc) or UNEXPECTED_FAILURE_COPY
+
+
+def _search_marketplaces_with_unreachable(
+    query: str, limit: int = 20
+) -> tuple[list, dict[str, int], list[dict[str, str]]]:
+    """Search registered catalogues and report failed sources alongside the results."""
+    from gideon.extensions.skills.loader import ProcedureLibrary
+    from gideon.extensions.skills.marketplace import get_default_skills_registry
+
+    registry = get_default_skills_registry()
+    installed_names = {
+        s["key"] for s in ProcedureLibrary(install_builtins=False).list_skills()
+    }
+
+    all_results = []
+    unreachable: list[dict[str, str]] = []
+    for name in registry.list():
+        if name == "installed":
+            continue
+        try:
+            mp = registry.get(name)
+            all_results.extend(mp.search(query, limit=limit))
+        except Exception as exc:
+            logger.warning("skills search failed for %s: %s", name, exc)
+            unreachable.append({"source": name, "reason": _safe_catalogue_failure(exc)})
+
+    filtered = [
+        r
+        for r in all_results
+        if r.id not in installed_names and r.name not in installed_names
+    ]
+    counts: dict[str, int] = {}
+    for result in filtered:
+        counts[result.source] = counts.get(result.source, 0) + 1
+    filtered.sort(key=lambda result: result.installs, reverse=True)
+    return filtered[:limit], counts, unreachable
 
 
 def search_marketplaces_counted(
@@ -300,34 +361,8 @@ def search_marketplaces_counted(
     Never raises — a failing marketplace (an unreachable catalog) is logged and skipped,
     so one bad source cannot empty the store.
     """
-    from gideon.extensions.skills.loader import ProcedureLibrary
-    from gideon.extensions.skills.marketplace import get_default_skills_registry
-
-    registry = get_default_skills_registry()
-    installed_names = {
-        s["key"] for s in ProcedureLibrary(install_builtins=False).list_skills()
-    }
-
-    all_results = []
-    for name in registry.list():
-        if name == "installed":
-            continue
-        try:
-            mp = registry.get(name)
-            all_results.extend(mp.search(query, limit=limit))
-        except Exception as exc:
-            logger.warning("skills search failed for %s: %s", name, exc)
-
-    filtered = [
-        r
-        for r in all_results
-        if r.id not in installed_names and r.name not in installed_names
-    ]
-    counts: dict[str, int] = {}
-    for r in filtered:
-        counts[r.source] = counts.get(r.source, 0) + 1
-    filtered.sort(key=lambda r: r.installs, reverse=True)
-    return filtered[:limit], counts
+    results, counts, _ = _search_marketplaces_with_unreachable(query, limit=limit)
+    return results, counts
 
 
 def search_marketplaces(query: str, limit: int = 20) -> list:

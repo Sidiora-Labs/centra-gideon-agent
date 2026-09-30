@@ -1538,6 +1538,7 @@ export interface SkillIntegrity { name: string; integrity: 'intact' | 'tampered'
 export interface SkillFile { path: string; size: number }
 export interface SkillMarketplace { name: string; type: string }
 export interface SkillSearchResult { id: string; name: string; description: string; source: string; url?: string; installs?: number }
+export interface SkillCatalogueFailure { source: string; reason: string }
 export interface SkillMarketplaceDetail { id: string; name: string; audit_status?: string; files: Array<{ path: string; binary?: boolean }>; frontmatter?: Record<string, unknown>; body?: string; marketplace?: string }
 export interface ToolItem { name: string; description: string; provider: string; serverTool?: string; parameters?: Record<string, unknown>; requires_approval?: boolean; risk_level?: 'safe' | 'caution' | 'destructive'; disabled: boolean; locked?: boolean; providerDisabled: boolean; group?: string; tier?: string }
 export interface ToolLoadFailure { provider: string; error: string }
@@ -4804,7 +4805,7 @@ export const api = {
     del(`/api/skills/ephemeral/${encodeURIComponent(session)}/${encodeURIComponent(slug)}`),
   skillMarketplaces: () => get<SkillMarketplace[]>('/api/skills/marketplaces'),
   searchSkillsCounted: (q: string, marketplace?: string, limit = 30) =>
-    get<{ results: SkillSearchResult[]; counts?: Record<string, number>; installable_sources?: number }>(`/api/skills/search?q=${encodeURIComponent(q)}&limit=${limit}${marketplace ? `&marketplace=${encodeURIComponent(marketplace)}` : ''}`).then((d) => ({ results: d.results, counts: d.counts ?? {}, installableSources: d.installable_sources ?? 0 })),
+    get<{ results: SkillSearchResult[]; counts?: Record<string, number>; installable_sources?: number; unreachable?: SkillCatalogueFailure[] }>(`/api/skills/search?q=${encodeURIComponent(q)}&limit=${limit}${marketplace ? `&marketplace=${encodeURIComponent(marketplace)}` : ''}`).then((d) => ({ results: d.results, counts: d.counts ?? {}, installableSources: d.installable_sources ?? 0, unreachable: d.unreachable ?? [] })),
   searchSkills: (q: string, marketplace?: string, limit = 30) =>
     get<{ results: SkillSearchResult[] }>(`/api/skills/search?q=${encodeURIComponent(q)}&limit=${limit}${marketplace ? `&marketplace=${encodeURIComponent(marketplace)}` : ''}`).then((d) => d.results),
   skillMarketplaceDetail: (id: string, marketplace = 'skills.sh') =>
