@@ -15,6 +15,7 @@ Routes:
 import asyncio
 import contextlib
 import logging
+import time
 from typing import Any
 
 from aiohttp import web
@@ -93,7 +94,11 @@ async def api_providers_list(request: web.Request) -> web.Response:
     registry = get_default_registry()
     entries = registry.list_entries()
 
-    from gideon.extensions.providers.connection import entry_fingerprint, get_connection_board
+    from gideon.extensions.providers.connection import (
+        Connection,
+        entry_fingerprint,
+        get_connection_board,
+    )
 
     board = get_connection_board()
     result: list[dict[str, Any]] = []
@@ -119,10 +124,12 @@ async def api_providers_list(request: web.Request) -> web.Response:
         except Exception:
             capabilities = sorted(c.value for c in entry.declared_capabilities)
 
-        connection = board.read(
-            entry.name,
-            entry_fingerprint(entry),
-            lambda e=entry: registry.build_catalog(e),
+        key = (entry.name, entry_fingerprint(entry))
+        cached = board._answers.get(key)
+        connection = (
+            cached[0]
+            if cached is not None and time.monotonic() - cached[1] < board._ttl
+            else Connection("untested", "Use Test to check this provider.")
         )
         result.append(
             {
@@ -182,9 +189,9 @@ async def api_agent_providers_list(request: web.Request) -> web.Response:
     This is the one source of truth for the "Agent Providers" UI section: the
     AgentProvider *runtime* axis, spanning the in-process ``native`` runtime
     and every ``acp:<cli>`` runtime registered by a removable bundle
-    (claude-code / codex / future). Each runtime is probed so the UI
-    can show a readiness chip and offer the Sign-in terminal when a runtime
-    reports ``needs_login``.
+    (claude-code / codex / future). Cached readiness is shown when available;
+    otherwise the row stays untested until an explicit Test request launches
+    an ACP check.
 
     Returns ``{agent_providers: [{name, provider_id, type, extension, ready,
     state, detail, login_command}]}`` where ``extension`` (when present) is the
@@ -193,8 +200,6 @@ async def api_agent_providers_list(request: web.Request) -> web.Response:
     """
     from gideon.engine.agents.registry import get_agent_provider_class
     from gideon.integrations.llm.registry import get_default_registry
-
-    force_refresh = request.query.get("refresh") in ("1", "true", "yes")
 
     registry = get_default_registry()
     entries = registry.list_entries()
@@ -225,95 +230,51 @@ async def api_agent_providers_list(request: web.Request) -> web.Response:
 
     _pool = get_acp_pool()
 
-    async def _probe(entry: Any) -> dict[str, Any]:
-        family = "acp" if entry.type == "acp_agent" else entry.type
-        cls = get_agent_provider_class(family)
+    def _row(entry: Any) -> dict[str, Any]:
         options = dict(entry.options or {})
-        import time as _time
-
-        def _row(status_d: dict[str, Any]) -> dict[str, Any]:
-            return {
-                "name": entry.name,
-                "provider_id": entry.name,
-                "type": entry.type,
-                "extension": options.get("extension"),
-                **status_d,
-            }
-
         tenant_scope = _runner_tenant_scope(request)
         refusal = _runner_consent_refusal(entry.name, tenant_scope)
         if refusal:
-            return _row(
-                {
-                    "ready": False,
-                    "state": "needs_owner_approval",
-                    "detail": refusal,
-                    "login_command": None,
-                }
-            )
-
-        if _pool is not None and _pool.is_warmed(entry.name):
-            return _row(
-                {
-                    "ready": True,
-                    "state": "ready",
-                    "detail": "warmed (pooled live connection)",
-                    "login_command": None,
-                }
-            )
-        if not force_refresh:
-            hit = _readiness_cache.get(entry.name)
-            if hit and (_time.monotonic() - hit[0]) < _READINESS_TTL_SECS:
-                return _row(hit[1])
-        if cls is None:
-            return _row(
-                {
-                    "ready": False,
-                    "state": "error",
-                    "detail": f"no agent provider registered for family {family!r}",
-                    "login_command": None,
-                }
-            )
-        try:
-            status = await cls.probe_readiness(options)
-            status_d = {
-                "ready": status.ready,
-                "state": status.state,
-                "detail": status.detail,
-                "login_command": status.login_command,
-            }
-        except Exception as exc:  # noqa: BLE001 - never fail the listing
-            logger.debug("agent-provider probe failed for %s: %s", entry.name, exc)
             status_d = {
                 "ready": False,
-                "state": "error",
-                "detail": f"probe failed: {exc}",
+                "state": "needs_owner_approval",
+                "detail": refusal,
                 "login_command": None,
             }
-        _readiness_cache[entry.name] = (_time.monotonic(), status_d)
-        return _row(status_d)
+        elif _pool is not None and _pool.is_warmed(entry.name):
+            status_d = {
+                "ready": True,
+                "state": "ready",
+                "detail": "warmed (pooled live connection)",
+                "login_command": None,
+            }
+        else:
+            hit = _readiness_cache.get(entry.name)
+            if hit and (time.monotonic() - hit[0]) < _READINESS_TTL_SECS:
+                status_d = hit[1]
+            else:
+                status_d = {
+                    "ready": False,
+                    "state": "untested",
+                    "detail": "Not tested. Use Test to check this provider and model.",
+                    "login_command": None,
+                }
 
-    if runtime_entries:
-        import asyncio as _asyncio
+        return {
+            "name": entry.name,
+            "provider_id": entry.name,
+            "type": entry.type,
+            "extension": options.get("extension"),
+            **status_d,
+        }
 
-        result.extend(await _asyncio.gather(*(_probe(e) for e in runtime_entries)))
+    result.extend(_row(entry) for entry in runtime_entries)
 
     return web.json_response({"agent_providers": result})
 
 
 async def warm_readiness_cache() -> int:
-    """Populate ``_readiness_cache`` for every ACP runtime at startup.
-
-    The agent-providers readiness probe is slow for runtimes NOT in the pool
-    (codex does a 45s npx fetch before failing). Running it once in the background
-    at launch means the first ``/api/agent-providers`` call — which the chat
-    picker's discovered section depends on — is fast instead of blocking on the
-    slowest probe. Pool-warmed runtimes are answered from the pool and skipped
-    here. Best-effort; never raises. Returns the number of runtimes probed."""
-    import asyncio as _asyncio
-    import time as _time
-
-    from gideon.engine.agents.registry import get_agent_provider_class
+    """Keep startup read-only; ACP readiness is measured only after an operator Test."""
     from gideon.integrations.acp.connection_pool import get_acp_pool
     from gideon.integrations.llm.registry import get_default_registry
 
@@ -321,45 +282,7 @@ async def warm_readiness_cache() -> int:
     entries = [
         e for e in get_default_registry().list_entries() if e.type == "acp_agent"
     ]
-    targets = [
-        e
-        for e in entries
-        if not (pool is not None and pool.is_warmed(e.name))
-        and not _runner_consent_refusal(e.name)
-    ]
-    if not targets:
-        return 0
-
-    async def _probe_one(entry: Any) -> None:
-        cls = get_agent_provider_class("acp")
-        if cls is None:
-            return
-        try:
-            status = await cls.probe_readiness(dict(entry.options or {}))
-            status_d = {
-                "ready": status.ready,
-                "state": status.state,
-                "detail": status.detail,
-                "login_command": status.login_command,
-            }
-        except Exception as exc:  # noqa: BLE001
-            status_d = {
-                "ready": False,
-                "state": "error",
-                "detail": f"probe failed: {exc}",
-                "login_command": None,
-            }
-        _readiness_cache[entry.name] = (_time.monotonic(), status_d)
-        if status_d.get("ready"):
-            try:
-                await _compute_discovery(entry.name, entry)
-            except Exception:  # noqa: BLE001 - warming never breaks boot
-                logger.debug(
-                    "discovery pre-warm failed for %s", entry.name, exc_info=True
-                )
-
-    await _asyncio.gather(*(_probe_one(e) for e in targets), return_exceptions=True)
-    return len(targets)
+    return sum(1 for entry in entries if pool is not None and pool.is_warmed(entry.name))
 
 
 _DISCOVERY_TTL_SECS = 600.0
@@ -1116,6 +1039,73 @@ async def api_provider_test(request: web.Request) -> web.Response:
             )
         except Exception:
             return web.json_response({"error": "not found"}, status=404)
+
+    if entry.type == "acp_agent":
+        from gideon.engine.agents.registry import get_agent_provider_class
+        from gideon.extensions.providers.connection import (
+            Connection,
+            CONNECTED,
+            FAILED,
+            entry_fingerprint,
+            get_connection_board,
+        )
+        from gideon.extensions.providers.failure_copy import relayed_failure_copy
+
+        cls = get_agent_provider_class("acp")
+        if cls is None:
+            status_d = {
+                "ready": False,
+                "state": "error",
+                "detail": "ACP provider is unavailable. Enable its provider app and retry.",
+                "login_command": None,
+            }
+        elif not str(entry.model or "").strip():
+            status_d = {
+                "ready": False,
+                "state": "no_model",
+                "detail": "Choose a model for this provider before testing it.",
+                "login_command": None,
+            }
+        else:
+            try:
+                provider = registry.build(name, model=entry.model)
+                result = await asyncio.wait_for(
+                    provider.explicit_self_test(), timeout=120
+                )
+                status_d = {
+                    "ready": result.ready,
+                    "state": result.state,
+                    "detail": result.detail,
+                    "login_command": result.login_command,
+                }
+            except Exception as exc:  # noqa: BLE001 — tests return safe, typed status
+                logger.debug(
+                    "ACP provider self-test failed for %s", name, exc_info=True
+                )
+                status_d = {
+                    "ready": False,
+                    "state": "error",
+                    "detail": relayed_failure_copy(exc),
+                    "login_command": None,
+                }
+        _readiness_cache[name] = (time.monotonic(), status_d)
+        get_connection_board().record(
+            name,
+            entry_fingerprint(entry),
+            Connection(
+                CONNECTED if status_d["ready"] else FAILED,
+                status_d["detail"],
+                checked_at=time.time(),
+            ),
+        )
+        return web.json_response(
+            {
+                "ok": bool(status_d["ready"]),
+                "status": status_d["state"],
+                "message": status_d["detail"],
+                "model": entry.model,
+            }
+        )
 
     from gideon.extensions.providers.connection import entry_fingerprint, get_connection_board, measure
 

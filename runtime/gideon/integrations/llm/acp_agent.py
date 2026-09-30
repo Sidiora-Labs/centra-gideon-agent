@@ -111,6 +111,44 @@ class AcpAgentProvider(AcpToolOutcomesMixin, ModelProvider, AgentProvider):
             return ReadinessStatus(False, "error", "no options.command configured")
         return await plan.readiness(cls)
 
+    async def explicit_self_test(self) -> ReadinessStatus:
+        """Run one explicit, model-bound inference and require usable text output."""
+        from gideon.engine.agents.provider import ReadinessStatus
+
+        model = str(self._model or "").strip()
+        if not model:
+            return ReadinessStatus(
+                False, "no_model", "Choose a model for this provider before testing it."
+            )
+
+        from gideon.extensions.providers.failure_copy import relayed_failure_copy
+        from gideon.integrations.llm.events import EVENT_COMPLETE, EVENT_TEXT_CHUNK
+
+        output = False
+        try:
+            await self.start()
+            async for event in self.stream("Reply with a short confirmation."):
+                if event.kind in {EVENT_TEXT_CHUNK, EVENT_COMPLETE} and str(
+                    getattr(event, "text", "") or ""
+                ).strip():
+                    output = True
+            if output:
+                return ReadinessStatus(
+                    True, "ready", f"{model} returned usable text."
+                )
+            return ReadinessStatus(
+                False,
+                "no_output",
+                "The selected provider/model returned no usable text. Check sign-in and model access, then run Test again.",
+            )
+        except Exception as exc:  # noqa: BLE001 — keep provider details redacted
+            return ReadinessStatus(False, "error", relayed_failure_copy(exc))
+        finally:
+            try:
+                await self.shutdown()
+            except Exception:
+                logger.debug("ACP self-test cleanup failed", exc_info=True)
+
     @classmethod
     async def discover_agents(cls, options: dict) -> list[DiscoveredAgent]:
         plan = ProbePlan.from_options(options)
