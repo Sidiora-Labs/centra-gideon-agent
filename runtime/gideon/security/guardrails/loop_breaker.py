@@ -49,6 +49,9 @@ STRUCT_REPEAT = 3
 STRUCT_PINGPONG_CYCLES = 3
 STRUCT_CYCLE_PERIODS = (2, 3)
 STRUCT_POLL_REPEAT = STRUCT_REPEAT * 3
+READ_REPEAT_THRESHOLD = 3
+REPEAT_CIRCUIT_THRESHOLD = 8
+WAIT_TOOLS = frozenset({"wait", "wait_for"})
 POLL_TOOLS = frozenset(
     {
         "workflow_status",
@@ -104,6 +107,21 @@ def _is_poll_signature(sig: str) -> bool:
         lowered = sig.split("\x1f", 1)[0].lower()
         return any(hint in lowered for hint in _POLL_COMMAND_HINTS)
     return False
+
+
+def _is_wait_signature(sig: str) -> bool:
+    """Whether this observation represents time passing and rearms read streaks."""
+    tool = _tool_of(sig)
+    if tool in WAIT_TOOLS:
+        return True
+    if tool not in SHELL_TOOLS:
+        return False
+    try:
+        args = json.loads(sig.split("\x1f", 1)[0].split(":", 1)[1])
+    except (IndexError, TypeError, ValueError):
+        return False
+    command = args.get("command", "") if isinstance(args, dict) else ""
+    return isinstance(command, str) and command.strip().startswith("sleep")
 
 
 def _repeat_threshold(sig: str) -> int:
@@ -280,6 +298,8 @@ class LoopBreaker:
     def __init__(self) -> None:
         self._counts: dict[str, int] = {}
         self.total_failures = 0
+        self._read_results: dict[str, tuple[str, int]] = {}
+        self.total_repeats = 0
         self._circuit_threshold: int | None = None
         self._recent: deque[str] = deque(maxlen=STRUCT_WINDOW)
         self._struct_reported: set[str] = set()
@@ -288,6 +308,8 @@ class LoopBreaker:
         self._counts.clear()
         self._circuit_threshold = None
         self.total_failures = 0
+        self._read_results.clear()
+        self.total_repeats = 0
         self._recent.clear()
         self._struct_reported.clear()
 
@@ -308,6 +330,58 @@ class LoopBreaker:
 
     def count(self, key: str) -> int:
         return self._counts.get(key, 0)
+
+    def repeat_count(self, key: str) -> int:
+        """Number of consecutive identical results observed for a read call."""
+        return self._read_results.get(key, ("", 0))[1]
+
+    def read_refusal(self, tool_name: str, key: str) -> str:
+        """Refuse a non-polling read after its third identical result."""
+        if _is_poll_signature(key) or self.repeat_count(key) < READ_REPEAT_THRESHOLD:
+            return ""
+        count = self.repeat_count(key)
+        return (
+            f"Error: tool `{tool_name}` was not run — it returned the same result "
+            f"the last {count} times it ran this turn. Do NOT call it again with "
+            "these arguments; use a different read or explain what is blocking progress."
+        )
+
+    def record_read_result(self, key: str, digest: str) -> int:
+        """Track a successful read result across intervening calls."""
+        if _is_wait_signature(key):
+            self._read_results.clear()
+            return 0
+        if _is_poll_signature(key):
+            return 0
+        previous_digest, previous_count = self._read_results.get(key, ("", 0))
+        count = previous_count + 1 if previous_digest == digest else 1
+        if count > 1:
+            self.total_repeats += 1
+        self._read_results[key] = (digest, count)
+        return count
+
+    def observe_wait(self, key: str) -> None:
+        if _is_wait_signature(key):
+            self._read_results.clear()
+
+    def record_read_refusal(self, key: str) -> int:
+        """Count a refused retry toward the run-wide repeated-read ceiling."""
+        if not _is_poll_signature(key):
+            self.total_repeats += 1
+        return self.total_repeats
+
+    def repeat_circuit_tripped(self) -> bool:
+        return self.total_repeats > REPEAT_CIRCUIT_THRESHOLD
+
+    def repeat_circuit_message(self) -> str:
+        if not self.repeat_circuit_tripped():
+            return ""
+        return (
+            "Run aborted by the loop breaker: "
+            f"{self.total_repeats} tool calls in this turn repeated an earlier read "
+            "with the same result. The run was stopped rather than allowed to keep "
+            "repeating work without progress."
+        )
 
     def circuit_tripped(self) -> bool:
         """Cache the configured ceiling lazily until the next run's reset."""

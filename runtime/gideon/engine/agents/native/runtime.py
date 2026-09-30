@@ -352,9 +352,12 @@ class _TurnTotals:
             if usage.context_usage_pct is not None:
                 response.runtime._last_context_pct = usage.context_usage_pct
 
-    def finish(self, reason: str, context_pct: float | None) -> AgentEvent:
+    def finish(
+        self, reason: str, context_pct: float | None, text: str = ""
+    ) -> AgentEvent:
         return AgentEvent(
             kind=EVENT_COMPLETE,
+            text=text,
             served_model_ref=self.served_model_ref,
             stop_reason=reason,
             input_tokens=self.input_tokens,
@@ -1056,7 +1059,9 @@ class NativeAgentRuntime(AgentProvider):
             for _ in range(self._max_turns):
                 if self._cancelled:
                     yield totals.finish(
-                        self._stop_reason_for_cancel(), self._last_context_pct
+                        self._stop_reason_for_cancel(),
+                        self._last_context_pct,
+                        self._breaker.repeat_circuit_message(),
                     )
                     return
                 totals.cycles += 1
@@ -1085,7 +1090,11 @@ class NativeAgentRuntime(AgentProvider):
                         if self._cancelled
                         else "end_turn"
                     )
-                    yield totals.finish(reason, self._last_context_pct)
+                    yield totals.finish(
+                        reason,
+                        self._last_context_pct,
+                        self._breaker.repeat_circuit_message(),
+                    )
                     return
                 async for event in self._execute_tool_batch(tool_calls):
                     totals.events += 1
@@ -1256,6 +1265,7 @@ class NativeAgentRuntime(AgentProvider):
                 ticket.invoke = (
                     ticket.outcome is None
                     and self._breaker.count(ticket.prepared.bkey) < BLOCK_THRESHOLD
+                    and not self._read_refusal(ticket.prepared)
                 )
         for ticket in tickets:
             if ticket.outcome is not _DROPPED:
@@ -1345,6 +1355,17 @@ class NativeAgentRuntime(AgentProvider):
 
         if not card_emitted:
             yield prep.card
+        read_refusal = self._read_refusal(prep)
+        if read_refusal:
+            self._breaker.record_read_refusal(prep.bkey)
+            metadata = {"ok": False, "loop_breaker_refusal": True}
+            observation = read_refusal
+            if self._breaker.repeat_circuit_tripped():
+                self._cancel.request(reason=CANCEL_INTERNAL)
+            self._record_tool_outcome(prep.tool_name, True, observation)
+            yield prep.result_event(observation, metadata)
+            self._messages.append(self._tool_result_msg(prep.call, observation, metadata))
+            return
         if prefetched is None and self._breaker.count(prep.bkey) >= BLOCK_THRESHOLD:
             observation = blocked_message(
                 prep.tool_name, self._breaker.count(prep.bkey)
@@ -1414,6 +1435,8 @@ class NativeAgentRuntime(AgentProvider):
                         prep.tool_name, prep.args, meta_sink=metadata
                     )
         observation = self._observe_tool_result(prep, observation, metadata)
+        if self._breaker.repeat_circuit_tripped():
+            self._cancel.request(reason=CANCEL_INTERNAL)
         yield prep.result_event(observation, metadata)
         self._messages.append(self._tool_result_msg(prep.call, observation, metadata))
         if revision_instruction:
@@ -1425,6 +1448,7 @@ class NativeAgentRuntime(AgentProvider):
     def _observe_tool_result(
         self, prep: "_PreparedCall", observation: str, metadata: dict
     ) -> str:
+        self._breaker.observe_wait(prep.bkey)
         failed = metadata.get("ok") is False
         self._record_tool_outcome(prep.tool_name, failed, observation)
         streak = self._breaker.record(prep.bkey, failed)
@@ -1435,11 +1459,31 @@ class NativeAgentRuntime(AgentProvider):
                 else observation
             )
         signature = f"{prep.bkey}\x1f{result_digest(observation)}"
+        if self._read_only_call(prep):
+            self._breaker.record_read_result(prep.bkey, result_digest(observation))
         repeated = self._breaker.record_structural(signature)
         if repeated:
             logger.info("native structural loop for %s: %s", prep.tool_name, repeated)
             return observation + structural_note(repeated)
         return observation
+
+    def _read_only_call(self, prep: "_PreparedCall") -> bool:
+        from gideon.engine.task_modes import resolve_effective_risk
+
+        return (
+            resolve_effective_risk(
+                self._tool_risk.get(prep.tool_name, RiskLevel.SAFE),
+                prep.tool_name,
+                prep.call.tool_kind,
+                prep.args,
+            )
+            == RiskLevel.SAFE.value
+        )
+
+    def _read_refusal(self, prep: "_PreparedCall") -> str:
+        if not self._read_only_call(prep):
+            return ""
+        return self._breaker.read_refusal(prep.tool_name, prep.bkey)
 
     def _record_tool_outcome(self, tool_name: str, failed: bool, observation: str) -> None:
         from gideon.security.security import is_denial_observation
