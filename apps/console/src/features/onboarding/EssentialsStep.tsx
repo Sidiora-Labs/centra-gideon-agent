@@ -9,9 +9,9 @@ import { essentialLane, essentialCandidates, setupErrorText, useEssentialSetup, 
 import { ConsentModal, PermissionConsent, CronConsentList } from '../apps/installConsent'
 import { SchemaField } from '../settings/ModelBackends'
 import { SchemaFieldDisclosure } from '../tools/schema'
-import { type AppCatalogEntry, type OnboardingState, type OnboardingStatePatch } from '../../shared/data/api'
+import { type AppCatalogEntry, type OnboardingState, type OnboardingStatePatch, type SearchProviderInfo, type ToolItem } from '../../shared/data/api'
 import { BundledModelOffer, smallestLocalChatModel } from './BundledModelOffer'
-import { useQuery } from '../../shared/data/data'
+import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { api } from '../../shared/data/api'
 
 type LaneId = EssentialLane
@@ -48,6 +48,23 @@ export function emptyEssentialGuidance(lane: EssentialLane, offeredOffline: bool
 
 const LANE_PREVIEW = 4
 
+export type WebSearchReadiness = 'ready' | 'not-ready' | 'unknown'
+
+export function evaluateWebSearchReadiness(
+  providers: readonly SearchProviderInfo[] | undefined,
+  tools: readonly ToolItem[] | undefined,
+  failed = false,
+): WebSearchReadiness {
+  if (failed || !providers || !tools) return 'unknown'
+  const hasAvailableProvider = providers.some((provider) => provider.available)
+  const webSearch = tools.find((tool) => tool.name === 'web_search')
+  return hasAvailableProvider && webSearch && !webSearch.disabled && !webSearch.providerDisabled ? 'ready' : 'not-ready'
+}
+
+function invalidateProviderQueries() {
+  for (const key of ['apps', 'onboarding:essentials-catalog', 'settings:search', 'tools:index']) invalidateKeys(key)
+}
+
 export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
 
   readiness: OnboardingState | null
@@ -58,10 +75,28 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
 
   onProgress: (patch: OnboardingStatePatch) => void
 }) {
+  const handleProgress = (patch: OnboardingStatePatch) => {
+    const essentials = patch.essentials
+    if (essentials && (Object.prototype.hasOwnProperty.call(essentials, 'model') || essentials.search)) {
+      invalidateProviderQueries()
+    }
+    onProgress(patch)
+  }
   const { catalog, catalogError, refresh, providerTypes, lanes, installed, open, expanded, modelApp, phase, boundLabel,
-    pendingRef, guarded, install, confirmInstall, toggle, expand, configured, bound, selectInstalledProvider, modelVerdict, verify } = useEssentialSetup(readiness, onProgress)
+    pendingRef, guarded, install, confirmInstall, toggle, expand, configured, bound, selectInstalledProvider, modelVerdict, verify } = useEssentialSetup(readiness, handleProgress)
 
   const modelReady = phase === 'done' && modelVerdict?.kind === 'ok'
+  const { data: searchReadiness, error: searchReadinessError, revalidating: checkingSearch, refresh: refreshSearch } = useQuery('settings:search', async () => {
+    const [providers, active, tools] = await Promise.all([
+      api.searchProviders(),
+      api.searchActive(),
+      api.tools(),
+    ])
+    return { providers, active, tools }
+  }, { persist: true })
+  const searchStatus = evaluateWebSearchReadiness(searchReadiness?.providers, searchReadiness?.tools, !!searchReadinessError)
+  const searchReady = !checkingSearch && searchStatus === 'ready'
+  const searchUnknown = searchStatus === 'unknown'
   const { data: localModels } = useQuery('onboarding:local-chat-catalog', () => api.modelsAvailable())
   const offeredOffline = Boolean(smallestLocalChatModel(localModels ?? []))
 
@@ -90,7 +125,7 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
         const items = lanes[lane.id]
         const isModel = lane.id === 'model'
         const shown = expanded[lane.id] ? items : items.slice(0, LANE_PREVIEW)
-        const laneDone = isModel ? modelReady : items.some((e) => installed[e.name])
+        const laneDone = isModel ? modelReady : lane.id === 'search' ? searchReady : items.some((e) => installed[e.name])
         return (
           <section key={lane.id} role="group" className="grid gap-s rounded-xl border border-outline/25 p-m" aria-label={lane.title}>
             <div className="flex items-baseline gap-2">
@@ -104,6 +139,14 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
               )}
             </div>
             <p className="text-on-surface-low text-[0.8125rem]">{lane.blurb}</p>
+
+            {lane.id === 'search' && checkingSearch && <p role="status" className="text-on-surface-low text-[0.8125rem]">Checking Web search readiness…</p>}
+            {lane.id === 'search' && searchUnknown && <div role="status" className="flex flex-wrap items-center gap-s text-on-surface-low text-[0.8125rem]">
+              <span>Web search status is unknown because current provider and tool data could not be read.</span>
+              <Button variant="secondary" size="sm" onClick={() => { invalidateKeys('settings:search'); refreshSearch() }}>Retry Web search check</Button>
+            </div>}
+            {lane.id === 'search' && !checkingSearch && searchStatus === 'not-ready' &&
+              <p role="status" className="text-on-surface-low text-[0.8125rem]">Web search is not ready. Configure an available search provider and enable the web_search tool.</p>}
 
             {isModel && <BundledModelOffer onReady={verify} />}
             {isModel && !modelVerdict && <p role="status">Checking the resolved chat model…</p>}
@@ -120,7 +163,7 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
 
             {isModel && phase !== 'pick' ? (
               <ModelSubFlow app={modelApp} phase={phase} boundLabel={boundLabel}
-                onBound={bound} onConfigured={configured} />
+                onBound={bound} onConfigured={() => { invalidateProviderQueries(); configured() }} />
             ) : items.length === 0 ? (
               <p className="text-on-surface-low text-[0.8125rem]">
                 No {lane.title.toLowerCase()} app is available from your app sources. {emptyEssentialGuidance(lane.id, offeredOffline)}

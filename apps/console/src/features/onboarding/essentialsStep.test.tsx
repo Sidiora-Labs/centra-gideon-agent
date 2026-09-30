@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
-import type { AppCatalogEntry } from '../../shared/data/api'
+import type { AppCatalogEntry, SearchCapabilitiesInfo, SearchProviderInfo, ToolItem } from '../../shared/data/api'
 
 
 const installApp = vi.fn()
@@ -28,7 +28,7 @@ vi.mock('../../shared/data/api', () => ({
 }))
 vi.mock('../../app/shell/appSdk', () => ({ launchChat: vi.fn(), notify: vi.fn() }))
 
-import { EssentialsStep, laneOf, candidatesByLane, emptyEssentialGuidance, CATALOG_FAILURE_GUIDANCE } from './EssentialsStep'
+import { EssentialsStep, laneOf, candidatesByLane, emptyEssentialGuidance, CATALOG_FAILURE_GUIDANCE, evaluateWebSearchReadiness } from './EssentialsStep'
 import { invalidateKeys } from '../../shared/data/data'
 
 function entry(over: Partial<AppCatalogEntry> & { name: string }): AppCatalogEntry {
@@ -337,5 +337,30 @@ describe('a failed catalog fetch says so', () => {
     }
     expect(CATALOG_FAILURE_GUIDANCE).toContain('Retry')
     expect(CATALOG_FAILURE_GUIDANCE).not.toMatch(/first.party|repository|workspace|dev tree/i)
+  })
+})
+
+describe('web search readiness uses the configured provider and current tool state', () => {
+  it('shows Web search ready only when web_search is usable', () => {
+    const capabilities: SearchCapabilitiesInfo = {
+      returns_content: true, returns_answer: true, returns_highlights: false,
+      supports_recency: false, supports_domains: false, supports_fetch: false, depths: [],
+    }
+    const provider: SearchProviderInfo = {
+      name: 'searxng', display_name: 'SearXNG', capabilities, available: true,
+    }
+    const webSearch: ToolItem = {
+      name: 'web_search', description: 'Search the web', provider: 'core',
+      disabled: false, providerDisabled: false,
+    }
+
+    expect(evaluateWebSearchReadiness([provider], [webSearch])).toBe('ready')
+    expect(evaluateWebSearchReadiness([{ ...provider, available: false }], [webSearch])).toBe('not-ready')
+    expect(evaluateWebSearchReadiness([provider], [{ ...webSearch, disabled: true }])).toBe('not-ready')
+    expect(evaluateWebSearchReadiness([provider], [{ ...webSearch, providerDisabled: true }])).toBe('not-ready')
+    expect(evaluateWebSearchReadiness([provider], [])).toBe('not-ready')
+    expect(evaluateWebSearchReadiness(undefined, [webSearch])).toBe('unknown')
+    expect(evaluateWebSearchReadiness([provider], undefined)).toBe('unknown')
+    expect(evaluateWebSearchReadiness([provider], [webSearch], true)).toBe('unknown')
   })
 })
