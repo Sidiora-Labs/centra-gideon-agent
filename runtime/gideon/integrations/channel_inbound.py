@@ -72,7 +72,16 @@ def admit(
     identity = _message_key(provider, msg)
     with _ADMISSION_LOCK:
         if identity not in _ADMITTED:
-            decision = _decide(state, provider, msg, is_dm=is_dm)
+            hold_for_owner = None
+            if is_dm and _speaks_as_owner(provider):
+                hold_for_owner = lambda: _hold_unknown_sender(state, provider, msg)
+            decision = _decide(
+                state,
+                provider,
+                msg,
+                is_dm=is_dm,
+                hold_for_owner=hold_for_owner,
+            )
             _remember(identity, decision)
             return decision
         decision = _ADMITTED[identity]
@@ -91,7 +100,12 @@ def admit(
 
 
 def _decide(
-    state: Any, provider: str, msg: ChannelMessage, *, is_dm: bool
+    state: Any,
+    provider: str,
+    msg: ChannelMessage,
+    *,
+    is_dm: bool,
+    hold_for_owner: Callable[[], bool] | None = None,
 ) -> TrustVerdict:
     metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
     return guard_inbound(
@@ -102,7 +116,47 @@ def _decide(
         channel_id=msg.channel_id,
         is_dm=is_dm,
         text=msg.text,
+        hold_for_owner=hold_for_owner,
     )
+
+
+def _speaks_as_owner(provider: str) -> bool:
+    from gideon.integrations.channel_transports import get_transport
+
+    transport = get_transport(provider)
+    if transport is None:
+        return False
+    try:
+        return bool(getattr(transport.capabilities(), "speaks_as_owner", False))
+    except Exception:
+        logger.warning(
+            "channel %s capabilities could not be read; suppressing stranger reply",
+            provider,
+            exc_info=True,
+        )
+        return True
+
+
+def _hold_unknown_sender(state: Any, provider: str, msg: ChannelMessage) -> bool:
+    from gideon.integrations.channel_transports import get_transport
+    from gideon.integrations.inbox_providers.native_source import hold_from_someone_new
+
+    transport = get_transport(provider)
+    metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+    item = hold_from_someone_new(
+        state,
+        provider=provider,
+        channel_name=str(getattr(transport, "display_name", "") or provider),
+        channel_id=msg.channel_id,
+        sender_id=msg.sender,
+        sender_name=str(metadata.get("sender_name") or ""),
+        subject=str(metadata.get("subject") or ""),
+        text=msg.text,
+        thread_id=msg.thread_id,
+        message_id=msg.message_id,
+        ts=float(msg.ts or 0),
+    )
+    return item is not None
 
 
 @dataclass(frozen=True)

@@ -13,7 +13,7 @@ import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 _ENTITY = "channel_trust"
@@ -668,6 +668,7 @@ def note_unknown_sender(
     sender_name: str = "",
     *,
     silent: bool = False,
+    held: bool = False,
 ) -> bool:
     if not _claim_contact(provider, sender_id):
         return False
@@ -676,7 +677,15 @@ def note_unknown_sender(
         try:
             from gideon.workspace import notification_kinds
 
-            message = "{} messaged your agent on {} but isn't paired. Allow them to converse, or deny."
+            if held:
+                title = f"Someone new wrote to you on {provider}"
+                message = (
+                    "{} wrote to you on {} and isn't paired. Nothing was sent to them. "
+                    "Their message is in your Inbox: reply to it, pair them, or ignore it."
+                )
+            else:
+                title = f"Unknown {provider} sender wants to talk"
+                message = "{} messaged your agent on {} but isn't paired. Allow them to converse, or deny."
             details = {
                 "event": "channel.unknown_sender",
                 "provider": provider,
@@ -686,7 +695,7 @@ def note_unknown_sender(
             }
             state.notify(
                 notification_kinds.WARNING,
-                f"Unknown {provider} sender wants to talk",
+                title,
                 message.format(sender_name or sender_id, provider),
                 meta=details,
             )
@@ -709,6 +718,14 @@ def apply_trust_action(
     return False
 
 
+def owner_was_asked_about(provider: str, sender_id: str) -> bool:
+    """Whether the trust gate recorded this sender as an unknown contact."""
+    if not sender_id:
+        return False
+    rate = _lookup(provider, "rate")
+    return isinstance(rate, dict) and sender_id in rate
+
+
 def guard_inbound(
     state: Any,
     provider: str,
@@ -718,6 +735,7 @@ def guard_inbound(
     channel_id: str = "",
     is_dm: bool = True,
     text: str = "",
+    hold_for_owner: Callable[[], bool] | None = None,
 ) -> TrustVerdict:
     context = _InboundContext(provider, sender_id, channel_id, is_dm)
     if not is_dm and channel_id:
@@ -749,18 +767,38 @@ def guard_inbound(
             )
             policy = ""
         else:
-            announced = note_unknown_sender(
-                state, provider, sender_id, sender_name, silent=policy == "owner_only"
-            )
+            held = False
+            if hold_for_owner is not None:
+                try:
+                    held = bool(hold_for_owner())
+                except Exception:
+                    logger.warning("unknown-sender inbox hold failed", exc_info=True)
+                announced = (
+                    note_unknown_sender(
+                        state,
+                        provider,
+                        sender_id,
+                        sender_name,
+                        silent=True,
+                        held=True,
+                    )
+                    if held
+                    else False
+                )
+            else:
+                announced = note_unknown_sender(
+                    state, provider, sender_id, sender_name, silent=policy == "owner_only"
+                )
             decision = TrustVerdict(
                 False,
                 "unknown_sender",
                 canned_reply=(
                     CANNED_PAIRING_REPLY
-                    if announced and policy != "owner_only"
+                    if announced and policy != "owner_only" and hold_for_owner is None
                     else ""
                 ),
                 fired_notification=announced,
+                meta={"held_for_owner": held} if hold_for_owner is not None else {},
             )
     return report_inbound_verdict(
         provider,

@@ -12,9 +12,12 @@ from typing import Any
 from gideon.integrations.inbox import (
     Classification,
     Confidence,
+    InboxState,
     InboxItem,
     InboxStore,
+    ItemKind,
     ItemStatus,
+    thread_mute_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,6 +54,89 @@ def _store_from_state(state) -> InboxStore:
         loaded.load()
         state._inbox_store = loaded
         return loaded
+
+
+def _state_from_state(state) -> InboxState:
+    with _push_lock:
+        service = getattr(state, "_inbox_svc", None)
+        if service is not None:
+            return service.state
+        existing = getattr(state, "_inbox_state", None)
+        if existing is not None:
+            return existing
+        loaded = InboxState()
+        loaded.load()
+        state._inbox_state = loaded
+        return loaded
+
+
+def hold_from_someone_new(
+    state: Any,
+    *,
+    provider: str,
+    channel_name: str,
+    channel_id: str,
+    sender_id: str,
+    text: str,
+    sender_name: str = "",
+    subject: str = "",
+    thread_id: str = "",
+    message_id: str = "",
+    ts: float = 0.0,
+) -> InboxItem | None:
+    """Persist one unknown owner-voice message without dispatching it to an agent."""
+    if state is None or not sender_id or not channel_id:
+        return None
+    import hashlib
+
+    stamp = float(ts or 0) or time.time()
+    identity = "\0".join(
+        (provider, channel_id, message_id)
+        if message_id
+        else (provider, channel_id, sender_id, repr(stamp), thread_id, text)
+    )
+    key = hashlib.sha256(identity.encode("utf-8", "replace")).hexdigest()[:20]
+    item_id = f"someone_new_{key}_{stamp:.6f}"
+    source = f"channel:{provider}"
+    store = _store_from_state(state)
+    inbox_state = _state_from_state(state)
+    mute_key = thread_mute_key(source, channel_id, thread_id or message_id or item_id)
+    if item_id in store.items or item_id in inbox_state.dismissed or mute_key in inbox_state.muted_threads:
+        return None
+
+    from gideon.security.security import redact_credentials, redact_exfiltration_urls
+
+    displayed = text
+    for redact in (redact_exfiltration_urls, redact_credentials):
+        displayed, _ = redact(displayed)
+    title = str(subject or "").strip()
+    item = InboxItem(
+        id=item_id,
+        channel=channel_id,
+        channel_name="DM",
+        thread_ts=thread_id or None,
+        message=f"{title}\n\n{displayed}" if title else displayed,
+        sender_id=sender_id,
+        sender_name=sender_name or sender_id,
+        classification=Classification.NEEDS_REPLY.value,
+        confidence=Confidence.NEEDS_REVIEW.value,
+        status=ItemStatus.PENDING.value,
+        created_at=stamp,
+        source=source,
+        can_reply=True,
+        reply_target=message_id or thread_id,
+        item_kind=ItemKind.MESSAGE.value,
+        refs={"someone_new": provider, "channel_name": channel_name},
+    )
+    store.add(item)
+    store.flush()
+    try:
+        from gideon.interfaces.dashboard.handlers_inbox import _redact_item
+
+        state.broadcast_ws("inbox_new_item", _redact_item(item.to_dict()))
+    except Exception:
+        logger.debug("hold_from_someone_new: broadcast failed", exc_info=True)
+    return item
 
 
 @dataclass(frozen=True)

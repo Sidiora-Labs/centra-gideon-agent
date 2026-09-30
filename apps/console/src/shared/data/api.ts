@@ -924,6 +924,8 @@ export interface NotificationItem {
   kind: string; title: string; body: string; ts: string
   job_id?: string; loop_id?: string; loop_kind?: string; acked: boolean
   reversal_id?: string; reversal?: string; action_type?: string; rung?: string
+  event?: string; provider?: string; sender_id?: string; sender_name?: string
+  actions?: string[]; trust_answer?: 'allowed' | 'denied'; created_by_app?: string; raised_by_app?: string
 }
 export type ScheduleKind = 'every' | 'cron' | 'at'
 export type ScheduleExecMode = 'agent' | 'script' | 'command' | 'other'
@@ -4561,6 +4563,8 @@ export const api = {
 
   notifications: () => get<{ notifications: NotificationItem[]; unread: number }>('/api/notifications'),
   ackNotification: (ts: string) => post('/api/notifications/ack', { ts }),
+  answerNotificationTrust: (ts: string, action: 'allow' | 'deny', confirm = false) =>
+    post<{ ok: boolean; answer: 'allowed' | 'denied' }>('/api/notifications/trust', { ts, action, ...(confirm ? { confirm: true } : {}) }),
 
   status: () => get<DashboardStatus>('/api/status'),
   approvals: () => get<PendingApproval[]>('/api/approvals'),
@@ -5108,6 +5112,7 @@ export const api = {
   inboxStatus: () => get<InboxStatus>('/api/inbox/status'),
   inboxProviders: () => get<{ providers: InboxProvider[] }>('/api/inbox/providers').then((d) => d.providers),
   updateInboxItem: (id: string, body: Record<string, unknown>) => put<InboxItem>(`/api/inbox/${encodeURIComponent(id)}`, body),
+  pairInboxSender: (id: string) => post<{ ok: boolean; paired: boolean; item: InboxItem }>(`/api/inbox/${encodeURIComponent(id)}/pair`, { confirm: true }),
   restoreInboxItem: (id: string) => post<InboxItem>(`/api/inbox/${encodeURIComponent(id)}/restore`),
   applyInboxProposal: (id: string, edited?: InboxProposal) =>
     post<InboxProposalApplyResult>(

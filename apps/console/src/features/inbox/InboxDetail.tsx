@@ -14,6 +14,7 @@ import { classMeta, confMeta, statusMeta, kindMeta, channelLabel, sourceLabel, r
 import { WorkflowGateActions } from './WorkflowGateActions'
 import { TriggerParkActions } from './TriggerParkActions'
 import { DeniedCallRerun } from './DeniedCallRerun'
+import { SomeoneNewActions } from './SomeoneNewActions'
 import { invalidateKeys } from '../../shared/data/data'
 import { TextLink } from '../../shared/ui/TextLink'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
@@ -72,6 +73,17 @@ export function InboxDetail({ item, onChanged, navigate }: { item: InboxItem; on
       <div data-type="body-m" className="rounded-xl border border-outline/25 bg-surface-container p-m text-on-surface leading-relaxed"><Markdown>{item.message}</Markdown></div>
 
       {item.refs?.auto_denied && <DeniedCallRerun item={item} onChanged={onChanged} navigate={navigate} />}
+
+      {typeof item.refs?.someone_new === 'string' && (
+        <Section label="Someone new">
+          <SomeoneNewActions
+            item={item}
+            onChanged={onChanged}
+            onIgnore={() => { void patch({ status: 'dismissed' }, 'dismiss') }}
+            busy={!!busy}
+          />
+        </Section>
+      )}
 
       {(item.thread_context?.length ?? 0) > 0 && (
         <Section label={`Thread context · ${item.thread_context!.length}`}>

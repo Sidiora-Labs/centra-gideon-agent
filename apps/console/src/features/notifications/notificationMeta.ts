@@ -87,6 +87,14 @@ export function notificationLink(statusUrl?: unknown): string {
   return ''
 }
 
+export function canAnswerUnknownSender(note: Pick<NotificationItem, 'event' | 'sender_id' | 'actions' | 'created_by_app' | 'raised_by_app'>): boolean {
+  return note.event === 'channel.unknown_sender'
+    && Boolean(note.sender_id)
+    && !note.created_by_app
+    && !note.raised_by_app
+    && (note.actions ?? []).some(action => action === 'allow' || action === 'deny')
+}
+
 export function toneChipBg(tone: string): string {
   return `color-mix(in srgb, ${tone} 16%, transparent)`
 }

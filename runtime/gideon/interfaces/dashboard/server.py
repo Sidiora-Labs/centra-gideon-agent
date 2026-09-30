@@ -1462,6 +1462,7 @@ async def start_dashboard(
     )
     app.router.add_post("/api/inbox/{id}/restore", handlers_inbox.api_inbox_restore)
     app.router.add_post("/api/inbox/send", handlers_inbox.api_inbox_send)
+    app.router.add_post("/api/inbox/{id}/pair", handlers_inbox.api_inbox_pair)
     app.router.add_put("/api/inbox/{id}", handlers_inbox.api_inbox_update)
     app.router.add_post("/api/inbox/{id}/draft", handlers_inbox.api_inbox_draft)
     app.router.add_post("/api/inbox/{id}/open", handlers_inbox.api_inbox_open)
@@ -1471,6 +1472,7 @@ async def start_dashboard(
 
     app.router.add_delete("/api/notifications", handlers.api_notification_delete)
     app.router.add_post("/api/notifications/ack", handlers.api_notification_ack)
+    app.router.add_post("/api/notifications/trust", handlers.api_notification_trust)
     app.router.add_post("/api/notifications/unack", handlers.api_notification_unack)
     app.router.add_post(
         "/api/notifications/ack-all", handlers.api_notifications_ack_all

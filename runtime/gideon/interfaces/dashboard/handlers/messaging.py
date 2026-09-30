@@ -10,6 +10,8 @@ from typing import Any
 
 from aiohttp import web
 
+from gideon.core.http_request import RequestBodyTypeError
+from gideon.http_errors import json_error
 from gideon.assurance.validation import (
     SPAWN_RUN_SCHEMA,
     ValidationError,
@@ -357,6 +359,89 @@ async def api_notification_ack(request: web.Request) -> web.Response:
         return web.json_response({"error": "ts is required"}, status=400)
     ok = state.ack_notification(ts, app=str(request.get("app", "") or ""))
     return web.json_response({"ok": ok})
+
+
+async def api_notification_trust(request: web.Request) -> web.Response:
+    """Apply the owner's Allow or Deny to a trust-gate unknown-sender notice."""
+    if request.get("app"):
+        return json_error("forbidden", status=403)
+    state: ConsoleState = request.app["state"]
+    try:
+        body = await read_json_body(request)
+    except RequestBodyTypeError:
+        return json_error("invalid_body", status=400)
+    except Exception:
+        return json_error("invalid_json", status=400)
+    ts = body.get("ts")
+    action = body.get("action")
+    if (
+        not isinstance(ts, str)
+        or not ts.strip()
+        or not isinstance(action, str)
+        or action not in {"allow", "deny"}
+    ):
+        return json_error("invalid_request", status=400)
+    if "confirm" in body and not isinstance(body["confirm"], bool):
+        return json_error("invalid_request", status=400)
+    if action == "allow" and body.get("confirm") is not True:
+        return json_error(
+            "confirmation_required",
+            message="Confirm pairing this sender before granting access.",
+            status=409,
+        )
+
+    note = next(
+        (row for row in state._notification_log if row.get("ts") == ts.strip()),
+        None,
+    )
+    if note is None:
+        return json_error("not_found", status=404)
+    provider = str(note.get("provider") or "")
+    sender_id = str(note.get("sender_id") or "")
+    actions = note.get("actions")
+    if (
+        note.get("event") != "channel.unknown_sender"
+        or note.get("created_by_app")
+        or note.get("raised_by_app")
+        or not isinstance(actions, list)
+        or action not in actions
+    ):
+        return json_error("invalid_request", message="This notice cannot answer a sender.", status=409)
+    from gideon.integrations import channel_trust
+
+    if not channel_trust.owner_was_asked_about(provider, sender_id):
+        return json_error("invalid_request", message="The trust gate did not ask about this sender.", status=409)
+    if note.get("trust_answer"):
+        return json_error("invalid_request", message="This sender notice was already answered.", status=409)
+
+    name = str(note.get("sender_name") or "")
+    allowed = action == "allow"
+    channel_trust.apply_trust_action(action, provider, sender_id, name)
+
+    from gideon.integrations.inbox import ItemStatus, owner_username
+    from gideon.interfaces.dashboard.handlers_inbox import (
+        _dismiss,
+        _get_inbox,
+        _owner_item,
+    )
+
+    inbox_state, inbox = _get_inbox(state)
+    owner = owner_username()
+    for item in inbox.items.values():
+        refs = item.refs if isinstance(item.refs, dict) else {}
+        if refs.get("someone_new") != provider or item.sender_id != sender_id:
+            continue
+        if allowed:
+            inbox.update(item.id, refs={**refs, "paired": True})
+            inbox.update_status(item.id, ItemStatus.HANDLED.value, owner=owner)
+        else:
+            _dismiss(state, inbox_state, inbox, item, owner)
+            inbox.save()
+        state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
+
+    note["trust_answer"] = "allowed" if allowed else "denied"
+    state.ack_notification(ts.strip())
+    return web.json_response({"ok": True, "answer": note["trust_answer"]})
 
 
 async def api_notification_unack(request: web.Request) -> web.Response:

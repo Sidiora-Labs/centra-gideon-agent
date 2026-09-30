@@ -1,6 +1,6 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Bell, Check, CheckCheck, Trash2, Undo2, X, Target } from 'lucide-react'
+import { Bell, Check, CheckCheck, Trash2, Undo2, X, Target, UserPlus, XCircle } from 'lucide-react'
 import { TopBar } from '../../shared/ui/TopBar'
 import { Button } from '../../shared/ui/Button'
 import { IconButton } from '../../shared/ui/IconButton'
@@ -19,13 +19,18 @@ import { ContextMenu, type ContextMenuItem } from '../../shared/ui/motion'
 import { spring } from '../../shared/theme/motion'
 import { rowSubject } from '../../shared/data/rowSubject'
 import { type NotificationItem } from '../../shared/data/api'
-import { kindMeta, BUCKET_ORDER, relTime, clockTime, firstLine, toneChipBg } from './notificationMeta'
+import { kindMeta, BUCKET_ORDER, relTime, clockTime, firstLine, toneChipBg, canAnswerUnknownSender } from './notificationMeta'
 import { fvs } from '../../shared/theme/fontWeight'
 import { useQueryParam, type RouteProps } from '../../app/shell/useQueryState'
 import { PageTitle } from '../../shared/ui/PageTitle'
 import { accentChip, toneChipSkin } from '../../shared/theme/accent'
+import { api } from '../../shared/data/api'
+import { confirm } from '../../shared/ui/dialog'
+import { FieldError } from '../../shared/ui/forms'
 
 export function NotificationsPage({ query, setQuery, navigate }: Pick<RouteProps, 'query' | 'setQuery' | 'navigate'>) {
+  const [trustBusy, setTrustBusy] = useState(false)
+  const [trustError, setTrustError] = useState('')
   const [filter, setFilter] = useQueryParam(query, setQuery, 'filter', 'all', { replace: true })
   const [openTsRaw, setOpenTs] = useQueryParam(query, setQuery, 'open', '')
   const openTs = openTsRaw || null
@@ -70,6 +75,21 @@ export function NotificationsPage({ query, setQuery, navigate }: Pick<RouteProps
               {open.acked && <span className="text-on-surface-low inline-flex items-center gap-1"><Check size={13} /> read</span>}
             </div>
             <div className="text-on-surface-var text-[0.9375rem] leading-relaxed"><Markdown>{open.body}</Markdown></div>
+            {canAnswerUnknownSender(open) && !open.trust_answer && (
+              <div className="grid gap-s rounded-lg border border-outline/40 bg-surface-container p-m">
+                <p className="text-on-surface-var text-[0.875rem]">Allow this sender to start conversations with your agent, or deny access. The held message stays out of the agent conversation.</p>
+                <div className="flex flex-wrap gap-s">
+                  {open.actions?.includes('allow') && <Button size="sm" disabled={trustBusy} onClick={() => void answerSender('allow')}>
+                    <UserPlus size={14} /> Allow sender
+                  </Button>}
+                  {open.actions?.includes('deny') && <Button size="sm" variant="secondary" disabled={trustBusy} onClick={() => void answerSender('deny')}>
+                    <XCircle size={14} /> Deny sender
+                  </Button>}
+                </div>
+                {trustError && <FieldError>{trustError}</FieldError>}
+              </div>
+            )}
+            {open.trust_answer && <p className="text-on-surface-low text-[0.8125rem]">Sender access {open.trust_answer}.</p>}
             <div className="flex flex-wrap gap-s border-t border-outline-variant/40 pt-l">
 
               {open.loop_id && (
@@ -120,6 +140,25 @@ export function NotificationsPage({ query, setQuery, navigate }: Pick<RouteProps
       </div>
     </WorkbenchLayout>
   )
+
+  async function answerSender(action: 'allow' | 'deny') {
+    if (!open || trustBusy) return
+    if (action === 'allow' && !await confirm({
+      title: `Allow ${open.sender_name || open.sender_id}?`,
+      body: 'This grants the sender access to start future conversations with your agent. The held message will not be replayed.',
+      confirmLabel: 'Allow sender',
+    })) return
+    setTrustBusy(true)
+    setTrustError('')
+    try {
+      await api.answerNotificationTrust(open.ts, action, action === 'allow')
+      load()
+    } catch (reason) {
+      setTrustError(reason instanceof Error ? reason.message : 'Could not update sender access.')
+    } finally {
+      setTrustBusy(false)
+    }
+  }
 }
 
 function Row({ n, index, now, onOpen, onAck, onUnack, onDelete }: { n: NotificationItem; index: number; now: number; onOpen: () => void; onAck: () => void; onUnack: () => void; onDelete: () => void }) {

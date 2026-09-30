@@ -145,6 +145,7 @@ class MailDeskTransport(ChannelTransportProvider):
         return ChannelCapabilities(
             inbound=True, threads=True, attachments=True, reactions=False,
             edits=False, rich_text=True, typing_indicator=False, max_text_len=0,
+            speaks_as_owner=True,
         )
 
     # ── settings + credentials ──

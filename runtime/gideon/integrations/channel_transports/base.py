@@ -63,6 +63,7 @@ class ChannelCapabilities:
     typing_indicator: bool = False
     max_text_len: int = 0
     owner_pairing: bool = False
+    speaks_as_owner: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {

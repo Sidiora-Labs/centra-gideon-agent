@@ -372,6 +372,8 @@ async def api_inbox_update(request: web.Request) -> web.Response:
     item = inbox.items.get(item_id)
     if item is None:
         return web.json_response({"error": "not found"}, status=404)
+    if (item.refs or {}).get("someone_new") and request.get("app"):
+        return json_error("forbidden", status=403)
 
     updates = {k: v for k, v in body.items() if k in _UPDATABLE_FIELDS}
     if isinstance(updates.get("draft"), str):
@@ -629,6 +631,50 @@ async def api_inbox_send(request: web.Request) -> web.Response:
     except MaskConflict:
         return web.json_response({"error": MASK_CONFLICT}, status=409)
 
+    provider = str((item.refs or {}).get("someone_new") or "")
+    if provider:
+        if request.get("app") or not item.belongs_to(owner):
+            return json_error("forbidden", status=403)
+        if item.source != f"channel:{provider}" or not item.sender_id:
+            return json_error("invalid_request", status=409)
+        from gideon.integrations.channel_delivery import delivery_for
+        from gideon.integrations.channel_transports import get_transport
+
+        transport = get_transport(provider)
+        try:
+            speaks_as_owner = bool(
+                transport
+                and getattr(transport.capabilities(), "speaks_as_owner", False)
+            )
+        except Exception:
+            logger.warning("channel capabilities unavailable for Inbox reply: %s", provider, exc_info=True)
+            speaks_as_owner = False
+        if not speaks_as_owner:
+            return json_error("channel_provider_unavailable", status=503)
+        delivery = delivery_for(provider)
+        if delivery is None:
+            return json_error("channel_provider_unavailable", status=503)
+        try:
+            receipt = await delivery.deliver_text(
+                item.channel, text, item.thread_ts or item.reply_target
+            )
+        except Exception:
+            logger.warning("Inbox reply failed for owner-voice channel %s", provider, exc_info=True)
+            receipt = ""
+        if not receipt:
+            inbox.update(item_id, draft=text)
+            return json_error(
+                "upstream_unavailable",
+                message="The channel could not send the reply; your draft was kept.",
+                status=502,
+            )
+        item.replied_at = time.time()
+        inbox.update(item_id, draft=text)
+        inbox.update_status(item_id, ItemStatus.SENT.value, owner=owner)
+        _record_signal(state, item, "reply")
+        state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
+        return web.json_response({"ok": True, "sent": True, "item": _owner_item(item, owner)})
+
     if item.source == "native":
         delivered = False
         target = getattr(item, "reply_target", "") or ""
@@ -669,6 +715,64 @@ async def api_inbox_send(request: web.Request) -> web.Response:
     _record_signal(state, item, "reply")
     state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
     return web.json_response({"ok": True, "sent": True, "item": _owner_item(item, owner)})
+
+
+async def api_inbox_pair(request: web.Request) -> web.Response:
+    """Explicitly grant one held owner-voice sender access to their next message."""
+    if request.get("app"):
+        return json_error("forbidden", status=403)
+    try:
+        body = await read_json_body(request)
+    except RequestBodyTypeError:
+        return json_error("invalid_body", status=400)
+    except Exception:
+        return json_error("invalid_json", status=400)
+    if body.get("confirm") is not True:
+        return json_error(
+            "confirmation_required",
+            message="Confirm pairing this sender before granting access.",
+            status=409,
+        )
+
+    state: "ConsoleState" = request.app["state"]
+    _, inbox = _get_inbox(state)
+    item_id = request.match_info.get("id", "")
+    item = inbox.items.get(item_id)
+    if item is None:
+        return json_error("not_found", status=404)
+    owner = owner_username()
+    if not item.belongs_to(owner):
+        return json_error("not_found", status=404)
+    provider = str((item.refs or {}).get("someone_new") or "")
+    if not provider or not item.sender_id or item.source != f"channel:{provider}":
+        return json_error("invalid_request", status=409)
+    if (item.refs or {}).get("paired") or item.status_for(owner) in {
+        ItemStatus.HANDLED.value,
+        ItemStatus.SENT.value,
+        ItemStatus.DISMISSED.value,
+    }:
+        return json_error("invalid_request", message="This Inbox item was already answered.", status=409)
+
+    from gideon.integrations.channel_transports import get_transport
+    from gideon.integrations.channel_trust import allow_sender
+
+    transport = get_transport(provider)
+    try:
+        speaks_as_owner = bool(
+            transport
+            and getattr(transport.capabilities(), "speaks_as_owner", False)
+        )
+    except Exception:
+        logger.warning("channel capabilities unavailable for Inbox pairing: %s", provider, exc_info=True)
+        speaks_as_owner = False
+    if not speaks_as_owner:
+        return json_error("channel_provider_unavailable", status=503)
+    name = item.sender_name if item.sender_name != item.sender_id else ""
+    allow_sender(provider, item.sender_id, name, via="owner")
+    inbox.update(item.id, refs={**item.refs, "paired": True})
+    inbox.update_status(item.id, ItemStatus.HANDLED.value, owner=owner)
+    state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
+    return web.json_response({"ok": True, "paired": True, "item": _owner_item(item, owner)})
 
 
 async def api_inbox_open(request: web.Request) -> web.Response:
