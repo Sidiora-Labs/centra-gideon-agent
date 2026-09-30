@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 logger = logging.getLogger(__name__)
+_REDACTION_FAILED = "[redaction failed; text withheld]"
 
 
 def redact(value: Any) -> Any:
@@ -32,8 +33,8 @@ def redact(value: Any) -> Any:
             text, _ = redact_credentials(text)
             return text
         except Exception:  # pragma: no cover — redaction must never break a write
-            logger.debug("redaction unavailable", exc_info=True)
-            return value
+            logger.debug("redaction unavailable; text withheld")
+            return _REDACTION_FAILED
     if isinstance(value, dict):
         return {k: redact(v) for k, v in value.items()}
     if isinstance(value, list):
