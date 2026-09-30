@@ -105,7 +105,7 @@ async def test_snapshot_none_when_dead_or_expired():
 
 
 @pytest.mark.asyncio
-async def test_claim_detaches_and_rewarms():
+async def test_claim_detaches_without_implicit_rewarm():
     pool, built = _make_pool()
     await pool.warm("acp:test-cli")
     first = built[0]
@@ -113,8 +113,8 @@ async def test_claim_detaches_and_rewarms():
     assert claimed is first
     assert pool.snapshot("acp:test-cli") is None
     await asyncio.sleep(0.05)
-    assert len(built) == 2
-    assert pool.snapshot("acp:test-cli") is not None
+    assert len(built) == 1
+    assert pool.snapshot("acp:test-cli") is None
 
 
 @pytest.mark.asyncio

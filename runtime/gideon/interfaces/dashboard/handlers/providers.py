@@ -26,7 +26,13 @@ from gideon.extensions.providers.failure_copy import relayed_failure_copy
 logger = logging.getLogger(__name__)
 
 _READINESS_TTL_SECS = 300.0
-_readiness_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_readiness_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+
+
+def _tenant_cache_key(tenant: Any) -> str:
+    if hasattr(tenant, "kind"):
+        return str(getattr(tenant, "tenant", "") or "self-hosted")
+    return str(tenant or "self-hosted")
 
 
 def _runner_consent_refusal(runtime_id: str, tenant: Any = None) -> str:
@@ -249,7 +255,9 @@ async def api_agent_providers_list(request: web.Request) -> web.Response:
                 "login_command": None,
             }
         else:
-            hit = _readiness_cache.get(entry.name)
+            hit = _readiness_cache.get(
+                (_tenant_cache_key(tenant_scope), entry.name)
+            )
             if hit and (time.monotonic() - hit[0]) < _READINESS_TTL_SECS:
                 status_d = hit[1]
             else:
@@ -286,28 +294,14 @@ async def warm_readiness_cache() -> int:
 
 
 _DISCOVERY_TTL_SECS = 600.0
-_discovery_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
-
-
-def _runtime_label_for(entry: Any) -> str:
-    """A friendly display label for a runtime (e.g. "Claude Code", "Codex").
-
-    Title-cases the ``acp:<cli>`` suffix so discovered agent names read well
-    (``claude-code`` → ``Claude Code``). Vendor display polish lives at this
-    presentation layer; the backend stays neutral."""
-    name = str(entry.name or "")
-    cli = name.split(":", 1)[-1] if ":" in name else name
-    return (
-        " ".join(w.capitalize() for w in cli.replace("_", "-").split("-") if w) or cli
-    )
+_discovery_cache: dict[tuple[str, str], tuple[float, list[dict[str, Any]]]] = {}
 
 
 async def api_agent_provider_agents(request: web.Request) -> web.Response:
-    """GET /api/agent-providers/{id}/agents — list a runtime's discoverable agents.
+    """GET /api/agent-providers/{id}/agents — read previously tested agents.
 
-    Opens one live session on the ``acp:<cli>`` runtime and returns its normalized
-    agent catalog (default-dialect personas / claude effort-agents) for the chat picker.
-    Cached per runtime id with a TTL; ``?refresh=1`` forces a fresh probe.
+    This read is cache-only. The explicit POST provider Test action is the sole
+    settings discovery boundary; a stale or missing cache remains untested.
 
     Returns ``{agents: [{id, name, runtime, description, provider_agent,
     reasoning_effort, models}], permission_modes: [...], cached: bool}`` where
@@ -315,8 +309,6 @@ async def api_agent_provider_agents(request: web.Request) -> web.Response:
     for the trust-ladder grey-out). ``native`` and unknown ids return ``[]``.
     """
     runtime_id = request.match_info.get("id", "")
-    refresh = request.rel_url.query.get("refresh") in ("1", "true", "yes")
-
     if runtime_id == "native":
         return web.json_response(
             {"agents": [], "permission_modes": [], "cached": False}
@@ -326,11 +318,6 @@ async def api_agent_provider_agents(request: web.Request) -> web.Response:
     refusal = _runner_consent_refusal(runtime_id, tenant_scope)
     if refusal:
         return web.json_response({"error": refusal}, status=409)
-
-    if not refresh:
-        cached = _cached_discovery(runtime_id)
-        if cached is not None:
-            return web.json_response({**cached, "cached": True})
 
     from gideon.integrations.llm.registry import get_default_registry
 
@@ -346,23 +333,31 @@ async def api_agent_provider_agents(request: web.Request) -> web.Response:
             {"error": f"{runtime_id!r} is not an ACP runtime"}, status=400
         )
 
-    payload = await _compute_discovery(runtime_id, entry)
-    if payload is None:
-        return web.json_response({"error": "ACP runtime class unavailable"}, status=500)
-    return web.json_response({**payload, "cached": False})
+    payload = _cached_discovery(runtime_id, tenant=tenant_scope)
+    if payload is not None:
+        return web.json_response({**payload, "cached": True})
+    return web.json_response(
+        {
+            "agents": [],
+            "permission_modes": [],
+            "cached": False,
+            "state": "untested",
+            "detail": "Not tested. Use Test to discover agents.",
+        }
+    )
 
 
-def _cached_discovery(runtime_id: str) -> dict[str, Any] | None:
+def _cached_discovery(runtime_id: str, *, tenant: Any = None) -> dict[str, Any] | None:
     """Return the cached discovery payload for *runtime_id* if still fresh."""
     import time as _time
 
-    hit = _discovery_cache.get(runtime_id)
+    hit = _discovery_cache.get((_tenant_cache_key(tenant), runtime_id))
     if hit and (_time.monotonic() - hit[0]) < _DISCOVERY_TTL_SECS:
         return dict(hit[1][0]) if hit[1] else {}
     return None
 
 
-def declared_efforts(runtime_id: str) -> list[str] | None:
+def declared_efforts(runtime_id: str, *, tenant: Any = None) -> list[str] | None:
     """The reasoning-effort values *runtime_id* DECLARED, or ``None`` when unknown.
 
     Cache-only by design: discovery opens a live ACP session (~15-20 s), so a write path
@@ -379,7 +374,7 @@ def declared_efforts(runtime_id: str) -> list[str] | None:
     agent (``AcpAgentProvider.discover_agents``), so this is a runtime-level question and
     needs no per-agent disambiguation.
     """
-    payload = _cached_discovery(runtime_id)
+    payload = _cached_discovery(runtime_id, tenant=tenant)
     if payload is None:
         return None
     agents = payload.get("agents") or []
@@ -396,84 +391,15 @@ def declared_efforts(runtime_id: str) -> list[str] | None:
     return out
 
 
-async def _compute_discovery(runtime_id: str, entry: Any) -> dict[str, Any] | None:
-    """Run discovery for one ACP runtime entry, write the cache, return payload.
-
-    Returns ``None`` only when the ACP runtime class can't be resolved. Discovery
-    failures yield an empty agent list (never raises) so callers never break.
-    """
-    import time as _time
-
-    if _runner_consent_refusal(runtime_id):
-        return None
-
-    from gideon.engine.agents.registry import get_agent_provider_class
-
-    cls = get_agent_provider_class("acp")
-    if cls is None:
-        return None
-
-    options = dict(entry.options or {})
-    options["runtime_id"] = runtime_id
-    options["runtime_label"] = _runtime_label_for(entry)
-
-    agents = None
-    try:
-        from gideon.integrations.acp.connection_pool import get_acp_pool
-
-        pool = get_acp_pool()
-        snap = pool.snapshot(runtime_id) if pool is not None else None
-        if snap is not None:
-            agents = cls.agents_from_snapshot(options, snap)
-            logger.debug("discovery: served %s from pool snapshot", runtime_id)
-    except Exception:
-        logger.debug(
-            "discovery: pool snapshot path failed for %s", runtime_id, exc_info=True
-        )
-        agents = None
-
-    if agents is None:
-        try:
-            agents = await cls.discover_agents(options)
-        except Exception as exc:  # noqa: BLE001 - discovery never breaks the caller
-            logger.debug("discover_agents failed for %s: %s", runtime_id, exc)
-            agents = []
-
-    permission_modes = await _runtime_permission_modes(options, cls)
-    payload: dict[str, Any] = {
-        "agents": [
-            {
-                "id": a.id,
-                "name": a.name,
-                "runtime": a.runtime,
-                "description": a.description,
-                "provider_agent": a.provider_agent,
-                "reasoning_effort": a.reasoning_effort,
-                "models": list(a.models),
-                "supported_efforts": list(a.supported_efforts),
-            }
-            for a in agents
-        ],
-        "permission_modes": permission_modes,
+def _record_runtime_test(runtime_id: str, tenant: Any, payload: dict[str, Any]) -> None:
+    cached = {
+        "agents": list(payload.get("agents") or []),
+        "permission_modes": list(payload.get("permission_modes") or []),
     }
-    _discovery_cache[runtime_id] = (_time.monotonic(), [payload])
-    return payload
-
-
-async def _runtime_permission_modes(options: dict, cls: Any) -> list[str]:
-    """The runtime's native permission modes (capability for the trust grey-out).
-
-    Reuses the same lightweight read discovery does — but discovery already
-    captured it via the dialect. To avoid a second spawn we infer from the
-    dialect's static shape: Zed adapters expose the 5-mode axis; the default
-    dialect exposes none. This is a static per-dialect fact, so no extra
-    session is opened."""
-    from gideon.integrations.acp.dialect import ZedAdapterDialect, get_dialect
-
-    dialect = get_dialect(options.get("dialect"))
-    if isinstance(dialect, ZedAdapterDialect):
-        return ["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"]
-    return []
+    _discovery_cache[(_tenant_cache_key(tenant), runtime_id)] = (
+        time.monotonic(),
+        [cached],
+    )
 
 
 async def api_provider_models(request: web.Request) -> web.Response:
@@ -1041,7 +967,17 @@ async def api_provider_test(request: web.Request) -> web.Response:
             return web.json_response({"error": "not found"}, status=404)
 
     if entry.type == "acp_agent":
-        from gideon.engine.agents.registry import get_agent_provider_class
+        principal = _runner_owner_principal(request)
+        if principal is None:
+            return web.json_response(
+                {"error": "Only the authenticated owner may test an ACP runtime."},
+                status=403,
+            )
+        tenant = _runner_tenant_scope(request)
+        refusal = _runner_consent_refusal(name, tenant)
+        if refusal:
+            return web.json_response({"error": refusal}, status=409)
+
         from gideon.extensions.providers.connection import (
             Connection,
             CONNECTED,
@@ -1051,44 +987,18 @@ async def api_provider_test(request: web.Request) -> web.Response:
         )
         from gideon.extensions.providers.failure_copy import relayed_failure_copy
 
-        cls = get_agent_provider_class("acp")
-        if cls is None:
-            status_d = {
-                "ready": False,
-                "state": "error",
-                "detail": "ACP provider is unavailable. Enable its provider app and retry.",
-                "login_command": None,
-            }
-        elif not str(entry.model or "").strip():
-            status_d = {
-                "ready": False,
-                "state": "no_model",
-                "detail": "Choose a model for this provider before testing it.",
-                "login_command": None,
-            }
-        else:
-            try:
-                provider = registry.build(name, model=entry.model)
-                result = await asyncio.wait_for(
-                    provider.explicit_self_test(), timeout=120
-                )
-                status_d = {
-                    "ready": result.ready,
-                    "state": result.state,
-                    "detail": result.detail,
-                    "login_command": result.login_command,
-                }
-            except Exception as exc:  # noqa: BLE001 — tests return safe, typed status
-                logger.debug(
-                    "ACP provider self-test failed for %s", name, exc_info=True
-                )
-                status_d = {
-                    "ready": False,
-                    "state": "error",
-                    "detail": relayed_failure_copy(exc),
-                    "login_command": None,
-                }
-        _readiness_cache[name] = (time.monotonic(), status_d)
+        from gideon.engine.agents.runtime_tests import test_runtime
+
+        tested = await test_runtime(name, entry, tenant=tenant)
+        status_d = {
+            "ready": tested["ready"],
+            "state": tested["state"],
+            "detail": tested["detail"],
+            "login_command": tested["login_command"],
+        }
+        tenant_key = _tenant_cache_key(tenant)
+        _readiness_cache[(tenant_key, name)] = (time.monotonic(), status_d)
+        _record_runtime_test(name, tenant, tested)
         get_connection_board().record(
             name,
             entry_fingerprint(entry),
@@ -1104,6 +1014,8 @@ async def api_provider_test(request: web.Request) -> web.Response:
                 "status": status_d["state"],
                 "message": status_d["detail"],
                 "model": entry.model,
+                "agents": tested["agents"],
+                "permission_modes": tested["permission_modes"],
             }
         )
 
@@ -1219,8 +1131,9 @@ async def api_agent_runner_grant(request: web.Request) -> web.Response:
             {"error": "runner definition changed; review the current definition again"},
             status=409,
         )
-    _readiness_cache.pop(definition.runtime_id, None)
-    _discovery_cache.pop(definition.runtime_id, None)
+    tenant_key = _tenant_cache_key(principal)
+    _readiness_cache.pop((tenant_key, definition.runtime_id), None)
+    _discovery_cache.pop((tenant_key, definition.runtime_id), None)
     return web.json_response({"ok": True, "runner": definition.id}, status=200)
 
 

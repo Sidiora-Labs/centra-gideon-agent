@@ -69,14 +69,12 @@ class AcpConnectionPool:
         self._ttl = snapshot_ttl_secs
         self._slots: dict[str, _Slot] = {}
         self._lock = asyncio.Lock()
-        self._runtimes: set[str] = set()
         self._health_task: asyncio.Task | None = None
         self._background: set[asyncio.Task] = set()
         self._closed = False
 
     async def _slot(self, runtime_id: str) -> _Slot:
         async with self._lock:
-            self._runtimes.add(runtime_id)
             if runtime_id not in self._slots:
                 self._slots[runtime_id] = _Slot()
             return self._slots[runtime_id]
@@ -110,6 +108,7 @@ class AcpConnectionPool:
             return False
 
     async def warm(self, runtime_id: str) -> bool:
+        """Explicitly warm one runtime after a caller has requested a live check."""
         if not await self._ready(runtime_id):
             return False
         slot = await self._slot(runtime_id)
@@ -133,17 +132,10 @@ class AcpConnectionPool:
                 snapshot = dict(getattr(candidate, "session_snapshot", {}) or {})
                 slot.accept(candidate, snapshot)
                 candidate = None
-                logger.info(
-                    "ACP runtime %s warmed with %d modes",
-                    runtime_id,
-                    _snapshot_agent_count(slot.snapshot),
-                )
                 return True
             except Exception:
                 slot.failed()
-                logger.warning(
-                    "ACP runtime %s could not warm", runtime_id, exc_info=True
-                )
+                logger.debug("ACP runtime %s could not warm", runtime_id, exc_info=True)
                 return False
             finally:
                 if candidate is not None:
@@ -284,7 +276,6 @@ class AcpConnectionPool:
             provider = slot.detach()
         if holder:
             self._record_lease(runtime_id, holder)
-        self._spawn_bg(self.warm(runtime_id))
         return provider
 
     @staticmethod
@@ -308,14 +299,6 @@ class AcpConnectionPool:
                 await asyncio.sleep(_HEALTH_INTERVAL_SECS)
                 if self._closed:
                     break
-                for runtime_id in tuple(self._runtimes):
-                    slot = self._slots.get(runtime_id)
-                    now = time.monotonic()
-                    if slot is not None and self.is_warmed(runtime_id):
-                        if now - slot.warmed_at >= self._ttl:
-                            await self._refresh(runtime_id)
-                    elif slot is None or now >= slot.next_retry_at:
-                        await self.warm(runtime_id)
                 await self._release_idle_leases()
         except asyncio.CancelledError:
             pass
@@ -334,16 +317,6 @@ class AcpConnectionPool:
                 logger.info("Released %d idle ACP leases", len(released))
         except Exception:
             logger.debug("ACP idle lease sweep failed", exc_info=True)
-
-    async def _refresh(self, runtime_id: str) -> None:
-        slot = self._slots.get(runtime_id)
-        if slot is None:
-            return
-        async with slot.warming:
-            previous = slot.detach()
-            if previous is not None:
-                await _safe_shutdown(previous)
-        await self.warm(runtime_id)
 
     async def invalidate(self, runtime_id: str) -> None:
         slot = self._slots.get(runtime_id)
@@ -397,38 +370,12 @@ def set_acp_pool(pool: AcpConnectionPool | None) -> None:
     _pool = pool
 
 
-def _ready_acp_runtime_ids() -> list[str]:
-    try:
-        from gideon.integrations.llm.registry import get_default_registry
-
-        entries = get_default_registry().list_entries()
-        return [entry.name for entry in entries if entry.type == "acp_agent"]
-    except Exception:
-        logger.debug("ACP runtime enumeration failed", exc_info=True)
-        return []
-
-
 def _build_acp_provider(runtime_id: str) -> ModelProvider:
     from gideon.integrations.llm.registry import get_default_registry
 
     registry = get_default_registry()
     options: dict = {**(registry.get_entry(runtime_id).options or {}), "model": "auto"}
     return registry.build(runtime_id, **options)
-
-
-async def _acp_runtime_ready(runtime_id: str) -> bool:
-    try:
-        from gideon.engine.agents.registry import get_agent_provider_class
-        from gideon.integrations.llm.registry import get_default_registry
-
-        provider = get_agent_provider_class("acp")
-        if provider is None:
-            return False
-        options = get_default_registry().get_entry(runtime_id).options or {}
-        return bool((await provider.probe_readiness(dict(options))).ready)
-    except Exception:
-        logger.debug("ACP runtime %s readiness failed", runtime_id, exc_info=True)
-        return False
 
 
 async def init_acp_pool(start_sem: asyncio.Semaphore) -> AcpConnectionPool:
@@ -438,12 +385,8 @@ async def init_acp_pool(start_sem: asyncio.Semaphore) -> AcpConnectionPool:
     pool = AcpConnectionPool(
         provider_builder=_build_acp_provider,
         start_sem=start_sem,
-        readiness_check=_acp_runtime_ready,
     )
     set_acp_pool(pool)
-    runtimes = _ready_acp_runtime_ids()
-    if runtimes:
-        pool._spawn_bg(pool.warm_all(runtimes))
     pool.start_health_loop()
     return pool
 

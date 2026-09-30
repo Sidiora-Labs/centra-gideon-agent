@@ -221,6 +221,21 @@ function Chip({ children, tone = 'neutral' }: { children: React.ReactNode; tone?
 function RunnerRowItem({ row }: { row: RunnerRow }) {
   const h = row.health
   const caps = row.capabilities
+  const [testing, setTesting] = useState(false)
+  const [testMessage, setTestMessage] = useState('')
+  const ownerGrant = (row as RunnerRow & { owner_grant?: { allowed: boolean } }).owner_grant
+  const test = async () => {
+    setTesting(true)
+    setTestMessage('')
+    try {
+      const result = await api.testModelProvider(row.runtime_id)
+      setTestMessage(result.message || (result.ok ? 'Runtime test passed.' : 'Runtime test failed.'))
+    } catch (error) {
+      setTestMessage((error as Error)?.message || String(error))
+    } finally {
+      setTesting(false)
+    }
+  }
   return (
     <li className="px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -234,7 +249,12 @@ function RunnerRowItem({ row }: { row: RunnerRow }) {
         {
 }
         {row.lease !== null && <Chip>held by {row.lease.holder}</Chip>}
+        <Button size="xs" variant="secondary" loading={testing}
+          disabled={row.source === 'user' && ownerGrant?.allowed === false}
+          disabledReason={row.source === 'user' && ownerGrant?.allowed === false ? 'Approve this runner before testing it' : undefined}
+          onClick={() => { void test() }}>Test</Button>
       </div>
+      {testMessage && <p data-type="caption" className="mt-2 text-on-surface-low" role="status">{testMessage}</p>}
       {
 }
       {row.lease !== null && (

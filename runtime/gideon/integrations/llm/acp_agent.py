@@ -113,36 +113,54 @@ class AcpAgentProvider(AcpToolOutcomesMixin, ModelProvider, AgentProvider):
 
     async def explicit_self_test(self) -> ReadinessStatus:
         """Run one explicit, model-bound inference and require usable text output."""
+        status, _ = await self.explicit_self_test_with_snapshot()
+        return status
+
+    async def explicit_self_test_with_snapshot(
+        self,
+    ) -> tuple[ReadinessStatus, dict[str, Any]]:
+        """Return the normal Test verdict and its same-session discovery snapshot."""
         from gideon.engine.agents.provider import ReadinessStatus
 
         model = str(self._model or "").strip()
         if not model:
-            return ReadinessStatus(
-                False, "no_model", "Choose a model for this provider before testing it."
+            return (
+                ReadinessStatus(
+                    False,
+                    "no_model",
+                    "Choose a model for this provider before testing it.",
+                ),
+                {},
             )
 
         from gideon.extensions.providers.failure_copy import relayed_failure_copy
         from gideon.integrations.llm.events import EVENT_COMPLETE, EVENT_TEXT_CHUNK
 
         output = False
+        snapshot: dict[str, Any] = {}
         try:
             await self.start()
+            snapshot = dict(self.session_snapshot or {})
             async for event in self.stream("Reply with a short confirmation."):
                 if event.kind in {EVENT_TEXT_CHUNK, EVENT_COMPLETE} and str(
                     getattr(event, "text", "") or ""
                 ).strip():
                     output = True
             if output:
-                return ReadinessStatus(
-                    True, "ready", f"{model} returned usable text."
+                return (
+                    ReadinessStatus(True, "ready", f"{model} returned usable text."),
+                    snapshot,
                 )
-            return ReadinessStatus(
-                False,
-                "no_output",
-                "The selected provider/model returned no usable text. Check sign-in and model access, then run Test again.",
+            return (
+                ReadinessStatus(
+                    False,
+                    "no_output",
+                    "The selected provider/model returned no usable text. Check sign-in and model access, then run Test again.",
+                ),
+                snapshot,
             )
         except Exception as exc:  # noqa: BLE001 — keep provider details redacted
-            return ReadinessStatus(False, "error", relayed_failure_copy(exc))
+            return ReadinessStatus(False, "error", relayed_failure_copy(exc)), snapshot
         finally:
             try:
                 await self.shutdown()
@@ -176,7 +194,11 @@ class AcpAgentProvider(AcpToolOutcomesMixin, ModelProvider, AgentProvider):
 
     @classmethod
     def agents_from_snapshot(
-        cls, options: dict, snapshot: dict
+        cls,
+        options: dict,
+        snapshot: dict,
+        *,
+        record_capabilities: bool = True,
     ) -> list[DiscoveredAgent]:
         from gideon.engine.agents.provider import DiscoveredAgent
         from gideon.integrations.acp.dialect import get_dialect
@@ -189,23 +211,24 @@ class AcpAgentProvider(AcpToolOutcomesMixin, ModelProvider, AgentProvider):
             snapshot or {}
         )
         models, efforts = list(discovered.models), list(discovered.supported_efforts)
-        try:
-            from gideon.engine.agents.runners import record_capabilities
+        if record_capabilities:
+            try:
+                from gideon.engine.agents.runners import record_capabilities
 
-            axes = {
-                "models": models,
-                "modes": [str(row["id"]) for row in discovered.agents if row.get("id")],
-                "efforts": [
-                    str(row["value"])
-                    for row in efforts
-                    if isinstance(row, dict) and row.get("value")
-                ],
-            }
-            record_capabilities(runtime, **axes)
-        except Exception:
-            logger.debug(
-                "Runner capability recording failed for %s", runtime, exc_info=True
-            )
+                axes = {
+                    "models": models,
+                    "modes": [str(row["id"]) for row in discovered.agents if row.get("id")],
+                    "efforts": [
+                        str(row["value"])
+                        for row in efforts
+                        if isinstance(row, dict) and row.get("value")
+                    ],
+                }
+                record_capabilities(runtime, **axes)
+            except Exception:
+                logger.debug(
+                    "Runner capability recording failed for %s", runtime, exc_info=True
+                )
 
         def make_agent(row: dict) -> DiscoveredAgent:
             raw_id, title = str(row.get("id") or ""), str(row.get("label") or "")

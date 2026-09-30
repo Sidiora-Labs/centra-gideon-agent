@@ -213,10 +213,8 @@ def test_discovery_unknown_runtime_404():
         reset_default_registry()
 
 
-def test_discovery_lists_agents_and_caches(monkeypatch):
-    """Discovery surfaces discover_agents output + caches it (2nd call cached)."""
-    from gideon.engine.agents.provider import DiscoveredAgent
-    from gideon.engine.agents.registry import get_agent_provider_class
+def test_agent_read_is_cache_only_until_explicit_test():
+    """A cache miss reports untested and never invokes live ACP discovery."""
     from gideon.interfaces.dashboard.handlers import providers as prov_mod
 
     _fresh_registry()
@@ -233,45 +231,22 @@ def test_discovery_lists_agents_and_caches(monkeypatch):
                 declared_capabilities=ACP_AGENT_CAPABILITY.capabilities,
             )
         )
-        calls = {"n": 0}
-
-        async def fake_discover(cls, options):
-            calls["n"] += 1
-            assert options.get("runtime_id") == "acp:test-cli"
-            assert options.get("runtime_label") == "Test Cli"
-            return [
-                DiscoveredAgent(
-                    id="acp:test-cli/gpu-dev",
-                    name="gpu-dev",
-                    runtime="acp:test-cli",
-                    provider_agent="gpu-dev",
-                    models=["auto"],
-                )
-            ]
-
-        acp_cls = get_agent_provider_class("acp")
-        monkeypatch.setattr(acp_cls, "discover_agents", classmethod(fake_discover))
-
         status, data = _call_agents("acp:test-cli")
-        assert status == 200 and data["cached"] is False
-        assert [a["id"] for a in data["agents"]] == ["acp:test-cli/gpu-dev"]
-        assert calls["n"] == 1
+        assert status == 200
+        assert data["cached"] is False
+        assert data["state"] == "untested"
+        assert data["agents"] == []
 
         status, data2 = _call_agents("acp:test-cli")
-        assert data2["cached"] is True and calls["n"] == 1
-        assert [a["id"] for a in data2["agents"]] == ["acp:test-cli/gpu-dev"]
-
-        status, data3 = _call_agents("acp:test-cli", query="refresh=1")
-        assert data3["cached"] is False and calls["n"] == 2
+        assert status == 200 and data2["state"] == "untested"
+        assert data2["agents"] == []
     finally:
         prov_mod._discovery_cache.clear()
         reset_default_registry()
 
 
-def test_discovery_uses_pool_snapshot_without_spawn(monkeypatch):
-    """When a warmed pool connection holds a live snapshot, discovery maps it
-    directly (agents_from_snapshot) and never calls the spawning discover_agents."""
-    from gideon.engine.agents.registry import get_agent_provider_class
+def test_agent_read_does_not_launch_even_when_pool_exists():
+    """A stale cache miss remains read-only even when a pool is available."""
     from gideon.integrations.acp import connection_pool as cp
     from gideon.interfaces.dashboard.handlers import providers as prov_mod
 
@@ -290,32 +265,12 @@ def test_discovery_uses_pool_snapshot_without_spawn(monkeypatch):
             )
         )
 
-        class _FakePool:
-            def snapshot(self, runtime_id):
-                if runtime_id == "acp:test-cli":
-                    return {
-                        "modes": {
-                            "availableModes": [{"id": "gpu-dev", "name": "gpu-dev"}]
-                        },
-                        "models": {"availableModels": [{"modelId": "auto"}]},
-                    }
-                return None
-
-        cp.set_acp_pool(_FakePool())
-
-        async def boom(cls, options):
-            raise AssertionError(
-                "discover_agents should not spawn when pool snapshot exists"
-            )
-
-        monkeypatch.setattr(
-            get_agent_provider_class("acp"), "discover_agents", classmethod(boom)
-        )
+        cp.set_acp_pool(None)
 
         status, data = _call_agents("acp:test-cli")
         assert status == 200
-        assert [a["id"] for a in data["agents"]] == ["acp:test-cli/gpu-dev"]
-        assert data["agents"][0]["provider_agent"] == "gpu-dev"
+        assert data["agents"] == []
+        assert data["state"] == "untested"
     finally:
         cp.set_acp_pool(None)
         prov_mod._discovery_cache.clear()
