@@ -13,10 +13,10 @@ from uuid import uuid4
 from gideon.core.cancellation import terminate_and_reap
 from gideon.security.sandbox import (
     PROFILE_TOOL,
-    build_child_env,
     create_subprocess_limited,
     wrap_argv,
 )
+from gideon.security.net.git import git_argv, git_child_env
 
 from .projects import ProjectService
 from .store import ConflictError
@@ -36,30 +36,8 @@ class GitService:
         os.chmod(self.db_path, 0o600)
 
     async def _git(self, path, *args):
-        env = {
-            k: v
-            for k, v in build_child_env(site="workspace-git").items()
-            if not k.startswith("GIT_")
-        }
-        env.update(
-            GIT_CONFIG_NOSYSTEM="1",
-            GIT_CONFIG_GLOBAL="/dev/null",
-            GIT_TERMINAL_PROMPT="0",
-            GIT_OPTIONAL_LOCKS="0",
-        )
         argv, disposable = wrap_argv(
-            [
-                "git",
-                "-c",
-                "core.fsmonitor=false",
-                "-c",
-                "core.hooksPath=/dev/null",
-                "-c",
-                "protocol.allow=never",
-                "-c",
-                "submodule.recurse=false",
-                *args,
-            ]
+            git_argv(["-c", "submodule.recurse=false", *args])
         )
         proc = None
         try:
@@ -67,7 +45,7 @@ class GitService:
                 *argv,
                 profile=PROFILE_TOOL,
                 cwd=str(path),
-                env=env,
+                env=git_child_env(site="workspace-git"),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,

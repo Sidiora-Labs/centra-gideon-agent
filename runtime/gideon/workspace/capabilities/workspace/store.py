@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from gideon.security.net.git import git_argv, git_child_env
+
 
 class ConflictError(ValueError):
     pass
@@ -55,15 +57,10 @@ class SnapshotStore:
 
     def _git(self, path, *args):
         result = subprocess.run(
-            ["git", "-c", "core.fsmonitor=false", "-C", str(path), *args],
+            git_argv(["-C", str(path), *args]),
             capture_output=True,
             timeout=10,
-            env={
-                "PATH": os.environ.get("PATH", ""),
-                "GIT_CONFIG_NOSYSTEM": "1",
-                "GIT_CONFIG_GLOBAL": os.devnull,
-                "GIT_OPTIONAL_LOCKS": "0",
-            },
+            env=git_child_env(site="workspace-snapshot-git"),
         )
         if result.returncode:
             raise ValueError("Workspace Git context is unavailable")
