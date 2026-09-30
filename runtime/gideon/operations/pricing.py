@@ -10,7 +10,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 _PRICING_FILE = Path(__file__).resolve().parent / "model_pricing.json"
-_PER = 1000000.0
 _PROVIDER_PREFIX = re.compile("^(?:[a-z]{2,6}\\.)?anthropic\\.")
 _VERSION_TAIL = re.compile("-(\\d+)-(\\d+)(?=-\\d{8}|$)")
 
@@ -40,6 +39,8 @@ def _canonical(model: str) -> str:
 
 @dataclass(frozen=True)
 class PriceTable:
+    """Read-only compatibility view over the bundled model catalog."""
+
     rows: dict
 
     def lookup(self, model):
@@ -64,24 +65,47 @@ def _rates(model: str) -> dict[str, float] | None:
     return PriceTable(_PRICES).lookup(model)
 
 
+def builtin_rate(model: str) -> dict[str, float] | None:
+    """Return the bundled row in the canonical routing-rate field names."""
+    row = _rates(model)
+    if row is None:
+        return None
+    return {
+        "in_per_mtok": float(row.get("in", 0.0)),
+        "out_per_mtok": float(row.get("out", 0.0)),
+        "cache_read_per_mtok": float(row.get("cache_read", row.get("in", 0.0))),
+        "cache_write_per_mtok": float(row.get("cache_write", 0.0)),
+    }
+
+
 @dataclass(frozen=True)
 class TokenCharge:
+    """Compatibility value object that delegates charge math to ``ModelRate``."""
+
     prompt: int = 0
     response: int = 0
     cached_read: int = 0
     cached_write: int = 0
 
     def at(self, row):
-        input_rate = float(row.get("in", 0.0))
-        prices = (
-            input_rate,
-            float(row.get("out", 0.0)),
-            float(row.get("cache_read", input_rate)),
-            float(row.get("cache_write", 0.0)),
+        from gideon.engine.routing.rates import ModelRate
+
+        rate = ModelRate.from_obj(
+            {
+                "in_per_mtok": row.get("in", 0.0),
+                "out_per_mtok": row.get("out", 0.0),
+                "cache_read_per_mtok": row.get("cache_read", row.get("in", 0.0)),
+                "cache_write_per_mtok": row.get("cache_write", 0.0),
+            }
         )
-        tokens = (self.prompt, self.response, self.cached_read, self.cached_write)
-        charges = [(count or 0) * price for count, price in zip(tokens, prices)]
-        return round((charges[0] + charges[1] + charges[2] + charges[3]) / _PER, 6)
+        if rate is None:
+            return 0.0
+        return rate.cost(
+            input_tokens=self.prompt,
+            output_tokens=self.response,
+            cache_read_tokens=self.cached_read,
+            cache_creation_tokens=self.cached_write,
+        )
 
 
 def estimate_cost(
@@ -90,34 +114,54 @@ def estimate_cost(
     output_tokens: int = 0,
     cache_read_tokens: int = 0,
     cache_creation_tokens: int = 0,
+    provider: str = "",
+    reported_cost_usd: float | None = None,
+    provider_reported: bool | None = None,
 ) -> float:
-    row = _rates(model)
-    if row is None:
-        return 0.0
-    return TokenCharge(
-        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
-    ).at(row)
+    from gideon.engine.routing.rates import resolve_effective_price
+
+    result = resolve_effective_price(
+        provider,
+        model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+        reported_cost_usd=reported_cost_usd,
+        provider_reported=provider_reported,
+    )
+    return float(result.cost_usd or 0.0)
 
 
-def has_pricing(model: str) -> bool:
-    return _rates(model) is not None
+def has_pricing(model: str, *, provider: str = "") -> bool:
+    from gideon.engine.routing.rates import rate_for
+
+    return rate_for(provider, model) is not None
 
 
 def cache_savings_usd(
     model: str,
     *,
+    provider: str = "",
     cache_read_tokens: int = 0,
     cache_creation_tokens: int = 0,
     input_tokens: int = 0,
     output_tokens: int = 0,
 ) -> float | None:
-    if _rates(model) is None:
+    if not has_pricing(model, provider=provider):
         return None
     actual = estimate_cost(
-        model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
+        model,
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_creation_tokens,
+        provider=provider,
     )
     uncached = (
         (input_tokens or 0) + (cache_read_tokens or 0) + (cache_creation_tokens or 0)
     )
-    hypothetical = estimate_cost(model, uncached, output_tokens, 0, 0)
+    hypothetical = estimate_cost(
+        model, uncached, output_tokens, 0, 0, provider=provider
+    )
     return round(hypothetical - actual, 6)

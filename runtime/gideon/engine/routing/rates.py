@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
@@ -30,6 +31,7 @@ LOCAL_PROVIDER_HINTS: frozenset[str] = frozenset(
     }
 )
 __all__ = [
+    "EffectiveModelPrice",
     "LOCAL_PROVIDER_HINTS",
     "RATES_VERSION",
     "ModelRate",
@@ -37,6 +39,7 @@ __all__ = [
     "is_local_provider_type",
     "load_overlay",
     "rate_for",
+    "resolve_effective_price",
     "ref_of",
     "save_overlay",
 ]
@@ -47,28 +50,67 @@ class ModelRate:
     in_per_mtok: float
     out_per_mtok: float
     source: str = field(default="", compare=False)
+    cache_read_per_mtok: float | None = None
+    cache_write_per_mtok: float | None = None
 
-    def cost(self, *, input_tokens: int = 0, output_tokens: int = 0) -> float:
+    def cost(
+        self,
+        *,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_creation_tokens: int = 0,
+    ) -> float:
         charges = (
             (input_tokens or 0) * self.in_per_mtok,
             (output_tokens or 0) * self.out_per_mtok,
+            (cache_read_tokens or 0)
+            * (
+                self.in_per_mtok
+                if self.cache_read_per_mtok is None
+                else self.cache_read_per_mtok
+            ),
+            (cache_creation_tokens or 0) * (self.cache_write_per_mtok or 0.0),
         )
-        return round((charges[0] + charges[1]) / 1_000_000.0, 6)
+        return round(sum(charges) / 1_000_000.0, 6)
 
     def to_dict(self) -> dict[str, float]:
-        return dict(
+        values = dict(
             zip(("in_per_mtok", "out_per_mtok"), (self.in_per_mtok, self.out_per_mtok))
         )
+        if self.cache_read_per_mtok is not None:
+            values["cache_read_per_mtok"] = self.cache_read_per_mtok
+        if self.cache_write_per_mtok is not None:
+            values["cache_write_per_mtok"] = self.cache_write_per_mtok
+        return values
 
     @classmethod
     def from_obj(cls, obj: Any, *, source: str = "") -> ModelRate | None:
         if isinstance(obj, ModelRate):
-            return ModelRate(obj.in_per_mtok, obj.out_per_mtok, source or obj.source)
+            return ModelRate(
+                obj.in_per_mtok,
+                obj.out_per_mtok,
+                source or obj.source,
+                obj.cache_read_per_mtok,
+                obj.cache_write_per_mtok,
+            )
         fields = ("in_per_mtok", "out_per_mtok")
         if isinstance(obj, dict) and any(name in obj for name in fields):
             try:
                 values = [float(obj.get(name, 0.0) or 0.0) for name in fields]
-                return cls(values[0], values[1], source=source)
+                cache_read = obj.get("cache_read_per_mtok", obj.get("cache_read"))
+                cache_write = obj.get("cache_write_per_mtok", obj.get("cache_write"))
+                return cls(
+                    values[0],
+                    values[1],
+                    source=source,
+                    cache_read_per_mtok=(
+                        None if cache_read is None else float(cache_read)
+                    ),
+                    cache_write_per_mtok=(
+                        None if cache_write is None else float(cache_write)
+                    ),
+                )
             except (ValueError, TypeError):
                 pass
         return None
@@ -205,14 +247,9 @@ def _app_default_rate(provider: str, model: str) -> ModelRate | None:
 
 def _builtin_rate(model: str) -> ModelRate | None:
     try:
-        from gideon.operations.pricing import estimate_cost, has_pricing
+        from gideon.operations.pricing import builtin_rate
 
-        if has_pricing(model):
-            amounts = [
-                float(estimate_cost(model, **{key: 1_000_000}))
-                for key in ("input_tokens", "output_tokens")
-            ]
-            return ModelRate(amounts[0], amounts[1], source="builtin")
+        return ModelRate.from_obj(builtin_rate(model), source="builtin")
     except Exception:
         logger.warning(
             "builtin pricing lookup failed for model %r", model, exc_info=True
@@ -251,11 +288,80 @@ def cost_for(
     *,
     input_tokens: int = 0,
     output_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
     home: Path | None = None,
 ) -> float | None:
+    result = resolve_effective_price(
+        provider,
+        model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+        home=home,
+    )
+    return result.cost_usd
+
+
+@dataclass(frozen=True)
+class EffectiveModelPrice:
+    provider: str
+    model: str
+    cost_usd: float | None
+    priced: bool
+    source: str
+    estimated: bool
+
+
+def resolve_effective_price(
+    provider: str,
+    model: str,
+    *,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+    reported_cost_usd: float | None = None,
+    provider_reported: bool | None = None,
+    home: Path | None = None,
+) -> EffectiveModelPrice:
+    """Resolve cost, priced state and provenance at the single spend seam.
+
+    ``provider_reported`` can explicitly validate a reported zero. Without that
+    signal, only a positive cost is inferred as provider-reported so an absent
+    default zero never masquerades as a billable observation.
+    """
+    try:
+        reported = float(reported_cost_usd) if reported_cost_usd is not None else None
+    except (TypeError, ValueError):
+        reported = None
+    reported_ok = (
+        provider_reported is True
+        or (provider_reported is None and reported is not None and reported > 0.0)
+    )
+    if (
+        reported_ok
+        and reported is not None
+        and math.isfinite(reported)
+        and reported >= 0
+    ):
+        return EffectiveModelPrice(
+            provider, model, reported, True, "provider_reported", False
+        )
     rate = rate_for(provider, model, home=home)
-    return (
-        None
-        if rate is None
-        else rate.cost(input_tokens=input_tokens, output_tokens=output_tokens)
+    if rate is None:
+        return EffectiveModelPrice(provider, model, None, False, "unknown", False)
+    return EffectiveModelPrice(
+        provider,
+        model,
+        rate.cost(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+        ),
+        True,
+        rate.source,
+        rate.source != "local",
     )

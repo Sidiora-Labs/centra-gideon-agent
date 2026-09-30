@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from gideon.core.atomic_write import atomic_write
-from gideon.engine.routing.rates import rate_for
+from gideon.engine.routing.rates import resolve_effective_price
 from gideon.engine.routing.stats import ref_of
 
 logger = logging.getLogger(__name__)
@@ -99,15 +99,15 @@ class RatePresence:
         key = provider, model
         if key not in self.cache:
             try:
-                rate = rate_for(provider, model, home=self.home)
+                rate = resolve_effective_price(provider, model, home=self.home)
             except Exception:
                 logger.debug(
                     "rate lookup failed for %s:%s", provider, model, exc_info=True
                 )
                 rate = None
             self.cache[key] = (
-                rate is None,
-                bool(rate is not None and getattr(rate, "source", "") == "local"),
+                rate is None or not rate.priced,
+                bool(rate is not None and rate.source == "local"),
             )
         return self.cache[key]
 

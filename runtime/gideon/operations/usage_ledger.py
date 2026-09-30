@@ -42,6 +42,8 @@ class TurnUsage:
     cache_creation_tokens: int = 0
     cost_usd: float = 0.0
     priced: bool = True
+    estimated: bool = True
+    price_source: str = "unknown"
     model_calls: int | None = None
     usage_status: str = "absent"
     duration_ms: int = 0
@@ -459,24 +461,38 @@ class EventAccounting:
     model: str
     estimate: bool
 
-    def values(self):
-        from gideon.operations.pricing import estimate_cost, has_pricing
+    def values(self, provider):
+        from gideon.engine.routing.rates import resolve_effective_price
 
         counts = {key: int(getattr(self.event, key, 0) or 0) for key in _TOKEN_FIELDS}
         cost = float(getattr(self.event, "cost_usd", 0.0) or 0.0)
-        if not cost and self.model and self.estimate:
-            cost = estimate_cost(self.model, **counts)
-        return counts, cost, has_pricing
+        metadata = getattr(self.event, "tool_meta", None)
+        metadata = metadata if isinstance(metadata, dict) else {}
+        reported = metadata.get("usage_reported")
+        provider_reported = (
+            bool(reported)
+            if reported is not None
+            else bool(cost > 0.0)
+        )
+        price = resolve_effective_price(
+            provider,
+            self.model,
+            **counts,
+            reported_cost_usd=cost,
+            provider_reported=provider_reported,
+        )
+        return counts, price
 
     def record(self, source, session_key, agent, provider):
-        counts, cost, has_pricing = self.values()
+        counts, price = self.values(provider)
         metadata = getattr(self.event, "tool_meta", None)
         metadata = metadata if isinstance(metadata, dict) else {}
         calls = metadata.get("model_calls")
         calls = calls if isinstance(calls, int) and calls >= 0 else None
         status = metadata.get("usage_status")
         if status not in {"measured", "partial", "absent", "no_model_calls"}:
-            status = "measured" if any(counts.values()) or cost else "absent"
+            status = "measured" if any(counts.values()) or price.cost_usd else "absent"
+        cost = float(price.cost_usd or 0.0)
         return TurnUsage(
             ts=datetime.now(timezone.utc).isoformat(),
             session_key=session_key,
@@ -486,9 +502,9 @@ class EventAccounting:
             model=self.model,
             **counts,
             cost_usd=cost,
-            priced=status == "no_model_calls" or (
-                status == "measured" and (bool(cost) or has_pricing(self.model))
-            ),
+            priced=status == "no_model_calls" or (status == "measured" and price.priced),
+            estimated=price.estimated,
+            price_source=price.source,
             model_calls=calls,
             usage_status=status,
             duration_ms=int(getattr(self.event, "duration_ms", 0) or 0),

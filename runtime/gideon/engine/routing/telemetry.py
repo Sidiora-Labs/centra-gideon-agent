@@ -46,7 +46,7 @@ class EfficiencyPoint:
         return cls(
             row["success"],
             latency if latency > 0 else float("inf"),
-            row["avg_cost_usd"],
+            row["avg_cost_usd"] if row.get("priced", False) else float("inf"),
         )
 
     def dominates(self, other):
@@ -82,6 +82,8 @@ def _project(ref, estimate, samples):
     ):
         row[target] = round(float(estimate.get(source, 0.0)), precision)
     row.update(p50_ms=_percentile(ordered, 50), p95_ms=_percentile(ordered, 95))
+    row["priced"] = bool(estimate.get("priced", False))
+    row["price_source"] = estimate.get("price_source", "")
     return row
 
 

@@ -372,7 +372,8 @@ class ModelCallGuard(ModelProvider):
                 if event.kind == EVENT_COMPLETE and not recorded:
                     tokens_in = int(getattr(event, "input_tokens", 0) or 0)
                     tokens_out = int(getattr(event, "output_tokens", 0) or 0)
-                    dollars = self._estimate_dollars(event, tokens_in, tokens_out)
+                    price = self._estimate_dollars(event, tokens_in, tokens_out)
+                    dollars = float(price.cost_usd or 0.0)
                     self._breaker.record_success()
                     self._meter.charge(
                         tokens_in + tokens_out,
@@ -389,6 +390,9 @@ class ModelCallGuard(ModelProvider):
                         True,
                         strategy,
                         dollars=dollars,
+                        priced=price.priced,
+                        price_source=price.source,
+                        estimated=price.estimated,
                     )
                     recorded = True
                 _workflow_stream_observation(
@@ -397,9 +401,7 @@ class ModelCallGuard(ModelProvider):
                     event=event,
                     cost_usd=(dollars if event.kind == EVENT_COMPLETE else None),
                     cost_reported=(
-                        bool(getattr(event, "tool_meta", {}).get("usage_reported", False))
-                        or float(getattr(event, "cost_usd", 0.0) or 0.0) > 0.0
-                        or (event.kind == EVENT_COMPLETE and dollars > 0.0)
+                        price.source == "provider_reported"
                         if event.kind == EVENT_COMPLETE
                         else None
                     ),
@@ -458,28 +460,31 @@ class ModelCallGuard(ModelProvider):
 
     def _estimate_dollars(
         self, event: LLMEvent, tokens_in: int, tokens_out: int
-    ) -> float:
-        """Dollar estimate for one completed call. Provider-reported ``cost_usd``
-        wins when present (non-zero); otherwise the static pricing table
-        (``pricing.estimate_cost``) derives it — 0.0 for an unpriced model, an
-        honest 'unknown', never a guess."""
-        reported = float(getattr(event, "cost_usd", 0.0) or 0.0)
-        if reported > 0.0:
-            return reported
-        try:
-            from gideon.operations.pricing import estimate_cost
+    ):
+        """Resolve cost and provenance once for the budget and audit paths."""
+        from gideon.engine.routing.rates import resolve_effective_price
 
-            return estimate_cost(
-                self._model,
-                input_tokens=tokens_in,
-                output_tokens=tokens_out,
-                cache_read_tokens=int(getattr(event, "cache_read_tokens", 0) or 0),
-                cache_creation_tokens=int(
-                    getattr(event, "cache_creation_tokens", 0) or 0
-                ),
-            )
-        except Exception:
-            return 0.0
+        metadata = getattr(event, "tool_meta", None)
+        metadata = metadata if isinstance(metadata, dict) else {}
+        reported = getattr(event, "cost_usd", None)
+        reported_signal = metadata.get("usage_reported")
+        provider_reported = (
+            bool(reported_signal)
+            if reported_signal is not None
+            else bool(reported and float(reported) > 0.0)
+        )
+        return resolve_effective_price(
+            self._provider_name,
+            self._model,
+            input_tokens=tokens_in,
+            output_tokens=tokens_out,
+            cache_read_tokens=int(getattr(event, "cache_read_tokens", 0) or 0),
+            cache_creation_tokens=int(
+                getattr(event, "cache_creation_tokens", 0) or 0
+            ),
+            reported_cost_usd=reported,
+            provider_reported=provider_reported,
+        )
 
     def _audit(
         self,
@@ -493,6 +498,9 @@ class ModelCallGuard(ModelProvider):
         strategy: str,
         *,
         dollars: float = 0.0,
+        priced: bool | None = None,
+        price_source: str = "",
+        estimated: bool = True,
     ) -> None:
         requested_temperature = getattr(
             self._inner, "sampling_temperature", None
@@ -532,7 +540,7 @@ class ModelCallGuard(ModelProvider):
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             dollars_est=round(dollars, 6),
-            estimated=True,
+            estimated=estimated,
             passed=passed,
             strategy=strategy,
             query_class=self._query_class,
@@ -541,6 +549,8 @@ class ModelCallGuard(ModelProvider):
             caller=current_caller(),
             extra=extra,
         )
+        if priced is not None:
+            rec.extra.update(priced=priced, price_source=price_source)
         record_attempt(rec)
         try:
             from gideon.core.config.loader import config_dir

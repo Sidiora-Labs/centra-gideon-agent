@@ -69,12 +69,32 @@ class AttemptEstimate:
     row: dict
 
     def accept(self, rec, now):
-        observations = (
+        observations = [
             ("success_rate", 1.0 if rec.get("passed") else 0.0, 4),
             ("avg_ms", float(rec.get("latency_ms", 0.0) or 0.0), 1),
-            ("avg_cost_usd", float(rec.get("dollars_est", 0.0) or 0.0), 6),
-        )
+        ]
         self.row["n"] = int(self.row.get("n", 0)) + 1
+        declared_price = rec.get("priced")
+        if declared_price is None:
+            extra = rec.get("extra")
+            declared_price = extra.get("priced") if isinstance(extra, dict) else None
+        prior_price = self.row.get("priced")
+        # Old rows have no price provenance. Keep their historical average intact,
+        # but never let it participate in a cheapest-model comparison as verified.
+        if self.row["n"] == 1:
+            self.row["priced"] = bool(declared_price)
+        else:
+            self.row["priced"] = bool(prior_price) and bool(declared_price)
+        extra = rec.get("extra")
+        source = rec.get("price_source")
+        if not source and isinstance(extra, dict):
+            source = extra.get("price_source")
+        if self.row["n"] == 1 or self.row["priced"]:
+            self.row["price_source"] = str(source or "unknown")
+        if declared_price:
+            observations.append(
+                ("avg_cost_usd", float(rec.get("dollars_est", 0.0) or 0.0), 6)
+            )
         for field, value, precision in observations:
             self.row[field] = (
                 value
