@@ -13,11 +13,24 @@ export function ReactWidgetFrame({ jsx, title = 'React widget', onReady, onError
   const frame = useRef<HTMLIFrameElement>(null)
   const [height, setHeight] = useState(240)
   const [error, setError] = useState<string | null>(null)
+  const [source, setSource] = useState<string | null>(null)
   const expansion = useWidgetExpansion()
   const vars = useMemo(() => readThemeVars(), [mode])
-  const source = useMemo(() => buildReactSrcdoc({ jsx, themeVars: vars, mode }), [jsx, vars, mode])
-  const url = useWidgetDocument(source)
-  useEffect(() => setError(null), [source])
+  useEffect(() => {
+    let current = true
+    setSource(null)
+    setError(null)
+    void buildReactSrcdoc({ jsx, themeVars: vars, mode }).then(document => {
+      if (current) setSource(document)
+    }).catch(failure => {
+      if (!current) return
+      const message = failure instanceof Error ? failure.message : String(failure)
+      setError(message)
+      onError?.(message)
+    })
+    return () => { current = false }
+  }, [jsx, vars, mode, onError])
+  const url = useWidgetDocument(source ?? '')
   useWidgetWire(frame, { onHeight: value => setHeight(Math.max(80, Math.min(640, value))), onReady, onError: message => { setError(message); onError?.(message) } })
   return <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
     className={expansion.expanded ? 'fixed inset-4 z-[var(--z-content)] flex flex-col rounded-2xl border border-outline-variant bg-surface shadow-2xl' : 'relative my-3 overflow-hidden rounded-xl border border-outline-variant bg-surface'}>
@@ -26,11 +39,12 @@ export function ReactWidgetFrame({ jsx, title = 'React widget', onReady, onError
         {error && <span className="inline-flex items-center gap-1 text-xs text-danger" title={error}><AlertTriangle size={12} />error</span>}
       </div>
       <div className="flex gap-1" role="group" aria-label={`${title} actions`}>
-        <SquareIconButton label="Open in new tab" icon={ExternalLink} onClick={() => exportWidget(source, title, 'tab')} />
+        <SquareIconButton label="Open in new tab" icon={ExternalLink} disabled={!source} onClick={() => source && exportWidget(source, title, 'tab')} />
         <SquareIconButton label={expansion.expanded ? 'Minimize' : 'Expand'} icon={expansion.expanded ? Minimize2 : Maximize2} onClick={expansion.toggle} />
       </div>
     </div>
-    {url && <iframe ref={frame} src={url} sandbox="allow-scripts" title={title} className="w-full border-none bg-surface" style={{ height: expansion.expanded ? 'calc(100% - 44px)' : height }} />}
+    {url && source && <iframe ref={frame} src={url} sandbox="allow-scripts" title={title} className="w-full border-none bg-surface" style={{ height: expansion.expanded ? 'calc(100% - 44px)' : height }} />}
+    {error && <div role="alert" className="border-t border-outline-variant bg-surface-high px-m py-s text-sm text-danger">React artifact could not be rendered: {error}</div>}
     {expansion.expanded && <div className="fixed inset-0 -z-10 bg-black/55 backdrop-blur-sm" onClick={expansion.close} />}
   </motion.div>
 }

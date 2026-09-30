@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { api, type Artifact } from '../../shared/data/api'
 import { artifactKindMeta, relTime } from '../files/fileMeta'
-import { buildSrcdoc, buildReactSrcdoc, readThemeVars } from '../../shared/ui/widget/widgetSrcdoc'
+import { buildSelfContainedSrcdoc, buildReactSrcdoc, readThemeVars } from '../../shared/ui/widget/widgetSrcdoc'
 import { resolveContentType, isSandboxed } from '../../shared/ui/content/contentTypes'
 import { TileButton } from '../../shared/ui/TileButton'
 import { ArtifactCard as DonorArtifactCard } from '../../shared/vendor/assistant-ui/elements/artifact-card'
@@ -66,22 +66,35 @@ function KindTile({ icon: Icon, tone }: { icon: LucideIcon; tone: string }) {
 }
 
 function LivePreview({ art, content, mode }: { art: Artifact; content: string; mode: 'dark' | 'light' }) {
-  const srcdoc = useMemo(() => {
+  const [srcdoc, setSrcdoc] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let current = true
+    setSrcdoc(null)
+    setError(null)
     const themeVars = readThemeVars()
-    if (art.kind === 'react') return buildReactSrcdoc({ jsx: content, themeVars, mode })
     const html = art.kind === 'svg' ? `<div style="display:grid;place-items:center;height:100vh">${content}</div>` : content
-    return buildSrcdoc({ html, themeVars, mode })
+    const document = art.kind === 'react'
+      ? buildReactSrcdoc({ jsx: content, themeVars, mode })
+      : buildSelfContainedSrcdoc({ html, themeVars, mode })
+    void document.then(value => {
+      if (current) setSrcdoc(value)
+    }).catch(failure => {
+      if (current) setError(failure instanceof Error ? failure.message : String(failure))
+    })
+    return () => { current = false }
   }, [art.kind, content, mode])
+  if (error) return <div role="alert" className="grid h-full w-full place-items-center p-3 text-center text-xs text-danger">Preview could not be rendered: {error}</div>
   return (
     <div className="pointer-events-none h-full w-full overflow-hidden" aria-hidden>
-      <iframe
+      {srcdoc && <iframe
         srcDoc={srcdoc}
         sandbox="allow-scripts"
         tabIndex={-1}
         title={`Preview of ${art.name}`}
         className="origin-top-left border-none bg-surface"
         style={{ width: `${100 / PREVIEW_SCALE}%`, height: `${100 / PREVIEW_SCALE}%`, transform: `scale(${PREVIEW_SCALE})` }}
-      />
+      />}
     </div>
   )
 }

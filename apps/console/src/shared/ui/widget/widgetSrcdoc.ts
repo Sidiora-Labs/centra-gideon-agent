@@ -1,4 +1,11 @@
 import { sanitizeCssValue } from './cssSanitize'
+import { compile as compileTailwind } from 'tailwindcss'
+import * as typescript from 'typescript'
+import tailwindIndex from 'gideon:widget-runtime/tailwindcss/index.js'
+import reactSource from 'gideon:widget-runtime/react/react.production.js'
+import reactDomSource from 'gideon:widget-runtime/react-dom/react-dom.production.js'
+import reactDomClientSource from 'gideon:widget-runtime/react-dom/react-dom-client.production.js'
+import schedulerSource from 'gideon:widget-runtime/scheduler/scheduler.production.js'
 
 const themeAliases: Record<string, string> = {
   '--bg': '--color-canvas', '--bg-elevated': '--color-surface-high', '--bg-hover': '--color-surface-highest',
@@ -145,16 +152,9 @@ export const EDIT_MODE_SCRIPT_SOURCE = String.raw`(function () {
 })();`
 
 const script = (source: string, attributes = '') => `<script${attributes}>\n${source}\n<\/script>`
-const externalScript = (source: string, crossorigin = false) => `<script${crossorigin ? ' crossorigin' : ''} src="${source}"><\/script>`
-const libraries = [externalScript('https://cdn.tailwindcss.com'), script("tailwind.config={darkMode:'class'}")]
-const reactLibraries = [
-  externalScript('https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js', true),
-  externalScript('https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js', true),
-  externalScript('https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js'),
-]
 const policy = [
-  "default-src 'none'", "script-src 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
-  "style-src 'unsafe-inline' https://cdn.tailwindcss.com", "img-src data: blob:", "font-src data:", "connect-src 'none'", "form-action 'none'", "base-uri 'none'",
+  "default-src 'none'", "script-src 'unsafe-inline'",
+  "style-src 'unsafe-inline'", "img-src data: blob:", "font-src data:", "connect-src 'none'", "form-action 'none'", "base-uri 'none'",
 ].join('; ') + ';'
 
 function stylesheet(vars: Record<string, string>, mode: 'dark' | 'light', transparent: boolean) {
@@ -168,10 +168,30 @@ body{margin:0;padding:16px;font:14px/1.5 system-ui,-apple-system,BlinkMacSystemF
 h1,h2,h3,h4{line-height:1.25;margin:0 0 .4em}p{margin:0 0 .75em}img,svg,canvas,video{max-width:100%;height:auto}table{border-collapse:collapse}a{color:var(--accent)}${theme}`
 }
 
-function documentSource(body: string, vars: Record<string, string>, mode: 'dark' | 'light', transparent: boolean, extra: string[] = []) {
+function documentSource(body: string, vars: Record<string, string>, mode: 'dark' | 'light', transparent: boolean, extra: string[] = [], utilities = '') {
   return ['<!DOCTYPE html>', '<html>', '<head>', '<meta charset="utf-8">', '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    `<meta http-equiv="Content-Security-Policy" content="${policy}">`, ...libraries, ...extra,
-    `<style>\n${stylesheet(vars, mode, transparent)}\n</style>`, '</head>', `<body class="${mode}">`, body, '</body>', '</html>'].join('\n')
+    `<meta http-equiv="Content-Security-Policy" content="${policy}">`, ...extra,
+    `<style>\n${utilities}\n${stylesheet(vars, mode, transparent)}\n</style>`, '</head>', `<body class="${mode}">`, body, '</body>', '</html>'].join('\n')
+}
+
+function createTailwindCompiler() {
+  return compileTailwind(`${tailwindIndex}\n@custom-variant dark (&:where(.dark, .dark *));`, { base: '' })
+}
+
+function extractTailwindCandidates(source: string): string[] {
+  const candidates = new Set<string>()
+  const classAttribute = /\bclass(?:Name)?\s*=\s*(?:\{\s*)?(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g
+  for (const match of source.matchAll(classAttribute)) {
+    for (const candidate of (match[1] ?? match[2] ?? match[3] ?? '').split(/\s+/)) {
+      if (candidate) candidates.add(candidate)
+    }
+  }
+  return [...candidates]
+}
+
+async function compiledStyles(source: string): Promise<string> {
+  const compiler = await createTailwindCompiler()
+  return compiler.build(extractTailwindCandidates(source))
 }
 
 export interface BuildSrcdocOpts {
@@ -186,6 +206,12 @@ export interface BuildSrcdocOpts {
 export function buildSrcdoc({ html, themeVars, mode, includeHost = true, transparentBody = false, editMode = false }: BuildSrcdocOpts): string {
   const runtime = [editMode ? script(EDIT_MODE_SCRIPT_SOURCE) : '', includeHost ? script(HOST_SCRIPT_SOURCE) : ''].filter(Boolean).join('\n')
   return documentSource(`${html}\n${runtime}`, themeVars, mode, transparentBody)
+}
+
+export async function buildSelfContainedSrcdoc(opts: BuildSrcdocOpts): Promise<string> {
+  const { html, themeVars, mode, includeHost = true, transparentBody = false, editMode = false } = opts
+  const runtime = [editMode ? script(EDIT_MODE_SCRIPT_SOURCE) : '', includeHost ? script(HOST_SCRIPT_SOURCE) : ''].filter(Boolean).join('\n')
+  return documentSource(`${html}\n${runtime}`, themeVars, mode, transparentBody, [], await compiledStyles(html))
 }
 
 const reactHarness = String.raw`(function () {
@@ -227,8 +253,37 @@ const reactHarness = String.raw`(function () {
 })();`
 
 export interface BuildReactSrcdocOpts { jsx: string; themeVars: Record<string, string>; mode: 'dark' | 'light' }
-export function buildReactSrcdoc({ jsx, themeVars, mode }: BuildReactSrcdocOpts): string {
-  const source = jsx.replace(/<\/script\s*>/gi, '<\\/script>')
-  const attributes = ' type="text/babel" data-presets="react"'
-  return documentSource(['<div id="root"></div>', script(source, attributes), script(reactHarness, attributes)].join('\n'), themeVars, mode, false, reactLibraries)
+export async function buildReactSrcdoc({ jsx, themeVars, mode }: BuildReactSrcdocOpts): Promise<string> {
+  const transpiled = typescript.transpileModule(jsx, {
+    reportDiagnostics: true,
+    compilerOptions: {
+      jsx: typescript.JsxEmit.React,
+      jsxFactory: 'React.createElement',
+      jsxFragmentFactory: 'React.Fragment',
+      target: typescript.ScriptTarget.ES2022,
+      module: typescript.ModuleKind.ESNext,
+    },
+  })
+  const syntaxErrors = transpiled.diagnostics?.filter(diagnostic => diagnostic.category === typescript.DiagnosticCategory.Error) ?? []
+  if (syntaxErrors.length) {
+    throw new Error(syntaxErrors.map(diagnostic => typescript.flattenDiagnosticMessageText(diagnostic.messageText, '\n')).join('\n'))
+  }
+  const sourceFile = typescript.createSourceFile('widget.tsx', jsx, typescript.ScriptTarget.ES2022, true, typescript.ScriptKind.TSX)
+  let hasDynamicModuleSyntax = false
+  const inspectModuleSyntax = (node: typescript.Node) => {
+    if ((typescript.isCallExpression(node) && node.expression.kind === typescript.SyntaxKind.ImportKeyword) ||
+      (typescript.isMetaProperty(node) && node.keywordToken === typescript.SyntaxKind.ImportKeyword)) {
+      hasDynamicModuleSyntax = true
+    }
+    typescript.forEachChild(node, inspectModuleSyntax)
+  }
+  inspectModuleSyntax(sourceFile)
+  if (typescript.isExternalModule(sourceFile) || hasDynamicModuleSyntax) {
+    throw new Error('React widgets cannot use import or export syntax.')
+  }
+  const moduleText = (source: string) => source.replace(/<\/script/gi, '<\\/script')
+  const runtime = `(function () {\nvar cache = Object.create(null);\nfunction load(name, factory) { if (cache[name]) return cache[name].exports; var module = {exports:{}}; cache[name] = module; factory(module,module.exports,requireModule); return module.exports; }\nfunction requireModule(name) { if (name === 'react') return load('react', function(module,exports,require){${moduleText(reactSource)}\n}); if (name === 'react-dom') return load('react-dom', function(module,exports,require){${moduleText(reactDomSource)}\n}); if (name === 'react-dom/client') return load('react-dom/client', function(module,exports,require){${moduleText(reactDomClientSource)}\n}); if (name === 'scheduler') return load('scheduler', function(module,exports,require){${moduleText(schedulerSource)}\n}); throw new Error('Missing bundled runtime module: ' + name); }\nwindow.React = requireModule('react'); window.ReactDOM = requireModule('react-dom/client');\n})();`
+  const compiledSource = transpiled.outputText.replace(/<\/script\s*>/gi, '<\\/script>')
+  const body = ['<div id="root"></div>', script(runtime), script(compiledSource), script(reactHarness)].join('\n')
+  return documentSource(body, themeVars, mode, false, [], await compiledStyles(jsx))
 }

@@ -4,7 +4,7 @@ import { Bookmark, Download, ExternalLink, Maximize2, Minimize2, Pin, SlidersHor
 import { useMode } from '../../../app/shell/theme'
 import { SquareIconButton } from '../SquareIconButton'
 import { spring } from '../../theme/motion'
-import { buildSrcdoc, readThemeVars } from './widgetSrcdoc'
+import { buildSelfContainedSrcdoc, readThemeVars } from './widgetSrcdoc'
 import { effectiveWidgetSlug } from './widgetSlug'
 import { useWidgetWire } from './useWidgetActionBridge'
 import { useArtifactIteration } from './useArtifactIteration'
@@ -23,19 +23,33 @@ export function WidgetFrame({ html, title = 'Widget', slug, messageTs, widgetInd
   const identity = effectiveWidgetSlug({ explicitSlug: slug, messageTs, widgetIndex })
   const artifact = useWidgetArtifact(identity, title, html, streaming)
   const themeVars = useMemo(() => readThemeVars(), [mode])
-  const source = useMemo(() => buildSrcdoc({ html, themeVars, mode, includeHost: !streaming, transparentBody: true, editMode: !streaming }), [html, themeVars, mode, streaming])
-  const url = useWidgetDocument(source)
   const [railOpen, setRailOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [source, setSource] = useState<string | null>(null)
+  useEffect(() => {
+    let current = true
+    setSource(null)
+    setError(null)
+    if (!streaming) void buildSelfContainedSrcdoc({ html, themeVars, mode, includeHost: true, transparentBody: true, editMode: true }).then(document => {
+      if (current) setSource(document)
+    }).catch(failure => {
+      if (current) setError(failure instanceof Error ? failure.message : String(failure))
+    })
+    return () => { current = false }
+  }, [html, themeVars, mode, streaming])
+  const url = useWidgetDocument(source ?? '')
   const iteration = useArtifactIteration(frame, { source: html, target: { slug: identity, persistVersion: artifact.persistVersion } })
   useWidgetWire(frame, { forwardActions: true, onHeight: measure.receive, onError: setError, liveArtifact: artifact.liveArtifact, ...iteration.wire })
-  const exportSource = () => buildSrcdoc({ html, themeVars, mode, includeHost: false })
+  const exportSource = async (destination: 'tab' | 'download') => {
+    try { exportWidget(await buildSelfContainedSrcdoc({ html, themeVars, mode, includeHost: false }), title, destination) }
+    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)) }
+  }
   const actions = <div className="flex items-center gap-1" role="group" aria-label={`${title} actions`}>
     <SquareIconButton label={railOpen ? 'Close the iteration rail' : 'Iterate — tweak parameters or mark elements'} icon={SlidersHorizontal} on={railOpen} ariaExpanded={railOpen} onClick={() => setRailOpen(open => !open)} />
     <SquareIconButton label={artifact.saved ? 'Saved — click to remove' : 'Save as artifact'} children={<Bookmark size={14} fill={artifact.saved ? 'currentColor' : 'none'} />} on={artifact.saved} loading={artifact.savePending} onClick={artifact.toggleSave} />
     <SquareIconButton label={artifact.pinned ? 'Pinned to dashboard' : 'Pin to dashboard'} icon={Pin} on={artifact.pinned} disabled={artifact.pinned} loading={artifact.pinPending} onClick={artifact.pin} />
-    <SquareIconButton label="Download as HTML" icon={Download} onClick={() => exportWidget(exportSource(), title, 'download')} />
-    <SquareIconButton label="Open in new tab" icon={ExternalLink} onClick={() => exportWidget(exportSource(), title, 'tab')} />
+    <SquareIconButton label="Download as HTML" icon={Download} onClick={() => void exportSource('download')} />
+    <SquareIconButton label="Open in new tab" icon={ExternalLink} onClick={() => void exportSource('tab')} />
     <SquareIconButton label={expansion.expanded ? 'Minimize' : 'Expand'} icon={expansion.expanded ? Minimize2 : Maximize2} onClick={expansion.toggle} />
   </div>
   return <motion.div ref={wrapper} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
@@ -45,7 +59,7 @@ export function WidgetFrame({ html, title = 'Widget', slug, messageTs, widgetInd
       <span className="truncate text-xs font-medium text-on-surface">{title}</span>{!streaming && actions}
     </div>}
     <AnimatePresence mode="wait">
-      {streaming ? <BlueprintSkeleton key="blueprint" height={240} /> : url && <motion.iframe key="document" ref={frame} src={url} sandbox="allow-scripts" title={title}
+      {streaming ? <BlueprintSkeleton key="blueprint" height={240} /> : url && source && <motion.iframe key="document" ref={frame} src={url} sandbox="allow-scripts" title={title}
         className="w-full border-none bg-transparent" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={spring.effects}
         style={{ height: expansion.expanded ? 'calc(100% - 44px)' : measure.height }} />}
     </AnimatePresence>

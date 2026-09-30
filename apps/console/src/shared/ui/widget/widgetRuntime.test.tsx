@@ -1,13 +1,16 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { useRef } from 'react'
 import { parseWidgetBlocks, findGenUiBlock, widgetlessText } from './blocks'
-import { buildReactSrcdoc, buildSrcdoc, EDIT_MODE_SCRIPT_SOURCE, HOST_SCRIPT_SOURCE } from './widgetSrcdoc'
+import { buildReactSrcdoc, buildSelfContainedSrcdoc, buildSrcdoc, EDIT_MODE_SCRIPT_SOURCE, HOST_SCRIPT_SOURCE } from './widgetSrcdoc'
 import { composeWidgetActionText, finishActionText, MAX_ACTION_TEXT_BYTES, publishWidgetAction } from './actionTurn'
 import { readWidgetMessage, useWidgetActionBridge, useWidgetWire } from './useWidgetActionBridge'
 import { sanitizeCssValue } from './cssSanitize'
 import { deriveWidgetSlug, effectiveWidgetSlug } from './widgetSlug'
 import { standaloneWidgetDocument, useWidgetExpansion, widgetLayout } from './widgetFrameState'
+import { ReactWidgetFrame } from './ReactWidgetFrame'
 
 describe('widget content ownership', () => {
   it('keeps prose, attribute order and complete block boundaries', () => {
@@ -60,12 +63,41 @@ describe('iframe document envelope', () => {
     expect(source).not.toContain('--x:')
     expect(source).not.toContain('--bad:')
   })
-  it('keeps JSX script terminators inside the source script', () => {
-    const source = buildReactSrcdoc({ jsx: 'const App = () => "</script><script>escape()</script>"', themeVars: {}, mode: 'light' })
+  it('keeps JSX script terminators inside the source script', async () => {
+    const source = await buildReactSrcdoc({ jsx: 'const App = () => "</script><script>escape()</script>"', themeVars: {}, mode: 'light' })
     const document = new DOMParser().parseFromString(source, 'text/html')
-    expect(document.querySelectorAll('script[type="text/babel"]')).toHaveLength(2)
-    expect(document.querySelector('script[type="text/babel"]')?.textContent).toContain('<\\/script>')
+    expect(document.querySelectorAll('script')).toHaveLength(3)
+    expect(document.querySelectorAll('script')[1]?.textContent).toContain('<\\/script>')
     expect(source).not.toContain(HOST_SCRIPT_SOURCE)
+  })
+  it('renders widgets and React artifacts without external fetches', async () => {
+    const [widget, react] = await Promise.all([
+      buildSelfContainedSrcdoc({ html: '<main class="flex gap-4 p-4"><h1 class="text-lg font-bold">Offline widget</h1></main>', themeVars: {}, mode: 'dark' }),
+      buildReactSrcdoc({ jsx: 'const App = () => <main className="grid gap-4 p-4"><h1 className="text-lg font-bold">Offline artifact</h1></main>', themeVars: {}, mode: 'light' }),
+    ])
+    for (const [source, utility] of [[widget, '.flex'], [react, '.grid']] as const) {
+      const frame = new DOMParser().parseFromString(source, 'text/html')
+      const policy = frame.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') ?? ''
+      expect(frame.querySelectorAll('script[src],link[rel="stylesheet"],link[as="font"]')).toHaveLength(0)
+      expect(frame.querySelector('style')?.textContent).toContain(utility)
+      expect(policy).toContain("connect-src 'none'")
+      expect(policy).toContain("font-src data:")
+      expect(policy).not.toContain('https://')
+      expect(source).not.toMatch(/parent\.(?:document|localStorage|sessionStorage)/)
+      expect(source).not.toMatch(/document\.cookie/)
+    }
+    const dashboardPolicy = readFileSync(join(process.cwd(), 'runtime/gideon/interfaces/dashboard/server.py'), 'utf8')
+    const artifactPolicy = readFileSync(join(process.cwd(), 'runtime/gideon/workspace/artifacts/deploy.py'), 'utf8')
+    expect(dashboardPolicy).not.toMatch(/https:\/\/(?:cdn\.tailwindcss\.com|cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com)/)
+    expect(artifactPolicy).not.toMatch(/https:\/\/(?:cdn\.tailwindcss\.com|cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com)/)
+    expect(widget).toContain('Offline widget')
+    expect(react).toContain('Offline artifact')
+    expect(react).toContain('data-widget-error')
+    expect(react).toContain('react-dom-client.production.js')
+    await expect(buildReactSrcdoc({ jsx: "import runtime from 'runtime'; const App = () => <main />", themeVars: {}, mode: 'light' }))
+      .rejects.toThrow('React widgets cannot use import or export syntax.')
+    render(<ReactWidgetFrame jsx="const App = () => <div>broken" />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('React artifact could not be rendered')
   })
   it('exports through a sandboxed wrapper with escaped source and title', () => {
     const page = new DOMParser().parseFromString(standaloneWidgetDocument('<h1>"Hello"</h1>', '<script>title</script>'), 'text/html')

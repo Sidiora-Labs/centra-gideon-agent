@@ -1,12 +1,13 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import { widgetRuntime } from './tooling/vite/widgetRuntime.ts'
 
 const SWITCHED_OFF_LIVE_REQUESTED = process.env.GIDEON_E2E_FEATURE_STATES === '1'
   || process.argv.some((argument) => argument.includes('switchedOffIsSaid.live'))
 
 // Vitest config for the web app's unit/component tests. Kept separate from
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), widgetRuntime()],
   test: {
     coverage: { provider: 'v8', reporter: ['text-summary', 'json', 'json-summary'] },
     environment: 'jsdom',

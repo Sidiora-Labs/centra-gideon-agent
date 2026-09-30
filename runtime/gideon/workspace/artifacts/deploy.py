@@ -74,9 +74,8 @@ FILES_SUBDIR = "webapp"
 
 ARTIFACT_SERVE_CSP = (
     "default-src 'none'; "
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
-    "https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-    "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+    "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: blob:; "
     "font-src 'self' data:; "
     "connect-src 'none'; "

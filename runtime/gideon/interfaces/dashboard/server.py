@@ -295,11 +295,8 @@ def _dashboard_csp() -> str:
     """Return the dashboard policy, including its explicit framing boundary."""
     return (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' blob: "
-        "https://cdn.tailwindcss.com https://cdn.jsdelivr.net "
-        "https://cdnjs.cloudflare.com; "
-        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com "
-        "https://cdn.jsdelivr.net; "
+        "script-src 'self' 'unsafe-inline' blob:; "
+        "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: blob: https:; "
         "font-src 'self' data:; "
         f"connect-src 'self' ws://localhost:* ws://127.0.0.1:*{_ws_csp_sources()}; "

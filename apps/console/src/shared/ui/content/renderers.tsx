@@ -1,11 +1,11 @@
 export { CodePreview } from './CodePreview'
 import { CodePreview, isCodePreviewPath } from './CodePreview'
-import { memo, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Download, ShieldAlert, Sliders } from 'lucide-react'
 import type { PreviewProps } from './contentTypes'
 import { Markdown } from '../Markdown'
 import { SquareIconButton } from '../SquareIconButton'
-import { buildSrcdoc, readThemeVars } from '../widget/widgetSrcdoc'
+import { buildSelfContainedSrcdoc, readThemeVars } from '../widget/widgetSrcdoc'
 import { ReactWidgetFrame } from '../widget/ReactWidgetFrame'
 import { useWidgetDocument } from '../widget/widgetFrameState'
 import { useWidgetWire } from '../widget/useWidgetActionBridge'
@@ -23,16 +23,30 @@ export const MarkdownPreview = memo(function MarkdownPreview({ content }: Previe
 export const IframeHtmlPreview = memo(function IframeHtmlPreview({ content, mode, title, iterate }: PreviewProps) {
   const frame = useRef<HTMLIFrameElement>(null)
   const editable = !!iterate
-  const source = useMemo(() => buildSrcdoc({ html: content, themeVars: readThemeVars(), mode, editMode: editable }), [content, mode, editable])
-  const url = useWidgetDocument(source)
+  const [source, setSource] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const themeVars = useMemo(() => readThemeVars(), [mode])
+  useEffect(() => {
+    let current = true
+    setSource(null)
+    setError(null)
+    void buildSelfContainedSrcdoc({ html: content, themeVars, mode, editMode: editable }).then(document => {
+      if (current) setSource(document)
+    }).catch(failure => {
+      if (current) setError(failure instanceof Error ? failure.message : String(failure))
+    })
+    return () => { current = false }
+  }, [content, themeVars, mode, editable])
+  const url = useWidgetDocument(source ?? '')
   const iteration = useArtifactIteration(frame, { source: content, target: iterate ?? {} })
   useWidgetWire(frame, { forwardActions: true, ...iteration.wire })
   const [open, setOpen] = useState(false)
   return <div className="flex h-full w-full">
-    {url && <iframe ref={frame} src={url} sandbox="allow-scripts" title={title} className="h-full min-w-0 flex-1 border-none bg-surface" />}
+    {url && source && <iframe ref={frame} src={url} sandbox="allow-scripts" title={title} className="h-full min-w-0 flex-1 border-none bg-surface" />}
     {editable && (open ? <ArtifactIterationRail it={iteration} onClose={() => setOpen(false)} /> : <div className="shrink-0 border-l border-outline-variant/30 p-2">
       <SquareIconButton icon={Sliders} label="Iterate on this artifact — tweak parameters or mark elements" onClick={() => setOpen(true)} iconSize={13} />
     </div>)}
+    {error && <div role="alert" className="border-t border-outline-variant bg-surface-high px-m py-s text-sm text-danger">Preview could not be rendered: {error}</div>}
   </div>
 })
 
