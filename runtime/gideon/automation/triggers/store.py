@@ -15,6 +15,7 @@ from typing import Any, Iterator
 
 from gideon.automation.triggers.models import Issue, Trigger, parse_trigger
 from gideon.automation.triggers.provider import TriggerStoreProvider
+from gideon.operations.durability import record_files
 
 logger = logging.getLogger(__name__)
 STORE_VERSION = 1
@@ -79,7 +80,7 @@ class TriggerDocument:
         except OSError:
             return 0.0
 
-    def read(self) -> list[dict[str, Any]]:
+    def read(self, *, strict: bool = False) -> list[dict[str, Any]]:
         if not self.path.exists():
             self.observed_mtime = 0.0
             return []
@@ -87,11 +88,18 @@ class TriggerDocument:
             self.observed_mtime = self.path.stat().st_mtime
             envelope = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            if strict:
+                raise ValueError("triggers.json is unreadable or malformed")
             logger.warning(
                 "triggers.json is unreadable or malformed; treating as empty"
             )
             return []
         records = envelope.get("triggers") if isinstance(envelope, dict) else envelope
+        if strict and (
+            not isinstance(records, list)
+            or any(not isinstance(item, dict) for item in records)
+        ):
+            raise ValueError("triggers.json has an invalid record envelope")
         return list(filter(lambda item: isinstance(item, dict), records or []))
 
     def publish(self, rows: list[dict[str, Any]]) -> None:
@@ -215,15 +223,17 @@ class TriggerStore(TriggerStoreProvider):
     @contextmanager
     def _mutation(self) -> Iterator[RecordMutation]:
         with self._file_lock():
-            changes = RecordMutation(self._read_rows())
-            yield changes
-            if changes.changed:
-                self._write(changes.rows)
+            with record_files.locked_store(self.base_dir):
+                changes = RecordMutation(self._document.read(strict=True))
+                yield changes
+                if changes.changed:
+                    self._write(changes.rows)
 
     def save_all(self, triggers: list[Trigger]) -> int:
         with self._file_lock():
-            snapshot = [trigger.to_dict() for trigger in triggers]
-            self._write(snapshot)
+            with record_files.locked_store(self.base_dir):
+                snapshot = [trigger.to_dict() for trigger in triggers]
+                self._write(snapshot)
         return len(snapshot)
 
     def upsert(self, trigger: Trigger) -> Trigger:

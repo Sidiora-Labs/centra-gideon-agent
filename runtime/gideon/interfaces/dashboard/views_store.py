@@ -31,8 +31,8 @@ import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
+from gideon.operations.durability import record_files
 
 
 def config_dir() -> Path:
@@ -168,19 +168,28 @@ def _empty_disk() -> dict:
     return {"views": [], "overlay": {}}
 
 
-def _read_disk() -> dict:
-    p = views_path()
+def _read_disk(*, strict: bool = False, path: Path | None = None) -> dict:
+    p = path or views_path()
     if not p.exists():
         return _empty_disk()
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        if strict:
+            raise ValueError("dashboard_views.json is unreadable or malformed")
         logger.warning(
             "dashboard_views.json unreadable; treating as empty", exc_info=True
         )
         return _empty_disk()
     if not isinstance(data, dict):
+        if strict:
+            raise ValueError("dashboard_views.json must contain an object")
         return _empty_disk()
+    if strict and (
+        not isinstance(data.get("views", []), list)
+        or not isinstance(data.get("overlay", {}), dict)
+    ):
+        raise ValueError("dashboard_views.json has an invalid record envelope")
     data.setdefault("views", [])
     data.setdefault("overlay", {})
     if not isinstance(data["views"], list):
@@ -190,8 +199,17 @@ def _read_disk() -> dict:
     return data
 
 
-def _write_disk(data: dict) -> None:
-    atomic_write(views_path(), json.dumps(data, indent=2) + "\n")
+def _mutate_disk(operation):
+    path = views_path()
+    with record_files.locked_store(path.parent) as root:
+        data = _read_disk(strict=True, path=path)
+        before = json.dumps(data, sort_keys=True)
+        result = operation(data)
+        if before != json.dumps(data, sort_keys=True):
+            record_files.write_text_locked(
+                root, path.name, json.dumps(data, indent=2) + "\n"
+            )
+        return result
 
 
 def _refresh_from_dict(d: object) -> TileRefresh:
@@ -318,9 +336,7 @@ def _user_view_from_dict(d: dict) -> DashboardView:
     )
 
 
-def load_views() -> list[DashboardView]:
-    """Every view: locked presets first, then user-created views."""
-    data = _read_disk()
+def _views_from_data(data: dict) -> list[DashboardView]:
     user = [
         _user_view_from_dict(v)
         for v in data["views"]
@@ -332,6 +348,11 @@ def load_views() -> list[DashboardView]:
             tile for tile in _overlay_tiles(data, view.id) if tile.ref not in existing
         )
     return [*_presets(data), *user]
+
+
+def load_views() -> list[DashboardView]:
+    """Every view: locked presets first, then user-created views."""
+    return _views_from_data(_read_disk())
 
 
 def list_views() -> list[dict]:
@@ -358,18 +379,18 @@ def create_view(name: str, icon: str | None = None) -> DashboardView:
     name = name.strip()
     if not name:
         raise ValueError("view name is required")
-    data = _read_disk()
     view_id = uuid.uuid4().hex[:8]
-    data["views"].append(
-        {
-            "id": view_id,
-            "name": name,
-            "icon": icon or None,
-            "nav_pinned": False,
-            "tiles": [],
-        }
+    _mutate_disk(
+        lambda data: data["views"].append(
+            {
+                "id": view_id,
+                "name": name,
+                "icon": icon or None,
+                "nav_pinned": False,
+                "tiles": [],
+            }
+        )
     )
-    _write_disk(data)
     return DashboardView(
         id=view_id, name=name, icon=icon or None, preset=False, tiles=[]
     )
@@ -379,31 +400,33 @@ def update_view(view_id: str, patch: dict) -> DashboardView:
     """Update a user view's metadata. Presets refuse edit (they are code-locked)."""
     if _is_preset(view_id):
         raise PresetLockedError(f"'{view_id}' is a preset and cannot be edited")
-    data = _read_disk()
-    for v in data["views"]:
-        if v.get("id") == view_id:
-            if "name" in patch and str(patch["name"]).strip():
-                v["name"] = str(patch["name"]).strip()
-            if "icon" in patch:
-                v["icon"] = str(patch["icon"]) if patch["icon"] else None
-            if "nav_pinned" in patch:
-                v["nav_pinned"] = bool(patch["nav_pinned"])
-            _write_disk(data)
-            return _user_view_from_dict(v)
-    raise ViewNotFoundError(view_id)
+    def update(data: dict) -> DashboardView:
+        for view in data["views"]:
+            if view.get("id") == view_id:
+                if "name" in patch and str(patch["name"]).strip():
+                    view["name"] = str(patch["name"]).strip()
+                if "icon" in patch:
+                    view["icon"] = str(patch["icon"]) if patch["icon"] else None
+                if "nav_pinned" in patch:
+                    view["nav_pinned"] = bool(patch["nav_pinned"])
+                return _user_view_from_dict(view)
+        raise ViewNotFoundError(view_id)
+
+    return _mutate_disk(update)
 
 
 def delete_view(view_id: str) -> None:
     """Delete a user view. Presets refuse deletion."""
     if _is_preset(view_id):
         raise PresetLockedError(f"'{view_id}' is a preset and cannot be deleted")
-    data = _read_disk()
-    before = len(data["views"])
-    data["views"] = [v for v in data["views"] if v.get("id") != view_id]
-    if len(data["views"]) == before:
-        raise ViewNotFoundError(view_id)
-    data["overlay"].pop(view_id, None)
-    _write_disk(data)
+    def delete(data: dict) -> None:
+        before = len(data["views"])
+        data["views"] = [v for v in data["views"] if v.get("id") != view_id]
+        if len(data["views"]) == before:
+            raise ViewNotFoundError(view_id)
+        data["overlay"].pop(view_id, None)
+
+    _mutate_disk(delete)
 
 
 def _max_tiles() -> int:
@@ -434,22 +457,26 @@ def add_tile(
         size = "m"
     if added_by not in _ADDED_BY:
         added_by = "user"
-    if not _is_preset(view_id) and get_view(view_id) is None:
-        raise ViewNotFoundError(view_id)
+    def add(data: dict) -> None:
+        if not _is_preset(view_id) and not any(
+            view.id == view_id for view in _views_from_data(data)
+        ):
+            raise ViewNotFoundError(view_id)
+        tiles = data["overlay"].setdefault(view_id, [])
+        if not isinstance(tiles, list):
+            tiles = []
+            data["overlay"][view_id] = tiles
+        for tile in tiles:
+            if isinstance(tile, dict) and tile.get("ref") == ref:
+                return
+        cap = _max_tiles()
+        if len([tile for tile in tiles if isinstance(tile, dict)]) >= cap:
+            raise ValueError(f"view is at its tile cap ({cap}); unpin one first")
+        tiles.append(
+            {"ref": ref, "size": size, "order": len(tiles), "added_by": added_by}
+        )
 
-    data = _read_disk()
-    tiles = data["overlay"].setdefault(view_id, [])
-    if not isinstance(tiles, list):
-        tiles = []
-        data["overlay"][view_id] = tiles
-    for t in tiles:
-        if isinstance(t, dict) and t.get("ref") == ref:
-            return get_view(view_id)  # type: ignore[return-value]
-    cap = _max_tiles()
-    if len([t for t in tiles if isinstance(t, dict)]) >= cap:
-        raise ValueError(f"view is at its tile cap ({cap}); unpin one first")
-    tiles.append({"ref": ref, "size": size, "order": len(tiles), "added_by": added_by})
-    _write_disk(data)
+    _mutate_disk(add)
     return get_view(view_id)  # type: ignore[return-value]
 
 
@@ -461,16 +488,17 @@ def set_tile_refresh(view_id: str, ref: str, patch: dict) -> DashboardTile:
     the write so what the caller reads back is what a refresh will actually honor.
     """
     ref = ref.strip()
-    data = _read_disk()
-    tiles = data["overlay"].get(view_id)
-    if not isinstance(tiles, list):
-        raise ViewNotFoundError(view_id)
-    for t in tiles:
-        if isinstance(t, dict) and t.get("ref") == ref:
-            t["refresh"] = asdict(_refresh_from_dict(patch))
-            _write_disk(data)
-            return _tile_from_dict(t)
-    raise ViewNotFoundError(f"{view_id}:{ref}")
+    def refresh(data: dict) -> DashboardTile:
+        tiles = data["overlay"].get(view_id)
+        if not isinstance(tiles, list):
+            raise ViewNotFoundError(view_id)
+        for tile in tiles:
+            if isinstance(tile, dict) and tile.get("ref") == ref:
+                tile["refresh"] = asdict(_refresh_from_dict(patch))
+                return _tile_from_dict(tile)
+        raise ViewNotFoundError(f"{view_id}:{ref}")
+
+    return _mutate_disk(refresh)
 
 
 def find_tile(view_id: str, ref: str) -> DashboardTile | None:
@@ -492,27 +520,32 @@ def resolve_tile(view_id: str, ref: str, keep: bool) -> DashboardView:
     unpin a user tile). Both are the human's decision — the agent only proposes.
     """
     ref = ref.strip()
-    data = _read_disk()
-    tiles = data["overlay"].get(view_id)
-    if not isinstance(tiles, list):
-        raise ViewNotFoundError(view_id)
-    if keep:
-        found = False
-        for t in tiles:
-            if isinstance(t, dict) and t.get("ref") == ref:
-                t["added_by"] = "user"
-                found = True
-        if not found:
-            raise ViewNotFoundError(f"{view_id}:{ref}")
-    else:
-        kept = [t for t in tiles if not (isinstance(t, dict) and t.get("ref") == ref)]
-        if len(kept) == len(tiles):
-            raise ViewNotFoundError(f"{view_id}:{ref}")
-        data["overlay"][view_id] = kept
-        for i, t in enumerate(data["overlay"][view_id]):
-            if isinstance(t, dict):
-                t["order"] = i
-    _write_disk(data)
+    def resolve(data: dict) -> None:
+        tiles = data["overlay"].get(view_id)
+        if not isinstance(tiles, list):
+            raise ViewNotFoundError(view_id)
+        if keep:
+            found = False
+            for tile in tiles:
+                if isinstance(tile, dict) and tile.get("ref") == ref:
+                    tile["added_by"] = "user"
+                    found = True
+            if not found:
+                raise ViewNotFoundError(f"{view_id}:{ref}")
+        else:
+            kept = [
+                tile
+                for tile in tiles
+                if not (isinstance(tile, dict) and tile.get("ref") == ref)
+            ]
+            if len(kept) == len(tiles):
+                raise ViewNotFoundError(f"{view_id}:{ref}")
+            data["overlay"][view_id] = kept
+            for index, tile in enumerate(kept):
+                if isinstance(tile, dict):
+                    tile["order"] = index
+
+    _mutate_disk(resolve)
     return get_view(view_id)  # type: ignore[return-value]
 
 
@@ -546,48 +579,51 @@ def set_composition(view_id: str, patch: dict) -> dict:
         {"revision", "tiles"},
     ):
         raise ValueError("Observed revision and select or tiles are required")
-    data = _read_disk()
-    if type(patch["revision"]) is not int or patch["revision"] != data.get(
-        "composition_revision", 0
-    ):
-        raise ValueError("Dashboard composition changed; reload before saving")
-    view = get_view(view_id)
-    if view is None or view_id == PRESET_MISSION_CONTROL_ID:
-        raise ViewNotFoundError(view_id)
-    if "select" in patch:
-        if patch["select"] is not True:
-            raise ValueError("select must be true")
-        data["selected_view"] = view_id
-    else:
-        if view.preset:
-            raise PresetLockedError("Preset core composition is immutable")
-        tiles = patch["tiles"]
-        if not isinstance(tiles, list) or len(tiles) > len(CORE_COMPOSITION_REFS):
-            raise ValueError("Invalid core widget list")
-        seen = set()
-        for tile in tiles:
-            if (
-                not isinstance(tile, dict)
-                or set(tile) != {"ref", "size"}
-                or tile["ref"] not in CORE_COMPOSITION_REFS
-                or tile["size"] not in _SIZES
-                or tile["ref"] in seen
-            ):
-                raise ValueError(
-                    "Core widget references must be supported and unique with a valid size"
-                )
-            seen.add(tile["ref"])
-        for record in data["views"]:
-            if record.get("id") == view_id:
-                retained = [
-                    tile
-                    for tile in record.get("tiles", [])
-                    if not str(tile.get("ref", "")).startswith("core:")
-                ]
-                record["tiles"] = [
-                    {**tile, "order": index, "added_by": "user"}
-                    for index, tile in enumerate(tiles)
-                ] + retained
-    data["composition_revision"] = data.get("composition_revision", 0) + 1
-    _write_disk(data)
+    def change(data: dict) -> None:
+        if type(patch["revision"]) is not int or patch["revision"] != data.get(
+            "composition_revision", 0
+        ):
+            raise ValueError("Dashboard composition changed; reload before saving")
+        view = next(
+            (entry for entry in _views_from_data(data) if entry.id == view_id), None
+        )
+        if view is None or view_id == PRESET_MISSION_CONTROL_ID:
+            raise ViewNotFoundError(view_id)
+        if "select" in patch:
+            if patch["select"] is not True:
+                raise ValueError("select must be true")
+            data["selected_view"] = view_id
+        else:
+            if view.preset:
+                raise PresetLockedError("Preset core composition is immutable")
+            tiles = patch["tiles"]
+            if not isinstance(tiles, list) or len(tiles) > len(CORE_COMPOSITION_REFS):
+                raise ValueError("Invalid core widget list")
+            seen = set()
+            for tile in tiles:
+                if (
+                    not isinstance(tile, dict)
+                    or set(tile) != {"ref", "size"}
+                    or tile["ref"] not in CORE_COMPOSITION_REFS
+                    or tile["size"] not in _SIZES
+                    or tile["ref"] in seen
+                ):
+                    raise ValueError(
+                        "Core widget references must be supported and unique with a valid size"
+                    )
+                seen.add(tile["ref"])
+            for record in data["views"]:
+                if record.get("id") == view_id:
+                    retained = [
+                        tile
+                        for tile in record.get("tiles", [])
+                        if not str(tile.get("ref", "")).startswith("core:")
+                    ]
+                    record["tiles"] = [
+                        {**tile, "order": index, "added_by": "user"}
+                        for index, tile in enumerate(tiles)
+                    ] + retained
+        data["composition_revision"] = data.get("composition_revision", 0) + 1
+
+    _mutate_disk(change)
     return composition_state()

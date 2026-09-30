@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Callable
 
-from gideon.core.atomic_write import atomic_write
+from gideon.operations.durability import record_files
 from gideon.security.safety_flags import strict_bool
 from gideon.security.security import (
     is_denied,
@@ -774,18 +774,47 @@ class ScriptHookStore:
     def _load(self) -> None:
         if self._path.exists():
             try:
-                document = json.loads(self._path.read_text(encoding="utf-8"))
-                for entry in document.get("hooks", []):
-                    restored = ScriptHook.from_dict(entry)
+                for restored in self._read_records():
                     self._hooks[restored.id] = restored
-            except (json.JSONDecodeError, OSError) as exc:
+            except (json.JSONDecodeError, OSError, ValueError) as exc:
                 logger.warning("Failed to load hooks: %s", exc)
+
+    def _read_records(self) -> list[ScriptHook]:
+        try:
+            document = json.loads(self._path.read_text(encoding="utf-8"))
+        except OSError:
+            if not self._path.exists():
+                return []
+            raise
+        if (
+            not isinstance(document, dict)
+            or not isinstance(document.get("hooks"), list)
+            or any(not isinstance(entry, dict) for entry in document["hooks"])
+        ):
+            raise ValueError("hooks.json has an invalid record envelope")
+        return [ScriptHook.from_dict(entry) for entry in document["hooks"]]
+
+    def _mutate(self, operation: Callable[[dict[str, ScriptHook]], tuple[object, bool]]):
+        with record_files.locked_store(self._dir):
+            hooks = {record.id: record for record in self._read_records()}
+            result, changed = operation(hooks)
+            if changed:
+                payload = json.dumps(
+                    {"hooks": [record.to_dict() for record in hooks.values()]},
+                    indent=2,
+                )
+                record_files.write_text_locked(self._dir, _HOOKS_FILE, payload)
+            self._hooks = hooks
+            return result
 
     def _save(self) -> None:
         self._save_snapshot([record.to_dict() for record in self._hooks.values()])
 
     def _save_snapshot(self, hooks_data: list[dict]) -> None:
-        atomic_write(self._path, json.dumps({"hooks": hooks_data}, indent=2))
+        with record_files.locked_store(self._dir) as root:
+            record_files.write_text_locked(
+                root, _HOOKS_FILE, json.dumps({"hooks": hooks_data}, indent=2)
+            )
 
     def list_all(self) -> list[ScriptHook]:
         return [*self._hooks.values()]
@@ -796,41 +825,51 @@ class ScriptHookStore:
     def create(self, data: dict) -> ScriptHook:
         record = ScriptHook.from_dict(data)
         record.id = record.id or str(uuid.uuid4())[:8]
-        self._hooks[record.id] = record
-        self._save()
-        return record
+
+        def add(hooks: dict[str, ScriptHook]) -> tuple[ScriptHook, bool]:
+            hooks[record.id] = record
+            return record, True
+
+        return self._mutate(add)  # type: ignore[return-value]
 
     def update(self, hook_id: str, data: dict) -> ScriptHook | None:
-        record = self.get(hook_id)
-        if record is None:
-            return None
-        _validate_hook_patch(data)
-        editable = (
-            "name",
-            "event",
-            "matcher",
-            "provider",
-            "provider_config",
-            "timeout",
-            "enabled",
-        )
-        record.__dict__.update({key: data[key] for key in editable if key in data})
-        self._save()
-        return record
+        def edit(hooks: dict[str, ScriptHook]) -> tuple[ScriptHook | None, bool]:
+            record = hooks.get(hook_id)
+            if record is None:
+                return None, False
+            _validate_hook_patch(data)
+            editable = (
+                "name",
+                "event",
+                "matcher",
+                "provider",
+                "provider_config",
+                "timeout",
+                "enabled",
+            )
+            record.__dict__.update(
+                {key: data[key] for key in editable if key in data}
+            )
+            return record, True
+
+        return self._mutate(edit)  # type: ignore[return-value]
 
     def delete(self, hook_id: str) -> bool:
-        if self._hooks.pop(hook_id, None) is None:
-            return False
-        self._save()
-        return True
+        def remove(hooks: dict[str, ScriptHook]) -> tuple[bool, bool]:
+            removed = hooks.pop(hook_id, None) is not None
+            return removed, removed
+
+        return bool(self._mutate(remove))
 
     def toggle(self, hook_id: str) -> ScriptHook | None:
-        record = self.get(hook_id)
-        return (
-            self.update(hook_id, {"enabled": not record.enabled})
-            if record is not None
-            else None
-        )
+        def flip(hooks: dict[str, ScriptHook]) -> tuple[ScriptHook | None, bool]:
+            record = hooks.get(hook_id)
+            if record is None:
+                return None, False
+            record.enabled = not record.enabled
+            return record, True
+
+        return self._mutate(flip)  # type: ignore[return-value]
 
     async def fire(
         self,

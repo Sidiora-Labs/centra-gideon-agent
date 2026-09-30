@@ -18,6 +18,7 @@ from typing import Any
 
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
+from gideon.operations.durability import record_files
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
 from gideon.workspace import notification_kinds
 
@@ -62,6 +63,59 @@ _ITEMS_FILE = "inbox.json"
 _USER_CACHE_TTL = 86400
 _verification_tasks: set[asyncio.Task] = set()
 _verification_tasks_lock = threading.Lock()
+
+
+def _read_record_document(path: Path, key: str) -> dict[str, Any]:
+    if not path.exists():
+        return {key: []}
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(document, dict)
+        or not isinstance(document.get(key), list)
+        or any(not isinstance(row, dict) for row in document[key])
+    ):
+        raise ValueError(f"{path.name} has an invalid {key} record envelope")
+    return document
+
+
+def _merge_record_changes(
+    live: dict[str, dict[str, Any]],
+    baseline: dict[str, dict[str, Any]],
+    current: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Apply local record and field changes to the latest locked on-disk snapshot."""
+    merged = {identity: dict(row) for identity, row in live.items()}
+    for identity in baseline.keys() - current.keys():
+        merged.pop(identity, None)
+    for identity, row in current.items():
+        previous = baseline.get(identity)
+        if previous is None:
+            target = merged.setdefault(identity, dict(row))
+            for key, value in row.items():
+                target.setdefault(key, value)
+            continue
+        target = merged.setdefault(identity, dict(row))
+        for key in previous.keys() | row.keys():
+            before, after = previous.get(key), row.get(key)
+            if before == after:
+                continue
+            if key == "owner_states" and isinstance(after, dict):
+                owner_states = dict(target.get(key, {}))
+                before_states = previous.get(key, {})
+                for owner in set(before_states) | set(after):
+                    old, new = before_states.get(owner), after.get(owner)
+                    if old == new:
+                        continue
+                    if owner in after:
+                        owner_states[owner] = new
+                    else:
+                        owner_states.pop(owner, None)
+                target[key] = owner_states
+            elif key in row:
+                target[key] = after
+            else:
+                target.pop(key, None)
+    return merged
 
 
 def owner_username() -> str:
@@ -400,6 +454,16 @@ class InboxState:
         self.active_threads: dict[str, dict[str, str]] = {}
         self.user_resolver = UserResolver()
         self._user_alias: str | None = None
+        self._baseline: dict[str, Any] = self._snapshot()
+
+    def _snapshot(self) -> dict[str, Any]:
+        return {
+            "last_read_ts": dict(self.last_read_ts),
+            "channel_names": dict(self.channel_names),
+            "dismissed": set(self.dismissed),
+            "muted_threads": set(self.muted_threads),
+            "user_cache": self.user_resolver.dump(),
+        }
 
     def load(self) -> None:
         if self._path.exists():
@@ -414,19 +478,54 @@ class InboxState:
                 self.dismissed.update(data.get("dismissed", []))
                 self.muted_threads.update(data.get("muted_threads", []))
                 self.user_resolver.load(data.get("user_cache", {}))
+                self._baseline = self._snapshot()
             except (json.JSONDecodeError, OSError):
                 logger.warning("Failed to load inbox state, starting fresh")
 
     def save(self) -> None:
-        data = {
-            "last_read_ts": self.last_read_ts,
-            "channel_names": self.channel_names,
-            "dismissed": list(self.dismissed),
-            "muted_threads": list(self.muted_threads),
-            "user_cache": self.user_resolver.dump(),
-        }
         try:
-            atomic_write(self._path, json.dumps(data, indent=2), mode=0o600)
+            with record_files.locked_store(self._path.parent) as root:
+                try:
+                    live = json.loads(self._path.read_text(encoding="utf-8"))
+                except FileNotFoundError:
+                    live = {}
+                if not isinstance(live, dict):
+                    raise ValueError("inbox_state.json must contain a JSON object")
+                current = self._snapshot()
+                merged = dict(live)
+                for key in ("last_read_ts", "channel_names", "user_cache"):
+                    baseline = self._baseline.get(key, {})
+                    desired = current[key]
+                    existing = merged.get(key, {})
+                    if not isinstance(existing, dict):
+                        raise ValueError(f"inbox_state.json field {key} must be an object")
+                    combined = dict(existing)
+                    for identity in set(baseline) | set(desired):
+                        if baseline.get(identity) == desired.get(identity):
+                            continue
+                        if identity in desired:
+                            combined[identity] = desired[identity]
+                        else:
+                            combined.pop(identity, None)
+                    merged[key] = combined
+                for key in ("dismissed", "muted_threads"):
+                    baseline = set(self._baseline.get(key, set()))
+                    desired = set(current[key])
+                    existing = merged.get(key, [])
+                    if not isinstance(existing, list):
+                        raise ValueError(f"inbox_state.json field {key} must be a list")
+                    combined = set(existing)
+                    combined.difference_update(baseline - desired)
+                    combined.update(desired - baseline)
+                    merged[key] = sorted(combined)
+                target = record_files.safe_target(root, self._path.name)
+                atomic_write(target, json.dumps(merged, indent=2), mode=0o600)
+            self.last_read_ts = merged.get("last_read_ts", {})
+            self.channel_names = merged.get("channel_names", {})
+            self.dismissed = set(merged.get("dismissed", []))
+            self.muted_threads = set(merged.get("muted_threads", []))
+            self.user_resolver.load(merged.get("user_cache", {}))
+            self._baseline = self._snapshot()
         except OSError:
             logger.warning("Failed to save inbox state")
 
@@ -452,6 +551,7 @@ class InboxStore:
         self._path = path or (config_dir() / _ITEMS_FILE)
         self.items: dict[str, InboxItem] = {}
         self._dirty = False
+        self._baseline_items: dict[str, dict[str, Any]] = {}
 
     def load(self) -> None:
         if self._path.exists():
@@ -461,15 +561,40 @@ class InboxStore:
                 for d in data.get("items", []):
                     item = InboxItem.from_dict(d)
                     self.items[item.id] = item
+                self._baseline_items = {
+                    item.id: item.to_dict() for item in self.items.values()
+                }
                 self._dirty = False
             except (json.JSONDecodeError, OSError):
                 logger.warning("Failed to load inbox items, starting fresh")
 
     def save(self) -> None:
-        data = {"items": [item.to_dict() for item in self.items.values()]}
         try:
-            atomic_write(self._path, json.dumps(data, indent=2), mode=0o600)
+            with record_files.locked_store(self._path.parent) as root:
+                document = _read_record_document(self._path, "items")
+                if any(
+                    not isinstance(row.get("id"), str) or not row["id"]
+                    for row in document["items"]
+                ):
+                    raise ValueError("inbox.json contains an item without a valid id")
+                live = {
+                    row["id"]: row for row in document["items"]
+                }
+                current = {item.id: item.to_dict() for item in self.items.values()}
+                merged_items = _merge_record_changes(
+                    live, self._baseline_items, current
+                )
+                document["items"] = list(merged_items.values())
+                target = record_files.safe_target(root, self._path.name)
+                atomic_write(target, json.dumps(document, indent=2), mode=0o600)
             self._dirty = False
+            self._baseline_items = {
+                identity: dict(row) for identity, row in merged_items.items()
+            }
+            self.items = {
+                identity: InboxItem.from_dict(row)
+                for identity, row in merged_items.items()
+            }
         except OSError:
             logger.warning("Failed to save inbox items")
 
