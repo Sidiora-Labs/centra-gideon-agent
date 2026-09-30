@@ -5,7 +5,6 @@ import { fvs } from '../theme/fontWeight'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import rehypeRaw from 'rehype-raw'
 import rehypeKatex from 'rehype-katex'
 import hljs from 'highlight.js/lib/common'
 import { Play, Copy, Check, ImageOff, RefreshCw } from 'lucide-react'
@@ -231,7 +230,7 @@ const COMPONENTS: Record<string, React.ComponentType<any>> = {
 }
 
 const REMARK: PluggableList = [remarkGfm, [remarkMath, { singleDollarTextMath: false }]]
-const REHYPE: PluggableList = [[rehypeRaw, { passThrough: ['math', 'inlineMath'] }], rehypeKatex]
+const REHYPE: PluggableList = [rehypeKatex]
 
 const BARE_FILE_RE = /((?:~|\.{0,2}\/)?[\w.\-]+(?:\/[\w.\-]+)+\.\w{1,8})/g
 
