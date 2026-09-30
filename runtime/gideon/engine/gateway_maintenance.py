@@ -112,7 +112,10 @@ class RuntimeUpdates:
                 print("Already on latest version")
                 return
             self.logger.info("Updates available from remote")
-            if AppConfig.load().auto_update:
+            install_kind = self_update.detect_install_kind()
+            if AppConfig.load().auto_update and self_update.applies_updates_unattended(
+                install_kind
+            ):
                 self.logger.info("Auto-update enabled — applying update")
                 await self.runtime._auto_apply_update()
             elif self.runtime.dashboard_state:

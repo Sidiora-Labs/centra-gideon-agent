@@ -72,10 +72,13 @@ async def api_update_check(request: web.Request) -> web.Response:
         _behind = status.get("commits_behind")
         if isinstance(_behind, int) and _behind > 0:
             merged["available"] = True
-    merged["auto_update"] = cfg.auto_update
+    kind = str(merged.get("kind") or self_update.detect_install_kind())
+    can_update_unattended = self_update.applies_updates_unattended(kind)
+    merged["unattended_apply"] = can_update_unattended
+    merged["auto_update"] = bool(cfg.auto_update and can_update_unattended)
     merged["update_dev_mode"] = cfg.dashboard.update_dev_mode
     merged["version"] = _local_version
-    kind = str(merged.get("kind") or self_update.detect_install_kind())
+    merged["kind"] = kind
     merged.update(self_update.update_state_view(kind))
     return web.json_response(merged)
 
@@ -215,6 +218,16 @@ async def api_update_auto(request: web.Request) -> web.Response:
     enabled = body.get("enabled", True)
     if not isinstance(enabled, bool):
         return web.json_response({"error": "enabled must be a boolean"}, status=400)
+    if enabled and not self_update.applies_updates_unattended(
+        self_update.detect_install_kind()
+    ):
+        return web.json_response(
+            {
+                "error": "Automatic updates are available only for a Git source checkout",
+                "auto_update": False,
+            },
+            status=409,
+        )
     from gideon.core.config.transactions import mutate_config_async
 
     try:

@@ -126,6 +126,11 @@ def detect_install_kind() -> InstallKind:
     return _install_kind_for_package(__file__)
 
 
+def applies_updates_unattended(kind: InstallKind | str) -> bool:
+    """Whether Gideon can safely install updates without its owner replacing it."""
+    return kind == "git"
+
+
 def package_root(proj: str) -> str:
     return InstallLayout(proj).package()
 
@@ -468,6 +473,7 @@ class UpdateStatus:
             "update_available": moves_to(latest, self.current),
             "commits_behind": self.behind,
             "apply_method": _APPLY_METHOD.get(self.kind, "instructions"),
+            "unattended_apply": applies_updates_unattended(self.kind),
             "instructions": (
                 container_instructions(latest)
                 if self.kind == "container" and moves_to(latest, self.current)

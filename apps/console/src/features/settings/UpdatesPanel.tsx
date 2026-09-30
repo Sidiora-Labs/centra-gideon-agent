@@ -94,7 +94,7 @@ export function UpdatesPanel() {
 
   if (!info && loadErr) return <LoadError what="update status" error={loadErr} onRetry={refresh} />
   if (!info) return <FormSkeleton sections={3} what="update status" />
-  const kind = info.kind ?? 'git'
+  const kind = info.kind ?? 'unknown'
   const isContainer = kind === 'container'
   const isDesktop = kind === 'desktop'
   const isGit = kind === 'git'
@@ -103,7 +103,7 @@ export function UpdatesPanel() {
     applying: 'Applying update', applied: 'Last update applied', failed: 'Last update failed',
     rolling_back: 'Rolling back', rolled_back: 'Last update rolled back', idle: '',
   }[info.update_state ?? 'idle']
-  const kindLabel = { git: 'Git checkout', pip: 'pip / uv install', container: 'Container', desktop: 'Desktop app' }[kind] ?? kind
+  const kindLabel = ({ git: 'Git checkout', pip: 'pip / uv install', container: 'Container', desktop: 'Desktop app' } as Record<string, string>)[kind] ?? kind
   return (
     <div>
       <PanelHeader title="Updates" hint="Keep the Gideon core current — check for updates, auto-update, and read the changelog. Apps update individually from the Store." />
@@ -164,19 +164,18 @@ export function UpdatesPanel() {
         </div>
       </Section>
 
-      <Section title="Automatic updates">
-        <RowGroup>
-          <Row label="Auto-update" hint="Download and apply updates automatically when available.">
-            <div className="flex items-center gap-2"><SavedToast show={saved} /><Toggle on={info.auto_update} onChange={toggleAuto} label="Auto-update" /></div>
-          </Row>
-          { }
-          {isGit && (
+      {isGit && (
+        <Section title="Automatic updates">
+          <RowGroup>
+            <Row label="Auto-update" hint="Download and apply updates automatically when available.">
+              <div className="flex items-center gap-2"><SavedToast show={saved} /><Toggle on={info.auto_update} onChange={toggleAuto} label="Auto-update" /></div>
+            </Row>
             <Row label="Developer update mode" hint="Track every new commit on your branch instead of only tagged releases (contributors).">
               <div className="flex items-center gap-2"><Toggle on={!!info.update_dev_mode} onChange={toggleDevMode} label="Developer update mode" /></div>
             </Row>
-          )}
-        </RowGroup>
-      </Section>
+          </RowGroup>
+        </Section>
+      )}
 
       <Section title="Third-party notices" hint="Review the licenses for shipped fonts and console packages.">
         <ThirdPartyNoticesLink />
