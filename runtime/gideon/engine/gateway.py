@@ -955,8 +955,12 @@ class RuntimeCoordinator:
 
     async def _shutdown(self) -> None:
         from gideon.engine.lifecycle import retire
+        from gideon.engine.restart_request import reexec, take_restart_request
 
         await retire(self)
+        restart = take_restart_request()
+        if restart is not None:
+            reexec(restart)
 
     async def _check_for_updates(self) -> None:
         from gideon.engine.gateway_maintenance import RuntimeUpdates

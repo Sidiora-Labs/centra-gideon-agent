@@ -784,46 +784,21 @@ def _live_auth_mode(request: web.Request) -> str:
 
 
 async def _graceful_reexec(state: ConsoleState, *, auth_mode: str = "") -> None:
-    """Save history, close sessions, drain frames, then exec a fresh gateway
-    in-place. Shared by the update-apply restart and the standalone restart
-    endpoint so both use the identical proven sequence. ``os.execv`` replaces
-    this process image (same PID) — the kernel hands the listen socket to the
-    new image after it binds, so there is no window where nothing is running.
-    Uses ``-m gideon`` (not ``sys.argv[0]``) because a build-artifact
-    clean may have removed the original ``__main__`` path.
+    """Request re-exec after the gateway's registered shutdown hooks finish.
 
-    Preserves the resolved AUTH MODE across the re-exec (#46): the gateway reads
-    ``GIDEON_AUTH_MODE`` from the env at boot, but the original launcher's env
-    may not survive (e.g. the parent shell that exported ``=none`` exits, the
-    process gets reparented to PID 1, and a plain ``os.execv`` that relied on that
-    var being in ``os.environ`` would come back token-required). That's a SURPRISING
-    security-posture flip on a Restart. So snapshot the LIVE mode from the running
-    app's ``auth_cfg`` and pass it explicitly via ``os.execve`` — a Restart re-applies
-    code without ever changing whether auth is on/off."""
-    exe = sys.executable
-    if not os.path.isfile(exe) or not os.access(exe, os.X_OK):
-        state.push_update_progress(
-            "error", "Cannot restart: invalid Python executable path"
-        )
+    The gateway finalizer owns history persistence, consolidation, session
+    closure and resource retirement. Restarting here would bypass that
+    ordinary lifecycle and race an external stop.
+    """
+    from gideon.engine.restart_request import request_restart
+
+    try:
+        queued = request_restart(auth_mode)
+    except RuntimeError as error:
+        state.push_update_progress("error", str(error))
         return
-    from gideon.interfaces.dashboard.chat import save_all_sessions_to_history
-
-    child_env = dict(os.environ)
-    if auth_mode:
-        child_env["GIDEON_AUTH_MODE"] = str(auth_mode)
-
-    try:
-        save_all_sessions_to_history(state)
-    except Exception:
-        logger.debug("History save before restart failed", exc_info=True)
-    try:
-        await state.sessions.close_all()
-    except Exception:
-        logger.debug("Session cleanup before restart failed", exc_info=True)
-    sys.stdout.flush()
-    sys.stderr.flush()
-    await asyncio.sleep(0.5)
-    os.execve(exe, [exe, "-m", "gideon"] + sys.argv[1:], child_env)
+    if not queued:
+        state.push_update_progress("stopped", "Gateway stop already requested")
 
 
 def _active_work_snapshot(state: ConsoleState) -> dict[str, int]:

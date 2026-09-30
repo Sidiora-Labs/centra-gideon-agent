@@ -18,6 +18,7 @@ class ShutdownLatch:
 
     def __init__(self) -> None:
         self._requested = False
+        self._restart_intent: object | None = None
         self._waiters: set[asyncio.Future[bool]] = set()
         self._mutex = threading.Lock()
 
@@ -47,6 +48,7 @@ class ShutdownLatch:
     def set(self) -> None:
         with self._mutex:
             self._requested = True
+            self._restart_intent = None
             waiting = tuple(self._waiters)
         for waiter in waiting:
             try:
@@ -54,9 +56,32 @@ class ShutdownLatch:
             except RuntimeError:
                 pass
 
+    def request_restart(self, intent: object) -> bool:
+        """Request shutdown with a restart intent unless an ordinary stop won."""
+        with self._mutex:
+            if self._requested:
+                return False
+            self._requested = True
+            self._restart_intent = intent
+            waiting = tuple(self._waiters)
+        for waiter in waiting:
+            try:
+                waiter.get_loop().call_soon_threadsafe(self._release, waiter)
+            except RuntimeError:
+                pass
+        return True
+
+    def take_restart_intent(self) -> object | None:
+        """Consume pending restart intent after the ordinary shutdown hooks run."""
+        with self._mutex:
+            intent = self._restart_intent
+            self._restart_intent = None
+            return intent
+
     def clear(self) -> None:
         with self._mutex:
             self._requested = False
+            self._restart_intent = None
 
     def is_set(self) -> bool:
         with self._mutex:
