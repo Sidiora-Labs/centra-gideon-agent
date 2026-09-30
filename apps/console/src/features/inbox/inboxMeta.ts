@@ -3,6 +3,7 @@ import { epochSeconds } from '../../shared/data/epoch'
 import type { LucideIcon } from 'lucide-react'
 import type { InboxClassification, InboxConfidence, InboxItemStatus, InboxItemKind, InboxItem } from '../../shared/data/api'
 import { isOpenStatus, STATUS_OPEN } from '../../shared/data/attentionLanes'
+import { notificationLink } from '../notifications/notificationMeta'
 
 function resolveMeta<Row extends { key: string }>(rows: Row[], key: string | undefined, fallback: number): Row {
   const index = rows.map(row => row.key).indexOf(key ?? '')
@@ -83,7 +84,12 @@ function destination(item: ItemReference): { path: string; label: string } {
     { id: refs.workflow, path: `workflows/${refs.workflow}`, label: 'Go to workflow' },
     { id: refs.artifact, path: `artifacts/${encodeURIComponent(refs.artifact || '')}`, label: 'Open the report' },
   ]
-  return targets.find(target => Boolean(target.id)) ?? { path: '', label: 'Go to source' }
+  const typed = targets.find(target => Boolean(target.id))
+  if (typed) return typed
+  const statusPath = notificationLink(refs.statusUrl)
+  if (statusPath.startsWith('workflows/runs/')) return { path: statusPath, label: 'Open the workflow run' }
+  if (statusPath.startsWith('triggers?open=')) return { path: statusPath, label: 'Open the trigger' }
+  return { path: '', label: 'Go to source' }
 }
 export function refTarget(item: ItemReference): string { return destination(item).path }
 export function refLabel(item: ItemReference): string { return destination(item).label }

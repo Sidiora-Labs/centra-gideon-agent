@@ -9,6 +9,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,45 @@ class NotificationAttempt:
     def send(self) -> bool:
         if not self.permitted():
             return False
+        if self.delivery.event == EVENT_FAILED and self.delivery.destination == "inbox":
+            try:
+                from gideon.integrations.inbox import emit_attention_item
+                from gideon.workspace import notification_kinds
+
+                registered_kind = notification_kinds.kind_for_legacy(
+                    self.delivery.kind
+                )
+
+                item_id = emit_attention_item(
+                    self.state,
+                    source=registered_kind.source,
+                    kind=registered_kind.kind,
+                    title=self.delivery.title,
+                    body=self.delivery.body,
+                    refs={
+                        "trigger_id": self.delivery.trigger_id,
+                        "run_id": self.delivery.run_id,
+                        "statusUrl": self.delivery.status_url,
+                        "event_id": self.delivery.event_id,
+                    },
+                    item_kind="system",
+                    dedup_key=(
+                        f"trigger_failure:{self.delivery.trigger_id}:"
+                        f"{self.delivery.run_id or self.delivery.event_id}"
+                    ),
+                )
+            except Exception:
+                logger.debug(
+                    "failure %s could not be filed in Inbox",
+                    self.delivery.event_id,
+                    exc_info=True,
+                )
+                return False
+            if not item_id:
+                return False
+            if isinstance(self.delivered_ids, set):
+                self.delivered_ids.add(self.delivery.event_id)
+            return True
         try:
             self.state.notify(**self.delivery.to_notify_kwargs())
         except Exception:
@@ -148,7 +188,10 @@ class NotificationAttempt:
 
 def status_url(*, run_id: str = "", trigger_id: str = "") -> str:
     routes = ((run_id, "#/workflows/runs/"), (trigger_id, "#/triggers?open="))
-    return next((prefix + identity for identity, prefix in routes if identity), "")
+    return next(
+        (prefix + quote(identity, safe="") for identity, prefix in routes if identity),
+        "",
+    )
 
 
 def event_id(*, trigger_id: str, run_id: str = "", attempt_key: str = "") -> str:

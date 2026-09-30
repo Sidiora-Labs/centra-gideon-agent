@@ -62,6 +62,31 @@ export function kindMeta(kind: string): KindMeta {
   const known = Object.prototype.hasOwnProperty.call(KINDS, kind) ? KINDS[kind] : undefined
   return known || { label: kind || 'Notification', icon: Bell, tone: 'var(--color-primary)' }
 }
+
+function routeIdentity(raw: string): string {
+  if (!raw || /[\/?#&\\]/.test(raw)) return ''
+  try {
+    const identity = decodeURIComponent(raw)
+    if (!identity.trim() || identity === '.' || identity === '..' || /[\u0000-\u001f\u007f]/.test(identity)) return ''
+    return encodeURIComponent(identity)
+  } catch {
+    return ''
+  }
+}
+
+export function notificationLink(statusUrl?: unknown): string {
+  if (typeof statusUrl !== 'string') return ''
+  if (statusUrl.startsWith('#/workflows/runs/')) {
+    const runId = routeIdentity(statusUrl.slice('#/workflows/runs/'.length))
+    return runId ? `workflows/runs/${runId}` : ''
+  }
+  if (statusUrl.startsWith('#/triggers?open=')) {
+    const triggerId = routeIdentity(statusUrl.slice('#/triggers?open='.length))
+    return triggerId ? `triggers?open=${triggerId}` : ''
+  }
+  return ''
+}
+
 export function toneChipBg(tone: string): string {
   return `color-mix(in srgb, ${tone} 16%, transparent)`
 }
