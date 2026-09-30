@@ -13,6 +13,7 @@ from typing import Any
 
 from gideon.core.cancellation import terminate_and_reap
 from gideon.integrations.stt.provider import (
+    SttError,
     TranscriptResult,
     TranscriptSegment,
     TranscriptWord,
@@ -66,11 +67,18 @@ class _TranscriptionRequest:
 
     async def invoke(self, path: str, *, detailed: bool = False, bias_terms=None):
         arguments = {"model": self.model, "language": self.language}
-        if detailed:
-            return await self.provider.transcribe_detailed(
-                path, **arguments, bias_terms=bias_terms
-            )
-        return await self.provider.transcribe(path, **arguments)
+        try:
+            if detailed:
+                result = await self.provider.transcribe_detailed(
+                    path, **arguments, bias_terms=bias_terms
+                )
+            else:
+                result = await self.provider.transcribe(path, **arguments)
+        except SttError as exc:
+            raise SttError(exc.code) from None
+        except Exception:
+            raise SttError("provider_failed") from None
+        return _require_transcript(result, detailed=detailed)
 
     def needs_segments(self) -> bool:
         try:
@@ -80,24 +88,21 @@ class _TranscriptionRequest:
         return size > _stt_segment_threshold() and _ffmpeg_present()
 
 
-def _select_input(audio_path: str | None = None) -> _TranscriptionRequest | None:
+def _select_input(audio_path: str | None = None) -> _TranscriptionRequest:
     from gideon.extensions.providers.use_cases import load_use_case_settings
     from gideon.integrations.stt.registry import active_stt
 
     settings = load_use_case_settings("stt")
     if not settings.get("enabled", True):
-        logger.debug("STT disabled in settings")
-        return None
+        raise SttError("disabled")
     if audio_path is not None:
         from gideon.security.security import is_sensitive_path
 
         if is_sensitive_path(audio_path):
-            logger.error("Refusing to read sensitive path: %s", audio_path)
-            return None
+            raise SttError("sensitive_path")
     selection = active_stt()
     if selection is None:
-        logger.debug("No active STT model selected")
-        return None
+        raise SttError("no_model")
     return _TranscriptionRequest(
         selection[0],
         selection[1],
@@ -107,8 +112,11 @@ def _select_input(audio_path: str | None = None) -> _TranscriptionRequest | None
 
 
 async def is_available() -> bool:
-    request = _select_input()
-    if request is None or not await request.provider.is_available():
+    try:
+        request = _select_input()
+        if not await request.provider.is_available():
+            return False
+    except Exception:
         return False
     ensure_ffmpeg_in_path()
     if not _ffmpeg_present():
@@ -124,61 +132,76 @@ def _redacted_text(text: str) -> str:
     return text
 
 
-async def _transcription(audio_path: str, *, detailed: bool, bias_terms=None):
-    request = _select_input(audio_path)
-    if request is None:
-        return None
-    ensure_ffmpeg_in_path()
-    if request.needs_segments():
-        if detailed:
-            result = await _transcribe_segmented_detailed(
-                request.provider,
-                request.model,
-                request.language,
-                audio_path,
-                bias_terms,
-            )
-        else:
-            result = await _transcribe_segmented(
-                request.provider, request.model, request.language, audio_path
-            )
-    else:
-        result = await request.invoke(
-            audio_path, detailed=detailed, bias_terms=bias_terms
-        )
+def _require_transcript(result, *, detailed: bool):
+    if result is None:
+        raise SttError("no_transcript")
     if detailed:
-        if result is not None and result.text:
-            result.text = _redacted_text(result.text)
-    elif result:
-        result = _redacted_text(result)
+        valid = isinstance(result, TranscriptResult) and isinstance(result.text, str)
+    else:
+        valid = isinstance(result, str)
+    if not valid:
+        raise SttError("provider_failed")
     return result
 
 
-async def transcribe_audio(audio_path: str) -> str | None:
+async def _transcription(audio_path: str, *, detailed: bool, bias_terms=None):
+    try:
+        request = _select_input(audio_path)
+        ensure_ffmpeg_in_path()
+        if request.needs_segments():
+            if detailed:
+                result = await _transcribe_segmented_detailed(
+                    request.provider,
+                    request.model,
+                    request.language,
+                    audio_path,
+                    bias_terms,
+                )
+            else:
+                result = await _transcribe_segmented(
+                    request.provider, request.model, request.language, audio_path
+                )
+        else:
+            result = await request.invoke(
+                audio_path, detailed=detailed, bias_terms=bias_terms
+            )
+        result = _require_transcript(result, detailed=detailed)
+        if detailed:
+            result.text = _redacted_text(result.text)
+            for segment in result.segments:
+                segment.text = _redacted_text(segment.text)
+                for word in segment.words:
+                    word.word = _redacted_text(word.word)
+        else:
+            result = _redacted_text(result)
+        return result
+    except SttError as exc:
+        raise SttError(exc.code) from None
+    except Exception:
+        raise SttError("provider_failed") from None
+
+
+async def transcribe_audio(audio_path: str) -> str:
     try:
         from gideon.cognition.lexicon import get_lexicon_service
 
         lexicon = get_lexicon_service()
-        result = await _transcription(
-            audio_path,
-            detailed=True,
-            bias_terms=lexicon.select_bias_terms(),
-        )
-        if result is None:
-            return None
+        bias_terms = lexicon.select_bias_terms()
+    except Exception:
+        logger.warning("Dictation lexicon unavailable; transcribing without it")
+        return await _transcription(audio_path, detailed=False)
+    result = await _transcription(audio_path, detailed=True, bias_terms=bias_terms)
+    try:
         corrections = lexicon.correct(result)
         lexicon.write_dictation_corrections(corrections)
-        return result.text
     except Exception:
-        logger.warning(
-            "dictation lexicon failed; transcribing without it", exc_info=True
-        )
-        return await _transcription(audio_path, detailed=False)
+        logger.warning("Dictation corrections unavailable")
+    return _redacted_text(result.text)
 
 
 async def transcribe_audio_detailed(
     audio_path: str, *, bias_terms: list[str] | None = None
-):
+) -> TranscriptResult:
     return await _transcription(audio_path, detailed=True, bias_terms=bias_terms)
 
 
@@ -264,26 +287,19 @@ class _TranscriptAssembly:
             for segment in result.segments
         )
 
-    def finish(self) -> TranscriptResult | None:
-        text = " ".join(filter(None, self.texts)).strip()
-        if text or self.segments:
-            return TranscriptResult(
-                text=text,
-                language=self.language,
-                duration=self.duration,
-                segments=self.segments,
-            )
-        return None
+    def finish(self) -> TranscriptResult:
+        return TranscriptResult(
+            text=" ".join(filter(None, self.texts)).strip(),
+            language=self.language,
+            duration=self.duration,
+            segments=self.segments,
+        )
 
 
 async def _read_chunk(
     request: _TranscriptionRequest, chunk: str, *, detailed=False, bias_terms=None
 ):
-    try:
-        return await request.invoke(chunk, detailed=detailed, bias_terms=bias_terms)
-    except Exception:
-        logger.warning("STT segment failed: %s", os.path.basename(chunk), exc_info=True)
-        return None
+    return await request.invoke(chunk, detailed=detailed, bias_terms=bias_terms)
 
 
 async def _wait_split(process) -> int:
@@ -323,8 +339,7 @@ async def _transcribe_segmented_detailed(
             result = await _read_chunk(
                 request, chunk, detailed=True, bias_terms=bias_terms
             )
-            if result is not None:
-                combined.append(result, position * float(_STT_SEGMENT_SECONDS))
+            combined.append(result, position * float(_STT_SEGMENT_SECONDS))
         return combined.finish()
 
 
@@ -344,11 +359,7 @@ async def _transcribe_segmented(
         chunks = workspace.complete(await _wait_split(process))
         if not chunks:
             return await request.invoke(audio_path)
-        logger.info(
-            "STT: transcribing %d segments of %s",
-            len(chunks),
-            os.path.basename(audio_path),
-        )
+        logger.info("STT: transcribing %d segments", len(chunks))
         pieces = []
         for chunk in chunks:
             text = await _read_chunk(request, chunk)

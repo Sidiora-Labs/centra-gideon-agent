@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from gideon.integrations.stt.provider import SttError
 from gideon.integrations.transcribe import is_available, transcribe_audio
 
 
@@ -68,15 +69,17 @@ class TestIsAvailable:
 
 class TestTranscribeAudio:
     @pytest.mark.asyncio
-    async def test_disabled_returns_none(self):
+    async def test_disabled_raises_reason(self):
         with patch(
             "gideon.extensions.providers.use_cases.load_use_case_settings",
             return_value={"enabled": False},
         ):
-            assert await transcribe_audio("/tmp/test.webm") is None
+            with pytest.raises(SttError) as failure:
+                await transcribe_audio("/tmp/test.webm")
+            assert failure.value.code == "disabled"
 
     @pytest.mark.asyncio
-    async def test_no_active_model_returns_none(self):
+    async def test_no_active_model_raises_reason(self):
         with (
             patch(
                 "gideon.extensions.providers.use_cases.load_use_case_settings",
@@ -85,7 +88,9 @@ class TestTranscribeAudio:
             patch("gideon.security.security.is_sensitive_path", return_value=False),
             patch("gideon.integrations.stt.registry.active_stt", return_value=None),
         ):
-            assert await transcribe_audio("/tmp/test.webm") is None
+            with pytest.raises(SttError) as failure:
+                await transcribe_audio("/tmp/test.webm")
+            assert failure.value.code == "no_model"
 
     @pytest.mark.asyncio
     async def test_successful_transcription(self):
@@ -123,7 +128,8 @@ class TestTranscribeAudio:
                 return_value=(prov, "turbo"),
             ),
         ):
-            assert await transcribe_audio("/tmp/test.webm") is None
+            with pytest.raises(SttError):
+                await transcribe_audio("/tmp/test.webm")
 
     @pytest.mark.asyncio
     async def test_sensitive_path_blocked(self):
@@ -134,7 +140,9 @@ class TestTranscribeAudio:
             ),
             patch("gideon.security.security.is_sensitive_path", return_value=True),
         ):
-            assert await transcribe_audio("/etc/shadow") is None
+            with pytest.raises(SttError) as failure:
+                await transcribe_audio("/etc/shadow")
+            assert failure.value.code == "sensitive_path"
 
     @pytest.mark.asyncio
     async def test_small_file_uses_single_call(self, tmp_path):
@@ -377,3 +385,87 @@ class TestTranscriptContract:
         assert r.segments[0].start == 0.0 and r.segments[0].end == 5.0
         assert r.segments[1].start == 600.0 and r.segments[1].end == 605.0
         assert r.segments[1].words[0].start == 600.0
+
+
+@pytest.mark.asyncio
+async def test_disabled_failure_is_distinct_from_empty_silence(tmp_path, monkeypatch, caplog):
+    import asyncio
+    import traceback
+    from pathlib import Path
+
+    from gideon.extensions.providers.use_cases import (
+        save_active_models,
+        save_use_case_settings,
+    )
+    from gideon.integrations.stt.openai_provider import OpenAISttProvider
+    from gideon.integrations.stt.provider import TranscriptResult
+    from gideon.integrations.stt.transcription_runtime import (
+        bounded_transcription,
+        transcript_text,
+    )
+    from gideon.integrations.transcribe import (
+        _TranscriptAssembly,
+        _TranscriptionRequest,
+        _require_transcript,
+        transcribe_audio_detailed,
+    )
+
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "gideon"))
+    audio = tmp_path / "silence.txt"
+    audio.write_text("")
+    save_use_case_settings("stt", {"enabled": False})
+    for transcribe in (transcribe_audio, transcribe_audio_detailed):
+        with pytest.raises(SttError) as failure:
+            await transcribe(str(audio))
+        assert failure.value.code == "disabled"
+    assert not await is_available()
+
+    save_use_case_settings("stt", {})
+    save_active_models({})
+    with pytest.raises(SttError) as failure:
+        await transcribe_audio_detailed(str(audio))
+    assert failure.value.code == "no_model"
+    with pytest.raises(SttError) as failure:
+        await transcribe_audio_detailed(str(Path.home() / ".ssh" / "id_rsa"))
+    assert failure.value.code == "sensitive_path"
+    assert str(tmp_path) not in str(failure.value)
+
+    silence = TranscriptResult(text="", duration=2.0)
+    assert transcript_text(silence) == ""
+    assert transcript_text(TranscriptResult(text="  ")) == ""
+    assert _require_transcript(silence, detailed=True) is silence
+    assert _require_transcript(
+        await bounded_transcription(asyncio.to_thread(audio.read_text), "local"),
+        detailed=False,
+    ) == ""
+    assembly = _TranscriptAssembly()
+    assembly.append(silence, 0)
+    assembly.append(silence, 2)
+    assert assembly.finish() == TranscriptResult(text="", duration=4.0)
+
+    provider = OpenAISttProvider(provider_name="unconfigured")
+    request = _TranscriptionRequest(provider, "", "")
+    for detailed in (False, True):
+        with pytest.raises(SttError) as failure:
+            await request.invoke(str(audio), detailed=detailed)
+        assert failure.value.code == "no_transcript"
+    assert transcript_text(None) is None
+    with pytest.raises(SttError) as failure:
+        _require_transcript(None, detailed=True)
+    assert failure.value.code == "no_transcript"
+
+    private = tmp_path / "private-recording-sk-secret-do-not-expose"
+    with pytest.raises(SttError) as failure:
+        await bounded_transcription(asyncio.to_thread(private.read_text), str(private))
+    assert failure.value.code == "provider_failed"
+    rendered = "".join(traceback.format_exception(failure.value))
+    assert str(private) not in rendered
+    assert str(private) not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
+    assert str(private) not in str(SttError(str(private)))
+
+    cancelled = asyncio.create_task(bounded_transcription(asyncio.sleep(60), "local"))
+    await asyncio.sleep(0)
+    cancelled.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled

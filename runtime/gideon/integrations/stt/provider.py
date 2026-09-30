@@ -64,6 +64,22 @@ class SttModel:
     language_codes: list[str] = field(default_factory=list)
 
 
+class SttError(Exception):
+    """A transcription failure with a stable code and safe, actionable copy."""
+
+    _MESSAGES = {
+        "disabled": "Speech-to-text is turned off. Enable it in Settings → Speech & Transcription.",
+        "no_model": "No speech-to-text model is selected. Choose one in Settings → Models.",
+        "sensitive_path": "This recording is in a protected location and cannot be transcribed.",
+        "provider_failed": "Speech-to-text failed. Check the provider connection and model in Settings → Models, then retry.",
+        "no_transcript": "The speech-to-text provider returned no transcript or explanation. Check the selected model or choose another provider.",
+    }
+
+    def __init__(self, code: str = "provider_failed") -> None:
+        self.code = code if code in self._MESSAGES else "provider_failed"
+        super().__init__(self._MESSAGES[self.code])
+
+
 class SttProvider(ABC):
     """Provider interface for speech-to-text backends — the INFERENCE axis only.
 
@@ -93,7 +109,7 @@ class SttProvider(ABC):
     async def transcribe(
         self, audio_path: str, model: str = "", language: str = ""
     ) -> str | None:
-        """Transcribe an audio file. Returns text or None on failure."""
+        """Return text (empty for silence), or raise SttError; legacy None means failure."""
         ...
 
     async def transcribe_detailed(

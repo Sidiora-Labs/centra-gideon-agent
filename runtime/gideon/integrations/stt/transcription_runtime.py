@@ -9,15 +9,15 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from typing import Any
 
+from gideon.integrations.stt.provider import SttError
+
 logger = logging.getLogger(__name__)
 
 
 def transcript_text(response: Any) -> str | None:
     value = getattr(response, "text", None)
     if isinstance(value, str):
-        normalized = value.strip()
-        if normalized:
-            return normalized
+        return value.strip()
     return None
 
 
@@ -58,8 +58,11 @@ async def bounded_transcription(
 ) -> str | None:
     try:
         return await asyncio.wait_for(operation, timeout=timeout)
+    except SttError as exc:
+        raise SttError(exc.code) from None
     except asyncio.TimeoutError:
-        log.error("Remote STT timed out for provider %r", provider_name)
+        log.error("Remote STT timed out")
+        raise SttError("provider_failed") from None
     except Exception:
-        log.exception("Remote STT failed for provider %r", provider_name)
-    return None
+        log.error("Remote STT failed")
+        raise SttError("provider_failed") from None
