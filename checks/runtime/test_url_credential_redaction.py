@@ -32,7 +32,11 @@ from __future__ import annotations
 
 import pytest
 
-from gideon.security.security import redact_credentials, redact_url_userinfo
+from gideon.security.security import (
+    redact_credentials,
+    redact_for_display,
+    redact_url_userinfo,
+)
 
 LEAKY = [
     "https://user:s3cr3t@github.com/acme/repo.git",
@@ -212,3 +216,52 @@ class TestGitSourceValidation:
             _validate_git_source("https://user:s3cr3t@github.com/a/b.git")
         with pytest.raises(ValueError, match="git@github.com"):
             _validate_git_source("not-a-git-url")
+
+
+def test_scp_credential_is_redacted_and_git_username_is_preserved(
+    monkeypatch, tmp_path
+):
+    from gideon.interfaces.dashboard.handlers import apps
+    from gideon.security import sel as sel_module
+    from gideon.security.sel import SecurityEventLog
+
+    credential_address = "clone svc-user:pa$$word@code.example.net:team/repo.git"
+    expected_address = (
+        "clone [REDACTED: address credential]@code.example.net:team/repo.git"
+    )
+    redacted, warnings = redact_credentials(credential_address)
+    assert redacted == expected_address
+    assert warnings == ["Redacted credential in scp-style address"]
+    assert "svc-user" not in redacted and "pa$$word" not in redacted
+    assert all(
+        "svc-user" not in warning and "pa$$word" not in warning
+        for warning in warnings
+    )
+    assert redact_for_display(credential_address) == expected_address
+
+    unchanged = (
+        "git@github.com:owner/repo.git",
+        "https://github.com/owner/repo.git",
+        "mail user@example.com about https://example.com/a?to=a@b.com",
+    )
+    for text in unchanged:
+        assert redact_credentials(text) == (text, [])
+
+    url = "https://alice:hunter2@git.example.com/x.git"
+    url_redacted, url_warnings = redact_credentials(url)
+    assert url_redacted == "https://[REDACTED: url credential]@git.example.com/x.git"
+    assert (
+        url_warnings
+        and "alice" not in str(url_warnings)
+        and "hunter2" not in str(url_warnings)
+    )
+
+    monkeypatch.setattr(SecurityEventLog, "_instance", None)
+    audit_log = SecurityEventLog(base_dir=tmp_path)
+    monkeypatch.setattr(sel_module, "sel", lambda: audit_log)
+    apps._sel_log("apps.source_add", "ok", credential_address, {"user": "operator"})
+    stored = audit_log._path.read_text(encoding="utf-8")
+    assert "svc-user" not in stored and "pa$$word" not in stored
+    audit_rows = audit_log.audit_page()["events"]
+    assert len(audit_rows) == 1
+    assert audit_rows[0]["resources"] == expected_address

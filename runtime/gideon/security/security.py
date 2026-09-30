@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
+from gideon.security.address_logins import redact_address_logins
 from gideon.security.sel import SecurityEvent, SecurityEventLog
 
 logger = logging.getLogger(__name__)
@@ -704,6 +705,8 @@ def redact_credentials(text: str) -> tuple[str, list[str]]:
 
     result, url_warnings = redact_url_userinfo(text)
     warnings.extend(url_warnings)
+    result, address_warnings = redact_address_logins(result)
+    warnings.extend(address_warnings)
 
     def _tag_credential(m: "re.Match[str]") -> str:
         warnings.append(f"Redacted credential pattern: {m.group()[:20]}...")
