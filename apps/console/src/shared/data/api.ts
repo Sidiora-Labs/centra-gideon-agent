@@ -5191,7 +5191,7 @@ export const api = {
   dailyDigests: (rebuild = false) =>
     get<{ digests: DailyDigest[] }>(`/api/memory/daily-digests${rebuild ? '?rebuild=1' : ''}`).then((d) => d.digests),
   memorySemantic: () => get<{ entries: SemanticEntry[] }>('/api/memory/semantic').then((d) => d.entries),
-  writeSemantic: (key: string, value: unknown) => put<{ ok?: boolean }>('/api/memory/semantic', { key, value }),
+  writeSemantic: (key: string, value: unknown) => put<WriteReceipt>('/api/memory/semantic', { key, value }).then(requireWriteAccepted),
   deleteSemantic: (key: string) => del(`/api/memory/semantic/${encodeURIComponent(key)}`),
   memoryEpisodic: (opts: { offset?: number; limit?: number; tags?: string } = {}) =>
     get<{ entries: EpisodicEntry[] }>(`/api/memory/episodic?limit=${opts.limit ?? 50}&offset=${opts.offset ?? 0}${opts.tags ? `&tags=${encodeURIComponent(opts.tags)}` : ''}`).then((d) => d.entries),

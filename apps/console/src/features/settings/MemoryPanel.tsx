@@ -139,11 +139,8 @@ function Stat({ label, value, sub }: { label: string; value: number; sub?: strin
 function readValue(raw?: string): string {
   if (raw == null) return ''
   let v: unknown = raw
-  for (let i = 0; i < 2; i++) {
-    if (typeof v !== 'string') break
-    try { v = JSON.parse(v) } catch { break }
-  }
-  return typeof v === 'string' ? v : JSON.stringify(v)
+  try { v = JSON.parse(raw) } catch { /* legacy plain text */ }
+  return v == null ? '' : typeof v === 'string' ? v : JSON.stringify(v)
 }
 
 
@@ -520,6 +517,95 @@ export function FacetControls({ fact, onSaved }: { fact: SemanticEntry; onSaved:
   </div>
 }
 
+type FactDraft = { draft: string; base: string; valueType: string }
+const factDrafts = new Map<string, FactDraft>()
+
+function factValue(raw?: string): unknown {
+  if (raw == null) return null
+  try { return JSON.parse(raw) } catch { return raw }
+}
+
+function factValueType(value: unknown): string {
+  return value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value
+}
+
+function factDraftText(value: unknown): string {
+  return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+}
+
+export function SemanticFactEditor({ fact, onSaved }: { fact: SemanticEntry; onSaved: () => void }) {
+  return <FactValueEditor key={fact.key} fact={fact} onSaved={onSaved} />
+}
+
+function FactValueEditor({ fact, onSaved }: { fact: SemanticEntry; onSaved: () => void }) {
+  const cached = factDrafts.get(fact.key)
+  const [confirmed, setConfirmed] = useState(fact)
+  const [editing, setEditing] = useState(!!cached)
+  const [draft, setDraft] = useState(cached?.draft ?? factDraftText(factValue(fact.value_json)))
+  const [base, setBase] = useState(cached?.base ?? factDraftText(factValue(fact.value_json)))
+  const [valueType, setValueType] = useState(cached?.valueType ?? factValueType(factValue(fact.value_json)))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState(false)
+  useEffect(() => { setConfirmed(fact) }, [fact])
+  const begin = () => {
+    const value = factValue(confirmed.value_json)
+    const text = factDraftText(value)
+    setDraft(text); setBase(text); setValueType(factValueType(value))
+    setError(''); setSaved(false); setEditing(true)
+  }
+  const change = (text: string) => {
+    setDraft(text); setError('')
+    if (text === base) factDrafts.delete(fact.key)
+    else factDrafts.set(fact.key, { draft: text, base, valueType })
+    syncMemoryDocUnloadGuard()
+  }
+  const cancel = () => {
+    factDrafts.delete(fact.key); syncMemoryDocUnloadGuard()
+    setEditing(false); setError('')
+  }
+  const save = async () => {
+    if (busy || draft === base) return
+    let value: unknown = draft
+    if (valueType !== 'string') {
+      try { value = JSON.parse(draft) }
+      catch { setError('Enter valid JSON before saving.'); return }
+      if (factValueType(value) !== valueType || (typeof value === 'number' && !Number.isFinite(value))) {
+        setError(`Keep this fact's ${valueType} value type.`); return
+      }
+    }
+    setBusy(true); setError('')
+    try {
+      const receipt = await api.writeSemantic(fact.key, value)
+      if (receipt.ok !== true) throw new Error('The server did not confirm this change.')
+      const current = (await api.memorySemantic()).find((entry) => entry.key === fact.key)
+      if (!current) throw new Error('The saved fact could not be reloaded. Your draft is retained.')
+      setConfirmed(current)
+      factDrafts.delete(fact.key); syncMemoryDocUnloadGuard()
+      setEditing(false); setSaved(true); onSaved()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Save failed') }
+    finally { setBusy(false) }
+  }
+  const value = readValue(confirmed.value_json)
+  return <div className="flex flex-col gap-2">
+    <Eyebrow>Value</Eyebrow>
+    <pre aria-label="Saved fact value" data-type="caption" className="whitespace-pre-wrap rounded-lg bg-surface-high px-3 py-2 text-on-surface">{value || 'No value'}</pre>
+    {editing ? <>
+      <textarea value={draft} onChange={(e) => change(e.target.value)} disabled={busy}
+        aria-label="Fact value" rows={6} spellCheck={false} data-type="caption"
+        className="w-full resize-y rounded-lg bg-surface-high px-3 py-2 font-mono text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" onClick={save} loading={busy} loadingLabel="Saving…" disabled={busy || draft === base}
+          disabledReason={draft === base ? 'No changes to save' : undefined}><Save size={14} /> Save fact</Button>
+        <Button size="sm" variant="ghost" onClick={cancel} disabled={busy}>Cancel</Button>
+        {draft !== base && <span data-type="caption" className="text-on-surface-low">Unsaved changes</span>}
+      </div>
+    </> : <Button size="sm" variant="secondary" onClick={begin}><FileEdit size={14} /> Edit fact</Button>}
+    {error && <p role="alert" data-type="caption" className="text-danger">{error}</p>}
+    {saved && <span role="status" data-type="caption" className="text-ok">Saved</span>}
+  </div>
+}
+
 function StudioInspector({ item, onDelete, onSaved, onSlotChanged }: {
   item: StudioItem; onDelete: () => void; onSaved: () => void; onSlotChanged: () => void
 }) {
@@ -545,10 +631,7 @@ function StudioInspector({ item, onDelete, onSaved, onSlotChanged }: {
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {item.kind === 'fact' && item.fact && (
           <div data-type="body-s" className="flex flex-col gap-3">
-            <div>
-              <Eyebrow className="mb-1">Value</Eyebrow>
-              <pre data-type="caption" className="whitespace-pre-wrap rounded-lg bg-surface-high px-3 py-2 text-on-surface">{readValue(item.fact.value_json)}</pre>
-            </div>
+            <SemanticFactEditor fact={item.fact} onSaved={onSaved} />
             {item.fact.key.startsWith('pref.facet.') && <FacetControls fact={item.fact} onSaved={onSaved} />}
             <StudioMeta pairs={[
               ['Scope', (item.fact.scope || 'global') + (item.fact.scope_ref ? ` · ${item.fact.scope_ref}` : '')],
@@ -678,17 +761,17 @@ const memoryDocDrafts = new Map<MemoryDocName, MemoryDocDraft>()
 let memoryDocUnloadGuardAttached = false
 
 function guardMemoryDocDrafts(event: BeforeUnloadEvent) {
-  if (memoryDocDrafts.size === 0) return
+  if (memoryDocDrafts.size === 0 && factDrafts.size === 0) return
   event.preventDefault()
   event.returnValue = true
 }
 
 function syncMemoryDocUnloadGuard() {
   if (typeof window === 'undefined') return
-  if (memoryDocDrafts.size > 0 && !memoryDocUnloadGuardAttached) {
+  if ((memoryDocDrafts.size > 0 || factDrafts.size > 0) && !memoryDocUnloadGuardAttached) {
     window.addEventListener('beforeunload', guardMemoryDocDrafts)
     memoryDocUnloadGuardAttached = true
-  } else if (memoryDocDrafts.size === 0 && memoryDocUnloadGuardAttached) {
+  } else if (memoryDocDrafts.size === 0 && factDrafts.size === 0 && memoryDocUnloadGuardAttached) {
     window.removeEventListener('beforeunload', guardMemoryDocDrafts)
     memoryDocUnloadGuardAttached = false
   }
