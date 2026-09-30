@@ -155,3 +155,55 @@ class TestReadRegistry:
         store = SharedStore()
         run_sync_cycle(store, home, self_id="A", now="t")
         assert read_registry(store).seq_of("A") == 1
+
+
+def test_encryption_salt_read_failure_is_reported_as_failed_pull(tmp_path, monkeypatch):
+    from test_durability_convergence_e2e import FolderTransport
+
+    from gideon.operations.durability.crypto import SALT_KEY
+    from gideon.operations.durability.cursor import CONSUMED, Cursor
+
+    class SaltReadFailureTransport(FolderTransport):
+        def __init__(self, root):
+            super().__init__(root)
+            self.push_calls = 0
+
+        def pull(self, refs):
+            if any(ref.key == SALT_KEY for ref in refs):
+                raise ConnectionError("salt object read failed")
+            return super().pull(refs)
+
+        def push(self, objects):
+            self.push_calls += 1
+            return super().push(objects)
+
+    monkeypatch.setattr(
+        "gideon.core.config.credentials.get_credential",
+        lambda key: "sync test passphrase",
+    )
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    (remote / SALT_KEY).write_bytes(b"0123456789abcdef")
+    registry_path = remote / REGISTRY_KEY
+    registry_path.write_bytes(b'{"machines":{"peer":{"seq":4}}}')
+    registry_before = registry_path.read_bytes()
+
+    home = tmp_path / "home"
+    cursor = Cursor(home / "sync")
+    cursor.record("peer", 3, CONSUMED)
+    cursor_path = home / "sync" / "pull_cursor.json"
+    cursor_before = cursor_path.read_bytes()
+    transport = SaltReadFailureTransport(remote)
+
+    report = run_sync_cycle(
+        transport, home, self_id="local", now="t", encrypt="on"
+    )
+
+    assert report.ok is False
+    assert report.error.startswith("pull: encryption metadata read failed:")
+    assert "salt object read failed" in report.error
+    assert report.pulled is None
+    assert Cursor(home / "sync").seen() == {"peer": 3}
+    assert cursor_path.read_bytes() == cursor_before
+    assert registry_path.read_bytes() == registry_before
+    assert transport.push_calls == 0

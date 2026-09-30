@@ -117,6 +117,13 @@ def run_sync_cycle(
         report.ok = False
         report.error = f"encryption: {exc}"
         return report
+    except Exception as exc:  # noqa: BLE001 — salt/metadata transport reads fail the pull
+        logger.warning(
+            "sync cycle: encryption metadata read failed (%s)", exc, exc_info=True
+        )
+        report.ok = False
+        report.error = f"pull: encryption metadata read failed: {exc}"
+        return report
 
     try:
         registry = read_registry(transport)
