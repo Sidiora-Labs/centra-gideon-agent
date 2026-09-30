@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import time
 from dataclasses import dataclass
+
+from gideon.core.sqlite_compat import connect_shared, sqlite3
 
 # -- public data classes -------------------------------------------------------
 
@@ -105,7 +106,7 @@ class _LexiconDB:
     """Owns the raw sqlite3 connection and its access pragmas (no schema side effects)."""
 
     def __init__(self, path: str) -> None:
-        self._conn = sqlite3.connect(
+        self._conn = connect_shared(
             path, timeout=30, isolation_level=None, check_same_thread=False
         )
         self._conn.execute("PRAGMA journal_mode=WAL")

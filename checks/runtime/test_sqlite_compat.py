@@ -8,6 +8,10 @@ that now import ``sqlite3`` from here all share one honest answer.
 from __future__ import annotations
 
 import sqlite3 as _stdlib_sqlite
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
+from pathlib import Path
 
 from gideon.core import sqlite_compat
 
@@ -167,3 +171,56 @@ def test_no_production_site_uses_a_bare_with_on_a_connection():
         "a bare `with sqlite3.connect(...)` leaves the connection open — wrap it in "
         f"contextlib.closing(): {offenders}"
     )
+
+
+def test_shared_connection_serializes_real_cursor_use(tmp_path: Path):
+    """Concurrent users serialize real cursor work and persist writes to the file."""
+    path = tmp_path / "shared.sqlite3"
+    connection = sqlite_compat.connect_shared(
+        path, timeout=10, isolation_level=None, check_same_thread=False
+    )
+    assert isinstance(connection, sqlite_compat.sqlite3.Connection)
+    connection.execute("CREATE TABLE events (worker INTEGER, sequence INTEGER)").close()
+
+    class CustomCursor(sqlite_compat.sqlite3.Cursor):
+        pass
+
+    custom_cursor = connection.cursor(factory=CustomCursor)
+    assert isinstance(custom_cursor, CustomCursor)
+    custom_cursor.execute("SELECT 1")
+    assert custom_cursor.fetchone() == (1,)
+    custom_cursor.close()
+
+    workers = 6
+    writes_per_worker = 40
+    start = threading.Barrier(workers)
+
+    def use_connection(worker: int) -> None:
+        start.wait(timeout=5)
+        for sequence in range(writes_per_worker):
+            cursor = connection.execute(
+                "INSERT INTO events(worker, sequence) VALUES (?, ?)",
+                (worker, sequence),
+            )
+            cursor.close()
+            connection.commit()
+            cursor = connection.execute(
+                "SELECT sequence FROM events WHERE worker = ? ORDER BY sequence",
+                (worker,),
+            )
+            assert cursor.fetchone() == (0,)
+            assert len(list(cursor)) == sequence
+            cursor.close()
+            connection.rollback()
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(use_connection, worker) for worker in range(workers)]
+        for future in futures:
+            future.result(timeout=20)
+
+    connection.close()
+
+    with closing(sqlite_compat.sqlite3.connect(path)) as verify:
+        assert verify.execute("SELECT count(*) FROM events").fetchone() == (
+            workers * writes_per_worker,
+        )

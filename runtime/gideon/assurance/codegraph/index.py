@@ -15,12 +15,12 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from gideon.assurance.codegraph.parse import language_for, parse_source
+from gideon.core.sqlite_compat import connect_shared, sqlite3
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +168,7 @@ class CodeGraphIndex:
     def db(self) -> sqlite3.Connection:
         if self._db is None:
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
-            conn = sqlite3.connect(
+            conn = connect_shared(
                 str(self._db_path),
                 timeout=30,
                 isolation_level=None,

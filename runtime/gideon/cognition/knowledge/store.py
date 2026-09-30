@@ -12,7 +12,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from gideon.cognition.knowledge.vector_index import ChunkVectorIndex
-from gideon.core.sqlite_compat import FTS5_REMEDY, probe, sqlite3
+from gideon.core.sqlite_compat import FTS5_REMEDY, connect_shared, probe, sqlite3
 
 logger = logging.getLogger(__name__)
 
@@ -317,7 +317,7 @@ class KnowledgeStore:
         if not probe().fts5:
             raise RuntimeError(FTS5_REMEDY)
         self.db_path = db_path
-        self.db = sqlite3.connect(
+        self.db = connect_shared(
             db_path, timeout=30, isolation_level=None, check_same_thread=False
         )
         self.db.execute("PRAGMA journal_mode=WAL")
