@@ -119,7 +119,9 @@ class BashActionProvider(ActionProvider):
             return ActionResult(False, error="Bash hook is missing 'command' field")
         from gideon.security import security
 
-        denial = security.is_sensitive_bash_command(command)
+        denial = security.is_sensitive_bash_command(
+            command, cwd=ctx.execution_cwd or None
+        )
         if denial:
             _sel_refusal(command, denial, ctx)
             return ActionResult(False, error=denial)

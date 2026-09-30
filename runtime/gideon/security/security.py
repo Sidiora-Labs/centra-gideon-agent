@@ -109,6 +109,37 @@ def _gideon_home_sensitive_paths() -> list[str]:
     return [str(home / entry) for entry in _SENSITIVE_GIDEON_HOME_ENTRIES]
 
 
+def _external_cli_sensitive_paths() -> list[str]:
+    """Known local sign-in files, honoring each CLI's supported config override."""
+    home = Path.home()
+    xdg = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config").expanduser()
+    roots = (
+        (
+            Path(os.environ.get("CODEX_HOME") or home / ".codex").expanduser(),
+            ("auth.json",),
+        ),
+        (
+            Path(os.environ.get("CLAUDE_CONFIG_DIR") or home / ".claude").expanduser(),
+            (".credentials.json", "credentials.json"),
+        ),
+        (
+            Path(os.environ.get("GEMINI_CONFIG_DIR") or home / ".gemini").expanduser(),
+            ("oauth_creds.json", "google_accounts.json"),
+        ),
+        (
+            Path(os.environ.get("GH_CONFIG_DIR") or xdg / "gh").expanduser(),
+            ("hosts.yml", "hosts.yaml"),
+        ),
+        (
+            Path(os.environ.get("GLAB_CONFIG_DIR") or xdg / "glab-cli").expanduser(),
+            ("config.yml", "config.yaml"),
+        ),
+    )
+    return [
+        str(directory / name) for directory, names in roots for name in names
+    ]
+
+
 _READ_CMDS = (
     r"(?:cat|bat|head|tail|less|more|strings|xxd|od|hexdump|nl|base64|cp|scp|rsync|tar|"
     r"zip|gzip|dd|grep|egrep|fgrep|rg|ag|awk|sed|cut|paste|tr|sort|uniq|wc|jq|yq|diff|"
@@ -229,6 +260,10 @@ class SensitivePaths:
             protected.append(root)
             self._add_root(root)
         for raw in _gideon_home_sensitive_paths():
+            root = Path(raw)
+            protected.append(root)
+            self._add_root(root)
+        for raw in _external_cli_sensitive_paths():
             root = Path(raw)
             protected.append(root)
             self._add_root(root)
@@ -381,7 +416,9 @@ def _normalise_for_matching(command: str) -> str:
     return " && ".join(out)
 
 
-def is_sensitive_bash_command(command: str) -> str | None:
+def is_sensitive_bash_command(
+    command: str, *, cwd: str | os.PathLike[str] | None = None
+) -> str | None:
     """Check if a bash command reads sensitive paths.
 
     Returns denial reason string, or None if clean.
@@ -391,6 +428,10 @@ def is_sensitive_bash_command(command: str) -> str | None:
         return "Blocked: command accesses sensitive credential path"
     if _get_own_secret_re().search(normalised):
         return "Blocked: command accesses Gideon's own credential or audit key"
+    from gideon.security.command_paths import sensitive_command_paths
+
+    if sensitive_command_paths(command, cwd=cwd):
+        return "Blocked: command accesses sensitive credential path"
     return None
 
 

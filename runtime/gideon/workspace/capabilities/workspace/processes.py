@@ -103,7 +103,7 @@ class ProcessRegistry:
             or not any(path.is_relative_to(root) for root in self.allowed_roots)
         ):
             raise ValueError("Workspace outside allowed roots or inaccessible")
-        denial = is_sensitive_bash_command(payload["command"])
+        denial = is_sensitive_bash_command(payload["command"], cwd=path)
         if denial:
             raise PermissionError(denial)
         return {**payload, "workspace": str(path)}
