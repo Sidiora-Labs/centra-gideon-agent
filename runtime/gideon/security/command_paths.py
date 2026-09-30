@@ -40,22 +40,23 @@ def _expand_braces(value: str) -> tuple[str, ...]:
 def _normalise_home_expressions(command: str) -> str:
     home = str(Path.home())
     text = _HOME_WORDS.sub(home, command)
-    gideon_home = os.environ.get("GIDEON_HOME")
-    if gideon_home:
-        text = re.sub(r"\$\{GIDEON_HOME\}|\$GIDEON_HOME", gideon_home, text)
+    gideon_home = os.environ.get("GIDEON_HOME") or str(Path.home() / ".gideon")
+    text = re.sub(r"process\.env\.GIDEON_HOME", gideon_home, text)
+    text = re.sub(r"\$\{GIDEON_HOME\}|\$GIDEON_HOME", gideon_home, text)
     text = re.sub(r"%USERPROFILE%|\$env:USERPROFILE", home, text, flags=re.I)
     text = re.sub(r"\$\{HOME\}|\$HOME", home, text)
     quoted_suffix = r"(['\"])(/[^'\"]+)\1"
-    text = re.sub(
-        re.escape(home) + r"\s*\+\s*" + quoted_suffix,
-        lambda match: home + match.group(2),
-        text,
-    )
-    text = re.sub(
-        re.escape(home) + r"\s*/\s*(['\"])([^'\"]+)\1",
-        lambda match: str(Path(home) / match.group(2)),
-        text,
-    )
+    for root in {home, gideon_home}:
+        text = re.sub(
+            re.escape(root) + r"\s*\+\s*" + quoted_suffix,
+            lambda match: root + match.group(2),
+            text,
+        )
+        text = re.sub(
+            re.escape(root) + r"\s*/\s*(['\"])([^'\"]+)\1",
+            lambda match: str(Path(root) / match.group(2)),
+            text,
+        )
     return text
 
 

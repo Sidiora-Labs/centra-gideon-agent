@@ -47,6 +47,12 @@ def test_shell_refuses_sensitive_paths_across_home_and_cwd(tmp_path, monkeypatch
     assert is_sensitive_bash_command(
         "node -e \"read(process.env.HOME+'/.ssh/id_rsa')\""
     )
+    assert is_sensitive_bash_command(
+        "node -e \"read(process.env.GIDEON_HOME+'/credentials/token')\""
+    )
+    assert is_sensitive_bash_command(
+        "node -e \"read(process.env.GIDEON_HOME + '/.env')\""
+    )
     assert is_sensitive_bash_command("cat .gideon/credentials/token", cwd=project)
 
     (project / "README.md").write_text("ordinary", encoding="utf-8")
