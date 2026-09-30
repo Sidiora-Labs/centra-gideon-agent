@@ -58,6 +58,20 @@ from gideon.http_errors import json_error
 logger = logging.getLogger(__name__)
 
 
+def _mcp_instance_wire(instance, schema: dict) -> dict:
+    from gideon.stale_write import revision_of
+
+    document = _mcp.instance_revision_document(instance, schema)
+    revision = revision_of(document)
+    document.pop("_definition_revision", None)
+    document["revision"] = revision
+    return document
+
+
+def _mcp_instance_revision_document(instance, schema: dict) -> dict:
+    return _mcp.instance_revision_document(instance, schema)
+
+
 def _rebuild_agent_config_safe() -> None:
     """Best-effort agent-config rebuild after an instance mutation, so the change
     reaches Gideon sessions without a restart. Never raises."""
@@ -146,7 +160,7 @@ async def handle_list_instances(request: web.Request) -> web.Response:
 
     if name == _mcp.MCP_TOOLS_EXTENSION:
         return web.json_response(
-            {"instances": [mask_instance(i, schema) for i in _mcp.list_instances()]}
+            {"instances": [_mcp_instance_wire(i, schema) for i in _mcp.list_instances()]}
         )
 
     instances = list_instances(name)
@@ -211,7 +225,7 @@ async def handle_create_instance(request: web.Request) -> web.Response:
         except ValueError as exc:
             return json_error("bad_request", message=str(exc), status=400)
         _rebuild_agent_config_safe()
-        return web.json_response({"instance": mask_instance(inst, schema)}, status=201)
+        return web.json_response({"instance": _mcp_instance_wire(inst, schema)}, status=201)
 
     inst = create_instance(name, display_name=display_name, config=config)
     _refresh_instance_provider_safe(name)
@@ -242,7 +256,7 @@ async def handle_get_instance(request: web.Request) -> web.Response:
             return json_error(
                 "not_found", message="No instance exists with that id.", status=404
             )
-        return web.json_response({"instance": mask_instance(inst, schema)})
+        return web.json_response({"instance": _mcp_instance_wire(inst, schema)})
     inst = get_instance(name, instance_id)
     if not inst:
         return json_error(
@@ -290,6 +304,16 @@ async def handle_update_instance(request: web.Request) -> web.Response:
             if is_mcp
             else get_instance(name, instance_id)
         )
+        if is_mcp:
+            from gideon.stale_write import stale_write_refusal
+
+            refusal = stale_write_refusal(
+                request,
+                _mcp_instance_revision_document(existing, schema) if existing else {},
+                what="this MCP server definition",
+            )
+            if refusal is not None:
+                return refusal
         config = preserve_unchanged_secrets(
             config, existing.config if existing else {}, schema
         )
@@ -303,15 +327,18 @@ async def handle_update_instance(request: web.Request) -> web.Response:
             )
 
     if is_mcp:
-        inst = _mcp.update_instance(
-            instance_id, config=config, enabled=body.get("enabled")
-        )
+        try:
+            inst = _mcp.update_instance(
+                instance_id, config=config, enabled=body.get("enabled")
+            )
+        except ValueError as exc:
+            return json_error("stale_write", message=str(exc), status=409)
         if not inst:
             return json_error(
                 "not_found", message="No instance exists with that id.", status=404
             )
         _rebuild_agent_config_safe()
-        return web.json_response({"instance": mask_instance(inst, schema)})
+        return web.json_response({"instance": _mcp_instance_wire(inst, schema)})
 
     inst = update_instance(
         name,

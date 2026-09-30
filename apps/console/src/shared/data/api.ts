@@ -3039,7 +3039,7 @@ export interface ProviderSchemaProp extends SchemaProp {
   minLength?: number; maxLength?: number; pattern?: string
 }
 export interface ProviderSchema { type?: string; properties?: Record<string, ProviderSchemaProp>; required?: string[] }
-export interface ProviderInstance { id: string; extension_name: string; display_name: string; config: Record<string, unknown>; enabled: boolean; _secret_set?: string[] }
+export interface ProviderInstance { id: string; extension_name: string; display_name: string; config: Record<string, unknown>; enabled: boolean; revision?: string; _secret_set?: string[] }
 export interface ModelProvider { name: string; type: string; model?: string; capabilities: string[]; credential_status: string; connection?: { state: 'checking' | 'connected' | 'failed' | 'untestable'; detail: string; rejected_credential: boolean; checked_at: number | null } }
 export interface ModelProviderType {
   type: string
@@ -4222,8 +4222,8 @@ export const api = {
   providerInstances: (name: string) => get<{ instances: ProviderInstance[] }>(`/api/providers/${encodeURIComponent(name)}/instances`).then((d) => d.instances),
   createProviderInstance: (name: string, body: { display_name: string; config: Record<string, unknown> }) =>
     post<{ instance: ProviderInstance }>(`/api/providers/${encodeURIComponent(name)}/instances`, body),
-  updateProviderInstance: (name: string, id: string, body: { display_name?: string; config?: Record<string, unknown>; enabled?: boolean }) =>
-    put<{ instance: ProviderInstance }>(`/api/providers/${encodeURIComponent(name)}/instances/${encodeURIComponent(id)}`, body),
+  updateProviderInstance: (name: string, id: string, body: { display_name?: string; config?: Record<string, unknown>; enabled?: boolean }, basedOn?: string) =>
+    put<{ instance: ProviderInstance }>(`/api/providers/${encodeURIComponent(name)}/instances/${encodeURIComponent(id)}`, body, basedOn),
   deleteProviderInstance: (name: string, id: string) => del(`/api/providers/${encodeURIComponent(name)}/instances/${encodeURIComponent(id)}`),
   testProviderInstance: (name: string, id: string) => post<ProviderTestResult>(`/api/providers/${encodeURIComponent(name)}/instances/${encodeURIComponent(id)}/test`),
   modelProviders: () => get<{ providers: ModelProvider[] }>('/api/model-providers').then((d) => d.providers),

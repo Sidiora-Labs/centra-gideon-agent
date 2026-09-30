@@ -160,17 +160,40 @@ class McpServerInfo:
             allow_revision = mcp_grants.revision(self)
             allow_question = mcp_grants.question(self)
             display = mcp_grants.display(self)
+            display_valid = True
         except (mcp_grants.McpGrantDefinitionError, TypeError, ValueError):
             allowed = False
             allow_revision = ""
             allow_question = mcp_grants.WAITING_REASON
             display = {"command": "", "args": [], "url": "", "transport": "", "env": [], "headers": [], "header_credentials": [], "oauth": [], "poolable": False}
-        from gideon.integrations.mcp_secret_refs import safe_display_args, safe_display_url
+            display_valid = False
+        from gideon.extensions.providers.mcp_instances import _display_args, _display_command
+        from gideon.integrations.mcp_secret_refs import safe_display_url
+
+        safe_command = _display_command(display["command"])
+        safe_args = _display_args(display["args"])
+        safe_url = safe_display_url(display["url"])
+        if display_valid:
+            safe_review = {
+                "name": self.name,
+                "source": self.source,
+                "transport": display["transport"],
+                "command": safe_command,
+                "args": safe_args,
+                "cwd": self.cwd,
+                "url": safe_url,
+                "env": {name: "" for name in display["env"]},
+                "headers": {name: "" for name in display["headers"]},
+                "oauth": {name: "" for name in display["oauth"]},
+                "allowElicitation": self.allowElicitation,
+                "poolable": display["poolable"],
+            }
+            allow_question = mcp_grants.question(safe_review)
 
         d: dict[str, Any] = {
             "name": self.name,
-            "command": display["command"],
-            "args": safe_display_args(display["args"]),
+            "command": safe_command,
+            "args": safe_args,
             "transport": display["transport"],
             "env": display["env"],
             "headers": display["headers"],
@@ -187,7 +210,7 @@ class McpServerInfo:
             "allowQuestion": allow_question,
         }
         if self.url:
-            d["url"] = safe_display_url(display["url"])
+            d["url"] = safe_url
         if self.cwd:
             d["cwd"] = self.cwd
         if self.disabled_tools:

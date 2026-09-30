@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,62 @@ MCP_TOOLS_EXTENSION = "mcp-tools"
 _VALID_NAME = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+_HEADER_CREDENTIAL = re.compile(
+    r"(?i)(authorization|proxy-authorization|[!#$%&'*+.^_`|~0-9A-Za-z-]*(?:api[-_]?key|token|secret|credential|auth)[!#$%&'*+.^_`|~0-9A-Za-z-]*)(\s*[:=]\s*).*"
+)
+_MASK_MARKERS = ("[REDACTED", "…")
+
+
+def _has_mask(value: str) -> bool:
+    return any(marker in value for marker in _MASK_MARKERS)
+
+
+def _display_args(values: list[str]) -> list[str]:
+    from gideon.integrations.mcp_secret_refs import safe_display_args
+
+    displayed = safe_display_args(values)
+    for index, value in enumerate(displayed):
+        match = _HEADER_CREDENTIAL.search(value)
+        if match:
+            delimiter = ": " if ":" in match.group(2) else "="
+            displayed[index] = value[:match.start(2)] + delimiter + "[REDACTED: credential]"
+    return displayed
+
+
+def _display_command(value: Any) -> str:
+    raw = value if isinstance(value, str) else ""
+    try:
+        return shlex.join(_display_args(shlex.split(raw)))
+    except ValueError:
+        return _display_args([raw])[0]
+
+
+def _restore_command(incoming: str, stored: str) -> str:
+    displayed = _display_command(stored)
+    if incoming == displayed:
+        return stored
+    if _has_mask(displayed) or _has_mask(incoming):
+        raise ValueError("MCP credential mask moved or changed")
+    return incoming
+
+
+def _restore_args(incoming: str, stored: Any) -> list[str]:
+    values = shlex.split(incoming) if incoming.strip() else []
+    previous = stored if isinstance(stored, list) else []
+    displayed = _display_args(previous)
+    mask_indices: set[int] = set()
+    for index, safe in enumerate(displayed):
+        if not _has_mask(safe):
+            continue
+        mask_indices.add(index)
+        if index >= len(values) or values[index] != safe:
+            raise ValueError("MCP credential mask moved or changed")
+    for index, value in enumerate(values):
+        if _has_mask(value) and (index not in mask_indices or value != displayed[index]):
+            raise ValueError("MCP credential mask moved or changed")
+    for index in mask_indices:
+        values[index] = previous[index]
+    return values
 
 
 def _mcp_json_path() -> Path:
@@ -226,9 +283,9 @@ def _spec_to_instance(name: str, spec: dict[str, Any]) -> ExtensionInstance:
     args = spec.get("args", [])
     config: dict[str, Any] = {
         "transport": "sse" if url else "stdio",
-        "command": spec.get("command", ""),
-        "args": " ".join(args) if isinstance(args, list) else str(args or ""),
-        "endpoint": url,
+        "command": _display_command(spec.get("command", "")),
+        "args": shlex.join(_display_args(args)) if isinstance(args, list) else str(args or ""),
+        "endpoint": _safe_display_url(url),
     }
     return ExtensionInstance(
         id=name,
@@ -258,19 +315,33 @@ def _config_to_spec(
         if field in config:
             spec[field] = config[field]
 
+    old_command = str(existing.get("command") or "") if isinstance(existing, dict) else ""
+    old_args = existing.get("args", []) if isinstance(existing, dict) else []
+    old_url = str(existing.get("url") or "") if isinstance(existing, dict) else ""
     transport = config.get("transport") or (
         "sse" if config.get("endpoint") else "stdio"
     )
     if transport == "sse":
-        spec["url"] = (config.get("endpoint") or "").strip()
+        endpoint = (config.get("endpoint") or "").strip()
+        displayed = _safe_display_url(old_url)
+        if endpoint == displayed:
+            endpoint = old_url
+        elif _has_mask(endpoint):
+            raise ValueError("MCP credential mask moved or changed")
+        spec["url"] = endpoint
     else:
-        spec["command"] = (config.get("command") or "").strip()
+        spec["command"] = _restore_command((config.get("command") or "").strip(), old_command)
         raw_args = config.get("args") or ""
         if isinstance(raw_args, list):
-            spec["args"] = raw_args
-        else:
-            spec["args"] = raw_args.split() if raw_args.strip() else []
+            raw_args = shlex.join([str(value) for value in raw_args])
+        spec["args"] = _restore_args(str(raw_args), old_args)
     return spec
+
+
+def _safe_display_url(value: Any) -> str:
+    from gideon.integrations.mcp_secret_refs import safe_display_url
+
+    return safe_display_url(value)
 
 
 def list_instances() -> list[ExtensionInstance]:
@@ -287,6 +358,18 @@ def list_instances() -> list[ExtensionInstance]:
 def get_instance(instance_id: str) -> ExtensionInstance | None:
     spec = _load().get("mcpServers", {}).get(instance_id)
     return _spec_to_instance(instance_id, spec) if isinstance(spec, dict) else None
+
+
+def instance_revision_document(instance: ExtensionInstance, schema: dict[str, Any]) -> dict[str, Any]:
+    """Return the masked card projection plus a private definition fingerprint."""
+    from gideon.extensions.apps.secret_fields import mask_instance
+    from gideon.security import mcp_grants
+
+    spec = _load().get("mcpServers", {}).get(instance.id)
+    if not isinstance(spec, dict):
+        raise ValueError("MCP server definition is unavailable")
+    definition = mcp_grants.revision({**spec, "name": instance.id, "source": "mcp.json"})
+    return {**mask_instance(instance, schema), "_definition_revision": definition}
 
 
 def create_instance(display_name: str, config: dict[str, Any]) -> ExtensionInstance:

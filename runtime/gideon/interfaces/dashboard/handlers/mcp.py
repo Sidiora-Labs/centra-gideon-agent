@@ -51,6 +51,17 @@ def _redact_mcp_projection(value: Any) -> Any:
     if not isinstance(value, dict):
         return redact_values_for_display(value)
     redacted = redact_values_for_display(value)
+    if isinstance(value.get("command"), str) or isinstance(value.get("args"), list):
+        from gideon.extensions.providers.mcp_instances import _display_args, _display_command
+
+        if isinstance(value.get("command"), str):
+            redacted["command"] = _display_command(value["command"])
+        if isinstance(value.get("args"), list):
+            redacted["args"] = _display_args(value["args"])
+    if isinstance(value.get("url"), str):
+        from gideon.extensions.providers.mcp_instances import _safe_display_url
+
+        redacted["url"] = _safe_display_url(value["url"])
     for key in ("name", "header_credentials"):
         if key in value:
             redacted[key] = value[key]

@@ -101,7 +101,12 @@ function InstanceRow({ ext, inst, schema, onChanged }: {
   const save = async () => {
     setSaving(true)
     try {
-      if (!(await reportingWrite('save this instance', () => api.updateProviderInstance(ext.name, inst.id, { config })))) return
+      if (!(await reportingWrite('save this instance', () => api.updateProviderInstance(
+        ext.name,
+        inst.id,
+        { config },
+        ext.name === 'mcp-tools' ? inst.revision : undefined,
+      )))) return
       setEditing(false)
       onChanged()
     } finally { setSaving(false) }
