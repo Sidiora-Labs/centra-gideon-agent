@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shlex
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -37,15 +39,53 @@ def _pid_is_alive(pid: int) -> bool:
 
 
 @dataclass(frozen=True)
+class ProcessFacts:
+    argv: tuple[str, ...]
+    identity: str
+    state: str = ""
+
+
+def process_facts(pid: int) -> ProcessFacts | None:
+    if pid <= 0:
+        return None
+    proc = Path("/proc")
+    if proc.is_dir():
+        try:
+            entry = proc / str(pid)
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+            boot = (proc / "sys/kernel/random/boot_id").read_text().strip()
+            argv = tuple(
+                word.decode("utf-8", "replace")
+                for word in (entry / "cmdline").read_bytes().split(b"\0")
+                if word
+            )
+            return ProcessFacts(argv, f"{boot}:{fields[19]}", fields[0])
+        except (OSError, IndexError, ValueError):
+            return None
+    try:
+        result = subprocess.run(
+            ["ps", "-ww", "-p", str(pid), "-o", "lstart=", "-o", "args="],
+            capture_output=True, text=True, timeout=4, check=False,
+        )
+        output = result.stdout.strip()
+        if result.returncode or len(output) < 25:
+            return None
+        return ProcessFacts(tuple(shlex.split(output[24:].strip())), output[:24])
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+@dataclass(frozen=True)
 class BoundGateway:
     port: int
     pid: int
+    identity: str = ""
 
     def write(self, destination: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         staging = destination.with_suffix(".tmp")
         staging.write_text(
-            json.dumps(dict(port=self.port, pid=self.pid)), encoding="utf-8"
+            json.dumps(dict(port=self.port, pid=self.pid, identity=self.identity)), encoding="utf-8"
         )
         os.replace(staging, destination)
 
@@ -57,13 +97,20 @@ class BoundGateway:
             return None
         try:
             document = json.loads(text)
-            return cls(int(document["port"]), int(document.get("pid", 0)))
+            return cls(
+                int(document["port"]), int(document.get("pid", 0)),
+                str(document.get("identity", "")),
+            )
         except (ValueError, TypeError, KeyError, json.JSONDecodeError):
             logger.debug("ignoring malformed %s", RUNTIME_FILE)
             return None
 
     def live_port(self) -> int | None:
         if self.port > 0 and _pid_is_alive(self.pid):
+            if self.identity:
+                facts = process_facts(self.pid)
+                if facts is None or facts.identity != self.identity or facts.state == "Z":
+                    return None
             return self.port
         return None
 
@@ -74,7 +121,9 @@ def publish(port: int, *, pid: int | None = None) -> None:
             f"gateway_base.publish() needs the bound port, got {port!r}. A gateway that cannot name its own socket cannot address its children."
         )
     os.environ[PORT_ENV] = str(port)
-    binding = BoundGateway(port, int(os.getpid() if pid is None else pid))
+    owner = int(os.getpid() if pid is None else pid)
+    facts = process_facts(owner)
+    binding = BoundGateway(port, owner, facts.identity if facts else "")
     try:
         binding.write(_runtime_path())
     except OSError:

@@ -69,7 +69,9 @@ ENV PATH="/opt/venv/bin:$PATH" \
     GIDEON_HOME=/data \
     GIDEON_WORKSPACE=/data/workspace \
     GIDEON_PORT=10000 \
-    GIDEON_INSTALL_KIND=container
+    GIDEON_INSTALL_KIND=container \
+    GIDEON_CONTAINER_STARTED_BY=docker-run \
+    GIDEON_CONTAINER_IMAGE=gideon-gateway:local
 RUN mkdir -p /data && chown gideon:gideon /data
 VOLUME ["/data"]
 USER gideon
@@ -94,7 +96,7 @@ USER root
 COPY --from=console /app/apps/console/dist /tmp/gideon-console-dist
 RUN python -c 'from pathlib import Path; import shutil, sysconfig; shutil.copytree("/tmp/gideon-console-dist", Path(sysconfig.get_path("purelib")) / "gideon/static/dist", dirs_exist_ok=True)' && \
     rm -rf /tmp/gideon-console-dist
-ENV GIDEON_DOCKER_MODE=single GIDEON_BIND_HOST=0.0.0.0
+ENV GIDEON_DOCKER_MODE=single GIDEON_CONTAINER_IMAGE=gideon:local GIDEON_BIND_HOST=0.0.0.0
 USER gideon
 
 FROM runtime AS default

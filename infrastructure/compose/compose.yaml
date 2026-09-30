@@ -9,6 +9,9 @@ services:
     env_file:
       - ../../.env
     environment:
+      GIDEON_CONTAINER_STARTED_BY: compose
+      GIDEON_GATEWAY_IMAGE: ${GIDEON_GATEWAY_IMAGE:-gideon-gateway:local}
+      GIDEON_WEB_IMAGE: ${GIDEON_WEB_IMAGE:-gideon-web:local}
       GIDEON_HOME: /data
       GIDEON_PORT: "10000"
       GIDEON_WORKSPACE: /data/workspace
@@ -46,6 +49,9 @@ services:
     env_file:
       - ../../.env
     environment:
+      GIDEON_CONTAINER_STARTED_BY: compose
+      GIDEON_GATEWAY_IMAGE: ${GIDEON_GATEWAY_IMAGE:-gideon-gateway:local}
+      GIDEON_WEB_IMAGE: ${GIDEON_WEB_IMAGE:-gideon-web:local}
       GIDEON_HOME: /data
       GIDEON_WORKSPACE: /data/workspace
     depends_on:

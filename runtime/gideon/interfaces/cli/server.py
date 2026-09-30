@@ -21,12 +21,13 @@ from gideon.core.config import loader as config_loader
 from gideon.core.config.loader import _DEFAULT_PORT
 from gideon.core.constants import DATA_WARNING
 from gideon.core.layout import package_path
+from gideon.engine import gateway_base
 from gideon.engine.gateway import run_gateway
 from gideon.engine.session import ConversationDirectory
 from gideon.extensions.skills import ProcedureLibrary
 from gideon.interfaces.dashboard.origin import dashboard_origin, parse_dashboard_url
 from gideon.interfaces.dashboard.token_auth import parse_duration
-from gideon.operations import self_update
+from gideon.operations import container_host, self_update
 from gideon.operations.frontend import build_frontend_sync, ensure_dev_dist_symlink
 from gideon.operations.service import controller as service_controller
 from gideon.operations.service import linux as svc_linux
@@ -159,165 +160,102 @@ def _logout(port: int) -> None:
         sys.exit(1)
 
 
-def _stop(port: int) -> None:
-    """Stop a running Gideon gateway.
+def _container_lifecycle(done: str, command: str) -> None:
+    print(container_host.not_done_here(done, command), file=sys.stderr)
+    raise SystemExit(1)
 
-    If a user-level service (systemd/launchd) is active, prefer
-    ``service stop`` so the process manager does not immediately
-    restart the gateway under us. Otherwise fall back to the
-    SIGTERM-by-port path used for foreground gateways.
-    """
-    if service_controller.stop_service():
-        sel().log_api_access(
-            caller="cli",
-            operation="gateway_stop",
-            outcome="allowed",
-            source="cli",
-            resources=f"port={port} via=service",
-        )
-        print("✅ Stopped gideon service. To remove it: gideon service uninstall")
-        return
+
+def _runs_the_gateway(command: str | tuple[str, ...]) -> bool:
+    import shlex
 
     try:
-        out = subprocess.check_output(
-            ["lsof", "-ti", f"TCP:{port}", "-sTCP:LISTEN"], text=True
-        ).strip()
-    except FileNotFoundError:
-        sel().log_api_access(
-            caller="cli",
-            operation="gateway_stop",
-            outcome="error",
-            source="cli",
-            resources=f"port={port} reason=lsof_not_found",
-        )
-        print(
-            "❌ `lsof` not found — cannot look up gateway process. "
-            f"Install lsof or use `ss -tlnp | grep {port}` to find the PID manually."
-        )
-        sys.exit(1)
-    except subprocess.CalledProcessError:
-        out = ""
-
-    if not out:
-        sel().log_api_access(
-            caller="cli",
-            operation="gateway_stop",
-            outcome="no_target",
-            source="cli",
-            resources=f"port={port}",
-        )
-        print(f"No Gideon gateway currently running on port {port}.")
-        sys.exit(1)
-
-    pids = list(dict.fromkeys(int(p) for p in out.splitlines() if p.strip().isdigit()))
-
-    try:
-        pids = [p for p in pids if _is_gideon_process(p)]
-    except FileNotFoundError:
-        sel().log_api_access(
-            caller="cli",
-            operation="gateway_stop",
-            outcome="error",
-            source="cli",
-            resources=f"port={port} reason=ps_not_found",
-        )
-        print(
-            "❌ `ps` not found — cannot verify gateway process. "
-            "Install procps or manually kill the process."
-        )
-        sys.exit(1)
-    if not pids:
-        sel().log_api_access(
-            caller="cli",
-            operation="gateway_stop",
-            outcome="no_target",
-            source="cli",
-            resources=f"port={port} reason=no_gideon_process",
-        )
-        print(f"No Gideon gateway currently running on port {port}.")
-        sys.exit(1)
-
-    sent: set[int] = set()
-    denied: list[int] = []
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-            sent.add(pid)
-        except ProcessLookupError:
-            pass
-        except PermissionError:
-            denied.append(pid)
-
-    if sent:
-        for _ in range(10):
-            time.sleep(0.1)
-            if all(_pid_exited(p) for p in sent):
-                break
-
-    if sent:
-        sel().log_api_access(
-            caller="cli",
-            operation="gateway_stop",
-            outcome="allowed",
-            source="cli",
-            resources=f"pids={sorted(sent)} port={port}",
-        )
-        print(
-            f"✅ Sent SIGTERM to gateway (pid {', '.join(str(p) for p in sorted(sent))})."
-        )
-    if denied:
-        sel().log_api_access(
-            caller="cli",
-            operation="gateway_stop",
-            outcome="denied",
-            source="cli",
-            resources=f"pids={denied} port={port}",
-        )
-        print(
-            f"❌ No permission to stop pid {', '.join(str(p) for p in denied)} — try: sudo gideon stop"  # noqa: E501
-        )
-        sys.exit(1)
-    if not sent:
-        sel().log_api_access(
-            caller="cli",
-            operation="gateway_stop",
-            outcome="no_target",
-            source="cli",
-            resources=f"port={port} reason=process_already_exited",
-        )
-        print(
-            f"No Gideon gateway currently running on port {port} (process already exited)."
-        )
-        sys.exit(1)
+        argv = list(command if isinstance(command, tuple) else shlex.split(command))
+    except ValueError:
+        return False
+    if not argv:
+        return False
+    executable = Path(argv[0]).name.lower()
+    if executable.startswith("python"):
+        if len(argv) > 3 and argv[1:3] == ["-m", "gideon"]:
+            return argv[3] in {"gateway", "start"}
+        if len(argv) > 2 and Path(argv[1]).name == "gideon":
+            return argv[2] in {"gateway", "start"}
+        return False
+    return executable in {"gideon", "gideon-backend"} and len(argv) > 1 and argv[1] in {"gateway", "start"}
 
 
 def _is_gideon_process(pid: int) -> bool:
-    """Return True if *pid* looks like a Gideon gateway process."""
-    try:
-        out = (
-            subprocess.check_output(["ps", "-p", str(pid), "-o", "args="], text=True)
-            .strip()
-            .lower()
-        )
-        return (
-            "backend.gateway" in out
-            or "gideon.interfaces.dashboard" in out
-            or "gideon gateway" in out
-            or "gideon start" in out
-        )
-    except subprocess.CalledProcessError:
-        return False
+    facts = gateway_base.process_facts(pid)
+    return facts is not None and _runs_the_gateway(facts.argv)
 
 
 def _pid_exited(pid: int) -> bool:
-    """Return True if *pid* no longer exists."""
+    facts = gateway_base.process_facts(pid)
+    return facts is None or facts.state == "Z"
+
+
+def _stop(port: int) -> None:
+    """Stop this home's recorded gateway, after confirming its process identity."""
+    if container_host.in_container():
+        _container_lifecycle("stopped", container_host.stop_command())
+    recorded = gateway_base.BoundGateway.read(gateway_base._runtime_path())
+    if recorded is None or not gateway_base._pid_is_alive(recorded.pid):
+        print(f"No Gideon gateway currently running on port {port}.", file=sys.stderr)
+        raise SystemExit(1)
+    if recorded.port != port:
+        print(
+            f"This home's gateway listens on port {recorded.port}, not {port}; nothing was stopped.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    facts = gateway_base.process_facts(recorded.pid)
+    if (
+        facts is None or not _runs_the_gateway(facts.argv)
+        or not recorded.identity or facts.identity != recorded.identity
+    ):
+        print(
+            f"Cannot verify recorded pid {recorded.pid} as this home's Gideon gateway; it was not signalled.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if service_controller.stop_service():
+        print("Stopped gideon service. To remove it: gideon service uninstall")
+        return
+    descriptor = None
     try:
-        os.kill(pid, 0)
-        return False
+        if hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"):
+            descriptor = os.pidfd_open(recorded.pid)
+        confirmed = gateway_base.process_facts(recorded.pid)
+        if confirmed is None or confirmed.identity != facts.identity or confirmed.argv != facts.argv:
+            print("Gateway process identity changed; nothing was stopped.", file=sys.stderr)
+            raise SystemExit(1)
+        if descriptor is not None:
+            signal.pidfd_send_signal(descriptor, signal.SIGTERM)
+        else:
+            os.kill(recorded.pid, signal.SIGTERM)
     except ProcessLookupError:
-        return True
+        return
     except PermissionError:
-        return False
+        print(f"No permission to stop the gateway (pid {recorded.pid}).", file=sys.stderr)
+        raise SystemExit(1) from None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    for _ in range(150):
+        remaining = gateway_base.process_facts(recorded.pid)
+        if (
+            (remaining is None and not gateway_base._pid_is_alive(recorded.pid))
+            or (remaining is not None and (remaining.state == "Z" or remaining.identity != facts.identity))
+        ):
+            sel().log_api_access(
+                caller="cli", operation="gateway_stop", outcome="allowed",
+                source="cli", resources=f"pid={recorded.pid} port={port}",
+            )
+            print(f"Stopped the gateway (pid {recorded.pid}, port {port}).")
+            return
+        time.sleep(0.1)
+    print("Gateway was sent SIGTERM but is still running after 15 seconds.", file=sys.stderr)
+    raise SystemExit(1)
 
 
 def _spawn_detached_gateway(port: int) -> None:
@@ -353,29 +291,24 @@ def _spawn_detached_gateway(port: int) -> None:
 
 
 def _restart(port: int) -> None:
-    """Restart the gateway, service-aware.
-
-    If a platform service (systemd/launchd) manages the gateway, restart it
-    through the service manager and stop — it owns the process lifecycle.
-    Otherwise stop any foreground gateway on ``port`` and spawn a fresh
-    detached one. A ``_stop`` that exits (e.g. nothing was running) is
-    swallowed so restart still starts a gateway.
-    """
+    """Restart through the runtime owner, never spawn after a failed stop."""
+    if container_host.in_container():
+        _container_lifecycle("restarted", container_host.restart_command())
     if service_controller.restart_service():
-        sel().log_api_access(
-            caller="cli",
-            operation="gateway_restart",
-            outcome="allowed",
-            source="cli",
-            resources=f"port={port} via=service",
-        )
-        print("✅ Restarted gideon service.")
+        print("Restarted gideon service.")
         return
-
-    try:
+    recorded = gateway_base.BoundGateway.read(gateway_base._runtime_path())
+    running = recorded is not None and gateway_base._pid_is_alive(recorded.pid)
+    if running:
+        if recorded.port != port or not _is_gideon_process(recorded.pid):
+            print("Cannot verify this home's gateway on the requested port; nothing was restarted.", file=sys.stderr)
+            raise SystemExit(1)
+        facts = gateway_base.process_facts(recorded.pid)
+        if facts is None or not recorded.identity or facts.identity != recorded.identity:
+            print("Cannot verify gateway process identity; nothing was restarted.", file=sys.stderr)
+            raise SystemExit(1)
+    if running:
         _stop(port)
-    except SystemExit:
-        pass
     _spawn_detached_gateway(port)
 
 
@@ -529,7 +462,7 @@ def _update_container() -> None:
         return
     print("  📦 This is a container install — the image is replaced, not patched.")
     print("  Run these on the host:\n")
-    for cmd in self_update.container_instructions():
+    for cmd in self_update.container_instructions(latest):
         print(f"      {cmd}")
     print("\n  See docs/guides/CONTAINERS.md. Your data lives in the mounted volume")
     print("  and survives the recreate; `gideon snapshot` first if you want a copy.")
