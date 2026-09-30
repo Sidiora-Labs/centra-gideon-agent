@@ -39,6 +39,7 @@ import { GideonMark } from '../shared/ui/GideonMark'
 import { ComposerStage } from '../shared/ui/ComposerStage'
 import { CollapseColumnButton, CollapsedBoardColumn, boardGridTemplate, useBoardCollapse } from '../shared/ui/BoardCollapse'
 import { PromptPalette } from './chat/PromptPalette'
+import { memoryModeCopy } from './chat/memoryModeCopy'
 import { ChatContextLine } from './chat/ChatContextLine'
 import { SessionSkillsReview } from './chat/SessionSkillsReview'
 import { RoutingChip, type RoutingSuggestion } from './chat/RoutingChip'
@@ -174,10 +175,10 @@ function writeCachedDetail(key: string, d: ChatDetail): void {
 
 type ApproveAction = 'approved' | 'rejected' | 'revised' | 'trust' | 'trust_agent' | 'trust_reads' | 'yolo'
 
-const MEMORY_MODES: { id: MemoryMode; label: string; hint: string }[] = [
-  { id: 'persistent', label: 'Persistent', hint: 'Remember across sessions' },
-  { id: 'temporary', label: 'Temporary', hint: 'Forget when the session ends' },
-  { id: 'incognito', label: 'Incognito', hint: 'Do not write to memory' },
+const MEMORY_MODES: { id: MemoryMode; label: string }[] = [
+  { id: 'persistent', label: 'Persistent' },
+  { id: 'temporary', label: 'Temporary' },
+  { id: 'incognito', label: 'Incognito' },
 ]
 
 const APPROVAL_SLIDER = [
@@ -2110,9 +2111,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       {memoryMode !== 'persistent' && (
         <div className="mb-2 flex items-center gap-1.5 text-[0.75rem] text-on-surface-low">
           {memoryMode === 'incognito' ? <EyeOff size={13} className="shrink-0" /> : <Clock size={13} className="shrink-0" />}
-          <span>{memoryMode === 'incognito'
-            ? 'Incognito — memory writes are disabled. This chat is still saved to your history.'
-            : 'Temporary — this chat is forgotten when the session ends.'}</span>
+          <span>{memoryModeCopy(memoryMode).notice}</span>
         </div>
       )}
       {
@@ -2297,7 +2296,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
           <ProjectPicker value={projectId} onChange={setProjectId}
             emptyLabel="No project" emptyHint="" openSignal={openProjectSignal} />
           <Segmented ariaLabel="Memory mode" size="sm" value={memoryMode}
-            options={MEMORY_MODES.map((m) => ({ key: m.id, label: m.label, title: `${m.label} — ${m.hint}` }))}
+            options={MEMORY_MODES.map((m) => ({ key: m.id, label: m.label, title: `${m.label} — ${memoryModeCopy(m.id).hint}` }))}
             onChange={(v) => setMemoryMode(v as MemoryMode)} />
         </div>
       )}
