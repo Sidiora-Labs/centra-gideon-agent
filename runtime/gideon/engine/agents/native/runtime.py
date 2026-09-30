@@ -609,6 +609,7 @@ class NativeAgentRuntime(AgentProvider):
         project_id: str = "",
         tool_groups: list[str] | None = None,
         surface: str = "",
+        leaf_context: dict[str, str] | None = None,
         max_tool_concurrency: int = dispatch_plan.MAX_CONCURRENT_CALLS,
     ) -> None:
         self._definition, self._model = definition, model_provider
@@ -638,7 +639,7 @@ class NativeAgentRuntime(AgentProvider):
         self._session_key = session_key
         from gideon.integrations.mcp_shared import leaf_lineage
 
-        lineage = leaf_lineage(os.environ)
+        lineage = leaf_lineage(leaf_context or {})
         try:
             has_leaf_run = bool(lineage.get("__wf_run_id", "").strip()) and int(
                 lineage.get("__wf_depth", "0") or "0"

@@ -3,18 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 
 import pytest
 
 from gideon.automation.workflows.engine import leaf_spawn_env
 from gideon.automation.workflows.models import Node
+from gideon.core.config.loader import config_path
 from gideon.engine.agents.native.tools import InProcessMcpToolProvider
+from gideon.extensions.apps import app_manager, manager
+from gideon.extensions.providers.provider_bridge import _build_native_runtime
+from gideon.extensions.providers import loader
+from gideon.extensions.providers.registry import ProviderRegistry
+from gideon.extensions.providers.use_cases import active_models_path
 from gideon.integrations import mcp_automation, mcp_shared, mcp_subagents
 from gideon.integrations.acp import translate
 from gideon.integrations.acp.adapter import acp_event_to_agent_event
+from gideon.integrations.acp.client import AcpClient
 from gideon.integrations.acp.dialect import DefaultDialect
 from gideon.integrations.acp.mcp_servers import core_tool_declaration
 from gideon.integrations.acp.types import JsonRpcMessage
+from gideon.integrations.llm.registry import sync_entries_from_config
 
 
 def _stage_lineage(run_id: str, capability: str) -> dict[str, str]:
@@ -42,6 +52,86 @@ async def test_leaf_lineage_is_request_scoped_and_read_only_posture_is_enforced(
     mutating = _stage_lineage("leaf0002", "mutating")
     monkeypatch.setenv("__wf_run_id", "parent00")
     monkeypatch.setenv("__wf_depth", "3")
+
+    provider_config = config_path()
+    config = (
+        json.loads(provider_config.read_text(encoding="utf-8"))
+        if provider_config.exists()
+        else {}
+    )
+    config["providers"] = [
+        {
+            "name": "lineage-local-ollama",
+            "type": "ollama",
+            "model": "offline-lineage-model",
+            "options": {"endpoint": "http://127.0.0.1:11434"},
+        }
+    ]
+    provider_config.write_text(json.dumps(config), encoding="utf-8")
+    monkeypatch.setattr(manager, "config_dir", lambda: provider_config.parent)
+    assert "ollama-models" in app_manager.seed_builtin_apps()
+    manifest = app_manager._manifest_of("ollama-models")
+    assert manifest is not None and manifest.native
+    extension_registry = ProviderRegistry()
+    extension_registry.register(manifest)
+    extension = extension_registry.get("ollama-models")
+    assert extension is not None
+    bundle_factory = loader.load_factory(extension)
+    bundled_provider = bundle_factory(
+        {"model": "offline-lineage-model", "endpoint": "http://127.0.0.1:11434"}
+    )
+    assert type(bundled_provider).__name__ == "OllamaProvider"
+    sync_entries_from_config()
+    active_models_path().write_text(
+        json.dumps({"chat": ["lineage-local-ollama:offline-lineage-model"]}),
+        encoding="utf-8",
+    )
+
+    # Exercise the real provider bridge and runtime constructors. The arbitrary
+    # inherited environment is deliberately present; only workflow leaf keys may
+    # cross the constructor boundary, and an ordinary session gets an explicit
+    # empty context rather than inheriting its parent's lineage.
+    ambient = dict(os.environ)
+    native_leaf = _build_native_runtime(
+        use_case="chat",
+        session_key="lineage-native-leaf",
+        agent="gideon",
+        model_override=None,
+        cwd=None,
+        extra_env=research,
+    )
+    native_parent = _build_native_runtime(
+        use_case="chat",
+        session_key="lineage-native-parent",
+        agent="gideon",
+        model_override=None,
+        cwd=None,
+        extra_env={},
+    )
+    assert native_leaf._leaf_lineage == mcp_shared.leaf_lineage(research)
+    assert native_parent._leaf_lineage == {}
+    assert type(native_leaf._model).__name__ == "OllamaProvider"
+    assert type(native_parent._model).__name__ == "OllamaProvider"
+    assert native_leaf._model._client is None
+
+    acp_leaf = AcpClient(session_key="lineage-acp-leaf", extra_env=research)
+    acp_parent = AcpClient(session_key="lineage-acp-parent", extra_env={})
+    leaf_server_env = {
+        item["name"]: item["value"]
+        for item in acp_leaf._core_mcp_servers()[0]["env"]
+    }
+    parent_server_env = {
+        item["name"]: item["value"]
+        for item in acp_parent._core_mcp_servers()[0]["env"]
+    }
+    leaf_server_context = {
+        key: value
+        for key, value in leaf_server_env.items()
+        if key in mcp_shared.LEAF_KEYS
+    }
+    assert leaf_server_context == mcp_shared.leaf_lineage(research)
+    assert not (set(parent_server_env) & set(mcp_shared.LEAF_KEYS))
+    assert dict(os.environ) == ambient
 
     async def observe(lineage: dict[str, str]) -> tuple[str, int, str, str, str, str]:
         token = mcp_shared.bind_leaf_lineage(lineage)

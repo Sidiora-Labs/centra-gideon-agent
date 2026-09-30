@@ -144,8 +144,12 @@ class AcpClient:
 
     def _core_mcp_servers(self) -> list[dict[str, Any]]:
         from gideon.integrations.acp.mcp_servers import core_mcp_servers
+        from gideon.integrations.mcp_shared import leaf_lineage
 
-        return core_mcp_servers(session_key=self._session_key)
+        return core_mcp_servers(
+            session_key=self._session_key,
+            leaf_context=leaf_lineage(self._extra_env),
+        )
 
     @property
     def is_ready(self) -> bool:

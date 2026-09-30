@@ -540,6 +540,7 @@ def _build_native_runtime(
     project_id: str = "",
     model_axis: str = "",
     tool_groups: list | None = None,
+    extra_env: dict[str, str] | None = None,
     **kwargs: Any,
 ) -> ModelProvider:
     """Construct a :class:`NativeAgentRuntime` for a ``native`` agent.
@@ -561,6 +562,7 @@ def _build_native_runtime(
     )
     from gideon.engine.agents.native.runtime import NativeAgentRuntime
     from gideon.engine.agents.provider import AgentRuntimeDefinition
+    from gideon.integrations.mcp_shared import leaf_lineage
 
     from gideon.extensions.providers.use_cases import CHAT_SUBCATEGORIES
 
@@ -707,6 +709,7 @@ def _build_native_runtime(
         project_id=project_id,
         tool_groups=list(tool_groups) if tool_groups is not None else None,
         surface=inner_axis,
+        leaf_context=leaf_lineage(extra_env or {}),
     )
     runtime.model_substitution = substitution
     runtime._configured_substitution = substitution
