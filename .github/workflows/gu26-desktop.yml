@@ -15,8 +15,8 @@ jobs:
       GIDEON_SMOKE_EMAIL: ${{ secrets.GIDEON_SMOKE_EMAIL }}
       GIDEON_SMOKE_PASSWORD: ${{ secrets.GIDEON_SMOKE_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - name: Require approved hosted configuration and smoke account
@@ -61,7 +61,7 @@ jobs:
           $proof | ConvertTo-Json -Depth 8 | Set-Content $report
       - name: Upload Windows installer and proof
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gideon-windows-x64-proof
           path: |
