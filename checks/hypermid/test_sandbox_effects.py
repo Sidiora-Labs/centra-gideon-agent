@@ -7,7 +7,10 @@ import secrets
 import stat
 import subprocess
 
-from checks.hypermid.test_egress_secrets import network_gate_observations
+try:
+    from test_egress_secrets import network_gate_observations
+except ModuleNotFoundError:
+    from checks.hypermid.test_egress_secrets import network_gate_observations
 
 
 ROOT = Path(__file__).resolve().parents[2]

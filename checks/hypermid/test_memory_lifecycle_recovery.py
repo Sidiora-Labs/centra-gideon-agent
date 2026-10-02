@@ -307,6 +307,10 @@ async def test_memory_lifecycle_recovery_uses_real_daemon_stores(tmp_path: Path)
     owner_b = Scope("owner-b", "shared-project", workspace)
     source_root = tmp_path / "source"
     active = await _initialize_store(source_root, owner_a)
+    with sqlite3.connect(f"file:{active}?mode=ro", uri=True) as connection:
+        supported_schema = int(connection.execute(
+            "SELECT current_version FROM hypermid_schema_version WHERE singleton=1"
+        ).fetchone()[0])
 
     private_marker = "uniquetargettoken owner-a-private-revision-" + "x" * 1_100_000
     captured_marker = "owner-a-captured-source-" + "y" * 1_100_000
@@ -366,7 +370,7 @@ async def test_memory_lifecycle_recovery_uses_real_daemon_stores(tmp_path: Path)
             owner_a,
             BackupKey.generate(),
             expected_artifact_digest=before_receipt.artifact_digest,
-            supported_schema=1,
+            supported_schema=supported_schema,
         ),
     )
     assert active.read_bytes() == active_before_failures
@@ -379,7 +383,7 @@ async def test_memory_lifecycle_recovery_uses_real_daemon_stores(tmp_path: Path)
             owner_b,
             key,
             expected_artifact_digest=before_receipt.artifact_digest,
-            supported_schema=1,
+            supported_schema=supported_schema,
         ),
     )
     assert active.read_bytes() == active_before_failures
@@ -396,7 +400,7 @@ async def test_memory_lifecycle_recovery_uses_real_daemon_stores(tmp_path: Path)
                 owner_a,
                 key,
                 expected_artifact_digest=Digest.sha256(bytes(altered)),
-                supported_schema=1,
+                supported_schema=supported_schema,
             )
         except LifecycleSecurityError as error:
             assert error.code == "BACKUP_AUTHENTICATION_FAILED"
@@ -483,13 +487,17 @@ async def test_memory_lifecycle_recovery_uses_real_daemon_stores(tmp_path: Path)
             "memory_embeddings",
             "memory_retrieval_stats",
             "memory_fts_rows",
-            "memory_fts",
         ):
             count = int(connection.execute(
                 f"SELECT COUNT(*) FROM {table} WHERE record_id='a-target'"
             ).fetchone()[0])
             derived_copy_counts[table] = count
             assert count == 0
+        indexed_copies = int(connection.execute(
+            "SELECT COUNT(*) FROM memory_fts WHERE memory_fts MATCH 'uniquetargettoken'"
+        ).fetchone()[0])
+        derived_copy_counts["memory_fts"] = indexed_copies
+        assert indexed_copies == 0
         derived_copies_after_purge = sum(derived_copy_counts.values())
         assert derived_copies_after_purge == 0
         assert connection.execute(
@@ -507,7 +515,7 @@ async def test_memory_lifecycle_recovery_uses_real_daemon_stores(tmp_path: Path)
             owner_a,
             key,
             expected_artifact_digest=before_receipt.artifact_digest,
-            supported_schema=1,
+            supported_schema=supported_schema,
         ),
     )
     assert active.read_bytes() == after_purge
@@ -530,7 +538,7 @@ async def test_memory_lifecycle_recovery_uses_real_daemon_stores(tmp_path: Path)
         owner_a,
         key,
         expected_artifact_digest=current_receipt.artifact_digest,
-        supported_schema=1,
+        supported_schema=supported_schema,
     )
     assert restored_active.read_bytes() == pristine
     lifecycle_security.discard(stage.staging_id)
@@ -542,7 +550,7 @@ async def test_memory_lifecycle_recovery_uses_real_daemon_stores(tmp_path: Path)
         owner_a,
         key,
         expected_artifact_digest=current_receipt.artifact_digest,
-        supported_schema=1,
+        supported_schema=supported_schema,
     )
     restored = lifecycle_security.activate(stage.staging_id, _file_digest(restored_active))
     assert restored.scope == owner_a
