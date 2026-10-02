@@ -1,0 +1,35 @@
+{
+  "task": "mem-recovery",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-memory migration_recovery --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_recovery.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-memory migration_recovery --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_recovery.py",
+    "cargo check -p hypermid-memory --lib && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_foundation.py",
+    "cargo test -p hypermid-memory legacy_import::tests::legacy_fixture_imports_through_memory_api_and_exports_canonical_records --manifest-path crates/hypermid-memory/Cargo.toml -- --exact",
+    "cargo test -p hypermid-daemon --test startup_recovery real_crash_restart_reconciles_cursors_and_surfaces_unknown_effect_once -- --exact --nocapture",
+    "cargo test -p hypermid-daemon --test read_only_recovery corrupt_and_future_memory_start_authenticated_read_only_recovery_without_mutation -- --exact --nocapture",
+    "cargo test -p hypermid-context --test recovery_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_recovery.py",
+    "cargo test -p hypermid-memory snapshot::tests::lifecycle_snapshot_excludes_runtime_authority_bytes_and_rows --jobs 2 -- --exact --nocapture",
+    "<freshly-built startup_recovery test binary> restored_authority_free_store_reenrolls_only_the_configured_local_operator --exact --nocapture"
+  ],
+  "successful_gate_count": 10,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-memory/src/migrations.rs": "081a22af66cebd2e86bfb12b75e32aa7b9fd8619d5afe0ced2fb3fb1ada59068",
+    "crates/hypermid-memory/src/recovery.rs": "3a6119a56700136f603d7a019ff40d8958430fc1ed36c41c91ccc6d21fa2198d",
+    "crates/hypermid-memory/src/snapshot.rs": "472f7f21d6d8eeac63e25af85f8c71d8516c75ea1c0bbaeb5473c0fd6b9fb13e",
+    "runtime/gideon/hypermid/diagnostics.py": "f544bc76cb47041e17b53df141cf585808c9314a812f2d9177dbb1d6b06108f9",
+    "runtime/gideon/hypermid/recovery.py": "c99adce5cb2b90290898c6c93504c9f400169fe74dd455b236f4605f93828ac5",
+    "checks/hypermid/test_memory_recovery.py": "fee4075b01c53d4626c1858b57af90d6139e2877d122fe56b37439c8ad3ece68"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-memory/src/migrations.rs": "081a22af66cebd2e86bfb12b75e32aa7b9fd8619d5afe0ced2fb3fb1ada59068",
+    "crates/hypermid-memory/src/recovery.rs": "3a6119a56700136f603d7a019ff40d8958430fc1ed36c41c91ccc6d21fa2198d",
+    "crates/hypermid-memory/src/snapshot.rs": "472f7f21d6d8eeac63e25af85f8c71d8516c75ea1c0bbaeb5473c0fd6b9fb13e",
+    "runtime/gideon/hypermid/diagnostics.py": "f544bc76cb47041e17b53df141cf585808c9314a812f2d9177dbb1d6b06108f9",
+    "runtime/gideon/hypermid/recovery.py": "c99adce5cb2b90290898c6c93504c9f400169fe74dd455b236f4605f93828ac5",
+    "checks/hypermid/test_memory_recovery.py": "fee4075b01c53d4626c1858b57af90d6139e2877d122fe56b37439c8ad3ece68"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}

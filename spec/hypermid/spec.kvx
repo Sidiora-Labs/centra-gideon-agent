@@ -896,7 +896,7 @@ touches = ["crates/hypermid-memory/src/import.rs", "crates/hypermid-memory/src/e
 verify_cmd = "cargo test -p hypermid-memory portability --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_portability.py"
 [task.mem-recovery]
 title = "Migration, backup, restore, and repair"
-status = "pending"
+status = "done"
 wave = 7
 owner_lane = "memory"
 requires = ["wave-6-close"]

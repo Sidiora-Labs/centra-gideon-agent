@@ -151,7 +151,7 @@
 - [x] mem-records. Record CRUD, raw recovery, summaries, and lineage
   - _Requirements: mem-records.1, mem-records.2, mem-lineage.1, mem-lineage.2_
 
-- [ ] mem-recovery. Migration, backup, restore, and repair
+- [x] mem-recovery. Migration, backup, restore, and repair
   - _Requirements: mem-recovery.1, mem-recovery.2_
 
 - [ ] mem-release. OSS memory release integration

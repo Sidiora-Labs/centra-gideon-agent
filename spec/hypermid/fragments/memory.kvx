@@ -197,7 +197,7 @@ verify_cmd = "cargo test -p hypermid-memory portability --manifest-path crates/h
 
 [task.mem-recovery]
 title = "Migration, backup, restore, and repair"
-status = "pending"
+status = "done"
 wave = 7
 owner_lane = "memory"
 requires = ["mem-remote"]
