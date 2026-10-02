@@ -1,0 +1,24 @@
+{
+  "task": "fab-02-registry-routing",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-daemon --test registry_routes",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-daemon --test registry_routes"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-daemon/src/manifest.rs": "cea6b9a7c46e5de8ee1aa0ef0b69227cd37452d5c0744e3f342e2730f3249f5b",
+    "crates/hypermid-daemon/src/registry.rs": "980bee0bba86931cd6cefc12f92e5b4d754971a5e302a1df5b8b9e6fd1090ba6",
+    "crates/hypermid-daemon/src/router.rs": "84360bebbfbfbb236ae5944794fd3eed6330e04b9a9467220294f17dea50d76c",
+    "crates/hypermid-daemon/tests/registry_routes.rs": "f424ea0c3a3f57718a7c078a9829f72bab4a0ad8cd3db15301064bf1f1416240"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-daemon/src/manifest.rs": "cea6b9a7c46e5de8ee1aa0ef0b69227cd37452d5c0744e3f342e2730f3249f5b",
+    "crates/hypermid-daemon/src/registry.rs": "980bee0bba86931cd6cefc12f92e5b4d754971a5e302a1df5b8b9e6fd1090ba6",
+    "crates/hypermid-daemon/src/router.rs": "84360bebbfbfbb236ae5944794fd3eed6330e04b9a9467220294f17dea50d76c",
+    "crates/hypermid-daemon/tests/registry_routes.rs": "f424ea0c3a3f57718a7c078a9829f72bab4a0ad8cd3db15301064bf1f1416240"
+  },
+  "scope": "Focused task acceptance using actual production types and, for supervision, real child processes; later integration and release gates remain separate.",
+  "source_adjustments": []
+}

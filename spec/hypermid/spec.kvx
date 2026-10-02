@@ -336,7 +336,7 @@ ac_2 = "The focused gate exercises a real local socket through the Rust daemon a
 verify_cmd = "cargo test -p hypermid-protocol -p hypermid-transport -p hypermid-daemon && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_adapter.py"
 [task.fab-02-registry-routing]
 title = "Implement manifest registry and epoch-safe routing"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "fabric"
 requires = ["wave-1-close"]

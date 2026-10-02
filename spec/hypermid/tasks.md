@@ -85,7 +85,7 @@
 - [x] fab-01-bootstrap. Implement authenticated framing minimal daemon and passthrough adapter
   - _Requirements: fab-001.1, fab-001.2, fab-002.1, fab-002.2, fab-017.1, fab-017.2_
 
-- [ ] fab-02-registry-routing. Implement manifest registry and epoch-safe routing
+- [x] fab-02-registry-routing. Implement manifest registry and epoch-safe routing
   - _Requirements: fab-003.1, fab-003.2, fab-003.3, fab-004.1, fab-004.2_
 
 - [ ] fab-03-flow-lifecycle. Implement flow control cancellation and deadlines

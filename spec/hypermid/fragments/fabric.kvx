@@ -128,7 +128,7 @@ verify_cmd = "cargo test -p hypermid-protocol -p hypermid-transport -p hypermid-
 
 [task.fab-02-registry-routing]
 title = "Implement manifest registry and epoch-safe routing"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "fabric"
 requires = ["fab-01-bootstrap", "base-02"]
