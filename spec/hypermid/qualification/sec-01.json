@@ -1,0 +1,14 @@
+{
+  "task": "sec-01",
+  "status": "passed",
+  "command": "cargo test -p hypermid-core capability && cargo test -p hypermid-store authorization && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_security_capabilities.py",
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-core/src/capability.rs": "96142e8530b6ab94e7b7111c8eb3d259a6fda32af97b25d49cabd130feda5262",
+    "crates/hypermid-store/src/authorization.rs": "11e6593e612936fdbfe32ea0b3e1049bdf7e6d0cb1b3a5afc568dca4d19680fb",
+    "crates/hypermid-daemon/src/dispatch.rs": "d3bb261478a77fd7bb9f9f47a07f810535a500ad92d61ff3fd828c047d19a980",
+    "runtime/gideon/hypermid/authz.py": "5387cb7ca40ce7c9f2dfbae551efb7a02f27d7ef86f0501c9427f7cf0f181b03",
+    "checks/hypermid/test_security_capabilities.py": "b920531d23d91c0c9bd5589b8862e5dc2c1bdf354079c79abb0152a99893915c"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate."
+}

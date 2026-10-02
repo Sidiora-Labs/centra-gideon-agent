@@ -1257,7 +1257,7 @@ ac_3 = "Each background job receives an expiring capability for enumerated recor
 
 [task.sec-01]
 title = "Implement scoped capability enforcement"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "security"
 requires = ["base-02"]

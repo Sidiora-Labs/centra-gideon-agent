@@ -346,6 +346,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypermid-core"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "hypermid-contracts",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror",
+]
+
+[[package]]
 name = "hypermid-foundation"
 version = "0.1.0"
 dependencies = [
@@ -374,8 +386,11 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "hypermid-contracts",
+ "hypermid-core",
  "hypermid-leases",
  "rusqlite",
+ "serde",
+ "serde_json",
  "sha2 0.10.9",
  "tempfile",
  "thiserror",

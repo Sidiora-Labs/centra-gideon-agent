@@ -163,7 +163,7 @@
 - [ ] mem-retrieval. Unified search and deterministic ranking
   - _Requirements: mem-retrieval.1, mem-retrieval.2_
 
-- [ ] sec-01. Implement scoped capability enforcement
+- [x] sec-01. Implement scoped capability enforcement
   - _Requirements: sec-01.1, sec-01.2, sec-01.3_
 
 - [ ] sec-02. Implement encrypted protocol authentication and compatibility negotiation
