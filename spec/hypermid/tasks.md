@@ -28,7 +28,7 @@
 - [ ] base-08. Compaction, transform, and OSS foundation integration
   - _Requirements: base-context-roles.1, base-context-roles.2, base-context-roles.3_
 
-- [ ] ctx-background-summary. Implement leased background summarization
+- [x] ctx-background-summary. Implement leased background summarization
   - _Requirements: ctx-background-summary.1, ctx-background-summary.2, ctx-background-summary.3_
 
 - [ ] ctx-cache-policy. Implement stable baseline and delta cache regions

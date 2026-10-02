@@ -196,7 +196,7 @@ verify_cmd = "cargo test -p hypermid-context --test tier_decay"
 
 [task.ctx-background-summary]
 title = "Implement leased background summarization"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "context"
 requires = ["ctx-history", "sec-05", "base-03", "fab-02-registry-routing"]

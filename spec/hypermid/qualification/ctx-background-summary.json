@@ -1,0 +1,27 @@
+{
+  "task": "ctx-background-summary",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-context --test summary_pipeline && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_summarizer.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-context --test summary_pipeline",
+    "PYTHONPATH=runtime <approved-private-dotenv-runner> python -m pytest -q checks/runtime/test_hypermid_summarizer.py"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/runtime/test_hypermid_summarizer.py": "1d9b1422a4c5ae6adedc60a48e146c1f9794e1280f741b5c397418c3099b8dd2",
+    "crates/hypermid-context/src/summary_queue.rs": "95c46cec269c1d35cb4d65f707f47d63005b3f4ddbb592e976388a98352079b0",
+    "crates/hypermid-context/tests/summary_pipeline.rs": "fe953195787c36a5697a7a3df1f41f41881a3a21bf34e4a6b38583cf09f60009",
+    "crates/hypermid-core/src/summary.rs": "7374421184846297728e5cfa974bc5235a9ad06cc9cb07ed1d18ebb8bc46b3c1",
+    "runtime/gideon/hypermid/summarizer.py": "6c1f04ed0fa4e013309262d8a65d949a5ad55e8de12ad35241f753e3054e2478"
+  },
+  "tested_source_sha256": {
+    "checks/runtime/test_hypermid_summarizer.py": "1d9b1422a4c5ae6adedc60a48e146c1f9794e1280f741b5c397418c3099b8dd2",
+    "crates/hypermid-context/src/summary_queue.rs": "95c46cec269c1d35cb4d65f707f47d63005b3f4ddbb592e976388a98352079b0",
+    "crates/hypermid-context/tests/summary_pipeline.rs": "fe953195787c36a5697a7a3df1f41f41881a3a21bf34e4a6b38583cf09f60009",
+    "crates/hypermid-core/src/summary.rs": "7374421184846297728e5cfa974bc5235a9ad06cc9cb07ed1d18ebb8bc46b3c1",
+    "runtime/gideon/hypermid/summarizer.py": "6c1f04ed0fa4e013309262d8a65d949a5ad55e8de12ad35241f753e3054e2478"
+  },
+  "scope": "The unchanged Rust summary pipeline and current Python worker passed focused gates, including a bounded live model call. Later end-to-end integration and release qualification remain separate.",
+  "source_adjustments": []
+}

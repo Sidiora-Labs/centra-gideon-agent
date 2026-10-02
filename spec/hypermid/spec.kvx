@@ -609,7 +609,7 @@ touches = ["crates/hypermid-core/src/decay.rs", "crates/hypermid-core/src/budget
 verify_cmd = "cargo test -p hypermid-context --test tier_decay"
 [task.ctx-background-summary]
 title = "Implement leased background summarization"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "context"
 requires = ["sec-05", "fab-02-registry-routing"]
@@ -1307,8 +1307,8 @@ reqs = ["sec-03.1", "sec-03.2", "sec-03.3"]
 acceptance = "The production sandbox enforces declared resources and the durable effect ledger prevents unsafe retries after ambiguous outcomes."
 ac_1 = "Traversal, descriptor inheritance, malformed frame, oversized output, network escape, and child-survival attempts all fail without daemon-store access."
 ac_2 = "Crash injection around dispatch produces no duplicate committed effect and never maps an unknown outcome to failed."
-touches = ["crates/hypermid-sandbox/src/lib.rs", "crates/hypermid-mcp/src/stdio.rs", "crates/hypermid-store/src/effects.rs", "runtime/gideon/hypermid/effects.py", "apps/console/src/features/hypermid/UnknownEffects.tsx", "checks/hypermid/test_sandbox_effects.py"]
-verify_cmd = "cargo test -p hypermid-sandbox && cargo test -p hypermid-mcp stdio && cargo test -p hypermid-store effects && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_sandbox_effects.py"
+touches = ["crates/hypermid-sandbox/src/lib.rs", "crates/hypermid-mcp/src/stdio.rs", "crates/hypermid-bus/src/effects.rs", "runtime/gideon/hypermid/effects.py", "apps/console/src/features/hypermid/UnknownEffects.tsx", "checks/hypermid/test_sandbox_effects.py"]
+verify_cmd = "cargo test -p hypermid-sandbox && cargo test -p hypermid-mcp stdio && cargo test -p hypermid-bus --test recovery && cargo test -p hypermid-daemon --test effect_routes && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_sandbox_effects.py"
 [req.sec-04]
 title = "Egress, DNS, proxy, secret, and log containment"
 status = "pending"
