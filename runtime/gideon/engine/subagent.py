@@ -225,6 +225,9 @@ class SubagentInfo:
     _outcome_noted: bool = False
     memory_receipt: dict = field(default_factory=lambda: {"status": "pending", "count": 0})
     trigger_start_approval: Any = None
+    hypermid_snapshot: dict[str, Any] = field(default_factory=dict)
+    hypermid_contribution: dict[str, Any] = field(default_factory=dict)
+    _hypermid_registry: Any = field(default=None, repr=False)
 
 
 @dataclass
@@ -447,6 +450,8 @@ class DelegationSupervisor:
         sandbox: str = "none",
         extra_env: dict[str, str] | None = None,
         trigger_start_approval: Any = None,
+        hypermid_registry: Any = None,
+        hypermid_snapshot: Any = None,
     ) -> SubagentInfo | None:
         public_task = _redact(task)
         rejected = self._host_admission(public_task, agent, parent_session_key)
@@ -490,6 +495,23 @@ class DelegationSupervisor:
             extra_env=dict(extra_env or {}),
             _raw_task=task,
         )
+        if (hypermid_registry is None) != (hypermid_snapshot is None):
+            return self._refused(
+                public_task,
+                agent,
+                "spawn refused: Hypermid registry and snapshot must be supplied together",
+            )
+        if hypermid_registry is not None:
+            try:
+                snapshot = hypermid_registry.spawn(hypermid_snapshot)
+                info.hypermid_snapshot = snapshot.to_wire()
+                info._hypermid_registry = hypermid_registry
+            except Exception as error:
+                return self._refused(
+                    public_task,
+                    agent,
+                    f"spawn refused: invalid Hypermid snapshot ({error})",
+                )
         stopped = self._fanout_stops.get(_fanout_key(info))
         if stopped:
             info.done, info.error = True, f"spawn refused: {stopped}"
@@ -787,6 +809,35 @@ class DelegationSupervisor:
 
     def get(self, agent_id: str) -> SubagentInfo | None:
         return self._agents.get(agent_id)
+
+    def publish_hypermid_contribution(
+        self,
+        agent_id: str,
+        *,
+        parent_journal: Any,
+        parent_item_id: str,
+        idempotency_key: str,
+        contribution: Any,
+        authorization: Any,
+        now_ms: int,
+    ) -> Any:
+        info = self._agents.get(agent_id)
+        if info is None:
+            raise KeyError(agent_id)
+        if not info.done or info.error:
+            raise RuntimeError("only a successfully completed subagent may contribute")
+        if info._hypermid_registry is None or not info.hypermid_snapshot:
+            raise RuntimeError("subagent has no Hypermid context snapshot")
+        published = info._hypermid_registry.publish(
+            parent_journal=parent_journal,
+            parent_item_id=parent_item_id,
+            idempotency_key=idempotency_key,
+            contribution=contribution,
+            authorization=authorization,
+            now_ms=now_ms,
+        )
+        info.hypermid_contribution = published.to_wire()
+        return published
 
     def live_controls(self, agent_id: str) -> dict[str, Any] | None:
         info = self.get(agent_id)

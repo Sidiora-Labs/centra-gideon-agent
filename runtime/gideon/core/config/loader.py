@@ -56,6 +56,7 @@ from gideon.integrations.voice.duplex import (
     DEFAULT_EXIT_PHRASES,
     DEFAULT_PUSH_TO_TALK_CHORD,
 )
+from gideon.hypermid.config import ContextConfig
 
 logger = logging.getLogger(__name__)
 
@@ -2879,6 +2880,10 @@ class AppConfig:
         default_factory=MemoryConfig,
         metadata=_meta("Memory", "Memory and embedding configuration."),
     )
+    hypermid: ContextConfig = field(
+        default_factory=ContextConfig,
+        metadata=_meta("Hypermid", "Local context and memory engine configuration."),
+    )
     skills: SkillsConfig = field(
         default_factory=SkillsConfig,
         metadata=_meta("Skills", "Skill loading and matching configuration."),
@@ -3134,6 +3139,16 @@ class AppConfig:
         values = resolve_config_secrets(values)
         _validate_config_data(values)
         configuration = decode_configuration(values, cls)
+        stored_hypermid = values.get("hypermid")
+        if isinstance(stored_hypermid, dict) and stored_hypermid:
+            try:
+                configuration.hypermid = ContextConfig.from_wire(stored_hypermid)
+            except ValueError as failure:
+                logger.warning(
+                    "Hypermid configuration is invalid; using off defaults: %s",
+                    failure,
+                )
+                configuration.hypermid = ContextConfig()
         try:
             from gideon.core.config.migrations import apply_config_migrations
 

@@ -7,7 +7,9 @@ import logging
 import math
 import os
 import re
+import secrets
 import time as _time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -69,6 +71,21 @@ _SENSITIVE_TOOL_PATTERNS: tuple[str, ...] = (
 )
 
 _TOOL_ROLES: frozenset[str] = frozenset({"tool", "tool_call", "tool_result"})
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationSourceEvent:
+    source_event_id: str
+    source_digest: str
+    raw_bytes: bytes
+    message: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationCheckpoint:
+    session_key: str
+    source_digest: str
+    byte_count: int
 
 
 def config_dir() -> Path:
@@ -471,6 +488,7 @@ class ConversationLog:
         agent: str | None = None,
         tab_id: str | None = None,
         speaker: str | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> None:
         path = self._path(key)
         if not path.exists():
@@ -487,7 +505,10 @@ class ConversationLog:
             )
             path.write_text(json.dumps(header) + "\n", encoding="utf-8")
         entry: dict[str, Any] = dict(
-            role=role, content=content, ts=datetime.now().isoformat()
+            role=role,
+            content=content,
+            ts=datetime.now().isoformat(),
+            source_event_id=f"event:{secrets.token_hex(16)}",
         )
         entry.update(
             (name, value)
@@ -496,6 +517,7 @@ class ConversationLog:
                 ("source_thread", source_thread),
                 ("source_user", source_user),
                 ("speaker", speaker),
+                ("meta", meta),
             )
             if value
         )
@@ -510,6 +532,118 @@ class ConversationLog:
         self._invalidate_cache(key)
         self._maybe_rotate(path)
         self._notify_search_index(key)
+
+    @staticmethod
+    def _source_event(line: bytes, key: str) -> ConversationSourceEvent | None:
+        raw = line.rstrip(b"\r\n")
+        if not raw.strip():
+            return None
+        try:
+            message = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        if not isinstance(message, dict) or message.get("_type") is not None:
+            return None
+        if not isinstance(message.get("role"), str) or not isinstance(
+            message.get("content"), str
+        ):
+            return None
+        digest = hashlib.sha256(raw).hexdigest()
+        stored_id = message.get("source_event_id")
+        source_event_id = (
+            stored_id
+            if isinstance(stored_id, str) and stored_id
+            else f"legacy:{hashlib.sha256(key.encode() + b'\0' + raw).hexdigest()}"
+        )
+        return ConversationSourceEvent(source_event_id, digest, raw, message)
+
+    def source_events(self, key: str) -> tuple[ConversationSourceEvent, ...]:
+        """Return exact persisted transcript event bytes in authoritative order."""
+
+        path = self._path(key)
+        archive = _archive_dir(self._dir)
+        paths = (
+            sorted(archive.glob(f"{_safe_key(key)}__*.jsonl"))
+            if archive.is_dir()
+            else []
+        )
+        paths.append(path)
+        if not any(candidate.is_file() for candidate in paths):
+            return ()
+        events: list[ConversationSourceEvent] = []
+        seen: dict[str, str] = {}
+        for candidate in paths:
+            if not candidate.is_file():
+                continue
+            with candidate.open("rb") as stream:
+                for line in stream:
+                    event = self._source_event(line, key)
+                    if event is None:
+                        continue
+                    prior = seen.get(event.source_event_id)
+                    if prior is not None:
+                        if prior != event.source_digest:
+                            raise ValueError(
+                                "conversation source identity was reused for different bytes"
+                            )
+                        continue
+                    seen[event.source_event_id] = event.source_digest
+                    events.append(event)
+        return tuple(events)
+
+    def resolve_source_event(self, key: str, source_event_id: str) -> bytes:
+        """Resolve a source reference from ConversationLog or its retained archives."""
+
+        paths = [self._path(key)]
+        archive = _archive_dir(self._dir)
+        if archive.is_dir():
+            paths.extend(sorted(archive.glob(f"{_safe_key(key)}__*.jsonl"), reverse=True))
+        for path in paths:
+            if not path.is_file():
+                continue
+            with path.open("rb") as stream:
+                for line in stream:
+                    event = self._source_event(line, key)
+                    if event is not None and event.source_event_id == source_event_id:
+                        if hashlib.sha256(event.raw_bytes).hexdigest() != event.source_digest:
+                            raise ValueError("conversation source digest mismatch")
+                        return event.raw_bytes
+        raise KeyError(f"conversation source event {source_event_id!r} is unavailable")
+
+    def flush_for_hypermid(
+        self, session_keys: list[str] | tuple[str, ...] | None = None
+    ) -> tuple[ConversationCheckpoint, ...]:
+        """Durably flush transcript files and return digest checkpoints for cutover."""
+
+        keys = (
+            sorted({str(key) for key in session_keys if str(key)})
+            if session_keys is not None
+            else sorted(
+                path.stem
+                for path in self._dir.glob("*.jsonl")
+                if path.is_file()
+            )
+        )
+        checkpoints: list[ConversationCheckpoint] = []
+        for key in keys:
+            path = self._path(key)
+            if not path.is_file():
+                continue
+            with path.open("rb") as stream:
+                os.fsync(stream.fileno())
+            material = bytearray()
+            for event in self.source_events(key):
+                material.extend(len(event.raw_bytes).to_bytes(8, "big"))
+                material.extend(event.raw_bytes)
+            payload = bytes(material)
+            checkpoints.append(
+                ConversationCheckpoint(
+                    session_key=key,
+                    source_digest=hashlib.sha256(payload).hexdigest(),
+                    byte_count=len(payload),
+                )
+            )
+        return tuple(checkpoints)
 
     def _notify_search_index(self, key: str) -> None:
         try:
@@ -922,10 +1056,24 @@ class HistoryConsolidator:
         self._history_consolidated = self._schedule.history
         self._prefs_offset = self._schedule.preferences
         self._consolidation_count, self._last_promote_monotonic = 0, 0.0
+        self._quiesced = False
         self._schedule.recover()
 
     async def drain(self, timeout: float = 3.0) -> dict:
         return await self._schedule.drain(timeout)
+
+    async def quiesce(self, timeout: float = 3.0) -> dict:
+        """Fence new consolidation before draining already admitted tasks."""
+
+        self._quiesced = True
+        try:
+            return await self.drain(timeout=timeout)
+        except BaseException:
+            self._quiesced = False
+            raise
+
+    def resume(self) -> None:
+        self._quiesced = False
 
     @property
     def _svc(self):
@@ -957,6 +1105,8 @@ class HistoryConsolidator:
 
     def maybe_consolidate(self, key: str) -> None:
         self._last_activity[key] = _time.time()
+        if self._quiesced:
+            return
         if key not in self._running:
             count = len(self._log._read_messages(key))
             pending = count - self._prefs_offset.get(key, 0)
@@ -964,6 +1114,8 @@ class HistoryConsolidator:
                 self._schedule.start(key, False, self._prefs_offset, count)
 
     async def consolidate_now(self, key: str) -> bool:
+        if self._quiesced:
+            return False
         admitted = key not in self._running
         if admitted:
             self._running.add(key)
@@ -989,6 +1141,8 @@ class HistoryConsolidator:
         return outcome
 
     def check_idle_sessions(self) -> None:
+        if self._quiesced:
+            return
         now = _time.time()
         for key in self._schedule.idle(now):
             self._schedule.start(key, True, self._history_consolidated, now)

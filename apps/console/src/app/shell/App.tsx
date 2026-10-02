@@ -47,6 +47,7 @@ import { navigationItems, ROUTABLE_ROOTS, activeNavigationId, managesApps, recen
 const LoopsSection = lazyRoute('loops', () => import('../../features/loops/LoopsSection').then((m) => ({ default: m.LoopsSection })))
 const CodeSection = lazyRoute('code', () => import('../../features/code/CodeSection').then((m) => ({ default: m.CodeSection })))
 const SettingsPage = lazyRoute('settings', () => import('../../features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
+const HypermidPage = lazyRoute('hypermid', () => import('../../features/hypermid/HypermidPage').then((m) => ({ default: m.HypermidPage })))
 const AgentsSection = lazyRoute('agents', () => import('../../features/agents/AgentsSection').then((m) => ({ default: m.AgentsSection })))
 const CapabilitiesSection = lazyRoute('capabilities', () => import('../../features/capabilities/CapabilitiesSection'))
 const RoomsSection = lazyRoute('rooms', () => import('../../features/rooms/RoomsSection').then((m) => ({ default: m.RoomsSection })))
@@ -118,6 +119,7 @@ const pageComponents: Record<string, ComponentType<RouteProps>> = {
   apps: GideonCollection,
   app: AppHostPage,
   settings: SettingsPage,
+  hypermid: HypermidPage,
 }
 
 function renderPage(route: string, props: RouteProps) {

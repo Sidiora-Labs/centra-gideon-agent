@@ -935,5 +935,8 @@ def with_mcp_session_eviction(
             logger.debug(
                 "MCP session eviction failed for %s", session_key, exc_info=True
             )
+        from gideon.integrations.mcp_hypermid import evict_hypermid_session
+
+        await evict_hypermid_session(session_key)
 
     return _expire

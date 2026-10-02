@@ -121,6 +121,7 @@ def build_docker_argv(
         "docker",
         "run",
         "--rm",
+        "--interactive",
         "--init",
         "--name",
         container_name,

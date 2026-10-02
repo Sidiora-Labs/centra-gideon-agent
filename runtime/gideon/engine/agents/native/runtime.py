@@ -649,6 +649,11 @@ class NativeAgentRuntime(AgentProvider):
         self._leaf_lineage = lineage if has_leaf_run else {}
         self._max_turns = max_turns
         self._tool_providers = list(tool_providers or ())
+        from gideon.hypermid.modules import providers_for_session
+
+        for provider in providers_for_session(session_key):
+            if all(existing is not provider for existing in self._tool_providers):
+                self._tool_providers.append(provider)
         self._max_tool_concurrency = max(1, int(max_tool_concurrency or 1))
         self._hook_fire = hook_fire
         self._extra_deny = list(extra_deny_patterns or ())

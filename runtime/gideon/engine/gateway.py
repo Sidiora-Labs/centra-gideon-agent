@@ -562,6 +562,7 @@ class RuntimeCoordinator:
     subagent_mgr: DelegationSupervisor | None
     channel_history: ChannelHistory | None
     dashboard_state: ConsoleState | None
+    hypermid: Any | None
     _dashboard_runner: web.AppRunner | None
     _file_watch_task: asyncio.Task[Any] | None
     _web_watch_task: asyncio.Task[Any] | None

@@ -193,7 +193,7 @@
 - [x] ux-contract. Hypermid v1 clients and Gideon HostAdapter
   - _Requirements: ux-contract.1, ux-contract.2, ux-contract.3_
 
-- [ ] ux-inspection. Native session, memory, and cache inspector
+- [x] ux-inspection. Native session, memory, and cache inspector
   - _Requirements: ux-inspection.1, ux-inspection.2, ux-inspection.3_
 
 - [ ] ux-integrations. Tool bridge, stdio supervision, and condition runner

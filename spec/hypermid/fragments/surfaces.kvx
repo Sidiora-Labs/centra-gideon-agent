@@ -78,7 +78,7 @@ verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_client
 
 [task.ux-inspection]
 title = "Native session, memory, and cache inspector"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "surfaces"
 requires = ["ux-contract"]

@@ -71,6 +71,7 @@ export const SUBPAGES: SubPage[] = [
   { id: 'search', label: 'Search', icon: Search, render: () => <SearchPanel /> },
   { id: 'prompts', label: 'Prompts', icon: FileText, render: () => <PromptsPanel /> },
   { id: 'memory', label: 'Memory', icon: Database, render: (c) => <MemoryPanel query={c.query} setQuery={c.setQuery} /> },
+  { id: 'hypermid', label: 'Hypermid', icon: Database, render: () => null },
   { id: 'evals', label: 'Evaluations', icon: FlaskConical, render: () => <EvalsPanel /> },
   { id: 'agent', label: 'Agent defaults', icon: Bot, render: () => <AgentDefaultsPanel /> },
   { id: 'voice', label: 'Speech & Transcription', icon: AudioLines, render: (c) => <VoicePanel go={c.go} query={c.query} /> },
@@ -104,14 +105,16 @@ export const SUBPAGES: SubPage[] = [
 ]
 
 export function SettingsPage({ sub, navigate, query, setQuery }: RouteProps) {
-  const go = (id: string) => navigate?.(id ? `settings/${id}` : 'settings')
+  const go = (id: string) => navigate?.(id === 'hypermid' ? 'hypermid' : id ? `settings/${id}` : 'settings')
   const current = sub ? SUBPAGES.find((s) => s.id === sub) : undefined
 
   const legacyVocabulary = sub === 'vocabulary'
+  const nativeHypermid = sub === 'hypermid'
   useEffect(() => {
     if (legacyVocabulary) navigate?.('settings/voice?section=vocabulary', { replace: true })
-  }, [legacyVocabulary, navigate])
-  if (legacyVocabulary) return null
+    else if (nativeHypermid) navigate?.('hypermid', { replace: true })
+  }, [legacyVocabulary, nativeHypermid, navigate])
+  if (legacyVocabulary || nativeHypermid) return null
 
   if (!current) {
     return (

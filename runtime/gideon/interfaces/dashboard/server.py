@@ -542,6 +542,27 @@ async def start_dashboard(
 
     register_device_routes(app)
 
+    from gideon.interfaces.dashboard.handlers.hypermid import register_hypermid_routes
+
+    register_hypermid_routes(app)
+
+    async def _hypermid_security_startup(app_: web.Application) -> None:
+        if "security_status" in app_:
+            return
+        lifecycle = getattr(app_["state"], "hypermid", None)
+        adapter = getattr(lifecycle, "adapter", None)
+        client = getattr(adapter, "client", None)
+        if client is None:
+            return
+        try:
+            from gideon.hypermid.security_status import create_daemon_security_status
+
+            app_["security_status"] = create_daemon_security_status(client)
+        except (TypeError, ValueError):
+            logger.warning("Hypermid security status was not initialized", exc_info=True)
+
+    app.on_startup.append(_hypermid_security_startup)
+
     from gideon.interfaces.dashboard.handlers.browse_connector import (
         register_browse_connector_routes,
     )

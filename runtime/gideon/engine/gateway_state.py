@@ -48,6 +48,7 @@ class LaunchSettings:
             "channel_history",
             "dashboard_state",
             "_dashboard_runner",
+            "hypermid",
         )
         for attribute in empty_services:
             setattr(runtime, attribute, None)

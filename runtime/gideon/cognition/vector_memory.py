@@ -9,6 +9,7 @@ Episodic: conversation fragments with embeddings, importance scoring,
 time-decay retrieval via FAISS (falls back to FTS5 without embeddings).
 """
 
+import hashlib
 import json
 import logging
 import math
@@ -161,6 +162,62 @@ _DREAM_MIN_UNIQUE_QUERIES = 2
 _DREAM_RECENCY_HALFLIFE_DAYS = 30.0
 
 _LIKE_WORD_MAX_CHARS = 256
+
+
+@dataclass(frozen=True)
+class RecallArmEvidence:
+    name: str
+    state: str
+    result_count: int
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        result: dict[str, object] = {
+            "name": self.name,
+            "state": self.state,
+            "result_count": self.result_count,
+        }
+        if self.reason:
+            result["reason"] = self.reason
+        return result
+
+
+@dataclass(frozen=True)
+class HybridRecallHit:
+    id: str
+    content: str
+    content_digest: str
+    source: str
+    kind: str
+    scores: dict[str, float]
+
+    def inspection(self) -> dict[str, object]:
+        return {
+            "source": self.source,
+            "kind": self.kind,
+            "content_digest": self.content_digest,
+            "scores": dict(self.scores),
+        }
+
+
+@dataclass(frozen=True)
+class HybridRecallResult:
+    hits: tuple[HybridRecallHit, ...]
+    cursor: object
+    arms: tuple[RecallArmEvidence, ...]
+    degraded: bool
+    degradation_reason: str | None
+    suppressed: object
+
+    def inspection(self) -> dict[str, object]:
+        return {
+            "cursor": self.cursor.to_wire(),
+            "arms": [arm.to_dict() for arm in self.arms],
+            "degraded": self.degraded,
+            "degradation_reason": self.degradation_reason,
+            "result_count": len(self.hits),
+            "hits": [hit.inspection() for hit in self.hits],
+        }
 
 
 def _conceptual_richness(text: str) -> float:
@@ -1381,3 +1438,182 @@ class SemanticArchive(MemoryProvider):
             lessons_count=len(self.get_lessons()),
         )
         return result
+
+
+class ScopedHybridRecall:
+    """Bind Gideon's real archive to one exact Hypermid authorization scope."""
+
+    def __init__(self, archive: SemanticArchive, *, scope) -> None:
+        from gideon.hypermid.models import Scope
+
+        if not isinstance(scope, Scope):
+            raise TypeError("scope must be a Hypermid Scope")
+        self.archive = archive
+        self.scope = scope
+
+    def _record_is_in_scope(self, record) -> bool:
+        reference = record.scope_ref
+        workspace = self.scope.workspace_id
+        if workspace is not None:
+            return reference in (None, str(workspace))
+        return reference in (None, str(self.scope.project_id))
+
+    @staticmethod
+    def _stamp_ms(record) -> int | None:
+        stamp = record.updated_at or record.created_at
+        if not stamp:
+            return None
+        try:
+            parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return int(parsed.timestamp() * 1000)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    def _candidates(self, observed_at_ms: int, fingerprint: str | None):
+        from gideon.hypermid.search import CandidateVector, Provenance, SearchCandidate
+
+        candidates = []
+        for record in self.archive.iter_records(include_deleted=False):
+            if not self._record_is_in_scope(record):
+                continue
+            content = record.text
+            digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            vector = None
+            if record.embedding is not None and fingerprint is not None:
+                vector = CandidateVector(tuple(record.embedding), fingerprint, digest)
+            candidates.append(
+                SearchCandidate(
+                    id=record.id,
+                    owner_scope=self.scope,
+                    source=record.source or "gideon.memory",
+                    kind=record.kind.value,
+                    category=record.category or "",
+                    content=content,
+                    content_digest=digest,
+                    status="active",
+                    source_time_ms=self._stamp_ms(record),
+                    importance=record.importance,
+                    verification="supported" if record.confidence >= 0.8 else "unverified",
+                    provenance=(
+                        Provenance(
+                            source_kind="gideon_memory",
+                            source_digest=digest,
+                            observed_at_ms=observed_at_ms,
+                            capture_method="native_archive",
+                        ),
+                    ),
+                    vector=vector,
+                    useful_count=record.recall_count,
+                )
+            )
+        return candidates
+
+    def search(
+        self,
+        query: str,
+        *,
+        request_scope,
+        cursor,
+        trace,
+        observed_at_ms: int,
+        limit: int = 8,
+    ) -> HybridRecallResult:
+        from gideon.hypermid.search import SearchEngine, SearchMode, SearchRequest
+
+        if request_scope != self.scope:
+            raise PermissionError("recall scope does not match the bound archive scope")
+        embed_fn, raw_fingerprint = self.archive._embedding_context()
+        fingerprint = None
+        query_vector = None
+        if embed_fn is not None and raw_fingerprint is not None:
+            fingerprint = ":".join(str(part) for part in raw_fingerprint)
+            embedded = self.archive._try_embed(query)
+            if embedded is not None:
+                query_vector = tuple(float(value) for value in embedded)
+        candidates = self._candidates(observed_at_ms, fingerprint)
+        response = SearchEngine().search(
+            SearchRequest(
+                query=query,
+                scope=request_scope,
+                mode=SearchMode.HYBRID,
+                limit=limit,
+                trace=trace,
+                now_ms=observed_at_ms,
+                query_vector=query_vector,
+                vector_fingerprint=fingerprint,
+            ),
+            candidates,
+            cursor=cursor,
+        )
+        graph_scores = self.archive._graph_boosts(query) if self.archive.graph_enabled else {}
+        by_id = {candidate.id: candidate for candidate in candidates}
+        hits: list[HybridRecallHit] = []
+        included: set[str] = set()
+        for hit in response.hits:
+            graph = float(graph_scores.get(hit.id, 0.0))
+            hits.append(
+                HybridRecallHit(
+                    id=hit.id,
+                    content=hit.content,
+                    content_digest=hit.content_digest,
+                    source=hit.source,
+                    kind=hit.kind,
+                    scores={
+                        "keyword": hit.scores.lexical,
+                        "vector": hit.scores.semantic,
+                        "graph": graph,
+                        "total": hit.scores.total + graph,
+                    },
+                )
+            )
+            included.add(hit.id)
+        for record_id, graph in graph_scores.items():
+            candidate = by_id.get(record_id)
+            if candidate is None or record_id in included or graph <= 0:
+                continue
+            hits.append(
+                HybridRecallHit(
+                    id=candidate.id,
+                    content=candidate.content,
+                    content_digest=candidate.content_digest,
+                    source=candidate.source,
+                    kind=candidate.kind,
+                    scores={
+                        "keyword": 0.0,
+                        "vector": 0.0,
+                        "graph": float(graph),
+                        "total": float(graph),
+                    },
+                )
+            )
+        hits.sort(key=lambda hit: (-hit.scores["total"], hit.content_digest, hit.id))
+        hits = hits[:limit]
+        arms = (
+            RecallArmEvidence(
+                RECALL_ARM_KEYWORD,
+                "available",
+                sum(hit.scores["keyword"] > 0 for hit in hits),
+            ),
+            RecallArmEvidence(
+                RECALL_ARM_VECTOR,
+                "available" if query_vector is not None else "unavailable",
+                sum(hit.scores["vector"] > 0 for hit in hits),
+                "" if query_vector is not None else "semantic_unavailable",
+            ),
+            RecallArmEvidence(
+                RECALL_ARM_GRAPH,
+                "available" if self.archive.graph_enabled else "unsupported",
+                sum(hit.scores["graph"] > 0 for hit in hits),
+                "" if self.archive.graph_enabled else "graph_disabled",
+            ),
+        )
+        return HybridRecallResult(
+            tuple(hits),
+            response.cursor,
+            arms,
+            response.degraded,
+            response.degradation_reason,
+            response.suppressed,
+        )

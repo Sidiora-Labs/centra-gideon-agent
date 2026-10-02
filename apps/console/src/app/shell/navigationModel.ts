@@ -1,4 +1,4 @@
-import { Blocks, BookOpen, Brain, CalendarDays, FileCode, FileText, Files, FlaskConical, FolderKanban, Inbox, LayoutDashboard, Link2, ListChecks, MessageSquare, MessagesSquare, PenLine, Settings, Sparkles, Terminal, Users, Workflow, Wrench, Zap } from 'lucide-react'
+import { Blocks, BookOpen, Brain, CalendarDays, Database, FileCode, FileText, Files, FlaskConical, FolderKanban, Inbox, LayoutDashboard, Link2, ListChecks, MessageSquare, MessagesSquare, PenLine, Settings, Sparkles, Terminal, Users, Workflow, Wrench, Zap } from 'lucide-react'
 import type { NavItem } from '../../shared/ui/NavRail'
 import { capabilityAreas, capabilityNavigationId } from '../../features/capabilities/navigation'
 import type { ChatSessionSummary } from '../../shared/data/api'
@@ -39,6 +39,8 @@ export function navigationItems(hosted = false, translate: (value: string) => st
     { id: 'experiments', label: translate('Experiments'), icon: FlaskConical, section: section('More') },
     { id: 'settings', label: translate('Your account'), icon: Settings, pinBottom: true },
   ]
+  if (!hosted) items.splice(items.findIndex(item => item.id === 'tasks'), 0,
+    { id: 'hypermid', label: translate('Hypermid'), icon: Database, section: section('More') })
   if (hosted) items.splice(items.findIndex(item => item.id === 'apps'), 0,
     { id: 'connections', label: translate('Connections'), icon: Link2, section: section('Your apps') })
   return items
@@ -48,7 +50,7 @@ export const ROUTABLE_ROOTS = new Set([
   'dashboard', 'chat', 'capabilities', 'rooms', 'loop', 'loops', 'code', 'notifications',
   'discover', 'triggers', 'tasks', 'projects', 'knowledge', 'inbox', 'files', 'artifacts',
   'terminal', 'prompts', 'workflows', 'experiments', 'skills', 'learning', 'tools',
-  'agents', 'apps', 'app', 'settings', 'mission-control',
+  'agents', 'apps', 'app', 'settings', 'hypermid', 'mission-control',
 ])
 
 export function activeNavigationId(route: string, sub: string, query: Record<string, string>): string {

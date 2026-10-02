@@ -1071,6 +1071,9 @@ class ConversationDirectory:
         elif entry is not None:
             await entry.provider.shutdown()
             await _fire_session_end(key, "removed", entry)
+        from gideon.integrations.mcp_hypermid import evict_hypermid_session
+
+        await evict_hypermid_session(key)
 
     async def close_all(self) -> None:
         if self._cleanup_task is not None:
@@ -1099,6 +1102,12 @@ class ConversationDirectory:
                     _sync_kill_provider(provider)
         for key, entry in retired.items():
             await _fire_session_end(key, "shutdown", entry)
+        from gideon.integrations.mcp_hypermid import evict_hypermid_session
+
+        await asyncio.gather(
+            *(evict_hypermid_session(key) for key in retired),
+            return_exceptions=True,
+        )
 
     def record_success(self, key: str) -> None:
         entry = self._sessions.get(key)

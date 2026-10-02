@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, cast
 
 from gideon.cognition.identity import current_username
@@ -154,6 +156,57 @@ class MemoryService:
             )
         return archive.capabilities()
 
+    def flush_for_cutover(self) -> dict[str, int]:
+        """Commit legacy memory state and fsync its durable files before handoff."""
+
+        archive = self._vs
+        checkpointed_pages = 0
+        database = getattr(archive, "_db", None) if archive is not None else None
+        if database is not None:
+            database.commit()
+            checkpoint = database.execute("PRAGMA wal_checkpoint(FULL)").fetchone()
+            if checkpoint is not None:
+                values = tuple(int(value) for value in checkpoint)
+                if values and values[0] != 0:
+                    raise RuntimeError("legacy memory WAL remained busy during cutover")
+                if len(values) > 2:
+                    checkpointed_pages = values[2]
+
+        paths: set[Path] = set()
+        for page in getattr(self._provider, "_pages", ()):
+            location = getattr(page, "location", None)
+            if location is not None:
+                paths.add(Path(location))
+        for name in ("_index_db", "_db_path", "_faiss_path"):
+            value = getattr(self._provider, name, None)
+            if value is not None:
+                paths.add(Path(value))
+            if archive is not None:
+                value = getattr(archive, name, None)
+                if value is not None:
+                    paths.add(Path(value))
+        daily = getattr(self._provider, "_daily", None)
+        if daily is not None and Path(daily).is_dir():
+            paths.update(path for path in Path(daily).glob("*.md") if path.is_file())
+
+        flushed = 0
+        directories: set[Path] = set()
+        for path in sorted(paths):
+            if not path.is_file():
+                continue
+            with path.open("rb") as stream:
+                os.fsync(stream.fileno())
+            directories.add(path.parent)
+            flushed += 1
+        if hasattr(os, "O_DIRECTORY"):
+            for directory in directories:
+                descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+        return {"files": flushed, "checkpointed_pages": checkpointed_pages}
+
     @property
     def has_vector(self) -> bool:
         return self._vs is not None
@@ -165,6 +218,10 @@ class MemoryService:
 
     def fts_fallback_search(self, query: str, *, k: int = 8) -> list[dict]:
         searcher = self._fallback
+        if searcher is None:
+            lexical = getattr(self._provider, "lexical_query", None)
+            if callable(lexical) and query:
+                return lexical(query, k=k)
         if query and searcher is not None:
             try:
                 return searcher.vector_query(text=query, k=k)
@@ -1051,6 +1108,45 @@ class MemoryService:
             return None
         return getattr(archive, "contradiction_judge", None)
 
+    def record_page(self, *, cursor=None, limit: int = 100, category: str | None = None):
+        page = getattr(self._provider, "record_page", None)
+        if not callable(page):
+            return None
+        return page(cursor=cursor, limit=limit, category=category)
+
+    def search_with_evidence(self, query: str, *, limit: int = 8):
+        search = getattr(self._provider, "search_with_evidence", None)
+        if not callable(search):
+            return None
+        return search(query, k=limit)
+
+    def context_preview(self, query: str = "", *, cap: int = 4000) -> dict:
+        preview = getattr(self._provider, "context_preview", None)
+        if callable(preview):
+            return preview(query, cap=cap)
+        text = self.get_context(query=query)
+        return {"text": text[:cap], "chars": min(len(text), cap)}
+
+    def embedding_registration(self) -> Mapping[str, Any]:
+        active = getattr(self._provider, "embedding_active", None)
+        if not callable(active):
+            return {}
+        view = dict(active())
+        registration = view.get("registration")
+        if not isinstance(registration, Mapping):
+            return {}
+        result = dict(registration)
+        result["cursor"] = view.get("cursor")
+        return result
+
+    def register_embedding(self, registration: Mapping[str, Any]) -> Mapping[str, Any]:
+        register = getattr(self._provider, "embedding_register", None)
+        return {} if not callable(register) else dict(register(registration))
+
+    def retire_embedding(self, registration_id: str) -> Mapping[str, Any]:
+        retire = getattr(self._provider, "embedding_retire", None)
+        return {} if not callable(retire) else dict(retire(registration_id))
+
 
 class _NullProvider(MemoryProvider):
     """The explicit disabled-memory provider; writes and reads have no effect."""
@@ -1099,9 +1195,25 @@ class _NullProvider(MemoryProvider):
 
 _NULL_PROVIDER = _NullProvider()
 _services: "dict[int, MemoryService]" = {}
+_authoritative_service: MemoryService | None = None
+
+
+def install_authoritative_service(service: MemoryService) -> None:
+    global _authoritative_service
+    if _authoritative_service not in (None, service):
+        raise RuntimeError("another memory writer is already installed")
+    _authoritative_service = service
+
+
+def clear_authoritative_service(service: object) -> None:
+    global _authoritative_service
+    if _authoritative_service is service:
+        _authoritative_service = None
 
 
 def service_for(provider: "MemoryProvider") -> MemoryService:
+    if _authoritative_service is not None:
+        return _authoritative_service
     identity = id(provider)
     retained = _services.get(identity)
     if retained is not None and retained.provider is provider:

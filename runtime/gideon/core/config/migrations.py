@@ -88,12 +88,32 @@ def _repair_selection(config) -> bool:
     return True
 
 
+def _normalize_hypermid(config) -> bool:
+    from gideon.hypermid.config import ContextConfig, ContextMode
+
+    current = getattr(config, "hypermid", None)
+    if isinstance(current, ContextConfig):
+        return False
+    mode = ContextMode.OFF
+    if current is True:
+        mode = ContextMode.PASS_THROUGH
+    elif isinstance(current, str):
+        try:
+            mode = ContextMode(current)
+        except ValueError:
+            mode = ContextMode.OFF
+    config.hypermid = ContextConfig(mode=mode)
+    logger.info("Config migration: normalized legacy Hypermid configuration")
+    return True
+
+
 _UPGRADES = (
     _native_default,
     _seed_profiles,
     _retire_profiles,
     _repair_selection,
     _retire_seeded_native_prompt,
+    _normalize_hypermid,
 )
 
 

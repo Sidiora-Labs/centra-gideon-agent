@@ -120,6 +120,8 @@ async def bind_surface(runtime: RuntimeCoordinator, *, api_only: bool) -> None:
         )
     runtime._dashboard_runner = runner
     runtime.dashboard_state = surface
+    if surface is not None:
+        _bind_hypermid_surface(runtime, surface)
     addresses = runner.addresses if runner is not None else ()
     runtime._dashboard_port = addresses[0][1] if port == 0 and addresses else port
     runtime._publish_runtime_base()
@@ -128,6 +130,14 @@ async def bind_surface(runtime: RuntimeCoordinator, *, api_only: bool) -> None:
         if not api_only:
             surface._inbox_svc = runtime.inbox_svc
             surface._inbox_restart = runtime._restart_inbox
+
+
+def _bind_hypermid_surface(runtime: RuntimeCoordinator, surface: Any) -> None:
+    lifecycle = getattr(runtime, "hypermid", None)
+    surface.hypermid = lifecycle
+    inspection = getattr(lifecycle, "primary_context_inspection", None)
+    if callable(inspection):
+        surface.hypermid_context_inspection = inspection
 
 
 def reap_backends() -> None:
@@ -154,6 +164,13 @@ async def retire(runtime: RuntimeCoordinator) -> None:
     if runtime.consolidator is not None:
         outcome = await runtime.consolidator.drain(timeout=3.0)
         log.info("Memory extraction shutdown: %s", outcome)
+
+    from gideon.hypermid.lifecycle import stop_runtime as stop_hypermid_runtime
+
+    try:
+        await stop_hypermid_runtime(runtime)
+    except Exception:
+        log.warning("Hypermid shutdown could not finish", exc_info=True)
 
     await cancel_tasks(runtime._handler_tasks)
     for watcher in (runtime.loop_watchdog, runtime.workflow_watchdog):
@@ -270,6 +287,22 @@ class RuntimeProcess:
 
         runtime = self.runtime
         runtime._init_services()
+        from gideon.hypermid.lifecycle import start_runtime as start_hypermid_runtime
+
+        try:
+            status = await start_hypermid_runtime(runtime)
+            log.info(
+                "Hypermid mode=%s availability=%s healthy=%s writer=%s",
+                status.mode,
+                status.availability,
+                status.healthy,
+                status.writer,
+            )
+        except Exception:
+            log.warning(
+                "Hypermid startup failed before adapter readiness; Gideon remains authoritative",
+                exc_info=True,
+            )
         embedding = get_active_embed_fn()
         if embedding and getattr(runtime, "vector_memory", None) is not None:
             runtime.vector_memory.embed_fn = embedding

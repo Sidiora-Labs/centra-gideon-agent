@@ -3885,7 +3885,629 @@ export interface RewindApplyWire {
   preview: RewindPreviewWire
 }
 
+export interface HypermidCursorWire { epoch: number; sequence: number }
+export interface HypermidScopeWire { owner_id: string; project_id: string; workspace_id?: string }
+export interface HypermidOverviewWire {
+  availability: 'available' | 'degraded' | 'unavailable' | 'unauthorized'
+  daemon: {
+    state: 'absent' | 'starting' | 'ready' | 'degraded' | 'draining' | 'stopping' | 'stopped' | 'updating' | 'failed'
+    health: 'unknown' | 'healthy' | 'degraded' | 'failing' | 'unavailable'
+    transport?: 'local_unix' | 'local_windows' | 'remote_tls'
+    detail?: string
+  }
+  adapter: { availability: 'available' | 'degraded' | 'unavailable' | 'unauthorized'; full_host_integration: boolean; detail?: string }
+  scope: HypermidScopeWire
+  mode: 'off' | 'pass_through' | 'shadow' | 'primary'
+  store_health: 'unknown' | 'healthy' | 'degraded' | 'failing' | 'unavailable'
+  maintenance: { active: boolean; label?: string }
+  cursor?: HypermidCursorWire
+  versions: { protocol: string | null; storage: string | null; build: string | null }
+  checked_at_ms: number
+  failure_code: string | null
+}
+export interface HypermidSessionWire {
+  id: string
+  scope: HypermidScopeWire
+  state: 'active' | 'closed' | 'archived' | 'unhealthy'
+  updated_at: string
+  title: string
+  model_id?: string
+  cursor?: HypermidCursorWire
+}
+export interface HypermidTimelineItemWire {
+  id: string
+  cursor: HypermidCursorWire
+  kind: 'user' | 'assistant' | 'tool' | 'memory' | 'cache' | 'compaction' | 'diagnostic' | 'error'
+  occurred_at: string
+  summary: string
+  trace?: { trace_id: string; request_id?: string }
+  detail_digest?: string
+}
+export interface HypermidSessionDetailWire {
+  session: HypermidSessionWire
+  cursor: HypermidCursorWire
+  items: HypermidTimelineItemWire[]
+  gap?: { after: HypermidCursorWire; reason: string }
+}
+export interface HypermidPrimaryContextInspectionWire {
+  state: 'complete' | 'stale' | 'unavailable' | 'unreadable'
+  writer: string
+  writer_status: { module_id: string; epoch: number; generation: number }
+  scope: HypermidScopeWire
+  observed_at: number
+  digest_health: {
+    state: 'healthy' | 'mismatch'
+    component_count: number
+    mismatches: string[]
+    projection_digest: string | null
+    serialized_digest: string | null
+  }
+  active_digest: string
+  cache: {
+    freshness: 'fresh' | 'stale'
+    generation: number | null
+    bytes: number
+    bytes_known: boolean
+    reason: string
+    regions: Array<Record<string, unknown>>
+  }
+  recall_arms: Array<Record<string, unknown>>
+  summary: { memory_cursor?: HypermidCursorWire | null; authorized_records?: number; selected_records?: number } | null
+  provenance: Array<Record<string, unknown>>
+  components: Array<Record<string, unknown>>
+  budget_evidence: {
+    projected_tokens: number | null
+    assembled_tokens: number
+    recall_tokens: number
+    max_input_tokens: number | null
+    within_limit: boolean
+  }
+  cursor?: HypermidCursorWire
+  recovery_action?: string
+}
+export interface HypermidMemoryWire {
+  id: string
+  scope: HypermidScopeWire
+  kind: 'fact' | 'episode' | 'note' | 'smart_note' | 'anchor' | 'summary'
+  state: 'active' | 'archived' | 'tombstoned' | 'expired'
+  revision_digest: string
+  content_digest: string
+  title?: string
+  content?: string
+  verified?: boolean
+  contradicted?: boolean
+  source_session_id?: string
+  lineage?: Array<{ id: string; relation: string }>
+  sources?: Array<{ kind: string; label: string; href?: string }>
+  embedding?: { state: string; model_id?: string; dimensions?: number | null }
+  retrieval?: { score?: number | null; components?: Record<string, number | null>; suppressed?: number }
+  maintenance_jobs?: Array<{ id: string; state: string }>
+}
+export interface HypermidCacheWire {
+  id: string
+  scope: HypermidScopeWire
+  kind: string
+  generation: number
+  freshness: 'fresh' | 'stale' | 'rebuilding' | 'unavailable' | 'unreadable'
+  input_digest?: string
+  bytes: number
+  hits?: number
+  misses?: number
+  observed_at?: string
+}
+export interface HypermidCollectionWire<T> {
+  items: T[]
+  state: 'complete' | 'filtered' | 'stale' | 'rebuilding' | 'unavailable' | 'unreadable'
+  cursor?: HypermidCursorWire
+  suppressed?: number
+  detail?: string
+}
+export interface HypermidCachePlanWire {
+  plan_digest: string
+  action: 'clear' | 'rebuild'
+  scope: HypermidScopeWire
+  entries: Array<{ id: string; kind: string; bytes: number }>
+  recovery: string
+  destructive: boolean
+}
+export interface HypermidRuntimeConfigValueWire {
+  mode: 'off' | 'pass_through' | 'shadow' | 'primary'
+  overflow_policy: 'reclaim_then_refuse' | 'refuse_immediately'
+  refusal_policy: 'refuse' | 'compatible_last_known_good' | 'host_passthrough'
+  features: {
+    background_summaries: boolean
+    reduction_tools: boolean
+    automatic_reclaim: boolean
+    nudges: boolean
+    subagent_contributions: boolean
+    synthetic_hook_blocks: boolean
+  }
+}
+export interface HypermidRuntimeConfigWire {
+  config: HypermidRuntimeConfigValueWire
+  policy_revision: number
+  config_digest: string
+  source: 'default' | 'file' | 'environment' | 'host_adapter' | 'runtime'
+  editable: boolean
+  restart_required: boolean
+  validation: string[]
+  pending?: { next_config_digest: string; expected_policy_revision: number }
+}
+export interface HypermidConfigStageWire extends HypermidRuntimeConfigWire {
+  status: 'unchanged' | 'staged'
+  previous_config_digest: string
+  next_config_digest: string
+  applies_at: 'turn_boundary'
+}
+export interface HypermidModelWire {
+  id: string
+  provider_id: string
+  display_name?: string
+  availability: 'available' | 'degraded' | 'unavailable' | 'unauthorized'
+  health: 'unknown' | 'healthy' | 'degraded' | 'failing' | 'unavailable'
+  embedding_dimensions?: number | null
+  context_tokens?: number | null
+  resident?: boolean | null
+  price?: string | null
+  usage?: string | null
+  last_probe_at?: string | null
+}
+export interface HypermidModelBindingsWire {
+  models: HypermidModelWire[]
+  bindings: Record<string, string>
+  revision_digest: string
+  duties: Array<{ id: string; label: string; required_probe: string }>
+}
+export interface HypermidModelBindingPlanWire {
+  duty: string
+  model_id: string
+  affected_duties: string[]
+  readiness_required: boolean
+  revision_digest: string
+}
+export interface HypermidCredentialWire {
+  name: string
+  scope: HypermidScopeWire
+  backend: 'keychain' | 'protected_file' | 'host_adapter'
+  present: boolean
+  last_validated_at?: string | null
+  consumers: string[]
+}
+export interface HypermidCredentialListWire { credentials: HypermidCredentialWire[] }
+export interface HypermidCredentialDeletePlanWire {
+  name: string
+  consumers: string[]
+  present: boolean
+  confirmation_required: boolean
+}
+export interface HypermidRemoteDeviceWire {
+  device_id: string
+  name: string
+  expires_at: number
+  state: 'active' | 'expired' | 'revoked'
+  capabilities: string[]
+}
+export interface HypermidRemoteStatusWire {
+  state: 'local' | 'remote' | 'reconnecting' | 'degraded' | 'revoked'
+  enabled: boolean
+  tls: { configured: boolean; endpoint?: string; server_name?: string }
+  devices: HypermidRemoteDeviceWire[]
+  detail?: string
+}
+export interface HypermidRemotePlanWire {
+  plan_digest: string
+  endpoint: string
+  server_name: string
+  device_name: string
+  expires_at: number
+  capabilities: string[]
+  scope_label: string
+  warnings: string[]
+}
+export interface HypermidDiagnosticCheckWire {
+  id: string
+  title: string
+  health: 'healthy' | 'degraded' | 'unhealthy' | 'unknown'
+  observed_at: string
+  cached: boolean
+  summary: string
+  next_action?: string
+  evidence_digest?: string
+}
+export interface HypermidDiagnosticsWire {
+  scope: HypermidScopeWire
+  observed_at: string
+  cursor: HypermidCursorWire
+  cached: boolean
+  checks: HypermidDiagnosticCheckWire[]
+}
+export interface HypermidLogEntryWire {
+  cursor: HypermidCursorWire
+  observed_at: string
+  severity: string
+  component: string
+  message: string
+  fields: Record<string, unknown>
+}
+export interface HypermidLogPageWire {
+  scope: HypermidScopeWire
+  entries: HypermidLogEntryWire[]
+  cursor: HypermidCursorWire
+  gap: boolean
+  recovery_cursor: HypermidCursorWire | null
+}
+export interface HypermidOperationStepWire {
+  id: string
+  title: string
+  effect: 'read' | 'write_derivative' | 'write_authoritative' | 'delete_derivative' | 'delete_authoritative' | 'restart'
+  state: 'planned' | 'running' | 'committed' | 'skipped' | 'failed' | 'cancelled' | 'unknown'
+  detail?: string
+}
+export interface HypermidOperationPlanWire {
+  plan_id: string
+  operation: string
+  scope: HypermidScopeWire
+  created_at: string
+  expires_at: string
+  plan_digest: string
+  destructive: boolean
+  restart_required: boolean
+  steps: HypermidOperationStepWire[]
+  blockers: string[]
+  authority_digest?: string
+  blocker_digest?: string
+  [key: string]: unknown
+}
+export interface HypermidOperationReceiptWire {
+  job_id: string
+  operation: string
+  scope: HypermidScopeWire
+  plan_digest: string
+  state: 'running' | 'committed' | 'failed' | 'cancelled' | 'outcome_unknown'
+  started_at: string
+  finished_at: string | null
+  cursor: HypermidCursorWire | null
+  steps: HypermidOperationStepWire[]
+  rollback_available: boolean
+  artifact_digest: string | null
+  error: Record<string, unknown> | null
+  artifact_bytes?: number
+  artifact_path?: string
+}
+export type HypermidLifecycleAction = 'install' | 'update' | 'uninstall' | 'migrate' | 'export' | 'restore' | 'rollback'
+export interface HypermidAuthorityStatusWire {
+  scope: HypermidScopeWire
+  mode: string
+  writer: string
+  lease_state: string
+  owns_writes: boolean
+  authority_epoch: number
+  fence_epoch: number | null
+  cursor: HypermidCursorWire | null
+  failure: string | null
+  authority_digest: string
+}
+export interface HypermidAuthorityPlanWire {
+  schema_version: 1
+  plan_id: string
+  action: 'activate_primary' | 'rollback_to_gideon'
+  scope: HypermidScopeWire
+  created_at: string
+  expires_at: string
+  authority_digest: string
+  blockers: string[]
+  steps: string[]
+  plan_digest: string
+}
+export interface HypermidAuthorityReceiptWire {
+  schema_version: 1
+  operation_id: string
+  action: 'activate_primary' | 'rollback_to_gideon'
+  scope: HypermidScopeWire
+  plan_digest: string
+  state: 'committed' | 'failed' | 'outcome_unknown'
+  status: HypermidAuthorityStatusWire
+  finished_at: string
+  error: { code: string; message: string } | null
+}
+export type HypermidSecurityAction = 'backup' | 'restore' | 'tombstone' | 'purge'
+export interface HypermidSecurityCredentialWire {
+  credential_ref: 'local-backup'
+  label: string
+  purposes: Array<'backup' | 'restore'>
+  configured: boolean
+}
+export interface HypermidSecurityCredentialsWire {
+  credentials: HypermidSecurityCredentialWire[]
+}
+export interface HypermidSecurityPlanWire extends HypermidOperationPlanWire {
+  params_digest: string
+  staging_id?: string
+  source_digest?: string
+  export_id?: string
+  stream_digest?: string
+  bundle_digest?: string
+  item_count?: number
+  record_count?: number
+  unresolved_effect_count?: number
+  unknown_effect_count?: number
+  effect_snapshot_digest?: string
+  cursor?: HypermidCursorWire
+}
+export interface HypermidSecurityReceiptWire {
+  job_id: string
+  operation: string
+  scope: HypermidScopeWire
+  plan_digest: string
+  state: 'committed' | 'failed' | 'cancelled' | 'outcome_unknown'
+  started_at: string
+  finished_at: string
+  steps: HypermidOperationStepWire[]
+  rollback_available: boolean
+  effect_state: 'not_started' | 'committed' | 'unknown'
+  error: { code: string; message: string } | null
+  cursor?: HypermidCursorWire
+  artifact_digest?: string
+  artifact_bytes?: number
+  artifact_path?: string
+  source_digest?: string
+  active_digest?: string
+  export_id?: string
+  stream_digest?: string
+  bundle_digest?: string
+  item_count?: number
+  record_count?: number
+  batch_id?: string
+  batch_state?: string
+  replayed?: boolean
+}
+export type HypermidIntegrationOperation = 'enable' | 'disable' | 'reconnect' | 'stop'
+export interface HypermidIntegrationConnectionWire {
+  connection_id: string
+  kind: 'host' | 'module_supervisor' | 'stdio_module' | 'mcp_bridge' | 'mcp_module'
+  coverage: 'full_host' | 'tool_bridge'
+  transport: 'daemon' | 'stdio'
+  state: 'ready' | 'connected' | 'disconnected' | 'disabled' | 'stopped' | 'unavailable'
+  available: boolean
+  display_name: string
+  capabilities: string[]
+  operations: HypermidIntegrationOperation[]
+  module_id: string | null
+  connected_sessions: number | null
+  catalog_generation: number | null
+  active_calls: number | null
+  process_ready: boolean | null
+  budget: { state: string }
+  fault: { state: string; code: string | null }
+}
+export interface HypermidConditionWire {
+  condition_id: string | null
+  availability: 'available' | 'unavailable'
+  result: boolean | null
+  transition_id: string | null
+  transition_identity: 'available' | 'unavailable'
+  failure_code: string | null
+  checked_at_ms: number
+  observed_facts: Array<{ label: string; value: string }>
+}
+export interface HypermidIntegrationsWire {
+  scope: HypermidScopeWire
+  connections: HypermidIntegrationConnectionWire[]
+  conditions: HypermidConditionWire[]
+  checked_at_ms: number
+}
+export interface HypermidIntegrationActionWire {
+  connection_id: string
+  operation: HypermidIntegrationOperation
+  state: 'applied' | 'unavailable' | 'unsupported' | 'failed'
+  error_code: string | null
+}
+export interface HypermidNetworkGrantWire {
+  grantId: string
+  principalId: string
+  operation: string
+  scheme: string
+  hostname: string
+  ports: number[]
+  addressClasses: string[]
+  proxyPolicy: 'direct' | 'required'
+  redirectLimit: number
+  byteLimit: number
+  expiresAtMs: number
+}
+export interface HypermidNetworkDecisionWire {
+  code: string
+  rule: string
+  allowed: boolean
+  checkedAtMs: number
+}
+export interface HypermidSecurityStatusWire {
+  scope: HypermidScopeWire
+  grants: HypermidNetworkGrantWire[]
+  decisions: HypermidNetworkDecisionWire[]
+  availability: 'ready' | 'unavailable'
+  error?: { code: string; message: string; httpStatus: number }
+}
+export interface HypermidMemoryProvenanceWire {
+  memoryId: string
+  sourceType: string
+  sourceId: string
+  authorPrincipalId: string
+  contentDigest: string
+  revision: number
+  verification: 'unverified' | 'verified' | 'rejected'
+  instructionShaped: boolean
+  trustClass: 'data' | 'privileged_instruction'
+  reviewerPrincipalId?: string
+}
+export type HypermidEffectState = 'intent' | 'dispatched' | 'committed' | 'not_started' | 'unknown'
+export interface HypermidEffectReviewPlanWire {
+  review_id: string
+  effect_id: string
+  idempotency_key: string
+  module_id: string
+  operation: string
+  scope: HypermidScopeWire
+  input_digest: string
+  provider_id: string
+  provider_proof_id: string
+  provider_proof_digest: string
+  proposed_state: 'committed' | 'not_started'
+  result_digest: string | null
+  reason: string | null
+  created_ms: number
+  plan_digest: string
+}
+export interface HypermidEffectSnapshotWire {
+  effect_id: string
+  module_id: string
+  operation: string
+  principal_id: string
+  scope: HypermidScopeWire
+  input_digest: string
+  created_ms: number
+  state: HypermidEffectState
+  reviewable: boolean
+  result_digest: string | null
+  reason: string | null
+  settled_ms: number | null
+  next_action: 'wait_for_recovery' | 'check_authoritative_status' | 'resolved'
+  review_plan: HypermidEffectReviewPlanWire | null
+}
+export interface HypermidEffectsWire {
+  scope: HypermidScopeWire
+  effects: HypermidEffectSnapshotWire[]
+  checked_at_ms: number
+}
+
+function hypermidQuery(path: string, params: Record<string, string | undefined>): string {
+  const query = new URLSearchParams(Object.entries(params).filter((entry): entry is [string, string] => Boolean(entry[1]))).toString()
+  return query ? `${path}?${query}` : path
+}
+
 export const api = {
+  hypermidOverview: () => get<HypermidOverviewWire>('/api/hypermid/overview'),
+  hypermidSessions: (filters: Record<string, string | undefined> = {}) =>
+    get<HypermidCollectionWire<HypermidSessionWire>>(hypermidQuery('/api/hypermid/sessions', filters)),
+  hypermidSession: (id: string, after?: HypermidCursorWire) =>
+    get<HypermidSessionDetailWire>(hypermidQuery(`/api/hypermid/sessions/${encodeURIComponent(id)}`, {
+      after_epoch: after ? String(after.epoch) : undefined,
+      after_sequence: after ? String(after.sequence) : undefined,
+    })),
+  hypermidPrimaryContextInspection: (id: string) =>
+    get<HypermidPrimaryContextInspectionWire>(`/api/hypermid/sessions/${encodeURIComponent(id)}/primary-context`),
+  hypermidMemory: (filters: Record<string, string | undefined> = {}) =>
+    get<HypermidCollectionWire<HypermidMemoryWire>>(hypermidQuery('/api/hypermid/memory', filters)),
+  hypermidMemoryRecord: (id: string) => get<HypermidMemoryWire>(`/api/hypermid/memory/${encodeURIComponent(id)}`),
+  updateHypermidMemory: (id: string, body: { content: string }, basedOn: string) =>
+    patch<{ ok: true; record: HypermidMemoryWire }>(`/api/hypermid/memory/${encodeURIComponent(id)}`, body, basedOn),
+  hypermidCaches: (filters: Record<string, string | undefined> = {}) =>
+    get<HypermidCollectionWire<HypermidCacheWire>>(hypermidQuery('/api/hypermid/caches', filters)),
+  planHypermidCache: (id: string, action: 'clear' | 'rebuild') =>
+    post<HypermidCachePlanWire>(`/api/hypermid/caches/${encodeURIComponent(id)}/plan`, { action }),
+  hypermidRuntimeConfig: () => get<HypermidRuntimeConfigWire>('/api/hypermid/config/runtime'),
+  stageHypermidRuntimeConfig: (config: HypermidRuntimeConfigValueWire, policyRevision: number, configDigest: string) =>
+    put<HypermidConfigStageWire>('/api/hypermid/config/runtime', {
+      config, expected_revision: policyRevision, expected_digest: configDigest,
+    }, configDigest),
+  hypermidModelBindings: () => get<HypermidModelBindingsWire>('/api/hypermid/config/models'),
+  planHypermidModelBinding: (duty: string, modelId: string, revisionDigest: string) =>
+    post<HypermidModelBindingPlanWire>('/api/hypermid/config/models/plan', {
+      duty, model_id: modelId, expected_digest: revisionDigest,
+    }),
+  saveHypermidModelBinding: (duty: string, modelId: string, revisionDigest: string) =>
+    put<HypermidModelBindingsWire>('/api/hypermid/config/models', {
+      duty, model_id: modelId, expected_digest: revisionDigest,
+    }, revisionDigest),
+  probeHypermidModel: (modelId: string) =>
+    post<{ model: HypermidModelWire }>(`/api/hypermid/config/models/${encodeURIComponent(modelId)}/probe`, {}),
+  hypermidCredentials: () => get<HypermidCredentialListWire>('/api/hypermid/config/credentials'),
+  putHypermidCredential: (name: string, value: string) =>
+    put<{ credential: HypermidCredentialWire }>(`/api/hypermid/config/credentials/${encodeURIComponent(name)}`, { value }),
+  validateHypermidCredential: (name: string) =>
+    post<{ credential: HypermidCredentialWire }>(`/api/hypermid/config/credentials/${encodeURIComponent(name)}/validate`, {}),
+  planHypermidCredentialDelete: (name: string) =>
+    get<HypermidCredentialDeletePlanWire>(`/api/hypermid/config/credentials/${encodeURIComponent(name)}/delete-plan`),
+  deleteHypermidCredential: (name: string, confirm: boolean) =>
+    post<{ deleted: boolean }>(`/api/hypermid/config/credentials/${encodeURIComponent(name)}/delete`, { confirm }),
+  hypermidRemoteStatus: () => get<HypermidRemoteStatusWire>('/api/hypermid/remote'),
+  planHypermidRemote: (body: { endpoint: string; server_name: string; device_name: string; expires_at: number; capabilities: string[] }) =>
+    post<HypermidRemotePlanWire>('/api/hypermid/remote/plan', body),
+  enableHypermidRemote: (planDigest: string) =>
+    post<HypermidRemoteStatusWire>('/api/hypermid/remote/enable', { plan_digest: planDigest }),
+  revokeHypermidRemoteDevice: (deviceId: string) =>
+    post<HypermidRemoteStatusWire>(`/api/hypermid/remote/devices/${encodeURIComponent(deviceId)}/revoke`, {}),
+  hypermidDiagnostics: (refresh = false) =>
+    get<HypermidDiagnosticsWire>(`/api/hypermid/diagnostics${refresh ? '?refresh=true' : ''}`),
+  hypermidLogs: (options: { after?: HypermidCursorWire; severity?: string; component?: string; limit?: number } = {}) =>
+    get<HypermidLogPageWire>(hypermidQuery('/api/hypermid/logs', {
+      after_epoch: options.after ? String(options.after.epoch) : undefined,
+      after_sequence: options.after ? String(options.after.sequence) : undefined,
+      severity: options.severity,
+      component: options.component,
+      limit: options.limit ? String(options.limit) : undefined,
+    })),
+  planHypermidMaintenance: (action: string, params: Record<string, unknown> = {}) =>
+    post<HypermidOperationPlanWire>('/api/hypermid/operations/maintenance/plan', { action, params }),
+  applyHypermidMaintenance: (planId: string, planDigest: string, confirmDestructive = false) =>
+    post<HypermidOperationReceiptWire>('/api/hypermid/operations/maintenance/apply', {
+      plan_id: planId, plan_digest: planDigest, confirm_destructive: confirmDestructive,
+    }),
+  hypermidMaintenanceStatus: (jobId: string) =>
+    get<HypermidOperationReceiptWire>(`/api/hypermid/operations/maintenance/jobs/${encodeURIComponent(jobId)}`),
+  cancelHypermidMaintenance: (jobId: string) =>
+    post<HypermidOperationReceiptWire>(`/api/hypermid/operations/maintenance/jobs/${encodeURIComponent(jobId)}/cancel`, {}),
+  planHypermidLifecycle: (action: HypermidLifecycleAction, body: Record<string, unknown>) =>
+    post<HypermidOperationPlanWire>(`/api/hypermid/operations/lifecycle/${action}/plan`, body),
+  applyHypermidLifecycle: (action: HypermidLifecycleAction, body: { plan_id: string; plan_digest: string; confirm_destructive?: boolean; confirm_purge?: boolean }) =>
+    post<HypermidOperationReceiptWire>(`/api/hypermid/operations/lifecycle/${action}/apply`, body),
+  hypermidLifecycleStatus: (jobId: string) =>
+    get<HypermidOperationReceiptWire>(`/api/hypermid/operations/lifecycle/jobs/${encodeURIComponent(jobId)}`),
+  recoverHypermidLifecycle: (jobId: string) =>
+    post<{ receipt: HypermidOperationReceiptWire; recovery_state: string }>(`/api/hypermid/operations/lifecycle/jobs/${encodeURIComponent(jobId)}/recover`, {}),
+  resumeHypermidLifecycle: (jobId: string, after?: HypermidCursorWire) =>
+    post<HypermidOperationReceiptWire>(`/api/hypermid/operations/lifecycle/jobs/${encodeURIComponent(jobId)}/resume`, { after }),
+  hypermidAuthorityStatus: (reconcileUnknown = false) =>
+    get<HypermidAuthorityStatusWire>(`/api/hypermid/authority/status${reconcileUnknown ? '?reconcile_unknown=true' : ''}`),
+  planHypermidAuthority: (action: 'activate_primary' | 'rollback_to_gideon', ttlSeconds = 300) =>
+    post<HypermidAuthorityPlanWire>('/api/hypermid/authority/plan', { action, ttl_seconds: ttlSeconds }),
+  applyHypermidAuthority: (plan: HypermidAuthorityPlanWire) =>
+    post<HypermidAuthorityReceiptWire>('/api/hypermid/authority/apply', { plan, reviewed_digest: plan.plan_digest }),
+  hypermidSecurityCredentials: () =>
+    get<HypermidSecurityCredentialsWire>('/api/hypermid/operations/security/credentials'),
+  planHypermidBackup: (body: { destination: string; export_id?: string; credential_ref?: 'local-backup' }) =>
+    post<HypermidSecurityPlanWire>('/api/hypermid/operations/security/backup/plan', body),
+  planHypermidRestore: (body: { artifact_path: string; source_digest: string; credential_ref?: 'local-backup' }) =>
+    post<HypermidSecurityPlanWire>('/api/hypermid/operations/security/restore/plan', body),
+  planHypermidTombstone: (body: { record_id: string; revision_digest: string; now_ms: number; retention_until_ms: number }) =>
+    post<HypermidSecurityPlanWire>('/api/hypermid/operations/security/tombstone/plan', body),
+  planHypermidPurge: (body: { record_id: string; now_ms: number }) =>
+    post<HypermidSecurityPlanWire>('/api/hypermid/operations/security/purge/plan', body),
+  applyHypermidSecurity: (action: HypermidSecurityAction, body: { plan_id: string; plan_digest: string; confirm_destructive?: boolean; confirm_purge?: boolean }) =>
+    post<HypermidSecurityReceiptWire>(`/api/hypermid/operations/security/${action}/apply`, body),
+  hypermidSecurityStatus: (jobId: string) =>
+    get<HypermidSecurityReceiptWire>(`/api/hypermid/operations/security/jobs/${encodeURIComponent(jobId)}`),
+  recoverHypermidSecurity: (jobId: string) =>
+    post<HypermidSecurityReceiptWire>(`/api/hypermid/operations/security/jobs/${encodeURIComponent(jobId)}/recover`, {}),
+  hypermidConnections: () => get<HypermidIntegrationsWire>('/api/hypermid/connections'),
+  actHypermidConnection: (connectionId: string, operation: HypermidIntegrationOperation) =>
+    post<HypermidIntegrationActionWire>(`/api/hypermid/connections/${encodeURIComponent(connectionId)}/actions`, { operation }),
+  hypermidSecurityPolicy: () => get<HypermidSecurityStatusWire>('/api/hypermid/security'),
+  revokeHypermidNetworkGrant: (grantId: string) =>
+    post<HypermidSecurityStatusWire>(`/api/hypermid/security/grants/${encodeURIComponent(grantId)}/revoke`, {}),
+  hypermidMemoryProvenance: (memoryId: string) =>
+    get<HypermidMemoryProvenanceWire>(`/api/hypermid/security/memory/${encodeURIComponent(memoryId)}/provenance`),
+  promoteHypermidMemory: (memoryId: string, expectedRevision: number) =>
+    post<HypermidMemoryProvenanceWire>(`/api/hypermid/security/memory/${encodeURIComponent(memoryId)}/promote`, { expected_revision: expectedRevision }),
+  hypermidEffects: () => get<HypermidEffectsWire>('/api/hypermid/effects'),
+  hypermidEffectStatus: (effectId: string) =>
+    get<HypermidEffectSnapshotWire>(`/api/hypermid/effects/${encodeURIComponent(effectId)}`),
+  reviewHypermidEffect: (effectId: string) =>
+    post<{ plan: HypermidEffectReviewPlanWire }>(`/api/hypermid/effects/${encodeURIComponent(effectId)}/review`, {}),
+  reconcileHypermidEffect: (effectId: string, reviewId: string, reviewedPlanDigest: string) =>
+    post<HypermidEffectSnapshotWire>(`/api/hypermid/effects/${encodeURIComponent(effectId)}/reconcile`, {
+      review_id: reviewId, reviewed_plan_digest: reviewedPlanDigest,
+    }),
   experimentCampaigns: () => get<{ campaigns: ExperimentCampaign[] }>('/api/experiments/campaigns'),
   experimentCampaign: (id: string) => get<ExperimentCampaign>(`/api/experiments/campaigns/${encodeURIComponent(id)}`),
   createExperimentCampaign: (body: { title: string; objective: string; workflow_name: string; metric: string; direction: 'maximize' | 'minimize'; variants: Record<string, unknown>[]; max_parallel: number; max_tokens: number }) => post<ExperimentCampaign>('/api/experiments/campaigns', body),

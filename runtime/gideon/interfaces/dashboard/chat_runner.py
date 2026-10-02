@@ -10,7 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from gideon.assurance.validation import ValidationError, validate_ask_user_question
-from gideon.cognition.context_engine import assemble_context, check_headroom
+from gideon.cognition.context_engine import (
+    assemble_context,
+    check_headroom,
+    prepare_context_turn,
+)
 from gideon.cognition.context_headroom import HeadroomState
 from gideon.core.config import loader as config_loader
 from gideon.core.config.loader import AppConfig, resolve_agent_bindings
@@ -2565,6 +2569,7 @@ async def run_chat(
                     )
                     session._last_turn_errored = True
                     return
+            await prepare_context_turn(session_key)
             _assembled = assemble_context(
                 state.context_builder,
                 message,

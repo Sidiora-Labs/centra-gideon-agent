@@ -5,7 +5,10 @@ from __future__ import annotations
 import logging
 import re
 import time
+import asyncio
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Iterable
 
 from gideon.cognition.context_segmentation import Segment, segment_messages
 from gideon.cognition.history import ConversationLog, model_view, span_digest
@@ -15,6 +18,53 @@ _MIN_TRANSCRIPT_CHARS = 8_000
 _KEEP_RECENT_SEGMENTS = 1
 _MIDDLE_MSG_CAP = 600
 _RESULT_ID_RE = re.compile(r'tool_result_get\(result_id="(r_[^"]+)"\)')
+_GLOBAL_QUIESCE = "*"
+_quiesced_sessions: set[str] = set()
+_active_compressions: dict[str, set[asyncio.Task]] = {}
+
+
+@dataclass(frozen=True, slots=True)
+class BackgroundQuiesceReceipt:
+    session_keys: tuple[str, ...]
+    drained_tasks: int
+
+
+def _compression_blocked(key: str) -> bool:
+    return _GLOBAL_QUIESCE in _quiesced_sessions or key in _quiesced_sessions
+
+
+async def quiesce_background_compression(
+    session_keys: Iterable[str] | None = None, *, timeout: float = 3.0
+) -> BackgroundQuiesceReceipt:
+    """Fence new compression and wait for already admitted work to finish."""
+
+    keys = {_GLOBAL_QUIESCE} if session_keys is None else {
+        str(key) for key in session_keys if str(key)
+    }
+    _quiesced_sessions.update(keys)
+    active = {
+        task
+        for key, tasks in _active_compressions.items()
+        if _GLOBAL_QUIESCE in keys or key in keys
+        for task in tasks
+        if not task.done()
+    }
+    if active:
+        done, pending = await asyncio.wait(active, timeout=timeout)
+        if pending:
+            raise TimeoutError("background compression did not quiesce before cutover")
+        for task in done:
+            task.result()
+    return BackgroundQuiesceReceipt(
+        session_keys=tuple(sorted(keys)), drained_tasks=len(active)
+    )
+
+
+def resume_background_compression(session_keys: Iterable[str] | None = None) -> None:
+    keys = {_GLOBAL_QUIESCE} if session_keys is None else {
+        str(key) for key in session_keys if str(key)
+    }
+    _quiesced_sessions.difference_update(keys)
 
 
 def _idle_seconds(idle_days: float) -> float:
@@ -146,11 +196,23 @@ class _JournalCompression:
 async def compress_session(
     log: ConversationLog, key: str, *, embed_fn=None
 ) -> dict | None:
+    if _compression_blocked(key):
+        return None
+    task = asyncio.current_task()
+    if task is not None:
+        _active_compressions.setdefault(key, set()).add(task)
     try:
         return await _JournalCompression(log, key).run(embed_fn)
     except Exception:
         logger.warning("bg-compress: failed for session %s", key, exc_info=True)
         return None
+    finally:
+        if task is not None:
+            active = _active_compressions.get(key)
+            if active is not None:
+                active.discard(task)
+                if not active:
+                    _active_compressions.pop(key, None)
 
 
 def _eligible_keys(log: ConversationLog, idle_days: float, now: float) -> list[str]:

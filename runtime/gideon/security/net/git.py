@@ -510,3 +510,74 @@ def run_git_guarded(
     if proc.returncode != 0 and tunnel.unreachable:
         raise GitHostUnreachable(*tunnel.unreachable[0])
     return proc
+
+
+@dataclass(frozen=True, slots=True)
+class LocalGitSnapshot:
+    repository_root: str
+    head: str
+    refs: tuple[str, ...]
+    commits: tuple[str, ...]
+
+
+def read_local_git_snapshot(
+    repository: str | os.PathLike[str], *, max_commits: int = 64, timeout: float = 10.0
+) -> LocalGitSnapshot:
+    """Read a bounded local repository view through Gideon's Git process policy."""
+    if isinstance(max_commits, bool) or not 1 <= max_commits <= 512:
+        raise ValueError("max_commits must be between 1 and 512")
+    if not 0.0 < timeout <= 60.0:
+        raise ValueError("timeout must be between zero and 60 seconds")
+    root = os.path.realpath(os.fspath(repository))
+    if not os.path.isdir(root):
+        raise ValueError("Git source must be an existing directory")
+
+    def read(arguments: list[str]) -> str:
+        completed = subprocess.run(
+            git_argv(["-C", root, *arguments]),
+            env=git_child_env(site="hypermid-git-source"),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if completed.returncode != 0:
+            message = (completed.stderr or "Git source read failed").strip()
+            raise RuntimeError(message[:1024])
+        if len(completed.stdout.encode("utf-8")) > 1024 * 1024:
+            raise ValueError("Git source read exceeded the output limit")
+        return completed.stdout
+
+    repository_root = os.path.realpath(read(["rev-parse", "--show-toplevel"]).strip())
+    if repository_root != root:
+        raise ValueError("Git source must identify the repository root")
+    head = read(["rev-parse", "--verify", "HEAD"]).strip()
+    if re.fullmatch(r"[0-9a-f]{40,64}", head) is None:
+        raise ValueError("Git source HEAD is invalid")
+    refs = tuple(
+        line
+        for line in read(
+            [
+                "for-each-ref",
+                "--count=512",
+                "--format=%(refname)%00%(objectname)",
+                "refs/heads",
+                "refs/tags",
+            ]
+        ).splitlines()
+        if line
+    )
+    commits = tuple(
+        line
+        for line in read(
+            [
+                "log",
+                f"--max-count={max_commits}",
+                "--format=%H%x00%aI%x00%s",
+                "--no-decorate",
+                "--no-show-signature",
+            ]
+        ).splitlines()
+        if line
+    )
+    return LocalGitSnapshot(repository_root, head, refs, commits)
