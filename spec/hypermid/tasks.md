@@ -16,7 +16,7 @@
 - [x] base-04. Encrypted push and fleet logging
   - _Requirements: base-observability.1, base-observability.2, base-observability.3_
 
-- [ ] base-05. Message-plane contracts and topology
+- [x] base-05. Message-plane contracts and topology
   - _Requirements: base-bus.1, base-bus.2_
 
 - [ ] base-06. In-memory and NATS bus backends

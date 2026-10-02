@@ -114,7 +114,7 @@ verify_cmd = "cargo test -p hypermid-push -p hypermid-log --manifest-path Cargo.
 
 [task.base-05]
 title = "Message-plane contracts and topology"
-status = "pending"
+status = "done"
 wave = 5
 owner_lane = "foundation"
 requires = ["base-04"]

@@ -703,6 +703,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypermid-bus-contracts"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "hypermid-contracts",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "hypermid-bus-naming"
+version = "0.1.0"
+dependencies = [
+ "hypermid-contracts",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "hypermid-cache"
 version = "0.1.0"
 dependencies = [

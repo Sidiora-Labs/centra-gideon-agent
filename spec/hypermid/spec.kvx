@@ -160,7 +160,7 @@ touches = ["crates/hypermid-push/Cargo.toml", "crates/hypermid-push/src/lib.rs",
 verify_cmd = "cargo test -p hypermid-push -p hypermid-log --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_observability.py"
 [task.base-05]
 title = "Message-plane contracts and topology"
-status = "pending"
+status = "done"
 wave = 5
 owner_lane = "foundation"
 requires = ["wave-4-close"]
