@@ -246,7 +246,7 @@ verify_cmd = "cargo test -p hypermid-context --test subagent_context && PYTHONPA
 
 [task.ctx-hooks]
 title = "Implement bounded context lifecycle hooks"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "context"
 requires = ["ctx-background-summary", "ctx-reclaim"]

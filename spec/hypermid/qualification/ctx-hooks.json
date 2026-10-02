@@ -1,0 +1,26 @@
+{
+  "task": "ctx-hooks",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-context --test hook_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_hooks.py",
+  "recorded_portable_commands": [
+    "CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=<fleet-target> cargo test -p hypermid-context --test hook_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_hooks.py"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-core/src/hooks.rs": "81c82cd249575f69cebc168283bcf602dabc20a3dad21c85d0db46e0368ad3d9",
+    "crates/hypermid-context/src/hook_dispatch.rs": "c3a99948f2618b4adf1d9665cfa96d039d70d8b2a2b5d6c25b792364eea85bfc",
+    "runtime/gideon/hypermid/hooks.py": "694542223bceb172e2a7cc8406b21831549b90184d7edb3f6b92120ea96d231f",
+    "crates/hypermid-context/tests/hook_contract.rs": "15899dbc04e715739b64674677b4215ccadbb81d9e1159bff0ea40c1e843177b",
+    "checks/runtime/test_hypermid_hooks.py": "357c0e7b5c9fec81fc4317a558263663dcdccbaa5e50cd387ebd443410f3d8e8"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-core/src/hooks.rs": "81c82cd249575f69cebc168283bcf602dabc20a3dad21c85d0db46e0368ad3d9",
+    "crates/hypermid-context/src/hook_dispatch.rs": "c3a99948f2618b4adf1d9665cfa96d039d70d8b2a2b5d6c25b792364eea85bfc",
+    "runtime/gideon/hypermid/hooks.py": "694542223bceb172e2a7cc8406b21831549b90184d7edb3f6b92120ea96d231f",
+    "crates/hypermid-context/tests/hook_contract.rs": "15899dbc04e715739b64674677b4215ccadbb81d9e1159bff0ea40c1e843177b",
+    "checks/runtime/test_hypermid_hooks.py": "357c0e7b5c9fec81fc4317a558263663dcdccbaa5e50cd387ebd443410f3d8e8"
+  },
+  "scope": "Focused Rust and Python hook contract qualification; later wave and release gates remain separate.",
+  "source_adjustments": []
+}

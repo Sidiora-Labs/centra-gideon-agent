@@ -46,7 +46,7 @@
 - [x] ctx-history. Implement immutable history and exact expansion
   - _Requirements: ctx-history.1, ctx-history.2, ctx-history.3_
 
-- [ ] ctx-hooks. Implement bounded context lifecycle hooks
+- [x] ctx-hooks. Implement bounded context lifecycle hooks
   - _Requirements: ctx-hooks.1, ctx-hooks.2, ctx-hooks.3_
 
 - [x] ctx-identity. Implement stable scoped context identities

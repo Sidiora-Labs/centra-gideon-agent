@@ -654,7 +654,7 @@ touches = ["crates/hypermid-core/src/subagent.rs", "crates/hypermid-context/src/
 verify_cmd = "cargo test -p hypermid-context --test subagent_context && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_subagents.py"
 [task.ctx-hooks]
 title = "Implement bounded context lifecycle hooks"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "context"
 requires = ["wave-3-close"]
