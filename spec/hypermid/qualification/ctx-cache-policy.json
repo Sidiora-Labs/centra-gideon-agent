@@ -1,0 +1,27 @@
+{
+  "task": "ctx-cache-policy",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-context --test cache_policy && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_cache_policy.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-context --test cache_policy",
+    "PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_cache_policy.py"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/runtime/test_hypermid_cache_policy.py": "94201eb31231e351fd391204129b5bba963ee4e4b7c515bf6fd67d10b2288783",
+    "crates/hypermid-context/src/cache_store.rs": "897ffde9c6b52fe8047c820abe236bf47fd52cc425fc29eee18a49f60bc5f7f4",
+    "crates/hypermid-context/tests/cache_policy.rs": "2b6fc704755d4ccf1c5e4d6be8d74a5574e73b43ed8e80d52caacd0f75276f63",
+    "crates/hypermid-core/src/cache.rs": "f80ccd6df28cfad3bca87cf4cddc6f34bcc61426dc6bb4d8b06ed4a8defd6895",
+    "runtime/gideon/hypermid/cache.py": "cb4cd8a241503bcb6145f078f566344cfd1c82b6601c5069d6c0cb95fe38f5aa"
+  },
+  "tested_source_sha256": {
+    "checks/runtime/test_hypermid_cache_policy.py": "94201eb31231e351fd391204129b5bba963ee4e4b7c515bf6fd67d10b2288783",
+    "crates/hypermid-context/src/cache_store.rs": "897ffde9c6b52fe8047c820abe236bf47fd52cc425fc29eee18a49f60bc5f7f4",
+    "crates/hypermid-context/tests/cache_policy.rs": "2b6fc704755d4ccf1c5e4d6be8d74a5574e73b43ed8e80d52caacd0f75276f63",
+    "crates/hypermid-core/src/cache.rs": "f80ccd6df28cfad3bca87cf4cddc6f34bcc61426dc6bb4d8b06ed4a8defd6895",
+    "runtime/gideon/hypermid/cache.py": "cb4cd8a241503bcb6145f078f566344cfd1c82b6601c5069d6c0cb95fe38f5aa"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}

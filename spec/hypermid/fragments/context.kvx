@@ -176,7 +176,7 @@ verify_cmd = "cargo test -p hypermid-context --test provider_serialization && PY
 
 [task.ctx-cache-policy]
 title = "Implement stable baseline and delta cache regions"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "context"
 requires = ["ctx-provider-serialization"]

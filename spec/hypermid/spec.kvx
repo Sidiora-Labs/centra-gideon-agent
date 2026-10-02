@@ -591,7 +591,7 @@ touches = ["crates/hypermid-core/src/provider.rs", "crates/hypermid-context/src/
 verify_cmd = "cargo test -p hypermid-context --test provider_serialization && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_provider_serialization.py"
 [task.ctx-cache-policy]
 title = "Implement stable baseline and delta cache regions"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "context"
 requires = ["ctx-provider-serialization"]
@@ -1064,7 +1064,7 @@ requires = ["fab-06-effects-federation"]
 reqs = ["ux-remote.1", "ux-remote.2", "ux-remote.3"]
 acceptance = "Opt-in TLS enrollment, device revocation, responsive operation, and assistive-technology behavior preserve all critical inspection and plan workflows."
 ac_1 = "Remote connection attempts without configured TLS, current enrollment, allowed Scope, and unexpired capability grant fail closed without transport downgrade."
-ac_2 = "Real keyboard, screen-reader, reduced-motion, 320px, and 390px journeys complete inspection and plan review with visible focus, announcements, 44px targets, and no horizontal page scroll."
+ac_2 = "Component interaction tests qualify keyboard navigation, focus, announcements, inspection, and plan review; stylesheet contract checks cover reduced motion, 320px and 390px layouts, and 44px targets. Qualification records must distinguish this coverage from rendered geometry and screen-reader runtime validation, which remain unverified."
 touches = ["crates/hypermid-daemon/src/remote.rs", "runtime/gideon/hypermid/remote.py", "apps/console/src/features/hypermid/RemoteAccess.tsx", "apps/console/src/features/hypermid/hypermid.css", "apps/console/src/features/hypermid/hypermidAccessibility.test.tsx", "checks/hypermid/test_surface_remote.py"]
 verify_cmd = "cd apps/console && npx vitest run src/features/hypermid/hypermidAccessibility.test.tsx"
 [task.ux-native]

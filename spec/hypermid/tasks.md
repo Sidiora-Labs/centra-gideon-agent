@@ -31,7 +31,7 @@
 - [x] ctx-background-summary. Implement leased background summarization
   - _Requirements: ctx-background-summary.1, ctx-background-summary.2, ctx-background-summary.3_
 
-- [ ] ctx-cache-policy. Implement stable baseline and delta cache regions
+- [x] ctx-cache-policy. Implement stable baseline and delta cache regions
   - _Requirements: ctx-cache-policy.1, ctx-cache-policy.2, ctx-cache-policy.3_
 
 - [x] ctx-diagnostics. Implement context diagnostics and accounting
