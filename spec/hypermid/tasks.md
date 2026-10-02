@@ -208,7 +208,7 @@
 - [x] ux-operations. Diagnostics, logs, and maintenance plans
   - _Requirements: ux-operations.1, ux-operations.2, ux-operations.3_
 
-- [ ] ux-remote. Remote, mobile, and accessible operator experience
+- [x] ux-remote. Remote, mobile, and accessible operator experience
   - _Requirements: ux-remote.1, ux-remote.2, ux-remote.3_
 
 - [x] wave-1-close. Qualify vertical slice: Local session connection

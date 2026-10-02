@@ -1,0 +1,33 @@
+{
+  "task": "ux-remote",
+  "status": "passed",
+  "declared_command": "cd apps/console && npx vitest run src/features/hypermid/hypermidAccessibility.test.tsx",
+  "recorded_portable_commands": [
+    "cd apps/console && npx vitest run src/features/hypermid/hypermidAccessibility.test.tsx",
+    "cargo test -p hypermid-daemon --lib remote_listener::remote_listener_tests::remote_listener_runs_real_loopback_mtls_with_exact_short_scope -- --exact --nocapture"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-daemon/src/remote_listener.rs": "39f8be2412905bf07486b6edd4b13576c59a2b80e22d112f8464c53889a60af4",
+    "runtime/gideon/hypermid/remote.py": "51d0a4f399238e80960af1a4cf8b958e2840772c9f462a22eb09f8ebdb539ba3",
+    "apps/console/src/features/hypermid/RemoteAccess.tsx": "02f1d484b8e1261c863834384517227c383b05a67de08236732fa5374e6187ed",
+    "apps/console/src/features/hypermid/hypermid.css": "a14c242896475e8cf17cbe39e2548c4e90a9bb2b17c1fae00cd5843940b8731c",
+    "apps/console/src/features/hypermid/hypermidAccessibility.test.tsx": "8bb78bf54898d302d013fcf992479f773bfac6bd871733d2a940f39188b335e2",
+    "apps/console/src/shared/data/api.ts": "f8447e31af485bd44476f07a58d029e9a2041b24591f53351e635ec7684f5ad4",
+    "runtime/gideon/interfaces/dashboard/handlers/hypermid.py": "c04cb34cf27f65d6038b4832c9fed54eef1c1d1fcd1031e17565de25001c72f8",
+    "runtime/gideon/interfaces/dashboard/server.py": "548cea3f9ff20211e818ad4490e436ee1ad9770673b915c700481a0f5e97e5af"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-daemon/src/remote_listener.rs": "39f8be2412905bf07486b6edd4b13576c59a2b80e22d112f8464c53889a60af4",
+    "runtime/gideon/hypermid/remote.py": "51d0a4f399238e80960af1a4cf8b958e2840772c9f462a22eb09f8ebdb539ba3",
+    "apps/console/src/features/hypermid/RemoteAccess.tsx": "02f1d484b8e1261c863834384517227c383b05a67de08236732fa5374e6187ed",
+    "apps/console/src/features/hypermid/hypermid.css": "a14c242896475e8cf17cbe39e2548c4e90a9bb2b17c1fae00cd5843940b8731c",
+    "apps/console/src/features/hypermid/hypermidAccessibility.test.tsx": "8bb78bf54898d302d013fcf992479f773bfac6bd871733d2a940f39188b335e2",
+    "apps/console/src/shared/data/api.ts": "f8447e31af485bd44476f07a58d029e9a2041b24591f53351e635ec7684f5ad4",
+    "runtime/gideon/interfaces/dashboard/handlers/hypermid.py": "c04cb34cf27f65d6038b4832c9fed54eef1c1d1fcd1031e17565de25001c72f8",
+    "runtime/gideon/interfaces/dashboard/server.py": "548cea3f9ff20211e818ad4490e436ee1ad9770673b915c700481a0f5e97e5af"
+  },
+  "scope": "Mutual-TLS remote enforcement, component interaction, and responsive/accessibility stylesheet contracts passed. Rendered mobile geometry and real screen-reader runtime behavior remain unverified.",
+  "source_adjustments": []
+}

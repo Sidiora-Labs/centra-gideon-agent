@@ -1057,7 +1057,7 @@ touches = ["crates/hypermid-core/src/mcp_bridge.rs", "crates/hypermid-daemon/src
 verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surface_integrations.py::test_scoped_canonical_smart_note_condition_reaches_connections && PYTHONPATH=runtime python checks/hypermid/verify_wave_05.py"
 [task.ux-remote]
 title = "Remote, mobile, and accessible operator experience"
-status = "pending"
+status = "done"
 wave = 6
 owner_lane = "surfaces"
 requires = ["fab-06-effects-federation"]
