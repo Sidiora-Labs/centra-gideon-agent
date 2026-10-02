@@ -154,7 +154,7 @@
 - [x] mem-recovery. Migration, backup, restore, and repair
   - _Requirements: mem-recovery.1, mem-recovery.2_
 
-- [ ] mem-release. OSS memory release integration
+- [x] mem-release. OSS memory release integration
   - _Requirements: mem-release.1, mem-release.2_
 
 - [x] mem-remote. Local bus and remote-safe protocol

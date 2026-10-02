@@ -210,7 +210,7 @@ verify_cmd = "cargo test -p hypermid-memory migration_recovery --manifest-path c
 
 [task.mem-release]
 title = "OSS memory release integration"
-status = "pending"
+status = "done"
 wave = 8
 owner_lane = "memory"
 requires = ["mem-portability", "mem-recovery"]

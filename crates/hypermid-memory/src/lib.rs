@@ -32,8 +32,8 @@ pub mod store;
 pub mod summary;
 
 pub use api::{
-    EmbeddingView, MaintenanceClaimKey, MemoryApi, MemoryDiagnostics, MemoryHealth, RecordList,
-    RecordView, ServiceState,
+    EmbeddingView, MaintenanceClaimKey, MemoryApi, MemoryBudgetState, MemoryDiagnostics,
+    MemoryHealth, MemoryRecoveryState, RecordList, RecordView, ServiceState,
 };
 pub use auth::{authorize, authorize_access, capability_operation, reauthorize};
 pub use export::{ExportEntryKind, MemoryExportBundle, MemoryExportEntry, MemoryExportManifest};

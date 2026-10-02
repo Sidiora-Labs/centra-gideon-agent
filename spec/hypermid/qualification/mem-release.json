@@ -1,0 +1,36 @@
+{
+  "task": "mem-release",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-memory --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_oss_integration.py checks/hypermid/test_memory_release_diagnostics.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-memory --manifest-path crates/hypermid-memory/Cargo.toml"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-memory/src/api.rs": "4ca955534fc8283acaab5c56233b1112756fd690d717aae866228162a9a77f12",
+    "crates/hypermid-memory/src/lib.rs": "a2d47fad420d8749b3107b57fc6650804f70ed315683b13403a75969138e766d",
+    "crates/hypermid-memory/src/records.rs": "5c203b0762825025e95f655ce20a55bad29572565f7e0f1851bc7bbb87e2024a",
+    "crates/hypermid-memory/tests/release_conformance.rs": "8e632cc742e76f0de49bd3ef4a906dcca073773da1b637624b2aa095605c96a1",
+    "runtime/gideon/hypermid/contracts.py": "ce539b6f3db10610f09c01dd64f76df1a7a36f78992bde90f33d63d03b5829a1",
+    "checks/hypermid/test_memory_release.py": "047c82a67c72e01d5b386f09bfc3d0a308cf76a4119ca1ce56e480f6540583b9",
+    "checks/hypermid/test_memory_oss_integration.py": "a787d14d7d00a460cbadcefb12d167056b4df972eead8c317380261a412c32be",
+    "checks/hypermid/test_memory_release_diagnostics.py": "f9e0b0f1699e3ae2fc7328e1a580a32f8edfa0228990cd2bcd2787d2018fd733"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-memory/src/api.rs": "4ca955534fc8283acaab5c56233b1112756fd690d717aae866228162a9a77f12",
+    "crates/hypermid-memory/src/lib.rs": "a2d47fad420d8749b3107b57fc6650804f70ed315683b13403a75969138e766d",
+    "crates/hypermid-memory/src/records.rs": "5c203b0762825025e95f655ce20a55bad29572565f7e0f1851bc7bbb87e2024a",
+    "crates/hypermid-memory/tests/release_conformance.rs": "8e632cc742e76f0de49bd3ef4a906dcca073773da1b637624b2aa095605c96a1",
+    "runtime/gideon/hypermid/contracts.py": "ce539b6f3db10610f09c01dd64f76df1a7a36f78992bde90f33d63d03b5829a1",
+    "checks/hypermid/test_memory_release.py": "047c82a67c72e01d5b386f09bfc3d0a308cf76a4119ca1ce56e480f6540583b9",
+    "checks/hypermid/test_memory_oss_integration.py": "a787d14d7d00a460cbadcefb12d167056b4df972eead8c317380261a412c32be",
+    "checks/hypermid/test_memory_release_diagnostics.py": "f9e0b0f1699e3ae2fc7328e1a580a32f8edfa0228990cd2bcd2787d2018fd733"
+  },
+  "scope": "The real Python-to-Rust daemon journey passed on a clean source profile and a separate clean restored profile. It covers authenticated record creation and retrieval, maintenance fencing, canonical export/import, equivalent restored retrieval, scoped diagnostics for indexes, vectors, queue, leases, budgets and recovery, and diagnostic redaction. Rust crate-wide evidence and focused post-gate delta evidence are preserved separately.",
+  "source_adjustments": [
+    "The release check resolves its default daemon binary from the repository target directory while preserving the HYPERMID_DAEMON_BINARY override.",
+    "MemoryDiagnostics accepts the additive index, budget and recovery fields and treats their absence conservatively for older daemons.",
+    "The declared OSS integration and release diagnostics tests now execute complete production daemon journeys."
+  ]
+}

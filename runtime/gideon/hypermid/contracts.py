@@ -1768,17 +1768,61 @@ class MemoryDiagnostics:
     embedding_count: int
     queued_job_count: int
     active_lease_count: int
+    memory_fts_count: int | None = None
+    source_fts_count: int | None = None
+    budget_job_count: int | None = None
+    budget_reservation_count: int | None = None
+    budget_unknown_usage_count: int | None = None
+    budget_state: str = "disabled"
+    recovery_state: str = "degraded"
+
+    def __post_init__(self) -> None:
+        if self.budget_state not in {"available", "disabled"}:
+            raise MemoryContractError("memory budget diagnostic state is invalid")
+        if self.recovery_state not in {"ready", "degraded"}:
+            raise MemoryContractError("memory recovery diagnostic state is invalid")
 
     @classmethod
     def from_wire(cls, value: object) -> MemoryDiagnostics:
         raw = _object(value, "memory diagnostics")
-        return cls(
-            **{
-                name: _uint(
-                    raw.get(name),
-                    name,
-                    minimum=1 if name == "schema_version" else 0,
-                )
-                for name in cls.__dataclass_fields__
+        required_counts = {
+            "schema_version",
+            "record_count",
+            "stale_record_count",
+            "embedding_count",
+            "queued_job_count",
+            "active_lease_count",
+        }
+        optional_counts = {
+            "memory_fts_count",
+            "source_fts_count",
+            "budget_job_count",
+            "budget_reservation_count",
+            "budget_unknown_usage_count",
+        }
+        allowed = required_counts | optional_counts | {"budget_state", "recovery_state"}
+        unexpected = set(raw) - allowed
+        if unexpected:
+            raise MemoryContractError("memory diagnostics contain unexpected fields")
+        missing = required_counts - set(raw)
+        if missing:
+            raise MemoryContractError("memory diagnostics are incomplete")
+        counts = {
+            name: _uint(
+                raw.get(name),
+                name,
+                minimum=1 if name == "schema_version" else 0,
+            )
+            for name in required_counts
+        }
+        counts.update(
+            {
+                name: _uint(raw.get(name), name) if name in raw else None
+                for name in optional_counts
             }
+        )
+        return cls(
+            **counts,
+            budget_state=str(raw.get("budget_state", "disabled")),
+            recovery_state=str(raw.get("recovery_state", "degraded")),
         )

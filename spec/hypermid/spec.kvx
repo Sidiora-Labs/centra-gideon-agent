@@ -908,7 +908,7 @@ touches = ["crates/hypermid-memory/src/migrations.rs", "crates/hypermid-memory/s
 verify_cmd = "cargo test -p hypermid-memory migration_recovery --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_recovery.py"
 [task.mem-release]
 title = "OSS memory release integration"
-status = "pending"
+status = "done"
 wave = 8
 owner_lane = "memory"
 requires = ["wave-7-close"]
