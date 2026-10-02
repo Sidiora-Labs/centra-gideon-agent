@@ -1,0 +1,29 @@
+{
+  "task": "ctx-projection",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-context --test projection_determinism && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_projection.py",
+  "recorded_portable_commands": [
+    "CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=<shared-target> cargo test -p hypermid-context --test projection_determinism",
+    "PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_projection.py"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-core/src/projection.rs": "173ef1159ac5a724817fec116b9c9dafe77bf374c3b0784c6d9b8eb02276e55c",
+    "crates/hypermid-context/src/projector.rs": "7c0fbe4c989db0ba123fe27f207bc26dbdd3121814b88f8c3ed00dbace024b76",
+    "runtime/gideon/hypermid/projection.py": "6e0d0ed930e649ac153c69e22d7ae20235df1f44382676d07d173da05934f8fe",
+    "crates/hypermid-context/tests/projection_determinism.rs": "1ffdbab27c16cd0284a61a6950279e0508f3a6b5b301e5f1dfa0b808dad9ce87",
+    "checks/runtime/test_hypermid_projection.py": "e8b7610ee12dcd7033f67997e103a07dc94a3b13a0118c7e4ea48fb8b4443ece"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-core/src/projection.rs": "173ef1159ac5a724817fec116b9c9dafe77bf374c3b0784c6d9b8eb02276e55c",
+    "crates/hypermid-context/src/projector.rs": "7c0fbe4c989db0ba123fe27f207bc26dbdd3121814b88f8c3ed00dbace024b76",
+    "runtime/gideon/hypermid/projection.py": "6e0d0ed930e649ac153c69e22d7ae20235df1f44382676d07d173da05934f8fe",
+    "crates/hypermid-context/tests/projection_determinism.rs": "1ffdbab27c16cd0284a61a6950279e0508f3a6b5b301e5f1dfa0b808dad9ce87",
+    "checks/runtime/test_hypermid_projection.py": "e8b7610ee12dcd7033f67997e103a07dc94a3b13a0118c7e4ea48fb8b4443ece"
+  },
+  "scope": "Current deterministic projection preserves canonical source coverage, media and tool structure, stable output bytes, and does not mutate committed source input.",
+  "source_adjustments": [
+    "Current projection and projector sources replace the unavailable historical blobs; newer shared exports remain unchanged."
+  ]
+}

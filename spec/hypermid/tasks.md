@@ -61,7 +61,7 @@
 - [ ] ctx-portability. Implement context migration export and restore
   - _Requirements: ctx-portability.1, ctx-portability.2, ctx-portability.3_
 
-- [ ] ctx-projection. Implement deterministic context projections
+- [x] ctx-projection. Implement deterministic context projections
   - _Requirements: ctx-projection.1, ctx-projection.2_
 
 - [ ] ctx-provider-serialization. Implement provider-capability serialization

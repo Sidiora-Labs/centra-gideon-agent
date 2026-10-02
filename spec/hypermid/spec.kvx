@@ -573,7 +573,7 @@ touches = ["crates/hypermid-core/src/history.rs", "crates/hypermid-context/src/j
 verify_cmd = "cargo test -p hypermid-context --test history_projection && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_history.py"
 [task.ctx-projection]
 title = "Implement deterministic context projections"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "context"
 requires = ["wave-2-close"]
