@@ -879,16 +879,23 @@ impl LifecycleRoutes {
             return Ok(());
         }
         let intent = self.load_intent(&job_id)?;
-        if !matches!(
+        let operation_matches = matches!(
             intent.plan.input.operation,
             LifecycleOperation::Migrate | LifecycleOperation::Restore
-        ) || intent.plan.input.scope != startup.scope
-            || intent.plan.input.source_digest != Some(startup.manifest_digest)
-            || text_param(&intent.plan.input.params, "artifact_id")? != startup.artifact_id.as_str()
-        {
+        );
+        let scope_matches = intent.plan.input.scope == startup.scope;
+        let source_manifest_matches =
+            intent.plan.input.source_digest == Some(startup.source_manifest_digest);
+        let artifact_matches =
+            text_param(&intent.plan.input.params, "artifact_id")? == startup.artifact_id.as_str();
+        if !operation_matches || !scope_matches || !source_manifest_matches || !artifact_matches {
             return Err(lifecycle_error(
                 "RESTORE_RECEIPT_MISMATCH",
-                "startup restore receipt does not bind the pending lifecycle intent",
+                format!(
+                    "startup restore receipt does not bind the pending lifecycle intent \
+                     (operation={operation_matches}, scope={scope_matches}, \
+                     source_manifest={source_manifest_matches}, artifact={artifact_matches})"
+                ),
                 EffectState::Unknown,
             ));
         }
@@ -900,7 +907,7 @@ impl LifecycleRoutes {
             cursor: startup.cursor,
             steps: committed_steps(&intent.plan.input.steps),
             rollback_available: false,
-            artifact_digest: Some(startup.manifest_digest),
+            artifact_digest: Some(startup.source_manifest_digest),
             artifact_bytes: Some(startup.bytes),
             artifact_path: None,
             error_code: None,
@@ -1818,5 +1825,124 @@ fn failure(error: Error) -> LifecycleRouteResponse {
     LifecycleRouteResponse {
         payload: None,
         error: Some(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_reconcile_binds_reviewed_source_separately_from_resealed_manifest() {
+        let directory = tempfile::tempdir().unwrap();
+        let state_root = directory.path().join("state");
+        let lifecycle_root = state_root.join("lifecycle");
+        let routes = LifecycleRoutes::open(
+            &lifecycle_root,
+            None,
+            Arc::new(RecoveryAuthority::new(&state_root)),
+        )
+        .unwrap();
+        let scope = Scope::new(
+            Id::new("owner-reconcile").unwrap(),
+            Id::new("project-reconcile").unwrap(),
+            None,
+        );
+        let source_manifest_digest = Digest::sha256(b"reviewed source manifest");
+        let resealed_manifest_digest = Digest::sha256(b"resealed active manifest");
+        let authority_digest = Digest::sha256(b"active authority");
+        let blocker_digest = Digest::sha256(b"no blockers");
+        let plan = LifecyclePlan::new(LifecyclePlanInput {
+            operation: LifecycleOperation::Migrate,
+            scope: scope.clone(),
+            created_at: "2026-10-02T00:00:00Z".into(),
+            expires_at: "2026-10-02T00:10:00Z".into(),
+            destructive: true,
+            restart_required: true,
+            steps: vec![step(
+                "verify-recovery-artifact",
+                "Verify the recovery artifact",
+                StepEffect::WriteDerivative,
+            )],
+            blockers: Vec::new(),
+            authority_digest,
+            blocker_digest,
+            current_version: None,
+            target_version: None,
+            data_disposition: None,
+            source_digest: Some(source_manifest_digest),
+            destination: None,
+            rollback_digest: None,
+            staging_id: Some("restore-source-manifest".into()),
+            resume_after: None,
+            estimated_items: Some(1),
+            estimated_bytes: Some(512),
+            inventory: BTreeMap::new(),
+            exclusions: BTreeSet::new(),
+            checks: BTreeMap::from([
+                ("staged".into(), true),
+                ("validated".into(), true),
+                ("idempotency_checked".into(), true),
+            ]),
+            params: BTreeMap::from([(
+                "artifact_id".into(),
+                Value::String("artifact-reconcile".into()),
+            )]),
+        })
+        .unwrap();
+        let job_id = "job-reconcile-source-manifest";
+        let evidence = ApplyEvidence {
+            reviewed_plan_digest: plan.plan_digest,
+            current_authority_digest: authority_digest,
+            current_blocker_digest: blocker_digest,
+            observed_at: "2026-10-02T00:01:00Z".into(),
+            confirm_destructive: true,
+            confirm_purge: false,
+        };
+        routes
+            .write_intent(&ApplyIntent {
+                job_id: job_id.into(),
+                plan: plan.clone(),
+                evidence,
+                started_at: "2026-10-02T00:01:00Z".into(),
+                effect_started: false,
+            })
+            .unwrap();
+        let receipt = StartupRestoreReceipt {
+            intent_id: Id::new(job_id).unwrap(),
+            artifact_id: Id::new("artifact-reconcile").unwrap(),
+            scope,
+            cursor: Cursor::new(3, 7).unwrap(),
+            source_manifest_digest,
+            manifest_digest: resealed_manifest_digest,
+            active_digest: Digest::sha256(b"active SQLite image"),
+            bytes: 512,
+            recovered_at_ms: 1_800_000_000_000,
+            replayed: false,
+        };
+
+        let mut mismatched = receipt.clone();
+        mismatched.source_manifest_digest = Digest::sha256(b"different source manifest");
+        let error = routes.reconcile_startup_restore(mismatched).unwrap_err();
+        assert_eq!(error.code.as_str(), "RESTORE_RECEIPT_MISMATCH");
+        assert!(error.message.contains("source_manifest=false"));
+        assert!(lifecycle_root
+            .join(format!("{job_id}.intent.json"))
+            .is_file());
+
+        routes.reconcile_startup_restore(receipt).unwrap();
+        let recovered = routes.journal.recover(job_id).unwrap();
+        assert_eq!(recovered.recovery_state, RecoveryState::Committed);
+        assert_eq!(
+            recovered.receipt.artifact_digest,
+            Some(source_manifest_digest)
+        );
+        assert_ne!(
+            recovered.receipt.artifact_digest,
+            Some(resealed_manifest_digest)
+        );
+        assert!(!lifecycle_root
+            .join(format!("{job_id}.intent.json"))
+            .exists());
     }
 }

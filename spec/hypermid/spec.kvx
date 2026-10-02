@@ -1033,7 +1033,7 @@ touches = ["apps/console/src/features/hypermid/Diagnostics.tsx", "apps/console/s
 verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surface_operations.py"
 [task.ux-lifecycle]
 title = "Safe lifecycle and portability commands"
-status = "pending"
+status = "done"
 wave = 7
 owner_lane = "surfaces"
 requires = ["fab-07-registry-service", "mem-portability", "mem-recovery", "sec-07"]

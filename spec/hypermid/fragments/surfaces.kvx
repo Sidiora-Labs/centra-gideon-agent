@@ -117,7 +117,7 @@ verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surfac
 
 [task.ux-lifecycle]
 title = "Safe lifecycle and portability commands"
-status = "pending"
+status = "done"
 wave = 7
 owner_lane = "surfaces"
 requires = ["ux-operations", "fab-07-registry-service", "mem-portability", "mem-recovery", "sec-07"]

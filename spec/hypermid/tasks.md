@@ -199,7 +199,7 @@
 - [x] ux-integrations. Tool bridge, stdio supervision, and condition runner
   - _Requirements: ux-integrations.1, ux-integrations.2, ux-integrations.3_
 
-- [ ] ux-lifecycle. Safe lifecycle and portability commands
+- [x] ux-lifecycle. Safe lifecycle and portability commands
   - _Requirements: ux-lifecycle.1, ux-lifecycle.2, ux-lifecycle.3_
 
 - [ ] ux-native. OSS console, CLI, and desktop integration journey

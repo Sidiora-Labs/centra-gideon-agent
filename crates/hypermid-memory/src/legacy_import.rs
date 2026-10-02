@@ -1,9 +1,14 @@
 use crate::export::{
-    stream_digest, ExportEntryKind, MemoryExportBundle, MemoryExportEntry, MemoryExportManifest,
+    canonical_scope_entries, stream_digest, ExportEntryKind, MemoryExportBundle, MemoryExportEntry,
+    MemoryExportManifest,
 };
-use crate::import::MemoryImportBatch;
+use crate::import::{self, MemoryImportBatch};
 use crate::model::{scope_digest, MutationRequest};
-use crate::{error, Cursor, Digest, EffectState, Id, MemoryResult, Scope, MEMORY_SCHEMA_VERSION};
+use crate::{
+    error, AuthContext, Cursor, Digest, EffectState, Id, MemoryResult, MemoryStore,
+    MemoryTransaction, Scope, MEMORY_SCHEMA_VERSION,
+};
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest as _, Sha256};
@@ -68,6 +73,161 @@ pub struct LegacyImportReceipt {
     pub batch: MemoryImportBatch,
     pub record_count: u64,
     pub item_count: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyDestinationSnapshot {
+    destination_digest: Digest,
+    record_count: u64,
+    item_count: u64,
+}
+
+const LEGACY_DESTINATION_ITEM_KEY: &str = "__legacy_destination__";
+
+pub(crate) fn apply_legacy_import(
+    store: &mut MemoryStore,
+    context: &AuthContext,
+    request: &MutationRequest,
+    batch: &MemoryImportBatch,
+    plan: &LegacyImportPlan,
+    applied_at_ms: u64,
+) -> MemoryResult<LegacyImportReceipt> {
+    let (batch, destination) = import::apply_import_with_finalizer(
+        store,
+        context,
+        request,
+        batch,
+        &plan.bundle,
+        applied_at_ms,
+        |transaction, replayed| {
+            index_legacy_records(transaction, &request.target_scope)?;
+            if replayed {
+                load_destination_snapshot(transaction, &batch.batch_id)
+            } else {
+                persist_destination_snapshot(transaction, &batch.batch_id, &request.target_scope)
+            }
+        },
+    )?;
+    Ok(LegacyImportReceipt {
+        source_digest: plan.source_digest,
+        destination_digest: destination.destination_digest,
+        batch,
+        record_count: destination.record_count,
+        item_count: destination.item_count,
+    })
+}
+
+fn index_legacy_records(transaction: &MemoryTransaction<'_>, scope: &Scope) -> MemoryResult<()> {
+    let owner = scope_digest(scope).to_hex();
+    let records = {
+        let mut statement = transaction
+            .raw()
+            .prepare(
+                "SELECT r.record_id,r.owner_scope_digest,r.category,v.content,
+                        r.current_revision_digest,f.revision_digest
+                 FROM memory_records r
+                 JOIN memory_revisions v
+                   ON v.record_id=r.record_id AND v.revision=r.current_revision
+                 LEFT JOIN memory_fts_rows f ON f.record_id=r.record_id
+                 WHERE r.owner_scope_digest=?1 AND r.status IN ('active','stale')
+                 ORDER BY r.record_id",
+            )
+            .map_err(sql_error)?;
+        let records = statement
+            .query_map([&owner], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            })
+            .map_err(sql_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_error)?;
+        records
+    };
+    for (record_id, owner, category, content, revision_digest, indexed_revision) in records {
+        if indexed_revision.as_deref() == Some(revision_digest.as_str()) {
+            continue;
+        }
+        crate::fts::index_memory_record(
+            transaction.raw(),
+            &record_id,
+            &owner,
+            &category,
+            &content,
+            &revision_digest,
+        )?;
+    }
+    Ok(())
+}
+
+fn persist_destination_snapshot(
+    transaction: &MemoryTransaction<'_>,
+    batch_id: &Id,
+    scope: &Scope,
+) -> MemoryResult<LegacyDestinationSnapshot> {
+    let owner = scope_digest(scope).to_hex();
+    let entries = canonical_scope_entries(transaction.raw(), &owner, false)?;
+    let destination = LegacyDestinationSnapshot {
+        destination_digest: stream_digest(&entries)?,
+        record_count: entries
+            .iter()
+            .filter(|entry| entry.kind == ExportEntryKind::Record)
+            .count() as u64,
+        item_count: entries.len() as u64,
+    };
+    let payload = serde_json::to_value(&destination)
+        .map_err(|_| corrupt("legacy destination receipt could not be encoded"))?;
+    let item_digest = Digest::sha256(canonical_json(&payload)?);
+    transaction
+        .raw()
+        .execute(
+            "INSERT INTO import_items(
+                batch_id,item_key,item_digest,payload_json,state,error_code,applied_record_id)
+             VALUES (?1,?2,?3,?4,'applied',NULL,NULL)",
+            params![
+                batch_id.as_str(),
+                LEGACY_DESTINATION_ITEM_KEY,
+                item_digest.to_hex(),
+                serde_json::to_string(&payload)
+                    .map_err(|_| corrupt("legacy destination receipt could not be encoded"))?,
+            ],
+        )
+        .map_err(sql_error)?;
+    Ok(destination)
+}
+
+fn load_destination_snapshot(
+    transaction: &MemoryTransaction<'_>,
+    batch_id: &Id,
+) -> MemoryResult<LegacyDestinationSnapshot> {
+    let stored = transaction
+        .raw()
+        .query_row(
+            "SELECT item_digest,payload_json FROM import_items
+             WHERE batch_id=?1 AND item_key=?2 AND state='applied'",
+            params![batch_id.as_str(), LEGACY_DESTINATION_ITEM_KEY],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(sql_error)?
+        .ok_or_else(|| corrupt("legacy destination receipt is missing"))?;
+    let item_digest: Digest = stored
+        .0
+        .parse()
+        .map_err(|_| corrupt("legacy destination receipt digest is invalid"))?;
+    let payload: Value = serde_json::from_str(&stored.1)
+        .map_err(|_| corrupt("legacy destination receipt is invalid"))?;
+    if Digest::sha256(canonical_json(&payload)?) != item_digest {
+        return Err(corrupt("legacy destination receipt digest changed"));
+    }
+    serde_json::from_value(payload)
+        .map_err(|_| corrupt("legacy destination receipt fields are invalid"))
 }
 
 pub fn plan_legacy_import(
@@ -155,6 +315,8 @@ pub fn plan_legacy_import(
         add_details(item, &record_id, created_at_ms, &mut details)?;
         let source_id = legacy_source_id(item);
         let source_payload = Value::Object(item.payload.clone());
+        let source_payload_bytes = canonical_json(&source_payload)?;
+        let source_payload_length = source_payload_bytes.len() as u64;
         sources.entry(source_id.to_string()).or_insert(entry(
             format!("source:{source_id}"),
             ExportEntryKind::Source,
@@ -164,7 +326,7 @@ pub fn plan_legacy_import(
                 "source_kind": "memory",
                 "source_digest": item.source_digest,
                 "locator": item.source_identity,
-                "captured_content": String::from_utf8(canonical_json(&source_payload)?).map_err(|_| invalid("legacy payload is not UTF-8"))?,
+                "captured_content": String::from_utf8(source_payload_bytes).map_err(|_| invalid("legacy payload is not UTF-8"))?,
                 "capture_method": "gideon_legacy_import",
                 "observed_at_ms": created_at_ms,
                 "created_at_ms": created_at_ms
@@ -174,6 +336,7 @@ pub fn plan_legacy_import(
             &record_id,
             &source_id,
             item.source_digest,
+            source_payload_length,
         )?);
         if item.category == LegacyKnowledgeCategory::Summary {
             add_summary_sources(
@@ -482,7 +645,7 @@ fn add_summary_sources(
                 "created_at_ms": created_at_ms
             }),
         )?);
-        provenance.push(provenance_entry(record_id, &source_id, digest)?);
+        provenance.push(provenance_entry(record_id, &source_id, digest, 0)?);
     }
     Ok(())
 }
@@ -498,6 +661,7 @@ fn provenance_entry(
     record_id: &Id,
     source_id: &Id,
     quoted_digest: Digest,
+    span_end: u64,
 ) -> MemoryResult<MemoryExportEntry> {
     entry(
         format!("provenance:{record_id}:{:020}:{source_id}:{:020}", 1, 0),
@@ -507,7 +671,7 @@ fn provenance_entry(
             "revision": 1,
             "source_id": source_id,
             "span_start": 0,
-            "span_end": 0,
+            "span_end": span_end,
             "quoted_digest": quoted_digest
         }),
     )
@@ -646,6 +810,7 @@ fn revision_digest(
     hasher.update([0]);
     hasher.update(content.as_bytes());
     hash_part(&mut hasher, metadata);
+    hasher.update([0]);
     hasher.update(author.as_bytes());
     hasher.update(authored_at_ms.to_be_bytes());
     Digest::from_bytes(hasher.finalize().into())
@@ -702,6 +867,18 @@ fn write_canonical(value: &Value, output: &mut Vec<u8>) -> MemoryResult<()> {
 
 fn invalid(message: &'static str) -> hypermid_contracts::Error {
     error("INVALID_LEGACY_IMPORT", message, EffectState::NotStarted)
+}
+
+fn corrupt(message: &'static str) -> hypermid_contracts::Error {
+    error("STORE_CORRUPT", message, EffectState::Unknown)
+}
+
+fn sql_error(source: rusqlite::Error) -> hypermid_contracts::Error {
+    error(
+        "IMPORT_FAILED",
+        format!("legacy import receipt persistence failed: {source}"),
+        EffectState::Unknown,
+    )
 }
 
 #[cfg(test)]
@@ -929,6 +1106,9 @@ mod tests {
             )
             .unwrap();
         assert_eq!(exported.manifest.record_count, 8);
+        assert_eq!(exported.manifest.stream_digest, receipt.destination_digest);
+        assert_eq!(exported.manifest.record_count, receipt.record_count);
+        assert_eq!(exported.manifest.item_count, receipt.item_count);
         assert!(exported
             .entries
             .iter()
@@ -944,5 +1124,87 @@ mod tests {
                 .and_then(Value::as_str)
                 .is_some_and(|content| content.contains("conversation-jsonl-bytes"))
         }));
+
+        let store = api.into_store();
+        let inspected = store
+            .read(|connection| crate::recovery::inspect_store(connection, &scope))
+            .unwrap();
+        assert_eq!(inspected.record_count, receipt.record_count);
+        assert_eq!(inspected.revision_count, receipt.record_count);
+    }
+
+    #[test]
+    fn legacy_fixture_rejects_future_import_schema_without_effects() {
+        let directory = tempfile::tempdir().unwrap();
+        let scope = scope();
+        let capability_id = id("legacy-future-capability");
+        let mut store = MemoryStore::open(directory.path().join("memory.sqlite3")).unwrap();
+        store.ensure_scope(&scope, 1).unwrap();
+        let principal = AuthenticatedPrincipal {
+            principal_id: id("legacy-principal"),
+            owner_id: scope.owner_id.clone(),
+            kind: PrincipalKind::Foreground,
+        };
+        let grant = CapabilityGrant {
+            capability_id: capability_id.clone(),
+            issuer_owner_id: scope.owner_id.clone(),
+            principal_id: principal.principal_id.clone(),
+            claimed_scope: scope.clone(),
+            target_scope: scope.clone(),
+            operations: BTreeSet::from([CapabilityOperation::Append]),
+            resources: BTreeSet::from([id("legacy-future-batch")]),
+            expires_at_ms: 10_000,
+        };
+        store
+            .immediate(|transaction| {
+                put_grant(transaction.raw(), &principal, &grant).unwrap();
+                Ok(())
+            })
+            .unwrap();
+        let import_request = request(
+            &scope,
+            Operation::Import,
+            "legacy-future-batch",
+            "future-import",
+        );
+        let import_context = context(
+            &scope,
+            Operation::Import,
+            "legacy-future-batch",
+            &capability_id,
+            1_000,
+        );
+        let mut plan =
+            plan_legacy_import(&snapshot(scope.clone()), &import_request, 1_000).unwrap();
+        plan.bundle.manifest.schema_version = MEMORY_SCHEMA_VERSION + 1;
+        let before = store.cursor(&scope).unwrap();
+
+        let failure = import::stage_import(
+            &mut store,
+            &import_context,
+            &import_request,
+            id("legacy-future-batch"),
+            &plan.bundle,
+            scope.clone(),
+            BTreeMap::new(),
+            1_000,
+        )
+        .unwrap_err();
+
+        assert_eq!(failure.code, "INVALID_IMPORT");
+        assert_eq!(failure.effect_state, Some(EffectState::NotStarted));
+        assert_eq!(store.cursor(&scope).unwrap(), before);
+        assert_eq!(
+            store
+                .read(|connection| {
+                    connection
+                        .query_row("SELECT count(*) FROM import_batches", [], |row| {
+                            row.get::<_, u64>(0)
+                        })
+                        .map_err(sql_error)
+                })
+                .unwrap(),
+            0
+        );
     }
 }

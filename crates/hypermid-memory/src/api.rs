@@ -71,6 +71,36 @@ pub struct MemoryDiagnostics {
     pub embedding_count: u64,
     pub queued_job_count: u64,
     pub active_lease_count: u64,
+    #[serde(default)]
+    pub memory_fts_count: u64,
+    #[serde(default)]
+    pub source_fts_count: u64,
+    #[serde(default)]
+    pub budget_job_count: u64,
+    #[serde(default)]
+    pub budget_reservation_count: u64,
+    #[serde(default)]
+    pub budget_unknown_usage_count: u64,
+    #[serde(default)]
+    pub budget_state: MemoryBudgetState,
+    #[serde(default)]
+    pub recovery_state: MemoryRecoveryState,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryBudgetState {
+    Available,
+    #[default]
+    Disabled,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryRecoveryState {
+    Ready,
+    #[default]
+    Degraded,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -442,6 +472,40 @@ impl MemoryApi {
                     active_lease_count: count(
                         "SELECT count(*) FROM maintenance_leases WHERE owner_scope_digest=?1",
                     )?,
+                    memory_fts_count: count(
+                        "SELECT count(*) FROM memory_fts_rows f \
+                     JOIN memory_records r ON r.record_id=f.record_id \
+                     WHERE r.owner_scope_digest=?1",
+                    )?,
+                    source_fts_count: count(
+                        "SELECT count(*) FROM source_fts_rows f \
+                     JOIN source_index_documents d ON d.document_id=f.document_id \
+                     WHERE d.owner_scope_digest=?1",
+                    )?,
+                    budget_job_count: count(
+                        "SELECT count(*) FROM maintenance_jobs WHERE owner_scope_digest=?1",
+                    )?,
+                    budget_reservation_count: count(
+                        "SELECT count(*) FROM maintenance_jobs j \
+                     JOIN json_each(j.usage_json, '$.reservations') r \
+                     WHERE j.owner_scope_digest=?1",
+                    )?,
+                    budget_unknown_usage_count: count(
+                        "SELECT count(*) FROM maintenance_jobs \
+                     WHERE owner_scope_digest=?1 \
+                       AND COALESCE(CAST(json_extract(usage_json, '$.unknown_mask') AS INTEGER), 0) <> 0",
+                    )?,
+                    budget_state: MemoryBudgetState::Available,
+                    recovery_state: if crate::recovery::inspect_store(
+                        transaction.raw(),
+                        &request.target_scope,
+                    )
+                    .is_ok()
+                    {
+                        MemoryRecoveryState::Ready
+                    } else {
+                        MemoryRecoveryState::Degraded
+                    },
                 })
             })
     }
@@ -888,9 +952,13 @@ fn timestamp(value: u64) -> MemoryResult<i64> {
 mod tests {
     use super::*;
     use crate::{
-        AuthenticatedPrincipal, AuthorizationRequest, CapabilityGrant, PrincipalKind, Scope,
+        scope_digest, source_index, AccessRequest, AuthenticatedPrincipal, AuthorizationRequest,
+        CapabilityGrant, GrantOperation, MutationRequest, Operation, PrincipalKind, RecordDraft,
+        RecordKind, RevisionPrecondition, Scope, Trace,
     };
     use hypermid_store::authorization::put_grant;
+    use rusqlite::params;
+    use serde_json::{json, Map};
     use std::collections::BTreeSet;
 
     fn id(value: &str) -> Id {
@@ -969,5 +1037,222 @@ mod tests {
         assert_eq!(receipt.scope, scope);
         assert_eq!(receipt.cursor, cursor);
         assert!(receipt.bytes > 0);
+    }
+
+    #[test]
+    fn diagnostics_report_scoped_indexes_budgets_and_recovery_state() {
+        let compatible: MemoryDiagnostics = serde_json::from_value(json!({
+            "schema_version": MEMORY_SCHEMA_VERSION,
+            "record_count": 0,
+            "stale_record_count": 0,
+            "embedding_count": 0,
+            "queued_job_count": 0,
+            "active_lease_count": 0
+        }))
+        .unwrap();
+        assert_eq!(compatible.budget_state, MemoryBudgetState::Disabled);
+        assert_eq!(compatible.recovery_state, MemoryRecoveryState::Degraded);
+
+        let directory = tempfile::tempdir().unwrap();
+        let scope = Scope::new(id("owner-diagnostics"), id("project-diagnostics"), None);
+        let principal = AuthenticatedPrincipal {
+            principal_id: id("principal-diagnostics"),
+            owner_id: scope.owner_id.clone(),
+            kind: PrincipalKind::Foreground,
+        };
+        let issuer = AuthenticatedPrincipal {
+            principal_id: id("issuer-diagnostics"),
+            owner_id: scope.owner_id.clone(),
+            kind: PrincipalKind::Foreground,
+        };
+        let capability_id = id("capability-diagnostics");
+        let record_id = id("record-diagnostics");
+        let diagnostics_id = id("diagnostics");
+        let grant = CapabilityGrant {
+            capability_id: capability_id.clone(),
+            issuer_owner_id: scope.owner_id.clone(),
+            principal_id: principal.principal_id.clone(),
+            claimed_scope: scope.clone(),
+            target_scope: scope.clone(),
+            operations: BTreeSet::from([CapabilityOperation::Append, CapabilityOperation::Read]),
+            resources: BTreeSet::from([record_id.clone(), diagnostics_id.clone()]),
+            expires_at_ms: 10_000,
+        };
+        let mut store = MemoryStore::open(directory.path().join("memory.sqlite3")).unwrap();
+        store.ensure_scope(&scope, 1).unwrap();
+        store
+            .immediate(|transaction| {
+                put_grant(transaction.raw(), &issuer, &grant).unwrap();
+                Ok(())
+            })
+            .unwrap();
+        let create_context = AuthContext {
+            principal: principal.clone(),
+            request: AuthorizationRequest {
+                claimed_scope: scope.clone(),
+                target_scope: scope.clone(),
+                operation: CapabilityOperation::Append,
+                resource_id: record_id.clone(),
+                now_ms: 10,
+            },
+            capability_id: capability_id.clone(),
+        };
+        let create_request = MutationRequest {
+            operation: Operation::Create,
+            actor_scope: scope.clone(),
+            target_scope: scope.clone(),
+            record_id: Some(record_id.clone()),
+            category: Some("project_fact".to_owned()),
+            revision: RevisionPrecondition::MustNotExist,
+            trace: Trace::new(
+                id("trace-create-diagnostics"),
+                id("request-create-diagnostics"),
+            ),
+        };
+        let created = store
+            .create_record(
+                &create_context,
+                &create_request,
+                &RecordDraft {
+                    id: record_id,
+                    scope: scope.clone(),
+                    kind: RecordKind::Fact,
+                    category: "project_fact".to_owned(),
+                    content: "diagnostics exercise durable indexes".to_owned(),
+                    metadata: Map::new(),
+                    importance: 0.5,
+                    confidence: 0.8,
+                    expires_at_ms: None,
+                    retention_until_ms: None,
+                    provenance: Vec::new(),
+                    lineage: Vec::new(),
+                    smart_predicate: None,
+                    summary: None,
+                },
+                &[],
+                10,
+            )
+            .unwrap();
+        let owner = scope_digest(&scope).to_hex();
+        let source_content = "indexed source evidence";
+        let source_digest = Digest::sha256(source_content.as_bytes()).to_hex();
+        store
+            .immediate(|transaction| {
+                source_index::publish_document(
+                    transaction.raw(),
+                    &owner,
+                    &source_index::SourceDocument {
+                        document_id: "document-diagnostics".to_owned(),
+                        source_kind: source_index::SourceKind::Message,
+                        source_key: "message-diagnostics".to_owned(),
+                        content: source_content.to_owned(),
+                        content_digest: source_digest,
+                        source_time_ms: Some(10),
+                        metadata_json: "{}".to_owned(),
+                    },
+                    20,
+                )?;
+                transaction
+                    .raw()
+                    .execute(
+                        "INSERT INTO maintenance_jobs(
+                            job_id,owner_scope_digest,actor_scope_digest,required_operation,
+                            claimed_grant_id,kind,state,input_cursor_json,checkpoint_cursor_json,
+                            input_digest,config_digest,budget_json,usage_json,attempt,
+                            available_at_ms,created_at_ms,finished_at_ms,last_error_code)
+                         VALUES (?1,?2,?2,'summarize',NULL,'refresh_summaries','queued',?3,NULL,
+                                 ?4,?5,?6,?7,1,20,20,NULL,NULL)",
+                        params![
+                            "job-diagnostics",
+                            owner,
+                            serde_json::to_string(&created.cursor).unwrap(),
+                            Digest::sha256(b"input").to_hex(),
+                            Digest::sha256(b"config").to_hex(),
+                            json!({
+                                "max_items": 1,
+                                "max_input_tokens": 10,
+                                "max_output_tokens": 10,
+                                "max_requests": 1,
+                                "max_cost_units": 1,
+                                "max_retries": 0,
+                                "max_wall_ms": 1000
+                            })
+                            .to_string(),
+                            json!({
+                                "charged": {
+                                    "items": 0,
+                                    "input_tokens": 0,
+                                    "output_tokens": 0,
+                                    "requests": 0,
+                                    "cost_units": 0,
+                                    "retries": 0,
+                                    "wall_ms": 0
+                                },
+                                "reservations": {
+                                    "reservation-diagnostics": {
+                                        "items": 1,
+                                        "input_tokens": 10,
+                                        "output_tokens": 10,
+                                        "requests": 1,
+                                        "cost_units": 1,
+                                        "retries": 0,
+                                        "wall_ms": 1000
+                                    }
+                                },
+                                "settlements": {},
+                                "unknown_mask": 2
+                            })
+                            .to_string(),
+                        ],
+                    )
+                    .unwrap();
+                Ok(())
+            })
+            .unwrap();
+        let diagnostics_context = AuthContext {
+            principal,
+            request: AuthorizationRequest {
+                claimed_scope: scope.clone(),
+                target_scope: scope.clone(),
+                operation: CapabilityOperation::Read,
+                resource_id: diagnostics_id.clone(),
+                now_ms: 30,
+            },
+            capability_id,
+        };
+        let diagnostics_request = AccessRequest {
+            operation: GrantOperation::Read,
+            actor_scope: scope.clone(),
+            target_scope: scope.clone(),
+            resource_id: diagnostics_id,
+            category: None,
+            trace: Trace::new(id("trace-read-diagnostics"), id("request-read-diagnostics")),
+        };
+        let mut api = MemoryApi::new(store);
+        let diagnostics = api
+            .diagnostics(&diagnostics_context, &diagnostics_request)
+            .unwrap();
+        assert_eq!(diagnostics.memory_fts_count, 1);
+        assert_eq!(diagnostics.source_fts_count, 1);
+        assert_eq!(diagnostics.budget_job_count, 1);
+        assert_eq!(diagnostics.budget_reservation_count, 1);
+        assert_eq!(diagnostics.budget_unknown_usage_count, 1);
+        assert_eq!(diagnostics.budget_state, MemoryBudgetState::Available);
+        assert_eq!(diagnostics.recovery_state, MemoryRecoveryState::Ready);
+
+        api.store
+            .immediate(|transaction| {
+                transaction
+                    .raw()
+                    .execute("DELETE FROM source_fts_rows", [])
+                    .unwrap();
+                Ok(())
+            })
+            .unwrap();
+        let degraded = api
+            .diagnostics(&diagnostics_context, &diagnostics_request)
+            .unwrap();
+        assert_eq!(degraded.source_fts_count, 0);
+        assert_eq!(degraded.recovery_state, MemoryRecoveryState::Degraded);
     }
 }
