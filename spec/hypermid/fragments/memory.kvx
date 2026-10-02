@@ -106,7 +106,7 @@ verify_cmd = "cargo test -p hypermid-memory lineage --manifest-path crates/hyper
 
 [task.mem-embedding]
 title = "Embedding registry and guarded vector jobs"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "memory"
 requires = ["mem-records", "sec-04", "sec-05"]

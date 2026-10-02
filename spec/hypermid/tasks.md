@@ -133,7 +133,7 @@
 - [ ] mem-clients. OSS Gideon clients and lifecycle modules
   - _Requirements: mem-clients.1, mem-clients.2_
 
-- [ ] mem-embedding. Embedding registry and guarded vector jobs
+- [x] mem-embedding. Embedding registry and guarded vector jobs
   - _Requirements: mem-embedding.1, mem-embedding.2_
 
 - [x] mem-foundation. Memory core foundation and authorization primitives

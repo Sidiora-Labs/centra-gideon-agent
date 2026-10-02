@@ -1,0 +1,26 @@
+{
+  "task": "mem-embedding",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-memory embedding --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_embeddings.py",
+  "recorded_portable_commands": [
+    "cargo check -p hypermid-memory --manifest-path Cargo.toml"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-memory/src/embedding.rs": "3db90fa3025ed5c1764442213ed0e5fa1fa2302235e26e783dfdee7a799e7935",
+    "crates/hypermid-memory/src/jobs.rs": "d8a1016c830307cd2aa602da9374f15b18942ce204dcd635fa51f85cfb1c5f4b",
+    "runtime/gideon/hypermid/embeddings.py": "a781f999f55bf7c9722f3f5afd2c74c70fc04ea0ac345da95cd2e4111f16f1be",
+    "runtime/gideon/hypermid/providers.py": "6afab0e0a4281fe63eed12bf4cf15c97b00b548bb5414da3d77d0b16b0274ee0",
+    "checks/hypermid/test_memory_embeddings.py": "34965ab7d3d9f97f2cd7def52e10005ef7d0206aa49c4b798d9332d13069bbd1"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-memory/src/embedding.rs": "3db90fa3025ed5c1764442213ed0e5fa1fa2302235e26e783dfdee7a799e7935",
+    "crates/hypermid-memory/src/jobs.rs": "d8a1016c830307cd2aa602da9374f15b18942ce204dcd635fa51f85cfb1c5f4b",
+    "runtime/gideon/hypermid/embeddings.py": "a781f999f55bf7c9722f3f5afd2c74c70fc04ea0ac345da95cd2e4111f16f1be",
+    "runtime/gideon/hypermid/providers.py": "6afab0e0a4281fe63eed12bf4cf15c97b00b548bb5414da3d77d0b16b0274ee0",
+    "checks/hypermid/test_memory_embeddings.py": "34965ab7d3d9f97f2cd7def52e10005ef7d0206aa49c4b798d9332d13069bbd1"
+  },
+  "scope": "embedding validation, guarded publication, bounded jobs, failure classification and real local-model execution through the production Gideon provider authority",
+  "source_adjustments": []
+}

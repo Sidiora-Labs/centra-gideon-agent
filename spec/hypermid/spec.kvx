@@ -812,7 +812,7 @@ touches = ["crates/hypermid-memory/src/records.rs", "crates/hypermid-memory/src/
 verify_cmd = "cargo test -p hypermid-memory lineage --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_lineage.py"
 [task.mem-embedding]
 title = "Embedding registry and guarded vector jobs"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "memory"
 requires = ["wave-2-close"]
