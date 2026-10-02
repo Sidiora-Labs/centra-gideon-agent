@@ -1,0 +1,62 @@
+{
+  "task": "int-05",
+  "status": "passed",
+  "declared_command": "PYTHONPATH=runtime python checks/hypermid/verify_wave_05.py",
+  "recorded_portable_commands": [
+    "PYTHONPATH=runtime python checks/hypermid/verify_wave_05.py"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-daemon/src/mcp_routes.rs": "67547feff7547d81c13f1dc0fd02c6409411f34eb04eba98c500913e1630969e",
+    "crates/hypermid-daemon/tests/mcp_routes.rs": "3f603f480f1c3b0ec6a47d9a112ab8845f799b5239fe1fd9f6280d8239c56d58",
+    "runtime/gideon/hypermid/modules.py": "f0b69aae4a7c84bc4fbd924f691bb330fb6ad63e6a99b7480e487e5a20ebea4e",
+    "runtime/gideon/hypermid/lifecycle.py": "60cc7607ecc69c5c7f8668f9c578d9281abde4e2a9045d2aa3c6e86d90e23cd2",
+    "runtime/gideon/hypermid/config.py": "c4a215959a5d42d3f2b29354bff29078cfb010eab311d3348ced7dd8d7cb382f",
+    "runtime/gideon/hypermid/__init__.py": "d1b489b1d33d05a21c93516e26fe3dfeb1fbbfb0d6778056e690b8320ce7b7ab",
+    "runtime/gideon/hypermid/mcp_provider.py": "48744464b5dc9ff157d4050e6a6454cdaefb2ac18b454ec5057eade921f26f3e",
+    "runtime/gideon/hypermid/roles.py": "ef5ee439d7e99619811d4c06333a735d49324b78f034ff67c9ded38d638785e0",
+    "runtime/gideon/hypermid/tool_provider.py": "75a13f4decd3157d0f8a3d1ac274ee3298565456e0d93aee714c652998b880c0",
+    "runtime/gideon/sdk/hypermid.py": "0034ed99cef7dfc1852da59c6b218093dcf15577f511705a8fcf198e1c2e1db7",
+    "runtime/gideon/integrations/mcp_hypermid.py": "fd748f9850d31615d3c55dee5e2388f190b6c5c0ad16f773389d1f854a903720",
+    "runtime/gideon/integrations/mcp_client.py": "fd35d8426343ca8935b02fba35e251c6d928b68307996b95f3728ea26a85c214",
+    "runtime/gideon/integrations/tool_providers/registry.py": "940c84b8b56c9f780853eeb44d27a911c82aa29181fb789db5109b5ca92b65ed",
+    "runtime/gideon/engine/agents/native/tools.py": "d7f6be452d7556e649d13e059d8d3fa17f15908dd1ec5a1933505f8778a3b833",
+    "runtime/gideon/engine/agents/native/runtime.py": "58bf75cf1e13529e806341cd07252372d2a62d314ba1e1da2f86c46ee72d2d40",
+    "runtime/gideon/engine/session.py": "2d9c99be75990757086af1b8d30e17dbd989165c71e9c4b7d1801ef86fbd2af4",
+    "runtime/gideon/engine/lifecycle.py": "a29b311a6b4660716c140e79aab225a347c0025025a418d3deec325fe957ff7b",
+    "checks/runtime/test_hypermid_modules.py": "06900afd62afb09685443bb740a8211f82167b2771696d7071d067e74f6d7085",
+    "checks/hypermid/test_tool_provider.py": "c07660a6a6ca2c692a25133969b00532519fb435b22c298f92e9a5fc2a5a3cf0",
+    "checks/hypermid/test_model_role_integration.py": "c86e9d1d16374058222f440af401f10c723d23ecc95eb40aabcefaecad7d44d0",
+    "checks/hypermid/verify_wave_05.py": "eb0f6b8bc19594c59124e9105e9e58311ef5aa8b6827a03f6bac70c9e072b357",
+    "checks/hypermid/waves/test_wave_05.py": "6a2299469d0d7a7c307f487eef2f5c66f4166070edd15128f14b4c00658ca896"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-daemon/src/mcp_routes.rs": "67547feff7547d81c13f1dc0fd02c6409411f34eb04eba98c500913e1630969e",
+    "crates/hypermid-daemon/tests/mcp_routes.rs": "3f603f480f1c3b0ec6a47d9a112ab8845f799b5239fe1fd9f6280d8239c56d58",
+    "runtime/gideon/hypermid/modules.py": "f0b69aae4a7c84bc4fbd924f691bb330fb6ad63e6a99b7480e487e5a20ebea4e",
+    "runtime/gideon/hypermid/lifecycle.py": "60cc7607ecc69c5c7f8668f9c578d9281abde4e2a9045d2aa3c6e86d90e23cd2",
+    "runtime/gideon/hypermid/config.py": "c4a215959a5d42d3f2b29354bff29078cfb010eab311d3348ced7dd8d7cb382f",
+    "runtime/gideon/hypermid/__init__.py": "d1b489b1d33d05a21c93516e26fe3dfeb1fbbfb0d6778056e690b8320ce7b7ab",
+    "runtime/gideon/hypermid/mcp_provider.py": "48744464b5dc9ff157d4050e6a6454cdaefb2ac18b454ec5057eade921f26f3e",
+    "runtime/gideon/hypermid/roles.py": "ef5ee439d7e99619811d4c06333a735d49324b78f034ff67c9ded38d638785e0",
+    "runtime/gideon/hypermid/tool_provider.py": "75a13f4decd3157d0f8a3d1ac274ee3298565456e0d93aee714c652998b880c0",
+    "runtime/gideon/sdk/hypermid.py": "0034ed99cef7dfc1852da59c6b218093dcf15577f511705a8fcf198e1c2e1db7",
+    "runtime/gideon/integrations/mcp_hypermid.py": "fd748f9850d31615d3c55dee5e2388f190b6c5c0ad16f773389d1f854a903720",
+    "runtime/gideon/integrations/mcp_client.py": "fd35d8426343ca8935b02fba35e251c6d928b68307996b95f3728ea26a85c214",
+    "runtime/gideon/integrations/tool_providers/registry.py": "940c84b8b56c9f780853eeb44d27a911c82aa29181fb789db5109b5ca92b65ed",
+    "runtime/gideon/engine/agents/native/tools.py": "d7f6be452d7556e649d13e059d8d3fa17f15908dd1ec5a1933505f8778a3b833",
+    "runtime/gideon/engine/agents/native/runtime.py": "58bf75cf1e13529e806341cd07252372d2a62d314ba1e1da2f86c46ee72d2d40",
+    "runtime/gideon/engine/session.py": "2d9c99be75990757086af1b8d30e17dbd989165c71e9c4b7d1801ef86fbd2af4",
+    "runtime/gideon/engine/lifecycle.py": "a29b311a6b4660716c140e79aab225a347c0025025a418d3deec325fe957ff7b",
+    "checks/runtime/test_hypermid_modules.py": "06900afd62afb09685443bb740a8211f82167b2771696d7071d067e74f6d7085",
+    "checks/hypermid/test_tool_provider.py": "c07660a6a6ca2c692a25133969b00532519fb435b22c298f92e9a5fc2a5a3cf0",
+    "checks/hypermid/test_model_role_integration.py": "c86e9d1d16374058222f440af401f10c723d23ecc95eb40aabcefaecad7d44d0",
+    "checks/hypermid/verify_wave_05.py": "eb0f6b8bc19594c59124e9105e9e58311ef5aa8b6827a03f6bac70c9e072b357",
+    "checks/hypermid/waves/test_wave_05.py": "6a2299469d0d7a7c307f487eef2f5c66f4166070edd15128f14b4c00658ca896"
+  },
+  "scope": "Real supervised Gideon MCP and native model lifecycle with existing model, credential, approval, usage, cancellation, session, and process authorities preserved.",
+  "source_adjustments": [
+    "The final connected source supersedes earlier component snapshots for shared MCP route, stdio, provider ownership, and host adapter files."
+  ]
+}

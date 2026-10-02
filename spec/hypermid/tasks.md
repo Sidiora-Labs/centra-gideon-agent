@@ -118,7 +118,7 @@
 - [x] int-04. Implement integration slice 4: background maintenance, notes, Git context and budgets
   - _Requirements: int-04.1, int-04.2, int-04.3_
 
-- [ ] int-05. Implement integration slice 5: supervised modules, SDK, model and MCP lifecycle
+- [x] int-05. Implement integration slice 5: supervised modules, SDK, model and MCP lifecycle
   - _Requirements: int-05.1, int-05.2, int-05.3_
 
 - [ ] int-06. Implement integration slice 6: durable bus, federation, remote access and sandbox containment

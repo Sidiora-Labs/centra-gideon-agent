@@ -1180,7 +1180,7 @@ ac_3 = "SDK and MCP connections are scoped, health-reported, cancelled and evict
 
 [task.int-05]
 title = "Implement integration slice 5: supervised modules, SDK, model and MCP lifecycle"
-status = "pending"
+status = "done"
 wave = 5
 owner_lane = "integration"
 requires = ["mem-clients", "ux-integrations", "base-05"]
