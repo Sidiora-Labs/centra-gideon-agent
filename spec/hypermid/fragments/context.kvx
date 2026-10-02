@@ -146,7 +146,7 @@ verify_cmd = "cargo test -p hypermid-context --test identity_contract && PYTHONP
 
 [task.ctx-history]
 title = "Implement immutable history and exact expansion"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "context"
 requires = ["ctx-identity", "base-02"]

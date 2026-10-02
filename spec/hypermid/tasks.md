@@ -43,7 +43,7 @@
 - [ ] ctx-gideon-integration. Integrate Hypermid with OSS Gideon model turns
   - _Requirements: ctx-gideon-integration.1, ctx-gideon-integration.2, ctx-gideon-integration.3_
 
-- [ ] ctx-history. Implement immutable history and exact expansion
+- [x] ctx-history. Implement immutable history and exact expansion
   - _Requirements: ctx-history.1, ctx-history.2, ctx-history.3_
 
 - [ ] ctx-hooks. Implement bounded context lifecycle hooks

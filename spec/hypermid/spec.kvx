@@ -564,7 +564,7 @@ touches = ["crates/hypermid-core/src/identity.rs", "crates/hypermid-context/src/
 verify_cmd = "cargo test -p hypermid-context --test identity_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_identity.py"
 [task.ctx-history]
 title = "Implement immutable history and exact expansion"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "context"
 requires = ["ctx-identity"]

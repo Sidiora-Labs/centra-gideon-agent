@@ -1,0 +1,14 @@
+{
+  "task": "ctx-history",
+  "status": "passed",
+  "command": "cargo test -p hypermid-context --test history_projection && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_history.py",
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-core/src/history.rs": "355269feb981d488aee90188f64894d9922ab98aaffe9642dde3186605cc0429",
+    "crates/hypermid-context/src/journal.rs": "7d353f5e064d230ca1860234b77991df0640e4f11ade17926bad64f6d0706b4b",
+    "runtime/gideon/hypermid/history.py": "f098c669886ab8aa890d2bc4294f3dec163e2f3ecc037d736cd3964d631474b7",
+    "crates/hypermid-context/tests/history_projection.rs": "b2c2ab4907fea4c4093ad933f75501ea782b17a083d164d0d40ab89b1f00bdc9",
+    "checks/runtime/test_hypermid_history.py": "5f847964e9e3f43c535717c2b23e8b15103b9f44c974fc9b206f4713effc80b5"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate."
+}
