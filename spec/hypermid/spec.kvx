@@ -582,7 +582,7 @@ touches = ["crates/hypermid-core/src/projection.rs", "crates/hypermid-context/sr
 verify_cmd = "cargo test -p hypermid-context --test projection_determinism && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_projection.py"
 [task.ctx-provider-serialization]
 title = "Implement provider-capability serialization"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "context"
 requires = ["ctx-projection"]

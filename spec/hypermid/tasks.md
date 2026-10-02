@@ -64,7 +64,7 @@
 - [x] ctx-projection. Implement deterministic context projections
   - _Requirements: ctx-projection.1, ctx-projection.2_
 
-- [ ] ctx-provider-serialization. Implement provider-capability serialization
+- [x] ctx-provider-serialization. Implement provider-capability serialization
   - _Requirements: ctx-provider-serialization.1, ctx-provider-serialization.2, ctx-provider-serialization.3_
 
 - [ ] ctx-reclaim. Implement deterministic pressure reclaim

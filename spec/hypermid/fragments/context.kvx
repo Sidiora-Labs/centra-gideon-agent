@@ -166,7 +166,7 @@ verify_cmd = "cargo test -p hypermid-context --test projection_determinism && PY
 
 [task.ctx-provider-serialization]
 title = "Implement provider-capability serialization"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "context"
 requires = ["ctx-projection", "base-03"]

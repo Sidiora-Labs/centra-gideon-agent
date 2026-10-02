@@ -1,0 +1,29 @@
+{
+  "task": "ctx-provider-serialization",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-context --test provider_serialization && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_provider_serialization.py",
+  "recorded_portable_commands": [
+    "CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=<shared-target> cargo test -p hypermid-context --test provider_serialization",
+    "PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_provider_serialization.py"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-core/src/provider.rs": "35e656258ca722524b230c0d0ead6f91d1cdbc1f3959eeebb7449932cf768dcc",
+    "crates/hypermid-context/src/serializer.rs": "709dca9eddd2a2c16139a94e42a5d59f1c58f66ea88af74c3fa7c44b7b4d7a4f",
+    "runtime/gideon/hypermid/provider.py": "38b0b62e6db6c20b61a1ea73f6feea5ceba6e0773d075ce71fb5a39231dc3f8c",
+    "crates/hypermid-context/tests/provider_serialization.rs": "3e3b9d0a0b9b909d53d4e612961ab4c47ec3a39653bb2e6b08d72678703de3cc",
+    "checks/runtime/test_hypermid_provider_serialization.py": "39255f6f7ca791721748dbdb2e2592e05c68fc2d613b7a08a48680ba4c5fa593"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-core/src/provider.rs": "35e656258ca722524b230c0d0ead6f91d1cdbc1f3959eeebb7449932cf768dcc",
+    "crates/hypermid-context/src/serializer.rs": "709dca9eddd2a2c16139a94e42a5d59f1c58f66ea88af74c3fa7c44b7b4d7a4f",
+    "runtime/gideon/hypermid/provider.py": "38b0b62e6db6c20b61a1ea73f6feea5ceba6e0773d075ce71fb5a39231dc3f8c",
+    "crates/hypermid-context/tests/provider_serialization.rs": "3e3b9d0a0b9b909d53d4e612961ab4c47ec3a39653bb2e6b08d72678703de3cc",
+    "checks/runtime/test_hypermid_provider_serialization.py": "39255f6f7ca791721748dbdb2e2592e05c68fc2d613b7a08a48680ba4c5fa593"
+  },
+  "scope": "Current provider serialization preserves valid tool call/result pairs, profile generation, deterministic normalized blocks, and provider capability validation.",
+  "source_adjustments": [
+    "The current Rust regression test replaces the unavailable historical test blob; newer shared exports remain unchanged."
+  ]
+}
