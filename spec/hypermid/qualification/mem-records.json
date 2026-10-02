@@ -1,0 +1,35 @@
+{
+  "task": "mem-records",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-memory lineage --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_lineage.py",
+  "recorded_portable_commands": [
+    "cargo check -p hypermid-memory --manifest-path Cargo.toml",
+    "cargo test -p hypermid-memory records::lineage_record_tests::lineage_revisions_are_conflict_safe_invalidate_descendants_and_keep_raw_provenance -- --exact"
+  ],
+  "successful_gate_count": 3,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-memory/src/records.rs": "5c203b0762825025e95f655ce20a55bad29572565f7e0f1851bc7bbb87e2024a",
+    "crates/hypermid-memory/src/lineage.rs": "b6483c933c4d6fd56e9550ac4e00adc4f583365d50d76bc397b6254aad617c8e",
+    "crates/hypermid-memory/src/provenance.rs": "68e0d919149fd7cff610f222db249d9a79b645a0b7cab1341097b69ff75d7aa2",
+    "crates/hypermid-memory/src/invalidation.rs": "63771359001d6645a4d687576790c5bf4597beff1e2a33b1da570a07f6ea8dff",
+    "crates/hypermid-memory/src/summary.rs": "21cf2a005578785da62ef391cdee02a9f3d6536ac23a703a74a2777764d31bf6",
+    "runtime/gideon/hypermid/records.py": "f8a7bbf15341de83bc813d9fe2c4501f2743c45566488d7bfa3d6934975cee16",
+    "runtime/gideon/hypermid/lineage.py": "93c6e609506b925276de3a1f1f1e3d8f4462962bdf760ebffe9be87a277aacfb",
+    "checks/hypermid/test_memory_records.py": "206a76565a6e1f02ed526a88ca1d690d0342f06772e5950b0f126ea727739110",
+    "checks/hypermid/test_memory_lineage.py": "8c047cc436654d0ec68e5a9dbcd8a901ac72cc4aa78411659d86d472d21f155c"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-memory/src/records.rs": "5c203b0762825025e95f655ce20a55bad29572565f7e0f1851bc7bbb87e2024a",
+    "crates/hypermid-memory/src/lineage.rs": "b6483c933c4d6fd56e9550ac4e00adc4f583365d50d76bc397b6254aad617c8e",
+    "crates/hypermid-memory/src/provenance.rs": "68e0d919149fd7cff610f222db249d9a79b645a0b7cab1341097b69ff75d7aa2",
+    "crates/hypermid-memory/src/invalidation.rs": "63771359001d6645a4d687576790c5bf4597beff1e2a33b1da570a07f6ea8dff",
+    "crates/hypermid-memory/src/summary.rs": "21cf2a005578785da62ef391cdee02a9f3d6536ac23a703a74a2777764d31bf6",
+    "runtime/gideon/hypermid/records.py": "f8a7bbf15341de83bc813d9fe2c4501f2743c45566488d7bfa3d6934975cee16",
+    "runtime/gideon/hypermid/lineage.py": "93c6e609506b925276de3a1f1f1e3d8f4462962bdf760ebffe9be87a277aacfb",
+    "checks/hypermid/test_memory_records.py": "206a76565a6e1f02ed526a88ca1d690d0342f06772e5950b0f126ea727739110",
+    "checks/hypermid/test_memory_lineage.py": "8c047cc436654d0ec68e5a9dbcd8a901ac72cc4aa78411659d86d472d21f155c"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}

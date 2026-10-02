@@ -800,7 +800,7 @@ touches = ["crates/hypermid-memory/Cargo.toml", "crates/hypermid-memory/src/lib.
 verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_foundation.py"
 [task.mem-records]
 title = "Record CRUD, raw recovery, summaries, and lineage"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "memory"
 requires = ["wave-1-close"]

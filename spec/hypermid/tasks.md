@@ -148,7 +148,7 @@
 - [ ] mem-portability. Staged import and canonical export
   - _Requirements: mem-portability.1, mem-portability.2_
 
-- [ ] mem-records. Record CRUD, raw recovery, summaries, and lineage
+- [x] mem-records. Record CRUD, raw recovery, summaries, and lineage
   - _Requirements: mem-records.1, mem-records.2, mem-lineage.1, mem-lineage.2_
 
 - [ ] mem-recovery. Migration, backup, restore, and repair
