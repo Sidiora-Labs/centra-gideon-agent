@@ -1021,7 +1021,7 @@ touches = ["apps/console/src/features/hypermid/RuntimeConfig.tsx", "apps/console
 verify_cmd = "cd apps/console && npx vitest run src/features/hypermid/hypermidConfiguration.test.tsx"
 [task.ux-operations]
 title = "Diagnostics, logs, and maintenance plans"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "surfaces"
 requires = ["wave-3-close"]

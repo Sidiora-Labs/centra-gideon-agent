@@ -1,0 +1,43 @@
+{
+  "task": "ux-operations",
+  "status": "passed",
+  "declared_command": "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surface_operations.py",
+  "recorded_portable_commands": [
+    "cd apps/console && npx vitest run src/features/hypermid/hypermidDiagnostics.test.ts",
+    "cd apps/console && npx vitest run src/features/hypermid/hypermidOperations.test.ts",
+    "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surface_operations.py"
+  ],
+  "successful_gate_count": 4,
+  "exit_code": 0,
+  "source_sha256": {
+    "apps/console/src/features/hypermid/Diagnostics.tsx": "898fc2be1b1f1056f119eb952ab982f18d5eba76fe0c3f97dcd7cf374cd5e400",
+    "apps/console/src/features/hypermid/LiveLogs.tsx": "eb11c6ee1e87a8855ee7b0e53e4951f944def35977c1cd3cb131993464b5de39",
+    "apps/console/src/features/hypermid/diagnosticsState.ts": "e27bf74409bac80479e302ad3c197b7f11546684e1fc6056d24cfe735c98b982",
+    "apps/console/src/features/hypermid/hypermidDiagnostics.test.ts": "7452fc84897162fcbdfc8690ba769f001f2f54213b80753ace9c78cbd2d621ee",
+    "apps/console/src/features/hypermid/Operations.tsx": "f39ff718bfceee540181e7ea39504666a858c79895c94db07a3649b14c158609",
+    "apps/console/src/features/hypermid/operationsState.ts": "5f664cfaaa3f01732bc06ee45184c011fe63572cba511e7275c99a5a0fe71fa0",
+    "apps/console/src/features/hypermid/hypermidOperations.test.ts": "671c7b76d0712f612366deb559de18101ac02afb922a3e1e23891230dd6f1338",
+    "runtime/gideon/hypermid/operations.py": "bfa64053a5f7033527b4f9f23f0b34a6224bcfcb65aeaac2193e28247b9c85e4",
+    "checks/hypermid/test_surface_operations.py": "16c3665b0f6685958046daf4eecb703141dbd5faa6d616ec7234739589975785",
+    "crates/hypermid-daemon/src/operator_routes.rs": "59a41649d67c63624815bee83340531e4be1f126c9656b45938574a683f341e8",
+    "checks/hypermid/test_operator_routes_live.py": "527fabbbb24687fd111881fff36f6e7f0666fb38782e54a927320d49cf0b5227"
+  },
+  "tested_source_sha256": {
+    "apps/console/src/features/hypermid/Diagnostics.tsx": "898fc2be1b1f1056f119eb952ab982f18d5eba76fe0c3f97dcd7cf374cd5e400",
+    "apps/console/src/features/hypermid/LiveLogs.tsx": "eb11c6ee1e87a8855ee7b0e53e4951f944def35977c1cd3cb131993464b5de39",
+    "apps/console/src/features/hypermid/diagnosticsState.ts": "e27bf74409bac80479e302ad3c197b7f11546684e1fc6056d24cfe735c98b982",
+    "apps/console/src/features/hypermid/hypermidDiagnostics.test.ts": "7452fc84897162fcbdfc8690ba769f001f2f54213b80753ace9c78cbd2d621ee",
+    "apps/console/src/features/hypermid/Operations.tsx": "f39ff718bfceee540181e7ea39504666a858c79895c94db07a3649b14c158609",
+    "apps/console/src/features/hypermid/operationsState.ts": "5f664cfaaa3f01732bc06ee45184c011fe63572cba511e7275c99a5a0fe71fa0",
+    "apps/console/src/features/hypermid/hypermidOperations.test.ts": "671c7b76d0712f612366deb559de18101ac02afb922a3e1e23891230dd6f1338",
+    "runtime/gideon/hypermid/operations.py": "bfa64053a5f7033527b4f9f23f0b34a6224bcfcb65aeaac2193e28247b9c85e4",
+    "checks/hypermid/test_surface_operations.py": "16c3665b0f6685958046daf4eecb703141dbd5faa6d616ec7234739589975785",
+    "crates/hypermid-daemon/src/operator_routes.rs": "59a41649d67c63624815bee83340531e4be1f126c9656b45938574a683f341e8",
+    "checks/hypermid/test_operator_routes_live.py": "527fabbbb24687fd111881fff36f6e7f0666fb38782e54a927320d49cf0b5227"
+  },
+  "scope": "Focused nonbrowser console state, typed Python operations contracts, and a real immutable-daemon maintenance route. Aggregate native and later wave gates remain separate.",
+  "source_adjustments": [
+    "The final native UI consolidates Maintenance.tsx and PlanReviewDialog.tsx behavior into Operations.tsx with operationsState.ts.",
+    "Shared route, API, handler, server, and storage sources are bounded in dependency-closure.json and are not restaged."
+  ]
+}

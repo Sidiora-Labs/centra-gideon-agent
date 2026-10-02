@@ -205,7 +205,7 @@
 - [ ] ux-native. OSS console, CLI, and desktop integration journey
   - _Requirements: ux-native.1, ux-native.2, ux-native.3_
 
-- [ ] ux-operations. Diagnostics, logs, and maintenance plans
+- [x] ux-operations. Diagnostics, logs, and maintenance plans
   - _Requirements: ux-operations.1, ux-operations.2, ux-operations.3_
 
 - [ ] ux-remote. Remote, mobile, and accessible operator experience
