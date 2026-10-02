@@ -1,0 +1,16 @@
+[package]
+name = "hypermid-store"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+hex = "0.4"
+hypermid-contracts = { path = "../hypermid-contracts" }
+hypermid-leases = { path = "../hypermid-leases" }
+rusqlite = { version = "0.32", features = ["backup", "bundled"] }
+sha2 = "0.10"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

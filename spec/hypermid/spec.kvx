@@ -124,7 +124,7 @@ verify_cmd = "cargo test -p hypermid-foundation -p hypermid-contracts --manifest
 
 [task.base-02]
 title = "Lease-fenced storage backends"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "foundation"
 requires = ["base-01"]

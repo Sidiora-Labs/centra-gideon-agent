@@ -1,9 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "crates/hypermid-contracts",
-    "crates/hypermid-foundation",
-]
+members = ["crates/hypermid-contracts", "crates/hypermid-foundation", "crates/hypermid-leases", "crates/hypermid-store", "crates/hypermid-store-postgres"]
 
 [workspace.package]
 version = "0.1.0"
@@ -15,6 +12,7 @@ rust-version = "1.81"
 async-trait = "0.1"
 base64 = "0.22"
 bytes = "1.10"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
 getrandom = "0.3"
 hmac = "0.12"
 rand_core = { version = "0.6", features = ["getrandom"] }
@@ -23,6 +21,7 @@ rustls-pki-types = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
+snow = "0.9"
 subtle = "2.6"
 tempfile = "3"
 thiserror = "2.0"

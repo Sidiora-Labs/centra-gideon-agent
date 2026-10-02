@@ -1,0 +1,16 @@
+[package]
+name = "hypermid-leases"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+fs2 = "0.4"
+hypermid-contracts = { path = "../hypermid-contracts" }
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

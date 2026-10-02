@@ -1,0 +1,16 @@
+[package]
+name = "hypermid-store-postgres"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+hex = "0.4"
+hypermid-contracts = { path = "../hypermid-contracts" }
+hypermid-store = { path = "../hypermid-store" }
+postgres = "0.19"
+sha2 = "0.10"
+thiserror = "2"
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4"] }

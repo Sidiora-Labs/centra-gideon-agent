@@ -7,7 +7,7 @@
 - [x] base-01. Canonical identity and shared contracts
   - _Requirements: base-identity.1, base-identity.2, base-identity.3_
 
-- [ ] base-02. Lease-fenced storage backends
+- [x] base-02. Lease-fenced storage backends
   - _Requirements: base-storage.1, base-storage.2, base-storage.3_
 
 - [ ] base-03. Cache, catalog, and usage contracts
