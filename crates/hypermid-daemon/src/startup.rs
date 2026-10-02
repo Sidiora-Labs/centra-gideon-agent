@@ -3,12 +3,17 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use hypermid_bus::{DurableEffectLedger, DurableEventBus, EffectStatus};
-use hypermid_contracts::{Cursor, Digest, Id, Scope};
+use hypermid_contracts::{
+    storage::{BackendKind, LeaseKey},
+    Cursor, Digest, Id, Scope,
+};
+use hypermid_leases::LocalLease;
 use hypermid_memory::{
+    migrations::{schema_digest as memory_schema_digest, MEMORY_COMPATIBILITY_FLOOR},
     recovery::{inspect_store, stage_repaired_restore},
     MemoryRecoveryReport, MEMORY_SCHEMA_VERSION,
 };
-use hypermid_store::backup::SnapshotManifest;
+use hypermid_store::backup::{SnapshotEntry, SnapshotManifest};
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -56,6 +61,11 @@ impl StartupRecoveryReport {
     pub fn is_ready(&self) -> bool {
         self.mode == StartupRecoveryMode::Ready
     }
+
+    pub fn require_read_only(&mut self, code: impl Into<String>, message: impl Into<String>) {
+        self.mode = StartupRecoveryMode::ReadOnlyRecovery;
+        self.issues.push(issue(code, message));
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -73,18 +83,33 @@ impl StartupReconciler {
     ) -> Result<StartupRecoveryReport, StartupRecoveryError> {
         let memory_path = memory_path.as_ref();
         let state_root = memory_path.parent().unwrap_or_else(|| Path::new("."));
-        let connection = Connection::open_with_flags(
+        let mut issues = Vec::new();
+        let (unfinished_migration_versions, memories) = match Connection::open_with_flags(
             memory_path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(StartupRecoveryError::OpenMemory)?;
-        connection
-            .pragma_update(None, "query_only", true)
-            .map_err(StartupRecoveryError::OpenMemory)?;
-
-        let mut issues = Vec::new();
-        let unfinished_migration_versions = unfinished_migrations(&connection, &mut issues);
-        let memories = inspect_memories(&connection, &mut issues);
+        ) {
+            Ok(connection) => {
+                if let Err(error) = connection.pragma_update(None, "query_only", true) {
+                    issues.push(issue(
+                        "MEMORY_READ_ONLY_FAILED",
+                        format!("memory store could not enter read-only inspection: {error}"),
+                    ));
+                    (Vec::new(), Vec::new())
+                } else {
+                    (
+                        unfinished_migrations(&connection, &mut issues),
+                        inspect_memories(&connection, &mut issues),
+                    )
+                }
+            }
+            Err(error) => {
+                issues.push(issue(
+                    "MEMORY_STORE_UNAVAILABLE",
+                    format!("memory store could not be opened read-only: {error}"),
+                ));
+                (Vec::new(), Vec::new())
+            }
+        };
         let outbox_cursor = inspect_outbox(state_root.join("events.sqlite3"), &mut issues);
         let unknown_effects =
             reconcile_effects(state_root.join("effects.journal"), now_ms, &mut issues);
@@ -126,11 +151,19 @@ pub struct PendingRestoreReceipt {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+struct PendingRestoreDocument {
+    intent: PendingRestoreIntent,
+    active_authority_digest: Digest,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct StartupRestoreReceipt {
     pub intent_id: Id,
     pub artifact_id: Id,
     pub scope: Scope,
     pub cursor: Cursor,
+    pub source_manifest_digest: Digest,
     pub manifest_digest: Digest,
     pub active_digest: Digest,
     pub bytes: u64,
@@ -170,6 +203,12 @@ impl RecoveryAuthority {
         let recovery_root = self.recovery_root();
         fs::create_dir_all(&recovery_root)?;
         private_directory(&recovery_root)?;
+        if file_digest(&self.memory_path())? != intent.expected_active_digest {
+            return Err(RecoveryAuthorityError::InvalidIntent(
+                "active store changed before restore was queued".into(),
+            ));
+        }
+        let active_authority_digest = sqlite_authority_digest(&self.memory_path())?;
         let artifact = self.artifact_path(&intent.artifact_id);
         stage_repaired_restore(
             self.memory_path(),
@@ -178,13 +217,20 @@ impl RecoveryAuthority {
             &intent.scope,
         )
         .map_err(|error| RecoveryAuthorityError::Memory(error.to_string()))?;
+        if sqlite_authority_digest(&self.memory_path())? != active_authority_digest {
+            return Err(RecoveryAuthorityError::InvalidIntent(
+                "active store changed while restore was staged".into(),
+            ));
+        }
 
         let intent_path = self.intent_path();
         if intent_path.exists() {
-            let existing = self.load_intent()?.ok_or_else(|| {
+            let existing = self.load_document()?.ok_or_else(|| {
                 RecoveryAuthorityError::InvalidIntent("pending restore disappeared".into())
             })?;
-            if existing == intent {
+            if existing.intent == intent
+                && existing.active_authority_digest == active_authority_digest
+            {
                 return Ok(PendingRestoreReceipt {
                     intent,
                     state: "pending_restart".into(),
@@ -194,7 +240,13 @@ impl RecoveryAuthority {
                 "another restore is already pending".into(),
             ));
         }
-        write_atomic(&intent_path, &serde_json::to_vec(&intent)?)?;
+        write_atomic(
+            &intent_path,
+            &serde_json::to_vec(&PendingRestoreDocument {
+                intent: intent.clone(),
+                active_authority_digest,
+            })?,
+        )?;
         Ok(PendingRestoreReceipt {
             intent,
             state: "pending_restart".into(),
@@ -205,9 +257,11 @@ impl RecoveryAuthority {
         &self,
         now_ms: u64,
     ) -> Result<Option<StartupRestoreReceipt>, RecoveryAuthorityError> {
-        let Some(intent) = self.load_intent()? else {
+        let Some(document) = self.load_document()? else {
             return Ok(None);
         };
+        let intent = document.intent;
+        let _lease = acquire_memory_lease(&self.memory_path())?;
         let artifact = self.artifact_path(&intent.artifact_id);
         let manifest = load_manifest(&artifact, intent.manifest_digest)?;
         if manifest.scope != intent.scope {
@@ -216,20 +270,31 @@ impl RecoveryAuthority {
             ));
         }
 
-        if active_matches_manifest(&self.memory_path(), &manifest) {
-            let receipt = StartupRestoreReceipt {
-                intent_id: intent.intent_id,
-                artifact_id: intent.artifact_id,
-                scope: manifest.scope,
-                cursor: manifest.cursor,
-                manifest_digest: intent.manifest_digest,
-                active_digest: file_digest(&self.memory_path())?,
-                bytes: fs::metadata(self.memory_path())?.len(),
-                recovered_at_ms: now_ms,
-                replayed: true,
-            };
-            self.clear_intent()?;
-            return Ok(Some(receipt));
+        let queued_authority_is_unchanged = file_digest(&self.memory_path())?
+            == intent.expected_active_digest
+            && sqlite_authority_digest(&self.memory_path())? == document.active_authority_digest;
+        if !queued_authority_is_unchanged {
+            if active_matches_manifest(&self.memory_path(), &manifest) {
+                let activated_manifest_digest =
+                    active_manifest_digest(&self.memory_path(), &manifest)?;
+                let receipt = StartupRestoreReceipt {
+                    intent_id: intent.intent_id,
+                    artifact_id: intent.artifact_id,
+                    scope: manifest.scope,
+                    cursor: manifest.cursor,
+                    source_manifest_digest: intent.manifest_digest,
+                    manifest_digest: activated_manifest_digest,
+                    active_digest: file_digest(&self.memory_path())?,
+                    bytes: fs::metadata(self.memory_path())?.len(),
+                    recovered_at_ms: now_ms,
+                    replayed: true,
+                };
+                self.clear_intent()?;
+                return Ok(Some(receipt));
+            }
+            return Err(RecoveryAuthorityError::Activation(
+                "active store authority changed after restore was queued".into(),
+            ));
         }
 
         let staged = stage_repaired_restore(
@@ -239,14 +304,21 @@ impl RecoveryAuthority {
             &intent.scope,
         )
         .map_err(|error| RecoveryAuthorityError::Memory(error.to_string()))?;
+        if sqlite_authority_digest(&self.memory_path())? != document.active_authority_digest {
+            return Err(RecoveryAuthorityError::Activation(
+                "active store authority changed while restore was restaged".into(),
+            ));
+        }
+        let checkpointed_digest = checkpoint_inactive_store(&self.memory_path())?;
         let activated = staged
-            .activate(Some(intent.expected_active_digest))
+            .activate(Some(checkpointed_digest))
             .map_err(|error| RecoveryAuthorityError::Activation(error.to_string()))?;
         let receipt = StartupRestoreReceipt {
             intent_id: intent.intent_id,
             artifact_id: intent.artifact_id,
             scope: activated.scope,
             cursor: activated.cursor,
+            source_manifest_digest: intent.manifest_digest,
             manifest_digest: activated.manifest_digest,
             active_digest: activated.active_digest,
             bytes: activated.bytes,
@@ -258,7 +330,7 @@ impl RecoveryAuthority {
     }
 
     pub fn pending(&self) -> Result<Option<PendingRestoreIntent>, RecoveryAuthorityError> {
-        self.load_intent()
+        Ok(self.load_document()?.map(|document| document.intent))
     }
 
     fn memory_path(&self) -> PathBuf {
@@ -277,7 +349,7 @@ impl RecoveryAuthority {
         self.recovery_root().join("pending-restore.json")
     }
 
-    fn load_intent(&self) -> Result<Option<PendingRestoreIntent>, RecoveryAuthorityError> {
+    fn load_document(&self) -> Result<Option<PendingRestoreDocument>, RecoveryAuthorityError> {
         let path = self.intent_path();
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
@@ -341,18 +413,36 @@ fn inspect_memories(
     connection: &Connection,
     issues: &mut Vec<StartupRecoveryIssue>,
 ) -> Vec<MemoryRecoveryReport> {
-    let version = connection.query_row(
-        "SELECT current_version FROM hypermid_schema_version WHERE singleton=1",
+    let evidence = connection.query_row(
+        "SELECT current_version,compatibility_floor,schema_digest \
+         FROM hypermid_schema_version WHERE singleton=1",
         [],
-        |row| row.get::<_, u64>(0),
+        |row| {
+            Ok((
+                row.get::<_, u64>(0)?,
+                row.get::<_, u64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        },
     );
-    match version {
-        Ok(version) if version > MEMORY_SCHEMA_VERSION => {
+    match evidence {
+        Ok((version, _, _)) if version > MEMORY_SCHEMA_VERSION => {
             issues.push(issue(
                 "MEMORY_SCHEMA_FUTURE",
                 format!(
                     "memory schema version {version} is newer than supported version {MEMORY_SCHEMA_VERSION}"
                 ),
+            ));
+            return Vec::new();
+        }
+        Ok((version, compatibility_floor, digest))
+            if version != MEMORY_SCHEMA_VERSION
+                || compatibility_floor != MEMORY_COMPATIBILITY_FLOOR
+                || digest != memory_schema_digest().to_hex() =>
+        {
+            issues.push(issue(
+                "MEMORY_SCHEMA_FENCE_INVALID",
+                "memory schema fence does not match this runtime",
             ));
             return Vec::new();
         }
@@ -500,6 +590,28 @@ fn active_matches_manifest(active_path: &Path, manifest: &SnapshotManifest) -> b
     })
 }
 
+fn active_manifest_digest(
+    active_path: &Path,
+    source: &SnapshotManifest,
+) -> Result<Digest, RecoveryAuthorityError> {
+    let bytes = fs::metadata(active_path)?.len();
+    let manifest = SnapshotManifest {
+        format_version: source.format_version,
+        schema_version: source.schema_version,
+        scope: source.scope.clone(),
+        cursor: source.cursor,
+        source_digest: source.source_digest,
+        entries: vec![SnapshotEntry {
+            path: "store.sqlite3".into(),
+            bytes,
+            digest: file_digest(active_path)?,
+        }],
+    };
+    manifest
+        .digest()
+        .map_err(|error| RecoveryAuthorityError::Activation(error.to_string()))
+}
+
 fn file_digest(path: &Path) -> Result<Digest, std::io::Error> {
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
@@ -512,6 +624,90 @@ fn file_digest(path: &Path) -> Result<Digest, std::io::Error> {
         hasher.update(&buffer[..read]);
     }
     Ok(Digest::from_bytes(hasher.finalize().into()))
+}
+
+fn sqlite_authority_digest(path: &Path) -> Result<Digest, std::io::Error> {
+    let mut hasher = Sha256::new();
+    hasher.update(b"hypermid.sqlite.authority.v1\0");
+    for authority_path in [
+        path.to_path_buf(),
+        PathBuf::from(format!("{}-wal", path.display())),
+    ] {
+        match fs::symlink_metadata(&authority_path) {
+            Ok(metadata) if metadata.file_type().is_file() => {
+                hasher.update([1]);
+                hasher.update(metadata.len().to_be_bytes());
+                let mut file = File::open(authority_path)?;
+                let mut buffer = [0_u8; 64 * 1024];
+                loop {
+                    let count = file.read(&mut buffer)?;
+                    if count == 0 {
+                        break;
+                    }
+                    hasher.update(&buffer[..count]);
+                }
+            }
+            Ok(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "SQLite authority path is not a regular file",
+                ))
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => hasher.update([0]),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(Digest::from_bytes(hasher.finalize().into()))
+}
+
+fn acquire_memory_lease(path: &Path) -> Result<LocalLease, RecoveryAuthorityError> {
+    let mut lease_path = path.as_os_str().to_os_string();
+    lease_path.push(".lease");
+    LocalLease::acquire(
+        PathBuf::from(lease_path),
+        LeaseKey {
+            module_id: Id::new("hypermid-memory").expect("constant module id is valid"),
+            backend: BackendKind::Sqlite,
+            scope_key: Id::new("memory-store").expect("constant scope key is valid"),
+        },
+    )
+    .map_err(|error| RecoveryAuthorityError::Activation(error.to_string()))
+}
+
+fn checkpoint_inactive_store(path: &Path) -> Result<Digest, RecoveryAuthorityError> {
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|error| RecoveryAuthorityError::Activation(error.to_string()))?;
+    connection
+        .busy_timeout(std::time::Duration::ZERO)
+        .map_err(|error| RecoveryAuthorityError::Activation(error.to_string()))?;
+    let (busy, _, _): (u64, u64, u64) = connection
+        .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .map_err(|error| RecoveryAuthorityError::Activation(error.to_string()))?;
+    if busy != 0 {
+        return Err(RecoveryAuthorityError::Activation(
+            "active SQLite authority is still in use".into(),
+        ));
+    }
+    drop(connection);
+    for sidecar in [
+        PathBuf::from(format!("{}-wal", path.display())),
+        PathBuf::from(format!("{}-shm", path.display())),
+    ] {
+        match fs::remove_file(sidecar) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    if let Some(parent) = path.parent() {
+        sync_directory(parent)?;
+    }
+    file_digest(path).map_err(RecoveryAuthorityError::from)
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {

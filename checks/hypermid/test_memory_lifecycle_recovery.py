@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import sqlite3
 import struct
 import subprocess
@@ -23,6 +24,7 @@ from gideon.hypermid.lifecycle_security import (
 )
 from gideon.hypermid.sources import scope_digest
 
+from checks.hypermid.evidence import ObservationWriter
 from checks.hypermid.waves.local_journey import daemon_binary
 
 
@@ -299,6 +301,7 @@ def _assert_error(code: str, operation: object) -> None:
 
 @pytest.mark.asyncio
 async def test_memory_lifecycle_recovery_uses_real_daemon_stores(tmp_path: Path) -> None:
+    observation = ObservationWriter.from_env("deletion_export_backup_restore")
     workspace = "shared-workspace"
     owner_a = Scope("owner-a", "shared-project", workspace)
     owner_b = Scope("owner-b", "shared-project", workspace)
@@ -348,6 +351,7 @@ async def test_memory_lifecycle_recovery_uses_real_daemon_stores(tmp_path: Path)
         connection.close()
     artifact = before_purge_backup.read_bytes()
     offsets = _chunk_offsets(artifact)
+    altered_backup_chunks_accepted = 0
     assert len(offsets) >= 3
     assert private_marker.encode() not in artifact
     assert captured_marker.encode() not in artifact
@@ -385,18 +389,21 @@ async def test_memory_lifecycle_recovery_uses_real_daemon_stores(tmp_path: Path)
         altered[offset] ^= 0x01
         altered_path = tmp_path / f"owner-a-altered-{index}.hmbk"
         altered_path.write_bytes(altered)
-        _assert_error(
-            "BACKUP_AUTHENTICATION_FAILED",
-            lambda path=altered_path, content=bytes(altered): lifecycle_security.stage_restore(
+        try:
+            lifecycle_security.stage_restore(
                 active,
-                path,
+                altered_path,
                 owner_a,
                 key,
-                expected_artifact_digest=Digest.sha256(content),
+                expected_artifact_digest=Digest.sha256(bytes(altered)),
                 supported_schema=1,
-            ),
-        )
+            )
+        except LifecycleSecurityError as error:
+            assert error.code == "BACKUP_AUTHENTICATION_FAILED"
+        else:
+            altered_backup_chunks_accepted += 1
         assert active.read_bytes() == active_before_failures
+    assert altered_backup_chunks_accepted == 0
 
     connection = sqlite3.connect(active)
     try:
@@ -453,6 +460,7 @@ async def test_memory_lifecycle_recovery_uses_real_daemon_stores(tmp_path: Path)
             ),
         )
         purge_record(connection, owner_a, owner_a, "a-target", now_ms=3_000)
+        derived_copy_counts: dict[str, int] = {}
         for table in (
             "memory_records",
             "memory_revisions",
@@ -461,12 +469,29 @@ async def test_memory_lifecycle_recovery_uses_real_daemon_stores(tmp_path: Path)
             "summary_details",
         ):
             column = "child_record_id" if table == "memory_lineage" else "record_id"
-            assert connection.execute(
+            count = int(connection.execute(
                 f"SELECT COUNT(*) FROM {table} WHERE {column}='a-target'"
-            ).fetchone() == (0,)
-        assert connection.execute(
+            ).fetchone()[0])
+            derived_copy_counts[table] = count
+            assert count == 0
+        source_copies = int(connection.execute(
             "SELECT COUNT(*) FROM memory_sources WHERE source_id='source-a-target'"
-        ).fetchone() == (0,)
+        ).fetchone()[0])
+        derived_copy_counts["memory_sources"] = source_copies
+        assert source_copies == 0
+        for table in (
+            "memory_embeddings",
+            "memory_retrieval_stats",
+            "memory_fts_rows",
+            "memory_fts",
+        ):
+            count = int(connection.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE record_id='a-target'"
+            ).fetchone()[0])
+            derived_copy_counts[table] = count
+            assert count == 0
+        derived_copies_after_purge = sum(derived_copy_counts.values())
+        assert derived_copies_after_purge == 0
         assert connection.execute(
             "SELECT purged_at_ms FROM hypermid_lifecycle_tombstones WHERE record_id='a-target'"
         ).fetchone() == (3_000,)
@@ -530,12 +555,81 @@ async def test_memory_lifecycle_recovery_uses_real_daemon_stores(tmp_path: Path)
         assert connection.execute(
             "SELECT record_id FROM memory_records ORDER BY record_id"
         ).fetchall() == [("a-parent",)]
-        assert connection.execute(
-            "SELECT COUNT(*) FROM memory_records WHERE owner_scope_digest=?",
-            (str(scope_digest(owner_b)),),
-        ).fetchone() == (0,)
+        owner_b_digest = str(scope_digest(owner_b))
+        cross_owner_export_counts = {
+            "memory_scopes": int(connection.execute(
+                "SELECT COUNT(*) FROM memory_scopes WHERE scope_digest=?",
+                (owner_b_digest,),
+            ).fetchone()[0]),
+            "memory_records": int(connection.execute(
+                "SELECT COUNT(*) FROM memory_records WHERE owner_scope_digest=?",
+                (owner_b_digest,),
+            ).fetchone()[0]),
+            "memory_sources": int(connection.execute(
+                "SELECT COUNT(*) FROM memory_sources WHERE owner_scope_digest=?",
+                (owner_b_digest,),
+            ).fetchone()[0]),
+            "memory_mutation_events": int(connection.execute(
+                "SELECT COUNT(*) FROM memory_mutation_events WHERE owner_scope_digest=?",
+                (owner_b_digest,),
+            ).fetchone()[0]),
+            "hypermid_lifecycle_tombstones": int(connection.execute(
+                "SELECT COUNT(*) FROM hypermid_lifecycle_tombstones WHERE owner_scope_digest=?",
+                (owner_b_digest,),
+            ).fetchone()[0]),
+        }
+        cross_owner_export_entries = sum(cross_owner_export_counts.values())
+        assert cross_owner_export_entries == 0
         assert connection.execute(
             "SELECT purged_at_ms FROM hypermid_lifecycle_tombstones WHERE record_id='a-target'"
         ).fetchone() == (3_000,)
     finally:
         connection.close()
+
+    if observation is not None:
+        report_path = observation.directory / ".deletion-export-backup-restore-report.json"
+        report_path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+        report_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "gate": "deletion_export_backup_restore",
+                    "observations": {
+                        "altered-backup-chunks-accepted": altered_backup_chunks_accepted,
+                        "cross-owner-export-entries": cross_owner_export_entries,
+                        "derived-copies-after-purge": derived_copies_after_purge,
+                    },
+                    "purge_copy_counts": derived_copy_counts,
+                    "cross_owner_export_counts": cross_owner_export_counts,
+                    "altered_backup_chunks_tested": len(offsets),
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        observation.measure(
+            "derived-copies-after-purge",
+            derived_copies_after_purge,
+            "eq",
+            0,
+            unit="copies",
+        )
+        observation.measure(
+            "cross-owner-export-entries",
+            cross_owner_export_entries,
+            "eq",
+            0,
+            unit="entries",
+        )
+        observation.measure(
+            "altered-backup-chunks-accepted",
+            altered_backup_chunks_accepted,
+            "eq",
+            0,
+            unit="chunks",
+        )
+        observation.artifact(
+            "lifecycle-integrity-report", report_path, "application/json"
+        )

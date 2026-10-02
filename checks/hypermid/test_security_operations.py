@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 import sqlite3
@@ -28,6 +29,7 @@ from gideon.hypermid.operator_lifecycle import HypermidOperatorLifecycle
 from gideon.hypermid.security_operations import SecurityOperations
 from gideon.integrations.llm.credentials import CredentialStore
 
+from checks.hypermid.evidence import ObservationWriter
 from checks.hypermid.test_memory_release import (
     _access,
     _daemon_binary,
@@ -439,6 +441,7 @@ async def test_real_handler_encrypts_and_imports_canonical_memory_bundle(
 async def test_real_lifecycle_and_encrypted_security_handler_journey(
     tmp_path: Path,
 ) -> None:
+    observation = ObservationWriter.from_env("deletion_export_backup_restore")
     source_scope = Scope(Id("journey-owner"), Id("journey-project"), Id("journey-workspace"))
     foreign_scope = Scope(Id("foreign-owner"), Id("journey-project"), Id("journey-workspace"))
     capability_id = Id("journey-capability")
@@ -721,11 +724,51 @@ async def test_real_lifecycle_and_encrypted_security_handler_journey(
             },
         )
         assert restored["state"] == "committed"
+        restore_manifest_comparisons = {
+            "artifact_digest": restored["artifact_digest"] == backup["artifact_digest"],
+            "source_digest": restored["source_digest"] == backup["source_digest"],
+            "batch_source_digest": restored["batch_source_digest"] == backup["source_digest"],
+            "export_id": restored["export_id"] == backup["export_id"],
+            "stream_digest": restored["stream_digest"] == backup["stream_digest"],
+            "item_count": restored["item_count"] == backup["item_count"],
+            "record_count": restored["record_count"] == backup["record_count"],
+            "cursor": restored["cursor"] == backup["cursor"],
+        }
+        restore_manifest_mismatches = sum(
+            not matched for matched in restore_manifest_comparisons.values()
+        )
+        assert restore_manifest_mismatches == 0
+        assert restored["artifact_digest"] == backup["artifact_digest"]
+        assert restored["source_digest"] == backup["source_digest"]
+        assert restored["batch_source_digest"] == backup["source_digest"]
+        assert restored["export_id"] == backup["export_id"]
+        assert restored["stream_digest"] == backup["stream_digest"]
+        assert restored["item_count"] == backup["item_count"]
+        assert restored["record_count"] == backup["record_count"]
+        assert restored["cursor"] == backup["cursor"]
         imported, _ = await restored_memory.get(
             _access(source_scope, GrantOperation.READ, record_id, "journey-read")
         )
         assert imported is not None
         assert imported.current.content == content
+        if observation is not None:
+            report_path = observation.directory / ".deletion-export-backup-restore-report.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["observations"]["restore-manifest-mismatches"] = restore_manifest_mismatches
+            report["restore_manifest_comparisons"] = restore_manifest_comparisons
+            report_path.write_text(
+                json.dumps(report, separators=(",", ":"), sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            observation.measure(
+                "restore-manifest-mismatches",
+                restore_manifest_mismatches,
+                "eq",
+                0,
+                unit="mismatches",
+            )
+            observation.finish(source_digest=os.environ["HYPERMID_SOURCE_DIGEST"])
+            report_path.unlink()
     finally:
         for client in clients:
             await client.close()

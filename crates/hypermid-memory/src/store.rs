@@ -945,7 +945,10 @@ mod foundation_tests {
             principal_id: owner_principal.principal_id.clone(),
             claimed_scope: owner.clone(),
             target_scope: owner.clone(),
-            operations: BTreeSet::from([hypermid_core::capability::CapabilityOperation::Append]),
+            operations: BTreeSet::from([
+                hypermid_core::capability::CapabilityOperation::Append,
+                hypermid_core::capability::CapabilityOperation::Read,
+            ]),
             resources: BTreeSet::from([id("memory-records")]),
             expires_at_ms: 5_000,
         };
@@ -956,6 +959,39 @@ mod foundation_tests {
             })
             .unwrap();
         assert!(store.authorize(&collection_context, &owner_request).is_ok());
+        let owner_collection_access = AccessRequest {
+            operation: GrantOperation::Read,
+            actor_scope: owner.clone(),
+            target_scope: owner.clone(),
+            resource_id: id("memory-records"),
+            category: None,
+            trace: hypermid_contracts::Trace::new(id("trace-owner-read"), id("request-owner-read")),
+        };
+        let owner_read_context = AuthContext {
+            principal: owner_principal.clone(),
+            request: AuthorizationRequest {
+                claimed_scope: owner.clone(),
+                target_scope: owner.clone(),
+                operation: hypermid_core::capability::CapabilityOperation::Read,
+                resource_id: id("memory-records"),
+                now_ms: 2_000,
+            },
+            capability_id: collection_context.capability_id,
+        };
+        assert!(store
+            .immediate_access(&owner_read_context, &owner_collection_access, |_, _| Ok(()))
+            .is_ok());
+        let owner_search_access = AccessRequest {
+            operation: GrantOperation::Search,
+            trace: hypermid_contracts::Trace::new(
+                id("trace-owner-search"),
+                id("request-owner-search"),
+            ),
+            ..owner_collection_access
+        };
+        assert!(store
+            .immediate_access(&owner_read_context, &owner_search_access, |_, _| Ok(()))
+            .is_ok());
 
         let foreign_request = request(foreign.clone(), owner.clone(), Operation::Create);
         let foreign_principal = principal("reader", "principal-reader", PrincipalKind::Foreground);
@@ -976,7 +1012,10 @@ mod foundation_tests {
             principal_id: foreign_principal.principal_id.clone(),
             claimed_scope: foreign.clone(),
             target_scope: owner.clone(),
-            operations: BTreeSet::from([hypermid_core::capability::CapabilityOperation::Append]),
+            operations: BTreeSet::from([
+                hypermid_core::capability::CapabilityOperation::Append,
+                hypermid_core::capability::CapabilityOperation::Read,
+            ]),
             resources: BTreeSet::from([id("memory-records")]),
             expires_at_ms: 5_000,
         };
@@ -993,7 +1032,7 @@ mod foundation_tests {
                     id: foreign_context.capability_id.clone(),
                     owner_scope: owner.clone(),
                     grantee_scope: foreign,
-                    operations: BTreeSet::from([GrantOperation::Create]),
+                    operations: BTreeSet::from([GrantOperation::Create, GrantOperation::Read]),
                     categories: Some(BTreeSet::from(["project_fact".to_owned()])),
                     granted_at_ms: 1_000,
                     expires_at_ms: Some(5_000),
@@ -1006,6 +1045,39 @@ mod foundation_tests {
         assert_eq!(
             store
                 .authorize(&foreign_context, &foreign_request)
+                .unwrap_err()
+                .code,
+            "AUTHORIZATION_DENIED"
+        );
+        let foreign_collection_access = AccessRequest {
+            operation: GrantOperation::Read,
+            actor_scope: foreign_context.request.claimed_scope.clone(),
+            target_scope: owner,
+            resource_id: id("memory-records"),
+            category: None,
+            trace: hypermid_contracts::Trace::new(
+                id("trace-foreign-read"),
+                id("request-foreign-read"),
+            ),
+        };
+        let foreign_read_context = AuthContext {
+            principal: foreign_principal,
+            request: AuthorizationRequest {
+                claimed_scope: foreign_context.request.claimed_scope,
+                target_scope: foreign_context.request.target_scope,
+                operation: hypermid_core::capability::CapabilityOperation::Read,
+                resource_id: id("memory-records"),
+                now_ms: 2_000,
+            },
+            capability_id: foreign_context.capability_id,
+        };
+        assert_eq!(
+            store
+                .immediate_access(
+                    &foreign_read_context,
+                    &foreign_collection_access,
+                    |_, _| Ok(())
+                )
                 .unwrap_err()
                 .code,
             "AUTHORIZATION_DENIED"

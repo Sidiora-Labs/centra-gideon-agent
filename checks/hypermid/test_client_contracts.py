@@ -6,6 +6,8 @@ from pathlib import Path
 import subprocess
 import time
 
+from checks.hypermid.evidence import ObservationWriter
+
 
 ROOT = Path(__file__).resolve().parents[2]
 FLEET = ROOT.parent
@@ -165,6 +167,82 @@ def test_rust_typescript_and_swift_sdks_against_real_tls_daemon(tmp_path: Path) 
             except subprocess.TimeoutExpired:
                 daemon.kill()
                 daemon.wait(timeout=5)
+
+    expected_languages = {"rust", "typescript", "swift"}
+    compatibility_checks = (
+        "tls",
+        "describe",
+        "passthrough",
+        "durable_ack",
+        "reconnect_resume",
+        "wrong_epoch_refused",
+        "invalid_version_refused",
+        "mutation_outcome_unknown",
+    )
+    qualified_languages = {
+        result.get("language")
+        for result in results
+        if result.get("language") in expected_languages
+        and all(result.get(check) is True for check in compatibility_checks)
+    }
+    wrong_epoch_acceptances = sum(
+        result.get("wrong_epoch_refused") is not True for result in results
+    )
+    invalid_version_acceptances = sum(
+        result.get("invalid_version_refused") is not True for result in results
+    )
+    outcome_unknown_preserved = (
+        {result.get("language") for result in results} == expected_languages
+        and all(result.get("mutation_outcome_unknown") is True for result in results)
+    )
+
+    observation = ObservationWriter.from_env("client_compatibility")
+    if observation is not None:
+        matrix = tmp_path / "sdk-compatibility-matrix.json"
+        matrix.write_text(
+            json.dumps(
+                {
+                    "gate": "client_compatibility",
+                    "languages": sorted(results, key=lambda result: result["language"]),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        observation.measure(
+            "qualified-sdk-languages",
+            len(qualified_languages),
+            "gte",
+            3,
+            "languages",
+        )
+        observation.measure(
+            "wrong-epoch-acceptances",
+            wrong_epoch_acceptances,
+            "eq",
+            0,
+            "acceptances",
+        )
+        observation.measure(
+            "invalid-version-acceptances",
+            invalid_version_acceptances,
+            "eq",
+            0,
+            "acceptances",
+        )
+        observation.measure(
+            "outcome-unknown-preserved",
+            outcome_unknown_preserved,
+            "eq",
+            True,
+            "boolean",
+        )
+        observation.artifact(
+            "sdk-compatibility-matrix", matrix, "application/json"
+        )
+        observation.finish(source_digest=os.environ["HYPERMID_SOURCE_DIGEST"])
 
     assert {result["language"] for result in results} == {"rust", "typescript", "swift"}
     for result in results:

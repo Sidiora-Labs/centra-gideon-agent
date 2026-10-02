@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import json
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 import pytest
 
+from checks.hypermid.evidence import ObservationWriter
 from gideon.hypermid.network_policy import (
     Destination,
     EgressDenied,
@@ -15,6 +20,134 @@ from gideon.hypermid.network_policy import (
     SecretDenied,
     SecretVault,
 )
+
+
+@dataclass
+class NetworkGateObservations:
+    egress_connections: int | None = None
+    egress_secret_occurrences: int | None = None
+    egress_matrix: dict[str, Any] = field(default_factory=dict)
+    sandbox: dict[str, Any] | None = None
+
+    def record_egress_connections(
+        self, *, unauthorized_connections: int, matrix: dict[str, Any]
+    ) -> None:
+        assert self.egress_connections is None
+        assert unauthorized_connections >= 0
+        self.egress_connections = unauthorized_connections
+        self.egress_matrix["network"] = matrix
+
+    def record_egress_secrets(
+        self, *, secret_canary_occurrences: int, matrix: dict[str, Any]
+    ) -> None:
+        assert self.egress_secret_occurrences is None
+        assert secret_canary_occurrences >= 0
+        self.egress_secret_occurrences = secret_canary_occurrences
+        self.egress_matrix["secrets"] = matrix
+
+    def record_sandbox(
+        self,
+        *,
+        unauthorized_connections: int,
+        unauthorized_file_accesses: int,
+        surviving_children: int,
+        secret_canary_occurrences: int,
+        matrix: dict[str, Any],
+    ) -> None:
+        assert self.sandbox is None
+        counts = (
+            unauthorized_connections,
+            unauthorized_file_accesses,
+            surviving_children,
+            secret_canary_occurrences,
+        )
+        assert all(isinstance(value, int) and value >= 0 for value in counts)
+        self.sandbox = {
+            "unauthorized_connections": unauthorized_connections,
+            "unauthorized_file_accesses": unauthorized_file_accesses,
+            "surviving_children": surviving_children,
+            "secret_canary_occurrences": secret_canary_occurrences,
+            "matrix": matrix,
+        }
+        writer = ObservationWriter.from_env("network_secrets_sandbox")
+        if writer is None:
+            return
+        with tempfile.TemporaryDirectory(prefix="hypermid-network-observation-") as root:
+            self.finish(writer, Path(root) / "network-secret-matrix.json")
+
+    def finish(self, writer: ObservationWriter, artifact_path: Path) -> None:
+        assert self.egress_connections is not None
+        assert self.egress_secret_occurrences is not None
+        assert self.sandbox is not None
+        unauthorized_connections = (
+            self.egress_connections + self.sandbox["unauthorized_connections"]
+        )
+        secret_canary_occurrences = (
+            self.egress_secret_occurrences
+            + self.sandbox["secret_canary_occurrences"]
+        )
+        writer.measure(
+            "unauthorized-connections",
+            unauthorized_connections,
+            "eq",
+            0,
+            "connections",
+        )
+        writer.measure(
+            "unauthorized-file-accesses",
+            self.sandbox["unauthorized_file_accesses"],
+            "eq",
+            0,
+            "accesses",
+        )
+        writer.measure(
+            "surviving-sandbox-children",
+            self.sandbox["surviving_children"],
+            "eq",
+            0,
+            "processes",
+        )
+        writer.measure(
+            "secret-canary-occurrences",
+            secret_canary_occurrences,
+            "eq",
+            0,
+            "occurrences",
+        )
+        artifact_path.write_text(
+            json.dumps(
+                {
+                    "gate": "network_secrets_sandbox",
+                    "egress": self.egress_matrix,
+                    "sandbox": self.sandbox["matrix"],
+                    "measurements": {
+                        "unauthorized_connections": unauthorized_connections,
+                        "unauthorized_file_accesses": self.sandbox[
+                            "unauthorized_file_accesses"
+                        ],
+                        "surviving_sandbox_children": self.sandbox[
+                            "surviving_children"
+                        ],
+                        "secret_canary_occurrences": secret_canary_occurrences,
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        writer.artifact(
+            "network-secret-matrix", artifact_path, "application/json"
+        )
+        writer.finish()
+
+
+_NETWORK_GATE_OBSERVATIONS = NetworkGateObservations()
+
+
+def network_gate_observations() -> NetworkGateObservations:
+    return _NETWORK_GATE_OBSERVATIONS
 
 
 def grant(**changes: object) -> NetworkGrant:
@@ -87,6 +220,17 @@ def test_controlled_dns_rebinding_metadata_redirect_and_byte_limits_fail_before_
             connect_after_admission(addresses, **changes)
         assert denied.value.rule == rule
     assert connections == []
+    network_gate_observations().record_egress_connections(
+        unauthorized_connections=len(connections),
+        matrix={
+            "attempted_denied_destinations": 4,
+            "connections_after_denial": len(connections),
+            "mixed_dns_checked": True,
+            "metadata_checked": True,
+            "loopback_checked": True,
+            "redirect_limit_checked": True,
+        },
+    )
     admitted = authorize(policy, grant(), redirect_hops=1)
     assert admitted.redirects_remaining == 0
     with pytest.raises(EgressDenied, match="response.byte_limit"):
@@ -146,9 +290,18 @@ def test_registered_secret_and_common_credentials_are_absent_from_all_captured_p
         "ui": {"credential": canary.decode(), "present": True},
     }
     encoded = json.dumps(redactor.redact(captured), sort_keys=True)
-    assert canary.decode() not in encoded
+    canary_occurrences = encoded.count(canary.decode())
+    assert canary_occurrences == 0
     assert "operator:" not in encoded
     assert encoded.count(REDACTED) >= 6
+    network_gate_observations().record_egress_secrets(
+        secret_canary_occurrences=canary_occurrences,
+        matrix={
+            "captured_surfaces": sorted(captured),
+            "redacted_fields": encoded.count(REDACTED),
+            "secret_canary_occurrences": canary_occurrences,
+        },
+    )
 
 
 def test_network_grants_ui_source_has_no_secret_value_surface() -> None:

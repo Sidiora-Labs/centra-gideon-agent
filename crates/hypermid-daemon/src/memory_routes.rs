@@ -839,21 +839,18 @@ fn dispatch_operation(
             )?;
             let smart_notes = build_knowledge_authorities(
                 session,
-                trace,
                 payload.smart_notes,
                 Operation::Index,
                 now_ms,
             )?;
             let verifications = build_knowledge_authorities(
                 session,
-                trace,
                 payload.verifications,
                 Operation::Verify,
                 now_ms,
             )?;
             let sharing_judgments = build_knowledge_authorities(
                 session,
-                trace,
                 payload.sharing_judgments,
                 Operation::Verify,
                 now_ms,
@@ -861,7 +858,7 @@ fn dispatch_operation(
             let recall = payload
                 .recall
                 .map(|authority| {
-                    build_knowledge_authority(session, trace, authority, Operation::Create, now_ms)
+                    build_knowledge_authority(session, authority, Operation::Create, now_ms)
                 })
                 .transpose()?;
             let authorities = KnowledgePublicationAuthorities {
@@ -1564,30 +1561,27 @@ fn record_resource(request: &MutationRequest) -> Result<Id, Error> {
 
 fn build_knowledge_authorities(
     session: &AuthenticatedSession,
-    trace: &Trace,
     values: Vec<KnowledgeAuthorityPayload>,
     operation: Operation,
     now_ms: u64,
 ) -> Result<Vec<KnowledgePublicationAuthority>, Error> {
     values
         .into_iter()
-        .map(|value| build_knowledge_authority(session, trace, value, operation, now_ms))
+        .map(|value| build_knowledge_authority(session, value, operation, now_ms))
         .collect()
 }
 
 fn build_knowledge_authority(
     session: &AuthenticatedSession,
-    trace: &Trace,
     value: KnowledgeAuthorityPayload,
     operation: Operation,
     now_ms: u64,
 ) -> Result<KnowledgePublicationAuthority, Error> {
-    require_trace_scope(
-        trace,
-        session,
-        &value.request.actor_scope,
-        &value.request.trace,
-    )?;
+    if value.request.actor_scope != session.bound_scope {
+        return Err(denied(
+            "knowledge authority scope does not match the authenticated session",
+        ));
+    }
     require_operation(&value.request, operation)?;
     let record_id = record_resource(&value.request)?;
     let resource = record_authority_resource(

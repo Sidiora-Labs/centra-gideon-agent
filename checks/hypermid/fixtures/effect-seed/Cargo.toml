@@ -1,0 +1,14 @@
+[package]
+name = "hypermid-effect-seed"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+hypermid-bus = { path = "../../../../crates/hypermid-bus" }
+hypermid-contracts = { path = "../../../../crates/hypermid-contracts" }
+hypermid-daemon = { path = "../../../../crates/hypermid-daemon" }
+hypermid-protocol = { path = "../../../../crates/hypermid-protocol" }
+hypermid-transport = { path = "../../../../crates/hypermid-transport" }

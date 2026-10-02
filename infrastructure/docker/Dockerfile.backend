@@ -1,6 +1,16 @@
-ARG PYTHON_IMAGE=mirror.gcr.io/library/python:3.13-slim
+ARG PYTHON_IMAGE=mirror.gcr.io/library/python:3.13-slim@sha256:bb2988715db2cf7ace7b53f38f3cffbef7c7046a656bee66245eb0ed386e2e81
+ARG NODE_TOOLS_IMAGE=node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c
+ARG RUST_IMAGE=rust:1.91.1-bookworm@sha256:c1e5f19e773b7878c3f7a805dd00a495e747acbdc76fb2337a4ebf0418896b33
+ARG CONSOLE_IMAGE=mirror.gcr.io/library/node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
 FROM ${PYTHON_IMAGE} AS base
-FROM node:22-bookworm-slim AS node-tools
+FROM ${NODE_TOOLS_IMAGE} AS node-tools
+FROM ${RUST_IMAGE} AS hypermid-builder
+ARG CARGO_BUILD_JOBS=2
+ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
+WORKDIR /build
+COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
+COPY crates/ ./crates/
+RUN cargo build --locked --release -p hypermid-daemon
 FROM base AS deps
 WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -14,7 +24,7 @@ RUN python -m venv /opt/venv && \
 COPY pyproject.toml setup.py ./
 RUN mkdir -p runtime/gideon && \
     echo '__version__ = "0.1.0"' > runtime/gideon/__init__.py && \
-    /opt/venv/bin/pip install --no-cache-dir \
+    GIDEON_DEPENDENCIES_ONLY=1 /opt/venv/bin/pip install --no-cache-dir \
     --extra-index-url https://download.pytorch.org/whl/cpu \
     ".[slack,eval,httpx,anthropic,openai,embeddings,stt,tts,mcp,channels]" && \
     /opt/venv/bin/pip uninstall -y gideon-agent-harness && \
@@ -22,9 +32,13 @@ RUN mkdir -p runtime/gideon && \
 
 FROM deps AS builder
 COPY runtime/ ./runtime/
+COPY spec/hypermid/schemas/ ./spec/hypermid/schemas/
 COPY pyproject.toml setup.py ./
+COPY --from=hypermid-builder /build/target/release/hypermid-daemon /tmp/hypermid-daemon
 RUN rm -rf build/ *.egg-info && \
-    /opt/venv/bin/pip install --no-cache-dir --no-deps --no-build-isolation .
+    GIDEON_PREBUILT_HYPERMID_DAEMON=/tmp/hypermid-daemon \
+    /opt/venv/bin/pip install --no-cache-dir --no-deps --no-build-isolation . && \
+    rm -f /tmp/hypermid-daemon
 
 FROM builder AS test
 RUN /opt/venv/bin/pip install --no-cache-dir \
@@ -57,6 +71,8 @@ RUN npm install -g --no-fund --no-audit \
 RUN groupadd --gid 10001 gideon && \
     useradd --uid 10001 --gid 10001 --create-home --shell /bin/false gideon
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=hypermid-builder /build/target/release/hypermid-daemon /usr/local/bin/hypermid-daemon
+RUN chmod 0755 /usr/local/bin/hypermid-daemon
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 RUN /opt/venv/bin/pip install --no-cache-dir 'playwright>=1.40' && \
     /opt/venv/bin/python -m playwright install --with-deps chromium && \
@@ -82,7 +98,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["gideon", "gateway"]
 
-FROM mirror.gcr.io/library/node:24-alpine AS console
+FROM ${CONSOLE_IMAGE} AS console
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/console/package.json apps/console/

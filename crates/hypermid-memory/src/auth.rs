@@ -35,10 +35,16 @@ pub fn authorize_access(
     context: &AuthContext,
     request: &AccessRequest,
 ) -> MemoryResult<Authorization> {
-    let resource_matches = context.request.resource_id == request.resource_id
-        || (request.operation == GrantOperation::Read
-            && same_project(&request.actor_scope, &request.target_scope)
-            && context.request.resource_id.as_str() == "memory-records");
+    let collection_authority = matches!(
+        request.operation,
+        GrantOperation::Read | GrantOperation::Search
+    ) && same_project(&request.actor_scope, &request.target_scope)
+        && context.request.resource_id.as_str() == "memory-records";
+    let resource_matches = if request.resource_id.as_str() == "memory-records" {
+        collection_authority
+    } else {
+        context.request.resource_id == request.resource_id || collection_authority
+    };
     if !matches!(
         request.operation,
         GrantOperation::Read | GrantOperation::Search

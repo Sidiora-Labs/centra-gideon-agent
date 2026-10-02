@@ -13,6 +13,7 @@ GIDEON_PACKAGE="${GIDEON_PACKAGE_SOURCE:-}"
 GIDEON_DISTRIBUTION="gideon-agent-harness"
 GIDEON_MIN_VERSION="0.1.2"
 UV_INSTALLER_URL="https://astral.sh/uv/install.sh"
+GIDEON_SOURCE_CHECKOUT=0
 
                                                                                
 if [ -t 1 ]; then
@@ -112,9 +113,23 @@ resolve_package_source() {
     checkout=$(CDPATH='' cd -- "$installer_dir/../.." && pwd)
     if [ -f "$checkout/pyproject.toml" ]; then
         GIDEON_PACKAGE="$checkout"
+        GIDEON_SOURCE_CHECKOUT=1
     else
         die "set GIDEON_PACKAGE_SOURCE to a Gideon wheel, checkout path, or versioned package specification"
     fi
+}
+
+ensure_hypermid_toolchain() {
+    if [ "$GIDEON_SOURCE_CHECKOUT" -ne 1 ] && {
+        [ ! -d "$GIDEON_PACKAGE" ] || [ ! -f "$GIDEON_PACKAGE/Cargo.toml" ];
+    }; then
+        return 0
+    fi
+    if ! have cargo || ! have rustc; then
+        die "installing from source requires the pinned Rust toolchain to build hypermid-daemon; install rustup, or use a published wheel or --container"
+    fi
+    have npm ||
+        die "installing from source requires npm to build the Gideon console; install Node.js, or use a published wheel or --container"
 }
 
 install_gideon() {
@@ -141,6 +156,7 @@ offer_setup() {
     step "Installed. Next steps:"
     say "  gideon setup      # configure your workspace directory + timezone"
     say "  gideon gateway    # start the dashboard on http://localhost:10000"
+    say "  Hypermid is installed and remains off until you enable it in Gideon settings."
     say ""
                                                                                     
     if [ -t 0 ]; then
@@ -182,6 +198,7 @@ main() {
     say "${_bold}Gideon installer${_reset}"
     detect_platform
     resolve_package_source
+    ensure_hypermid_toolchain
     ensure_uv
     install_gideon
     offer_setup

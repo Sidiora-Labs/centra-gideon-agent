@@ -12,7 +12,7 @@ import subprocess
 import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
+from checks.hypermid.evidence import ObservationWriter
 from gideon.hypermid.client import (
     ConnectionRecord,
     HypermidClient,
@@ -48,6 +49,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def _daemon_binary() -> Path:
+    configured = os.environ.get("HYPERMID_DAEMON_BINARY", "").strip()
+    if configured:
+        candidate = Path(configured).expanduser().resolve()
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+        raise AssertionError(
+            "HYPERMID_DAEMON_BINARY must name an executable daemon file"
+        )
     target = Path(
         os.environ.get(
             "CARGO_TARGET_DIR",
@@ -80,6 +89,102 @@ class LiveDaemon:
     def tls_directory(self) -> Path:
         raw = json.loads(self.record.read_text(encoding="utf-8"))
         return Path(raw["ca_certificate"]).parent
+
+
+@dataclass
+class AuthenticationGateObservations:
+    captures: list[dict[str, Any]] = field(default_factory=list)
+    invalid_sessions: list[dict[str, Any]] = field(default_factory=list)
+    compatible_resume_passed: int = 0
+
+    def record_capture(
+        self, transport: str, captured: bytes, plaintext_needles: tuple[bytes, ...]
+    ) -> None:
+        plaintext_bytes = sum(
+            len(needle) * captured.count(needle)
+            for needle in plaintext_needles
+            if needle
+        )
+        self.captures.append(
+            {
+                "transport": transport,
+                "captured_bytes": len(captured),
+                "plaintext_application_bytes": plaintext_bytes,
+            }
+        )
+
+    def record_invalid_rejection(self, failure_class: str) -> None:
+        self.invalid_sessions.append(
+            {"failure_class": failure_class, "accepted": False}
+        )
+
+    def record_compatible_resume(self, passed: bool) -> None:
+        assert passed
+        self.compatible_resume_passed += int(passed)
+
+    def finish(self, writer: ObservationWriter, artifact_path: Path) -> None:
+        assert len(self.captures) >= 2
+        assert self.invalid_sessions
+        assert self.compatible_resume_passed > 0
+        plaintext_bytes = sum(
+            capture["plaintext_application_bytes"] for capture in self.captures
+        )
+        invalid_sessions_accepted = sum(
+            int(item["accepted"]) for item in self.invalid_sessions
+        )
+        writer.measure(
+            "plaintext-application-bytes",
+            plaintext_bytes,
+            "eq",
+            0,
+            "bytes",
+        )
+        writer.measure(
+            "invalid-sessions-accepted",
+            invalid_sessions_accepted,
+            "eq",
+            0,
+            "sessions",
+        )
+        writer.measure(
+            "compatible-resume-passed",
+            self.compatible_resume_passed,
+            "gte",
+            1,
+            "journeys",
+        )
+        artifact_path.write_text(
+            json.dumps(
+                {
+                    "gate": "authentication",
+                    "captures": self.captures,
+                    "invalid_sessions": self.invalid_sessions,
+                    "compatible_resume_passed": self.compatible_resume_passed,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        writer.artifact("transport-auth-matrix", artifact_path, "application/json")
+        writer.finish()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def authentication_observations(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[AuthenticationGateObservations]:
+    observations = AuthenticationGateObservations()
+    yield observations
+    writer = ObservationWriter.from_env("authentication")
+    if writer is None:
+        return
+    artifact_path = (
+        tmp_path_factory.mktemp("authentication-observation")
+        / "transport-auth-matrix.json"
+    )
+    observations.finish(writer, artifact_path)
 
 
 def _start_daemon(
@@ -273,7 +378,12 @@ def _write_crl(path: Path, ca_directory: Path, certificate: x509.Certificate) ->
     return path
 
 
-async def _connection_fails(record_path: Path, scope: Scope) -> None:
+async def _connection_fails(
+    record_path: Path,
+    scope: Scope,
+    observations: AuthenticationGateObservations,
+    failure_class: str,
+) -> None:
     client = HypermidClient(record_path, scope=scope)
     with pytest.raises(
         (
@@ -286,6 +396,7 @@ async def _connection_fails(record_path: Path, scope: Scope) -> None:
     ):
         await asyncio.wait_for(client.connect(), timeout=5)
     await asyncio.wait_for(client.close(), timeout=5)
+    observations.record_invalid_rejection(failure_class)
 
 
 async def _close_writer(writer: asyncio.StreamWriter) -> None:
@@ -477,7 +588,9 @@ async def _tcp_proxy_record(
 
 @pytest.mark.asyncio
 async def test_real_tls_hmac_frames_and_ciphertext_capture(
-    live_daemon: LiveDaemon, tmp_path: Path
+    live_daemon: LiveDaemon,
+    tmp_path: Path,
+    authentication_observations: AuthenticationGateObservations,
 ) -> None:
     vectors = json.loads(
         (Path(__file__).parent / "vectors" / "client_v1.json").read_text(
@@ -554,6 +667,14 @@ async def test_real_tls_hmac_frames_and_ciphertext_capture(
         assert captured
         assert marker.encode() not in captured
         assert canonical_json_bytes({"marker": marker}) not in captured
+        authentication_observations.record_capture(
+            "unix",
+            captured,
+            (marker.encode(), canonical_json_bytes({"marker": marker})),
+        )
+        authentication_observations.record_compatible_resume(
+            resumed.point.cursor == acknowledged_cursor
+        )
 
     record = ConnectionRecord.load(live_daemon.record)
     assert record.credential_bytes().hex() not in repr(record)
@@ -568,6 +689,7 @@ async def test_real_tls_hmac_frames_and_ciphertext_capture(
 @pytest.mark.asyncio
 async def test_explicit_remote_tls_hmac_ciphertext_and_scope_binding(
     tmp_path: Path,
+    authentication_observations: AuthenticationGateObservations,
 ) -> None:
     bootstrap_root = tmp_path / "bootstrap"
     bootstrap = _start_daemon(bootstrap_root, "bootstrap")
@@ -610,10 +732,18 @@ async def test_explicit_remote_tls_hmac_ciphertext_and_scope_binding(
             assert captured
             assert marker.encode() not in captured
             assert canonical_json_bytes({"marker": marker}) not in captured
+            authentication_observations.record_capture(
+                "tcp",
+                captured,
+                (marker.encode(), canonical_json_bytes({"marker": marker})),
+            )
 
         baseline = _durable_snapshot(run_root)
         await _connection_fails(
-            remote_record, Scope("owner-remote", "another-project")
+            remote_record,
+            Scope("owner-remote", "another-project"),
+            authentication_observations,
+            "remote-cross-scope",
         )
         assert _durable_snapshot(run_root) == baseline
     finally:
@@ -622,7 +752,9 @@ async def test_explicit_remote_tls_hmac_ciphertext_and_scope_binding(
 
 @pytest.mark.asyncio
 async def test_invalid_peers_downgrade_and_stale_authorization_fail_closed(
-    live_daemon: LiveDaemon, tmp_path: Path
+    live_daemon: LiveDaemon,
+    tmp_path: Path,
+    authentication_observations: AuthenticationGateObservations,
 ) -> None:
     scope = Scope("owner-auth", "project-auth")
     client = HypermidClient(live_daemon.record, scope=scope)
@@ -633,7 +765,10 @@ async def test_invalid_peers_downgrade_and_stale_authorization_fail_closed(
     baseline = _durable_snapshot(tmp_path)
 
     await _connection_fails(
-        live_daemon.record, Scope("owner-auth", "another-project")
+        live_daemon.record,
+        Scope("owner-auth", "another-project"),
+        authentication_observations,
+        "local-cross-scope",
     )
 
     await _connection_fails(
@@ -643,6 +778,8 @@ async def test_invalid_peers_downgrade_and_stale_authorization_fail_closed(
             server_name="wrong.hypermid.local",
         ),
         scope,
+        authentication_observations,
+        "wrong-server-name",
     )
 
     now = datetime.now(timezone.utc)
@@ -661,6 +798,8 @@ async def test_invalid_peers_downgrade_and_stale_authorization_fail_closed(
             client_private_key=str(expired_key),
         ),
         scope,
+        authentication_observations,
+        "expired-client-certificate",
     )
 
     foreign_ca_key = ec.generate_private_key(ec.SECP256R1())
@@ -694,6 +833,8 @@ async def test_invalid_peers_downgrade_and_stale_authorization_fail_closed(
             client_private_key=str(mismatch_key),
         ),
         scope,
+        authentication_observations,
+        "peer-certificate-mismatch",
     )
 
     stale = _record_variant(
@@ -719,6 +860,7 @@ async def test_invalid_peers_downgrade_and_stale_authorization_fail_closed(
             ),
             timeout=5,
         )
+    authentication_observations.record_invalid_rejection("tls-downgrade")
 
     client = HypermidClient(live_daemon.record, scope=scope)
     after = await asyncio.wait_for(client.describe_typed(), timeout=5)
@@ -729,7 +871,9 @@ async def test_invalid_peers_downgrade_and_stale_authorization_fail_closed(
 
 @pytest.mark.asyncio
 async def test_hmac_protocol_sequence_and_ciphertext_tamper_are_refused(
-    live_daemon: LiveDaemon, tmp_path: Path
+    live_daemon: LiveDaemon,
+    tmp_path: Path,
+    authentication_observations: AuthenticationGateObservations,
 ) -> None:
     scope = Scope("owner-auth", "project-auth")
     record = ConnectionRecord.load(live_daemon.record)
@@ -753,6 +897,7 @@ async def test_hmac_protocol_sequence_and_ciphertext_tamper_are_refused(
             await asyncio.wait_for(
                 client._handshake(reader, writer, wrong_hmac), timeout=5
             )
+        authentication_observations.record_invalid_rejection("wrong-hmac")
     finally:
         await _close_writer(writer)
 
@@ -774,6 +919,9 @@ async def test_hmac_protocol_sequence_and_ciphertext_tamper_are_refused(
             assert refusal["error"]["code"] == "UNSUPPORTED_PROTOCOL"
             assert refusal["supported_protocol_min"] == PROTOCOL
             assert refusal["supported_protocol_max"] == PROTOCOL
+            authentication_observations.record_invalid_rejection(
+                f"unsupported-{protocols[0]}"
+            )
         finally:
             await _close_writer(writer)
 
@@ -781,6 +929,7 @@ async def test_hmac_protocol_sequence_and_ciphertext_tamper_are_refused(
     await write_frame(writer, _request(2, scope, "reordered-request"))
     with pytest.raises((HypermidConnectionError, ConnectionError, OSError)):
         await asyncio.wait_for(read_frame(reader), timeout=5)
+    authentication_observations.record_invalid_rejection("reordered-sequence")
     await _close_writer(writer)
 
     _client, reader, writer = await _authenticated_stream(live_daemon.record, scope)
@@ -790,6 +939,7 @@ async def test_hmac_protocol_sequence_and_ciphertext_tamper_are_refused(
     await write_frame(writer, replay)
     with pytest.raises((HypermidConnectionError, ConnectionError, OSError)):
         await asyncio.wait_for(read_frame(reader), timeout=5)
+    authentication_observations.record_invalid_rejection("replayed-sequence")
     await _close_writer(writer)
 
     async with _proxy_record(live_daemon, tmp_path, "tamper") as (path, proxy):
@@ -814,12 +964,18 @@ async def test_hmac_protocol_sequence_and_ciphertext_tamper_are_refused(
                     timeout=5,
                 )
             assert proxy.tampered
+            authentication_observations.record_invalid_rejection(
+                "modified-ciphertext"
+            )
         finally:
             await _close_writer(writer)
 
 
 @pytest.mark.asyncio
-async def test_revoked_certificate_is_rejected_by_real_daemon(tmp_path: Path) -> None:
+async def test_revoked_certificate_is_rejected_by_real_daemon(
+    tmp_path: Path,
+    authentication_observations: AuthenticationGateObservations,
+) -> None:
     initial = _start_daemon(tmp_path, "initial")
     tls_directory = initial.tls_directory
     initial.stop()
@@ -850,7 +1006,12 @@ async def test_revoked_certificate_is_rejected_by_real_daemon(tmp_path: Path) ->
             client_certificate=str(revoked_cert),
             client_private_key=str(revoked_key),
         )
-        await _connection_fails(revoked_record, scope)
+        await _connection_fails(
+            revoked_record,
+            scope,
+            authentication_observations,
+            "revoked-client-certificate",
+        )
         assert _durable_snapshot(tmp_path) == baseline
     finally:
         daemon.stop()
