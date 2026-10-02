@@ -19,7 +19,7 @@
 - [x] base-05. Message-plane contracts and topology
   - _Requirements: base-bus.1, base-bus.2_
 
-- [ ] base-06. In-memory and NATS bus backends
+- [x] base-06. In-memory and NATS bus backends
   - _Requirements: base-bus.1, base-bus.3_
 
 - [x] base-07. Tool and runner role protocols

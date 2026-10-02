@@ -1,0 +1,19 @@
+[package]
+name = "hypermid-bus-memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+async-trait.workspace = true
+hypermid-bus-contracts = { path = "../hypermid-bus-contracts" }
+hypermid-contracts = { path = "../hypermid-contracts" }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true
+

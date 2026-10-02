@@ -127,7 +127,7 @@ verify_cmd = "cargo test -p hypermid-bus-contracts -p hypermid-bus-naming --mani
 
 [task.base-06]
 title = "In-memory and NATS bus backends"
-status = "pending"
+status = "done"
 wave = 6
 owner_lane = "foundation"
 requires = ["base-05"]

@@ -172,7 +172,7 @@ touches = ["crates/hypermid-bus-contracts/Cargo.toml", "crates/hypermid-bus-cont
 verify_cmd = "cargo test -p hypermid-bus-contracts -p hypermid-bus-naming --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_bus_contracts.py"
 [task.base-06]
 title = "In-memory and NATS bus backends"
-status = "pending"
+status = "done"
 wave = 6
 owner_lane = "foundation"
 requires = ["wave-5-close"]

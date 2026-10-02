@@ -1,0 +1,41 @@
+{
+  "task": "base-06",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-bus-memory -p hypermid-bus-nats --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_bus_backends.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-bus-nats authenticated_server_leaf_revocation_and_system_matrix --manifest-path Cargo.toml",
+    "cargo test -p hypermid-bus --test recovery durable_consumer_resume_preserves_inflight_redelivery_and_refuses_identity_drift -- --exact"
+  ],
+  "successful_gate_count": 3,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/hypermid/test_base_bus_backends.py": "8546acfa8e095b2b9c74e46520ff2ec9d7bfc6498baaa0e1a1fe52cde0a7f6e5",
+    "crates/hypermid-bus-memory/Cargo.toml": "444112a47bd7cbc4b63d12b6dd648ee0f4990a4c03f6d2444e0afd7582d223a8",
+    "crates/hypermid-bus-memory/src/backend.rs": "44ab0667c5a1feaac8b9f33bf038c306ecd020c062916aa4391091995f2309cf",
+    "crates/hypermid-bus-memory/src/lib.rs": "77e812ec9f117b842e32c440714a98e50279a7aeb02a7b4bc036f3b01de45f00",
+    "crates/hypermid-bus-nats/Cargo.toml": "33d74b3d13b0533d6a1af5986410db8df397530cdc827d514b6be7ecdeea0c64",
+    "crates/hypermid-bus-nats/src/connection.rs": "31e094024125388d94fc41331f428607dab77200bc0d74deedd8ce4ba0987c00",
+    "crates/hypermid-bus-nats/src/lib.rs": "bb918c15878e84d1187d57a07966affe31dcb35bc3121e088f58dc59f4d5dcdf",
+    "crates/hypermid-bus-nats/src/register.rs": "73b8c75082fabb00bed4434d007da2adaa62694c0dc7e62e7023b9b354063c6c",
+    "crates/hypermid-bus-nats/src/stream.rs": "3036a3a4799ef5b268d889f16748fd1d35ac8d7ba569c8fdb3357476e648cba8",
+    "crates/hypermid-bus-nats/src/work_queue.rs": "61b15d0b35282160a4ae109f2d133c8d8466adf756eacc944d732da57a00f740",
+    "crates/hypermid-bus/src/events.rs": "09e629a2a09bdf6c3f2599b2cce71472c2308bd11d769a12f39b9ff783617ef4",
+    "crates/hypermid-bus/tests/recovery.rs": "a708082f73f90b3f4826859c553c25aabf2f9b07e894ab481a0d3d5e634ee213"
+  },
+  "tested_source_sha256": {
+    "checks/hypermid/test_base_bus_backends.py": "8546acfa8e095b2b9c74e46520ff2ec9d7bfc6498baaa0e1a1fe52cde0a7f6e5",
+    "crates/hypermid-bus-memory/Cargo.toml": "444112a47bd7cbc4b63d12b6dd648ee0f4990a4c03f6d2444e0afd7582d223a8",
+    "crates/hypermid-bus-memory/src/backend.rs": "44ab0667c5a1feaac8b9f33bf038c306ecd020c062916aa4391091995f2309cf",
+    "crates/hypermid-bus-memory/src/lib.rs": "77e812ec9f117b842e32c440714a98e50279a7aeb02a7b4bc036f3b01de45f00",
+    "crates/hypermid-bus-nats/Cargo.toml": "33d74b3d13b0533d6a1af5986410db8df397530cdc827d514b6be7ecdeea0c64",
+    "crates/hypermid-bus-nats/src/connection.rs": "31e094024125388d94fc41331f428607dab77200bc0d74deedd8ce4ba0987c00",
+    "crates/hypermid-bus-nats/src/lib.rs": "bb918c15878e84d1187d57a07966affe31dcb35bc3121e088f58dc59f4d5dcdf",
+    "crates/hypermid-bus-nats/src/register.rs": "73b8c75082fabb00bed4434d007da2adaa62694c0dc7e62e7023b9b354063c6c",
+    "crates/hypermid-bus-nats/src/stream.rs": "3036a3a4799ef5b268d889f16748fd1d35ac8d7ba569c8fdb3357476e648cba8",
+    "crates/hypermid-bus-nats/src/work_queue.rs": "61b15d0b35282160a4ae109f2d133c8d8466adf756eacc944d732da57a00f740",
+    "crates/hypermid-bus/src/events.rs": "09e629a2a09bdf6c3f2599b2cce71472c2308bd11d769a12f39b9ff783617ef4",
+    "crates/hypermid-bus/tests/recovery.rs": "a708082f73f90b3f4826859c553c25aabf2f9b07e894ab481a0d3d5e634ee213"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}
