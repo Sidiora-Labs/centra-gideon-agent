@@ -1,0 +1,14 @@
+{
+  "task": "ctx-diagnostics",
+  "status": "passed",
+  "command": "cargo test -p hypermid-context --test diagnostics_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_diagnostics.py",
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-core/src/diagnostics.rs": "5bb1e8fced27466295e1e5d56b6f8f09fccfc2280684f91188b654b1c6e3efde",
+    "crates/hypermid-context/src/diagnostic_store.rs": "59e7ad0c4a1549af3d580ce15f12fd13d2d57f9fe98e9cec6221cb3c74813645",
+    "runtime/gideon/hypermid/diagnostics.py": "f544bc76cb47041e17b53df141cf585808c9314a812f2d9177dbb1d6b06108f9",
+    "crates/hypermid-context/tests/diagnostics_contract.rs": "a9d5aa4546b2bd8c8fa0dd649d33dfb2ec2eff195d5c80511035b07ab82bf817",
+    "checks/runtime/test_hypermid_diagnostics.py": "e7a49c98a4fbc52e73d585b032d0b419367a16e7483da61e13d545cd8915edd7"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate."
+}

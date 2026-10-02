@@ -34,7 +34,7 @@
 - [ ] ctx-cache-policy. Implement stable baseline and delta cache regions
   - _Requirements: ctx-cache-policy.1, ctx-cache-policy.2, ctx-cache-policy.3_
 
-- [ ] ctx-diagnostics. Implement context diagnostics and accounting
+- [x] ctx-diagnostics. Implement context diagnostics and accounting
   - _Requirements: ctx-diagnostics.1, ctx-diagnostics.2, ctx-diagnostics.3_
 
 - [ ] ctx-gideon-adapter. Install the Gideon pass-through adapter and context status

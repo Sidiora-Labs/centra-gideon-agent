@@ -672,7 +672,7 @@ touches = ["crates/hypermid-core/src/mode.rs", "crates/hypermid-context/src/conf
 verify_cmd = "cargo test -p hypermid-context --test mode_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_modes.py"
 [task.ctx-diagnostics]
 title = "Implement context diagnostics and accounting"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "context"
 requires = ["ctx-identity"]
