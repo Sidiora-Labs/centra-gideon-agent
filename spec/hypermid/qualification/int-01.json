@@ -2,9 +2,7 @@
   "task": "int-01",
   "status": "passed",
   "declared_command": "PYTHONPATH=runtime python checks/hypermid/verify_wave_01.py",
-  "recorded_portable_commands": [
-    "PYTHONPATH=runtime HYPERMID_DAEMON_BINARY=<immutable-07ea642b> python -m pytest checks/hypermid/waves/test_wave_01.py -q"
-  ],
+  "recorded_portable_commands": [],
   "successful_gate_count": 1,
   "exit_code": 0,
   "source_sha256": {

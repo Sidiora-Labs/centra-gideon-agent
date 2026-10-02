@@ -109,7 +109,7 @@
 - [x] int-01. Implement integration slice 1: local daemon auth, pass-through journal adapter and status
   - _Requirements: int-01.1, int-01.2, int-01.3_
 
-- [ ] int-02. Implement integration slice 2: durable summaries, full memory CRUD, raw recovery and opt-in ownership
+- [x] int-02. Implement integration slice 2: durable summaries, full memory CRUD, raw recovery and opt-in ownership
   - _Requirements: int-02.1, int-02.2, int-02.3, int-02.4_
 
 - [ ] int-03. Implement integration slice 3: cache policy, hybrid recall and native inspection

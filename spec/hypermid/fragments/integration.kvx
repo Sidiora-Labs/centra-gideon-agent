@@ -49,7 +49,7 @@ ac_4 = "A crash-recovery journey replays the knowledge event journal, discards s
 
 [task.int-02]
 title = "Implement integration slice 2: durable summaries, full memory CRUD, raw recovery and opt-in ownership"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "integration"
 requires = ["int-01", "base-03", "mem-records", "ctx-background-summary", "ctx-recovery", "fab-02-registry-routing", "sec-05", "ux-inspection"]

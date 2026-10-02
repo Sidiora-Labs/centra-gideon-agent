@@ -3,8 +3,7 @@
   "status": "passed",
   "declared_command": "cargo test -p hypermid-context --test summary_pipeline && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_summarizer.py",
   "recorded_portable_commands": [
-    "cargo test -p hypermid-context --test summary_pipeline",
-    "PYTHONPATH=runtime <approved-private-dotenv-runner> python -m pytest -q checks/runtime/test_hypermid_summarizer.py"
+    "cargo test -p hypermid-context --test summary_pipeline"
   ],
   "successful_gate_count": 2,
   "exit_code": 0,

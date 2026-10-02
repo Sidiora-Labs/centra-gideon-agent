@@ -1,0 +1,38 @@
+{
+  "task": "int-02",
+  "status": "passed",
+  "declared_command": "PYTHONPATH=runtime python checks/hypermid/verify_wave_02.py",
+  "recorded_portable_commands": [],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/hypermid/verify_wave_02.py": "e166b481697ab820c1125f60e77c23958203a93cf844b5b914e01460b0970cf2",
+    "checks/hypermid/waves/test_wave_02.py": "75b2fc5c5da42bed8ce55870cf3d02b20d6956c2574b4910e32470379bed10b0",
+    "checks/hypermid/waves/wave_02.py": "c43bfe48b164b9c49dee44610e29b6226f481495c23204c10de03ad10a1db002",
+    "runtime/gideon/cognition/bg_compress.py": "9ab2dbbb9f033bcd857b56584be1acf9a467a1c0d4761533d5eca2f9d938740c",
+    "runtime/gideon/cognition/context_engine.py": "58c68290aa41a1b761e1faedc546234956973ad2f7db7c14cc733318b13ec425",
+    "runtime/gideon/cognition/history.py": "6906dbb686aa5b6f7468819abd7a996810a7981b0515460555d0d45aac35e336",
+    "runtime/gideon/cognition/memory_service.py": "753432483030718429501f6fffe08b68142157c79ddb346cbc3eaf15e78cafaa",
+    "runtime/gideon/hypermid/context.py": "de7a4a1448bae3fa3b7c9a58e989139f3441a2aa6b4ee7e5a1a7bf11fd187017",
+    "runtime/gideon/hypermid/host_model.py": "602fd88147ce090586f7c8b951527402bfb5fef0b0390420e4c08ebfb46d6736",
+    "runtime/gideon/hypermid/memory.py": "9d8e573f019bd5ec38e1e0706b6bc952a1f37f009e337e17656008e0f9b8cc4a",
+    "runtime/gideon/hypermid/writer.py": "0368b0a38ee9ed221648b2991856cfbc27301cef1ff14b06a234796df445c368",
+    "runtime/gideon/hypermid/contracts.py": "4e836a895cc22af8860ad65da2fb4dd1c6f9fbc017c7cb2804376beec2a604a1"
+  },
+  "tested_source_sha256": {
+    "checks/hypermid/verify_wave_02.py": "e166b481697ab820c1125f60e77c23958203a93cf844b5b914e01460b0970cf2",
+    "checks/hypermid/waves/test_wave_02.py": "75b2fc5c5da42bed8ce55870cf3d02b20d6956c2574b4910e32470379bed10b0",
+    "checks/hypermid/waves/wave_02.py": "c43bfe48b164b9c49dee44610e29b6226f481495c23204c10de03ad10a1db002",
+    "runtime/gideon/cognition/bg_compress.py": "9ab2dbbb9f033bcd857b56584be1acf9a467a1c0d4761533d5eca2f9d938740c",
+    "runtime/gideon/cognition/context_engine.py": "58c68290aa41a1b761e1faedc546234956973ad2f7db7c14cc733318b13ec425",
+    "runtime/gideon/cognition/history.py": "6906dbb686aa5b6f7468819abd7a996810a7981b0515460555d0d45aac35e336",
+    "runtime/gideon/cognition/memory_service.py": "753432483030718429501f6fffe08b68142157c79ddb346cbc3eaf15e78cafaa",
+    "runtime/gideon/hypermid/context.py": "de7a4a1448bae3fa3b7c9a58e989139f3441a2aa6b4ee7e5a1a7bf11fd187017",
+    "runtime/gideon/hypermid/host_model.py": "602fd88147ce090586f7c8b951527402bfb5fef0b0390420e4c08ebfb46d6736",
+    "runtime/gideon/hypermid/memory.py": "9d8e573f019bd5ec38e1e0706b6bc952a1f37f009e337e17656008e0f9b8cc4a",
+    "runtime/gideon/hypermid/writer.py": "0368b0a38ee9ed221648b2991856cfbc27301cef1ff14b06a234796df445c368",
+    "runtime/gideon/hypermid/contracts.py": "4e836a895cc22af8860ad65da2fb4dd1c6f9fbc017c7cb2804376beec2a604a1"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}
