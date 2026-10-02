@@ -57,6 +57,37 @@ describe('console third-party notice generation', () => {
     })).toThrow(/names no installed package/)
   })
 
+  it('attributes rendered widget runtime modules to their installed packages', async () => {
+    const { buildCensus } = await loadNotices()
+    const modules = [
+      '\0gideon:widget-runtime/tailwindcss/index.js',
+      '\0gideon:widget-runtime/react/react.production.js',
+      '\0gideon:widget-runtime/react-dom/react-dom.production.js',
+      '\0gideon:widget-runtime/react-dom/react-dom-client.production.js',
+      '\0gideon:widget-runtime/scheduler/scheduler.production.js',
+    ]
+    const result = buildCensus({
+      outputs: new Map([['assets/widget-runtime.js', new Set(modules)]]),
+      webDir: resolve(root, 'apps/console/src'),
+      repoRoot: root,
+    })
+
+    const expectedPackages = ['react', 'react-dom', 'scheduler', 'tailwindcss']
+    for (const name of expectedPackages) {
+      const packageJson = JSON.parse(readFileSync(resolve(root, 'node_modules', name, 'package.json'), 'utf8')) as {
+        version: string
+      }
+      expect(result.json.packages).toContainEqual(
+        expect.objectContaining({ name, version: packageJson.version, license: 'MIT' }),
+      )
+    }
+    expect(result.json.files['assets/widget-runtime.js']).toEqual(
+      expectedPackages.map((name) => `node_modules/${name}`),
+    )
+    expect(result.text).toContain('Meta Platforms, Inc. and affiliates')
+    expect(result.text).toContain('Tailwind Labs, Inc.')
+  })
+
   it('preserves an earlier build failure instead of checking incomplete output', async () => {
     const { thirdPartyNotices } = await loadNotices()
     const transformFailure = thirdPartyNotices(resolve(root, 'absent-console'), { repoRoot: root }).plugin()

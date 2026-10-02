@@ -23,6 +23,7 @@ ROOT_FILES = (
     "setup.py",
 )
 SOURCE_ROOTS = (
+    "apps/assistant",
     "apps/console",
     "apps/desktop",
     "checks/hypermid",

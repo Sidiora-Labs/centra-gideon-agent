@@ -102,8 +102,11 @@ FROM ${CONSOLE_IMAGE} AS console
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/console/package.json apps/console/
-RUN npm ci --workspace=apps/console --prefer-offline
+COPY apps/assistant/package.json apps/assistant/package-lock.json apps/assistant/
+RUN npm ci --workspace=apps/console --prefer-offline && \
+    npm ci --prefix apps/assistant --prefer-offline
 COPY apps/console/ apps/console/
+COPY apps/assistant/ apps/assistant/
 COPY runtime/gideon/security/scan_rule_gloss.json runtime/gideon/security/scan_rule_gloss.json
 RUN npm exec --workspace=apps/console -- vite build
 

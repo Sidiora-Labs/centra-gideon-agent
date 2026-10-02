@@ -56,6 +56,10 @@ const VIRTUAL_ORIGINS = [
   ['\0commonjsHelpers.js', ['vite']],
   ['__vite-browser-external', ['vite']], // the stub Vite substitutes for a Node built-in
   ['\0rolldown/runtime', ['vite', 'rolldown']],
+  ['\0gideon:widget-runtime/react/', ['react']],
+  ['\0gideon:widget-runtime/react-dom/', ['react-dom']],
+  ['\0gideon:widget-runtime/scheduler/', ['react-dom', 'scheduler']],
+  ['\0gideon:widget-runtime/tailwindcss/', ['tailwindcss']],
 ]
 
 const CSS_MODULE = /\.(?:css|less|sass|scss|styl|stylus|pcss|postcss|sss)$/

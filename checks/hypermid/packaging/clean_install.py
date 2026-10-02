@@ -33,6 +33,33 @@ class QualificationFailure(RuntimeError):
     pass
 
 
+def _environment_flag(name: str) -> bool:
+    value = os.environ.get(name, "").strip().lower()
+    if value in {"", "0", "false", "no"}:
+        return False
+    if value in {"1", "true", "yes"}:
+        return True
+    raise QualificationFailure(f"{name} must be a boolean flag")
+
+
+def _docker_object_exists(kind: str, name: str) -> bool:
+    result = subprocess.run(
+        ["docker", kind, "inspect", name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise QualificationFailure(
+        f"docker {kind} inspection failed with exit {result.returncode}: "
+        + result.stderr.strip()
+    )
+
+
 def _run(
     command: list[str],
     *,
@@ -147,6 +174,13 @@ def qualify(
     image = f"hypermid-packaged-install:{run_id}"
     volume = f"hypermid_packaged_install_{run_id}"
     container_prefix = f"hypermid-packaged-{run_id}"
+    preserve_package_artifacts = _environment_flag(
+        "GIDEON_PRESERVE_PACKAGE_ARTIFACTS"
+    )
+    if _docker_object_exists("image", image):
+        raise QualificationFailure(f"packaging image already exists: {image}")
+    if _docker_object_exists("volume", volume):
+        raise QualificationFailure(f"packaging volume already exists: {volume}")
     with tempfile.TemporaryDirectory(prefix="hypermid-package-") as temporary:
         work = Path(temporary)
         wheel_source = work / "wheel-source"
@@ -239,79 +273,85 @@ def qualify(
             log=log,
         )
 
-        _run(
-            [
-                "docker",
-                "build",
-                "--memory",
-                "4g",
-                "--build-arg",
-                "CARGO_BUILD_JOBS=2",
-                "--target",
-                "single",
-                "-f",
-                "infrastructure/docker/Dockerfile.backend",
-                "-t",
-                image,
-                ".",
-            ],
-            log=log,
-            cwd=container_source,
-            environment=build_environment,
-            timeout=3600,
-        )
-        inspect = subprocess.run(
-            ["docker", "image", "inspect", image],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        image_inspection = json.loads(inspect.stdout)
-        if not isinstance(image_inspection, list) or len(image_inspection) != 1:
-            raise QualificationFailure("container inspection returned an invalid result")
-        image_record = image_inspection[0]
-        image_user = str(image_record.get("Config", {}).get("User", ""))
-        if image_user not in {"gideon", "10001", "10001:10001"}:
-            raise QualificationFailure(f"container user is not unprivileged: {image_user!r}")
-        _write_json(
-            artifact_dir / "image-manifest.json",
-            {
-                "schema_version": 1,
-                "source_digest": source_digest,
-                "image_tag": image,
-                "image_id": image_record.get("Id"),
-                "repo_digests": sorted(image_record.get("RepoDigests") or []),
-                "config_user": image_user,
-            },
-        )
-
-        _run(["docker", "volume", "create", volume], log=log)
-        probe = source_root / "checks/hypermid/packaging/container_probe.py"
-        if not probe.is_file():
-            raise QualificationFailure("frozen source omits the container probe")
-        probe_mount = f"{probe}:/opt/hypermid-package-probe.py:ro"
-        common = [
-            "docker",
-            "run",
-            "--rm",
-            "--memory",
-            "2g",
-            "--cpus",
-            "2",
-            "--user",
-            "10001:10001",
-            "-e",
-            "GIDEON_HOME=/data",
-            "-e",
-            "GIDEON_WORKSPACE=/data/workspace",
-            "-v",
-            f"{volume}:/data",
-            "-v",
-            probe_mount,
-            "--entrypoint",
-            "/opt/venv/bin/python",
-        ]
+        image_created = False
+        volume_created = False
         try:
+            _run(
+                [
+                    "docker",
+                    "build",
+                    "--memory",
+                    "4g",
+                    "--build-arg",
+                    "CARGO_BUILD_JOBS=2",
+                    "--target",
+                    "single",
+                    "-f",
+                    "infrastructure/docker/Dockerfile.backend",
+                    "-t",
+                    image,
+                    ".",
+                ],
+                log=log,
+                cwd=container_source,
+                environment=build_environment,
+                timeout=3600,
+            )
+            image_created = True
+            inspect = subprocess.run(
+                ["docker", "image", "inspect", image],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            image_inspection = json.loads(inspect.stdout)
+            if not isinstance(image_inspection, list) or len(image_inspection) != 1:
+                raise QualificationFailure("container inspection returned an invalid result")
+            image_record = image_inspection[0]
+            image_user = str(image_record.get("Config", {}).get("User", ""))
+            if image_user not in {"gideon", "10001", "10001:10001"}:
+                raise QualificationFailure(
+                    f"container user is not unprivileged: {image_user!r}"
+                )
+            _write_json(
+                artifact_dir / "image-manifest.json",
+                {
+                    "schema_version": 1,
+                    "source_digest": source_digest,
+                    "image_tag": image,
+                    "image_id": image_record.get("Id"),
+                    "repo_digests": sorted(image_record.get("RepoDigests") or []),
+                    "config_user": image_user,
+                },
+            )
+
+            _run(["docker", "volume", "create", volume], log=log)
+            volume_created = True
+            probe = source_root / "checks/hypermid/packaging/container_probe.py"
+            if not probe.is_file():
+                raise QualificationFailure("frozen source omits the container probe")
+            probe_mount = f"{probe}:/opt/hypermid-package-probe.py:ro"
+            common = [
+                "docker",
+                "run",
+                "--rm",
+                "--memory",
+                "2g",
+                "--cpus",
+                "2",
+                "--user",
+                "10001:10001",
+                "-e",
+                "GIDEON_HOME=/data",
+                "-e",
+                "GIDEON_WORKSPACE=/data/workspace",
+                "-v",
+                f"{volume}:/data",
+                "-v",
+                probe_mount,
+                "--entrypoint",
+                "/opt/venv/bin/python",
+            ]
             _run(
                 common
                 + ["--name", f"{container_prefix}-first", image, "/opt/hypermid-package-probe.py", "first"],
@@ -329,18 +369,21 @@ def qualify(
                 stderr=subprocess.DEVNULL,
                 check=False,
             )
-            subprocess.run(
-                ["docker", "volume", "rm", "-f", volume],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            subprocess.run(
-                ["docker", "image", "rm", "-f", image],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
+            if not preserve_package_artifacts:
+                if volume_created:
+                    subprocess.run(
+                        ["docker", "volume", "rm", "-f", volume],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                    )
+                if image_created:
+                    subprocess.run(
+                        ["docker", "image", "rm", "-f", image],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                    )
 
     return {
         "wheel": wheel_result,
