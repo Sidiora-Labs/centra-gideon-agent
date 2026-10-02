@@ -106,7 +106,7 @@
 - [ ] fab-08-integration. Qualify the complete OSS process fabric
   - _Requirements: fab-001.1, fab-001.2, fab-002.1, fab-002.2, fab-003.1, fab-003.2, fab-003.3, fab-004.1, fab-004.2, fab-005.1, fab-005.2, fab-006.1, fab-006.2, fab-007.1, fab-007.2, fab-008.1, fab-008.2, fab-009.1, fab-009.2, fab-010.1, fab-010.2, fab-011.1, fab-011.2, fab-012.1, fab-012.2, fab-013.1, fab-013.2, fab-014.1, fab-014.2, fab-015.1, fab-015.2, fab-016.1, fab-016.2, fab-017.1, fab-017.2_
 
-- [ ] int-01. Implement integration slice 1: local daemon auth, pass-through journal adapter and status
+- [x] int-01. Implement integration slice 1: local daemon auth, pass-through journal adapter and status
   - _Requirements: int-01.1, int-01.2, int-01.3_
 
 - [ ] int-02. Implement integration slice 2: durable summaries, full memory CRUD, raw recovery and opt-in ownership

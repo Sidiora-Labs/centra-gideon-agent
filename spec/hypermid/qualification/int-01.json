@@ -1,0 +1,39 @@
+{
+  "task": "int-01",
+  "status": "passed",
+  "declared_command": "PYTHONPATH=runtime python checks/hypermid/verify_wave_01.py",
+  "recorded_portable_commands": [
+    "PYTHONPATH=runtime HYPERMID_DAEMON_BINARY=<immutable-07ea642b> python -m pytest checks/hypermid/waves/test_wave_01.py -q"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "runtime/gideon/hypermid/__init__.py": "d1b489b1d33d05a21c93516e26fe3dfeb1fbbfb0d6778056e690b8320ce7b7ab",
+    "runtime/gideon/hypermid/adapter.py": "c0fd225b3ef4011ced9ee0d392135a1c6be0deba8fbdda1990ccb318f2907f85",
+    "runtime/gideon/hypermid/client.py": "6839d3f1c075ffa7fbf51b231b4b38cbf95f4c66003c1990c7f37326dfdf37f7",
+    "runtime/gideon/hypermid/config.py": "c4a215959a5d42d3f2b29354bff29078cfb010eab311d3348ced7dd8d7cb382f",
+    "runtime/gideon/hypermid/foundation.py": "3a0640b8f5cde359fe44078c0e2a341f95e02a91ad9a38ef4abe2f0e5e89f224",
+    "runtime/gideon/hypermid/lifecycle.py": "60cc7607ecc69c5c7f8668f9c578d9281abde4e2a9045d2aa3c6e86d90e23cd2",
+    "runtime/gideon/hypermid/models.py": "e9260119b0da89f842c786c2c85a6c9918ae6c8189a4744586edbaff0e12141c",
+    "runtime/gideon/hypermid/status.py": "70d77995a71e3f5ab68902303ede36527bd47662cd9a4728fdda0153673f5283",
+    "checks/hypermid/waves/local_journey.py": "bde5abf5c7ff4654981489e7239a8fa80c830c1e9c95912223724488082ed123",
+    "checks/hypermid/verify_wave_01.py": "846d1545518579df2246505f8a33aeb67be39c515cd8ca05a4b9e7215525aa20"
+  },
+  "tested_source_sha256": {
+    "runtime/gideon/hypermid/__init__.py": "d1b489b1d33d05a21c93516e26fe3dfeb1fbbfb0d6778056e690b8320ce7b7ab",
+    "runtime/gideon/hypermid/adapter.py": "c0fd225b3ef4011ced9ee0d392135a1c6be0deba8fbdda1990ccb318f2907f85",
+    "runtime/gideon/hypermid/client.py": "6839d3f1c075ffa7fbf51b231b4b38cbf95f4c66003c1990c7f37326dfdf37f7",
+    "runtime/gideon/hypermid/config.py": "c4a215959a5d42d3f2b29354bff29078cfb010eab311d3348ced7dd8d7cb382f",
+    "runtime/gideon/hypermid/foundation.py": "3a0640b8f5cde359fe44078c0e2a341f95e02a91ad9a38ef4abe2f0e5e89f224",
+    "runtime/gideon/hypermid/lifecycle.py": "60cc7607ecc69c5c7f8668f9c578d9281abde4e2a9045d2aa3c6e86d90e23cd2",
+    "runtime/gideon/hypermid/models.py": "e9260119b0da89f842c786c2c85a6c9918ae6c8189a4744586edbaff0e12141c",
+    "runtime/gideon/hypermid/status.py": "70d77995a71e3f5ab68902303ede36527bd47662cd9a4728fdda0153673f5283",
+    "checks/hypermid/waves/local_journey.py": "bde5abf5c7ff4654981489e7239a8fa80c830c1e9c95912223724488082ed123",
+    "checks/hypermid/waves/test_wave_01.py": "8e92402370de7eb4335f1c365afe51a2e4734d2848fa1b75def3eed0d7744c72",
+    "checks/hypermid/verify_wave_01.py": "846d1545518579df2246505f8a33aeb67be39c515cd8ca05a4b9e7215525aa20"
+  },
+  "scope": "Authenticated local daemon restart, scoped pass-through with Gideon as sole writer, byte-preserved ConversationLog, live NativeAgentRuntime conversation, one terminal response, and unavailable-daemon fallback on the recorded source hashes and immutable daemon.",
+  "source_adjustments": [
+    "Current cumulative Hypermid adapter sources are preserved; older component snapshots are not restored."
+  ]
+}

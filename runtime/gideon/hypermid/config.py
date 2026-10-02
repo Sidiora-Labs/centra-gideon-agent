@@ -281,6 +281,7 @@ class DaemonConfig:
     request_timeout_ms: int = 30_000
     shutdown_timeout_ms: int = 10_000
     connection_record: str | None = None
+    mcp_config: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.transport, DaemonTransport):
@@ -291,6 +292,8 @@ class DaemonConfig:
         _bounded_string(self.executable, "executable")
         if self.connection_record is not None:
             _bounded_string(self.connection_record, "connection_record")
+        if self.mcp_config is not None:
+            _bounded_string(self.mcp_config, "mcp_config")
         if type(self.start_on_demand) is not bool:
             raise ValueError("start_on_demand must be a boolean")
         _bounded_integer(self.request_timeout_ms, "request_timeout_ms", 100, 600_000)

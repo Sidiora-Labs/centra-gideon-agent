@@ -1111,7 +1111,7 @@ ac_3 = "RuntimeProcess starts, health-checks and drains the daemon over authenti
 
 [task.int-01]
 title = "Implement integration slice 1: local daemon auth, pass-through journal adapter and status"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "integration"
 requires = ["mem-foundation", "ux-contract"]
