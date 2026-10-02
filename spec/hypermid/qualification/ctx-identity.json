@@ -1,0 +1,14 @@
+{
+  "task": "ctx-identity",
+  "status": "passed",
+  "command": "cargo test -p hypermid-context --test identity_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_identity.py",
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-core/src/identity.rs": "c7f1beeafabc44182957892a4658955b4a3609a70556da777b9451c89506c71a",
+    "crates/hypermid-context/src/identity_store.rs": "0dfde54887868cd1adb469136a7eaec3648781496cc522913ade27143eea757e",
+    "runtime/gideon/hypermid/identity.py": "f259cd1fe33cccf30f445d078a78e1e5f75d7a7e62cae3ef9fcb9e3249de2411",
+    "crates/hypermid-context/tests/identity_contract.rs": "83b07313120a9db5487b59ce9f170b9e5262111e6526a267f319d6ab93a72a73",
+    "checks/runtime/test_hypermid_identity.py": "c547979fe70463c0f1274bbd59965da56a278072cbc5649e3db00eb37ce64742"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate."
+}

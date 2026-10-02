@@ -49,7 +49,7 @@
 - [ ] ctx-hooks. Implement bounded context lifecycle hooks
   - _Requirements: ctx-hooks.1, ctx-hooks.2, ctx-hooks.3_
 
-- [ ] ctx-identity. Implement stable scoped context identities
+- [x] ctx-identity. Implement stable scoped context identities
   - _Requirements: ctx-identity.1, ctx-identity.2_
 
 - [ ] ctx-modes. Implement optional modes and turn-boundary configuration

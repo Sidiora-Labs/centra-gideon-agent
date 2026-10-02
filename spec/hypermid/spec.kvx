@@ -555,7 +555,7 @@ touches = ["crates/hypermid-core/src/protocol.rs", "crates/hypermid-context/src/
 verify_cmd = "cargo test -p hypermid-context --test protocol_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_protocol.py"
 [task.ctx-identity]
 title = "Implement stable scoped context identities"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "context"
 requires = ["ctx-ownership"]

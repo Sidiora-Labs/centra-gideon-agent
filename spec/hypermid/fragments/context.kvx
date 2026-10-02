@@ -136,7 +136,7 @@ verify_cmd = "cargo test -p hypermid-context --test protocol_contract && PYTHONP
 
 [task.ctx-identity]
 title = "Implement stable scoped context identities"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "context"
 requires = ["ctx-ownership"]
