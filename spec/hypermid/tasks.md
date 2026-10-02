@@ -166,7 +166,7 @@
 - [x] sec-01. Implement scoped capability enforcement
   - _Requirements: sec-01.1, sec-01.2, sec-01.3_
 
-- [ ] sec-02. Implement encrypted protocol authentication and compatibility negotiation
+- [x] sec-02. Implement encrypted protocol authentication and compatibility negotiation
   - _Requirements: sec-02.1, sec-02.2, sec-02.3_
 
 - [ ] sec-03. Implement MCP and stdio sandbox with effect reconciliation

@@ -1278,7 +1278,7 @@ ac_3 = "Certificate expiry, revocation, peer mismatch, wrong server name, reorde
 
 [task.sec-02]
 title = "Implement encrypted protocol authentication and compatibility negotiation"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "security"
 requires = ["sec-01", "fab-01-bootstrap"]

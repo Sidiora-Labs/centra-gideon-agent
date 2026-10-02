@@ -1,0 +1,50 @@
+{
+  "task": "sec-02",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-protocol handshake && cargo test -p hypermid-daemon listener && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_auth_protocol.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-transport --test protocol_vectors",
+    "CARGO_TARGET_DIR=<portable target containing immutable symlink> PYTHONPATH=runtime python -m pytest -p no:cacheprovider -q checks/hypermid/test_auth_protocol.py",
+    "python3 -m py_compile checks/hypermid/test_auth_protocol.py; private-path scan; git diff --check"
+  ],
+  "successful_gate_count": 3,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/hypermid/test_auth_protocol.py": "658da41176e04b7740446126c326b681290aef14d1393f822863dc4f66ee2e1b",
+    "crates/hypermid-protocol/Cargo.toml": "c4b33bbe7ff3c4faf184e26c72e816781f7251d937962f0b23591cb398f690b2",
+    "crates/hypermid-protocol/src/frame.rs": "52ed3531b3a8a4a63278b3fcafd7e18e406d6ce1ef8bd459853d026c16cb6f4f",
+    "crates/hypermid-protocol/src/handshake.rs": "26b4b83e001c8085fc4bd82aef4cfdd70595600dd177126e77b8920c8e3471e6",
+    "crates/hypermid-protocol/src/lib.rs": "7489242224c995c59fcca31a316b6197d2e36235db514a51de793a436171944b",
+    "crates/hypermid-transport/Cargo.toml": "bc1c1880f55122650fb5a6a54e036c336c6bccf7ef4586c6d5f3631377a97a2b",
+    "crates/hypermid-transport/src/cancellation.rs": "3af376a43c2137ad0cc9dfbb864375df40ff903933a4a7656d6ce540059fd098",
+    "crates/hypermid-transport/src/deadline.rs": "e39ff4da077a32bde8b083d9c287362aba05553dad095f4271a7fd023ed487dd",
+    "crates/hypermid-transport/src/flow.rs": "065de507499641300b520e5230dd305ab37b7a3a58ad3ea0de20497bb20032b4",
+    "crates/hypermid-transport/src/framing.rs": "ae0f26613615eb9f6fa5527251416923667cc0a27de3a11a37cd3e5b1cd61e05",
+    "crates/hypermid-transport/src/handshake.rs": "ce9658c4962c2008a1de2344159a1812899e2c94ad115af915fba05bcc5b59b8",
+    "crates/hypermid-transport/src/lib.rs": "25ced02e859d776b800f0cb4e22a7fd6a6940470f4f000a65068286f3015e20e",
+    "crates/hypermid-transport/src/local.rs": "d9834c11b4dbcf58cac6ffdfc2bea04cf08aaeb19f581d79cdb3c04e9ea97f35",
+    "crates/hypermid-transport/src/tls.rs": "48a89c369e48c47207547cff99fbba6d710919ea9f6b61dc7190f11829daf243",
+    "crates/hypermid-transport/tests/protocol_vectors.rs": "992f348bc0dc6cd88b27f782a1d2c17cfc41dc4365f580c7b68ee1ab98cc106c",
+    "spec/hypermid/schemas/fabric.schema.json": "f18d3c1d54cb48b947042721dc42372198056ff229019ab0459bb65bae01dd4f"
+  },
+  "tested_source_sha256": {
+    "checks/hypermid/test_auth_protocol.py": "658da41176e04b7740446126c326b681290aef14d1393f822863dc4f66ee2e1b",
+    "crates/hypermid-protocol/Cargo.toml": "c4b33bbe7ff3c4faf184e26c72e816781f7251d937962f0b23591cb398f690b2",
+    "crates/hypermid-protocol/src/frame.rs": "52ed3531b3a8a4a63278b3fcafd7e18e406d6ce1ef8bd459853d026c16cb6f4f",
+    "crates/hypermid-protocol/src/handshake.rs": "26b4b83e001c8085fc4bd82aef4cfdd70595600dd177126e77b8920c8e3471e6",
+    "crates/hypermid-protocol/src/lib.rs": "7489242224c995c59fcca31a316b6197d2e36235db514a51de793a436171944b",
+    "crates/hypermid-transport/Cargo.toml": "bc1c1880f55122650fb5a6a54e036c336c6bccf7ef4586c6d5f3631377a97a2b",
+    "crates/hypermid-transport/src/cancellation.rs": "3af376a43c2137ad0cc9dfbb864375df40ff903933a4a7656d6ce540059fd098",
+    "crates/hypermid-transport/src/deadline.rs": "e39ff4da077a32bde8b083d9c287362aba05553dad095f4271a7fd023ed487dd",
+    "crates/hypermid-transport/src/flow.rs": "065de507499641300b520e5230dd305ab37b7a3a58ad3ea0de20497bb20032b4",
+    "crates/hypermid-transport/src/framing.rs": "ae0f26613615eb9f6fa5527251416923667cc0a27de3a11a37cd3e5b1cd61e05",
+    "crates/hypermid-transport/src/handshake.rs": "ce9658c4962c2008a1de2344159a1812899e2c94ad115af915fba05bcc5b59b8",
+    "crates/hypermid-transport/src/lib.rs": "25ced02e859d776b800f0cb4e22a7fd6a6940470f4f000a65068286f3015e20e",
+    "crates/hypermid-transport/src/local.rs": "d9834c11b4dbcf58cac6ffdfc2bea04cf08aaeb19f581d79cdb3c04e9ea97f35",
+    "crates/hypermid-transport/src/tls.rs": "48a89c369e48c47207547cff99fbba6d710919ea9f6b61dc7190f11829daf243",
+    "crates/hypermid-transport/tests/protocol_vectors.rs": "992f348bc0dc6cd88b27f782a1d2c17cfc41dc4365f580c7b68ee1ab98cc106c",
+    "spec/hypermid/schemas/fabric.schema.json": "f18d3c1d54cb48b947042721dc42372198056ff229019ab0459bb65bae01dd4f"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}

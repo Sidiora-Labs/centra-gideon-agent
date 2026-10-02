@@ -41,11 +41,12 @@
     },
     "Envelope": {
       "type": "object",
-      "required": ["protocol", "kind", "message_id"],
+      "required": ["protocol", "kind", "message_id", "sequence"],
       "properties": {
         "protocol": { "$ref": "#/$defs/Protocol" },
         "kind": { "enum": ["request", "response", "event", "credit", "cancel", "ping", "pong", "close"] },
         "message_id": { "$ref": "#/$defs/Id" },
+        "sequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
         "reply_to": { "$ref": "#/$defs/Id" },
         "route_id": { "$ref": "#/$defs/Id" },
         "route_epoch": { "type": "integer", "minimum": 1 },
@@ -77,17 +78,19 @@
         { "$ref": "#/$defs/ClientHello" },
         { "$ref": "#/$defs/ServerChallenge" },
         { "$ref": "#/$defs/ClientAuthentication" },
-        { "$ref": "#/$defs/SessionAccepted" }
+        { "$ref": "#/$defs/SessionAccepted" },
+        { "$ref": "#/$defs/CompatibilityRefusal" }
       ]
     },
     "ClientHello": {
       "type": "object",
-      "required": ["kind", "protocols", "client_nonce", "connection_class"],
+      "required": ["kind", "protocols", "client_nonce", "connection_class", "scope"],
       "properties": {
         "kind": { "const": "hello" },
         "protocols": { "type": "array", "contains": { "$ref": "#/$defs/Protocol" }, "maxItems": 8 },
         "client_nonce": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "connection_class": { "enum": ["client", "module", "device", "service"] }
+        "connection_class": { "enum": ["client", "module", "device", "service"] },
+        "scope": { "$ref": "#/$defs/Scope" }
       },
       "additionalProperties": false
     },
@@ -126,6 +129,17 @@
         "principal": { "$ref": "#/$defs/Principal" },
         "limits": { "$ref": "#/$defs/ConnectionLimits" },
         "server_time_ms": { "$ref": "#/$defs/TimestampMs" }
+      },
+      "additionalProperties": false
+    },
+    "CompatibilityRefusal": {
+      "type": "object",
+      "required": ["kind", "error", "supported_protocol_min", "supported_protocol_max"],
+      "properties": {
+        "kind": { "const": "close" },
+        "error": { "$ref": "#/$defs/Error" },
+        "supported_protocol_min": { "$ref": "#/$defs/Protocol" },
+        "supported_protocol_max": { "$ref": "#/$defs/Protocol" }
       },
       "additionalProperties": false
     },
