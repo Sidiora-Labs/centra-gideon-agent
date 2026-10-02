@@ -1,0 +1,40 @@
+{
+  "task": "ux-configuration",
+  "status": "passed",
+  "declared_command": "cd apps/console && npx vitest run src/features/hypermid/hypermidConfiguration.test.tsx",
+  "recorded_portable_commands": [
+    "cd apps/console && npx vitest run src/features/hypermid/hypermidConfiguration.test.tsx",
+    "cd apps/console && npx tsc --ignoreConfig --noEmit --jsx react-jsx --moduleResolution bundler --module esnext --target es2022 --lib es2022,dom,dom.iterable --skipLibCheck --types node --strict src/features/hypermid/configState.ts src/features/hypermid/RuntimeConfig.tsx src/features/hypermid/ModelBindings.tsx src/features/hypermid/CredentialVault.tsx src/features/hypermid/hypermidConfiguration.test.tsx",
+    "PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_config_store.py"
+  ],
+  "successful_gate_count": 3,
+  "exit_code": 0,
+  "source_sha256": {
+    "apps/console/src/features/settings/HypermidPanel.tsx": "281df90129976bbec0ee84d42db4c6b42d5c4c564f8094488842ea622c58b746",
+    "apps/console/src/features/hypermid/RuntimeConfig.tsx": "94f68a4a80342b55c39387e051446c556be1969bb9961a8e045feb5806595d57",
+    "apps/console/src/features/hypermid/ModelBindings.tsx": "2f167cf8b4e00990dd0e9b40a2e31e4dba85527f01eaff818df35a0e14d3b56d",
+    "apps/console/src/features/hypermid/CredentialVault.tsx": "e756849c5b2142655e118bdb9de433e81c40097acfa9eb2cb54a2693e87ada23",
+    "apps/console/src/features/hypermid/configState.ts": "3602c0253e393fcffb69fd4ed8c95f11bd402ec43071b258a6212f892846495c",
+    "apps/console/src/features/hypermid/hypermidConfiguration.test.tsx": "dcf0e4b7b2c773e8ce803b80663f0c1aea36bc585cc75c0722193748cea334f8",
+    "apps/console/src/shared/data/api.ts": "f8447e31af485bd44476f07a58d029e9a2041b24591f53351e635ec7684f5ad4",
+    "runtime/gideon/hypermid/configuration.py": "bf7bdf6cfdbf13f9c7ff1cb8e6833dfcb5fd210c44e51a9f0ec65eb283d2b312",
+    "runtime/gideon/hypermid/config_store.py": "6c8899527443337746190a249403b5b953fd773320b4fbd47afd5810315ee830",
+    "checks/runtime/test_hypermid_config_store.py": "b93f821ea200d9ad729cd7179dad560491b5ce8b8afc0dbcea309fe2a6240396",
+    "runtime/gideon/interfaces/dashboard/handlers/hypermid.py": "c04cb34cf27f65d6038b4832c9fed54eef1c1d1fcd1031e17565de25001c72f8"
+  },
+  "tested_source_sha256": {
+    "apps/console/src/features/settings/HypermidPanel.tsx": "281df90129976bbec0ee84d42db4c6b42d5c4c564f8094488842ea622c58b746",
+    "apps/console/src/features/hypermid/RuntimeConfig.tsx": "94f68a4a80342b55c39387e051446c556be1969bb9961a8e045feb5806595d57",
+    "apps/console/src/features/hypermid/ModelBindings.tsx": "2f167cf8b4e00990dd0e9b40a2e31e4dba85527f01eaff818df35a0e14d3b56d",
+    "apps/console/src/features/hypermid/CredentialVault.tsx": "e756849c5b2142655e118bdb9de433e81c40097acfa9eb2cb54a2693e87ada23",
+    "apps/console/src/features/hypermid/configState.ts": "3602c0253e393fcffb69fd4ed8c95f11bd402ec43071b258a6212f892846495c",
+    "apps/console/src/features/hypermid/hypermidConfiguration.test.tsx": "dcf0e4b7b2c773e8ce803b80663f0c1aea36bc585cc75c0722193748cea334f8",
+    "apps/console/src/shared/data/api.ts": "f8447e31af485bd44476f07a58d029e9a2041b24591f53351e635ec7684f5ad4",
+    "runtime/gideon/hypermid/configuration.py": "bf7bdf6cfdbf13f9c7ff1cb8e6833dfcb5fd210c44e51a9f0ec65eb283d2b312",
+    "runtime/gideon/hypermid/config_store.py": "6c8899527443337746190a249403b5b953fd773320b4fbd47afd5810315ee830",
+    "checks/runtime/test_hypermid_config_store.py": "b93f821ea200d9ad729cd7179dad560491b5ce8b8afc0dbcea309fe2a6240396",
+    "runtime/gideon/interfaces/dashboard/handlers/hypermid.py": "c04cb34cf27f65d6038b4832c9fed54eef1c1d1fcd1031e17565de25001c72f8"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}

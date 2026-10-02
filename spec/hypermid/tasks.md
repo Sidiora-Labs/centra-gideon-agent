@@ -187,7 +187,7 @@
 - [ ] sec-08. Implement crash recovery and security acceptance gates
   - _Requirements: sec-08.1, sec-08.2, sec-08.3_
 
-- [ ] ux-configuration. Runtime, model, and credential settings
+- [x] ux-configuration. Runtime, model, and credential settings
   - _Requirements: ux-configuration.1, ux-configuration.2, ux-configuration.3_
 
 - [x] ux-contract. Hypermid v1 clients and Gideon HostAdapter

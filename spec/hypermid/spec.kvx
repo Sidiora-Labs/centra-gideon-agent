@@ -1009,7 +1009,7 @@ touches = ["apps/console/src/features/settings/HypermidPanel.tsx", "apps/console
 verify_cmd = "cd apps/console && npx vitest run src/features/hypermid/hypermidInspection.test.tsx"
 [task.ux-configuration]
 title = "Runtime, model, and credential settings"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "surfaces"
 requires = ["wave-2-close"]

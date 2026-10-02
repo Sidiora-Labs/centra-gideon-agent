@@ -91,7 +91,7 @@ verify_cmd = "cd apps/console && npx vitest run src/features/hypermid/hypermidIn
 
 [task.ux-configuration]
 title = "Runtime, model, and credential settings"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "surfaces"
 requires = ["ux-inspection"]
