@@ -13,11 +13,13 @@ use crate::records::{
     MemoryRecord, RecordDraft, RecordMutation, RelocationMutation, SplitMutation, VerificationState,
 };
 use crate::search::{SearchResponse, StoredSearchRequest};
+use crate::snapshot::create_memory_snapshot;
 use crate::{
     error, AuthContext, CapabilityOperation, Cursor, Digest, EffectState, Id, MemoryResult,
     MemoryStore, MEMORY_SCHEMA_VERSION,
 };
 use hypermid_store::authorization::{authorize as authorize_capability, commit_authorized};
+use hypermid_store::backup::SnapshotReceipt;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -110,6 +112,14 @@ impl MemoryApi {
             lexical_available: true,
             schema_digest: evidence.schema_digest,
         }
+    }
+
+    pub fn snapshot_scope(
+        &mut self,
+        scope: crate::Scope,
+        artifact_path: impl AsRef<Path>,
+    ) -> MemoryResult<SnapshotReceipt> {
+        create_memory_snapshot(&self.store, artifact_path, scope)
     }
 
     pub fn drain(&mut self, context: &AuthContext) -> MemoryResult<MemoryHealth> {
@@ -594,25 +604,24 @@ impl MemoryApi {
             BTreeMap::new(),
             applied_at_ms,
         )?;
-        let batch = if staged.state == ImportState::Rejected {
-            staged
+        if staged.state == ImportState::Rejected {
+            Ok(LegacyImportReceipt {
+                source_digest: plan.source_digest,
+                destination_digest: plan.destination_digest,
+                batch: staged,
+                record_count: plan.record_count,
+                item_count: plan.item_count,
+            })
         } else {
-            import::apply_import(
+            legacy_import::apply_legacy_import(
                 &mut self.store,
                 context,
                 request,
                 &staged,
-                &plan.bundle,
+                &plan,
                 applied_at_ms,
-            )?
-        };
-        Ok(LegacyImportReceipt {
-            source_digest: plan.source_digest,
-            destination_digest: plan.destination_digest,
-            batch,
-            record_count: plan.record_count,
-            item_count: plan.item_count,
-        })
+            )
+        }
     }
 
     pub fn claim_maintenance(
@@ -943,5 +952,22 @@ mod tests {
         assert_eq!(drained.state, ServiceState::Draining);
         assert_eq!(drained.schema_digest, evidence.schema_digest);
         assert!(drained.durable && drained.lexical_available);
+    }
+
+    #[test]
+    fn api_snapshot_scope_uses_the_canonical_memory_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let scope = Scope::new(id("owner-snapshot"), id("project-snapshot"), None);
+        let mut store = MemoryStore::open(directory.path().join("memory.sqlite3")).unwrap();
+        let cursor = store.ensure_scope(&scope, 10).unwrap();
+        let mut api = MemoryApi::new(store);
+
+        let receipt = api
+            .snapshot_scope(scope.clone(), directory.path().join("artifact"))
+            .unwrap();
+
+        assert_eq!(receipt.scope, scope);
+        assert_eq!(receipt.cursor, cursor);
+        assert!(receipt.bytes > 0);
     }
 }

@@ -860,7 +860,7 @@ touches = ["crates/hypermid-memory/src/source_index.rs", "crates/hypermid-memory
 verify_cmd = "cargo test -p hypermid-memory source_index --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_source_indexes.py"
 [task.mem-clients]
 title = "OSS Gideon clients and lifecycle modules"
-status = "pending"
+status = "done"
 wave = 5
 owner_lane = "memory"
 requires = ["wave-4-close"]

@@ -158,7 +158,7 @@ verify_cmd = "cargo test -p hypermid-memory source_index --manifest-path crates/
 
 [task.mem-clients]
 title = "OSS Gideon clients and lifecycle modules"
-status = "pending"
+status = "done"
 wave = 5
 owner_lane = "memory"
 requires = ["mem-maintenance", "mem-indexes"]

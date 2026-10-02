@@ -130,7 +130,7 @@
 - [ ] int-08. Implement integration slice 8: whole OSS conformance, packaging and release readiness
   - _Requirements: int-08.1, int-08.2, int-08.3_
 
-- [ ] mem-clients. OSS Gideon clients and lifecycle modules
+- [x] mem-clients. OSS Gideon clients and lifecycle modules
   - _Requirements: mem-clients.1, mem-clients.2_
 
 - [x] mem-embedding. Embedding registry and guarded vector jobs

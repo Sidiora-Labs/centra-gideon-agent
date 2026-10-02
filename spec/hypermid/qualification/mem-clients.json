@@ -1,0 +1,34 @@
+{
+  "task": "mem-clients",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-memory api --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_clients.py",
+  "recorded_portable_commands": [],
+  "successful_gate_count": 3,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/hypermid/test_memory_clients.py": "3b5cb808884662c58a1c6e30839f2046e2256f6188bca90a715c800d95cac4e7",
+    "crates/hypermid-memory/src/api.rs": "00ea6400cea79c34a610f4ed4f2ff1c48ad65ba79dbdd0d4387618132e14fef9",
+    "crates/hypermid-memory/src/ffi.rs": "107aea69fb08e69445af0edab410ea44d30ae8bf784da5e62ad61faf945700f3",
+    "runtime/gideon/hypermid/__init__.py": "d1b489b1d33d05a21c93516e26fe3dfeb1fbbfb0d6778056e690b8320ce7b7ab",
+    "runtime/gideon/hypermid/client.py": "6839d3f1c075ffa7fbf51b231b4b38cbf95f4c66003c1990c7f37326dfdf37f7",
+    "runtime/gideon/hypermid/contracts.py": "4e836a895cc22af8860ad65da2fb4dd1c6f9fbc017c7cb2804376beec2a604a1",
+    "runtime/gideon/hypermid/lifecycle.py": "60cc7607ecc69c5c7f8668f9c578d9281abde4e2a9045d2aa3c6e86d90e23cd2",
+    "runtime/gideon/hypermid/memory_client.py": "e6b1334fb034c2bfd0178e901e2115500fbf15500f5da2ee04c9fec80390a60c"
+  },
+  "tested_source_sha256": {
+    "checks/hypermid/test_memory_clients.py": "3b5cb808884662c58a1c6e30839f2046e2256f6188bca90a715c800d95cac4e7",
+    "crates/hypermid-memory/src/api.rs": "00ea6400cea79c34a610f4ed4f2ff1c48ad65ba79dbdd0d4387618132e14fef9",
+    "crates/hypermid-memory/src/ffi.rs": "107aea69fb08e69445af0edab410ea44d30ae8bf784da5e62ad61faf945700f3",
+    "runtime/gideon/hypermid/__init__.py": "d1b489b1d33d05a21c93516e26fe3dfeb1fbbfb0d6778056e690b8320ce7b7ab",
+    "runtime/gideon/hypermid/client.py": "6839d3f1c075ffa7fbf51b231b4b38cbf95f4c66003c1990c7f37326dfdf37f7",
+    "runtime/gideon/hypermid/contracts.py": "4e836a895cc22af8860ad65da2fb4dd1c6f9fbc017c7cb2804376beec2a604a1",
+    "runtime/gideon/hypermid/lifecycle.py": "60cc7607ecc69c5c7f8668f9c578d9281abde4e2a9045d2aa3c6e86d90e23cd2",
+    "runtime/gideon/hypermid/memory_client.py": "e6b1334fb034c2bfd0178e901e2115500fbf15500f5da2ee04c9fec80390a60c"
+  },
+  "scope": "Focused typed client plus real daemon lifecycle and additive Knowledge-contract qualification; aggregate release certification remains separate.",
+  "source_adjustments": [
+    "contracts.py and memory_client.py include additive Knowledge DTO and route support qualified by the real Wave 4 journey.",
+    "api.rs includes the qualified additive legacy destination receipt repair.",
+    "lifecycle.py preserves later qualified inspection, security-operation, and MCP configuration additions."
+  ]
+}
