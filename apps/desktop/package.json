@@ -101,6 +101,7 @@
       "assets/gideon.svg",
       "src/application/window-workspace.js",
       "src/application/local-gateway.js",
+      "src/application/hypermid.js",
       "src/application/endpoint-session.js",
       "src/application/desktop-application.js",
       "assets/gideon-dark.png",

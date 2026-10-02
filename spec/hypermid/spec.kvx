@@ -1069,7 +1069,7 @@ touches = ["crates/hypermid-daemon/src/remote.rs", "runtime/gideon/hypermid/remo
 verify_cmd = "cd apps/console && npx vitest run src/features/hypermid/hypermidAccessibility.test.tsx"
 [task.ux-native]
 title = "OSS console, CLI, and desktop integration journey"
-status = "pending"
+status = "done"
 wave = 8
 owner_lane = "surfaces"
 requires = ["wave-7-close"]

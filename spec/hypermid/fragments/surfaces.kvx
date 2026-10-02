@@ -156,7 +156,7 @@ verify_cmd = "cd apps/console && npx vitest run src/features/hypermid/hypermidAc
 
 [task.ux-native]
 title = "OSS console, CLI, and desktop integration journey"
-status = "pending"
+status = "done"
 wave = 8
 owner_lane = "surfaces"
 requires = ["ux-remote", "ux-lifecycle"]

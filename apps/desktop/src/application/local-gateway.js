@@ -10,6 +10,7 @@ const { buildGatewayEnv } = require("../gateway/environment");
 const { createLoginPathResolver } = require("../gateway/login-path");
 const { shutdownGateway } = require("../gateway/shutdown");
 const { assertLoopbackTarget } = require("../connection/controller");
+const { HypermidDesktop } = require("./hypermid");
 
 const READY_PREFIX = "GIDEON_READY:";
 const START_TIMEOUT = 120000;
@@ -30,6 +31,9 @@ class LocalGateway {
   constructor({ app, home, status, log = console }) {
     Object.assign(this, { app, home, status, log, child: null, url: null });
     this.loginPath = createLoginPathResolver({ env: process.env, execFileSync, warn: log.warn });
+    this.hypermid = new HypermidDesktop({ home, resourcesPath: process.resourcesPath,
+      projectDir: path.resolve(__dirname, "../../../.."), platform: process.platform,
+      isPackaged: app.isPackaged, request: (...arguments_) => this.request(...arguments_), status });
   }
 
   start() {
@@ -52,9 +56,10 @@ class LocalGateway {
       };
       const deadline = setTimeout(() => complete(new Error("Gateway start timed out")), START_TIMEOUT);
       try {
-        this.child = spawn(executable, arguments_, { stdio: ["ignore", "pipe", "pipe"], detached: true,
-          env: buildGatewayEnv({ env: process.env, loginPath: this.loginPath(),
-            projectDir: this.app.isPackaged ? process.resourcesPath : path.resolve(__dirname, "../../../..") }) });
+        const environment = buildGatewayEnv({ env: process.env, loginPath: this.loginPath(),
+          projectDir: this.app.isPackaged ? process.resourcesPath : path.resolve(__dirname, "../../../..") });
+        Object.assign(environment, this.hypermid.gatewayEnvironment());
+        this.child = spawn(executable, arguments_, { stdio: ["ignore", "pipe", "pipe"], detached: true, env: environment });
       } catch (error) { complete(error); return; }
       const child = this.child;
       child.stdout.on("data", (chunk) => {
@@ -81,6 +86,7 @@ class LocalGateway {
     const outcome = await shutdownGateway({ child, graceMs: 8000, killGroup: true,
       log: (message) => this.log.log(`gateway shutdown: ${message}`) });
     this.log.log(`Gateway shutdown outcome: ${outcome.outcome}${outcome.groupSwept ? " (residual process-group members were killed)" : ""}`);
+    this.hypermid.stopped();
     return outcome;
   }
 
@@ -148,7 +154,10 @@ class LocalGateway {
       if (window?.isDestroyed()) throw new Error("Window closed");
       if (Date.now() > deadline) throw new Error("Backend timeout");
       const status = await this.request("GET", "/api/status", undefined, {}, true);
-      if (status !== null && status < 500) return;
+      if (status !== null && status < 500) {
+        await this.hypermid.refresh();
+        return;
+      }
       await pause(500);
     }
   }

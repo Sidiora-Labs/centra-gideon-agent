@@ -202,7 +202,7 @@
 - [x] ux-lifecycle. Safe lifecycle and portability commands
   - _Requirements: ux-lifecycle.1, ux-lifecycle.2, ux-lifecycle.3_
 
-- [ ] ux-native. OSS console, CLI, and desktop integration journey
+- [x] ux-native. OSS console, CLI, and desktop integration journey
   - _Requirements: ux-native.1, ux-native.2, ux-native.3_
 
 - [x] ux-operations. Diagnostics, logs, and maintenance plans
