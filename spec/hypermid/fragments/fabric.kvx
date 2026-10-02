@@ -141,7 +141,7 @@ verify_cmd = "cargo test -p hypermid-daemon --test registry_routes"
 
 [task.fab-03-flow-lifecycle]
 title = "Implement flow control cancellation and deadlines"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "fabric"
 requires = ["fab-01-bootstrap", "fab-02-registry-routing", "base-03"]

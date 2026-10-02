@@ -348,7 +348,7 @@ ac_2 = "A stale route epoch cannot deliver to a new binding even when the route 
 verify_cmd = "cargo test -p hypermid-daemon --test registry_routes"
 [task.fab-03-flow-lifecycle]
 title = "Implement flow control cancellation and deadlines"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "fabric"
 requires = ["wave-2-close"]

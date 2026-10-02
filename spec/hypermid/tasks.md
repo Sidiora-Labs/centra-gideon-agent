@@ -88,7 +88,7 @@
 - [x] fab-02-registry-routing. Implement manifest registry and epoch-safe routing
   - _Requirements: fab-003.1, fab-003.2, fab-003.3, fab-004.1, fab-004.2_
 
-- [ ] fab-03-flow-lifecycle. Implement flow control cancellation and deadlines
+- [x] fab-03-flow-lifecycle. Implement flow control cancellation and deadlines
   - _Requirements: fab-005.1, fab-005.2, fab-006.1, fab-006.2_
 
 - [ ] fab-04-control-diagnostics. Implement scoped control RPC health and diagnostics

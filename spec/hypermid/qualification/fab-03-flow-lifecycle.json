@@ -1,0 +1,26 @@
+{
+  "task": "fab-03-flow-lifecycle",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-daemon --test flow_lifecycle",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-daemon --test flow_lifecycle"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-daemon/src/flow.rs": "a6dca64d6d96f5f5f85b3813749c6f5ef5222d88309abed2fc7a1d5088a94c3a",
+    "crates/hypermid-daemon/src/connection.rs": "7eb6e237e216c7d4a8575f04773160b1fc7612c5e427bf23564573ecfeba2b03",
+    "crates/hypermid-daemon/src/deadline.rs": "e9ddf3219b01e60d62c201886a8a3f389acc9ccbb2aac623888cb04e600d59eb",
+    "crates/hypermid-daemon/src/cancellation.rs": "76387ba1ad8f0d91a27e287236d187cb3cef790d8f9878decabfdbad134b58f0",
+    "crates/hypermid-daemon/tests/flow_lifecycle.rs": "650a8c6ca8bdd8bb2312f4e80fa188494ea521473f756b1c391a4dc921a5ea89"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-daemon/src/flow.rs": "a6dca64d6d96f5f5f85b3813749c6f5ef5222d88309abed2fc7a1d5088a94c3a",
+    "crates/hypermid-daemon/src/connection.rs": "7eb6e237e216c7d4a8575f04773160b1fc7612c5e427bf23564573ecfeba2b03",
+    "crates/hypermid-daemon/src/deadline.rs": "e9ddf3219b01e60d62c201886a8a3f389acc9ccbb2aac623888cb04e600d59eb",
+    "crates/hypermid-daemon/src/cancellation.rs": "76387ba1ad8f0d91a27e287236d187cb3cef790d8f9878decabfdbad134b58f0",
+    "crates/hypermid-daemon/tests/flow_lifecycle.rs": "650a8c6ca8bdd8bb2312f4e80fa188494ea521473f756b1c391a4dc921a5ea89"
+  },
+  "scope": "Focused task acceptance using actual production types and, for supervision, real child processes; later integration and release gates remain separate.",
+  "source_adjustments": []
+}
