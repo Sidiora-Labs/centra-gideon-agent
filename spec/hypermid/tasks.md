@@ -190,7 +190,7 @@
 - [ ] ux-configuration. Runtime, model, and credential settings
   - _Requirements: ux-configuration.1, ux-configuration.2, ux-configuration.3_
 
-- [ ] ux-contract. Hypermid v1 clients and Gideon HostAdapter
+- [x] ux-contract. Hypermid v1 clients and Gideon HostAdapter
   - _Requirements: ux-contract.1, ux-contract.2, ux-contract.3_
 
 - [ ] ux-inspection. Native session, memory, and cache inspector

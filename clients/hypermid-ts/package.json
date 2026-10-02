@@ -1,0 +1,10 @@
+{
+  "name": "@hypermid/client",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/client.ts",
+    "./node": "./src/node.ts"
+  },
+  "types": "./src/client.ts"
+}

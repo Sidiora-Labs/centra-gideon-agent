@@ -985,7 +985,7 @@ ac_3 = "Desktop local mode owns daemon start/stop and shutdown handoff without o
 
 [task.ux-contract]
 title = "Hypermid v1 clients and Gideon HostAdapter"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "surfaces"
 requires = ["ctx-gideon-adapter"]

@@ -1,0 +1,16 @@
+[package]
+name = "hypermid-rust-sdk-harness"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+hypermid-client = { path = "../../../../crates/hypermid-client" }
+hypermid-contracts = { path = "../../../../crates/hypermid-contracts" }
+hypermid-protocol = { path = "../../../../crates/hypermid-protocol" }
+hypermid-transport = { path = "../../../../crates/hypermid-transport" }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+
