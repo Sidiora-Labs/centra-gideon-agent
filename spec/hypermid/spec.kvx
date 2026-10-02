@@ -872,7 +872,7 @@ touches = ["crates/hypermid-memory/src/api.rs", "crates/hypermid-memory/src/ffi.
 verify_cmd = "cargo test -p hypermid-memory api --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_clients.py"
 [task.mem-remote]
 title = "Local bus and remote-safe protocol"
-status = "pending"
+status = "done"
 wave = 6
 owner_lane = "memory"
 requires = ["wave-5-close"]

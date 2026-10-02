@@ -171,7 +171,7 @@ verify_cmd = "cargo test -p hypermid-memory api --manifest-path crates/hypermid-
 
 [task.mem-remote]
 title = "Local bus and remote-safe protocol"
-status = "pending"
+status = "done"
 wave = 6
 owner_lane = "memory"
 requires = ["mem-clients"]

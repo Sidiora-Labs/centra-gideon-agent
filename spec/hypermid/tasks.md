@@ -157,7 +157,7 @@
 - [ ] mem-release. OSS memory release integration
   - _Requirements: mem-release.1, mem-release.2_
 
-- [ ] mem-remote. Local bus and remote-safe protocol
+- [x] mem-remote. Local bus and remote-safe protocol
   - _Requirements: mem-remote.1, mem-remote.2_
 
 - [x] mem-retrieval. Unified search and deterministic ranking

@@ -1,0 +1,27 @@
+{
+  "task": "mem-remote",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-memory protocol --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_transport.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-memory protocol --manifest-path crates/hypermid-memory/Cargo.toml",
+    "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_transport.py"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/hypermid/test_memory_transport.py": "38bb0411525393efb0135709d4bcebac1d3f14f264252798512bc8f1d5733689",
+    "crates/hypermid-memory/src/bus.rs": "0025980217e936aeae9ef418a726ac74583cc60585ce0ab62b6c04dda7d080e7",
+    "crates/hypermid-memory/src/protocol.rs": "92097a731537b8c605ab62ff2590e9f6cbce1cd35603f18b60345ad4644fb7ba",
+    "runtime/gideon/hypermid/bus.py": "6351868fb4250a55f993a31acd1995b3063c50504f7e4b7aea9a3e4d09c6db15",
+    "runtime/gideon/hypermid/transport.py": "afe771c7b4a63d01ad64fb8b0c71f9a9cfc3823351217dcd71a137d409173382"
+  },
+  "tested_source_sha256": {
+    "checks/hypermid/test_memory_transport.py": "38bb0411525393efb0135709d4bcebac1d3f14f264252798512bc8f1d5733689",
+    "crates/hypermid-memory/src/bus.rs": "0025980217e936aeae9ef418a726ac74583cc60585ce0ab62b6c04dda7d080e7",
+    "crates/hypermid-memory/src/protocol.rs": "92097a731537b8c605ab62ff2590e9f6cbce1cd35603f18b60345ad4644fb7ba",
+    "runtime/gideon/hypermid/bus.py": "6351868fb4250a55f993a31acd1995b3063c50504f7e4b7aea9a3e4d09c6db15",
+    "runtime/gideon/hypermid/transport.py": "afe771c7b4a63d01ad64fb8b0c71f9a9cfc3823351217dcd71a137d409173382"
+  },
+  "scope": "Focused OSS in-process and authenticated local-bus transport conformance; aggregate wave and hosted certification remain separate.",
+  "source_adjustments": []
+}
