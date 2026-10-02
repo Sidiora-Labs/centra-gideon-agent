@@ -70,7 +70,7 @@
 - [ ] ctx-reclaim. Implement deterministic pressure reclaim
   - _Requirements: ctx-reclaim.1, ctx-reclaim.2, ctx-reclaim.3_
 
-- [ ] ctx-recovery. Implement journal rebuild and last-known-good recovery
+- [x] ctx-recovery. Implement journal rebuild and last-known-good recovery
   - _Requirements: ctx-recovery.1, ctx-recovery.2, ctx-recovery.3_
 
 - [ ] ctx-reduction. Implement explicit recoverable reduction

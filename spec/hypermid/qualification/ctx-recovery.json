@@ -1,0 +1,24 @@
+{
+  "task": "ctx-recovery",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-context --test recovery_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_recovery.py",
+  "recorded_portable_commands": [],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/runtime/test_hypermid_recovery.py": "825d83f53ffcaa704e2bcb54d235826a0867786dde29f3e7e3db18d6813488e9",
+    "crates/hypermid-context/src/recovery_store.rs": "ee8516fcea82fb9c685748f899efca3d9c323e83165975ac52611ef20ffe1b3f",
+    "crates/hypermid-context/tests/recovery_contract.rs": "b3fe0e52a568eaaba0b9b9d4f132571a1f9e3fa04936a9dab817e77bb142ecd1",
+    "crates/hypermid-core/src/recovery.rs": "b79c72bfe0552994ed7583f504483c4638158bca6e4e1cdc2719648da4db67cb",
+    "runtime/gideon/hypermid/recovery.py": "c99adce5cb2b90290898c6c93504c9f400169fe74dd455b236f4605f93828ac5"
+  },
+  "tested_source_sha256": {
+    "checks/runtime/test_hypermid_recovery.py": "825d83f53ffcaa704e2bcb54d235826a0867786dde29f3e7e3db18d6813488e9",
+    "crates/hypermid-context/src/recovery_store.rs": "ee8516fcea82fb9c685748f899efca3d9c323e83165975ac52611ef20ffe1b3f",
+    "crates/hypermid-context/tests/recovery_contract.rs": "b3fe0e52a568eaaba0b9b9d4f132571a1f9e3fa04936a9dab817e77bb142ecd1",
+    "crates/hypermid-core/src/recovery.rs": "b79c72bfe0552994ed7583f504483c4638158bca6e4e1cdc2719648da4db67cb",
+    "runtime/gideon/hypermid/recovery.py": "c99adce5cb2b90290898c6c93504c9f400169fe74dd455b236f4605f93828ac5"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}

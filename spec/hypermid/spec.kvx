@@ -636,7 +636,7 @@ touches = ["crates/hypermid-core/src/reclaim.rs", "crates/hypermid-context/src/r
 verify_cmd = "cargo test -p hypermid-context --test reclaim_policy && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_reclaim.py"
 [task.ctx-recovery]
 title = "Implement journal rebuild and last-known-good recovery"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "context"
 requires = ["wave-1-close"]

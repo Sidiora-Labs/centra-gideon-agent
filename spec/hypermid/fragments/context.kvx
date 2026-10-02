@@ -226,7 +226,7 @@ verify_cmd = "cargo test -p hypermid-context --test reclaim_policy && PYTHONPATH
 
 [task.ctx-recovery]
 title = "Implement journal rebuild and last-known-good recovery"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "context"
 requires = ["ctx-history"]
