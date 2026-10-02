@@ -231,7 +231,7 @@
   - Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance.
   - _Requirements: wave-4.1, wave-4.2_
 
-- [ ] wave-5-close. Qualify vertical slice: Supervised capability ecosystem
+- [x] wave-5-close. Qualify vertical slice: Supervised capability ecosystem
   - Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths.
   - Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance.
   - _Requirements: wave-5.1, wave-5.2_

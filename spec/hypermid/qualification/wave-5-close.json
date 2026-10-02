@@ -1,0 +1,22 @@
+{
+  "task": "wave-5-close",
+  "status": "passed",
+  "declared_command": "python -m pytest checks/hypermid/waves/test_wave_05.py -q",
+  "recorded_portable_commands": [
+    "PYTHONPATH=runtime python checks/hypermid/verify_wave_05.py"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/hypermid/verify_wave_05.py": "eb0f6b8bc19594c59124e9105e9e58311ef5aa8b6827a03f6bac70c9e072b357",
+    "checks/hypermid/waves/test_wave_05.py": "6a2299469d0d7a7c307f487eef2f5c66f4166070edd15128f14b4c00658ca896"
+  },
+  "tested_source_sha256": {
+    "checks/hypermid/verify_wave_05.py": "eb0f6b8bc19594c59124e9105e9e58311ef5aa8b6827a03f6bac70c9e072b357",
+    "checks/hypermid/waves/test_wave_05.py": "6a2299469d0d7a7c307f487eef2f5c66f4166070edd15128f14b4c00658ca896"
+  },
+  "scope": "The actual Wave 5 vertical journey through the immutable daemon, NativeAgentRuntime, real model provider, approval gate, MCP child, cancellation ledger, session eviction, and supervised shutdown.",
+  "source_adjustments": [
+    "The final connected source supersedes earlier component snapshots for shared MCP route, stdio, provider ownership, and host adapter files."
+  ]
+}

@@ -1485,7 +1485,7 @@ ac_2 = "Restart, route replacement, slow consumption and deadline expiry preserv
 
 [task.wave-5-close]
 title = "Qualify vertical slice: Supervised capability ecosystem"
-status = "pending"
+status = "done"
 wave = 5
 owner_lane = "integration"
 requires = ["int-05"]
