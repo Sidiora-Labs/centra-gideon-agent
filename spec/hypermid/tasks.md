@@ -22,7 +22,7 @@
 - [ ] base-06. In-memory and NATS bus backends
   - _Requirements: base-bus.1, base-bus.3_
 
-- [ ] base-07. Tool and runner role protocols
+- [x] base-07. Tool and runner role protocols
   - _Requirements: base-tool-role.1, base-tool-role.2, base-tool-role.3, base-runner-role.1, base-runner-role.2, base-runner-role.3_
 
 - [ ] base-08. Compaction, transform, and OSS foundation integration

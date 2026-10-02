@@ -944,6 +944,65 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypermid-role-harness"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "hypermid-contracts",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "hypermid-role-runner"
+version = "0.1.0"
+dependencies = [
+ "hypermid-contracts",
+ "hypermid-role-harness",
+ "hypermid-role-tool",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "hypermid-role-runner-conformance"
+version = "0.1.0"
+dependencies = [
+ "hypermid-contracts",
+ "hypermid-role-harness",
+ "hypermid-role-runner",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "hypermid-role-tool"
+version = "0.1.0"
+dependencies = [
+ "hypermid-contracts",
+ "hypermid-role-harness",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror",
+]
+
+[[package]]
+name = "hypermid-role-tool-conformance"
+version = "0.1.0"
+dependencies = [
+ "hypermid-contracts",
+ "hypermid-role-harness",
+ "hypermid-role-tool",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "hypermid-sandbox"
 version = "0.1.0"
 dependencies = [

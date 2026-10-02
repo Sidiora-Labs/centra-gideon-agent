@@ -140,7 +140,7 @@ verify_cmd = "cargo test -p hypermid-bus-memory -p hypermid-bus-nats --manifest-
 
 [task.base-07]
 title = "Tool and runner role protocols"
-status = "pending"
+status = "done"
 wave = 5
 owner_lane = "foundation"
 requires = ["base-03"]

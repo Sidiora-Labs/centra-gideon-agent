@@ -1,0 +1,15 @@
+[package]
+name = "hypermid-role-runner-conformance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+hypermid-contracts = { path = "../hypermid-contracts" }
+hypermid-role-harness = { path = "../hypermid-role-harness" }
+hypermid-role-runner = { path = "../hypermid-role-runner" }
+serde_json.workspace = true
+thiserror.workspace = true
+

@@ -1,0 +1,47 @@
+{
+  "task": "base-07",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-role-harness -p hypermid-role-tool-conformance -p hypermid-role-runner-conformance --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_roles.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-role-harness -p hypermid-role-tool-conformance -p hypermid-role-runner-conformance --manifest-path Cargo.toml",
+    "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_roles.py"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/hypermid/test_base_roles.py": "c795e288265604b44074279274aa26e4f46ac5810877a20b6ea739dd4d248d5e",
+    "crates/hypermid-role-harness/Cargo.toml": "8fd6ecf7794d567a67689ea850aeba2b7377ebeb7b506d767d787bd16283241f",
+    "crates/hypermid-role-harness/src/lib.rs": "019c9d40b34200c627a12c3a24d0f5a07354ce6843102bf60c7dd3318873975e",
+    "crates/hypermid-role-runner-conformance/Cargo.toml": "6441ded075c632a2b0782afbc080c91a2f0be00f4240486dfc96e3a3ab6b95ee",
+    "crates/hypermid-role-runner-conformance/src/lib.rs": "557daa065bd9101a965068591c5074d41b8e5ce5b5bf9cb1b4f3aa928a2ef1e6",
+    "crates/hypermid-role-runner/Cargo.toml": "def454093eaceba9e8073e8554aa5b3aae5476bee479ef40e0c4943d6157ee64",
+    "crates/hypermid-role-runner/src/lib.rs": "bb9dd4049ba1f11866289f5087342bbf30c48b14a457869ef75ca97a1021187d",
+    "crates/hypermid-role-tool-conformance/Cargo.toml": "0ba3ad13b09f6e9e6f6e654e5543cf2344a1e6f7d7f71beea87ad39c8ac79385",
+    "crates/hypermid-role-tool-conformance/src/lib.rs": "bb384a36827dd526202af0e1c5cd8f920f846f75f2c4ad8ed18b3113278bf80e",
+    "crates/hypermid-role-tool/Cargo.toml": "fb164ecc7d329254855c0aa163fdea93c41fc69ce9d62a09b85b3dacba29812a",
+    "crates/hypermid-role-tool/src/lib.rs": "29f76ebdb6bf4586b51a6ffe70b0975c29cadc87ae1e90c4a63bed2a36345de4",
+    "crates/hypermid-role-vectors/runner-v1/session.json": "7c9b954741da5bb1585d3208ba3b1ff6898b92f4a9523640cabdf75e676095f9",
+    "crates/hypermid-role-vectors/tool-v1/catalog.json": "bc7e7c87b4a72fd0229d8e51b9edc32bb60541401d8b915dbab148e7cf15b149",
+    "runtime/gideon/hypermid/roles.py": "ef5ee439d7e99619811d4c06333a735d49324b78f034ff67c9ded38d638785e0"
+  },
+  "tested_source_sha256": {
+    "checks/hypermid/test_base_roles.py": "c795e288265604b44074279274aa26e4f46ac5810877a20b6ea739dd4d248d5e",
+    "crates/hypermid-role-harness/Cargo.toml": "8fd6ecf7794d567a67689ea850aeba2b7377ebeb7b506d767d787bd16283241f",
+    "crates/hypermid-role-harness/src/lib.rs": "019c9d40b34200c627a12c3a24d0f5a07354ce6843102bf60c7dd3318873975e",
+    "crates/hypermid-role-runner-conformance/Cargo.toml": "6441ded075c632a2b0782afbc080c91a2f0be00f4240486dfc96e3a3ab6b95ee",
+    "crates/hypermid-role-runner-conformance/src/lib.rs": "557daa065bd9101a965068591c5074d41b8e5ce5b5bf9cb1b4f3aa928a2ef1e6",
+    "crates/hypermid-role-runner/Cargo.toml": "def454093eaceba9e8073e8554aa5b3aae5476bee479ef40e0c4943d6157ee64",
+    "crates/hypermid-role-runner/src/lib.rs": "bb9dd4049ba1f11866289f5087342bbf30c48b14a457869ef75ca97a1021187d",
+    "crates/hypermid-role-tool-conformance/Cargo.toml": "0ba3ad13b09f6e9e6f6e654e5543cf2344a1e6f7d7f71beea87ad39c8ac79385",
+    "crates/hypermid-role-tool-conformance/src/lib.rs": "bb384a36827dd526202af0e1c5cd8f920f846f75f2c4ad8ed18b3113278bf80e",
+    "crates/hypermid-role-tool/Cargo.toml": "fb164ecc7d329254855c0aa163fdea93c41fc69ce9d62a09b85b3dacba29812a",
+    "crates/hypermid-role-tool/src/lib.rs": "29f76ebdb6bf4586b51a6ffe70b0975c29cadc87ae1e90c4a63bed2a36345de4",
+    "crates/hypermid-role-vectors/runner-v1/session.json": "7c9b954741da5bb1585d3208ba3b1ff6898b92f4a9523640cabdf75e676095f9",
+    "crates/hypermid-role-vectors/tool-v1/catalog.json": "bc7e7c87b4a72fd0229d8e51b9edc32bb60541401d8b915dbab148e7cf15b149",
+    "runtime/gideon/hypermid/roles.py": "ef5ee439d7e99619811d4c06333a735d49324b78f034ff67c9ded38d638785e0"
+  },
+  "scope": "Role contracts, independent vectors, Rust conformance, and a real local tool-provider and durable runner route passed. Model quality and later integration remain separate.",
+  "source_adjustments": [
+    "RoleProcess later gained a compatible poll-backed running property; base-07 wire behavior and qualified source bytes are preserved by the publication bundle."
+  ]
+}
