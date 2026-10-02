@@ -1,0 +1,29 @@
+{
+  "task": "mem-retrieval",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-memory search --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_search.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-memory search --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_search.py",
+    "cargo check -p hypermid-memory --tests --manifest-path crates/hypermid-memory/Cargo.toml"
+  ],
+  "successful_gate_count": 4,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-memory/src/fts.rs": "2081f86513afc4f6b2f78151f3605013e802c675459140fd3149d126e3e0a386",
+    "crates/hypermid-memory/src/search.rs": "3cb20109186e8f78b1b321f798e2c39386a2a9fd11736ad1ddf71c224aafaa7d",
+    "crates/hypermid-memory/src/rank.rs": "efea1fcfbf7226287b924d7d6ae0e090a264329963cfe36899c1327d06a8c9ef",
+    "runtime/gideon/hypermid/search.py": "170cc56f6286b0fe14f0b129c425947517960665535145390e2ff941878a8304",
+    "runtime/gideon/hypermid/prompt_projection.py": "e02e1134a8ca692a7fe8d1211a6afbfb066191d8583dc1a418a55b520c044dda",
+    "checks/hypermid/test_memory_search.py": "4051a93aac1223058c3fe23f5200442767120bb7d1617ca142dbdd9b385327a3"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-memory/src/fts.rs": "2081f86513afc4f6b2f78151f3605013e802c675459140fd3149d126e3e0a386",
+    "crates/hypermid-memory/src/search.rs": "3cb20109186e8f78b1b321f798e2c39386a2a9fd11736ad1ddf71c224aafaa7d",
+    "crates/hypermid-memory/src/rank.rs": "efea1fcfbf7226287b924d7d6ae0e090a264329963cfe36899c1327d06a8c9ef",
+    "runtime/gideon/hypermid/search.py": "170cc56f6286b0fe14f0b129c425947517960665535145390e2ff941878a8304",
+    "runtime/gideon/hypermid/prompt_projection.py": "e02e1134a8ca692a7fe8d1211a6afbfb066191d8583dc1a418a55b520c044dda",
+    "checks/hypermid/test_memory_search.py": "4051a93aac1223058c3fe23f5200442767120bb7d1617ca142dbdd9b385327a3"
+  },
+  "scope": "current file-backed SQLite MemoryApi lexical, semantic and hybrid retrieval with scope, active fingerprint, current revision digest, tombstone, stable ranking and provenance enforcement",
+  "source_adjustments": []
+}

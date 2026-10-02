@@ -824,7 +824,7 @@ touches = ["crates/hypermid-memory/src/embedding.rs", "crates/hypermid-memory/sr
 verify_cmd = "cargo test -p hypermid-memory embedding --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_embeddings.py"
 [task.mem-retrieval]
 title = "Unified search and deterministic ranking"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "memory"
 requires = ["wave-2-close"]

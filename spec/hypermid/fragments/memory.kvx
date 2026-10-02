@@ -119,7 +119,7 @@ verify_cmd = "cargo test -p hypermid-memory embedding --manifest-path crates/hyp
 
 [task.mem-retrieval]
 title = "Unified search and deterministic ranking"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "memory"
 requires = ["mem-records"]

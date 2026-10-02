@@ -160,7 +160,7 @@
 - [ ] mem-remote. Local bus and remote-safe protocol
   - _Requirements: mem-remote.1, mem-remote.2_
 
-- [ ] mem-retrieval. Unified search and deterministic ranking
+- [x] mem-retrieval. Unified search and deterministic ranking
   - _Requirements: mem-retrieval.1, mem-retrieval.2_
 
 - [x] sec-01. Implement scoped capability enforcement

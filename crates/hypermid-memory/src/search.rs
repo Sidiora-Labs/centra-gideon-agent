@@ -755,12 +755,19 @@ pub fn persist_explicit_delivery(
 mod tests {
     use super::*;
     use crate::{
+        embedding::{
+            self, validate_provider_embedding, EmbeddingMode, EmbeddingRegistration,
+            ProviderEmbedding,
+        },
+        provenance::{ProvenanceSpan, SourceKind, SourceSnapshot},
         AuthenticatedPrincipal, AuthorizationRequest, CapabilityGrant, CapabilityOperation,
-        PrincipalKind,
+        MemoryApi, MutationRequest, Operation, PrincipalKind, RecordDraft, RecordKind,
+        RevisionPrecondition,
     };
     use hypermid_contracts::Id;
     use hypermid_store::authorization::put_grant;
     use rusqlite::Connection;
+    use serde_json::Map;
     use std::collections::BTreeSet;
 
     fn scope(owner: &str) -> Scope {
@@ -794,6 +801,216 @@ mod tests {
             useful_count: 0,
             not_useful_count: 0,
         }
+    }
+
+    fn api_principal(owner: &str) -> AuthenticatedPrincipal {
+        AuthenticatedPrincipal {
+            principal_id: Id::new(&format!("principal-{owner}")).unwrap(),
+            owner_id: Id::new(owner).unwrap(),
+            kind: PrincipalKind::Foreground,
+        }
+    }
+
+    fn install_api_grant(
+        api: &mut MemoryApi,
+        principal: &AuthenticatedPrincipal,
+        owner: &Scope,
+        capability_id: &Id,
+    ) {
+        api.store.ensure_scope(owner, 1).unwrap();
+        let grant = CapabilityGrant {
+            capability_id: capability_id.clone(),
+            issuer_owner_id: owner.owner_id.clone(),
+            principal_id: principal.principal_id.clone(),
+            claimed_scope: owner.clone(),
+            target_scope: owner.clone(),
+            operations: BTreeSet::from([
+                CapabilityOperation::Append,
+                CapabilityOperation::Read,
+                CapabilityOperation::Revise,
+                CapabilityOperation::Delete,
+            ]),
+            resources: BTreeSet::from([Id::new("memory-records").unwrap()]),
+            expires_at_ms: 10_000,
+        };
+        api.store
+            .immediate(|transaction| {
+                put_grant(transaction.raw(), principal, &grant).unwrap();
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    fn api_context(
+        principal: &AuthenticatedPrincipal,
+        owner: &Scope,
+        capability_id: &Id,
+        operation: CapabilityOperation,
+        now_ms: u64,
+    ) -> AuthContext {
+        AuthContext {
+            principal: principal.clone(),
+            request: AuthorizationRequest {
+                claimed_scope: owner.clone(),
+                target_scope: owner.clone(),
+                operation,
+                resource_id: Id::new("memory-records").unwrap(),
+                now_ms,
+            },
+            capability_id: capability_id.clone(),
+        }
+    }
+
+    fn api_mutation(
+        owner: &Scope,
+        operation: Operation,
+        record_id: &Id,
+        revision: RevisionPrecondition,
+        suffix: &str,
+    ) -> MutationRequest {
+        MutationRequest {
+            operation,
+            actor_scope: owner.clone(),
+            target_scope: owner.clone(),
+            record_id: Some(record_id.clone()),
+            category: (operation != Operation::Embed).then(|| "general".to_owned()),
+            revision,
+            trace: Trace::new(
+                Id::new(&format!("trace-{suffix}")).unwrap(),
+                Id::new(&format!("request-{suffix}")).unwrap(),
+            ),
+        }
+    }
+
+    fn api_record_draft(owner: &Scope, record_id: &Id, content: &str) -> RecordDraft {
+        RecordDraft {
+            id: record_id.clone(),
+            scope: owner.clone(),
+            kind: RecordKind::Fact,
+            category: "general".to_owned(),
+            content: content.to_owned(),
+            metadata: Map::new(),
+            importance: 0.7,
+            confidence: 0.8,
+            expires_at_ms: None,
+            retention_until_ms: Some(20_000),
+            provenance: vec![ProvenanceSpan {
+                source_id: Id::new(&format!("source-{record_id}")).unwrap(),
+                span_start: None,
+                span_end: None,
+                quoted_digest: Some(Digest::sha256(content.as_bytes())),
+            }],
+            lineage: Vec::new(),
+            smart_predicate: None,
+            summary: None,
+        }
+    }
+
+    fn api_source(owner: &Scope, record_id: &Id, content: &str, now_ms: u64) -> SourceSnapshot {
+        SourceSnapshot {
+            source_id: Id::new(&format!("source-{record_id}")).unwrap(),
+            owner_scope_digest: scope_digest(owner),
+            kind: SourceKind::Message,
+            source_digest: Digest::sha256(content.as_bytes()),
+            locator: Some(format!("session:{record_id}")),
+            captured_content: Some(content.to_owned()),
+            capture_method: "canonical-test-vector".to_owned(),
+            observed_at_ms: now_ms,
+        }
+    }
+
+    fn create_api_record(
+        api: &mut MemoryApi,
+        principal: &AuthenticatedPrincipal,
+        owner: &Scope,
+        capability_id: &Id,
+        record_id: &str,
+        content: &str,
+        now_ms: u64,
+    ) -> crate::RecordMutation {
+        let record_id = Id::new(record_id).unwrap();
+        let draft = api_record_draft(owner, &record_id, content);
+        let source = api_source(owner, &record_id, content, now_ms);
+        api.create_record(
+            &api_context(
+                principal,
+                owner,
+                capability_id,
+                CapabilityOperation::Append,
+                now_ms,
+            ),
+            &api_mutation(
+                owner,
+                Operation::Create,
+                &record_id,
+                RevisionPrecondition::MustNotExist,
+                record_id.as_str(),
+            ),
+            &draft,
+            &[source],
+            now_ms,
+        )
+        .unwrap()
+    }
+
+    fn register_api_embedding(
+        api: &mut MemoryApi,
+        principal: &AuthenticatedPrincipal,
+        owner: &Scope,
+        capability_id: &Id,
+        registration: &EmbeddingRegistration,
+        now_ms: u64,
+    ) {
+        api.register_embedding(
+            &api_context(
+                principal,
+                owner,
+                capability_id,
+                CapabilityOperation::Revise,
+                now_ms,
+            ),
+            &api_mutation(
+                owner,
+                Operation::Embed,
+                &registration.registration_id,
+                RevisionPrecondition::MustNotExist,
+                registration.registration_id.as_str(),
+            ),
+            registration,
+            now_ms,
+        )
+        .unwrap();
+    }
+
+    fn publish_api_vector(
+        api: &mut MemoryApi,
+        registration: &EmbeddingRegistration,
+        record: &crate::MemoryRecord,
+        values: Vec<f32>,
+        now_ms: u64,
+    ) {
+        let guard = api
+            .store
+            .read(|connection| embedding::publication_guard(connection, &record.id, registration))
+            .unwrap();
+        let candidate = validate_provider_embedding(
+            registration,
+            record.current.content_digest,
+            ProviderEmbedding {
+                provider_identity: registration.provider_identity.clone(),
+                model_id: registration.model_id.clone(),
+                vector: values,
+                input_tokens: Some(1),
+                cost_units: Some(0.0),
+            },
+        )
+        .unwrap();
+        api.store
+            .immediate(|transaction| {
+                embedding::publish_embedding(transaction.raw(), &guard, candidate, now_ms)
+                    .map(|_| ())
+            })
+            .unwrap();
     }
 
     #[test]
@@ -992,6 +1209,321 @@ mod tests {
                 .unwrap_err()
                 .code,
             "AUTHORIZATION_DENIED"
+        );
+    }
+
+    #[test]
+    fn memory_api_sqlite_hybrid_search_fences_scope_fingerprint_digest_and_tombstones() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut api = MemoryApi::open(directory.path().join("memory.sqlite3")).unwrap();
+        let alice = scope("alice");
+        let bob = scope("bob");
+        let alice_principal = api_principal("alice");
+        let bob_principal = api_principal("bob");
+        let alice_capability = Id::new("cap-alice-search").unwrap();
+        let bob_capability = Id::new("cap-bob-search").unwrap();
+        install_api_grant(&mut api, &alice_principal, &alice, &alice_capability);
+        install_api_grant(&mut api, &bob_principal, &bob, &bob_capability);
+
+        let retired_registration = EmbeddingRegistration::new(
+            Id::new("embedding-retired").unwrap(),
+            alice.clone(),
+            EmbeddingMode::Local,
+            "canonical-test-vector",
+            "retired-axis-2d",
+            2,
+            false,
+        )
+        .unwrap();
+        register_api_embedding(
+            &mut api,
+            &alice_principal,
+            &alice,
+            &alice_capability,
+            &retired_registration,
+            100,
+        );
+        let wrong_fingerprint = create_api_record(
+            &mut api,
+            &alice_principal,
+            &alice,
+            &alice_capability,
+            "wrong-fingerprint",
+            "retired vector only",
+            110,
+        );
+        publish_api_vector(
+            &mut api,
+            &retired_registration,
+            &wrong_fingerprint.record,
+            vec![1.0, 0.0],
+            120,
+        );
+
+        let active_registration = EmbeddingRegistration::new(
+            Id::new("embedding-active").unwrap(),
+            alice.clone(),
+            EmbeddingMode::Local,
+            "canonical-test-vector",
+            "active-axis-2d",
+            2,
+            false,
+        )
+        .unwrap();
+        register_api_embedding(
+            &mut api,
+            &alice_principal,
+            &alice,
+            &alice_capability,
+            &active_registration,
+            130,
+        );
+
+        let alpha = create_api_record(
+            &mut api,
+            &alice_principal,
+            &alice,
+            &alice_capability,
+            "alpha",
+            "launch checklist alpha",
+            140,
+        );
+        publish_api_vector(
+            &mut api,
+            &active_registration,
+            &alpha.record,
+            vec![1.0, 0.0],
+            150,
+        );
+        let beta = create_api_record(
+            &mut api,
+            &alice_principal,
+            &alice,
+            &alice_capability,
+            "beta",
+            "launch checklist beta",
+            160,
+        );
+        publish_api_vector(
+            &mut api,
+            &active_registration,
+            &beta.record,
+            vec![0.8, 0.2],
+            170,
+        );
+
+        let stale = create_api_record(
+            &mut api,
+            &alice_principal,
+            &alice,
+            &alice_capability,
+            "stale-digest",
+            "stale vector only",
+            180,
+        );
+        publish_api_vector(
+            &mut api,
+            &active_registration,
+            &stale.record,
+            vec![1.0, 0.0],
+            190,
+        );
+        let stale_update = "updated content without the old vector";
+        let stale_source_id = Id::new("source-stale-update").unwrap();
+        let mut stale_draft = api_record_draft(&alice, &stale.record.id, stale_update);
+        stale_draft.provenance[0].source_id = stale_source_id.clone();
+        let mut stale_source = api_source(&alice, &stale.record.id, stale_update, 200);
+        stale_source.source_id = stale_source_id;
+        stale_source.locator = Some("session:stale-update".to_owned());
+        api.update_record(
+            &api_context(
+                &alice_principal,
+                &alice,
+                &alice_capability,
+                CapabilityOperation::Revise,
+                200,
+            ),
+            &api_mutation(
+                &alice,
+                Operation::Update,
+                &stale.record.id,
+                RevisionPrecondition::Match(stale.record.current.digest),
+                "stale-update",
+            ),
+            &stale_draft,
+            &[stale_source],
+            200,
+        )
+        .unwrap();
+
+        let tombstoned = create_api_record(
+            &mut api,
+            &alice_principal,
+            &alice,
+            &alice_capability,
+            "tombstoned",
+            "deleted vector only",
+            210,
+        );
+        publish_api_vector(
+            &mut api,
+            &active_registration,
+            &tombstoned.record,
+            vec![1.0, 0.0],
+            220,
+        );
+        api.delete_record(
+            &api_context(
+                &alice_principal,
+                &alice,
+                &alice_capability,
+                CapabilityOperation::Delete,
+                230,
+            ),
+            &api_mutation(
+                &alice,
+                Operation::Delete,
+                &tombstoned.record.id,
+                RevisionPrecondition::Match(tombstoned.record.current.digest),
+                "tombstone",
+            ),
+            230,
+        )
+        .unwrap();
+
+        let bob_registration = EmbeddingRegistration::new(
+            Id::new("embedding-bob").unwrap(),
+            bob.clone(),
+            EmbeddingMode::Local,
+            "canonical-test-vector",
+            "active-axis-2d",
+            2,
+            false,
+        )
+        .unwrap();
+        register_api_embedding(
+            &mut api,
+            &bob_principal,
+            &bob,
+            &bob_capability,
+            &bob_registration,
+            240,
+        );
+        assert_eq!(
+            bob_registration.fingerprint,
+            active_registration.fingerprint
+        );
+        let foreign = create_api_record(
+            &mut api,
+            &bob_principal,
+            &bob,
+            &bob_capability,
+            "foreign",
+            "launch checklist foreign",
+            250,
+        );
+        publish_api_vector(
+            &mut api,
+            &bob_registration,
+            &foreign.record,
+            vec![1.0, 0.0],
+            260,
+        );
+
+        let trace = Trace::new(
+            Id::new("trace-api-search").unwrap(),
+            Id::new("request-api-search").unwrap(),
+        );
+        let access = AccessRequest {
+            operation: GrantOperation::Search,
+            actor_scope: alice.clone(),
+            target_scope: alice.clone(),
+            resource_id: Id::new("memory-records").unwrap(),
+            category: None,
+            trace: trace.clone(),
+        };
+        let search_context = api_context(
+            &alice_principal,
+            &alice,
+            &alice_capability,
+            CapabilityOperation::Read,
+            300,
+        );
+        let request = StoredSearchRequest {
+            query: "launch checklist".to_owned(),
+            scope: alice,
+            mode: SearchMode::Hybrid,
+            limit: 10,
+            candidate_limit_per_source: 10,
+            include_archived: false,
+            visible_digests: HashSet::new(),
+            query_vector: Some(vec![1.0, 0.0]),
+            vector_fingerprint: Some(active_registration.fingerprint),
+            semantic_required: true,
+            now_ms: 300,
+            from_ms: None,
+            to_ms: None,
+            sources: HashSet::new(),
+            kinds: HashSet::new(),
+            categories: HashSet::new(),
+            cursor: None,
+            trace,
+        };
+
+        let first = api.search(&search_context, &access, &request).unwrap();
+        let second = api.search(&search_context, &access, &request).unwrap();
+        let first_ids = first
+            .hits
+            .iter()
+            .map(|hit| hit.candidate.id.as_str())
+            .collect::<Vec<_>>();
+        let second_ids = second
+            .hits
+            .iter()
+            .map(|hit| hit.candidate.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(first_ids, vec!["alpha", "beta"]);
+        assert_eq!(second_ids, first_ids);
+        assert_eq!(first.cursor, second.cursor);
+        assert!(!first.degraded);
+        assert!(first.hits.iter().all(|hit| {
+            hit.scores.lexical > 0.0
+                && hit.scores.semantic > 0.0
+                && hit.scores.total.is_finite()
+                && hit.scores.provenance > 0.0
+                && hit.candidate.provenance == vec![format!("source-{}", hit.candidate.id)]
+        }));
+        assert_eq!(
+            first
+                .hits
+                .iter()
+                .map(|hit| hit.scores.clone())
+                .collect::<Vec<_>>(),
+            second
+                .hits
+                .iter()
+                .map(|hit| hit.scores.clone())
+                .collect::<Vec<_>>()
+        );
+        let rendered = format!("{first:?}");
+        assert!(!rendered.contains("foreign"));
+        assert!(!rendered.contains("wrong-fingerprint"));
+        assert!(!rendered.contains("stale-digest"));
+        assert!(!rendered.contains("tombstoned"));
+
+        let mut semantic_request = request.clone();
+        semantic_request.mode = SearchMode::Semantic;
+        semantic_request.query = "semantic-only".to_owned();
+        let semantic = api
+            .search(&search_context, &access, &semantic_request)
+            .unwrap();
+        assert_eq!(
+            semantic
+                .hits
+                .iter()
+                .map(|hit| hit.candidate.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "beta"]
         );
     }
 }
