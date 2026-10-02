@@ -1045,7 +1045,7 @@ touches = ["crates/hypermid-daemon/src/lifecycle.rs", "runtime/gideon/hypermid/l
 verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surface_lifecycle.py"
 [task.ux-integrations]
 title = "Tool bridge, stdio supervision, and condition runner"
-status = "pending"
+status = "done"
 wave = 5
 owner_lane = "surfaces"
 requires = ["sec-03"]

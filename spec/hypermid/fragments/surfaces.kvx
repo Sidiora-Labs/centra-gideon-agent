@@ -130,7 +130,7 @@ verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surfac
 
 [task.ux-integrations]
 title = "Tool bridge, stdio supervision, and condition runner"
-status = "pending"
+status = "done"
 wave = 5
 owner_lane = "surfaces"
 requires = ["ux-operations", "fab-05-supervision", "base-07", "sec-03"]

@@ -1,0 +1,53 @@
+{
+  "task": "ux-integrations",
+  "status": "passed",
+  "declared_command": "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surface_integrations.py::test_scoped_canonical_smart_note_condition_reaches_connections && PYTHONPATH=runtime python checks/hypermid/verify_wave_05.py",
+  "recorded_portable_commands": [
+    "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surface_integrations.py::test_scoped_canonical_smart_note_condition_reaches_connections",
+    "PYTHONPATH=runtime python checks/hypermid/verify_wave_05.py"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-daemon/src/mcp_routes.rs": "67547feff7547d81c13f1dc0fd02c6409411f34eb04eba98c500913e1630969e",
+    "crates/hypermid-daemon/tests/mcp_routes.rs": "3f603f480f1c3b0ec6a47d9a112ab8845f799b5239fe1fd9f6280d8239c56d58",
+    "crates/hypermid-mcp/Cargo.toml": "3eb147ee65f06013062f4971560bc1ebe1abb99602ceb553a3c3a8cee52faaa5",
+    "crates/hypermid-mcp/src/lib.rs": "7f4b80e22bd08841e210d9c5b8f75aae0e4acaacf180b788976b95fa6f14e15f",
+    "crates/hypermid-mcp/src/stdio.rs": "23ede56a02c056adaf697f68fed6c96a5a2e42aeaf469c38740df94b7c0bbba9",
+    "crates/hypermid-sandbox/Cargo.toml": "7c686638673ecf1b82ef5cb47a9540bfc3b6a326f637df8d7250781cb230eb13",
+    "crates/hypermid-sandbox/src/lib.rs": "c70a1573151db4db8053bf2cc1d7dba34b4280264ec7e0952bcd155860401b32",
+    "runtime/gideon/hypermid/integrations.py": "a11ab01f6e76c179908d878d8da1a9d11d29de8913bb331c98301bb606af3a15",
+    "runtime/gideon/hypermid/mcp_provider.py": "48744464b5dc9ff157d4050e6a6454cdaefb2ac18b454ec5057eade921f26f3e",
+    "runtime/gideon/interfaces/dashboard/handlers/hypermid.py": "c04cb34cf27f65d6038b4832c9fed54eef1c1d1fcd1031e17565de25001c72f8",
+    "apps/console/src/features/hypermid/Connections.tsx": "882106587c26ff8cdc3560bf7dc8a235b325e9c2dc8a44c164b9cad4f14871c2",
+    "apps/console/src/features/hypermid/hypermidConnections.test.tsx": "75469d81612585e57d9f2656a7079e8b1997774f790e815e379e2c86d0e9b951",
+    "apps/console/src/features/settings/HypermidPanel.tsx": "281df90129976bbec0ee84d42db4c6b42d5c4c564f8094488842ea622c58b746",
+    "apps/console/src/shared/data/api.ts": "f8447e31af485bd44476f07a58d029e9a2041b24591f53351e635ec7684f5ad4",
+    "checks/hypermid/test_surface_integrations.py": "07255a04dc048606d72f622ef3cc58fb291b16d840e9b2eb8ca27136b77494f4",
+    "checks/hypermid/verify_wave_05.py": "eb0f6b8bc19594c59124e9105e9e58311ef5aa8b6827a03f6bac70c9e072b357",
+    "checks/hypermid/waves/test_wave_05.py": "6a2299469d0d7a7c307f487eef2f5c66f4166070edd15128f14b4c00658ca896"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-daemon/src/mcp_routes.rs": "67547feff7547d81c13f1dc0fd02c6409411f34eb04eba98c500913e1630969e",
+    "crates/hypermid-daemon/tests/mcp_routes.rs": "3f603f480f1c3b0ec6a47d9a112ab8845f799b5239fe1fd9f6280d8239c56d58",
+    "crates/hypermid-mcp/Cargo.toml": "3eb147ee65f06013062f4971560bc1ebe1abb99602ceb553a3c3a8cee52faaa5",
+    "crates/hypermid-mcp/src/lib.rs": "7f4b80e22bd08841e210d9c5b8f75aae0e4acaacf180b788976b95fa6f14e15f",
+    "crates/hypermid-mcp/src/stdio.rs": "23ede56a02c056adaf697f68fed6c96a5a2e42aeaf469c38740df94b7c0bbba9",
+    "crates/hypermid-sandbox/Cargo.toml": "7c686638673ecf1b82ef5cb47a9540bfc3b6a326f637df8d7250781cb230eb13",
+    "crates/hypermid-sandbox/src/lib.rs": "c70a1573151db4db8053bf2cc1d7dba34b4280264ec7e0952bcd155860401b32",
+    "runtime/gideon/hypermid/integrations.py": "a11ab01f6e76c179908d878d8da1a9d11d29de8913bb331c98301bb606af3a15",
+    "runtime/gideon/hypermid/mcp_provider.py": "48744464b5dc9ff157d4050e6a6454cdaefb2ac18b454ec5057eade921f26f3e",
+    "runtime/gideon/interfaces/dashboard/handlers/hypermid.py": "c04cb34cf27f65d6038b4832c9fed54eef1c1d1fcd1031e17565de25001c72f8",
+    "apps/console/src/features/hypermid/Connections.tsx": "882106587c26ff8cdc3560bf7dc8a235b325e9c2dc8a44c164b9cad4f14871c2",
+    "apps/console/src/features/hypermid/hypermidConnections.test.tsx": "75469d81612585e57d9f2656a7079e8b1997774f790e815e379e2c86d0e9b951",
+    "apps/console/src/features/settings/HypermidPanel.tsx": "281df90129976bbec0ee84d42db4c6b42d5c4c564f8094488842ea622c58b746",
+    "apps/console/src/shared/data/api.ts": "f8447e31af485bd44476f07a58d029e9a2041b24591f53351e635ec7684f5ad4",
+    "checks/hypermid/test_surface_integrations.py": "07255a04dc048606d72f622ef3cc58fb291b16d840e9b2eb8ca27136b77494f4",
+    "checks/hypermid/verify_wave_05.py": "eb0f6b8bc19594c59124e9105e9e58311ef5aa8b6827a03f6bac70c9e072b357",
+    "checks/hypermid/waves/test_wave_05.py": "6a2299469d0d7a7c307f487eef2f5c66f4166070edd15128f14b4c00658ca896"
+  },
+  "scope": "Canonical exact-scope SmartNote conditions, bounded redacted connection facts, supervised stdio MCP bridging, native approval ownership, cancellation, eviction, and child retirement.",
+  "source_adjustments": [
+    "The final connected source supersedes earlier component snapshots for shared MCP route, stdio, provider ownership, and host adapter files."
+  ]
+}

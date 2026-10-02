@@ -196,7 +196,7 @@
 - [x] ux-inspection. Native session, memory, and cache inspector
   - _Requirements: ux-inspection.1, ux-inspection.2, ux-inspection.3_
 
-- [ ] ux-integrations. Tool bridge, stdio supervision, and condition runner
+- [x] ux-integrations. Tool bridge, stdio supervision, and condition runner
   - _Requirements: ux-integrations.1, ux-integrations.2, ux-integrations.3_
 
 - [ ] ux-lifecycle. Safe lifecycle and portability commands
