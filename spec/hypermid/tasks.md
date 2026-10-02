@@ -175,7 +175,7 @@
 - [x] sec-04. Implement network and secret containment
   - _Requirements: sec-04.1, sec-04.2, sec-04.3_
 
-- [ ] sec-05. Implement budget admission and provenance trust boundaries
+- [x] sec-05. Implement budget admission and provenance trust boundaries
   - _Requirements: sec-05.1, sec-05.2, sec-05.3_
 
 - [ ] sec-06. Implement artifact supply-chain verification

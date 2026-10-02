@@ -1,0 +1,28 @@
+{
+  "task": "sec-05",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-store budget && cargo test -p hypermid-core provenance && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_budget_provenance.py",
+  "recorded_portable_commands": [],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-store/src/budget.rs": "0fa32e0a78eb58a354fff78ab8e091d4f03c271f225a3a0266de51f47cf4a766",
+    "crates/hypermid-core/src/provenance.rs": "5749692af4451871dd58ab4917ffd8fe55ae213f2eef25826124e62ea366f40c",
+    "crates/hypermid-daemon/src/model_admission.rs": "d06979790af36891025acb88b2542afac84434031838d653939aafbd4e42fa02",
+    "runtime/gideon/hypermid/budgets.py": "c954dacbdfc3b790df187b987eb4964f6cdb25b4aafe07d00784add012960c11",
+    "runtime/gideon/hypermid/render.py": "42e987609aaa395848d23dc1f730542cea6b0b9744a6968f1dfc021aeb8b9ba6",
+    "apps/console/src/features/hypermid/MemoryProvenance.tsx": "8f14049033450be6dd016386ad53076615c983e2c8a98c84a8750ff3a5e3a94a",
+    "checks/hypermid/test_budget_provenance.py": "2c18acf55e578de5faded1cc6419c5edbd9a012679453b0e329761e5be6453e7"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-store/src/budget.rs": "0fa32e0a78eb58a354fff78ab8e091d4f03c271f225a3a0266de51f47cf4a766",
+    "crates/hypermid-core/src/provenance.rs": "5749692af4451871dd58ab4917ffd8fe55ae213f2eef25826124e62ea366f40c",
+    "crates/hypermid-daemon/src/model_admission.rs": "d06979790af36891025acb88b2542afac84434031838d653939aafbd4e42fa02",
+    "runtime/gideon/hypermid/budgets.py": "c954dacbdfc3b790df187b987eb4964f6cdb25b4aafe07d00784add012960c11",
+    "runtime/gideon/hypermid/render.py": "42e987609aaa395848d23dc1f730542cea6b0b9744a6968f1dfc021aeb8b9ba6",
+    "apps/console/src/features/hypermid/MemoryProvenance.tsx": "8f14049033450be6dd016386ad53076615c983e2c8a98c84a8750ff3a5e3a94a",
+    "checks/hypermid/test_budget_provenance.py": "2c18acf55e578de5faded1cc6419c5edbd9a012679453b0e329761e5be6453e7"
+  },
+  "scope": "Focused durable budget admission, unresolved charge retention, provider policy, provenance invalidation and revision-bound promotion passed. Live integration and final release evidence remain separate.",
+  "source_adjustments": []
+}

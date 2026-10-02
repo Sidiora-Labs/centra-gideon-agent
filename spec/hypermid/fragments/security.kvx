@@ -103,7 +103,7 @@ ac_3 = "Instruction-shaped memory remains provenance-labeled data and cannot alt
 
 [task.sec-05]
 title = "Implement budget admission and provenance trust boundaries"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "security"
 requires = ["sec-04", "base-03"]
