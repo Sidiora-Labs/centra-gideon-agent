@@ -125,7 +125,7 @@ ac_3 = "An update that requests any new filesystem, network, model, secret, or m
 
 [task.sec-06]
 title = "Implement artifact supply-chain verification"
-status = "pending"
+status = "done"
 wave = 6
 owner_lane = "security"
 requires = ["sec-05"]

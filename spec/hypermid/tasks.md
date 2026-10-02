@@ -178,7 +178,7 @@
 - [x] sec-05. Implement budget admission and provenance trust boundaries
   - _Requirements: sec-05.1, sec-05.2, sec-05.3_
 
-- [ ] sec-06. Implement artifact supply-chain verification
+- [x] sec-06. Implement artifact supply-chain verification
   - _Requirements: sec-06.1, sec-06.2, sec-06.3_
 
 - [ ] sec-07. Implement lifecycle portability and migrations

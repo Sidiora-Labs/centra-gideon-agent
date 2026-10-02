@@ -1,0 +1,36 @@
+{
+  "task": "sec-06",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-artifacts && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_artifact_supply_chain.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-artifacts && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_artifact_supply_chain.py"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "apps/console/src/features/hypermid/ArtifactApproval.tsx": "fec06936c820cd3d360a43fc59c9233885d905d8048028d79a2e94b69d62242c",
+    "checks/hypermid/test_artifact_supply_chain.py": "02723cf13e843837b7c72672f503dffa47b2943ea71738da75657d48f673000e",
+    "crates/hypermid-artifacts/Cargo.toml": "a768a80597ade6b30909230dd2fa2d8ac66d7e0e9ffd48d23e3621ae212c0410",
+    "crates/hypermid-artifacts/src/activate.rs": "c0d7e08d8cc52a91b44818c41dfc5ade0142c4ba8e2f62b53c84ac415b2de01f",
+    "crates/hypermid-artifacts/src/install.rs": "ad3e84b803765f6fd33c771405089c4450bc2dc959e3a6a50e15ad3ed70dfd7a",
+    "crates/hypermid-artifacts/src/lib.rs": "bb276e09c3596428c5a4ac8ac604a2f586eb5833b643fad5f4e478a39b865d5f",
+    "crates/hypermid-artifacts/src/manifest.rs": "653df02afcce78d12e4c1358c6f2edea2f3ab4550cf3bc51505bb83498802217",
+    "crates/hypermid-artifacts/tests/supply_chain.rs": "1e22b9fdbccdc79165d1de42708f74f4e86e003d1d1abc0801b975bf51223245",
+    "runtime/gideon/hypermid/artifacts.py": "31ca715303eb0da4528f7bcad6a965db80010b2ec215bdefd1bf85a8dff3b146"
+  },
+  "tested_source_sha256": {
+    "apps/console/src/features/hypermid/ArtifactApproval.tsx": "fec06936c820cd3d360a43fc59c9233885d905d8048028d79a2e94b69d62242c",
+    "checks/hypermid/test_artifact_supply_chain.py": "02723cf13e843837b7c72672f503dffa47b2943ea71738da75657d48f673000e",
+    "crates/hypermid-artifacts/Cargo.toml": "a768a80597ade6b30909230dd2fa2d8ac66d7e0e9ffd48d23e3621ae212c0410",
+    "crates/hypermid-artifacts/src/activate.rs": "6b686db3e0477f359f4584239109956440304289ef5612a0dceb1cfc917a5d90",
+    "crates/hypermid-artifacts/src/install.rs": "ad3e84b803765f6fd33c771405089c4450bc2dc959e3a6a50e15ad3ed70dfd7a",
+    "crates/hypermid-artifacts/src/lib.rs": "bb276e09c3596428c5a4ac8ac604a2f586eb5833b643fad5f4e478a39b865d5f",
+    "crates/hypermid-artifacts/src/manifest.rs": "653df02afcce78d12e4c1358c6f2edea2f3ab4550cf3bc51505bb83498802217",
+    "crates/hypermid-artifacts/tests/supply_chain.rs": "1e22b9fdbccdc79165d1de42708f74f4e86e003d1d1abc0801b975bf51223245",
+    "runtime/gideon/hypermid/artifacts.py": "31ca715303eb0da4528f7bcad6a965db80010b2ec215bdefd1bf85a8dff3b146"
+  },
+  "scope": "Focused task acceptance with real signed bytes, durable filesystem lifecycle, and native process behavior; aggregate release certification remains separate.",
+  "source_adjustments": [
+    "Current source preserves qualified activation and recovery behavior and adds reviewed-pin deactivation with a durable recovery intent; exact bytes were captured and compiled in repair-3, then consumed by the actual daemon lifecycle surface."
+  ]
+}
