@@ -43,6 +43,7 @@ include = ["gideon*"]
 
 [tool.setuptools.package-data]
 "gideon.workspace.capabilities.experience.assets" = ["*.applescript", "*.swift", "world-engine/*.js", "world-engine/*.json"]
+"gideon.hypermid" = ["bin/hypermid-daemon", "bin/hypermid-daemon.exe", "schemas/*.json"]
 "gideon" = ["extensions/apps/native/*/*.py", "extensions/apps/native/*/*/*.py", "extensions/apps/native/*/LICENSE", "extensions/apps/native/*/README.md"]
 "*" = ["*.json", "*.md", "*.yaml", "*.yml", "*.pub", "py.typed", "*.html", "*.css", "*.js", "*.mjs", "*.svg", "*.png", "*.woff2", "**/*.json", "**/*.md", "**/*.yaml", "**/*.yml", "**/*.pub", "**/*.html", "**/*.css", "**/*.js", "**/*.mjs", "**/*.svg", "**/*.png", "**/*.woff2"]
 

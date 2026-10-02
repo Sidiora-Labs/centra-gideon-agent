@@ -1,0 +1,122 @@
+{
+  "protocol": "hypermid.v1",
+  "maximum_frame_bytes": 8388608,
+  "maximum_chunk_bytes": 65536,
+  "frames": {
+    "request": {
+      "value": {
+        "protocol": "hypermid.v1",
+        "kind": "request",
+        "sequence": 1,
+        "message_id": "request-1",
+        "route_id": "control",
+        "route_epoch": 1,
+        "operation": "passthrough",
+        "scope": {
+          "owner_id": "owner-1",
+          "project_id": "project-1",
+          "workspace_id": "workspace-1"
+        },
+        "trace": {
+          "trace_id": "trace-1",
+          "request_id": "request-1"
+        },
+        "deadline_ms": 4102444800000,
+        "payload": {
+          "text": "hello"
+        }
+      },
+      "canonical_json": "{\"deadline_ms\":4102444800000,\"kind\":\"request\",\"message_id\":\"request-1\",\"operation\":\"passthrough\",\"payload\":{\"text\":\"hello\"},\"protocol\":\"hypermid.v1\",\"route_epoch\":1,\"route_id\":\"control\",\"scope\":{\"owner_id\":\"owner-1\",\"project_id\":\"project-1\",\"workspace_id\":\"workspace-1\"},\"sequence\":1,\"trace\":{\"request_id\":\"request-1\",\"trace_id\":\"trace-1\"}}",
+      "frame_base64": "AAABVHsiZGVhZGxpbmVfbXMiOjQxMDI0NDQ4MDAwMDAsImtpbmQiOiJyZXF1ZXN0IiwibWVzc2FnZV9pZCI6InJlcXVlc3QtMSIsIm9wZXJhdGlvbiI6InBhc3N0aHJvdWdoIiwicGF5bG9hZCI6eyJ0ZXh0IjoiaGVsbG8ifSwicHJvdG9jb2wiOiJoeXBlcm1pZC52MSIsInJvdXRlX2Vwb2NoIjoxLCJyb3V0ZV9pZCI6ImNvbnRyb2wiLCJzY29wZSI6eyJvd25lcl9pZCI6Im93bmVyLTEiLCJwcm9qZWN0X2lkIjoicHJvamVjdC0xIiwid29ya3NwYWNlX2lkIjoid29ya3NwYWNlLTEifSwic2VxdWVuY2UiOjEsInRyYWNlIjp7InJlcXVlc3RfaWQiOiJyZXF1ZXN0LTEiLCJ0cmFjZV9pZCI6InRyYWNlLTEifX0="
+    },
+    "response": {
+      "value": {
+        "protocol": "hypermid.v1",
+        "kind": "response",
+        "sequence": 1,
+        "message_id": "response-1",
+        "reply_to": "request-1",
+        "payload": {
+          "accepted": true
+        }
+      },
+      "canonical_json": "{\"kind\":\"response\",\"message_id\":\"response-1\",\"payload\":{\"accepted\":true},\"protocol\":\"hypermid.v1\",\"reply_to\":\"request-1\",\"sequence\":1}",
+      "frame_base64": "AAAAhnsia2luZCI6InJlc3BvbnNlIiwibWVzc2FnZV9pZCI6InJlc3BvbnNlLTEiLCJwYXlsb2FkIjp7ImFjY2VwdGVkIjp0cnVlfSwicHJvdG9jb2wiOiJoeXBlcm1pZC52MSIsInJlcGx5X3RvIjoicmVxdWVzdC0xIiwic2VxdWVuY2UiOjF9"
+    },
+    "event": {
+      "value": {
+        "protocol": "hypermid.v1",
+        "kind": "event",
+        "sequence": 2,
+        "message_id": "event-1",
+        "operation": "memory.updated",
+        "payload": {
+          "cursor": {
+            "epoch": 7,
+            "sequence": 42
+          }
+        }
+      },
+      "canonical_json": "{\"kind\":\"event\",\"message_id\":\"event-1\",\"operation\":\"memory.updated\",\"payload\":{\"cursor\":{\"epoch\":7,\"sequence\":42}},\"protocol\":\"hypermid.v1\",\"sequence\":2}",
+      "frame_base64": "AAAAmXsia2luZCI6ImV2ZW50IiwibWVzc2FnZV9pZCI6ImV2ZW50LTEiLCJvcGVyYXRpb24iOiJtZW1vcnkudXBkYXRlZCIsInBheWxvYWQiOnsiY3Vyc29yIjp7ImVwb2NoIjo3LCJzZXF1ZW5jZSI6NDJ9fSwicHJvdG9jb2wiOiJoeXBlcm1pZC52MSIsInNlcXVlbmNlIjoyfQ=="
+    },
+    "error": {
+      "value": {
+        "protocol": "hypermid.v1",
+        "kind": "response",
+        "sequence": 3,
+        "message_id": "response-2",
+        "reply_to": "request-2",
+        "error": {
+          "code": "OUTCOME_UNKNOWN",
+          "message": "effect requires reconciliation",
+          "retryable": false,
+          "effect_state": "unknown"
+        }
+      },
+      "canonical_json": "{\"error\":{\"code\":\"OUTCOME_UNKNOWN\",\"effect_state\":\"unknown\",\"message\":\"effect requires reconciliation\",\"retryable\":false},\"kind\":\"response\",\"message_id\":\"response-2\",\"protocol\":\"hypermid.v1\",\"reply_to\":\"request-2\",\"sequence\":3}",
+      "frame_base64": "AAAA43siZXJyb3IiOnsiY29kZSI6Ik9VVENPTUVfVU5LTk9XTiIsImVmZmVjdF9zdGF0ZSI6InVua25vd24iLCJtZXNzYWdlIjoiZWZmZWN0IHJlcXVpcmVzIHJlY29uY2lsaWF0aW9uIiwicmV0cnlhYmxlIjpmYWxzZX0sImtpbmQiOiJyZXNwb25zZSIsIm1lc3NhZ2VfaWQiOiJyZXNwb25zZS0yIiwicHJvdG9jb2wiOiJoeXBlcm1pZC52MSIsInJlcGx5X3RvIjoicmVxdWVzdC0yIiwic2VxdWVuY2UiOjN9"
+    }
+  },
+  "chunk": {
+    "value": {
+      "event_id": "event-1",
+      "chunk_index": 0,
+      "chunk_count": 1,
+      "digest": "5ba9d5dd3d2c78cf8bd06d5e3425f2dbe29218e9e0c5d6cf3b87c0e7855cc26c",
+      "data": "aHlwZXJtaWQtY2h1bms="
+    },
+    "decoded_utf8": "hypermid-chunk"
+  },
+  "additive_response": {
+    "protocol": "hypermid.v1",
+    "kind": "response",
+    "sequence": 4,
+    "message_id": "response-3",
+    "reply_to": "request-3",
+    "payload": null,
+    "future_optional_field": {
+      "ignored": true
+    }
+  },
+  "refusals": {
+    "oversized_declared_length": 8388609,
+    "wrong_cursor_epoch": {
+      "expected": {
+        "epoch": 7,
+        "sequence": 42
+      },
+      "received": {
+        "epoch": 8,
+        "sequence": 43
+      }
+    }
+  },
+  "mutation_disconnect": {
+    "effect_kind": "mutation",
+    "written": true,
+    "expected_error_code": "OUTCOME_UNKNOWN",
+    "retryable": false,
+    "automatic_retry_count": 0
+  }
+}

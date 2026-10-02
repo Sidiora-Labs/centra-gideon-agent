@@ -1,5 +1,7 @@
 pub mod authorization;
+pub mod backup;
 pub mod budget;
+pub mod migrate;
 pub mod sqlite;
 
 use sha2::{Digest as _, Sha256};

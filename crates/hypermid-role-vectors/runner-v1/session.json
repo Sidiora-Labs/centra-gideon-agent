@@ -1,0 +1,13 @@
+{
+  "send": {
+    "send_id": "send-1",
+    "mode": "queue",
+    "content": "persist me"
+  },
+  "invariants": [
+    "repeating the same send Id and content is idempotent",
+    "reusing a send Id with different content conflicts",
+    "transcript ordinals and message Ids remain immutable after restart",
+    "an indeterminate tool effect is never redispatched"
+  ]
+}

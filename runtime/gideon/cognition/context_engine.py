@@ -27,7 +27,9 @@ Design constraints (matching Gideon's posture):
 from __future__ import annotations
 
 import logging
+import inspect
 from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from gideon.cognition.context_headroom import (
@@ -363,6 +365,12 @@ def _recent_turns(builder: "PromptAssembler", session_key: str) -> list[str]:
 
 _DEFAULT = DefaultContextEngine()
 _active: ContextEngine = _DEFAULT
+_turn_boundary_hook: Callable[[str], Awaitable[None] | None] | None = None
+_UNSET_BOUNDARY = object()
+
+
+class ContextBoundaryRefusal(RuntimeError):
+    """A durable authority transition refused this turn and remains pending."""
 
 
 def get_engine() -> ContextEngine:
@@ -396,6 +404,59 @@ def set_engine(engine: ContextEngine | None) -> None:
         engine.name,
         getattr(engine, "owns_compaction", False),
     )
+
+
+def compare_and_set_engine(
+    expected: ContextEngine, replacement: ContextEngine | None
+) -> bool:
+    """Atomically publish a cutover only while its prepared predecessor is active."""
+
+    if _active is not expected:
+        return False
+    set_engine(replacement)
+    return _active is (replacement if replacement is not None else _DEFAULT)
+
+
+def set_turn_boundary_hook(
+    hook: Callable[[str], Awaitable[None] | None] | None,
+    *,
+    expected: object = _UNSET_BOUNDARY,
+) -> bool:
+    """CAS-publish the host boundary that applies pending authority changes."""
+
+    global _turn_boundary_hook
+    if expected is not _UNSET_BOUNDARY and _turn_boundary_hook is not expected:
+        return False
+    _turn_boundary_hook = hook
+    return True
+
+
+async def prepare_context_turn(session_key: str) -> None:
+    """Apply host cutover work before synchronous context assembly begins."""
+
+    hook = _turn_boundary_hook
+    if hook is not None:
+        try:
+            result = hook(session_key)
+            if inspect.isawaitable(result):
+                await result
+        except ContextBoundaryRefusal:
+            logger.warning("Context turn refused by the durable authority boundary")
+            raise
+        except BaseException:
+            set_turn_boundary_hook(None, expected=hook)
+            logger.exception("Context turn boundary failed and was quarantined")
+            raise
+    engine = get_engine()
+    prepare = getattr(engine, "prepare_turn", None)
+    if callable(prepare):
+        try:
+            result = prepare(session_key)
+            if inspect.isawaitable(result):
+                await result
+        except BaseException:
+            logger.exception("Context engine turn preparation failed")
+            raise
 
 
 def assemble_context(

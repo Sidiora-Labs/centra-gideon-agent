@@ -1,6 +1,19 @@
-pub mod engine;
-pub mod identity_store;
-pub mod journal;
+pub mod cache_store;
 pub mod config;
-
 pub mod diagnostic_store;
+pub mod durable_writer;
+pub mod engine;
+pub mod export;
+pub mod hook_dispatch;
+pub mod identity_store;
+pub mod import;
+pub mod journal;
+pub mod migration;
+pub mod projector;
+pub mod reclaimer;
+pub mod recovery_store;
+pub mod reduction_store;
+pub mod serializer;
+pub mod subagent_context;
+pub mod summary_queue;
+pub mod tier_selector;

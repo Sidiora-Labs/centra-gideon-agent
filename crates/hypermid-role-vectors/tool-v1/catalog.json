@@ -1,0 +1,15 @@
+{
+  "request": {
+    "preset": "default",
+    "parameters": {"mode": "local"},
+    "composition": {"modules": ["files"]},
+    "system_text": "include",
+    "digest_only": false
+  },
+  "invariants": [
+    "catalog bytes are independent of request scope",
+    "schema descriptions do not affect structural digest",
+    "tool name, structural digest and semantic revision form the schema pin",
+    "one request produces exactly one terminal frame"
+  ]
+}

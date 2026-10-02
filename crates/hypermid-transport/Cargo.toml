@@ -1,0 +1,25 @@
+[package]
+name = "hypermid-transport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+base64.workspace = true
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+getrandom.workspace = true
+hypermid-protocol = { path = "../hypermid-protocol" }
+libc = "0.2"
+rcgen = { version = "0.13", features = ["pem"] }
+rustls.workspace = true
+rustls-pemfile = "2"
+rustls-pki-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+snow = "0.9"
+thiserror.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

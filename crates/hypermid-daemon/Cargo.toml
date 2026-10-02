@@ -1,0 +1,36 @@
+[package]
+name = "hypermid-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+base64.workspace = true
+getrandom.workspace = true
+hypermid-contracts = { path = "../hypermid-contracts" }
+hypermid-core = { path = "../hypermid-core" }
+hypermid-bus = { path = "../hypermid-bus" }
+hypermid-artifacts = { path = "../hypermid-artifacts" }
+hypermid-control = { path = "../hypermid-control" }
+hypermid-context = { path = "../hypermid-context" }
+hypermid-memory = { path = "../hypermid-memory" }
+hypermid-mcp = { path = "../hypermid-mcp" }
+hypermid-models = { path = "../hypermid-models" }
+hypermid-protocol = { path = "../hypermid-protocol" }
+hypermid-registry = { path = "../hypermid-registry" }
+hypermid-sandbox = { path = "../hypermid-sandbox" }
+hypermid-store = { path = "../hypermid-store" }
+hypermid-transport = { path = "../hypermid-transport" }
+libc = "0.2"
+rusqlite = { version = "0.32", features = ["backup", "bundled"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+
+[dev-dependencies]
+hypermid-client = { path = "../hypermid-client" }
+tempfile.workspace = true

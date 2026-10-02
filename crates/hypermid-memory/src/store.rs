@@ -577,6 +577,7 @@ mod foundation_tests {
             "memory_provenance",
             "memory_lineage",
             "memory_verification_events",
+            "memory_sharing_judgments",
             "memory_mutation_events",
             "embedding_registrations",
             "memory_embeddings",
@@ -615,7 +616,7 @@ mod foundation_tests {
         let connection = Connection::open(&path).unwrap();
         connection
             .execute(
-                "UPDATE hypermid_schema_version SET current_version=2 WHERE singleton=1",
+                "UPDATE hypermid_schema_version SET current_version=3 WHERE singleton=1",
                 [],
             )
             .unwrap();
@@ -625,6 +626,50 @@ mod foundation_tests {
             Err(error) => error,
         };
         assert_eq!(error.code, "SCHEMA_NEWER_UNSUPPORTED");
+    }
+
+    #[test]
+    fn foundation_upgrades_the_immutable_v1_chain_to_sharing_judgments() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("memory.sqlite3");
+        let migrations = memory_migrations();
+        let lease_key = LeaseKey {
+            module_id: id("hypermid-memory"),
+            backend: BackendKind::Sqlite,
+            scope_key: id("memory-store"),
+        };
+        let v1 = SQLiteStore::open(&path, lease_key, 1, &migrations[..1]).unwrap();
+        assert_eq!(
+            v1.read(|connection| {
+                Ok(connection.query_row(
+                    "SELECT current_version FROM hypermid_schema_version WHERE singleton=1",
+                    [],
+                    |row| row.get::<_, u64>(0),
+                )?)
+            })
+            .unwrap(),
+            1
+        );
+        drop(v1);
+
+        let upgraded = MemoryStore::open(&path).unwrap();
+        let evidence = upgraded.schema_evidence().unwrap();
+        assert_eq!(evidence.current_version, MEMORY_SCHEMA_VERSION);
+        assert_eq!(evidence.schema_digest, schema_digest());
+        upgraded
+            .read(|connection| {
+                let present: i64 = connection
+                    .query_row(
+                        "SELECT count(*) FROM sqlite_master \
+                         WHERE type='table' AND name='memory_sharing_judgments'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .map_err(read_error)?;
+                assert_eq!(present, 1);
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]

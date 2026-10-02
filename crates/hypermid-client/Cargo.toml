@@ -1,0 +1,23 @@
+[package]
+name = "hypermid-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+getrandom.workspace = true
+hypermid-contracts = { path = "../hypermid-contracts" }
+hypermid-protocol = { path = "../hypermid-protocol" }
+hypermid-transport = { path = "../hypermid-transport" }
+rustls.workspace = true
+rustls-pemfile = "2"
+rustls-pki-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+
+[dev-dependencies]
+hypermid-transport = { path = "../hypermid-transport" }

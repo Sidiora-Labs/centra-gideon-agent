@@ -115,7 +115,7 @@ ac_2 = "On daemon epoch change it invalidates route epochs and event cursors, re
 
 [task.fab-01-bootstrap]
 title = "Implement authenticated framing minimal daemon and passthrough adapter"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "fabric"
 requires = ["base-01"]

@@ -82,7 +82,7 @@
 - [ ] ctx-tier-decay. Implement budgeted historical tier decay
   - _Requirements: ctx-tier-decay.1, ctx-tier-decay.2_
 
-- [ ] fab-01-bootstrap. Implement authenticated framing minimal daemon and passthrough adapter
+- [x] fab-01-bootstrap. Implement authenticated framing minimal daemon and passthrough adapter
   - _Requirements: fab-001.1, fab-001.2, fab-002.1, fab-002.2, fab-017.1, fab-017.2_
 
 - [ ] fab-02-registry-routing. Implement manifest registry and epoch-safe routing

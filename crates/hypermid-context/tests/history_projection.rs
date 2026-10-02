@@ -1,9 +1,13 @@
 use hypermid_context::journal::{Journal, RawSourceJournal};
+use hypermid_context::projector::{
+    DeterministicProjector, JournalItemSelection, JournalProjectionRequest,
+};
 use hypermid_contracts::{Cursor, Digest, Id, Scope};
 use hypermid_core::history::{
     ContextPart, HistoryViolation, IngestRequest, JournalRange, PartKind, PendingContextItem, Role,
 };
 use hypermid_core::identity::{IdentityRelation, RelationKind};
+use hypermid_core::projection::{ContextMode, ProjectionBudgetInputs, RegionKind};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -83,6 +87,268 @@ fn structured_digest(fields: &[&[u8]]) -> Digest {
         bytes.extend_from_slice(field);
     }
     Digest::sha256(bytes)
+}
+
+#[test]
+fn canonical_history_tool_pair_projects_without_digest_reinterpretation() {
+    let directory = TestDirectory::new();
+    let scope = Scope::new(id("owner-tools"), id("project-tools"), None);
+    let session_id = id("session-tools");
+    let journal = Journal::open(
+        directory.0.join("context"),
+        scope.clone(),
+        session_id.clone(),
+        1,
+    )
+    .unwrap();
+    let call_id = id("call-tools");
+    let arguments = r#"{"path":"GOTCHA.kvx"}"#;
+    let call_digest =
+        structured_digest(&[call_id.as_str().as_bytes(), b"read", arguments.as_bytes()]);
+    let call = journal
+        .append(IngestRequest {
+            expected_cursor: Cursor::new(1, 0).unwrap(),
+            idempotency_key: id("append-tool-call"),
+            item: pending(
+                "item-tool-call",
+                "event-tool-call",
+                b"tool-call-source",
+                &scope,
+                &session_id,
+                Role::Assistant,
+                vec![ContextPart {
+                    part_id: id("part-tool-call"),
+                    kind: PartKind::ToolCall,
+                    content_digest: call_digest,
+                    text: None,
+                    call_id: Some(call_id.clone()),
+                    tool_name: Some("read".into()),
+                    arguments_json: Some(arguments.into()),
+                    result_json: None,
+                    media_type: None,
+                    source_uri: None,
+                    width: None,
+                    height: None,
+                    metadata: None,
+                }],
+                vec![],
+            ),
+            source_snapshot: Some(b"tool-call-source".to_vec()),
+        })
+        .unwrap();
+    let result = r#"{"status":"ok"}"#;
+    let result_digest = structured_digest(&[call_id.as_str().as_bytes(), result.as_bytes()]);
+    let tool_result = journal
+        .append(IngestRequest {
+            expected_cursor: call.cursor,
+            idempotency_key: id("append-tool-result"),
+            item: pending(
+                "item-tool-result",
+                "event-tool-result",
+                b"tool-result-source",
+                &scope,
+                &session_id,
+                Role::Tool,
+                vec![ContextPart {
+                    part_id: id("part-tool-result"),
+                    kind: PartKind::ToolResult,
+                    content_digest: result_digest,
+                    text: None,
+                    call_id: Some(call_id),
+                    tool_name: None,
+                    arguments_json: None,
+                    result_json: Some(result.into()),
+                    media_type: None,
+                    source_uri: None,
+                    width: None,
+                    height: None,
+                    metadata: None,
+                }],
+                vec![],
+            ),
+            source_snapshot: Some(b"tool-result-source".to_vec()),
+        })
+        .unwrap();
+
+    let projection = DeterministicProjector
+        .project_journal(
+            &journal,
+            JournalProjectionRequest {
+                scope,
+                session_id,
+                source_cursor: tool_result.cursor,
+                generation: 1,
+                policy_revision: 1,
+                mode: ContextMode::Primary,
+                provider_profile_digest: Digest::sha256(b"provider-tools"),
+                budget_inputs: ProjectionBudgetInputs {
+                    context_window_tokens: 1_000,
+                    reserved_output_tokens: 100,
+                    max_input_tokens: 900,
+                    max_items: 10,
+                    max_images: 0,
+                },
+                created_at: "2026-10-02T12:00:00Z".into(),
+                items: vec![
+                    JournalItemSelection {
+                        item_id: call.item_id,
+                        region: RegionKind::Tail,
+                        token_mass: 10,
+                    },
+                    JournalItemSelection {
+                        item_id: tool_result.item_id,
+                        region: RegionKind::Tail,
+                        token_mass: 10,
+                    },
+                ],
+                summaries: vec![],
+            },
+        )
+        .unwrap();
+    assert_eq!(projection.blocks[0].parts[0].content_digest, call_digest);
+    assert_eq!(projection.blocks[1].parts[0].content_digest, result_digest);
+}
+
+#[test]
+fn canonical_history_image_and_file_project_with_dimensions_and_metadata() {
+    let directory = TestDirectory::new();
+    let scope = Scope::new(id("owner-media"), id("project-media"), None);
+    let session_id = id("session-media");
+    let journal = Journal::open(
+        directory.0.join("context"),
+        scope.clone(),
+        session_id.clone(),
+        1,
+    )
+    .unwrap();
+    let image_media = "image/png";
+    let image_uri = "artifact://media/image";
+    let image_digest = structured_digest(&[
+        image_media.as_bytes(),
+        image_uri.as_bytes(),
+        &640_u64.to_be_bytes(),
+        &480_u64.to_be_bytes(),
+    ]);
+    let image = journal
+        .append(IngestRequest {
+            expected_cursor: Cursor::new(1, 0).unwrap(),
+            idempotency_key: id("append-image"),
+            item: pending(
+                "item-image",
+                "event-image",
+                b"image-source",
+                &scope,
+                &session_id,
+                Role::User,
+                vec![ContextPart {
+                    part_id: id("part-image"),
+                    kind: PartKind::Image,
+                    content_digest: image_digest,
+                    text: None,
+                    call_id: None,
+                    tool_name: None,
+                    arguments_json: None,
+                    result_json: None,
+                    media_type: Some(image_media.into()),
+                    source_uri: Some(image_uri.into()),
+                    width: Some(640),
+                    height: Some(480),
+                    metadata: Some(serde_json::json!({"alt": "fixture image"})),
+                }],
+                vec![],
+            ),
+            source_snapshot: Some(b"image-source".to_vec()),
+        })
+        .unwrap();
+    let file_media = "application/octet-stream";
+    let file_uri = "artifact://media/file";
+    let file_digest = structured_digest(&[
+        file_media.as_bytes(),
+        file_uri.as_bytes(),
+        &0_u64.to_be_bytes(),
+        &0_u64.to_be_bytes(),
+    ]);
+    let file = journal
+        .append(IngestRequest {
+            expected_cursor: image.cursor,
+            idempotency_key: id("append-file"),
+            item: pending(
+                "item-file",
+                "event-file",
+                b"file-source",
+                &scope,
+                &session_id,
+                Role::User,
+                vec![ContextPart {
+                    part_id: id("part-file"),
+                    kind: PartKind::File,
+                    content_digest: file_digest,
+                    text: None,
+                    call_id: None,
+                    tool_name: None,
+                    arguments_json: None,
+                    result_json: None,
+                    media_type: Some(file_media.into()),
+                    source_uri: Some(file_uri.into()),
+                    width: None,
+                    height: None,
+                    metadata: Some(serde_json::json!({"name": "fixture.bin"})),
+                }],
+                vec![],
+            ),
+            source_snapshot: Some(b"file-source".to_vec()),
+        })
+        .unwrap();
+
+    let projection = DeterministicProjector
+        .project_journal(
+            &journal,
+            JournalProjectionRequest {
+                scope,
+                session_id,
+                source_cursor: file.cursor,
+                generation: 1,
+                policy_revision: 1,
+                mode: ContextMode::Primary,
+                provider_profile_digest: Digest::sha256(b"provider-media"),
+                budget_inputs: ProjectionBudgetInputs {
+                    context_window_tokens: 1_000,
+                    reserved_output_tokens: 100,
+                    max_input_tokens: 900,
+                    max_items: 10,
+                    max_images: 2,
+                },
+                created_at: "2026-10-02T12:00:00Z".into(),
+                items: vec![
+                    JournalItemSelection {
+                        item_id: image.item_id,
+                        region: RegionKind::Tail,
+                        token_mass: 10,
+                    },
+                    JournalItemSelection {
+                        item_id: file.item_id,
+                        region: RegionKind::Tail,
+                        token_mass: 10,
+                    },
+                ],
+                summaries: vec![],
+            },
+        )
+        .unwrap();
+    let image_part = &projection.blocks[0].parts[0];
+    assert_eq!(image_part.content_digest, image_digest);
+    assert_eq!(
+        (image_part.width, image_part.height),
+        (Some(640), Some(480))
+    );
+    assert_eq!(
+        image_part.metadata.as_ref().unwrap()["alt"],
+        "fixture image"
+    );
+    let file_part = &projection.blocks[1].parts[0];
+    assert_eq!(file_part.content_digest, file_digest);
+    assert_eq!((file_part.width, file_part.height), (None, None));
+    assert_eq!(file_part.metadata.as_ref().unwrap()["name"], "fixture.bin");
 }
 
 #[test]

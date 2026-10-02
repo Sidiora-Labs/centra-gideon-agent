@@ -66,7 +66,7 @@ impl<'de> Deserialize<'de> for Id {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, Hash, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scope {
     pub owner_id: Id,

@@ -6,6 +6,18 @@
   "source_sha256": {
     "crates/hypermid-leases/Cargo.toml": "43a7d884fc2c5aba4fd651dbe3b3986a4a4c769c76346aed2bd74477181283a3",
     "crates/hypermid-leases/src/lib.rs": "a8295a4c9db28260477b0716b4b8f7ffe050020a7829dcdc2963c86c189e8e1c",
+    "crates/hypermid-store/Cargo.toml": "9e5e6f72b8fcf488d95b6407c3bc64021dc3d4bbb6b23a387c9fbbb924219abe",
+    "crates/hypermid-store/src/lib.rs": "94b54f087b530c9d1a7f8afed32a8bb1b53ad2792e3a401bc25f42b6759351b7",
+    "crates/hypermid-store/src/sqlite.rs": "560027cc99345e2b3554f437e5d6d03d6fb8c64d0d931edc95ebaf370b3e21af",
+    "crates/hypermid-store-postgres/Cargo.toml": "8315c41c7e6bb95d5a3f70942d66d3739c9860cce26edd836587f9a939daa141",
+    "crates/hypermid-store-postgres/src/lib.rs": "182ecb3eb05dead2560be5743819e0229c335e738c7e0d30ff216d7a7db8ecd8",
+    "runtime/gideon/hypermid/storage.py": "69a27df092207b88c7546f2e62d1d6377abbe87493e1a21db5db0a30b844961c",
+    "checks/hypermid/test_base_storage.py": "fbaa9da4f536dd39dda8c3350d3ab1c059b2ae58dba73b307a0f495dffee23f7"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "tested_source_sha256": {
+    "crates/hypermid-leases/Cargo.toml": "43a7d884fc2c5aba4fd651dbe3b3986a4a4c769c76346aed2bd74477181283a3",
+    "crates/hypermid-leases/src/lib.rs": "a8295a4c9db28260477b0716b4b8f7ffe050020a7829dcdc2963c86c189e8e1c",
     "crates/hypermid-store/Cargo.toml": "0ffae6421f6893a56e6f32fae6e9659be4d82d1d3ed47932cbbae9100def6d26",
     "crates/hypermid-store/src/lib.rs": "5c19821032cc919a9b4abf00298a5b8f4b30bebe842b27077f040857a001e94c",
     "crates/hypermid-store/src/sqlite.rs": "560027cc99345e2b3554f437e5d6d03d6fb8c64d0d931edc95ebaf370b3e21af",
@@ -14,5 +26,6 @@
     "runtime/gideon/hypermid/storage.py": "69a27df092207b88c7546f2e62d1d6377abbe87493e1a21db5db0a30b844961c",
     "checks/hypermid/test_base_storage.py": "fbaa9da4f536dd39dda8c3350d3ab1c059b2ae58dba73b307a0f495dffee23f7"
   },
-  "scope": "Focused task acceptance; subsequent integration gates remain separate."
+  "source_commit": "98f53a58197e6d0e57fca820ba1ed96f46790da7",
+  "publication_note": "Published manifests and module indexes expose the qualified dependency closure; implementation source remains identified separately."
 }

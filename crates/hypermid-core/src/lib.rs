@@ -1,7 +1,18 @@
+pub mod budget;
+pub mod cache;
 pub mod capability;
-pub mod protocol;
-pub mod identity;
-pub mod history;
-pub mod mode;
-
+pub mod decay;
 pub mod diagnostics;
+pub mod history;
+pub mod hooks;
+pub mod identity;
+pub mod mode;
+pub mod projection;
+pub mod protocol;
+pub mod provenance;
+pub mod provider;
+pub mod reclaim;
+pub mod recovery;
+pub mod reduction;
+pub mod subagent;
+pub mod summary;

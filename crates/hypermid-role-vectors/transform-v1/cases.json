@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "subscriptions": [
+    {
+      "name": "bounded pre-tool mutation",
+      "valid": true,
+      "value": {
+        "hook": "pre_tool",
+        "phase": "mutate",
+        "tools": ["lookup"],
+        "ops": ["append"],
+        "on_unavailable": "fail_step",
+        "budget_ms": 500
+      }
+    },
+    {
+      "name": "post-tool preserving transform",
+      "valid": true,
+      "value": {
+        "hook": "post_tool",
+        "tools": [],
+        "ops": ["append"],
+        "on_unavailable": "continue",
+        "budget_ms": 250
+      }
+    },
+    {
+      "name": "phase outside pre-tool is refused",
+      "valid": false,
+      "value": {
+        "hook": "pre_user",
+        "phase": "approve",
+        "tools": [],
+        "ops": ["append"],
+        "on_unavailable": "fail_run",
+        "budget_ms": 100
+      }
+    },
+    {
+      "name": "unbounded budget is refused",
+      "valid": false,
+      "value": {
+        "hook": "post_assistant",
+        "tools": [],
+        "ops": ["append"],
+        "on_unavailable": "continue",
+        "budget_ms": 60001
+      }
+    }
+  ]
+}

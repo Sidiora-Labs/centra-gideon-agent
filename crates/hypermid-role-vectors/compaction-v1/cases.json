@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "directives": [
+    {
+      "name": "half-open replacement",
+      "valid": true,
+      "value": {
+        "request_id": "request-1",
+        "compaction_id": "compaction-1",
+        "version": 1,
+        "from_ordinal": 0,
+        "to_ordinal": 2,
+        "replacement": []
+      }
+    },
+    {
+      "name": "empty insertion range",
+      "valid": true,
+      "value": {
+        "request_id": "request-2",
+        "compaction_id": "compaction-2",
+        "version": 2,
+        "from_ordinal": 3,
+        "to_ordinal": 3,
+        "replacement": []
+      }
+    },
+    {
+      "name": "zero version remains draft and is refused",
+      "valid": false,
+      "value": {
+        "request_id": "request-3",
+        "compaction_id": "compaction-3",
+        "version": 0,
+        "from_ordinal": 0,
+        "to_ordinal": 1,
+        "replacement": []
+      }
+    },
+    {
+      "name": "reversed range is refused",
+      "valid": false,
+      "value": {
+        "request_id": "request-4",
+        "compaction_id": "compaction-4",
+        "version": 1,
+        "from_ordinal": 4,
+        "to_ordinal": 2,
+        "replacement": []
+      }
+    }
+  ]
+}

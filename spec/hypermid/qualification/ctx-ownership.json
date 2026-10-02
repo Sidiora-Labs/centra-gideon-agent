@@ -5,6 +5,19 @@
   "exit_code": 0,
   "source_sha256": {
     "crates/hypermid-core/Cargo.toml": "6e5793e8d4b6c7c95b83cce7a770bf320660ce7223fe2e9fc65569e75a7b16e8",
+    "crates/hypermid-core/src/lib.rs": "7786b08ae1d93306d6491454563561e54dd7c9fae2fc575a81fa9c7f7fb65f8c",
+    "crates/hypermid-core/src/protocol.rs": "cfdba2ff5e9ace4dd5f971bde12b24e2f97a284e54615eae0c5b06c836cd02ba",
+    "crates/hypermid-context/Cargo.toml": "83cc13123b054840b201bbed57b4694ae08294c1f9806fb7d806277970a17ed6",
+    "crates/hypermid-context/src/lib.rs": "aa8d95e90d3d6bb72220cbafb6dfdd2fd9139d89476b41c875561e4afd36c574",
+    "crates/hypermid-context/src/engine.rs": "cba94797bd25dae21b301c227a76ec3395f4a7f13be24e6eaef4fbac8c180d49",
+    "runtime/gideon/hypermid/protocol.py": "469473af6c280505fa6a5412f4e9e7fc5eaa933935c47cee62f0eacc69b6bb35",
+    "runtime/gideon/hypermid/ownership.py": "5e00facb7e423cd3f4357f1be01a92407410a77a471567a22e843eeb377d2990",
+    "crates/hypermid-context/tests/protocol_contract.rs": "d97938ebdc0beb4ada8992e9f11cc8946e0906611e3845c69e9e4f350abe8777",
+    "checks/runtime/test_hypermid_protocol.py": "4369a47c5bdb9ff6890bbdf1c3769a4efbbf94babb9168a1c7bb4ad0f6f8cab5"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "tested_source_sha256": {
+    "crates/hypermid-core/Cargo.toml": "6e5793e8d4b6c7c95b83cce7a770bf320660ce7223fe2e9fc65569e75a7b16e8",
     "crates/hypermid-core/src/lib.rs": "c070bccf9edbc0e15c2572c95c2f1c2060cb9eae18215a9f13dd0e5bef76f2cf",
     "crates/hypermid-core/src/protocol.rs": "cfdba2ff5e9ace4dd5f971bde12b24e2f97a284e54615eae0c5b06c836cd02ba",
     "crates/hypermid-context/Cargo.toml": "83cc13123b054840b201bbed57b4694ae08294c1f9806fb7d806277970a17ed6",
@@ -15,5 +28,6 @@
     "crates/hypermid-context/tests/protocol_contract.rs": "d97938ebdc0beb4ada8992e9f11cc8946e0906611e3845c69e9e4f350abe8777",
     "checks/runtime/test_hypermid_protocol.py": "4369a47c5bdb9ff6890bbdf1c3769a4efbbf94babb9168a1c7bb4ad0f6f8cab5"
   },
-  "scope": "Focused task acceptance; subsequent integration gates remain separate."
+  "source_commit": "6f02d518fae4720f21183e65e003b5d1249a0866",
+  "publication_note": "Published manifests and module indexes expose the qualified dependency closure; implementation source remains identified separately."
 }

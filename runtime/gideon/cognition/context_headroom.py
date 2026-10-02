@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -52,6 +54,80 @@ class Component:
     text: str
     compressible: bool = True
     content_type: str = ""
+    source: str = "gideon"
+    source_order: int = 0
+    content_digest: str = ""
+    covered_digest: str = ""
+    policy_revision: int = 1
+    cache_region: str = "tail"
+    source_cursor: str = ""
+
+    def inspection(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "source": self.source,
+            "source_order": self.source_order,
+            "content_digest": self.content_digest,
+            "covered_digest": self.covered_digest,
+            "policy_revision": self.policy_revision,
+            "cache_region": self.cache_region,
+            "source_cursor": self.source_cursor,
+            "tokens": count_tokens(self.text),
+            "compressible": self.compressible,
+            "content_type": self.content_type,
+        }
+
+
+def attribute_components(
+    components: "list[Component] | tuple[Component, ...]",
+    *,
+    policy_revision: int,
+    cache_regions: "dict[str, str] | None" = None,
+    covered_digests: "dict[str, str] | None" = None,
+    source_cursor: str = "",
+) -> list[Component]:
+    if policy_revision < 1:
+        raise ValueError("context policy revision must be positive")
+    regions = cache_regions or {}
+    covered = covered_digests or {}
+    attributed = []
+    for order, component in enumerate(components):
+        region = regions.get(component.name, component.cache_region or "tail")
+        if region not in {"baseline", "delta", "tail"}:
+            raise ValueError(f"invalid cache region for component {component.name!r}")
+        digest = hashlib.sha256(component.text.encode("utf-8")).hexdigest()
+        coverage = covered.get(component.name, component.covered_digest or digest)
+        if len(coverage) != 64 or any(character not in "0123456789abcdef" for character in coverage):
+            raise ValueError(f"invalid covered digest for component {component.name!r}")
+        attributed.append(
+            replace(
+                component,
+                source_order=order,
+                content_digest=digest,
+                covered_digest=coverage,
+                policy_revision=policy_revision,
+                cache_region=region,
+                source_cursor=source_cursor,
+            )
+        )
+    return attributed
+
+
+def validate_component_evidence(
+    components: "list[Component] | tuple[Component, ...]",
+    *,
+    policy_revision: int,
+    covered_digests: "dict[str, str] | None" = None,
+) -> None:
+    expected = covered_digests or {}
+    for component in components:
+        if component.policy_revision != policy_revision:
+            raise ValueError(
+                f"policy revision mismatch for component {component.name!r}"
+            )
+        covered = expected.get(component.name)
+        if covered is not None and component.covered_digest != covered:
+            raise ValueError(f"covered digest mismatch for component {component.name!r}")
 
 
 @dataclass(frozen=True)
@@ -122,6 +198,7 @@ class Headroom:
     oversized: tuple[Oversized, ...] = ()
     reason: str = ""
     fix: str = ""
+    components: tuple[Component, ...] = ()
 
     @property
     def headroom_tokens(self) -> int | None:
@@ -193,6 +270,19 @@ class Headroom:
         for name in ("compressed", "oversized"):
             result[name] = [record.to_dict() for record in getattr(self, name)]
         result.update(_fields(self, ("reason", "fix")))
+        evidence = [component.inspection() for component in self.components]
+        result["components"] = evidence
+        encoded = json.dumps(
+            {
+                "state": self.state.value,
+                "window": self.window.to_dict(),
+                "assembled_tokens": self.assembled_tokens,
+                "components": evidence,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        result["decision_digest"] = hashlib.sha256(encoded).hexdigest()
         return result
 
 
@@ -280,7 +370,14 @@ class _ProjectionBudget:
         measured = count_tokens(projected.text)
         if not projected.truncated or measured >= previous:
             return False
-        self.working[index] = (replace(component, text=projected.text), measured)
+        self.working[index] = (
+            replace(
+                component,
+                text=projected.text,
+                content_digest=hashlib.sha256(projected.text.encode("utf-8")).hexdigest(),
+            ),
+            measured,
+        )
         self.total -= previous - measured
         existing = self.changes.get(index)
         self.changes[index] = Compressed(
@@ -365,9 +462,17 @@ class _AssemblyBudget:
                 original,
                 reason=_UNMEASURED_REASON,
                 fix=_UNMEASURED_FIX,
+                components=tuple(component for component, _ in self.working),
             )
         if self.raw <= limit:
-            return Headroom(HeadroomState.FITS, window, self.raw, self.raw, original)
+            return Headroom(
+                HeadroomState.FITS,
+                window,
+                self.raw,
+                self.raw,
+                original,
+                components=tuple(component for component, _ in self.working),
+            )
         total, compressed = _compress(self.working, limit=limit, total=self.raw)
         rendered = self.joined()
         if total > limit:
@@ -375,7 +480,15 @@ class _AssemblyBudget:
         outcome = (
             HeadroomState.FITS_AFTER_COMPRESSION if compressed else HeadroomState.FITS
         )
-        return Headroom(outcome, window, total, self.raw, rendered, tuple(compressed))
+        return Headroom(
+            outcome,
+            window,
+            total,
+            self.raw,
+            rendered,
+            tuple(compressed),
+            components=tuple(component for component, _ in self.working),
+        )
 
     def refuse(self, total, compressed):
         window = self.window
@@ -410,6 +523,7 @@ class _AssemblyBudget:
             oversized,
             reason,
             fix,
+            tuple(component for component, _ in self.working),
         )
 
 

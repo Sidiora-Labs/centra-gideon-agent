@@ -1,0 +1,21 @@
+[package]
+name = "hypermid-registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hex = "0.4"
+hypermid-artifacts = { path = "../hypermid-artifacts" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+ed25519-dalek = "2"
+flate2 = "1"
+tar = "0.4"
+tempfile.workspace = true
+
