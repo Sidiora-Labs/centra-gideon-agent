@@ -67,7 +67,7 @@
 - [x] ctx-provider-serialization. Implement provider-capability serialization
   - _Requirements: ctx-provider-serialization.1, ctx-provider-serialization.2, ctx-provider-serialization.3_
 
-- [ ] ctx-reclaim. Implement deterministic pressure reclaim
+- [x] ctx-reclaim. Implement deterministic pressure reclaim
   - _Requirements: ctx-reclaim.1, ctx-reclaim.2, ctx-reclaim.3_
 
 - [x] ctx-recovery. Implement journal rebuild and last-known-good recovery

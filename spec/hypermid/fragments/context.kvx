@@ -216,7 +216,7 @@ verify_cmd = "cargo test -p hypermid-context --test reduction_contract && PYTHON
 
 [task.ctx-reclaim]
 title = "Implement deterministic pressure reclaim"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "context"
 requires = ["ctx-reduction", "ctx-tier-decay"]

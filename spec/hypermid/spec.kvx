@@ -627,7 +627,7 @@ touches = ["crates/hypermid-core/src/reduction.rs", "crates/hypermid-context/src
 verify_cmd = "cargo test -p hypermid-context --test reduction_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_reduction.py"
 [task.ctx-reclaim]
 title = "Implement deterministic pressure reclaim"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "context"
 requires = ["ctx-reduction", "ctx-tier-decay"]

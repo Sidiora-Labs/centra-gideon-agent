@@ -1,0 +1,26 @@
+{
+  "task": "ctx-reclaim",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-context --test reclaim_policy && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_reclaim.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-context --test reclaim_policy"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-core/src/reclaim.rs": "df0c43a39ceb68acde5c1774b384afadbe8b6da97a5689e47395c82c2f9b4533",
+    "crates/hypermid-context/src/reclaimer.rs": "c95e2b4ffc9746fbf119f435f7bef74a5f1af84e80e0069b0ba1d778d234e907",
+    "runtime/gideon/hypermid/pressure.py": "6c04eab733775be77a6ce5bb9e5100c60a09c19344f8c5e30414713537856644",
+    "crates/hypermid-context/tests/reclaim_policy.rs": "46c25b988e6b8dfe5b3226184183a032449f053b1295543c73b79ec15ca16823",
+    "checks/runtime/test_hypermid_reclaim.py": "41a68dffeca01c33f0ceb5bb24d394431bdaf94776d5218025badac261036a0a"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-core/src/reclaim.rs": "df0c43a39ceb68acde5c1774b384afadbe8b6da97a5689e47395c82c2f9b4533",
+    "crates/hypermid-context/src/reclaimer.rs": "c95e2b4ffc9746fbf119f435f7bef74a5f1af84e80e0069b0ba1d778d234e907",
+    "runtime/gideon/hypermid/pressure.py": "6c04eab733775be77a6ce5bb9e5100c60a09c19344f8c5e30414713537856644",
+    "crates/hypermid-context/tests/reclaim_policy.rs": "46c25b988e6b8dfe5b3226184183a032449f053b1295543c73b79ec15ca16823",
+    "checks/runtime/test_hypermid_reclaim.py": "41a68dffeca01c33f0ceb5bb24d394431bdaf94776d5218025badac261036a0a"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}
