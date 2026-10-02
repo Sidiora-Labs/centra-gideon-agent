@@ -1,0 +1,625 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hypermid.gideon.dev/schemas/config.schema.json",
+  "title": "Gideon Hypermid OSS configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scope",
+    "mode",
+    "protocol",
+    "daemon",
+    "storage",
+    "ownership",
+    "shadow",
+    "maintenance",
+    "migration",
+    "federation",
+    "sandbox"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "scope": {
+      "$ref": "#/$defs/Scope"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["off", "pass_through", "shadow", "primary"],
+      "default": "off"
+    },
+    "protocol": {
+      "$ref": "#/$defs/Protocol"
+    },
+    "daemon": {
+      "$ref": "#/$defs/Daemon"
+    },
+    "storage": {
+      "$ref": "#/$defs/Storage"
+    },
+    "ownership": {
+      "$ref": "#/$defs/Ownership"
+    },
+    "shadow": {
+      "$ref": "#/$defs/Shadow"
+    },
+    "context": {
+      "$ref": "#/$defs/Context"
+    },
+    "memory": {
+      "$ref": "#/$defs/Memory"
+    },
+    "maintenance": {
+      "$ref": "#/$defs/Maintenance"
+    },
+    "migration": {
+      "$ref": "#/$defs/Migration"
+    },
+    "federation": {
+      "$ref": "#/$defs/Federation"
+    },
+    "sandbox": {
+      "$ref": "#/$defs/Sandbox"
+    },
+    "observability": {
+      "$ref": "#/$defs/Observability"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "enum": ["off", "pass_through", "shadow"]
+          }
+        },
+        "required": ["mode"]
+      },
+      "then": {
+        "properties": {
+          "ownership": {
+            "properties": {
+              "context_writer": {
+                "const": "gideon"
+              },
+              "memory_writer": {
+                "const": "gideon"
+              }
+            }
+          },
+          "maintenance": {
+            "properties": {
+              "enabled": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "shadow"
+          }
+        },
+        "required": ["mode"]
+      },
+      "then": {
+        "properties": {
+          "shadow": {
+            "properties": {
+              "enabled": {
+                "const": true
+              },
+              "write_policy": {
+                "const": "read_only"
+              },
+              "publish_context": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "primary"
+          }
+        },
+        "required": ["mode"]
+      },
+      "then": {
+        "properties": {
+          "ownership": {
+            "properties": {
+              "context_writer": {
+                "const": "hypermid"
+              },
+              "memory_writer": {
+                "const": "hypermid"
+              },
+              "require_writer_lease": {
+                "const": true
+              }
+            }
+          },
+          "migration": {
+            "properties": {
+              "require_validated_checkpoint": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "federation": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": ["enabled"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "sandbox": {
+            "properties": {
+              "required_for_remote": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "Id": {
+      "$ref": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Id"
+    },
+    "Scope": {
+      "$ref": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Scope"
+    },
+    "Digest": {
+      "$ref": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Digest"
+    },
+    "Cursor": {
+      "$ref": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Cursor"
+    },
+    "Error": {
+      "$ref": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Error"
+    },
+    "Trace": {
+      "$ref": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Trace"
+    },
+    "Protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "maximum", "allow_previous"],
+      "properties": {
+        "minimum": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "maximum": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "allow_previous": {
+          "const": true
+        }
+      }
+    },
+    "Daemon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transport",
+        "executable",
+        "start_on_demand",
+        "auth",
+        "request_timeout_ms",
+        "shutdown_timeout_ms",
+        "endpoint"
+      ],
+      "properties": {
+        "transport": {
+          "type": "string",
+          "enum": ["unix_socket", "loopback_tcp"]
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "executable": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "default": "hypermid-daemon"
+        },
+        "start_on_demand": {
+          "type": "boolean",
+          "default": true
+        },
+        "auth": {
+          "$ref": "#/$defs/LocalAuth"
+        },
+        "request_timeout_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 600000,
+          "default": 30000
+        },
+        "shutdown_timeout_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 120000,
+          "default": 10000
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "transport": {
+                "const": "unix_socket"
+              }
+            },
+            "required": ["transport"]
+          },
+          "then": {
+            "properties": {
+              "auth": {
+                "properties": {
+                  "method": {
+                    "const": "peer_and_hmac"
+                  },
+                  "require_peer_identity": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "transport": {
+                "const": "loopback_tcp"
+              }
+            },
+            "required": ["transport"]
+          },
+          "then": {
+            "properties": {
+              "auth": {
+                "properties": {
+                  "method": {
+                    "const": "hmac_token_file"
+                  },
+                  "require_peer_identity": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "LocalAuth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "token_file", "require_peer_identity"],
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["peer_and_hmac", "hmac_token_file"]
+        },
+        "token_file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "require_peer_identity": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "fsync", "digest_chain", "storage_version"],
+      "properties": {
+        "root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "fsync": {
+          "const": true
+        },
+        "digest_chain": {
+          "const": "sha256"
+        },
+        "storage_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "Ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context_writer", "memory_writer", "require_writer_lease"],
+      "properties": {
+        "context_writer": {
+          "type": "string",
+          "enum": ["gideon", "hypermid"]
+        },
+        "memory_writer": {
+          "type": "string",
+          "enum": ["gideon", "hypermid"]
+        },
+        "require_writer_lease": {
+          "const": true
+        },
+        "expected_epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "expected_head_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "Shadow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "write_policy", "publish_context", "sample_rate"],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "write_policy": {
+          "const": "read_only"
+        },
+        "publish_context": {
+          "const": false
+        },
+        "sample_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0
+        },
+        "record_aggregate_metrics": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "Context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "summary_target_tokens": {
+          "type": "integer",
+          "minimum": 128,
+          "maximum": 131072,
+          "default": 2048
+        },
+        "max_component_tokens": {
+          "type": "integer",
+          "minimum": 128,
+          "maximum": 1048576,
+          "default": 32768
+        },
+        "cache_policy_version": {
+          "$ref": "#/$defs/Id"
+        },
+        "preserve_raw_transcript": {
+          "const": true
+        }
+      }
+    },
+    "Memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "keyword_recall": {
+          "type": "boolean",
+          "default": true
+        },
+        "vector_recall": {
+          "type": "boolean",
+          "default": true
+        },
+        "graph_recall": {
+          "type": "boolean",
+          "default": true
+        },
+        "max_results_per_arm": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 12
+        },
+        "require_attribution": {
+          "const": true
+        }
+      }
+    },
+    "Maintenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "inherit_gideon_budgets", "minimum_idle_seconds"],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "inherit_gideon_budgets": {
+          "const": true
+        },
+        "minimum_idle_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31536000,
+          "default": 86400
+        },
+        "max_scopes_per_pass": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "default": 50
+        }
+      }
+    },
+    "Migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_format",
+        "require_validated_checkpoint",
+        "batch_size",
+        "verify_digest_chain",
+        "retain_source",
+        "allow_in_place_downgrade"
+      ],
+      "properties": {
+        "source_format": {
+          "const": "gideon-v1"
+        },
+        "require_validated_checkpoint": {
+          "const": true
+        },
+        "batch_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "default": 250
+        },
+        "verify_digest_chain": {
+          "const": true
+        },
+        "retain_source": {
+          "const": true
+        },
+        "allow_in_place_downgrade": {
+          "const": false
+        },
+        "resume_cursor": {
+          "$ref": "#/$defs/Cursor"
+        },
+        "checkpoint_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "Federation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "implicit_writer_lease", "peers"],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "implicit_writer_lease": {
+          "const": false
+        },
+        "peers": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Peer"
+          },
+          "maxItems": 128
+        }
+      }
+    },
+    "Peer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "endpoint", "scope", "auth_secret_ref", "read_only"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "auth_secret_ref": {
+          "type": "string",
+          "pattern": "^(env|file|keychain):[A-Za-z0-9._:/-]+$",
+          "maxLength": 512
+        },
+        "read_only": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "Sandbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_for_remote", "provider"],
+      "properties": {
+        "required_for_remote": {
+          "const": true
+        },
+        "provider": {
+          "$ref": "#/$defs/Id"
+        }
+      }
+    },
+    "Observability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "include_raw_content": {
+          "const": false
+        },
+        "trace": {
+          "$ref": "#/$defs/Trace"
+        },
+        "last_known_cursor": {
+          "$ref": "#/$defs/Cursor"
+        },
+        "last_error": {
+          "$ref": "#/$defs/Error"
+        }
+      }
+    }
+  }
+}

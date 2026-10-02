@@ -1,0 +1,409 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hypermid.gideon.dev/schemas/fabric.schema.json",
+  "title": "Hypermid process fabric contracts",
+  "description": "Wire, module, supervision, event, effect, registry, and federation contracts for hypermid.v1.",
+  "oneOf": [
+    { "$ref": "#/$defs/Envelope" },
+    { "$ref": "#/$defs/HandshakeMessage" },
+    { "$ref": "#/$defs/ModuleManifest" },
+    { "$ref": "#/$defs/SupervisorSnapshot" },
+    { "$ref": "#/$defs/EventRecord" },
+    { "$ref": "#/$defs/EffectRecord" },
+    { "$ref": "#/$defs/RegistryRecord" },
+    { "$ref": "#/$defs/FederationMessage" }
+  ],
+  "$defs": {
+    "Id": { "$ref": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Id" },
+    "Scope": { "$ref": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Scope" },
+    "Digest": { "$ref": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Digest" },
+    "Cursor": { "$ref": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Cursor" },
+    "Error": { "$ref": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Error" },
+    "Trace": { "$ref": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Trace" },
+    "Protocol": { "const": "hypermid.v1" },
+    "TimestampMs": { "type": "integer", "minimum": 0 },
+    "Principal": {
+      "type": "object",
+      "required": ["id", "kind", "scopes"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Id" },
+        "kind": { "enum": ["local_user", "supervised_module", "device", "service"] },
+        "scopes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 160 },
+          "uniqueItems": true,
+          "maxItems": 256
+        },
+        "module_id": { "$ref": "#/$defs/Id" },
+        "spawn_generation": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "Envelope": {
+      "type": "object",
+      "required": ["protocol", "kind", "message_id"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/Protocol" },
+        "kind": { "enum": ["request", "response", "event", "credit", "cancel", "ping", "pong", "close"] },
+        "message_id": { "$ref": "#/$defs/Id" },
+        "reply_to": { "$ref": "#/$defs/Id" },
+        "route_id": { "$ref": "#/$defs/Id" },
+        "route_epoch": { "type": "integer", "minimum": 1 },
+        "operation": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "maxLength": 160 },
+        "scope": { "$ref": "#/$defs/Scope" },
+        "trace": { "$ref": "#/$defs/Trace" },
+        "deadline_ms": { "$ref": "#/$defs/TimestampMs" },
+        "payload": true,
+        "error": { "$ref": "#/$defs/Error" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "request" } }, "required": ["kind"] },
+          "then": { "required": ["route_id", "route_epoch", "operation", "deadline_ms"] }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["response", "cancel"] } }, "required": ["kind"] },
+          "then": { "required": ["reply_to"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "credit" } }, "required": ["kind"] },
+          "then": { "properties": { "payload": { "$ref": "#/$defs/Credit" } }, "required": ["route_id", "route_epoch", "payload"] }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "HandshakeMessage": {
+      "oneOf": [
+        { "$ref": "#/$defs/ClientHello" },
+        { "$ref": "#/$defs/ServerChallenge" },
+        { "$ref": "#/$defs/ClientAuthentication" },
+        { "$ref": "#/$defs/SessionAccepted" }
+      ]
+    },
+    "ClientHello": {
+      "type": "object",
+      "required": ["kind", "protocols", "client_nonce", "connection_class"],
+      "properties": {
+        "kind": { "const": "hello" },
+        "protocols": { "type": "array", "contains": { "$ref": "#/$defs/Protocol" }, "maxItems": 8 },
+        "client_nonce": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "connection_class": { "enum": ["client", "module", "device", "service"] }
+      },
+      "additionalProperties": false
+    },
+    "ServerChallenge": {
+      "type": "object",
+      "required": ["kind", "protocol", "server_nonce", "daemon_instance_id", "auth_method", "expires_ms"],
+      "properties": {
+        "kind": { "const": "challenge" },
+        "protocol": { "$ref": "#/$defs/Protocol" },
+        "server_nonce": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "daemon_instance_id": { "$ref": "#/$defs/Id" },
+        "auth_method": { "enum": ["hmac_sha256", "tls_certificate", "signed_token"] },
+        "expires_ms": { "$ref": "#/$defs/TimestampMs" }
+      },
+      "additionalProperties": false
+    },
+    "ClientAuthentication": {
+      "type": "object",
+      "required": ["kind", "proof"],
+      "properties": {
+        "kind": { "const": "authenticate" },
+        "proof": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+        "token": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "module_id": { "$ref": "#/$defs/Id" },
+        "spawn_generation": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "SessionAccepted": {
+      "type": "object",
+      "required": ["kind", "protocol", "session_id", "principal", "limits", "server_time_ms"],
+      "properties": {
+        "kind": { "const": "accepted" },
+        "protocol": { "$ref": "#/$defs/Protocol" },
+        "session_id": { "$ref": "#/$defs/Id" },
+        "principal": { "$ref": "#/$defs/Principal" },
+        "limits": { "$ref": "#/$defs/ConnectionLimits" },
+        "server_time_ms": { "$ref": "#/$defs/TimestampMs" }
+      },
+      "additionalProperties": false
+    },
+    "ConnectionLimits": {
+      "type": "object",
+      "required": ["max_frame_bytes", "event_chunk_bytes", "max_routes", "max_inflight_requests"],
+      "properties": {
+        "max_frame_bytes": { "const": 8388608 },
+        "event_chunk_bytes": { "const": 65536 },
+        "max_routes": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "max_inflight_requests": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      },
+      "additionalProperties": false
+    },
+    "Credit": {
+      "type": "object",
+      "required": ["request_credits", "byte_credits"],
+      "properties": {
+        "request_credits": { "type": "integer", "minimum": 0 },
+        "byte_credits": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "EventChunk": {
+      "type": "object",
+      "required": ["event_id", "chunk_index", "chunk_count", "digest", "data"],
+      "properties": {
+        "event_id": { "$ref": "#/$defs/Id" },
+        "chunk_index": { "type": "integer", "minimum": 0 },
+        "chunk_count": { "type": "integer", "minimum": 1, "maximum": 131072 },
+        "digest": { "$ref": "#/$defs/Digest" },
+        "data": { "type": "string", "contentEncoding": "base64", "maxLength": 87384 }
+      },
+      "additionalProperties": false
+    },
+    "RestartPolicy": {
+      "type": "object",
+      "required": ["mode", "max_restarts", "window_ms", "base_backoff_ms", "max_backoff_ms", "drain_timeout_ms"],
+      "properties": {
+        "mode": { "enum": ["never", "on_failure", "always"] },
+        "max_restarts": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "window_ms": { "type": "integer", "minimum": 1 },
+        "base_backoff_ms": { "type": "integer", "minimum": 1 },
+        "max_backoff_ms": { "type": "integer", "minimum": 1 },
+        "drain_timeout_ms": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "HealthPolicy": {
+      "type": "object",
+      "required": ["cadence_ms", "deadline_ms", "failure_threshold", "action"],
+      "properties": {
+        "cadence_ms": { "type": "integer", "minimum": 100 },
+        "deadline_ms": { "type": "integer", "minimum": 1 },
+        "failure_threshold": { "type": "integer", "minimum": 1 },
+        "action": { "enum": ["report", "drain", "restart"] }
+      },
+      "additionalProperties": false
+    },
+    "Operation": {
+      "type": "object",
+      "required": ["name", "effect", "remote", "required_scopes"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "maxLength": 160 },
+        "effect": { "enum": ["query", "idempotent", "durable"] },
+        "remote": { "type": "boolean" },
+        "required_scopes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 160 }, "uniqueItems": true }
+      },
+      "additionalProperties": false
+    },
+    "ModuleManifest": {
+      "type": "object",
+      "required": ["schema_version", "module_id", "version", "executable", "artifact_digest", "protocol", "roles", "operations", "requires", "concurrency", "overlap", "restart", "health"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "module_id": { "$ref": "#/$defs/Id" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "executable": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "arguments": { "type": "array", "items": { "type": "string", "maxLength": 4096 }, "maxItems": 256 },
+        "environment": { "type": "object", "additionalProperties": { "type": "string", "maxLength": 16384 }, "maxProperties": 256 },
+        "artifact_digest": { "$ref": "#/$defs/Digest" },
+        "protocol": { "$ref": "#/$defs/Protocol" },
+        "roles": {
+          "type": "array",
+          "items": { "enum": ["control_surface", "operation_provider", "pipeline_stage", "internal_service", "event_publisher", "event_consumer", "federation_gateway", "maintenance_worker"] },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "operations": { "type": "array", "items": { "$ref": "#/$defs/Operation" }, "maxItems": 4096 },
+        "requires": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 160 }, "uniqueItems": true, "maxItems": 1024 },
+        "concurrency": { "enum": ["serial", "bounded", "module_managed"] },
+        "max_concurrency": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "overlap": { "enum": ["exclusive", "safe"] },
+        "restart": { "$ref": "#/$defs/RestartPolicy" },
+        "health": { "$ref": "#/$defs/HealthPolicy" },
+        "resource_limits": { "$ref": "#/$defs/ResourceLimits" },
+        "storage_bindings": { "type": "array", "items": { "$ref": "#/$defs/StorageBinding" }, "maxItems": 64 }
+      },
+      "additionalProperties": false
+    },
+    "ResourceLimits": {
+      "type": "object",
+      "properties": {
+        "memory_bytes": { "type": "integer", "minimum": 1048576 },
+        "cpu_millis_per_second": { "type": "integer", "minimum": 1 },
+        "open_files": { "type": "integer", "minimum": 16 },
+        "processes": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "StorageBinding": {
+      "type": "object",
+      "required": ["name", "kind", "scope", "writable"],
+      "properties": {
+        "name": { "$ref": "#/$defs/Id" },
+        "kind": { "enum": ["directory", "sqlite", "secret"] },
+        "scope": { "$ref": "#/$defs/Scope" },
+        "writable": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "SupervisorState": { "enum": ["disabled", "starting", "warming", "ready", "draining", "stopping", "backoff", "failed", "retired"] },
+    "ModuleStatus": {
+      "type": "object",
+      "required": ["module_id", "state", "spawn_generation", "artifact_digest", "ready", "restart_count", "active_routes"],
+      "properties": {
+        "module_id": { "$ref": "#/$defs/Id" },
+        "state": { "$ref": "#/$defs/SupervisorState" },
+        "spawn_generation": { "type": "integer", "minimum": 0 },
+        "pid": { "type": "integer", "minimum": 1 },
+        "artifact_digest": { "$ref": "#/$defs/Digest" },
+        "ready": { "type": "boolean" },
+        "restart_count": { "type": "integer", "minimum": 0 },
+        "next_retry_ms": { "$ref": "#/$defs/TimestampMs" },
+        "active_routes": { "type": "integer", "minimum": 0 },
+        "health": { "enum": ["unknown", "healthy", "degraded", "failing"] },
+        "last_error": { "$ref": "#/$defs/Error" }
+      },
+      "additionalProperties": false
+    },
+    "SupervisorSnapshot": {
+      "type": "object",
+      "required": ["daemon_instance_id", "registry_generation", "cursor", "modules"],
+      "properties": {
+        "daemon_instance_id": { "$ref": "#/$defs/Id" },
+        "registry_generation": { "type": "integer", "minimum": 0 },
+        "cursor": { "$ref": "#/$defs/Cursor" },
+        "modules": { "type": "array", "items": { "$ref": "#/$defs/ModuleStatus" } }
+      },
+      "additionalProperties": false
+    },
+    "EventRecord": {
+      "type": "object",
+      "required": ["event_id", "topic", "producer", "scope", "at_ms", "schema_name", "schema_version", "payload_digest", "cursor", "payload"],
+      "properties": {
+        "event_id": { "$ref": "#/$defs/Id" },
+        "topic": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "maxLength": 256 },
+        "producer": { "$ref": "#/$defs/Principal" },
+        "scope": { "$ref": "#/$defs/Scope" },
+        "at_ms": { "$ref": "#/$defs/TimestampMs" },
+        "schema_name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "schema_version": { "type": "integer", "minimum": 1 },
+        "payload_digest": { "$ref": "#/$defs/Digest" },
+        "trace": { "$ref": "#/$defs/Trace" },
+        "cursor": { "$ref": "#/$defs/Cursor" },
+        "payload": true
+      },
+      "additionalProperties": false
+    },
+    "EffectRecord": {
+      "type": "object",
+      "required": ["effect_id", "module_id", "operation", "principal", "scope", "input_digest", "state", "created_ms"],
+      "properties": {
+        "effect_id": { "$ref": "#/$defs/Id" },
+        "module_id": { "$ref": "#/$defs/Id" },
+        "operation": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "principal": { "$ref": "#/$defs/Principal" },
+        "scope": { "$ref": "#/$defs/Scope" },
+        "input_digest": { "$ref": "#/$defs/Digest" },
+        "state": { "enum": ["intent", "dispatched", "committed", "not_started", "unknown"] },
+        "created_ms": { "$ref": "#/$defs/TimestampMs" },
+        "settled_ms": { "$ref": "#/$defs/TimestampMs" },
+        "result_digest": { "$ref": "#/$defs/Digest" },
+        "error": { "$ref": "#/$defs/Error" }
+      },
+      "additionalProperties": false
+    },
+    "RegistryRecord": {
+      "type": "object",
+      "required": ["schema_version", "generation", "installed_at_ms", "entries"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "generation": { "type": "integer", "minimum": 1 },
+        "installed_at_ms": { "$ref": "#/$defs/TimestampMs" },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["module_id", "path", "digest", "owner"],
+            "properties": {
+              "module_id": { "$ref": "#/$defs/Id" },
+              "path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+              "digest": { "$ref": "#/$defs/Digest" },
+              "owner": { "const": "hypermid" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "FederationMessage": {
+      "oneOf": [
+        { "$ref": "#/$defs/PeerHello" },
+        { "$ref": "#/$defs/RelayGrant" },
+        { "$ref": "#/$defs/FederatedCall" },
+        { "$ref": "#/$defs/PushWake" }
+      ]
+    },
+    "PeerHello": {
+      "type": "object",
+      "required": ["kind", "protocol", "peer_id", "incarnation", "features", "catalog_digest", "max_record_bytes"],
+      "properties": {
+        "kind": { "const": "peer_hello" },
+        "protocol": { "$ref": "#/$defs/Protocol" },
+        "peer_id": { "$ref": "#/$defs/Id" },
+        "incarnation": { "$ref": "#/$defs/Id" },
+        "features": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 160 }, "uniqueItems": true },
+        "effect_ledger_epoch": { "$ref": "#/$defs/Id" },
+        "catalog_digest": { "$ref": "#/$defs/Digest" },
+        "max_record_bytes": { "type": "integer", "minimum": 1024, "maximum": 8388608 }
+      },
+      "additionalProperties": false
+    },
+    "RelayGrant": {
+      "type": "object",
+      "required": ["kind", "pipe_id", "side", "token", "expires_ms"],
+      "properties": {
+        "kind": { "const": "relay_grant" },
+        "pipe_id": { "$ref": "#/$defs/Id" },
+        "side": { "enum": ["initiator", "responder"] },
+        "token": { "type": "string", "minLength": 32, "maxLength": 2048 },
+        "expires_ms": { "$ref": "#/$defs/TimestampMs" }
+      },
+      "additionalProperties": false
+    },
+    "FederatedCall": {
+      "type": "object",
+      "required": ["kind", "message_id", "operation", "principal", "scope", "trace", "deadline_ms", "effect", "payload"],
+      "properties": {
+        "kind": { "const": "federated_call" },
+        "message_id": { "$ref": "#/$defs/Id" },
+        "operation": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "principal": { "$ref": "#/$defs/Principal" },
+        "scope": { "$ref": "#/$defs/Scope" },
+        "trace": { "$ref": "#/$defs/Trace" },
+        "deadline_ms": { "$ref": "#/$defs/TimestampMs" },
+        "effect": { "enum": ["query", "idempotent", "durable"] },
+        "effect_id": { "$ref": "#/$defs/Id" },
+        "input_digest": { "$ref": "#/$defs/Digest" },
+        "payload": true
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "effect": { "const": "durable" } }, "required": ["effect"] },
+          "then": { "required": ["effect_id", "input_digest"] }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "PushWake": {
+      "type": "object",
+      "required": ["kind", "wake_token"],
+      "properties": {
+        "kind": { "const": "push_wake" },
+        "wake_token": { "type": "string", "pattern": "^[A-Za-z0-9_-]{16,128}$" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

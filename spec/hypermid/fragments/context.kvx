@@ -1,0 +1,305 @@
+[design.context]
+document = "spec/hypermid/design/context.txt"
+contract = "Hypermid owns immutable context state and deterministic projections behind a bounded versioned protocol; runtime/gideon/hypermid is the first adapter and Gideon remains the product authority for sessions, providers, tools, and authorization."
+
+[req.ctx-ownership]
+title = "Bounded protocol and context ownership"
+acceptance = "Define and enforce the authority boundary between Gideon and the independent Hypermid engine."
+ac_1 = "Each UTF-8 JSON envelope uses a four-byte unsigned big-endian length, stays within eight MiB, uses digest-checked ordered chunks of at most 64 KiB for larger logical inputs, and rejects unsupported, oversized, stale, incomplete, or scope-mismatched work before state changes."
+ac_2 = "Gideon owns authorization, provider credentials, tool execution, final delivery, session lifecycle, and the authoritative transcript while Hypermid owns only its source references and derived projection, summary, reduction, cache, lease, and diagnostic state."
+ac_3 = "Exactly one fenced writer lease can advance a session cursor, and repeated mutation idempotency keys return the recorded outcome without advancing it again."
+
+[req.ctx-identity]
+title = "Stable scoped context identity"
+acceptance = "Keep context identities stable through retries, restarts, provider changes, edits, forks, and imports."
+ac_1 = "Sessions, journal items, tool calls, derived summaries, projections, and subagent snapshots have stable non-empty identifiers and explicit relation fields instead of position-derived identity."
+ac_2 = "Owner or project mismatch fails closed, workspace changes require a recorded rebind, and reconnecting or replaying an acknowledged append cannot create a second item."
+
+[req.ctx-history]
+title = "Immutable history and exact recovery"
+acceptance = "Preserve an append-only context journal that can reproduce every accepted original item."
+ac_1 = "Ingest atomically validates Gideon source identity and digest, ordering, tool-call/result linkage, expected cursor, and idempotency before appending a reference or matching snapshot; summaries and reductions never overwrite source items."
+ac_2 = "Exact recovery by item id, reclaim tag, or cursor range resolves the authoritative Gideon content through the scoped adapter and verifies its digest, including content absent from the current projection."
+ac_3 = "Corrections, edits, tombstones, regeneration, and forks append explicit relations and do not renumber or silently mutate prior entries."
+
+[req.ctx-projection]
+title = "Deterministic context projection"
+acceptance = "Derive reproducible provider-ready context from a committed journal cursor."
+ac_1 = "A projection records source range and digest, policy revision, mode, provider profile, budget inputs, selected identities, region digests, and output digest."
+ac_2 = "The same journal cursor and request inputs produce byte-identical normalized projection output, and no projection mutates the journal."
+
+[req.ctx-provider-serialization]
+title = "Capability-driven provider serialization"
+acceptance = "Serialize valid provider requests without coupling the engine to provider credentials or SDKs."
+ac_1 = "Provider capability profiles cover context and output limits, supported roles and parts, tool adjacency, reasoning, attachments, and cache boundaries; unsupported combinations are rejected before dispatch."
+ac_2 = "The explicit host_serialized render mode returns language-independent normalized blocks and ModelBudget values; Gideon's HostSerializer preserves tool pairing and order, excludes internal metadata, and reports a canonical serialized digest before dispatch."
+ac_3 = "A provider-profile change creates a new projection generation and never reinterprets stored source bytes in place."
+
+[req.ctx-cache-policy]
+title = "Stable baseline and delta cache policy"
+acceptance = "Preserve reusable prompt prefixes while admitting new durable context at explicit boundaries."
+ac_1 = "Managed projections expose separately digested baseline, delta, and live-tail regions; replay returns byte-identical baseline and delta bytes."
+ac_2 = "Delta refresh changes only delta bytes, while baseline folds occur only for a declared hard-boundary reason and atomically advance the cache generation."
+ac_3 = "Reduction or decay changes that affect cached bytes wait for a compatible boundary unless the declared overflow policy records and returns a pressure refusal."
+
+[req.ctx-tier-decay]
+title = "Budgeted tier decay"
+acceptance = "Degrade older history predictably while protecting current work and important anchors."
+ac_1 = "Every summarized span has four ordered immutable detail tiers, and tier selection accounts for age, importance, protection, recurrence, dependency reach, and available budget."
+ac_2 = "Tier decisions remain fixed for a cache generation and reserve output, the live tail, active tool pairs, latest user request, approvals, and protected-window capacity first."
+
+[req.ctx-background-summary]
+title = "Background summary pipeline"
+acceptance = "Build derived historical summaries off the active turn with bounded, validated jobs."
+ac_1 = "Summary jobs carry source cursor range and digest, tier schema, locale, token limits, lease, and opaque job id; per-session single flight and bounded global concurrency prevent duplicate work."
+ac_2 = "Only a structurally valid candidate matching the current source digest and live lease commits atomically; stale, empty, malformed, cancelled, or timed-out work cannot alter projection state."
+ac_3 = "The immutable journal can rebuild all summary records after loss, and summary-model usage is recorded separately from foreground usage."
+
+[req.ctx-reduction]
+title = "Explicit recoverable reduction"
+acceptance = "Let agents request context removal by stable tags without losing authoritative content."
+ac_1 = "Reduction accepts tags and ranges idempotently, reports accepted and rejected targets individually, and rejects foreign, unknown, protected, provider-framing, active, or already summarized targets."
+ac_2 = "Applied reductions use typed markers with identity, size, and exact recovery instructions, while latest user input, active tool pairs, approvals, control messages, and the protected tail remain present."
+
+[req.ctx-reclaim]
+title = "Deterministic pressure reclaim"
+acceptance = "Recover context budget through safe ordered policies and refuse unsafe overflow."
+ac_1 = "Reclaim ranks explicit reductions, superseded edits, obsolete or completed tool output, historical detail, and unprotected prose by recoverable size, age, dependency safety, and content class."
+ac_2 = "Advisory, action, emergency, and hard-wall pressure bands use calibrated provider mass; the hard wall refuses the call when no safe plan fits instead of sending unmanaged or silently truncated input."
+ac_3 = "Every reclaim plan records chosen candidates, exclusions, reason codes, estimated savings, and the compatible boundary where it applied."
+
+[req.ctx-recovery]
+title = "Crash-safe projection recovery"
+acceptance = "Rebuild state from the journal and safely replay a compatible last-known-good projection."
+ac_1 = "The engine stores a complete last-known-good normalized projection with cursor, generation, provider-profile digest, policy revision, and region digests before publication."
+ac_2 = "Replay is allowed only when every binding and budget input still matches; otherwise the adapter returns a retryable refusal and never dispatches an unmanaged prompt."
+ac_3 = "Corrupt or partial derived records are quarantined and observable, and journal replay can reconstruct projection state without source loss."
+
+[req.ctx-subagents]
+title = "Isolated subagent context"
+acceptance = "Give delegated work bounded inherited context without sharing mutable context authority."
+ac_1 = "A child receives a distinct session identity and immutable spawn snapshot containing parent link, cursor, allowed regions, scope, mode ceiling, provider profile, and budget."
+ac_2 = "Child writes, summaries, reductions, and cache generations remain child-owned; a parent contribution requires Gideon authorization and appends as a new parent item with child identity and digest."
+ac_3 = "Child usage and context outcomes remain separately attributable while supporting bounded roll-up diagnostics."
+
+[req.ctx-hooks]
+title = "Context lifecycle hooks"
+acceptance = "Expose deterministic, bounded extension points around context operations."
+ac_1 = "Lifecycle events cover bind, ingest, projection, pressure, reduction, summary, recovery, subagent snapshot, and faults with scope, trace, session, cursor, policy revision, and redacted metadata."
+ac_2 = "Pre hooks may deny or return bounded synthetic blocks with identities and digests but cannot rewrite journal items; timeouts and exceptions cannot leave partial mutations."
+ac_3 = "Post hooks run after commit and are advisory, with every hook outcome recorded under the originating trace."
+
+[req.ctx-modes]
+title = "Optional context modes and features"
+acceptance = "Support off, pass-through, shadow, and primary operation with explicit overflow and refusal policy."
+ac_1 = "off leaves Hypermid inactive, pass_through observes health while preserving Gideon request bytes, shadow computes locally without model calls, durable mutation, publication, or serving-cursor advance, and primary serves verified projections under a fenced lease."
+ac_2 = "Background summaries, reduction tools, automatic reclaim, nudges, subagent contributions, and synthetic hook blocks are independently configurable with safe defaults."
+ac_3 = "Strict behavior is selected through overflow_policy and refusal_policy; configuration changes take effect only at a turn boundary, advance policy revision when bytes may change, and preserve prior and next digests."
+
+[req.ctx-diagnostics]
+title = "Context diagnostics and accounting"
+acceptance = "Make every context decision, cost, and failure inspectable without exposing content by default."
+ac_1 = "Status includes cursor, generation, scope binding, mode, provider-profile digest, journal and region sizes, calibrated mass, budget, selected tiers, protected items, pending reductions, summary work, and recovery eligibility."
+ac_2 = "Decision records carry one reason code and Trace, while accounting distinguishes no call, missing usage, zero usage, cache reads and writes, summaries, and subagents."
+ac_3 = "Diagnostic output is redacted and bounded by default, rotates safely, and remains available when the engine cannot answer."
+
+[req.ctx-portability]
+title = "Context migration, export, and restore"
+acceptance = "Move context state without changing authoritative history, scope, identity, or cache semantics."
+ac_1 = "Canonical export includes session binding, ordered source references, derived records, policy revisions, cache generations, reductions, and manifest digests while excluding credentials, live leases, transient queues, and SDK payloads."
+ac_2 = "Import is staged, bounded, scope checked, digest verified, idempotent, and invisible until the entire manifest commits."
+ac_3 = "Migration resumes from a committed cursor without duplication, restore rebuilds derived state from verified sources, and failed cutover retains the previous authority at a quiescent turn boundary."
+
+[req.ctx-gideon-adapter]
+title = "Installed Gideon pass-through adapter and status"
+acceptance = "Install and supervise Hypermid in Gideon without changing provider input before primary projection is enabled."
+ac_1 = "Gideon supervises the local engine, negotiates protocol version and transport limits, binds authenticated scope, and exposes redacted availability, version, mode, cursor, and lease status."
+ac_2 = "off and pass_through preserve Gideon's existing assembled provider request bytes and cannot publish context state; shadow may compare a local projection but makes no model calls or durable writes and advances no serving cursor."
+ac_3 = "Engine startup, handshake, timeout, or disconnect failure preserves the existing Gideon request path and records an unavailable status without claiming Hypermid served the turn."
+
+[req.ctx-gideon-integration]
+title = "OSS Gideon context integration"
+acceptance = "Use Hypermid for complete native-agent context management while preserving Gideon authority."
+ac_1 = "Before each primary-mode model turn Gideon binds the session, appends newly committed items, supplies provider capabilities and safe budget, runs hooks, requests a projection, serializes it, and verifies its digest before dispatch."
+ac_2 = "Assistant and tool events append after the turn, while stop, edit/resend, regenerate, fork, compaction, provider failover, and subagent spawn use explicit protocol operations."
+ac_3 = "Existing Gideon authorization, approval, cancellation, streaming, provider selection, and transcript persistence remain authoritative, and every primary-mode provider call has a recorded projection or policy-selected refusal."
+
+[task.ctx-ownership]
+title = "Implement the bounded context protocol and ownership fence"
+status = "pending"
+wave = 1
+owner_lane = "context"
+requires = ["sec-01", "base-02"]
+reqs = ["ctx-ownership.1", "ctx-ownership.2", "ctx-ownership.3"]
+touches = ["crates/hypermid-core/src/protocol.rs", "crates/hypermid-context/src/engine.rs", "runtime/gideon/hypermid/protocol.py", "runtime/gideon/hypermid/ownership.py", "crates/hypermid-context/tests/protocol_contract.rs", "checks/runtime/test_hypermid_protocol.py"]
+verify_cmd = "cargo test -p hypermid-context --test protocol_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_protocol.py"
+
+[task.ctx-identity]
+title = "Implement stable scoped context identities"
+status = "pending"
+wave = 1
+owner_lane = "context"
+requires = ["ctx-ownership"]
+reqs = ["ctx-identity.1", "ctx-identity.2"]
+touches = ["crates/hypermid-core/src/identity.rs", "crates/hypermid-context/src/identity_store.rs", "runtime/gideon/hypermid/identity.py", "crates/hypermid-context/tests/identity_contract.rs", "checks/runtime/test_hypermid_identity.py"]
+verify_cmd = "cargo test -p hypermid-context --test identity_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_identity.py"
+
+[task.ctx-history]
+title = "Implement immutable history and exact expansion"
+status = "pending"
+wave = 1
+owner_lane = "context"
+requires = ["ctx-identity", "base-02"]
+reqs = ["ctx-history.1", "ctx-history.2", "ctx-history.3"]
+touches = ["crates/hypermid-core/src/history.rs", "crates/hypermid-context/src/journal.rs", "runtime/gideon/hypermid/history.py", "crates/hypermid-context/tests/history_projection.rs", "checks/runtime/test_hypermid_history.py"]
+verify_cmd = "cargo test -p hypermid-context --test history_projection && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_history.py"
+
+[task.ctx-projection]
+title = "Implement deterministic context projections"
+status = "pending"
+wave = 3
+owner_lane = "context"
+requires = ["ctx-background-summary", "ctx-recovery", "mem-records"]
+reqs = ["ctx-projection.1", "ctx-projection.2"]
+touches = ["crates/hypermid-core/src/projection.rs", "crates/hypermid-context/src/projector.rs", "runtime/gideon/hypermid/projection.py", "crates/hypermid-context/tests/projection_determinism.rs", "checks/runtime/test_hypermid_projection.py"]
+verify_cmd = "cargo test -p hypermid-context --test projection_determinism && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_projection.py"
+
+[task.ctx-provider-serialization]
+title = "Implement provider-capability serialization"
+status = "pending"
+wave = 3
+owner_lane = "context"
+requires = ["ctx-projection", "base-03"]
+reqs = ["ctx-provider-serialization.1", "ctx-provider-serialization.2", "ctx-provider-serialization.3"]
+touches = ["crates/hypermid-core/src/provider.rs", "crates/hypermid-context/src/serializer.rs", "runtime/gideon/hypermid/provider.py", "crates/hypermid-context/tests/provider_serialization.rs", "checks/runtime/test_hypermid_provider_serialization.py"]
+verify_cmd = "cargo test -p hypermid-context --test provider_serialization && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_provider_serialization.py"
+
+[task.ctx-cache-policy]
+title = "Implement stable baseline and delta cache regions"
+status = "pending"
+wave = 3
+owner_lane = "context"
+requires = ["ctx-provider-serialization"]
+reqs = ["ctx-cache-policy.1", "ctx-cache-policy.2", "ctx-cache-policy.3"]
+touches = ["crates/hypermid-core/src/cache.rs", "crates/hypermid-context/src/cache_store.rs", "runtime/gideon/hypermid/cache.py", "crates/hypermid-context/tests/cache_policy.rs", "checks/runtime/test_hypermid_cache_policy.py"]
+verify_cmd = "cargo test -p hypermid-context --test cache_policy && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_cache_policy.py"
+
+[task.ctx-tier-decay]
+title = "Implement budgeted historical tier decay"
+status = "pending"
+wave = 3
+owner_lane = "context"
+requires = ["ctx-cache-policy"]
+reqs = ["ctx-tier-decay.1", "ctx-tier-decay.2"]
+touches = ["crates/hypermid-core/src/decay.rs", "crates/hypermid-core/src/budget.rs", "crates/hypermid-context/src/tier_selector.rs", "crates/hypermid-context/tests/tier_decay.rs"]
+verify_cmd = "cargo test -p hypermid-context --test tier_decay"
+
+[task.ctx-background-summary]
+title = "Implement leased background summarization"
+status = "pending"
+wave = 2
+owner_lane = "context"
+requires = ["ctx-history", "sec-05", "base-03", "fab-02-registry-routing"]
+reqs = ["ctx-background-summary.1", "ctx-background-summary.2", "ctx-background-summary.3"]
+touches = ["crates/hypermid-core/src/summary.rs", "crates/hypermid-context/src/summary_queue.rs", "runtime/gideon/hypermid/summarizer.py", "crates/hypermid-context/tests/summary_pipeline.rs", "checks/runtime/test_hypermid_summarizer.py"]
+verify_cmd = "cargo test -p hypermid-context --test summary_pipeline && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_summarizer.py"
+
+[task.ctx-reduction]
+title = "Implement explicit recoverable reduction"
+status = "pending"
+wave = 3
+owner_lane = "context"
+requires = ["ctx-cache-policy"]
+reqs = ["ctx-reduction.1", "ctx-reduction.2"]
+touches = ["crates/hypermid-core/src/reduction.rs", "crates/hypermid-context/src/reduction_store.rs", "runtime/gideon/hypermid/tools.py", "crates/hypermid-context/tests/reduction_contract.rs", "checks/runtime/test_hypermid_reduction.py"]
+verify_cmd = "cargo test -p hypermid-context --test reduction_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_reduction.py"
+
+[task.ctx-reclaim]
+title = "Implement deterministic pressure reclaim"
+status = "pending"
+wave = 3
+owner_lane = "context"
+requires = ["ctx-reduction", "ctx-tier-decay"]
+reqs = ["ctx-reclaim.1", "ctx-reclaim.2", "ctx-reclaim.3"]
+touches = ["crates/hypermid-core/src/reclaim.rs", "crates/hypermid-context/src/reclaimer.rs", "runtime/gideon/hypermid/pressure.py", "crates/hypermid-context/tests/reclaim_policy.rs", "checks/runtime/test_hypermid_reclaim.py"]
+verify_cmd = "cargo test -p hypermid-context --test reclaim_policy && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_reclaim.py"
+
+[task.ctx-recovery]
+title = "Implement journal rebuild and last-known-good recovery"
+status = "pending"
+wave = 2
+owner_lane = "context"
+requires = ["ctx-history"]
+reqs = ["ctx-recovery.1", "ctx-recovery.2", "ctx-recovery.3"]
+touches = ["crates/hypermid-core/src/recovery.rs", "crates/hypermid-context/src/recovery_store.rs", "runtime/gideon/hypermid/recovery.py", "crates/hypermid-context/tests/recovery_contract.rs", "checks/runtime/test_hypermid_recovery.py"]
+verify_cmd = "cargo test -p hypermid-context --test recovery_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_recovery.py"
+
+[task.ctx-subagents]
+title = "Implement isolated subagent context snapshots"
+status = "pending"
+wave = 6
+owner_lane = "context"
+requires = ["ctx-hooks", "ctx-reclaim"]
+reqs = ["ctx-subagents.1", "ctx-subagents.2", "ctx-subagents.3"]
+touches = ["crates/hypermid-core/src/subagent.rs", "crates/hypermid-context/src/subagent_context.rs", "runtime/gideon/hypermid/subagents.py", "runtime/gideon/engine/subagent.py", "crates/hypermid-context/tests/subagent_context.rs", "checks/runtime/test_hypermid_subagents.py"]
+verify_cmd = "cargo test -p hypermid-context --test subagent_context && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_subagents.py"
+
+[task.ctx-hooks]
+title = "Implement bounded context lifecycle hooks"
+status = "pending"
+wave = 4
+owner_lane = "context"
+requires = ["ctx-background-summary", "ctx-reclaim"]
+reqs = ["ctx-hooks.1", "ctx-hooks.2", "ctx-hooks.3"]
+touches = ["crates/hypermid-core/src/hooks.rs", "crates/hypermid-context/src/hook_dispatch.rs", "runtime/gideon/hypermid/hooks.py", "runtime/gideon/engine/hooks.py", "crates/hypermid-context/tests/hook_contract.rs", "checks/runtime/test_hypermid_hooks.py"]
+verify_cmd = "cargo test -p hypermid-context --test hook_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_hooks.py"
+
+[task.ctx-modes]
+title = "Implement optional modes and turn-boundary configuration"
+status = "pending"
+wave = 1
+owner_lane = "context"
+requires = ["ctx-ownership"]
+reqs = ["ctx-modes.1", "ctx-modes.2", "ctx-modes.3"]
+touches = ["crates/hypermid-core/src/mode.rs", "crates/hypermid-context/src/config.rs", "runtime/gideon/hypermid/config.py", "crates/hypermid-context/tests/mode_contract.rs", "checks/runtime/test_hypermid_modes.py"]
+verify_cmd = "cargo test -p hypermid-context --test mode_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_modes.py"
+
+[task.ctx-diagnostics]
+title = "Implement context diagnostics and accounting"
+status = "pending"
+wave = 1
+owner_lane = "context"
+requires = ["ctx-identity"]
+reqs = ["ctx-diagnostics.1", "ctx-diagnostics.2", "ctx-diagnostics.3"]
+touches = ["crates/hypermid-core/src/diagnostics.rs", "crates/hypermid-context/src/diagnostic_store.rs", "runtime/gideon/hypermid/diagnostics.py", "crates/hypermid-context/tests/diagnostics_contract.rs", "checks/runtime/test_hypermid_diagnostics.py"]
+verify_cmd = "cargo test -p hypermid-context --test diagnostics_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_diagnostics.py"
+
+[task.ctx-gideon-integration]
+title = "Integrate Hypermid with OSS Gideon model turns"
+status = "pending"
+wave = 8
+owner_lane = "context"
+requires = ["ctx-portability", "ctx-subagents"]
+reqs = ["ctx-gideon-integration.1", "ctx-gideon-integration.2", "ctx-gideon-integration.3"]
+touches = ["runtime/gideon/hypermid/__init__.py", "runtime/gideon/hypermid/adapter.py", "runtime/gideon/cognition/context_engine.py", "runtime/gideon/engine/agents/native/runtime.py", "runtime/gideon/integrations/llm/prompt_cache.py", "checks/runtime/test_hypermid_gideon_integration.py"]
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_gideon_integration.py"
+
+[task.ctx-gideon-adapter]
+title = "Install the Gideon pass-through adapter and context status"
+status = "pending"
+wave = 1
+owner_lane = "context"
+requires = ["ctx-modes", "ctx-diagnostics", "fab-01-bootstrap", "sec-02"]
+reqs = ["ctx-gideon-adapter.1", "ctx-gideon-adapter.2", "ctx-gideon-adapter.3"]
+touches = ["runtime/gideon/hypermid/__init__.py", "runtime/gideon/hypermid/adapter.py", "runtime/gideon/hypermid/lifecycle.py", "runtime/gideon/hypermid/status.py", "runtime/gideon/cognition/context_engine.py", "checks/runtime/test_hypermid_passthrough.py"]
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_passthrough.py"
+
+[task.ctx-portability]
+title = "Implement context migration export and restore"
+status = "pending"
+wave = 7
+owner_lane = "context"
+requires = ["ctx-subagents", "mem-portability", "mem-recovery"]
+reqs = ["ctx-portability.1", "ctx-portability.2", "ctx-portability.3"]
+touches = ["crates/hypermid-context/src/export.rs", "crates/hypermid-context/src/import.rs", "crates/hypermid-context/src/migration.rs", "runtime/gideon/hypermid/portability.py", "crates/hypermid-context/tests/portability.rs", "checks/runtime/test_hypermid_portability.py"]
+verify_cmd = "cargo test -p hypermid-context --test portability && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_portability.py"

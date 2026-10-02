@@ -1,0 +1,135 @@
+[req.wave-1]
+title = "Local session connection"
+ac_1 = "A local OSS user starts Gideon with Hypermid available, authenticates the adapter to the local daemon, sees module health, and completes a normal conversation through a byte-preserving pass-through projection."
+ac_2 = "Default context ownership remains with the existing runtime; missing daemon, invalid handshake and shutdown expose truthful status without losing the journal or duplicating a delivered answer."
+
+[task.wave-1-close]
+title = "Qualify vertical slice: Local session connection"
+status = "pending"
+wave = 1
+owner_lane = "integration"
+requires = []
+reqs = ["wave-1.1", "wave-1.2"]
+touches = ["checks/hypermid/waves/test_wave_01.py", "spec/hypermid/qualification/wave-1.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_01.py -q"
+
+[req.wave-2]
+title = "Durable project continuity"
+ac_1 = "An opted-in project publishes a validated history segment and an owned memory, restarts Gideon and the daemon, and can recall the memory and expand the exact original source bytes."
+ac_2 = "A forced interruption at each declared publication boundary leaves either the prior checkpoint or a recoverable committed publication; a second context writer is fenced."
+
+[task.wave-2-close]
+title = "Qualify vertical slice: Durable project continuity"
+status = "pending"
+wave = 2
+owner_lane = "integration"
+requires = []
+reqs = ["wave-2.1", "wave-2.2"]
+touches = ["checks/hypermid/waves/test_wave_02.py", "spec/hypermid/qualification/wave-2.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_02.py -q"
+
+[req.wave-3]
+title = "Bounded cached context and recall"
+ac_1 = "A long conversation uses a stable serialized baseline and bounded delta, runs hybrid recall over the selected project sources, and shows source provenance and pressure in the native inspector."
+ac_2 = "Unchanged passes preserve exact prefix bytes, changes publish at allowed boundaries, every outgoing request fits its declared model budget, and lexical-only mode remains usable."
+
+[task.wave-3-close]
+title = "Qualify vertical slice: Bounded cached context and recall"
+status = "pending"
+wave = 3
+owner_lane = "integration"
+requires = []
+reqs = ["wave-3.1", "wave-3.2"]
+touches = ["checks/hypermid/waves/test_wave_03.py", "spec/hypermid/qualification/wave-3.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_03.py -q"
+
+[req.wave-4]
+title = "Budgeted background knowledge maintenance"
+ac_1 = "The user enables scheduled maintenance, sets its model and budget, observes one completed history and knowledge cycle, and inspects note conditions, code verification and git-derived recall."
+ac_2 = "Cancellation, stale content hashes, exceeded budget and foreign ownership prevent unintended writes; edited memories invalidate every affected embedding and sharing judgment."
+
+[task.wave-4-close]
+title = "Qualify vertical slice: Budgeted background knowledge maintenance"
+status = "pending"
+wave = 4
+owner_lane = "integration"
+requires = []
+reqs = ["wave-4.1", "wave-4.2"]
+touches = ["checks/hypermid/waves/test_wave_04.py", "spec/hypermid/qualification/wave-4.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_04.py -q"
+
+[req.wave-5]
+title = "Supervised capability ecosystem"
+ac_1 = "A scoped local module exposes a tool and a model capability through the daemon, the Python host and other SDKs consume versioned contracts, and the MCP bridge completes and cancels a real invocation."
+ac_2 = "Restart, route replacement, slow consumption and deadline expiry preserve attribution and flow control; an unknown external effect is reconciled rather than automatically reissued."
+
+[task.wave-5-close]
+title = "Qualify vertical slice: Supervised capability ecosystem"
+status = "pending"
+wave = 5
+owner_lane = "integration"
+requires = []
+reqs = ["wave-5.1", "wave-5.2"]
+touches = ["checks/hypermid/waves/test_wave_05.py", "spec/hypermid/qualification/wave-5.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_05.py -q"
+
+[req.wave-6]
+title = "Durable events and optional remote access"
+ac_1 = "The user subscribes to durable module events, resumes from a cursor after reconnect, and uses explicitly enabled remote transport with authenticated principals and OS containment."
+ac_2 = "Expired grants, wrong owner, stale route epoch and replayed delivery are refused; unacknowledged effects prevent destructive disposal, and remote transport remains disabled by default."
+
+[task.wave-6-close]
+title = "Qualify vertical slice: Durable events and optional remote access"
+status = "pending"
+wave = 6
+owner_lane = "integration"
+requires = []
+reqs = ["wave-6.1", "wave-6.2"]
+touches = ["checks/hypermid/waves/test_wave_06.py", "spec/hypermid/qualification/wave-6.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_06.py -q"
+
+[req.wave-7]
+title = "Lifecycle and native administration"
+ac_1 = "A local owner upgrades an installation, migrates existing Gideon knowledge, exports and restores a complete project, and operates diagnostics and maintenance from the native console and CLI."
+ac_2 = "Interrupted migrations resume safely, incompatible downgrades refuse, deletion removes derived copies according to policy, and rollback retains original journals and user credentials."
+
+[task.wave-7-close]
+title = "Qualify vertical slice: Lifecycle and native administration"
+status = "pending"
+wave = 7
+owner_lane = "integration"
+requires = []
+reqs = ["wave-7.1", "wave-7.2"]
+touches = ["checks/hypermid/waves/test_wave_07.py", "spec/hypermid/qualification/wave-7.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_07.py -q"
+
+[req.wave-8]
+title = "Complete OSS distribution"
+ac_1 = "A clean supported installation completes the full capability inventory through Gideon, including Python and other SDK contracts, native surfaces, SQLite and declared PostgreSQL backend behavior."
+ac_2 = "The release receipt binds exact artifacts and source revisions to required results; cost and latency measurements identify workload and provider, and incomplete external checks prevent a fully-qualified release claim."
+
+[task.wave-8-close]
+title = "Qualify vertical slice: Complete OSS distribution"
+status = "pending"
+wave = 8
+owner_lane = "integration"
+requires = []
+reqs = ["wave-8.1", "wave-8.2"]
+touches = ["checks/hypermid/waves/test_wave_08.py", "spec/hypermid/qualification/wave-8.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_08.py -q"

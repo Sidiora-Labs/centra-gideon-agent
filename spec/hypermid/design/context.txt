@@ -1,0 +1,89 @@
+Hypermid context architecture
+
+[context.boundary]
+Hypermid is an independent context engine with a bounded, versioned protocol. The engine is implemented by crates/hypermid-core and crates/hypermid-context. The first product adapter is runtime/gideon/hypermid/. The adapter translates Gideon session, provider, hook, and model-call contracts into the Hypermid protocol; the engine contains no Gideon imports and the adapter contains no context-selection policy.
+
+Protocol version 1 frames each UTF-8 JSON envelope with a four-byte unsigned big-endian body length. An envelope is limited to eight MiB. Larger logical inputs use ordered chunks no larger than 64 KiB, each bound to a transfer id, ordinal, total count, and digest. Local Unix sockets are the default transport. Windows uses authenticated loopback. Remote TLS is opt-in and requires an explicitly scoped principal. Every request carries protocol_version, operation, Scope, Trace, session identity, and an expected Cursor where mutation is possible. Unknown operations, unsupported versions, over-limit payloads, incomplete chunks, stale cursors, and invalid digests return structured errors before state changes. Mutation commands carry an idempotency key. A repeated key returns the recorded result.
+
+[context.ownership]
+Gideon owns user authorization, session lifecycle, provider credentials, tool execution, final delivery, and the authoritative application transcript. Hypermid owns stable context identities and all derived context state: source references, projection records, summaries, reduction intents, cache generations, leases, and diagnostics. Hypermid may retain immutable content snapshots to make projection deterministic, but each snapshot is bound to a Gideon event identity and digest and never becomes a second authority for conversation history. Gideon source events are never rewritten by Hypermid.
+
+The adapter accepts context work only for the authenticated owner and resolved project/workspace scope. A session is bound to one Scope when first opened. Changing owner_id or project_id creates a distinct context identity; workspace membership may change only through an explicit rebind command that records the previous and next scope. Reads, reduction, recovery, hooks, summaries, and diagnostics all enforce the same binding. Exactly one fenced writer lease may advance a session's context Cursor. Every foreground mutation, background publication, and recovery commit presents the current fence token; an expired or superseded writer cannot publish.
+
+[context.identity]
+Stable identities are content-independent. A session_id identifies a context stream; every accepted journal item receives an item_id and a monotonic Cursor. Tool calls and results also carry call_id so repeated provider-local identifiers cannot collide across turns. Derived objects contain their own id plus the source cursor range and source digest. Edits, retries, regenerations, forks, imported history, and subagent work use explicit relation fields instead of reusing identifiers.
+
+The engine stores an identity record before accepting content. The adapter may reconnect, restart, change providers, or replay an acknowledged append without changing identities. Scope or identity mismatch fails closed and does not advance the cursor.
+
+[context.history]
+The context source ledger is append-only. Ingest validates the Gideon source event identity and digest, role, part structure, tool-call/result linkage, ordering, size, expected cursor, and idempotency before one atomic append. A stored snapshot must match the source digest; it is a projection input cache and not a competing transcript. Original Gideon content is never replaced by a summary, drop marker, projection, or provider wire form. Corrections append a superseding source reference that points to the earlier item. Deletion requests append a tombstone subject to Gideon authorization; they do not silently renumber the stream.
+
+Projection state is derived from a committed Cursor. A projection records its journal range, source digest, policy revision, mode, provider profile, budget inputs, selected item identities, summary identities, reduction markers, baseline digest, delta digest, and output digest. Replaying the same committed state and request yields the same projection bytes.
+
+[context.provider-serialization]
+Hypermid receives a capability profile for the bound provider rather than provider credentials. The profile states the context window, reserved output, supported roles and part types, tool-call/result adjacency rules, reasoning treatment, image accounting rule, and cache-boundary capabilities. The engine normalizes text, tool calls, tool results, attachments, reasoning, and synthetic context into an ordered provider projection. It rejects a projection that would orphan a tool result, reorder dependent parts, expose internal metadata, exceed the safe input budget, or use an unsupported cache marker.
+
+Protocol version 1 declares render_mode as host_serialized. Hypermid returns language-independent normalized blocks plus a ModelBudget expressed as integer token and item limits, reservations, measured usage, and confidence; it does not return Python objects or SDK-specific values. The Gideon HostSerializer performs the final SDK-specific encoding and reports the canonical serialized digest before dispatch. Provider changes cause an explicit new projection generation. They never reinterpret stored source bytes in place.
+
+[context.cache-policy]
+Every primary projection has three regions: baseline, delta, and live tail. The baseline is a frozen, high-reuse prefix. The delta contains durable context committed after the baseline. The live tail contains current unsummarized conversation and tool work. Each region has an independent digest and ordered item list.
+
+A replay pass returns byte-identical baseline and delta bytes. A delta refresh changes only the delta when new durable material must be surfaced. A baseline fold occurs only when a declared hard boundary is already required: cache expiry, provider/profile change, incompatible policy revision, identity rebind, explicit flush, or pressure that cannot be resolved in the tail. The fold atomically promotes eligible delta state, advances the cache generation, and starts an empty delta. Reduction and decay decisions that would change cached bytes wait for the same compatible boundary unless the declared overflow policy requires refusal.
+
+[context.tier-decay]
+Historical spans are represented by immutable summary records with four ordered detail tiers. Tier selection uses age, importance, explicit protection, recurrence, dependency reach, and the available history budget. Newer or protected spans retain more detail; older low-value spans decay first. A tier is selected during a baseline fold and stays fixed throughout that cache generation.
+
+The budget always reserves provider output, the live tail, active tool pairs, the latest user request, unresolved approvals, and a configurable protected window before allocating historical tiers. If no valid selection fits, the engine follows the declared overflow_policy: reclaim_then_refuse attempts reclaim and an emergency fold before refusal, while refuse_immediately stops before mutation. It never silently overfills the provider window.
+
+[context.background-summary]
+The engine identifies closed journal spans and schedules bounded summary jobs without delaying the active turn. A job contains a source cursor range, source digest, target tier schema, maximum input and output tokens, locale, and an opaque job id. Gideon executes the model call through its existing provider controls and returns a candidate. The engine validates structure, source identity, digest, limits, and job lease before committing the candidate atomically.
+
+Jobs use per-session single-flight leases, bounded global concurrency, retry classes, backoff, and cancellation. A stale, timed-out, empty, malformed, or superseded candidate is recorded as an outcome and cannot alter the active projection. Summaries are derived indexes; the immutable journal remains sufficient to rebuild them.
+
+[context.reduction]
+Items exposed to an agent include stable reclaim tags. A reduction request names tags or ranges and records an idempotent intent. The engine rejects unknown, foreign, already summarized, provider-framing, protected, or currently executing targets. Eligible intents are applied at a cache-compatible boundary and yield explicit markers that preserve identity, content type, byte/token estimates, and exact recovery instructions.
+
+Reduction never removes the latest user request, active tool calls or results, unresolved approvals, required reasoning continuations, context control messages, or the configured protected tail. A repeated request returns the first outcome. Partial success reports every accepted and rejected target.
+
+[context.reclaim]
+Automatic reclaim is deterministic and policy driven. It considers explicit reductions first, then superseded edits, duplicate or obsolete tool output, completed large tool results, low-value historical details, and finally older unprotected prose. Candidate ranking uses recoverable size, age, dependency safety, and content class. The chosen plan and excluded reasons are recorded before application.
+
+Pressure bands are based on calibrated provider mass. The advisory band emits diagnostics and optional nudges. The action band applies eligible queued work on a compatible boundary. The emergency band may compact the live tail while preserving anchors and tool pairs. At the hard wall, if no safe plan fits, Hypermid refuses the call. It does not send unmanaged or truncated input.
+
+[context.recovery]
+Exact recovery resolves immutable Gideon source content by item id, reclaim tag, or cursor range through the authorized adapter, checks it against the stored source digest, and never mutates the active projection. A projection can be rebuilt from authoritative source events plus committed Hypermid policy records after process loss.
+
+Before publishing a projection, the engine stores a last-known-good record containing the committed cursor, cache generation, provider profile digest, policy revision, region digests, and complete normalized projection. If an engine operation fails before commit, the adapter follows refusal_policy: refuse stops the call, compatible_last_known_good may replay only when every binding still matches and the request remains within budget, and host_passthrough may use Gideon's existing path only at a recorded quiescent boundary. Corrupt records are quarantined and reported; they are never partially served.
+
+[context.subagents]
+Every subagent receives a distinct session identity linked to parent_session_id and spawn_cursor. Inheritance is an immutable snapshot: allowed baseline/delta context, scope, mode ceiling, budget, and provider profile are captured at spawn. Child writes remain in the child journal. A child completion may offer a bounded contribution to the parent; Gideon must authorize it and Hypermid appends it as a new parent item with child provenance and digest.
+
+Subagents cannot mutate parent reductions, cache generations, summaries, or hooks. Their usage, summary jobs, reductions, failures, and contribution outcomes are attributed separately and can roll up into parent diagnostics without merging identities.
+
+[context.hooks]
+The adapter exposes context lifecycle events for session bind, pre-ingest, post-ingest, pre-project, post-project, pressure change, reduction queued/applied/rejected, summary requested/committed/rejected, recovery used/refused, subagent snapshot, and diagnostic fault. Every event carries Scope, Trace, session_id, Cursor, policy revision, and redacted metadata.
+
+Pre-ingest and pre-project hooks may deny work or return bounded synthetic blocks. Synthetic blocks receive identities and digests and enter the projection record; they cannot rewrite journal items. Hook timeouts and exceptions follow the selected mode policy, are observable, and cannot leave a partial mutation. Post events are advisory and run after commit.
+
+[context.modes]
+Hypermid uses the same four modes as Gideon configuration. off leaves Hypermid inactive and clears no stored state. pass_through permits lifecycle and health observation but preserves Gideon's existing request bytes and context authority. shadow computes bounded projections and aggregate diagnostics locally for comparison, but makes no model calls, performs no durable context mutation, publishes no projection, and advances no serving cursor. primary holds the fenced context-writer lease and may serve Hypermid projections. Strictness is expressed by overflow_policy and refusal_policy, never by another mode.
+
+Background summaries, explicit reduction tools, automatic reclaim, nudges, subagent contribution, and synthetic hook blocks are independent options with safe defaults. Runtime option changes take effect at a turn boundary, increment the policy revision when projection bytes may change, and record the prior and next configuration digest. Unknown or invalid options fail without changing the live configuration.
+
+[context.diagnostics]
+Diagnostics expose current cursor and generation, ownership binding, mode, provider-profile digest, journal and projection sizes, calibrated token mass, safe budget, baseline/delta/tail sizes and digests, selected tiers, protected items, pending reductions, summary queue and leases, last-known-good eligibility, last decision, refusal cause, and bounded recent outcomes. Content is redacted by default; an authorized exact-content request uses the recovery path.
+
+Every projection decision has one reason code and a correlation Trace. Counters distinguish no model call, missing usage, zero usage, cache read, cache write, summary usage, and subagent usage. Logs and status output are size bounded, rotate, and remain useful when the context engine is unavailable.
+
+[context.portability]
+Context export writes a canonical manifest, session binding, ordered source references, derived records, policy revisions, cache generations, reduction state, and digests. It excludes provider credentials, active leases, transient queues, and SDK payloads. Import is staged, size bounded, scope checked, digest verified, and idempotent. No imported record is visible until the complete manifest commits.
+
+Migration from existing Gideon history reads authoritative events through the adapter, records source identities and digests, and checkpoints the last committed Cursor. Resume starts from that checkpoint without duplicating items. Restore validates the manifest and source bindings before rebuilding derived indexes and projections. Cutover and rollback occur only at a quiescent turn boundary; failure retains the previous context authority and records a repairable outcome.
+
+[context.gideon-adapter]
+Wave-one integration installs and supervises the local Hypermid engine, completes protocol negotiation and authenticated scope binding, and exposes a redacted status view. In off and pass_through operation, Gideon's existing assembled provider request remains byte-equivalent and Hypermid cannot publish projection, reduction, summary, or contribution state. Shadow may calculate a local comparison projection without model calls, durable mutation, serving publication, or cursor advance. A daemon fault leaves the current Gideon request path available and records the unavailable status without manufacturing success.
+
+[context.gideon-integration]
+The OSS Gideon integration opens or resumes the Hypermid session before a native-agent model turn, appends newly committed transcript items, resolves the provider capability profile and safe window, runs pre-project hooks, requests a projection, serializes it, and verifies its digest before provider dispatch. After the turn, it appends the assistant/tool stream as immutable items and emits post events. Session stop, edit/resend, regenerate, fork, compaction, provider failover, and subagent spawn use explicit protocol operations rather than editing engine storage.
+
+The adapter keeps existing Gideon authorization, approvals, cancellation, event streaming, provider selection, and transcript persistence authoritative. If Hypermid is off or pass_through, the current Gideon path remains available. In primary mode, every provider call has a recorded projection result or a recorded refusal under the selected policies.

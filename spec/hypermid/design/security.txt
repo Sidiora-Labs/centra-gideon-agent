@@ -1,0 +1,61 @@
+HYPERMID SECURITY AND RECOVERY DESIGN
+
+Status: design complete; implementation and qualification pending.
+
+[security.scope]
+Hypermid is an independently implemented Gideon subsystem. Its Rust crates live under crates/hypermid-*, its Gideon adapter lives under runtime/gideon/hypermid, and its user controls use the existing native console surfaces. The daemon is the only process allowed to open the durable store. Callers use a versioned authenticated protocol and never receive database paths, provider credentials, raw encryption keys, or unrestricted filesystem handles.
+
+Every request carries a principal, a Scope, a capability set, a request identifier, and an expiry. Scope contains owner_id and project_id and may contain workspace_id. Authorization is deny-by-default and is checked at the protocol boundary and again in the transaction that reads or mutates a record. Resource identifiers are opaque and never substitute for the scope check.
+
+[security.capabilities]
+Capabilities separate read, append, revise, archive, delete, export, restore, administer, model-use, network-use, artifact-install, and artifact-update operations. A project principal may read its own project and explicitly shared workspace records. Shared foreign records remain read-only. Mutations require owner and project equality; workspace membership alone never grants write access.
+
+Background historians, compactors, embedders, verifiers, and maintenance workers receive short-lived job capabilities for an enumerated set of record identifiers and operations. They cannot mint capabilities, change sharing, broaden a scope, install artifacts, read secrets, or write any other project. There is no blanket cross-project write capability. Cross-project consolidation creates a proposal in the destination owner's queue; only a destination-scoped foreground decision may commit it.
+
+Authorization decisions emit a redacted evidence record containing the capability identifier, scope, decision, rule identifier, and trace. Denials reveal no foreign-record existence. List, search, expand, export, and backup apply the same row-level predicate before ranking or serialization.
+
+[security.memory_provenance]
+Durable memory is data, even when its text resembles system instructions, configuration, tool commands, or authorization rules. Each memory carries source type, source identifier, author principal, creation trace, content digest, verification state, and supersession lineage. Rendering places memory in a delimited data channel with provenance. Memory cannot create capabilities, alter model/provider policy, suppress required approvals, or change the trust level of later memory.
+
+Instruction-shaped memory is labeled in the user interface and is excluded from privileged control context unless a user promotes it through a revision-checked decision. Promotion records the original digest, reviewer principal, resulting trust class, and decision trace. Editing content invalidates verification, embeddings, classification, and any prior promotion until they are recomputed against the new digest.
+
+[security.auth_protocol]
+The daemon exposes a local endpoint by default. Local peers must pass operating-system peer identity checks and a one-time device enrollment before receiving a short-lived client certificate. Local and remote sessions both use TLS 1.3, mutual certificate authentication, transcript-bound protocol negotiation, monotonically increasing request sequence numbers, and bounded replay windows. Private keys remain in the platform credential store or a permission-restricted Gideon state directory and are never accepted from project configuration.
+
+Remote listening is disabled until an operator explicitly enables an address and enrolls a client. Remote sessions require a trusted server name, mutual TLS, short-lived authorization, and the same scoped capability checks as local sessions. Plaintext fallback, certificate-skip modes, bearer tokens in URLs, and silent protocol downgrade are forbidden. The first frame negotiates schema and feature ranges. An incompatible client is rejected before any durable intent or effect is created and receives supported ranges plus a stable error code.
+
+[security.sandbox]
+MCP and stdio integrations execute outside the daemon store process in a per-principal sandbox. Each launch receives an explicit executable digest, argument vector, environment allowlist, working-directory root, filesystem grants, network grant, resource ceilings, and deadline. Project files, sockets, device nodes, process namespaces, and credential stores are unavailable unless individually granted. Standard input and output use bounded framed messages; oversized, malformed, late, or unsolicited frames terminate the sandbox and produce a typed failure.
+
+Tool schemas are validated before dispatch and results are validated before persistence. Shell interpolation is not used to construct commands. Cancellation stops descendants and closes inherited descriptors. Tool effects use an idempotency key and one of not_started, committed, or unknown. A timeout, disconnect, or crash after dispatch produces unknown unless reconciliation proves the effect committed or did not start. Unknown is never reported as failed and is never retried automatically.
+
+[security.network_and_secrets]
+Network access is denied by default. Granted egress names a scheme, normalized hostname, resolved-address policy, port set, proxy policy, redirect limit, byte limit, and expiry. DNS answers are checked before connection and on each redirect; private, loopback, link-local, multicast, metadata, and newly disallowed addresses are rejected unless the exact address class is explicitly granted. Connections use the approved resolver and proxy path, with destination checks after proxy selection. Rebinding or mixed allowed/disallowed answers fail closed.
+
+Secrets are resolved at dispatch from opaque handles scoped to the principal and operation. Secret values are excluded from prompts, memory, SQLite, command arguments, process listings, evidence artifacts, and UI payloads. Structured redaction covers request and response fields before logging; a final byte-pattern scrub covers registered secret values and common credential forms. Logs use event names and bounded metadata, never raw prompt, memory, tool payload, authorization header, certificate key, or environment dump.
+
+[security.model_budget]
+Foreground and background model use is admitted by an owner-controlled budget ledger. The admission key includes owner, project, job class, provider, model, estimated tokens, and estimated cost. Limits cover per-call, concurrent, hourly, daily, and job-total use. Reservations commit actual usage or release unused capacity. A crashed request is reconciled from provider identifiers when available; unresolved charges remain reserved and visible rather than silently retried.
+
+Project content may request less expensive or more restrictive behavior but cannot select credentials, raise limits, enable a provider, or route data to an unapproved region. Background work pauses with a typed budget reason and resumes only after a new admission decision. Live-provider qualification is separately gated and requires explicit operator opt-in.
+
+[security.artifact_supply_chain]
+Install and update accept only a pinned artifact identity, immutable digest, supported platform, declared capabilities, and verifiable publisher signature rooted in an operator-approved trust set. Resolution, download, verification, unpack, validation, and activation are distinct states. Archives reject absolute paths, parent traversal, links escaping the staging root, device files, duplicate normalized paths, case collisions, and decompression limits.
+
+Activation is an atomic pointer change after validation. Existing sessions retain their pinned version until restart. Failed validation leaves the prior version active; interrupted activation is recovered from a durable intent. Updates never inherit new filesystem, network, model, secret, or write capabilities without a fresh user-visible approval. The console shows publisher identity, digest, requested capability changes, installed version, update result, and rollback target.
+
+[security.lifecycle]
+Deletion writes an owner-scoped tombstone and removes the record from recall immediately. A compaction job physically removes content, derived embeddings, summaries, caches, indexes, and artifact references after the configured recovery window. Tombstones prevent restoration from stale worker output and synchronize into backups made during the recovery window. The UI distinguishes reversible deletion, completed purge, and blocked purge with remaining references.
+
+Export takes a consistent read snapshot, applies scope predicates, excludes secrets and transient cache material, and writes a manifest containing schema version, per-entry digest, provenance, and cursor. Backup is encrypted with an operator-selected destination key and contains a manifest authenticated independently from payload chunks. Restore stages into a new store, verifies every digest and schema, replays migrations, checks scope invariants, and swaps atomically only after validation. A failed restore leaves the current store untouched. Restored background jobs remain paused until their capabilities and budgets are reauthorized.
+
+[security.crash_consistency]
+Durable operations use write-ahead intents and atomic store transactions. A mutation commits its authoritative record, lineage, cursor, usage reservation change, and outbox reference together. Derived indexes and embeddings are rebuilt from committed authoritative records and use source-digest compare-and-swap to reject stale completion.
+
+On startup the daemon verifies the store format, migration journal, encryption metadata, cursor monotonicity, unfinished intents, and outbox. It resumes idempotent internal work, reconciles externally visible effects, and surfaces unknown effects for a user decision. It never infers failure from missing completion evidence. Corrupt or future-version state opens read-only recovery mode; raw events and exports remain available when their authenticated chunks are intact.
+
+Epoch changes identify restore, failover, or authoritative store replacement. Clients must discard cached mutation assumptions when the epoch changes and resume reads from the new cursor. A client outside the supported protocol range remains read-only only when the server can prove that the requested read schema is compatible; otherwise the connection is refused before data is returned.
+
+[security.user_surface]
+The native console presents effective scope, sharing source, memory provenance, instruction-shaped warnings, background-worker status, budget use, network grants, installed artifact identity, deletion phase, backup freshness, restore result, unknown effects, and protocol incompatibility. Every retry that could repeat an external effect requires an explicit reconciliation result or user decision. Error messages use stable codes and actionable recovery steps without disclosing secrets or foreign identifiers.
+

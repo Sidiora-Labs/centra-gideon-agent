@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "security.scoped-capabilities",
+      "title": "Scoped principal capabilities",
+      "behavior": "Authorizes reads and writes by principal, owner, project, optional workspace, operation, resource, and expiry at protocol and transaction boundaries.",
+      "requirement": "sec-01",
+      "task": "sec-01",
+      "design_anchor": "design/security.txt#security.capabilities",
+      "implementation_paths": ["crates/hypermid-core/src/capability.rs", "crates/hypermid-store/src/authorization.rs", "runtime/gideon/hypermid/authz.py"],
+      "acceptance": ["Workspace sharing cannot grant foreign writes.", "Revoked or expired capabilities leave durable state unchanged."],
+      "disposition": "implement"
+    },
+    {
+      "id": "security.worker-authority",
+      "title": "Bounded background-worker authority",
+      "behavior": "Issues expiring job capabilities for enumerated records and operations without any blanket cross-project write power.",
+      "requirement": "sec-01",
+      "task": "sec-01",
+      "design_anchor": "design/security.txt#security.capabilities",
+      "implementation_paths": ["crates/hypermid-core/src/capability.rs", "crates/hypermid-daemon/src/dispatch.rs", "checks/hypermid/test_security_capabilities.py"],
+      "acceptance": ["Workers cannot broaden scope or mint capabilities.", "Cross-project consolidation requires a destination-owner decision."],
+      "disposition": "implement"
+    },
+    {
+      "id": "security.authenticated-protocol",
+      "title": "Encrypted authenticated protocol",
+      "behavior": "Uses TLS 1.3 mutual authentication, scoped short-lived authorization, replay protection, and explicit remote enrollment.",
+      "requirement": "sec-02",
+      "task": "sec-02",
+      "design_anchor": "design/security.txt#security.auth_protocol",
+      "implementation_paths": ["crates/hypermid-protocol/src/handshake.rs", "crates/hypermid-daemon/src/listener.rs", "runtime/gideon/hypermid/client.py"],
+      "acceptance": ["Captured transports contain no plaintext application data.", "Invalid peers and replays are rejected before durable intent creation."],
+      "disposition": "implement"
+    },
+    {
+      "id": "security.client-compatibility",
+      "title": "Client compatibility fencing",
+      "behavior": "Negotiates schema and feature ranges and rejects incompatible clients before mutation without downgrade.",
+      "requirement": "sec-02",
+      "task": "sec-02",
+      "design_anchor": "design/security.txt#security.auth_protocol",
+      "implementation_paths": ["crates/hypermid-protocol/src/handshake.rs", "runtime/gideon/hypermid/client.py", "apps/console/src/features/hypermid/ConnectionStatus.tsx"],
+      "acceptance": ["Both supported range boundaries connect.", "Clients outside the range receive a stable incompatibility code and cause zero writes."],
+      "disposition": "implement"
+    },
+    {
+      "id": "security.sandbox-effects",
+      "title": "Sandboxed MCP and stdio effects",
+      "behavior": "Runs integrations with explicit resource grants and preserves not_started, committed, and unknown effect states through interruption.",
+      "requirement": "sec-03",
+      "task": "sec-03",
+      "design_anchor": "design/security.txt#security.sandbox",
+      "implementation_paths": ["crates/hypermid-sandbox/src/lib.rs", "crates/hypermid-mcp/src/stdio.rs", "crates/hypermid-store/src/effects.rs", "runtime/gideon/hypermid/effects.py"],
+      "acceptance": ["Sandboxed processes cannot reach ungranted files, network, credentials, or daemon storage.", "Unknown effects are never labeled failed or automatically retried."],
+      "disposition": "implement"
+    },
+    {
+      "id": "security.egress-secrets",
+      "title": "Egress and secret containment",
+      "behavior": "Applies destination checks before and after DNS, redirect, and proxy resolution while keeping secrets behind opaque dispatch-time handles.",
+      "requirement": "sec-04",
+      "task": "sec-04",
+      "design_anchor": "design/security.txt#security.network_and_secrets",
+      "implementation_paths": ["crates/hypermid-daemon/src/egress.rs", "crates/hypermid-daemon/src/secrets.rs", "crates/hypermid-daemon/src/redaction.rs", "runtime/gideon/hypermid/network_policy.py"],
+      "acceptance": ["Rebinding, mixed DNS, metadata, redirect, and proxy bypass attempts make zero unauthorized connections.", "Secret canaries appear in no prompt, log, evidence, export, process argument, or UI payload."],
+      "disposition": "implement"
+    },
+    {
+      "id": "security.model-budget",
+      "title": "Owner-controlled model budgets",
+      "behavior": "Reserves and reconciles foreground and background model usage under per-call, concurrency, hourly, daily, and job limits.",
+      "requirement": "sec-05",
+      "task": "sec-05",
+      "design_anchor": "design/security.txt#security.model_budget",
+      "implementation_paths": ["crates/hypermid-store/src/budget.rs", "crates/hypermid-daemon/src/model_admission.rs", "runtime/gideon/hypermid/budgets.py"],
+      "acceptance": ["No call is admitted above a configured limit.", "Unknown charges remain reserved and visible until reconciled."],
+      "disposition": "implement"
+    },
+    {
+      "id": "security.memory-provenance",
+      "title": "Instruction-shaped memory provenance",
+      "behavior": "Renders durable memory as provenance-bearing data and requires a revision-checked user decision before privileged promotion.",
+      "requirement": "sec-05",
+      "task": "sec-05",
+      "design_anchor": "design/security.txt#security.memory_provenance",
+      "implementation_paths": ["crates/hypermid-core/src/provenance.rs", "runtime/gideon/hypermid/render.py", "apps/console/src/features/hypermid/MemoryProvenance.tsx"],
+      "acceptance": ["Instruction-shaped text cannot alter capabilities, provider policy, approvals, or trust.", "Content edits invalidate prior verification and promotion."],
+      "disposition": "implement"
+    },
+    {
+      "id": "security.artifact-supply-chain",
+      "title": "Verified artifact lifecycle",
+      "behavior": "Verifies signed immutable artifacts in bounded staging and activates updates atomically with explicit approval for new capabilities.",
+      "requirement": "sec-06",
+      "task": "sec-06",
+      "design_anchor": "design/security.txt#security.artifact_supply_chain",
+      "implementation_paths": ["crates/hypermid-artifacts/src/manifest.rs", "crates/hypermid-artifacts/src/install.rs", "crates/hypermid-artifacts/src/activate.rs", "runtime/gideon/hypermid/artifacts.py"],
+      "acceptance": ["No artifact executes before verification and no archive writes outside staging.", "Failed or interrupted updates preserve the prior runnable version."],
+      "disposition": "implement"
+    },
+    {
+      "id": "security.data-lifecycle",
+      "title": "Deletion and portable encrypted state",
+      "behavior": "Coordinates tombstoned deletion, complete derived-data purge, scoped export, encrypted backup, validated migration, and atomic restore.",
+      "requirement": "sec-07",
+      "task": "sec-07",
+      "design_anchor": "design/security.txt#security.lifecycle",
+      "implementation_paths": ["crates/hypermid-store/src/deletion.rs", "crates/hypermid-store/src/export.rs", "crates/hypermid-store/src/backup.rs", "crates/hypermid-store/src/migrate.rs", "runtime/gideon/hypermid/lifecycle.py"],
+      "acceptance": ["Deletion immediately excludes recall and post-window purge removes every derived copy.", "Failed restore leaves the active store untouched; successful restore matches manifest digests and cursor."],
+      "disposition": "implement"
+    },
+    {
+      "id": "security.crash-recovery",
+      "title": "Crash-consistent recovery",
+      "behavior": "Commits authoritative state atomically, rejects stale derived writes, and reconciles intents and effects without duplicating work.",
+      "requirement": "sec-08",
+      "task": "sec-08",
+      "design_anchor": "design/security.txt#security.crash_consistency",
+      "implementation_paths": ["crates/hypermid-store/src/recovery.rs", "crates/hypermid-daemon/src/startup.rs", "runtime/gideon/hypermid/recovery.py", "apps/console/src/features/hypermid/RecoveryStatus.tsx"],
+      "acceptance": ["Crash injection produces no duplicate committed effect and no cursor regression.", "Corrupt or future state opens read-only recovery with intact authenticated raw data available."],
+      "disposition": "implement"
+    },
+    {
+      "id": "security.release-evidence",
+      "title": "Measurable security acceptance evidence",
+      "behavior": "Records real-path cache-byte, long-history, raw-recovery, migration, crash, auth, compatibility, lifecycle, sandbox, budget, and supply-chain results under one schema.",
+      "requirement": "sec-08",
+      "task": "sec-08",
+      "design_anchor": "design/qualification.txt#qualification.release_acceptance",
+      "implementation_paths": ["checks/hypermid/verify_security_acceptance.py", "spec/hypermid/schemas/evidence.schema.json"],
+      "acceptance": ["Every mandatory gate passes on the same source digest using real product paths.", "Live-provider success exists only with explicit opt-in and never derives from a mock."],
+      "disposition": "implement"
+    }
+  ]
+}

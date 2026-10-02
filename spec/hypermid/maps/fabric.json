@@ -1,0 +1,192 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "fabric.framing",
+      "title": "Versioned bounded JSON framing",
+      "behavior": "Frames hypermid.v1 JSON with a four-byte big-endian length, rejects bodies above 8 MiB, and chunks event data at 64 KiB with digest verification.",
+      "requirement": "fab-001",
+      "task": "fab-01-bootstrap",
+      "design_anchor": "fabric.transport.framing",
+      "implementation_paths": ["crates/hypermid-protocol/src/lib.rs", "crates/hypermid-transport/src/framing.rs"],
+      "acceptance": ["Oversize and malformed frames are rejected before declared-body allocation.", "Chunk order, count, and SHA-256 digest are verified before event publication."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.authentication",
+      "title": "Authenticated local and external sessions",
+      "behavior": "Binds local sessions to owner credentials and supervised spawn identity while keeping external access opt-in behind TLS and scoped principals.",
+      "requirement": "fab-002",
+      "task": "fab-01-bootstrap",
+      "design_anchor": "fabric.transport.handshake",
+      "implementation_paths": ["crates/hypermid-transport/src/handshake.rs", "crates/hypermid-transport/src/local.rs", "crates/hypermid-transport/src/tls.rs"],
+      "acceptance": ["Proof binds both nonces, protocol, daemon instance, and connection class.", "An external session without trusted TLS identity and required scopes is refused."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.manifests",
+      "title": "Validated module manifests",
+      "behavior": "Discovers manifests only from configured roots and validates identity, artifact digest, dependencies, capabilities, policy, and launch proof before routing.",
+      "requirement": "fab-003",
+      "task": "fab-02-registry-routing",
+      "design_anchor": "fabric.modules.discovery",
+      "implementation_paths": ["crates/hypermid-daemon/src/manifest.rs", "crates/hypermid-daemon/src/registry.rs"],
+      "acceptance": ["Invalid manifests do not change the registry generation.", "A process is unroutable until launch identity and catalog validation succeed.", "Every declared system role runs on the local fabric without a foreign service."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.routes",
+      "title": "Epoch-safe route lifecycle",
+      "behavior": "Reserves and binds routes atomically, stamps each binding epoch, and closes routes when process, capability, or scope authority changes.",
+      "requirement": "fab-004",
+      "task": "fab-02-registry-routing",
+      "design_anchor": "fabric.routing",
+      "implementation_paths": ["crates/hypermid-daemon/src/router.rs", "crates/hypermid-control/src/lib.rs"],
+      "acceptance": ["A route appears only after module bind acknowledgement.", "Frames from an earlier epoch never reach a reused route slot."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.flow_control",
+      "title": "Per-route flow control",
+      "behavior": "Uses independent request and byte credits with bounded queues and a separately bounded control lane.",
+      "requirement": "fab-005",
+      "task": "fab-03-flow-lifecycle",
+      "design_anchor": "fabric.routing",
+      "implementation_paths": ["crates/hypermid-daemon/src/flow.rs", "crates/hypermid-daemon/src/connection.rs"],
+      "acceptance": ["Credit exhaustion remains isolated to its route.", "Terminal frames release request credits without queue or ledger leaks."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.cancellation",
+      "title": "Cancellation and deadlines",
+      "behavior": "Carries one absolute deadline through every hop and settles idempotent cancellation races with one terminal outcome.",
+      "requirement": "fab-006",
+      "task": "fab-03-flow-lifecycle",
+      "design_anchor": "fabric.routing",
+      "implementation_paths": ["crates/hypermid-daemon/src/deadline.rs", "crates/hypermid-daemon/src/cancellation.rs"],
+      "acceptance": ["Internal hops and retries never extend the original deadline.", "Cancel, completion, timeout, and disconnect races emit at most one terminal result."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.supervision",
+      "title": "Contained process supervision",
+      "behavior": "Runs every module through a bounded lifecycle with platform process containment, restart backoff, ordered drains, and orphan cleanup by stable process identity.",
+      "requirement": "fab-007",
+      "task": "fab-05-supervision",
+      "design_anchor": "fabric.supervision",
+      "implementation_paths": ["crates/hypermid-daemon/src/supervisor.rs", "crates/hypermid-daemon/src/containment.rs", "crates/hypermid-daemon/src/child_journal.rs"],
+      "acceptance": ["Crash loops respect the restart window and backoff ceiling.", "Daemon recovery never kills a process whose pid was reused with a different identity."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.replacement",
+      "title": "Safe module replacement",
+      "behavior": "Previews registry reconciliation and performs exclusive or overlap-safe replacement without routing to an unready candidate.",
+      "requirement": "fab-008",
+      "task": "fab-05-supervision",
+      "design_anchor": "fabric.supervision",
+      "implementation_paths": ["crates/hypermid-daemon/src/replacement.rs", "crates/hypermid-daemon/src/registry.rs"],
+      "acceptance": ["Failed warmup leaves the incumbent serving.", "Successful cutover rejects new work on the incumbent before its drain begins."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.effects",
+      "title": "Durable effect recovery",
+      "behavior": "Commits effect intent before dispatch, commits outcomes before acknowledgement, deduplicates by effect id and input digest, and reconciles after restart.",
+      "requirement": "fab-009",
+      "task": "fab-06-effects-federation",
+      "design_anchor": "fabric.effects",
+      "implementation_paths": ["crates/hypermid-bus/src/effects.rs", "crates/hypermid-bus/src/journal.rs"],
+      "acceptance": ["Repeated effect ids with another digest are refused.", "Ambiguous recovery yields unknown and never blind replay."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.events",
+      "title": "Durable scoped event bus",
+      "behavior": "Persists scoped events with cursors and supports snapshot, replay, live continuation, durable acknowledgement, redelivery, and dead-letter handling.",
+      "requirement": "fab-010",
+      "task": "fab-06-effects-federation",
+      "design_anchor": "fabric.events",
+      "implementation_paths": ["crates/hypermid-bus/src/events.rs", "crates/hypermid-bus/src/dead_letter.rs", "crates/hypermid-bus/src/bridge.rs"],
+      "acceptance": ["Publish and subscribe both enforce principal scope.", "Expired cursors and lagged consumers receive explicit recovery positions."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.diagnostics",
+      "title": "Health and diagnostics",
+      "behavior": "Combines readiness, probes, resources, route state, dependencies, stderr, terminal history, provenance, and spawn events into inspectable evidence.",
+      "requirement": "fab-011",
+      "task": "fab-04-control-diagnostics",
+      "design_anchor": "fabric.health",
+      "implementation_paths": ["crates/hypermid-daemon/src/health.rs", "crates/hypermid-daemon/src/diagnostics.rs"],
+      "acceptance": ["Diagnostics remain readable during module failure.", "Unsupported and unavailable evidence is explicit rather than encoded as zero or healthy."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.control",
+      "title": "Scoped control RPC",
+      "behavior": "Provides typed describe, registry, route, supervisor, effect, and event operations with idempotent mutations and generation-stamped responses.",
+      "requirement": "fab-012",
+      "task": "fab-04-control-diagnostics",
+      "design_anchor": "fabric.control",
+      "implementation_paths": ["crates/hypermid-control/src/operations.rs", "crates/hypermid-daemon/src/control.rs"],
+      "acceptance": ["Every operation checks its named principal scope.", "Subscriptions reject foreign or expired cursors with recovery data."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.registry_release",
+      "title": "Owned install update and uninstall",
+      "behavior": "Uses signed release metadata, digest-verified staged activation, rollback, and an ownership ledger to protect user and unrelated state.",
+      "requirement": "fab-013",
+      "task": "fab-07-registry-service",
+      "design_anchor": "fabric.registry_and_release",
+      "implementation_paths": ["crates/hypermid-registry/src/ownership.rs", "crates/hypermid-registry/src/release_index.rs", "crates/hypermid-registry/src/activation.rs"],
+      "acceptance": ["Untrusted, stale, incompatible, or digest-mismatched artifacts never activate.", "Uninstall deletes only still-matching ownership-ledger paths."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.service_manager",
+      "title": "Cross-platform daemon service lifecycle",
+      "behavior": "Registers the per-user daemon with native service managers while preserving ordered shutdown of supervised children.",
+      "requirement": "fab-014",
+      "task": "fab-07-registry-service",
+      "design_anchor": "fabric.registry_and_release",
+      "implementation_paths": ["crates/hypermid-registry/src/service/linux.rs", "crates/hypermid-registry/src/service/macos.rs", "crates/hypermid-registry/src/service/windows.rs"],
+      "acceptance": ["Definitions restart on unexpected daemon exit and allow the full drain ceiling.", "Service-manager refusal text reaches the caller without replacement by a generic error."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.federation",
+      "title": "Opt-in federated routing",
+      "behavior": "Pairs peers, validates signed candidates, dials direct before relay, establishes mutually authenticated encryption, and intersects remote grants with local policy.",
+      "requirement": "fab-015",
+      "task": "fab-06-effects-federation",
+      "design_anchor": "fabric.federation",
+      "implementation_paths": ["crates/hypermid-transport/src/federation.rs", "crates/hypermid-transport/src/relay.rs", "crates/hypermid-daemon/src/federation.rs"],
+      "acceptance": ["Relay grants are side-specific, single-use, and expire.", "Only explicitly remote operations are discoverable or callable across peers."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.phone",
+      "title": "Durable outbound phone channel",
+      "behavior": "Uses outbound-only encrypted federation, a durable local mutation log, reconnect reconciliation, and content-free wake notifications.",
+      "requirement": "fab-016",
+      "task": "fab-06-effects-federation",
+      "design_anchor": "fabric.phone_channel",
+      "implementation_paths": ["crates/hypermid-bus/src/remote_effects.rs", "crates/hypermid-daemon/src/federation.rs"],
+      "acceptance": ["A reconnect reconciles unsettled mutations before another mutation is admitted.", "Wake notifications contain only an opaque token and cannot invoke an operation."],
+      "disposition": "implement"
+    },
+    {
+      "id": "fabric.gideon_adapter",
+      "title": "Typed Gideon adapter",
+      "behavior": "Provides typed asynchronous control, route, event, cancellation, and effect-status calls using shared contract definitions.",
+      "requirement": "fab-017",
+      "task": "fab-01-bootstrap",
+      "design_anchor": "fabric.gideon_adapter",
+      "implementation_paths": ["runtime/gideon/hypermid/models.py", "runtime/gideon/hypermid/adapter.py", "runtime/gideon/hypermid/subscriptions.py"],
+      "acceptance": ["Daemon epoch changes invalidate routes and event cursors before reuse.", "The adapter retries only retryable queries within the original deadline and never blindly retries durable effects."],
+      "disposition": "implement"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hypermid.gideon.dev/schemas/common.schema.json",
+  "title": "Hypermid shared contract types",
+  "$defs": {
+    "Id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},
+    "Digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "Scope": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner_id", "project_id"],
+      "properties": {
+        "owner_id": {"$ref": "#/$defs/Id"},
+        "project_id": {"$ref": "#/$defs/Id"},
+        "workspace_id": {"$ref": "#/$defs/Id"}
+      }
+    },
+    "Cursor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["epoch", "sequence"],
+      "properties": {
+        "epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "sequence": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+      }
+    },
+    "Error": {
+      "type": "object", "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$"},
+        "message": {"type": "string", "maxLength": 2048},
+        "retryable": {"type": "boolean"},
+        "retry_after_ms": {"type": "integer", "minimum": 0, "maximum": 86400000},
+        "effect_state": {"enum": ["not_started", "committed", "unknown"]}
+      }
+    },
+    "Trace": {
+      "type": "object", "additionalProperties": false,
+      "required": ["trace_id", "request_id"],
+      "properties": {
+        "trace_id": {"$ref": "#/$defs/Id"},
+        "request_id": {"$ref": "#/$defs/Id"}
+      }
+    }
+  }
+}

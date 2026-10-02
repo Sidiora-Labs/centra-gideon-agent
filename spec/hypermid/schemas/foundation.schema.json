@@ -1,0 +1,779 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hypermid.gideon.dev/schemas/foundation.schema.json",
+  "title": "Hypermid shared foundation contracts",
+  "type": "object",
+  "$defs": {
+    "ProjectRoot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "canonical_path",
+        "admission"
+      ],
+      "properties": {
+        "canonical_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "admission": {
+          "enum": [
+            "live",
+            "recovery_only"
+          ]
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        }
+      }
+    },
+    "SqliteBackend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "path"
+      ],
+      "properties": {
+        "kind": {
+          "const": "sqlite"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "PostgresBackend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "dsn_ref",
+        "database"
+      ],
+      "properties": {
+        "kind": {
+          "const": "postgres"
+        },
+        "dsn_ref": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "database": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]{0,62}$"
+        }
+      }
+    },
+    "StorageDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "module_id",
+        "isolation",
+        "backend"
+      ],
+      "properties": {
+        "module_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "isolation": {
+          "enum": [
+            "per_module",
+            "per_project"
+          ]
+        },
+        "backend": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SqliteBackend"
+            },
+            {
+              "$ref": "#/$defs/PostgresBackend"
+            }
+          ]
+        }
+      }
+    },
+    "LeaseKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "module_id",
+        "backend",
+        "scope_key"
+      ],
+      "properties": {
+        "module_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "backend": {
+          "enum": [
+            "sqlite",
+            "postgres"
+          ]
+        },
+        "scope_key": {
+          "$ref": "common.schema.json#/$defs/Id"
+        }
+      }
+    },
+    "Fence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lease",
+        "epoch"
+      ],
+      "properties": {
+        "lease": {
+          "$ref": "#/$defs/LeaseKey"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "CacheUnit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unit_id",
+        "kind",
+        "durability",
+        "frozen_payload"
+      ],
+      "properties": {
+        "unit_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "durability": {
+          "enum": [
+            "lineage",
+            "episode"
+          ]
+        },
+        "frozen_payload": {
+          "type": "string"
+        }
+      }
+    },
+    "CacheState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "action",
+        "boundary_id",
+        "units",
+        "reconcile_pending"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "action": {
+          "enum": [
+            "defer",
+            "rebuild_local",
+            "rebuild_full"
+          ]
+        },
+        "boundary_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "units": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CacheUnit"
+          }
+        },
+        "reconcile_pending": {
+          "type": "boolean"
+        }
+      }
+    },
+    "MoneyRate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nanodollars_per_million"
+      ],
+      "properties": {
+        "nanodollars_per_million": {
+          "type": "integer"
+        }
+      }
+    },
+    "ModelRecord": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "provider_id",
+        "model_id",
+        "context_window",
+        "output_limit",
+        "capabilities",
+        "rates"
+      ],
+      "properties": {
+        "provider_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "model_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "context_window": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "output_limit": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "rates": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/MoneyRate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "UsageWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "used_percent"
+      ],
+      "properties": {
+        "used_percent": {
+          "type": "number",
+          "minimum": 0
+        },
+        "raw_used_percent": {
+          "type": "number",
+          "minimum": 0
+        },
+        "resets_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "window_minutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "regeneration_per_minute": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "UsageEntry": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "provider_id",
+        "source",
+        "observed_at_ms"
+      ],
+      "properties": {
+        "provider_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "account_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "windows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UsageWindow"
+          }
+        },
+        "error": {
+          "$ref": "common.schema.json#/$defs/Error"
+        }
+      }
+    },
+    "PushEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "ciphertext"
+      ],
+      "properties": {
+        "version": {
+          "enum": [
+            1,
+            2
+          ]
+        },
+        "sender_key_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{16}$"
+        },
+        "ciphertext": {
+          "type": "string",
+          "contentEncoding": "base64"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "version": {
+                "const": 2
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "sender_key_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "version": {
+                "const": 1
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "sender_key_id"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "LogRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timestamp_ms",
+        "level",
+        "logger",
+        "message",
+        "trace"
+      ],
+      "properties": {
+        "timestamp_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "level": {
+          "enum": [
+            "TRACE",
+            "DEBUG",
+            "INFO",
+            "WARN",
+            "ERROR"
+          ]
+        },
+        "logger": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_.-]{0,127}$"
+        },
+        "message": {
+          "type": "string"
+        },
+        "bound": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "trace": {
+          "$ref": "common.schema.json#/$defs/Trace"
+        }
+      }
+    },
+    "BusMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "id",
+        "digest",
+        "headers",
+        "scope",
+        "trace"
+      ],
+      "properties": {
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "digest": {
+          "$ref": "common.schema.json#/$defs/Digest"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "trace": {
+          "$ref": "common.schema.json#/$defs/Trace"
+        }
+      }
+    },
+    "RegisterEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "value",
+        "revision"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "value": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "Delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "delivery_count",
+        "message"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "delivery_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "message": {
+          "$ref": "#/$defs/BusMessage"
+        }
+      }
+    },
+    "RoleDescriptor": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "implementation_version",
+        "majors"
+      ],
+      "properties": {
+        "implementation_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "majors": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "version",
+              "ops",
+              "stability"
+            ],
+            "properties": {
+              "version": {
+                "type": "string",
+                "pattern": "^hypermid[.][a-z0-9.-]+/v[1-9][0-9]*$"
+              },
+              "ops": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "stability": {
+                "enum": [
+                  "alpha",
+                  "beta",
+                  "stable"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "ToolCatalogEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "schema_digest",
+        "semantics",
+        "capabilities",
+        "input_schema"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "schema_digest": {
+          "$ref": "common.schema.json#/$defs/Digest"
+        },
+        "semantics": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "result_ops": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "prepend",
+              "append",
+              "replace"
+            ]
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "input_schema": {
+          "type": "object"
+        }
+      }
+    },
+    "LateResult": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "kind",
+        "scope",
+        "custodian_id",
+        "call_key",
+        "event_id",
+        "settled_at_ms",
+        "reduced"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "custodian_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "call_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "event_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "settled_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reduced": {
+          "type": "boolean"
+        },
+        "result": {},
+        "outcome": {
+          "type": "string"
+        }
+      }
+    },
+    "TranscriptPage": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "messages"
+      ],
+      "properties": {
+        "lineage_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "next_ordinal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cursor": {
+          "$ref": "common.schema.json#/$defs/Cursor"
+        }
+      }
+    },
+    "CompactionDirective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "compaction_id",
+        "version",
+        "from_ordinal",
+        "to_ordinal",
+        "replacement"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "compaction_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "from_ordinal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "to_ordinal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replacement": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "TransformSubscription": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hook",
+        "ops",
+        "on_unavailable",
+        "budget_ms"
+      ],
+      "properties": {
+        "hook": {
+          "enum": [
+            "pre_user",
+            "post_assistant",
+            "pre_tool",
+            "post_tool"
+          ]
+        },
+        "phase": {
+          "enum": [
+            "mutate",
+            "validate",
+            "approve"
+          ]
+        },
+        "tools": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "ops": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "prepend",
+              "append",
+              "replace"
+            ]
+          }
+        },
+        "on_unavailable": {
+          "enum": [
+            "continue",
+            "fail_step",
+            "fail_run"
+          ]
+        },
+        "budget_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        }
+      }
+    }
+  }
+}

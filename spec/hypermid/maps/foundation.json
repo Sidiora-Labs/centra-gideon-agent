@@ -1,0 +1,236 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "base-project-identity",
+      "title": "Canonical project identity",
+      "behavior": "Canonicalize live project roots across aliases and platforms while preserving distinct worktrees and a recovery-only path for vanished roots.",
+      "requirement": "base-identity",
+      "task": "base-01",
+      "design_anchor": "foundation:canonical-identity",
+      "implementation_paths": ["crates/hypermid-foundation/src/path.rs", "runtime/gideon/hypermid/foundation.py"],
+      "acceptance": ["Equivalent live spellings converge.", "Recovery identities cannot admit new durable state."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-lease",
+      "title": "Fenced single-writer leases",
+      "behavior": "Combine crash-released liveness with monotonically increasing epochs scoped by module, backend, and scope key.",
+      "requirement": "base-storage",
+      "task": "base-02",
+      "design_anchor": "foundation:leases-stores",
+      "implementation_paths": ["crates/hypermid-leases/src/lib.rs"],
+      "acceptance": ["Live contention is refused.", "A stale epoch cannot publish after replacement."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-storage-contracts",
+      "title": "Resolved storage descriptors",
+      "behavior": "Describe backend, isolation, least-privilege location, home resolution, and collision-safe database names without pulling database drivers into wire consumers.",
+      "requirement": "base-identity",
+      "task": "base-01",
+      "design_anchor": "foundation:common-contracts",
+      "implementation_paths": ["crates/hypermid-contracts/src/storage.rs"],
+      "acceptance": ["Descriptors carry no administrative credential.", "Missing and relative homes remain explicit."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-store-sqlite",
+      "title": "SQLite store mechanics",
+      "behavior": "Open owner-protected SQLite stores under a lease, apply ordered migrations once, and surface store-ahead state.",
+      "requirement": "base-storage",
+      "task": "base-02",
+      "design_anchor": "foundation:leases-stores",
+      "implementation_paths": ["crates/hypermid-store/src/lib.rs", "crates/hypermid-store/src/sqlite.rs"],
+      "acceptance": ["Migration chains reject duplicate or descending versions.", "Fresh and reopened stores do not repeat seeds."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-store-postgres",
+      "title": "PostgreSQL store mechanics",
+      "behavior": "Open pre-provisioned module databases, hold a session advisory lock, fence writes, and migrate by namespace.",
+      "requirement": "base-storage",
+      "task": "base-02",
+      "design_anchor": "foundation:leases-stores",
+      "implementation_paths": ["crates/hypermid-store-postgres/src/lib.rs"],
+      "acceptance": ["Connection loss releases liveness.", "Slug-colliding module Ids derive distinct database names."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-cache-core",
+      "title": "Frozen-prefix cache policy",
+      "behavior": "Freeze final bytes on rebuild, replay them verbatim on defer, reconcile missing boundaries, and CAS the complete state.",
+      "requirement": "base-cache-models",
+      "task": "base-03",
+      "design_anchor": "foundation:cache-model-usage",
+      "implementation_paths": ["crates/hypermid-cache/src/lib.rs"],
+      "acceptance": ["Deferred passes cannot render.", "A full rebuild drains deferred work."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-model-catalog",
+      "title": "Exact model catalog",
+      "behavior": "Parse provider capabilities, limits, modalities, raw additions, and exact tiered nanodollar prices without bundled data.",
+      "requirement": "base-cache-models",
+      "task": "base-03",
+      "design_anchor": "foundation:cache-model-usage",
+      "implementation_paths": ["crates/hypermid-models/src/lib.rs", "runtime/gideon/hypermid/models.py"],
+      "acceptance": ["Absent and zero prices remain distinct.", "Nonzero prices cannot silently round to zero."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-provider-usage",
+      "title": "Provider usage and capacity",
+      "behavior": "Represent quota windows, regeneration, breakdowns, balances, funding basis, account provenance, staleness, and in-band errors.",
+      "requirement": "base-cache-models",
+      "task": "base-03",
+      "design_anchor": "foundation:cache-model-usage",
+      "implementation_paths": ["crates/hypermid-usage/src/lib.rs", "runtime/gideon/hypermid/models.py"],
+      "acceptance": ["Missing providers are not rendered as zero.", "Healthy and degraded entries have unambiguous wire states."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-push-seal",
+      "title": "Encrypted push envelopes",
+      "behavior": "Seal bounded notification payloads in confidential or sender-authenticated HPKE envelopes with downgrade-safe opening.",
+      "requirement": "base-observability",
+      "task": "base-04",
+      "design_anchor": "foundation:encrypted-push",
+      "implementation_paths": ["crates/hypermid-push/src/lib.rs", "runtime/gideon/hypermid/observability.py"],
+      "acceptance": ["Authenticated opening uses a pinned full sender key.", "Oversized plaintext is refused before encryption."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-fleet-log",
+      "title": "Redacted fleet logging",
+      "behavior": "Format and parse canonical lines, filter hierarchical loggers, redact secrets, guard controls, retain append-only daily segments, and rotate single-writer captures.",
+      "requirement": "base-observability",
+      "task": "base-04",
+      "design_anchor": "foundation:fleet-logging",
+      "implementation_paths": ["crates/hypermid-log/src/lib.rs", "crates/hypermid-log/src/redaction.rs", "crates/hypermid-log/src/segment.rs", "crates/hypermid-log/src/sink.rs"],
+      "acceptance": ["Secrets and control bytes cannot forge a log line.", "Concurrent writers emit complete parseable daily lines."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-bus-contracts",
+      "title": "Message-plane traits",
+      "behavior": "Define digest-only messages, durable stream cursors, revisioned registers, bounded queues, census guards, dead letters, typed errors, and conformance properties.",
+      "requirement": "base-bus",
+      "task": "base-05",
+      "design_anchor": "foundation:message-plane",
+      "implementation_paths": ["crates/hypermid-bus-contracts/src/lib.rs", "crates/hypermid-bus-contracts/src/conformance.rs"],
+      "acceptance": ["Every delivery has one recorded settlement path.", "Dead-letter publication completes before terminal disposal."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-bus-memory",
+      "title": "Deterministic in-memory bus",
+      "behavior": "Implement parity semantics for process-local streams, registers, queues, and permission-failure injection.",
+      "requirement": "base-bus",
+      "task": "base-06",
+      "design_anchor": "foundation:bus-backends",
+      "implementation_paths": ["crates/hypermid-bus-memory/src/lib.rs", "crates/hypermid-bus-memory/src/backend.rs"],
+      "acceptance": ["Every parity property passes deterministically.", "NATS-only properties are inapplicable, never passed."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-bus-naming",
+      "title": "Bus topology and grants",
+      "behavior": "Derive six stream families, census names, durables, limits, and allow-only permissions from validated owner and principal tokens.",
+      "requirement": "base-bus",
+      "task": "base-05",
+      "design_anchor": "foundation:message-plane",
+      "implementation_paths": ["crates/hypermid-bus-naming/src/names.rs", "crates/hypermid-bus-naming/src/limits.rs", "crates/hypermid-bus-naming/src/grants.rs"],
+      "acceptance": ["Overlapping stream filters and escaping consumer filters are refused.", "Participants cannot publish another principal's workload."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-bus-nats",
+      "title": "NATS production bus",
+      "behavior": "Bind to provisioned NATS and JetStream resources with isolated inboxes, durable acknowledgements, revocation, and server-enforced grants.",
+      "requirement": "base-bus",
+      "task": "base-06",
+      "design_anchor": "foundation:bus-backends",
+      "implementation_paths": ["crates/hypermid-bus-nats/src/lib.rs", "crates/hypermid-bus-nats/src/connection.rs", "crates/hypermid-bus-nats/src/stream.rs"],
+      "acceptance": ["The client cannot create workload consumers.", "NATS-only restart, rekey, revocation, leaf, and system properties pass."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-role-harness",
+      "title": "Real-process role harness",
+      "behavior": "Spawn on a fresh state root, route through the real module boundary, kill after one durable point, restart, and record kill evidence.",
+      "requirement": "base-tool-role",
+      "task": "base-07",
+      "design_anchor": "foundation:role-harness",
+      "implementation_paths": ["crates/hypermid-role-harness/src/lib.rs"],
+      "acceptance": ["One root and one kill are used per point.", "Crash conformance cannot pass without a real process kill."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-role-tool",
+      "title": "Tool-provider contract",
+      "behavior": "Describe implementations, return deterministic catalogs, pin schemas and semantics, withdraw held work, and deliver acknowledged late results.",
+      "requirement": "base-tool-role",
+      "task": "base-07",
+      "design_anchor": "foundation:tool-role",
+      "implementation_paths": ["crates/hypermid-role-tool/src/lib.rs", "runtime/gideon/hypermid/roles.py"],
+      "acceptance": ["Catalog and schema digests are deterministic.", "Restart cannot auto-run pre-dispatch approval work."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-role-tool-conformance",
+      "title": "Tool-provider conformance",
+      "behavior": "Drive a live provider through real routes and approval crash points, reporting capability skips distinctly from passes.",
+      "requirement": "base-tool-role",
+      "task": "base-07",
+      "design_anchor": "foundation:tool-role",
+      "implementation_paths": ["crates/hypermid-role-tool-conformance/src/lib.rs", "crates/hypermid-role-vectors/tool-v1"],
+      "acceptance": ["All declared-capability cases run.", "Caller-only rules are checked against independently authored fixtures."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-role-runner",
+      "title": "Runner contract",
+      "behavior": "Define capability-gated transcript, run, stream, model-view, delivery, baseline, plan-change, hook, compaction, and tool attribution operations.",
+      "requirement": "base-runner-role",
+      "task": "base-07",
+      "design_anchor": "foundation:runner-role",
+      "implementation_paths": ["crates/hypermid-role-runner/src/lib.rs", "runtime/gideon/hypermid/roles.py"],
+      "acceptance": ["Reads and events are lineage and cursor safe.", "Send retries do not duplicate history or tool effects."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-role-runner-conformance",
+      "title": "Runner conformance",
+      "behavior": "Drive a live runner with scripted model and tool boundaries and verify role and crash guarantees through real routes.",
+      "requirement": "base-runner-role",
+      "task": "base-07",
+      "design_anchor": "foundation:runner-role",
+      "implementation_paths": ["crates/hypermid-role-runner-conformance/src/lib.rs", "crates/hypermid-role-vectors/runner-v1"],
+      "acceptance": ["Every declared group runs its cases.", "History, identities, terminal state, and dispatch remain valid after restart."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-role-compaction",
+      "title": "Compaction-provider contract and conformance",
+      "behavior": "Define pure setup, bounded deltas, strict request fences, versioned half-open replacements, wait/ready, refusal, model view, and live-provider crash conformance.",
+      "requirement": "base-context-roles",
+      "task": "base-08",
+      "design_anchor": "foundation:compaction-role",
+      "implementation_paths": ["crates/hypermid-role-compaction/src/lib.rs", "crates/hypermid-role-compaction-conformance/src/lib.rs", "runtime/gideon/hypermid/compaction.py"],
+      "acceptance": ["Late or superseded answers never apply.", "Cursor, version, wait work, and setup purity survive real restart cuts."],
+      "disposition": "implement"
+    },
+    {
+      "id": "base-role-transform",
+      "title": "Step-transform contract and conformance",
+      "behavior": "Declare bounded hook subscriptions and enforce phases, operations, order, grants, questions, failure policy, purity, and crash recovery.",
+      "requirement": "base-context-roles",
+      "task": "base-08",
+      "design_anchor": "foundation:transform-role",
+      "implementation_paths": ["crates/hypermid-role-transform/src/lib.rs", "crates/hypermid-role-transform-conformance/src/lib.rs", "runtime/gideon/hypermid/transforms.py"],
+      "acceptance": ["Plans may tighten but cannot widen declarations.", "A disallowed answer fails according to the frozen policy and cannot silently pass."],
+      "disposition": "implement"
+    }
+  ]
+}

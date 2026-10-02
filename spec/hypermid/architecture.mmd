@@ -1,0 +1,24 @@
+flowchart TB
+    User[User: conversation and project controls] --> Console[Gideon native console / CLI / desktop]
+    Console --> Runtime[Gideon runtime: turn ownership and approvals]
+    Runtime --> Journal[Authoritative append-only journal]
+    Runtime --> Adapter[Hypermid Python host adapter]
+    Adapter --> Daemon[Authenticated local module supervisor]
+    Daemon --> Projection[Deterministic context projection]
+    Daemon --> Knowledge[Knowledge and retrieval]
+    Daemon --> Background[Budgeted history and maintenance jobs]
+    Daemon --> Modules[Scoped tool / model / transform modules]
+    Journal --> Projection
+    Journal --> Background
+    Background --> Knowledge
+    Background --> Projection
+    Knowledge --> Projection
+    Projection --> Provider[Gideon provider request]
+    Provider --> Runtime
+    Runtime --> Delivery[Gideon authoritative final delivery]
+    Delivery --> Console
+    Projection --> Store[Owned storage, fenced leases and durable intents]
+    Knowledge --> Store
+    Modules --> Store
+    Daemon --> Events[Durable events, cursors and diagnostics]
+    Events --> Console

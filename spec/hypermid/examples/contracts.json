@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "note": "Shape examples only. Repeated digest and nonce bytes illustrate formats and are not valid authentication or content evidence. Authorization and digest equality require runtime checks.",
+  "examples": [
+    {
+      "id": "owned-project",
+      "schema": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Scope",
+      "value": {
+        "owner_id": "owner-demo",
+        "project_id": "project-demo"
+      }
+    },
+    {
+      "id": "cursor-after-restart",
+      "schema": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Cursor",
+      "value": {
+        "epoch": 3,
+        "sequence": 42
+      }
+    },
+    {
+      "id": "unresolved-effect",
+      "schema": "https://hypermid.gideon.dev/schemas/common.schema.json#/$defs/Error",
+      "value": {
+        "code": "OUTCOME_UNKNOWN",
+        "message": "The request was accepted before the connection ended. Reconcile its receipt before retrying.",
+        "retryable": false,
+        "effect_state": "unknown"
+      }
+    },
+    {
+      "id": "local-client-hello",
+      "schema": "https://hypermid.gideon.dev/schemas/fabric.schema.json#/$defs/ClientHello",
+      "value": {
+        "kind": "hello",
+        "protocols": [
+          "hypermid.v1"
+        ],
+        "client_nonce": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "connection_class": "client"
+      }
+    },
+    {
+      "id": "archive-owned-memory",
+      "schema": "https://hypermid.gideon.dev/schemas/memory.schema.json#/$defs/MutationRequest",
+      "value": {
+        "operation": "archive",
+        "actor_scope": {
+          "owner_id": "owner-demo",
+          "project_id": "project-demo"
+        },
+        "target_scope": {
+          "owner_id": "owner-demo",
+          "project_id": "project-demo"
+        },
+        "record_id": "memory-example",
+        "expected_revision_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "trace": {
+          "trace_id": "trace-demo",
+          "request_id": "request-archive-1"
+        }
+      }
+    }
+  ]
+}

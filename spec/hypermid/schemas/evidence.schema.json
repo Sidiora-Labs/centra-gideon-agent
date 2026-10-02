@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hypermid.gideon.dev/schemas/evidence.schema.json",
+  "title": "Hypermid qualification evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evidence_id",
+    "capability_id",
+    "scope",
+    "gate",
+    "source_digest",
+    "command",
+    "environment",
+    "started_at",
+    "ended_at",
+    "execution",
+    "trace",
+    "result",
+    "measurements",
+    "errors",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "evidence_id": {"$ref": "common.schema.json#/$defs/Id"},
+    "capability_id": {"$ref": "common.schema.json#/$defs/Id"},
+    "scope": {"$ref": "common.schema.json#/$defs/Scope"},
+    "gate": {
+      "enum": [
+        "capability_matrix",
+        "authentication",
+        "cache_bytes",
+        "long_history",
+        "raw_recovery",
+        "effect_recovery",
+        "migration",
+        "deletion_export_backup_restore",
+        "network_secrets_sandbox",
+        "model_budget",
+        "artifact_supply_chain",
+        "live_provider",
+        "client_compatibility",
+        "release_acceptance"
+      ]
+    },
+    "source_digest": {"$ref": "common.schema.json#/$defs/Digest"},
+    "command": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "architecture", "daemon_version", "client_version"],
+      "properties": {
+        "platform": {"type": "string", "minLength": 1, "maxLength": 128},
+        "architecture": {"type": "string", "minLength": 1, "maxLength": 64},
+        "daemon_version": {"type": "string", "minLength": 1, "maxLength": 128},
+        "client_version": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    },
+    "started_at": {"type": "string", "format": "date-time"},
+    "ended_at": {"type": "string", "format": "date-time"},
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path_kind", "provider_live", "explicit_opt_in", "product_acceptance_claim"],
+      "properties": {
+        "path_kind": {"enum": ["real", "mocked"]},
+        "provider_live": {"type": "boolean"},
+        "explicit_opt_in": {"type": "boolean"},
+        "product_acceptance_claim": {"type": "boolean"}
+      }
+    },
+    "cursor_before": {"$ref": "common.schema.json#/$defs/Cursor"},
+    "cursor_after": {"$ref": "common.schema.json#/$defs/Cursor"},
+    "trace": {"$ref": "common.schema.json#/$defs/Trace"},
+    "result": {"enum": ["passed", "failed", "skipped"]},
+    "measurements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "observed", "passed"],
+        "properties": {
+          "name": {"$ref": "common.schema.json#/$defs/Id"},
+          "observed": {"type": ["number", "integer", "string", "boolean"]},
+          "unit": {"type": "string", "maxLength": 64},
+          "comparator": {"enum": ["eq", "ne", "lt", "lte", "gt", "gte", "digest_eq", "byte_eq"]},
+          "threshold": {"type": ["number", "integer", "string", "boolean"]},
+          "passed": {"type": "boolean"}
+        }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {"$ref": "common.schema.json#/$defs/Error"}
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_id", "path", "digest", "size_bytes"],
+        "properties": {
+          "artifact_id": {"$ref": "common.schema.json#/$defs/Id"},
+          "path": {"type": "string", "minLength": 1, "maxLength": 1024},
+          "digest": {"$ref": "common.schema.json#/$defs/Digest"},
+          "size_bytes": {"type": "integer", "minimum": 0},
+          "media_type": {"type": "string", "maxLength": 128}
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "execution": {
+            "properties": {"product_acceptance_claim": {"const": true}},
+            "required": ["product_acceptance_claim"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "execution": {
+            "properties": {"path_kind": {"const": "real"}}
+          },
+          "result": {"const": "passed"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"gate": {"const": "live_provider"}},
+        "required": ["gate"]
+      },
+      "then": {
+        "properties": {
+          "execution": {
+            "properties": {
+              "path_kind": {"const": "real"},
+              "provider_live": {"const": true},
+              "explicit_opt_in": {"const": true}
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,391 @@
+HYPERMID SHARED FOUNDATION DESIGN
+=================================
+
+Status: implementation specification
+Release boundary: open-source Gideon only
+Rust workspace: crates/hypermid-*
+Python boundary: runtime/gideon/hypermid/
+
+1. Purpose and ownership
+------------------------
+
+Hypermid is a shared substrate for durable identity, storage, cache stability,
+model and usage data, encrypted notifications, fleet logging, message transport,
+and agent-role protocols. Rust owns byte-level contracts, durable mechanics,
+cryptographic envelopes, backend traits, and conformance suites. Python owns the
+Gideon-facing API and maps authenticated application calls into those contracts.
+Python never reimplements canonicalization, fencing, digest, or protocol rules.
+
+All public payloads reuse common.schema.json definitions for Id, Scope, Digest,
+Cursor, Error, and Trace. No foundation crate defines a competing owner, project,
+workspace, digest, cursor, error, or trace type. The fabric binding generation is
+a transport property and must not be substituted for a durable Cursor epoch.
+
+The first release is an OSS integration. Hosted services, hosted migrations,
+tenant routing, managed control planes, deployment, and hosted certification are
+outside this feature.
+
+2. Functional decomposition and delivery status
+------------------------------------------------
+
+The foundation is decomposed into 21 functional modules. Each supplies a runtime
+contract or its independently authored conformance runner. All implementation is
+pending; a listed module is an intended deliverable, not an existing library.
+
+| # | Hypermid target | Functional role | Implementation | Disposition |
+|---|---|---|---|---|
+| 1 | hypermid-foundation | canonical project-root identity and shared helpers | pending | implement |
+| 2 | hypermid-leases | local advisory leases and monotonic fence epochs | pending | implement |
+| 3 | hypermid-contracts | dependency-light storage and wire descriptors | pending | implement |
+| 4 | hypermid-store | SQLite open, migration, lease, and store-ahead reporting | pending | implement |
+| 5 | hypermid-store-postgres | PostgreSQL open, migration, advisory lease, and fencing | pending | implement |
+| 6 | hypermid-cache | frozen-prefix cache state machine | pending | implement |
+| 7 | hypermid-models | provider/model catalog parsing and exact price rates | pending | implement |
+| 8 | hypermid-usage | quota, balance, account identity, and degradation wire types | pending | implement |
+| 9 | hypermid-push | versioned confidential and authenticated push envelopes | pending | implement |
+| 10 | hypermid-log | filtering, formatting, redaction, segments, and line sinks | pending | implement |
+| 11 | hypermid-bus-contracts | stream, register, work-queue, census, error, and conformance traits | pending | implement |
+| 12 | hypermid-bus-memory | deterministic process-local bus backend | pending | implement |
+| 13 | hypermid-bus-naming | subjects, topology limits, durable names, and allow-only grants | pending | implement |
+| 14 | hypermid-bus-nats | production NATS and JetStream backend | pending | implement |
+| 15 | hypermid-role-harness | real-route spawn, crash-cut, restart, and kill ledger | pending | implement |
+| 16 | hypermid-role-tool | tool discovery, calls, withdrawal, and late-result protocol | pending | implement |
+| 17 | hypermid-role-tool-conformance | live-provider protocol and crash conformance | pending | implement |
+| 18 | hypermid-role-runner | session, transcript, run, delivery, and change protocol | pending | implement |
+| 19 | hypermid-role-runner-conformance | live-runner protocol and crash conformance | pending | implement |
+| 20 | hypermid-role-compaction | setup, step, replacement, wait, ready, and fencing protocol | pending | implement |
+| 21 | hypermid-role-transform | declared hooks, phases, operations, asks, and failure policy | pending | implement |
+
+Four role contracts require original vectors and live-process conformance suites.
+The push-envelope contract and bus backend semantics also require independent
+vectors. Compaction and transform roles remain experimental until their complete
+role conformance and Gideon acceptance journeys pass. Concrete v1 choices are
+specified below so implementation does not depend on unresolved draft behavior.
+
+Build workflows, fixture generators and changelog production support delivery;
+they are not independently exposed runtime capabilities. Packaging and release
+qualification are owned by the final OSS integration tasks.
+
+3. Canonical identity and common contracts
+------------------------------------------
+
+ProjectRoot binds a shared Scope to a canonical absolute filesystem location.
+Normalization resolves dot segments, symlinks, trailing separators, platform
+verbatim prefixes, and Windows drive-letter case. The durable project_id is an
+opaque registered identity, not the path string. Equivalent paths resolve through
+an owner-scoped alias table; new linked worktrees receive distinct registrations
+unless an explicit owner-authorized association joins them. A rename updates the
+binding atomically without changing the durable identity.
+
+Live admission refuses a missing path. Recovery-only resolution may use the
+longest existing prefix and append a missing tail with bounded symlink traversal;
+it can inspect or close an existing registered scope, never admit new durable
+state. Canonicalization changes require an explicit identity migration and must
+not merge projects based only on a matching repository URL.
+
+hypermid-contracts contains low-dependency wire descriptions. StorageDescriptor
+selects SQLite or PostgreSQL and names isolation explicitly. It carries a resolved,
+least-privilege location, never global configuration or an administrative
+credential. Data/config home resolution is centralized, empty variables count as
+unset, and a relative result is visible to the caller so application seams can
+refuse it. Module paths are formed once from the resolved home and module Id.
+
+4. Leases, stores, and migrations
+---------------------------------
+
+LeaseKey is the tuple module, backend, and scope key. Local leases use an OS
+advisory lock for liveness plus a persisted monotonically increasing epoch for
+fencing. Opening a lease file verifies it is a regular file and enforces owner-only
+permissions. Dropping the handle releases liveness; every durable writer still
+compares the epoch so a superseded holder cannot publish. Lease contention, I/O,
+malformed epoch, overflow, and stale-fence failures remain distinct.
+
+SQLite storage accepts a resolved descriptor, acquires the scoped lease, opens the
+database with declared durability settings, and applies ordered migrations exactly
+once in one transaction per version. Duplicate or non-monotonic migration versions
+are refused. Opening a store whose recorded version is newer than the binary returns
+an explicit store-ahead outcome; domain code decides whether its additive reads are
+safe. Database, WAL, SHM, lease, and directory permissions are tightened when
+opened. Domain queries remain outside the shared crate.
+
+PostgreSQL exposes the same open/migrate/epoch surface. It connects with a
+pre-provisioned module-scoped credential and never creates databases or roles.
+A session advisory lock supplies liveness across machines. The fence epoch is
+bumped under that lock in a module-local lease table. Migration records are keyed
+by storage namespace and version. Database-name derivation uses a bounded readable
+slug plus a hash of the complete module Id so slug collisions stay distinct.
+
+5. Cache, model catalog, and provider usage
+-------------------------------------------
+
+The cache crate owns a deterministic per-pass state machine. The host classifies a
+pass as defer, local rebuild, or full-prefix rebuild. Rebuild passes supply final
+rendered bytes, which Hypermid freezes. A defer pass can only replay those exact
+bytes and cannot invoke rendering. Validity depends on the frozen boundary Id still
+being present; content before that boundary is intentionally summarized away.
+Removing the boundary marks reconciliation pending while preserving the current
+pass. A full rebuild drains all deferred work. The complete state, including its
+version and durability class, is written with compare-and-swap.
+
+The model catalog parses provider and model capabilities, token limits, modalities,
+and tiered prices without bundling a catalog snapshot. Unknown input fields remain
+available as raw ingestion data. Money is converted at the parsing boundary into
+integer nanodollars per million tokens using decimal scaling and half-even rounding;
+a nonzero rate that would become zero is refused. Missing price and zero price are
+different states.
+
+Provider usage is a wire contract, not policy. It represents primary, secondary,
+tertiary, and per-model windows; effective and raw percentages; resets; rolling
+regeneration; categorical breakdowns; saved credits; prepaid and granted pools;
+subscription/account labels; verified account identity with closed provenance;
+staleness; and in-band provider failures. Missing providers and missing reset times
+are never fabricated as zero. Healthy entries omit error state. Monetary amounts
+use integer minor units with an explicit exponent and currency.
+
+6. Encrypted push
+-----------------
+
+hypermid-push uses a pinned HPKE suite: X25519 with HKDF-SHA256 and
+ChaCha20-Poly1305. Version 1 provides recipient confidentiality and is always
+treated as unauthenticated content by renderers. Version 2 adds sender
+authentication, a fixed Hypermid domain separator, and an eight-byte routing Id
+derived from the sender public key; verification still uses the full pinned key.
+The version and routing Id are authenticated associated data.
+
+The seal boundary refuses plaintext larger than 2,048 bytes rather than truncating.
+Opening distinguishes malformed data, unsupported versions, wrong mode, wrong
+sender-key routing, invalid key material, and authentication failure internally,
+while its public wire error avoids exposing cryptographic oracle detail. An
+authenticated opener never falls back to version 1. Recipient-key compromise means
+version 2 is not third-party proof of authorship; audit signatures remain a separate
+facility.
+
+7. Fleet logging
+----------------
+
+hypermid-log emits one canonical, parseable line shape with UTC timestamp, level,
+hierarchical logger, optional ordered bound fields, message, and structured fields.
+HYPERMID_LOG uses comma-separated logger-prefix levels, with the most specific dotted
+prefix winning and a safe info fallback on malformed configuration. Rust module
+paths do not become public logger names.
+
+Fleet credential redaction runs before an optional module redactor. Complete ANSI
+control sequences are removed and remaining control characters are escaped after
+redaction, preventing a redactor from injecting terminal controls or forged lines.
+Secret-bearing field classes are removed by default. Parsing returns stable typed
+levels and bound lineage fields for merged views.
+
+Multi-writer module logs use UTC date segments opened append-only; files are never
+renamed while shared. Age retention is based on exact filenames. Oversized daily
+segments raise one diagnostic and are not truncated. A separate single-writer line
+sink supports size rotation for captured child output and writes each complete line
+in one operation. Initialization creates owner-only paths, provides a once-reported
+stderr fallback, exposes swallowed-write and fallback health, and installs an
+optional chaining panic hook.
+
+8. Message plane contracts and naming
+-------------------------------------
+
+hypermid-bus-contracts defines a backend-neutral message containing subject, Id,
+Digest, and headers. Bodies remain in the owning store. Stream publication returns
+a monotonic sequence. Durable cursors provide one in-flight delivery with delivery
+count, ack, delayed nak, terminal disposition, and in-progress extension. Durable
+names bind only to an agent or module Id and cannot accept arbitrary consumer names.
+
+The register provides revisioned put, get, delete, and watch. A watch begins with one
+complete snapshot, including the empty case, then updates; disconnect clears absence
+proof. The census guard may refuse publication only after a current snapshot or an
+observed deletion proves absence. A missing snapshot is neutral.
+
+The bounded work queue returns item, empty, or max-deliveries-exceeded. Terminal
+disposal durably publishes a dead-letter record before terminating the delivery.
+Backend errors distinguish missing, denied, unavailable, disconnected, invalid,
+conflict, timeout, and internal failures and map without string matching.
+
+Naming derives six non-overlapping stream families per owner scope: room posts,
+wake signals, peer deliveries, effect intents, dead-letter effects, and module
+events. It also derives the census bucket, agent and module durables, and allow-only
+permission documents for participants, the delivery authority, the flow engine,
+and the system issuer. Identity tokens, event versions, wildcard position, filter
+containment, stream overlap, stream limits, and store-retention compatibility are
+validated before provisioning. Workload credentials cannot create consumers or
+publish another principal's work.
+
+9. Bus backends and conformance
+-------------------------------
+
+hypermid-bus-memory implements the backend traits deterministically for unit and
+component use. State ends with the final handle. It models ordered durable delivery,
+ack-wait redelivery, register revisions and watches, bounded queues, dead-lettering,
+and injected permission failures. It explicitly does not claim process persistence,
+leaf topology, server-side grants, or system events.
+
+hypermid-bus-nats is the production backend. It binds to provisioned streams,
+consumers, and key-value buckets and cannot create workload consumers. Connection
+configuration derives an isolated inbox from the credential public Id. JetStream
+acks are awaited before success; asynchronous permission violations are attributed
+through a sentinel operation; reconnect and credential revocation remain observable.
+
+One conformance catalog separates parity properties from NATS-only properties.
+Parity covers publish ordering, replay during backend lifetime, delivery counts,
+terminal disposition, in-progress extension, register snapshot/update semantics,
+queue exhaustion, dead-letter ordering, and error mapping. NATS-only cases cover
+process restart, credential rotation, device rekey, server grant denial, revocation,
+leaf behavior, and system events. An in-memory backend cannot report NATS-only cases
+as passed.
+
+10. Role harness
+----------------
+
+Every role implementation supplies a Harness that starts a real module on a fresh
+state root, opens the real route, kills it after a named durable point, and restarts
+it on the same root. A point declares allowed kill mechanisms. CrashDriver enforces
+one kill per point and one root per kill, and records a kill ledger. A conformance
+run that exercised crash cases cannot pass unless at least one cut ended a real
+process. Dropping a handle stops the module.
+
+Conformance code is development infrastructure with product-critical behavior, so
+its crates are implemented and versioned. It does not ship in production binaries.
+Generated fixture tools remain not_product.
+
+11. Tool-provider role
+----------------------
+
+The stable Hypermid tool role provides build description and deterministic catalog
+operations. Description lists supported major versions, operations, stability, and
+implementation version and is cacheable for one process incarnation. Catalog input
+includes preset, parameters, opaque composition, optional system-text request, and
+digest-only mode. Output includes generation, catalog digest, composition digest,
+tools, system text, and declared session capabilities.
+
+Each tool carries a model-facing name, structural schema digest, semantic revision,
+accepted result operations, capability tags, optional description, and input schema.
+Structural digests remove schema-description keywords recursively, canonicalize JSON,
+then hash it. Root argument schemas remain object-shaped and host-only parameters are
+optional and rejected when supplied by a model. Catalog and requested system text are
+a pure function of declared inputs; scope attribution cannot change their bytes.
+
+Calls support an optional printable bounded call key and a canonical schema pin that
+binds tool name, schema digest, and semantic revision. A provider refuses malformed
+pins and incompatible current contracts before execution. Every request emits exactly
+one final frame.
+
+Held calls are addressed by carrier plus call key. Withdrawal checks the stamped
+Scope and owner/carrier authority, then returns a repeatable recorded result:
+withdrawn, already started, completed, refused, or unknown. Approval-gated effects
+move durably through prepared, authorized, dispatch-started, and settled. Restart
+never auto-runs work that had not crossed dispatch-started.
+
+Providers with asynchronous settlement expose pull-based late results per custodian.
+Results use an incarnation-aware Cursor, deterministic event Id, explicit reduced
+outcome state, acknowledgement, bounded retention, and deduplication. Unknown result
+kinds are recordable and acknowledgeable. The conformance runner drives a live
+provider, checks declared capabilities without converting skips into passes, and
+cuts the approval points through the role harness.
+
+12. Runner role
+---------------
+
+The Hypermid runner role is frozen from an alpha draft into these target rules.
+Description declares capability groups: transcript reads, dispatch attribution,
+run results, streaming, model view, queue, steer, interrupt, compaction, and session
+change. Unsupported groups are refused during admission; clients never infer them.
+
+Transcript reads are lineage-bound and page by ordinal, message Id, count, and byte
+cap. A page carries immutable message Ids and ordinals, optional original forms,
+run attribution, dispatched provider and call key, continuation, and head metadata.
+An empty never-written session has no lineage. A stale lineage or unknown message Id
+is a typed refusal. Model-view pages distinguish raw messages from half-open
+replacement ranges and expose the applied compaction Id and version.
+
+Run results expose one terminal state and the final assistant text, including an
+empty string. Streaming subscriptions start from a named origin or returned head and
+produce cursored open events. Owner sends require an idempotency Id and one declared
+delivery mode: queue, steer, or interrupt. Reusing an Id with different content is a
+typed conflict. Missing optional runner parameters on steer or interrupt inherit the
+session's frozen values.
+
+Admission records a session baseline and a plan before dispatch. Mid-session refresh,
+policy refresh, and prefix flush use generations and have explicit superseded,
+already-applied, and unsupported-rung outcomes. Tool dispatch records provider,
+call key, schema pin, and indeterminate effect state before sending. Hook and
+compaction integrations are capability-gated. Crash conformance proves immutable
+history, non-reused identities, one terminal run state, idempotent sends, and
+at-most-once effect dispatch through real restart cuts.
+
+13. Compaction-provider role
+----------------------------
+
+The compaction role uses method/params envelopes with operations describe, setup,
+step, and ready. Setup is a pure function of preset, parameters, composition, and
+configuration. It declares stability ranks, optional call conditions, and an initial
+replacement recorded before the first model request.
+
+Each step carries session handle, request Id, lineage, step identity and kind, model
+geometry, previous usage or provider failure, request-size estimates, rebuild reason,
+newest message, last applied and last rejected compaction, a bounded ordered message
+delta after the provider cursor, and current time. Unknown call-condition kinds call
+the provider conservatively. A byte cap can stop the delta and moves the cursor only
+through the last delivered message.
+
+The four answers are no-change, replacement, wait, and refusal. A replacement names
+an opaque provider-minted compaction Id, a strictly increasing version, one half-open
+ordinal range, and complete replacement messages. It cannot split a tool call from
+its result. An empty range inserts before its ordinal. The runner applies an answer
+only when its request Id is still newest and it arrived before the recorded deadline;
+late and superseded answers are durable observations and never apply.
+
+Wait persists before blocking and is bounded. Ready is only a hint from the frozen
+session provider for the newest request; a timeout re-evaluates fit or ends with a
+typed error. Refusal ends the current run without poisoning the session. The new
+Hypermid conformance suite covers setup repeatability, cursor replay, rising versions,
+message deduplication, fence order, range structure, wait recovery, purity, and every
+declared crash point against a real provider.
+
+14. Step-transform-provider role
+--------------------------------
+
+The transform role uses describe, declare, and hook operations. Declare is a pure
+function of preset, parameters, composition, and configuration and bounds every hook
+a plan may install. A subscription names hook, optional pre-tool phase, tool filter,
+allowed text operations, unavailability policy, and budget. Admission may tighten a
+declaration but cannot widen it; missing or widened declarations make the plan stale.
+
+Hooks are pre-user, post-assistant, pre-tool, and post-tool. Pre-tool has mutate,
+validate, and approve phases. Text operations are prepend, append, and replace. One
+reduction owner may replace; preserving transforms run in frozen order. The reduction
+owner runs first, and post-tool replacement requires an explicit owner grant. A
+provider answer outside its declaration fails that hook closed under its recorded
+unavailability policy.
+
+Approve can pass or return a bounded user question with expiry behavior. Denial is
+limited to the validation phase. Subjects are text in version 1; reasoning, images,
+structured result mutation, and general rule execution are outside version 1.
+Repeated hook calls are fresh but deterministic for identical inputs where purity is
+declared. Hook state reaches a named durable point before the answer. The new Hypermid
+conformance suite checks declaration purity and bounds, phase-answer legality,
+operation ordering, failure policy, asks, and crash recovery through real routes.
+
+15. Python integration and error discipline
+-------------------------------------------
+
+runtime/gideon/hypermid exposes foundation, storage, cache/model, observability,
+bus, role, compaction, and transform adapters. Every operation accepts Trace and the
+authenticated Scope where applicable. Durable writes return Cursor. Python translates
+typed Rust failures into common Error without matching display strings. Retryability
+and effect state come from the originating contract.
+
+The Python layer cannot open a second database connection that bypasses a lease,
+recompute schema or composition digests, weaken bus grants, decrypt authenticated
+push as anonymous, or treat skipped conformance as passed. Integration selects a
+backend and role implementation explicitly and exposes readiness only after its
+declared contract checks succeed.
+
+16. Planned qualification boundary
+-----------------------------------
+
+Each task in fragments/foundation.kvx records one future focused verify_cmd. Those
+commands are planning data and were not executed while authoring this specification.
+The final wave must exercise the OSS Python boundary over real Rust libraries and
+real local process routes. It does not certify a hosted service, remote deployment,
+or production infrastructure.

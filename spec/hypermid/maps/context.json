@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "ctx-ownership",
+      "title": "Bounded protocol and context ownership",
+      "behavior": "Frames bounded versioned requests, authenticates scope, fences one context writer per session, and keeps Gideon authoritative for raw conversation events while Hypermid owns derived context state.",
+      "requirement": "ctx-ownership",
+      "task": "ctx-ownership",
+      "design_anchor": "design/context.txt#context.boundary",
+      "implementation_paths": ["crates/hypermid-core/src/protocol.rs", "crates/hypermid-context/src/engine.rs", "runtime/gideon/hypermid/protocol.py", "runtime/gideon/hypermid/ownership.py"],
+      "acceptance": ["Eight MiB framed envelopes and 64 KiB chunks reject invalid work before effects.", "Authority boundaries are explicit and scope checked.", "Fenced leases and idempotency prevent duplicate mutation."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-identity",
+      "title": "Stable scoped context identity",
+      "behavior": "Assigns durable identities to sessions, source events, parts, tool pairs, projections, summaries, forks, retries, and delegated work without deriving identity from array position or content.",
+      "requirement": "ctx-identity",
+      "task": "ctx-identity",
+      "design_anchor": "design/context.txt#context.identity",
+      "implementation_paths": ["crates/hypermid-core/src/identity.rs", "crates/hypermid-context/src/identity_store.rs", "runtime/gideon/hypermid/identity.py"],
+      "acceptance": ["Retries and reconnects retain identity without duplication.", "Scope mismatch fails without advancing the cursor."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-history",
+      "title": "Immutable source ledger and exact recovery",
+      "behavior": "Records ordered Gideon source identities and verified snapshots in an append-only context ledger while preserving authoritative raw events for exact scoped recovery.",
+      "requirement": "ctx-history",
+      "task": "ctx-history",
+      "design_anchor": "design/context.txt#context.history",
+      "implementation_paths": ["crates/hypermid-core/src/history.rs", "crates/hypermid-context/src/journal.rs", "runtime/gideon/hypermid/history.py"],
+      "acceptance": ["Atomic ingest validates digest, ordering, linkage, cursor, and idempotency.", "Exact recovery verifies authoritative source bytes.", "Edits, tombstones, regenerations, and forks append relations without renumbering."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-projection",
+      "title": "Deterministic context projection",
+      "behavior": "Builds reproducible provider-neutral projections from a committed source cursor and complete policy inputs without mutating source history.",
+      "requirement": "ctx-projection",
+      "task": "ctx-projection",
+      "design_anchor": "design/context.txt#context.history",
+      "implementation_paths": ["crates/hypermid-core/src/projection.rs", "crates/hypermid-context/src/projector.rs", "runtime/gideon/hypermid/projection.py"],
+      "acceptance": ["Projection records every source, policy, provider, budget, selection, region, and output digest.", "Identical committed input produces byte-identical normalized output."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-provider-serialization",
+      "title": "Capability-driven host serialization",
+      "behavior": "Uses provider capability profiles and language-independent budgets to produce normalized blocks that Gideon's HostSerializer encodes for the active SDK.",
+      "requirement": "ctx-provider-serialization",
+      "task": "ctx-provider-serialization",
+      "design_anchor": "design/context.txt#context.provider-serialization",
+      "implementation_paths": ["crates/hypermid-core/src/provider.rs", "crates/hypermid-context/src/serializer.rs", "runtime/gideon/hypermid/provider.py"],
+      "acceptance": ["Unsupported roles, parts, cache markers, and unsafe budgets are rejected before dispatch.", "host_serialized output preserves tool adjacency and reports a canonical digest.", "Provider profile changes create a new generation without rewriting source bytes."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-cache-policy",
+      "title": "Stable baseline and recent delta",
+      "behavior": "Separates frozen baseline, recent durable delta, and live tail so replay preserves cached bytes and hard folds occur only for explicit boundary reasons.",
+      "requirement": "ctx-cache-policy",
+      "task": "ctx-cache-policy",
+      "design_anchor": "design/context.txt#context.cache-policy",
+      "implementation_paths": ["crates/hypermid-core/src/cache.rs", "crates/hypermid-context/src/cache_store.rs", "runtime/gideon/hypermid/cache.py"],
+      "acceptance": ["Replay returns identical baseline and delta bytes.", "Delta refresh and baseline fold have distinct effects and reasons.", "Cached-byte mutations wait for a compatible boundary or return pressure refusal."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-tier-decay",
+      "title": "Budgeted tier decay",
+      "behavior": "Selects one of four immutable historical detail tiers by age, importance, protection, recurrence, dependencies, and remaining budget, fixed for a cache generation.",
+      "requirement": "ctx-tier-decay",
+      "task": "ctx-tier-decay",
+      "design_anchor": "design/context.txt#context.tier-decay",
+      "implementation_paths": ["crates/hypermid-core/src/decay.rs", "crates/hypermid-core/src/budget.rs", "crates/hypermid-context/src/tier_selector.rs"],
+      "acceptance": ["All summaries provide four ordered immutable tiers.", "Protected current work and output reservation receive budget before historical detail."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-background-summary",
+      "title": "Leased background summaries",
+      "behavior": "Schedules bounded single-flight summary jobs outside active turns and commits only structurally valid results tied to a live lease and unchanged source digest.",
+      "requirement": "ctx-background-summary",
+      "task": "ctx-background-summary",
+      "design_anchor": "design/context.txt#context.background-summary",
+      "implementation_paths": ["crates/hypermid-core/src/summary.rs", "crates/hypermid-context/src/summary_queue.rs", "runtime/gideon/hypermid/summarizer.py"],
+      "acceptance": ["Jobs carry source range, digest, tier schema, locale, budgets, lease, and attempt.", "Stale, empty, malformed, cancelled, or timed-out results cannot publish.", "Summaries rebuild from source and account usage separately."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-reduction",
+      "title": "Explicit recoverable reduction",
+      "behavior": "Queues idempotent reductions by stable tag or range, protects active dependencies, and renders typed recovery markers without deleting authoritative content.",
+      "requirement": "ctx-reduction",
+      "task": "ctx-reduction",
+      "design_anchor": "design/context.txt#context.reduction",
+      "implementation_paths": ["crates/hypermid-core/src/reduction.rs", "crates/hypermid-context/src/reduction_store.rs", "runtime/gideon/hypermid/tools.py"],
+      "acceptance": ["Every target reports queued, applied, rejected, or already-applied with a reason.", "Protected current work remains present and every applied marker supports exact recovery."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-reclaim",
+      "title": "Deterministic pressure reclaim",
+      "behavior": "Ranks safe recoverable candidates across explicit reductions, superseded edits, tool output, historical detail, and prose, escalating through calibrated pressure bands.",
+      "requirement": "ctx-reclaim",
+      "task": "ctx-reclaim",
+      "design_anchor": "design/context.txt#context.reclaim",
+      "implementation_paths": ["crates/hypermid-core/src/reclaim.rs", "crates/hypermid-context/src/reclaimer.rs", "runtime/gideon/hypermid/pressure.py"],
+      "acceptance": ["Ranking is deterministic and dependency safe.", "The hard wall refuses unsafe overflow rather than dispatching unmanaged input.", "Plans record choices, exclusions, savings, reasons, and application boundary."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-recovery",
+      "title": "Crash-safe projection recovery",
+      "behavior": "Rebuilds derived state from verified source events and replays a complete last-known-good projection only when cursor, generation, profile, policy, and budget still match.",
+      "requirement": "ctx-recovery",
+      "task": "ctx-recovery",
+      "design_anchor": "design/context.txt#context.recovery",
+      "implementation_paths": ["crates/hypermid-core/src/recovery.rs", "crates/hypermid-context/src/recovery_store.rs", "runtime/gideon/hypermid/recovery.py"],
+      "acceptance": ["Last-known-good publication is complete and digest bound.", "Mismatch returns a retryable refusal and dispatches no unmanaged prompt.", "Corrupt derived state is quarantined and rebuilt without source loss."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-subagents",
+      "title": "Isolated subagent context",
+      "behavior": "Creates a distinct child context from an immutable parent snapshot and permits bounded parent contribution only through explicit Gideon authorization.",
+      "requirement": "ctx-subagents",
+      "task": "ctx-subagents",
+      "design_anchor": "design/context.txt#context.subagents",
+      "implementation_paths": ["crates/hypermid-core/src/subagent.rs", "crates/hypermid-context/src/subagent_context.rs", "runtime/gideon/hypermid/subagents.py", "runtime/gideon/engine/subagent.py"],
+      "acceptance": ["Spawn snapshots bind parent cursor, scope, mode ceiling, profile, budget, and selected items.", "Children cannot mutate parent derived state.", "Child usage and contribution outcomes stay separately attributable."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-hooks",
+      "title": "Bounded context lifecycle hooks",
+      "behavior": "Emits scoped traced context events and permits pre-hook denial or bounded synthetic blocks without allowing source mutation or partial commits.",
+      "requirement": "ctx-hooks",
+      "task": "ctx-hooks",
+      "design_anchor": "design/context.txt#context.hooks",
+      "implementation_paths": ["crates/hypermid-core/src/hooks.rs", "crates/hypermid-context/src/hook_dispatch.rs", "runtime/gideon/hypermid/hooks.py", "runtime/gideon/engine/hooks.py"],
+      "acceptance": ["All declared lifecycle events carry scope, trace, session, cursor, policy, and redacted metadata.", "Pre-hook timeout or failure leaves no partial mutation.", "Post hooks are advisory and recorded after commit."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-modes",
+      "title": "Optional context modes and features",
+      "behavior": "Selects off, pass-through, shadow, or primary behavior, applies explicit overflow and refusal policies, and independently controls summaries, reduction tools, reclaim, nudges, subagent contributions, and hook blocks.",
+      "requirement": "ctx-modes",
+      "task": "ctx-modes",
+      "design_anchor": "design/context.txt#context.modes",
+      "implementation_paths": ["crates/hypermid-core/src/mode.rs", "crates/hypermid-context/src/config.rs", "runtime/gideon/hypermid/config.py"],
+      "acceptance": ["Each canonical mode has distinct mutation and serving behavior, and shadow makes no model calls or durable writes.", "Optional features can be controlled independently.", "Strict behavior comes from policies and changes apply at turn boundaries with prior and next configuration digests."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-diagnostics",
+      "title": "Context diagnostics and accounting",
+      "behavior": "Reports scope, cursor, generation, regions, budgets, pressure, protected items, work queues, lease state, recovery eligibility, decisions, and usage without exposing content by default.",
+      "requirement": "ctx-diagnostics",
+      "task": "ctx-diagnostics",
+      "design_anchor": "design/context.txt#context.diagnostics",
+      "implementation_paths": ["crates/hypermid-core/src/diagnostics.rs", "crates/hypermid-context/src/diagnostic_store.rs", "runtime/gideon/hypermid/diagnostics.py"],
+      "acceptance": ["Status contains the complete bounded operational state.", "Usage distinguishes no call, missing, reported zero, cache, summary, and subagent values.", "Redacted fallback status remains available during engine failure."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-portability",
+      "title": "Context migration export and restore",
+      "behavior": "Stages canonical scoped imports and exports, resumes cursor-checkpointed migration, rebuilds derived state, and changes serving authority only at quiescent boundaries.",
+      "requirement": "ctx-portability",
+      "task": "ctx-portability",
+      "design_anchor": "design/context.txt#context.portability",
+      "implementation_paths": ["crates/hypermid-context/src/export.rs", "crates/hypermid-context/src/import.rs", "crates/hypermid-context/src/migration.rs", "runtime/gideon/hypermid/portability.py"],
+      "acceptance": ["Exports include authoritative references and derived-state digests but no secrets or transient state.", "Imports are atomic, bounded, verified, and idempotent.", "Failed migration or restore retains prior authority without duplicate source entries."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-gideon-adapter",
+      "title": "Installed Gideon pass-through adapter and status",
+      "behavior": "Supervises the local engine, negotiates and binds scope, exposes redacted status, and preserves current Gideon provider input until primary serving is selected.",
+      "requirement": "ctx-gideon-adapter",
+      "task": "ctx-gideon-adapter",
+      "design_anchor": "design/context.txt#context.gideon-adapter",
+      "implementation_paths": ["runtime/gideon/hypermid/__init__.py", "runtime/gideon/hypermid/adapter.py", "runtime/gideon/hypermid/lifecycle.py", "runtime/gideon/hypermid/status.py", "runtime/gideon/cognition/context_engine.py"],
+      "acceptance": ["Installed engine health and binding appear in status.", "off and pass_through preserve existing provider bytes, while shadow compares locally without model calls, durable writes, publication, or serving-cursor advance.", "Engine faults retain the existing Gideon path and surface unavailable status."],
+      "disposition": "implement"
+    },
+    {
+      "id": "ctx-gideon-integration",
+      "title": "OSS Gideon primary context integration",
+      "behavior": "Connects session ingestion, hooks, provider capabilities, projection, host serialization, post-turn events, edits, forks, compaction, failover, and subagent lifecycle to Hypermid.",
+      "requirement": "ctx-gideon-integration",
+      "task": "ctx-gideon-integration",
+      "design_anchor": "design/context.txt#context.gideon-integration",
+      "implementation_paths": ["runtime/gideon/hypermid/__init__.py", "runtime/gideon/hypermid/adapter.py", "runtime/gideon/cognition/context_engine.py", "runtime/gideon/engine/agents/native/runtime.py", "runtime/gideon/integrations/llm/prompt_cache.py"],
+      "acceptance": ["Every primary-mode model turn binds, ingests, projects, serializes, and verifies before dispatch.", "All transcript and lifecycle variants use explicit protocol operations.", "Gideon authority remains intact and every primary call has a recorded projection or policy-selected refusal."],
+      "disposition": "implement"
+    }
+  ]
+}

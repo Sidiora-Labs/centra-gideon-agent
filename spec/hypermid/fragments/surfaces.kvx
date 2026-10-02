@@ -1,0 +1,168 @@
+[design.surfaces]
+contract = "Native OSS Gideon console, CLI, desktop, HostAdapter, and generic client experience for Hypermid administration and inspection. The Rust daemon/core remains authoritative and Gideon's Python adapter owns host translation. No duplicate standalone web UI and no hosted rollout."
+wire = "Hypermid v1 uses a four-byte big-endian JSON length, an 8 MiB frame ceiling, ordered chunks no larger than 64 KiB, authenticated local Unix or Windows loopback transport, and explicit TLS opt-in for remote access."
+truth = "Surfaces adopt authoritative cursors, expected digests, typed effect outcomes, and terminal receipts. HTTP completion, process exit, schema presence, optimistic state, or reconnect alone never proves a mutation committed."
+navigation = "Use Gideon's existing Settings, Diagnostics, Connections, terminal, shared headers, cards, forms, tables, dialogs, and responsive shell. Hypermid is one native destination with progressive disclosure, not a catch-all panel or separate web application."
+clients = "Python is required for the Gideon HostAdapter. Rust, TypeScript, and Swift clients provide wire and outcome parity. Generic SDKs may ship in OSS; they do not imply hosted availability."
+integration = "A full HostAdapter negotiates identity, scopes, sessions, memory, configuration, credentials, lifecycle, cursors, and reconnect. An MCP bridge exposes bounded tools only and is labeled separately."
+accessibility = "Keyboard, touch, screen-reader, reduced-motion, focus, announcements, linear reading order, 44px targets, 320/390px layouts, and high-risk review flows are first-class acceptance criteria."
+
+[req.ux-contract]
+title = "Versioned clients and full HostAdapter negotiation"
+acceptance = "All language clients and Gideon's Python HostAdapter agree on framing, scope, correlation, cursor, error, chunk, cancellation, reconnect, and mutation-outcome behavior."
+ac_1 = "Python, Rust, TypeScript, and Swift clients decode the same golden request, response, event, error, and chunk vectors and reject a declared frame above 8 MiB before allocating its body."
+ac_2 = "The Python HostAdapter negotiates only implemented capabilities and refuses a request whose owner/project/workspace mapping cannot be proven; an MCP bridge never satisfies the full-host capability set."
+ac_3 = "After disconnect, a mutating call that may have been accepted returns outcome unknown and is not automatically retried; reconnect uses a new authenticated handshake and explicit cursor resume."
+
+[req.ux-inspection]
+title = "Native sessions, memory, and cache inspection"
+acceptance = "Users inspect live and durable Hypermid state inside Gideon's native console with scoped filters, linked evidence, stable cursors, and truthful empty or degraded states."
+ac_1 = "A session timeline renders turns, tool activity, memory and cache decisions, compaction boundaries, errors, and trace links once in cursor order across reconnect and snapshot adoption."
+ac_2 = "Memory detail exposes scope, revision, lineage, source, verification, contradiction, embedding, and retrieval evidence while preserving anchor immutability and draft-on-conflict behavior."
+ac_3 = "Cache inventory distinguishes complete, filtered, stale, rebuilding, unavailable, and unreadable states and plans clear/rebuild effects before mutation."
+
+[req.ux-configuration]
+title = "Scoped runtime, model, and credential configuration"
+acceptance = "Configuration surfaces show effective values, sources, editability, revisions, readiness, and redacted credential metadata without exposing secret values."
+ac_1 = "Runtime mode offers exactly off, pass_through, shadow, and primary; strictness remains a separate policy field, and a stale configuration or model-binding write is refused while the user's dirty fields remain available for compare, reload, or reapply."
+ac_2 = "Model readiness comes from a real required probe, and unknown cost, usage, context, or health remains unknown rather than zero or ready."
+ac_3 = "Credential list, replace, validate, and delete flows expose presence and consumers only; diagnostics, events, and exports contain no secret value or reusable local authentication material."
+
+[req.ux-operations]
+title = "Diagnostics and maintenance control plane"
+acceptance = "Operators can observe health and run authorized maintenance through bounded plans, cursored progress, and terminal receipts."
+ac_1 = "Diagnostics names observed state, timestamp, Scope, cache age, transport/adapter/client compatibility, process health, and a specific next action; reruns preserve the previous result until a new result arrives."
+ac_2 = "Maintenance apply requires the reviewed plan digest, rechecks authority and blockers, streams ordered progress, and ends in committed, failed, cancelled, or outcome-unknown state."
+ac_3 = "Live logs resume from a Cursor or display an explicit gap and redact secrets before storage, streaming, filtering, copying, or export."
+
+[req.ux-lifecycle]
+title = "Install, update, uninstall, migration, and export journeys"
+acceptance = "Every lifecycle mutation follows plan, review, apply, progress, and receipt stages with explicit data retention, rollback, and interruption semantics."
+ac_1 = "Install and update validate platform, permissions, protected connection material, compatibility floors, migrations, space, drain, restart, and rollback requirements before apply."
+ac_2 = "Uninstall inventories runtime wiring and user data separately and cannot purge data unless the reviewed plan explicitly chose purge and the current authority permits it."
+ac_3 = "Migration stages and validates before visibility and is idempotent; export returns a verified artifact digest and excludes derivatives, credentials, and local authentication material."
+
+[req.ux-integrations]
+title = "MCP bridge, supervised stdio, and bounded conditions"
+acceptance = "Tool bridges, child processes, and local conditions expose useful integration behavior without gaining undeclared host authority or arbitrary execution."
+ac_1 = "Connections labels Tool bridge and Full host integration separately, and tool availability alone never implies session, configuration, credential, lifecycle, or cursor-resume coverage."
+ac_2 = "A stdio child starts with an allowlisted environment, bounded initialization/request/frame/idle budgets, isolated failure, and close-wait-terminate-reap shutdown; post-write timeout or cancellation returns outcome unknown."
+ac_3 = "File and git conditions revalidate authorized roots and repository identity, use no shell interpolation or network, emit stable transition occurrences, and return bounded observed facts."
+
+[req.ux-remote]
+title = "Remote, mobile, and accessible operation"
+acceptance = "Opt-in TLS remote operation and responsive native views preserve scope, truth, safety, and accessibility across desktop and mobile."
+ac_1 = "Remote enablement requires TLS, named device enrollment, scoped expiry, and capability review; revocation blocks a fresh session and no transport silently downgrades."
+ac_2 = "At 320 and 390 CSS pixels inspection, filters, plan review, progress, cancellation, and receipt recovery work without horizontal page scrolling or hidden required actions."
+ac_3 = "Keyboard and screen-reader journeys announce validation, stream gaps, and terminal outcomes once, preserve focus and drafts, meet 44px touch targets, and provide a linear alternative to dense tables or timelines."
+
+[req.ux-native]
+title = "Complete first OSS native slice"
+acceptance = "The existing Gideon console route, CLI, and desktop shell complete the same real-daemon journey through the Python HostAdapter and Rust authority."
+ac_1 = "A user can inspect one session and linked memory/cache evidence, change an allowed setting, run a maintenance plan, and verify its receipt without entering raw identifiers or JSON."
+ac_2 = "The CLI provides human-readable and JSON modes for status, inspect, config, maintenance, lifecycle, conditions, and export, with stable exit classes and no interactive prompt when non-interactive input is detected."
+ac_3 = "Desktop local mode owns daemon start/stop and shutdown handoff without orphaning supervised children; web-only mode reports local operations unavailable instead of starting a local daemon."
+
+[task.ux-contract]
+title = "Hypermid v1 clients and Gideon HostAdapter"
+status = "pending"
+wave = 1
+owner_lane = "surfaces"
+requires = ["fab-01-bootstrap", "ctx-gideon-adapter", "sec-02"]
+reqs = ["ux-contract.1", "ux-contract.2", "ux-contract.3"]
+acceptance = "Four clients and the Gideon adapter share framing, negotiation, scope, cursor, chunk, cancellation, reconnect, and effect-outcome behavior against a real daemon."
+ac_1 = "Cross-language golden vectors and a live handshake prove identical bytes and additive-field tolerance, including oversized-frame and wrong-epoch refusals."
+ac_2 = "Capability negotiation demonstrates a full Python HostAdapter and a tool-only bridge with visibly different capability sets and authorization outcomes."
+touches = ["crates/hypermid-protocol/src/lib.rs", "crates/hypermid-client/src/lib.rs", "clients/hypermid-ts/src/client.ts", "clients/hypermid-swift/Sources/HypermidClient/Client.swift", "runtime/gideon/hypermid/client.py", "runtime/gideon/hypermid/adapter.py", "checks/hypermid/test_client_contracts.py", "checks/hypermid/vectors/client_v1.json"]
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_client_contracts.py"
+
+[task.ux-inspection]
+title = "Native session, memory, and cache inspector"
+status = "pending"
+wave = 2
+owner_lane = "surfaces"
+requires = ["ux-contract"]
+reqs = ["ux-inspection.1", "ux-inspection.2", "ux-inspection.3"]
+acceptance = "The native console reads authoritative scoped snapshots and cursored events for sessions, memory, and caches, with linked details and conflict-safe edits."
+ac_1 = "A reconnecting live session journey renders each terminal turn and maintenance event once and makes an unrecoverable stream gap visible."
+ac_2 = "Memory and cache filters cannot replace complete cached collections, and stale edits retain their drafts with an explicit conflict treatment."
+touches = ["apps/console/src/features/settings/HypermidPanel.tsx", "apps/console/src/features/hypermid/HypermidOverview.tsx", "apps/console/src/features/hypermid/SessionInspector.tsx", "apps/console/src/features/hypermid/MemoryInspector.tsx", "apps/console/src/features/hypermid/CacheInspector.tsx", "apps/console/src/features/hypermid/hypermidState.ts", "apps/console/src/shared/data/api.ts", "runtime/gideon/interfaces/dashboard/handlers/hypermid.py", "checks/hypermid/test_surface_inspection.py"]
+verify_cmd = "cd apps/console && npx vitest run src/features/hypermid/hypermidInspection.test.tsx"
+
+[task.ux-configuration]
+title = "Runtime, model, and credential settings"
+status = "pending"
+wave = 3
+owner_lane = "surfaces"
+requires = ["ux-inspection"]
+reqs = ["ux-configuration.1", "ux-configuration.2", "ux-configuration.3"]
+acceptance = "Native forms manage scoped runtime settings, model bindings, and credential presence with validation, readiness probes, revisions, and one-way secret handling."
+ac_1 = "Runtime mode round-trips off, pass_through, shadow, and primary while strictness round-trips separately; a competing write produces a visible stale-write treatment without pairing an old draft with a new revision."
+ac_2 = "Credential values never appear in GET responses, DOM-readable metadata, logs, events, copied diagnostics, or export fixtures."
+touches = ["apps/console/src/features/hypermid/RuntimeConfig.tsx", "apps/console/src/features/hypermid/ModelBindings.tsx", "apps/console/src/features/hypermid/CredentialVault.tsx", "apps/console/src/features/hypermid/configState.ts", "runtime/gideon/hypermid/configuration.py", "runtime/gideon/interfaces/dashboard/handlers/hypermid.py", "checks/hypermid/test_surface_configuration.py"]
+verify_cmd = "cd apps/console && npx vitest run src/features/hypermid/hypermidConfiguration.test.tsx"
+
+[task.ux-operations]
+title = "Diagnostics, logs, and maintenance plans"
+status = "pending"
+wave = 4
+owner_lane = "surfaces"
+requires = ["ux-configuration"]
+reqs = ["ux-operations.1", "ux-operations.2", "ux-operations.3"]
+acceptance = "Operators see observed health and redacted logs and can execute maintenance only from a current reviewed plan with cursored progress and a terminal receipt."
+ac_1 = "Cached and fresh diagnostics remain distinguishable, a failed rerun leaves the last observation visible, and log reconnect either resumes or announces a gap."
+ac_2 = "Plan tampering, expiry, scope change, authorization loss, or blocker change prevents maintenance apply before any effect."
+touches = ["apps/console/src/features/hypermid/Diagnostics.tsx", "apps/console/src/features/hypermid/LiveLogs.tsx", "apps/console/src/features/hypermid/Maintenance.tsx", "apps/console/src/features/hypermid/PlanReviewDialog.tsx", "runtime/gideon/hypermid/operations.py", "runtime/gideon/interfaces/dashboard/handlers/hypermid.py", "checks/hypermid/test_surface_operations.py"]
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surface_operations.py"
+
+[task.ux-lifecycle]
+title = "Safe lifecycle and portability commands"
+status = "pending"
+wave = 7
+owner_lane = "surfaces"
+requires = ["ux-operations", "fab-07-registry-service", "mem-portability", "mem-recovery", "sec-07"]
+reqs = ["ux-lifecycle.1", "ux-lifecycle.2", "ux-lifecycle.3"]
+acceptance = "Install, update, uninstall, migrate, and export provide deterministic plans, explicit data choices, resumable progress, and verified receipts in console and CLI."
+ac_1 = "Interrupted lifecycle fixtures recover to a reported committed, resumable, rollback-available, failed, or outcome-unknown state without claiming success from process exit."
+ac_2 = "Uninstall purge cannot run from a retain/export plan, while repeated migration and export preserve idempotency and artifact digest verification."
+touches = ["crates/hypermid-daemon/src/lifecycle.rs", "runtime/gideon/hypermid/lifecycle.py", "runtime/gideon/interfaces/cli/hypermid.py", "apps/console/src/features/hypermid/Lifecycle.tsx", "apps/console/src/features/hypermid/Portability.tsx", "checks/hypermid/test_surface_lifecycle.py"]
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surface_lifecycle.py"
+
+[task.ux-integrations]
+title = "Tool bridge, stdio supervision, and condition runner"
+status = "pending"
+wave = 5
+owner_lane = "surfaces"
+requires = ["ux-operations", "fab-05-supervision", "base-07", "sec-03"]
+reqs = ["ux-integrations.1", "ux-integrations.2", "ux-integrations.3"]
+acceptance = "Gideon exposes separate tool-bridge and full-host states, supervises stdio children with bounded lifecycle, and evaluates declarative file/git conditions inside authorized roots."
+ac_1 = "A wedged or oversized stdio child is terminated and reaped without blocking daemon health or another child, and a post-write timeout is never auto-retried."
+ac_2 = "Symlink escape, repository identity change, shell syntax, network request, excessive output, and expired evaluation budget are refused with typed errors and no event publication."
+touches = ["crates/hypermid-core/src/mcp_bridge.rs", "crates/hypermid-daemon/src/stdio_supervisor.rs", "crates/hypermid-core/src/conditions.rs", "crates/hypermid-core/src/file_conditions.rs", "crates/hypermid-core/src/git_conditions.rs", "runtime/gideon/hypermid/integrations.py", "apps/console/src/features/hypermid/Connections.tsx", "checks/hypermid/test_surface_integrations.py"]
+verify_cmd = "cargo test -p hypermid-core conditions mcp_bridge && cargo test -p hypermid-daemon stdio_supervisor"
+
+[task.ux-remote]
+title = "Remote, mobile, and accessible operator experience"
+status = "pending"
+wave = 6
+owner_lane = "surfaces"
+requires = ["ux-integrations", "fab-06-effects-federation"]
+reqs = ["ux-remote.1", "ux-remote.2", "ux-remote.3"]
+acceptance = "Opt-in TLS enrollment, device revocation, responsive operation, and assistive-technology behavior preserve all critical inspection and plan workflows."
+ac_1 = "Remote connection attempts without configured TLS, current enrollment, allowed Scope, and unexpired capability grant fail closed without transport downgrade."
+ac_2 = "Real keyboard, screen-reader, reduced-motion, 320px, and 390px journeys complete inspection and plan review with visible focus, announcements, 44px targets, and no horizontal page scroll."
+touches = ["crates/hypermid-daemon/src/remote.rs", "runtime/gideon/hypermid/remote.py", "apps/console/src/features/hypermid/RemoteAccess.tsx", "apps/console/src/features/hypermid/hypermid.css", "apps/console/src/features/hypermid/hypermidAccessibility.test.tsx", "checks/hypermid/test_surface_remote.py"]
+verify_cmd = "cd apps/console && npx vitest run src/features/hypermid/hypermidAccessibility.test.tsx"
+
+[task.ux-native]
+title = "OSS console, CLI, and desktop integration journey"
+status = "pending"
+wave = 8
+owner_lane = "surfaces"
+requires = ["ux-remote", "ux-lifecycle"]
+reqs = ["ux-native.1", "ux-native.2", "ux-native.3"]
+acceptance = "The existing native console route, Gideon CLI, and desktop shell complete the first Hypermid journey against a real local daemon with no hosted dependency or duplicate web app."
+ac_1 = "The console and desktop complete inspect, configure, plan, apply, disconnect, reconnect, and receipt recovery against the same scoped daemon state."
+ac_2 = "Human and JSON CLI modes return equivalent authoritative results and stable exit classes, and desktop shutdown leaves no orphaned daemon-owned stdio child."
+touches = ["apps/console/src/app/shell/navigationModel.ts", "apps/console/src/features/settings/SettingsPage.tsx", "apps/console/src/features/hypermid/HypermidPage.tsx", "runtime/gideon/interfaces/cli/main.py", "runtime/gideon/interfaces/cli/hypermid.py", "apps/desktop/src/application/local-gateway.js", "apps/desktop/src/application/desktop-application.js", "checks/hypermid/test_surface_native_journey.py", "apps/desktop/test/hypermidLifecycle.test.js"]
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surface_native_journey.py"

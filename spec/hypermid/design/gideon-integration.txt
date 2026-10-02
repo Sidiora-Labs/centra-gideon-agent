@@ -1,0 +1,315 @@
+Hypermid adoption in Gideon OSS
+================================
+
+Status: implementation specification. No implementation or release is authorized by this document.
+
+Decision
+--------
+
+Hypermid is adopted through four principal integration components backed by the
+shared Rust workspace. These are architectural components, not a fixed crate count:
+
+* foundation and contracts: shared protocol, transport, scoped identities, cursors,
+  digest rules, errors, tracing fields, negotiation, leases and durable stores.
+* crates/hypermid-context: deterministic context assembly, summary validation,
+  compaction, headroom accounting, and provenance.
+* crates/hypermid-memory: append-only raw journals, semantic and episodic records,
+  retrieval, event audit, migrations, and rollback checkpoints.
+* daemon and fabric: a local process exposing foundation, context, and memory
+  contracts, with per-turn cancellation ownership and lifecycle health.
+
+Wire types are defined once by hypermid-protocol and hypermid-contracts. A foundation
+crate may re-export them; it must not define competing Id, Scope, Digest, Cursor, Error,
+or Trace types.
+
+Gideon integrates those crates through runtime/gideon/hypermid. The Python adapter is
+the only bridge between the daemon and Gideon's runtime. It translates existing Gideon
+session, context, memory, usage, tool, and lifecycle types. It does not create a second
+model loop, tool dispatcher, approval gate, final-delivery route, or credential store.
+Its shared wire models live in models.py, request/effect reconciliation in adapter.py,
+and durable event consumption in subscriptions.py.
+
+The complete usable system lands in OSS before any separate deployment work: local
+daemon lifecycle, Python integration, migration and rollback, CLI administration, and
+native console status and controls. This specification contains no non-OSS release.
+
+Existing behavior that must remain true
+---------------------------------------
+
+The integration starts from working Gideon capabilities. The work is an ownership
+change at selected seams, not a blank replacement.
+
+1. runtime/gideon/cognition/history.py
+   * ConversationLog stores and restores session JSONL, lineage, metadata, archives,
+     and search notifications.
+   * span_digest, summary_holds, write_summary, and model_view already keep the raw
+     transcript authoritative and accept a derived summary only when the covered
+     transcript prefix still matches.
+   * ConversationLog.rewrite_session supports edits and rewinds. This journal remains
+     the authoritative conversation source in every Hypermid mode; Hypermid does not
+     mirror it into a second raw transcript journal.
+
+2. runtime/gideon/cognition/bg_compress.py and context_compaction.py
+   * compress_session and run_bg_compression_pass derive background summaries.
+   * compact prunes tool material and folds a middle span while retaining head and tail.
+   * These paths remain the writer in off and shadow modes. They must be quiesced before
+     Hypermid becomes primary so two summarizers cannot publish for one scope.
+
+3. runtime/gideon/cognition/context_engine.py and context.py
+   * ContextEngine is already an injectable ingest/assemble/after_turn contract.
+   * DefaultContextEngine delegates to PromptAssembler, active recall, push context,
+     component accounting, and headroom checks.
+   * Hypermid extends this contract through an adapter. PromptAssembler's identity,
+     safety, skill, channel, and product-specific prompt layers stay in Gideon.
+
+4. runtime/gideon/cognition/memory.py, memory_service.py, and vector_memory.py
+   * MemoryJournal owns readable preferences, projects, daily history, and local FTS.
+   * MemoryService exposes semantic, episodic, lesson, slot, graph, audit, recall, and
+     maintenance behavior with explicit provider capabilities and fallbacks.
+   * SemanticArchive provides the current SQLite-backed records, event log, vector and
+     graph paths, import, recall, deletion, undo, and statistics.
+   * Hypermid must preserve this reachable breadth. A migration is incomplete if only
+     semantic search works while the audit, graph, lesson, slot, or episodic consumers
+     still require the old writer.
+
+5. runtime/gideon/engine/agents/native/runtime.py and integrations/llm
+   * NativeAgentRuntime.stream owns the native model/tool loop, provider fallback,
+     context percentage, in-process compaction trigger, approval requests, usage events,
+     and tool outcomes.
+   * ModelProvider.stream and ConversationProtocol preserve provider-specific streaming,
+     measured usage, caching, served model identity, and cancellation.
+   * These stay in Gideon. Hypermid receives normalized context requests and memory
+     operations; it never receives raw provider credentials and never calls provider
+     endpoints directly.
+
+6. runtime/gideon/integrations/tool_providers and mcp_client.py
+   * resolve_tool_catalog, InProcessMcpToolProvider, ConfiguredMcpToolProvider, and
+     McpClientRegistry already own tool discovery, schema conformance, session pooling,
+     OAuth-aware MCP connections, invocation, and shutdown.
+   * These remain authoritative. Hypermid may receive redacted tool-result projections
+     as context events. It cannot invoke a tool or open an MCP connection.
+
+7. runtime/gideon/core/cancellation.py and engine/session.py
+   * CancelScope owns an active native turn and its child processes.
+   * ConversationDirectory.stop_turn withdraws approvals, stops spawned children,
+     requests provider cancellation, and applies the existing soft/hard outcome.
+   * With Hypermid primary, ConversationDirectory remains the surface authority while
+     the daemon owns cancellation only after it has acknowledged a Hypermid request.
+
+8. runtime/gideon/engine/agents/native/approval.py, engine/result_delivery.py, and
+   interfaces/dashboard/chat_runner.py
+   * ApprovalGate and the dashboard approval state own approve, reject, revise, timeout,
+     mirroring, and withdrawal.
+   * ResultDelivery and run_chat own final assistant emission, persisted transcript,
+     session updates, inbox notifications, and channel delivery.
+   * These paths are preserved in place. Hypermid returns context and memory results to
+     them; it never resolves an approval and never emits a final user-visible answer.
+
+9. runtime/gideon/interfaces/cli and apps/console
+   * TerminalApp already provides gateway-backed chat, live events, approvals, stop,
+     session navigation, model selection, and setup.
+   * ChatPage, ContextLedger, MemoryPanel, and UsagePanel already provide native chat,
+     context provenance, memory inspection and edits, and measured usage.
+   * Hypermid administration extends these surfaces with the same gateway APIs and UI
+     primitives. It does not introduce a separate web application.
+
+10. runtime/gideon/core/config, engine/lifecycle.py, pyproject.toml, and the container
+    packaging
+    * AppConfig is a pure read; ordered migrations are persisted only from runtime boot.
+    * RuntimeProcess owns startup and retirement. The Python package owns the gideon CLI.
+    * The local daemon binary is built and packaged with the OSS application, started and
+      stopped by RuntimeProcess. Unix uses an authenticated Unix socket; Windows uses
+      authenticated loopback TCP bound only to the loopback interface. The daemon never
+      exposes a non-loopback listener.
+
+Ownership and mode state machine
+--------------------------------
+
+There is exactly one derived-context writer and one memory writer for an
+owner/project/workspace scope. ConversationLog remains Gideon's transcript writer in
+every mode.
+
+* off: Gideon writes transcripts, summaries, memory, and indexes. Hypermid is not called.
+* pass_through: the authenticated adapter and daemon lifecycle are active, but context
+  and memory operations delegate to the existing Gideon implementations. Gideon remains
+  the only derived-context and memory writer and Hypermid persists no summary, memory or
+  index.
+* shadow: Gideon remains the only writer. The adapter sends immutable, digest-addressed
+  snapshots to Hypermid for comparison. Hypermid runs with write_policy=read_only: it
+  cannot append raw events, publish summaries, mutate memory, update indexes, or invoke a
+  model. Shadow output is diagnostic data only and is never fed into the active prompt.
+* primary: Hypermid holds the scoped writer leases for its append-only knowledge events,
+  derived context, and migrated memory. Gideon's old summary and memory writers are
+  quiesced before the leases are granted. Gideon continues to own ConversationLog, its
+  in-memory conversation, provider loop, approvals, tools, final answer, and delivery.
+
+The writer lease is keyed by Scope and carries a monotonically increasing epoch. A write
+must include the lease epoch, Cursor, Trace, and expected head Digest. A stale epoch or
+head mismatch is rejected before mutation. No code path is allowed to infer write access
+from daemon availability or mode alone.
+
+For a mode transition, the adapter performs a barrier in this order:
+
+1. reject new transition attempts for the scope;
+2. flush Gideon's dirty sessions and memory writes;
+3. stop and await background compression and consolidation for that scope;
+4. record and verify the source transcript and memory checkpoint digests;
+5. negotiate protocol and storage versions with the daemon;
+6. acquire the new writer lease; and
+7. publish the active mode and epoch atomically.
+
+If the barrier fails before step 6, Gideon remains the writer. If the daemon accepted a
+write and the response is lost, the adapter returns effect_state=unknown and reconciles
+by request_id; it must not repeat the write through Gideon. Fallback to the Gideon writer
+is allowed only when the daemon reports effect_state=not_started and the lease is released.
+
+Append-only knowledge data and derived context
+----------------------------------------------
+
+The Hypermid knowledge event journal is append-only. Each record has Scope, Cursor,
+Trace, event_id, event kind, canonical payload bytes, previous Digest, and raw Digest.
+The raw digest is SHA-256 over the versioned canonical record excluding only its own
+digest. The first event uses the all-zero previous digest. Duplicate event_id with
+identical bytes is idempotent; duplicate event_id with different bytes is corruption
+and stops the scope.
+
+Memory deletion, undo, supersession, import, and rollback append knowledge events that
+name prior cursors or record IDs. Raw knowledge records are never rewritten. Conversation
+edits, regenerations, and rewinds remain in Gideon's authoritative ConversationLog.
+
+A context summary is derived data over a read-only Gideon transcript snapshot. It records
+the source session key, first and last covered source position, source span Digest,
+algorithm version, prompt/template version, and output Digest. It is usable only when
+ConversationLog still resolves the same covered source digest. A newer summary supersedes
+an older summary without copying or rewriting the transcript. This retains the invariant
+currently enforced by summary_holds while making the derived boundary portable.
+
+Context assembly returns ordered components with source, character/token estimates,
+included cursors, digests, and omission reasons. Gideon adds its runtime-specific identity,
+safety, active skill, channel, and attachment layers, then runs its existing provider-window
+headroom check. No summary or compaction output can enter a turn without provenance.
+
+Memory behavior
+---------------
+
+Hypermid memory implements the current MemoryService capability surface: readable pages,
+semantic and episodic records, lessons and standings, slots, graph entities and links,
+event audit and undo, embeddings when configured, keyword fallback, context preview,
+statistics, maintenance, and export/import. Owner and project are required identity fields;
+workspace is optional and narrows the scope when present.
+
+The adapter preserves Gideon's privacy modes. Incognito and temporary sessions are never
+written to Hypermid. Temporary sessions also block reads. A persistent session can read
+only records visible to its exact owner/project scope and optional workspace. A missing
+workspace never widens across owner or project.
+
+Embedding and model requests continue through configured Gideon providers. The minimal
+runtime/gideon/hypermid/host_model.py bridge supplies context-summary model work through
+ModelProvider in wave 2; module-facing model execution remains a later supervised wave-5
+surface. The daemon receives vectors or bounded normalized results through the adapter
+when needed. Provider secrets, subscription tokens, OAuth material, and environment
+credentials never cross the Hypermid protocol.
+
+Cancellation and lifecycle
+--------------------------
+
+Each request has one cancellation owner:
+
+* before daemon acceptance, runtime/gideon/hypermid/adapter.py owns the Python request and
+  can cancel it without contacting the daemon;
+* after acceptance, hypermid-daemon owns the request cancellation token and all Rust child
+  work; the Python adapter forwards cancel(request_id, epoch) and waits for its receipt;
+* ConversationDirectory.stop_turn remains the caller and retains the existing soft-stop
+  budget and hard-reset decision; it never concurrently cancels daemon-owned children;
+* approval futures are still withdrawn by Gideon before provider cancellation;
+* daemon shutdown refuses new work, cancels accepted work, drains journals, fsyncs accepted
+  appends, emits a final Cursor per scope, and then exits.
+
+An Error.effect_state value is mandatory for failed mutating calls. not_started permits a
+safe alternative; committed requires read-after-write reconciliation; unknown forbids a
+retry through another writer until status(request_id) resolves it.
+
+Migration, rollback, and version skew
+-------------------------------------
+
+Migration is copy-validate-cutover. It never upgrades the only copy in place.
+
+* Import reads MemoryJournal pages and SemanticArchive records/events into a new
+  versioned Hypermid store. Existing summary sidecars may be admitted only as derived
+  caches after validating them against the current Gideon transcript digest; session
+  JSONL remains in ConversationLog and is never imported as a Hypermid raw journal.
+* Every imported source item records source identity, source Digest, destination Cursor,
+  destination Digest, and import version. Imports are resumable and idempotent.
+* Validation compares counts by knowledge-record kind, memory visibility, sampled
+  retrieval results, admitted summary source digests, and the complete knowledge-event
+  digest chain.
+* A cutover marker is written only after validation succeeds and the writer barrier grants
+  Hypermid the next epoch.
+* Rollback releases the Hypermid lease, verifies that no effect_state is unknown, restores
+  Gideon as the writer at a higher epoch, and retains the Hypermid store for inspection.
+  It does not reverse-copy over the source files. Export to Gideon is a separate explicit
+  operation with its own digest validation.
+
+The daemon handshake reports protocol_min, protocol_max, storage_version, build_version,
+and capabilities. The adapter supports current and immediately previous protocol versions.
+No overlap is a startup refusal with a structured Error. A newer storage version is never
+downgraded. An older supported store is opened read-only until an explicit migration runs.
+Unknown fields are preserved at the protocol envelope boundary and ignored only when the
+negotiated version says they are optional.
+
+Supervision, tools, usage, approvals, and delivery
+--------------------------------------------------
+
+Hypermid is supervised by RuntimeProcess through a dedicated lifecycle adapter. Health
+means a successful authenticated handshake, compatible protocol, writable store only when
+primary, and no broken digest chain. Process existence alone is not readiness.
+
+MCP and other tools remain in Gideon's ToolCatalog and McpClientRegistry. Tool results can
+be projected into context only after the existing security and projection paths complete.
+ApprovalGate remains the only decision resolver. NativeAgentRuntime remains the only model
+and tool loop. Provider-stream usage continues into UsageJournal and the existing console
+UsagePanel; Hypermid-specific timings and context sizes are additive operational metrics
+and never substitute for provider token/cost records.
+
+ResultDelivery, run_chat, channel delivery, accepted-action receipts, stream cursors, and
+terminal snapshots remain unchanged. A Hypermid result is internal input to a turn, never
+a final answer. The integration acceptance gate must prove that a completed assistant
+answer is rendered and delivered exactly once and that approval decisions take the same
+path with Hypermid off, pass_through, shadow, and primary.
+
+Native administration
+---------------------
+
+The existing gideon CLI gains `gideon hypermid status`, `doctor`, `migrate`, `cutover`, and
+`rollback`. Mutating commands print the scope, source and target versions, writer epoch,
+checkpoint digest, and final result. They refuse an absent owner_id or project_id and never
+print secrets. `gideon tui` keeps its present chat, approval, and stop behavior.
+
+The console adds a Hypermid settings panel built from PanelHeader, Section, Field, Row,
+Toggle, Segmented, Meter, LoadError, and skeleton patterns already used in settings. It
+shows mode, writer, daemon health, negotiated versions, migration progress, digest health,
+last cursor, and rollback availability. Shadow comparison shows aggregate divergence and
+latency only; raw prompt, memory, tool, and credential material is not included.
+
+Chat continues to use ContextLedger for user-visible context provenance. When Hypermid is
+primary, its source and covered cursor/digest are shown in the same turn details without
+changing approvals or final response rendering.
+
+Packaging and scope
+-------------------
+
+The root Cargo workspace builds the shared Hypermid crates that implement the four
+principal components. The Python package includes the adapter
+and schema. The OSS container and local installation include the hypermid-daemon binary,
+run it as the same unprivileged application user, store data under the configured local
+root, and expose no network listener. The default mode is off; installation alone never
+changes writer ownership.
+
+No remote control plane, remote storage, external identity service, provider-credential
+path, or separate hosted dependency is part of this design. Any later deployment work must
+consume the same Scope and protocol contracts without weakening local isolation, but it is
+outside this specification.
+
+The authoritative seam-by-seam trace is spec/hypermid/maps/gideon-seams.json. Requirements
+and ordered implementation tasks are in spec/hypermid/fragments/integration.kvx. The public
+configuration contract is spec/hypermid/schemas/config.schema.json.

@@ -1,0 +1,222 @@
+[design.memory]
+contract = "Hypermid memory is an OSS-only, source-grounded durable substrate backed by crates/hypermid-memory and integrated through runtime/gideon/hypermid. Authoritative revisions and mutation events are preserved; indexes, embeddings, summaries, and prompt projections are rebuildable."
+authorization = "Every mutation, including background maintenance, requires the actor Scope to own the target Scope or hold an unexpired grant for the exact operation. Process role, workspace membership, and maintenance status never confer write authority."
+identity = "Use common.schema.json Id, Scope, Digest, Cursor, Error, and Trace definitions; do not create a second identity contract."
+release = "First integration targets OSS Gideon only. No hosted rollout, hosted migration, or hosted service is included."
+
+[req.mem-foundation]
+title = "Memory core transaction and authorization foundation"
+acceptance = "Provide schema fencing, transactional revision preconditions, scope cursors, and owner-scoped authorization primitives for all later memory operations."
+ac_1 = "Schema open, immediate transaction, revision precondition, scope epoch, and mutation-sequence primitives fail atomically and return shared errors and cursors."
+ac_2 = "Interactive and maintenance authorization fails unless the actor owns the target Scope or holds an unexpired grant containing the exact operation; workspace membership and process role alone fail."
+
+[req.mem-records]
+title = "Authoritative memory records and raw recovery"
+acceptance = "Persist facts, episodes, notes, smart notes, anchors, and revisable summaries with immutable revision history and exact source recovery."
+ac_1 = "Create, update, archive, restore, merge, split, relocate, delete, and retention-gated purge use expected revisions and never leave partial record or event state."
+ac_2 = "Anchors remain immutable chronological evidence while summaries may be published, revised, and decayed without modifying source bytes, anchor content, or anchor provenance."
+
+[req.mem-lineage]
+title = "Provenance, lineage, invalidation, and deletion"
+acceptance = "Preserve source spans, revision ancestry, typed lineage, verification events, contradiction state, tombstones, and deterministic descendant invalidation."
+ac_1 = "Updating or tombstoning a source invalidates stale embeddings, FTS rows, rank features, and derived descendants atomically by input digest."
+ac_2 = "Derived lineage is acyclic, deletes remain observable as tombstones, and physical purge requires owner authorization plus an elapsed retention deadline."
+
+[req.mem-embedding]
+title = "Embedding modes and guarded backfill"
+acceptance = "Support off, local, remote-compatible, and managed-service embedding modes with model identity validation, bounded jobs, and lexical fallback."
+ac_1 = "Vectors with substituted models, wrong dimensions, non-finite values, zero norm, retired registrations, or stale content digests are rejected without replacing a valid vector."
+ac_2 = "Backfill and re-embedding obey item, token, request, retry, cost, and wall-time budgets and persist a cooldown for repeatedly stalled batches."
+
+[req.mem-retrieval]
+title = "Unified lexical, semantic, and hybrid retrieval"
+acceptance = "Search authorized memory, message, file, and git sources with FTS, semantic similarity, deterministic fusion, time bounds, suppression, and bounded optional reranking."
+ac_1 = "Every candidate is filtered by Scope visibility, tombstone/archive/expiry state, compatible vector fingerprint, and current input digest before ranking."
+ac_2 = "Results expose source kind, score components, provenance, verification and contradiction state, suppression counts, and a shared Cursor in stable order."
+
+[req.mem-maintenance]
+title = "Lease-fenced maintenance with model budgets"
+acceptance = "Run extraction, verification, smart-note evaluation, summary refresh/decay, indexing, reconciliation, invalidation, compaction, integrity, import/export, and purge as bounded jobs."
+ac_1 = "Claim, heartbeat, publish, fail, abandon, and expiry transitions use fencing tokens; an expired or superseded attempt cannot publish."
+ac_2 = "Publication rechecks ownership or exact grant, source digests, active configuration, and reserved model budgets inside the commit transaction."
+ac_3 = "Smart-note predicates use a bounded declarative AST and cannot execute code, access the network, or read arbitrary files."
+
+[req.mem-indexes]
+title = "Message, file, and git indexes"
+acceptance = "Maintain recoverable indexes with dirty-floor reconciliation, auditable file predicates, opt-in git traversal, and scope-safe orphan cleanup."
+ac_1 = "File indexing rechecks canonical authorized-root containment after symlink resolution and records deny, ignore, binary, size, generated, vendor, and secret-policy decisions without rejected content."
+ac_2 = "Git publication rechecks repository identity and refs after bounded scanning, while non-repositories and empty repositories enter a persistent recheck cooldown."
+ac_3 = "Failed incremental message writes lower a durable dirty floor and reconciliation covers the gap before advancing its cursor."
+
+[req.mem-portability]
+title = "Staged import and canonical export"
+acceptance = "Provide digest-covered, versioned, idempotent import/export with explicit scope relocation and without derivative or secret-bearing state."
+ac_1 = "Import parses and validates into a staging batch before visibility, applies in bounded transactions, and is idempotent by source digest and item key."
+ac_2 = "Export includes ordered authoritative records, revisions, lineage, and provenance while excluding vectors, FTS rows, leases, jobs, credentials, and secret references."
+
+[req.mem-recovery]
+title = "Migration fences, integrity, and recovery"
+acceptance = "Version the schema, refuse unsupported newer stores, migrate transactionally, and rebuild derivative state without silent authoritative-data loss."
+ac_1 = "Fresh schema and migrated schema converge, migration start/finish is journaled, and a destructive migration requires a verified backup manifest."
+ac_2 = "Recovery checks integrity, revision chains, lineage cycles, source digests, and index fingerprints, then repairs only from a copied consistent store."
+
+[req.mem-clients]
+title = "OSS Gideon client and module boundary"
+acceptance = "Expose the independent memory core through typed Python clients and lifecycle modules without direct Python database writes or a hosted dependency."
+ac_1 = "Every client call carries shared Scope and Trace values and maps core failures to the shared Error contract without losing conflict or authorization details."
+ac_2 = "Runtime lifecycle opens, health-checks, drains, and closes the core deterministically while preserving lexical service when embeddings are disabled."
+
+[req.mem-remote]
+title = "Versioned local bus and remote-safe protocol"
+acceptance = "Provide a versioned request/response and event boundary that can run in-process or across an authenticated local bus while preserving identical authorization and cursor semantics."
+ac_1 = "In-process and bus transports produce equivalent typed results, cursors, errors, cancellation, and backpressure for the same conformance vectors."
+ac_2 = "Transport identity cannot replace actor Scope, and reconnect or replay cannot duplicate an acknowledged mutation event."
+
+[req.mem-release]
+title = "OSS release qualification surface"
+acceptance = "Package schema, migration, diagnostics, compatibility, and end-to-end OSS lifecycle gates as one releasable memory slice with no hosted rollout."
+ac_1 = "A clean OSS profile can create, retrieve, maintain, export, restore, and retrieve the same authoritative record set through the Python-to-Rust path."
+ac_2 = "Release diagnostics report schema, index, vector, queue, lease, and recovery state without exposing memory content, credentials, or secret references."
+
+[task.mem-foundation]
+title = "Memory core foundation and authorization primitives"
+status = "pending"
+wave = 1
+owner_lane = "memory"
+requires = ["base-02", "sec-01"]
+reqs = ["mem-foundation.1", "mem-foundation.2"]
+acceptance = "The independent Rust crate establishes shared-contract adapters, schema fencing, transaction primitives, owner/grant authorization, and cursor allocation for later vertical slices."
+ac_1 = "Real cross-project authorization predicates refuse an interactive actor and a maintenance actor unless an exact live grant exists."
+ac_2 = "Schema open, immediate transaction, revision precondition, scope epoch, and mutation-sequence primitives fail atomically and return typed shared errors."
+touches = ["crates/hypermid-memory/Cargo.toml", "crates/hypermid-memory/src/lib.rs", "crates/hypermid-memory/src/store.rs", "crates/hypermid-memory/src/auth.rs", "crates/hypermid-memory/src/model.rs", "crates/hypermid-memory/src/migrations.rs", "checks/hypermid/test_memory_foundation.py"]
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_foundation.py"
+
+[task.mem-records]
+title = "Record CRUD, raw recovery, summaries, and lineage"
+status = "pending"
+wave = 2
+owner_lane = "memory"
+requires = ["mem-foundation"]
+reqs = ["mem-records.1", "mem-records.2", "mem-lineage.1", "mem-lineage.2"]
+acceptance = "Facts, episodes, notes, smart notes, anchors, and summaries support complete CRUD, source recovery, provenance, revision lineage, contradiction grouping, tombstones, and invalidation."
+ac_1 = "Concurrent writes with one expected revision yield one commit and one conflict; raw source recovery remains exact after summary publication and tombstoning."
+ac_2 = "A source edit invalidates every digest-dependent projection transactionally, while cycle insertion and premature purge are refused."
+touches = ["crates/hypermid-memory/src/records.rs", "crates/hypermid-memory/src/lineage.rs", "crates/hypermid-memory/src/provenance.rs", "crates/hypermid-memory/src/invalidation.rs", "crates/hypermid-memory/src/summary.rs", "runtime/gideon/hypermid/records.py", "runtime/gideon/hypermid/lineage.py", "checks/hypermid/test_memory_records.py", "checks/hypermid/test_memory_lineage.py"]
+verify_cmd = "cargo test -p hypermid-memory lineage --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_lineage.py"
+
+[task.mem-embedding]
+title = "Embedding registry and guarded vector jobs"
+status = "pending"
+wave = 3
+owner_lane = "memory"
+requires = ["mem-records", "sec-04", "sec-05"]
+reqs = ["mem-embedding.1", "mem-embedding.2"]
+acceptance = "All embedding modes, fingerprints, guarded writes, failure classes, bounded backfill, retirement fencing, and lexical fallback work through real provider interfaces."
+ac_1 = "A content update or provider retirement during an in-flight call prevents that result from committing and preserves the last compatible valid vector."
+ac_2 = "Mode off and provider failure return lexical results; a semantic-required request returns a typed shared Error with its Trace."
+touches = ["crates/hypermid-memory/src/embedding.rs", "crates/hypermid-memory/src/jobs.rs", "runtime/gideon/hypermid/embeddings.py", "runtime/gideon/hypermid/providers.py", "checks/hypermid/test_memory_embeddings.py"]
+verify_cmd = "cargo test -p hypermid-memory embedding --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_embeddings.py"
+
+[task.mem-retrieval]
+title = "Unified search and deterministic ranking"
+status = "pending"
+wave = 3
+owner_lane = "memory"
+requires = ["mem-records"]
+reqs = ["mem-retrieval.1", "mem-retrieval.2"]
+acceptance = "FTS, semantic, and hybrid search enforce visibility and freshness, fuse bounded source candidates, expose score evidence, suppress visible content, and bound optional reranking."
+ac_1 = "Golden mixed-source queries produce stable ordering and explainable score components across lexical-only and hybrid modes."
+ac_2 = "Unauthorized, tombstoned, expired, archived-by-default, stale-vector, and already-visible candidates never leak content and produce accurate suppression counters."
+touches = ["crates/hypermid-memory/src/fts.rs", "crates/hypermid-memory/src/search.rs", "crates/hypermid-memory/src/rank.rs", "runtime/gideon/hypermid/search.py", "runtime/gideon/hypermid/prompt_projection.py", "checks/hypermid/test_memory_search.py"]
+verify_cmd = "cargo test -p hypermid-memory search --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_search.py"
+
+[task.mem-maintenance]
+title = "Ownership-safe maintenance scheduler"
+status = "pending"
+wave = 4
+owner_lane = "memory"
+requires = ["mem-embedding", "mem-retrieval", "sec-05"]
+reqs = ["mem-maintenance.1", "mem-maintenance.2", "mem-maintenance.3"]
+acceptance = "The full maintenance catalog runs with per-scope leases, fencing, input predicates, model reservations, checkpoints, cooldowns, and declarative smart-note evaluation."
+ac_1 = "A grant revoked after claim but before publish prevents the background write, and stale, expired, or wrong-token workers cannot publish or release another worker's lease."
+ac_2 = "Every model run reserves and settles item, token, request, cost, retry, and wall-time budgets, recording unknown usage distinctly from zero."
+touches = ["crates/hypermid-memory/src/maintenance.rs", "crates/hypermid-memory/src/lease.rs", "crates/hypermid-memory/src/budget.rs", "crates/hypermid-memory/src/smart_note.rs", "runtime/gideon/hypermid/maintenance.py", "runtime/gideon/hypermid/model_budget.py", "checks/hypermid/test_memory_maintenance.py"]
+verify_cmd = "cargo test -p hypermid-memory maintenance --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_maintenance.py"
+
+[task.mem-indexes]
+title = "Message, file, and git indexing"
+status = "pending"
+wave = 4
+owner_lane = "memory"
+requires = ["mem-retrieval"]
+reqs = ["mem-indexes.1", "mem-indexes.2", "mem-indexes.3"]
+acceptance = "Incremental and reconciled source indexes remain scope-safe and recoverable, with real filesystem and repository predicate enforcement."
+ac_1 = "Symlink escapes, ignored or secret files, changed read digests, and unauthorized roots are rejected before publication without persisting rejected bytes."
+ac_2 = "Message gaps recover from the earliest dirty cursor and git scans publish only if repository identity and requested refs remain current."
+touches = ["crates/hypermid-memory/src/source_index.rs", "crates/hypermid-memory/src/file_predicate.rs", "crates/hypermid-memory/src/git_index.rs", "runtime/gideon/hypermid/message_index.py", "runtime/gideon/hypermid/file_index.py", "runtime/gideon/hypermid/git_index.py", "checks/hypermid/test_memory_source_indexes.py"]
+verify_cmd = "cargo test -p hypermid-memory source_index --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_source_indexes.py"
+
+[task.mem-clients]
+title = "OSS Gideon clients and lifecycle modules"
+status = "pending"
+wave = 5
+owner_lane = "memory"
+requires = ["mem-maintenance", "mem-indexes"]
+reqs = ["mem-clients.1", "mem-clients.2"]
+acceptance = "Typed Python clients expose records, search, maintenance, portability preparation, diagnostics, and lifecycle management over the independent core without direct database access."
+ac_1 = "Contract conformance preserves shared Scope, Cursor, Error, and Trace values across Python and Rust for success, conflict, authorization refusal, and cancellation."
+ac_2 = "OSS lifecycle startup, health, drain, and shutdown preserve durable work and keep lexical retrieval available when vector providers are disabled."
+touches = ["crates/hypermid-memory/src/api.rs", "crates/hypermid-memory/src/ffi.rs", "runtime/gideon/hypermid/__init__.py", "runtime/gideon/hypermid/contracts.py", "runtime/gideon/hypermid/client.py", "runtime/gideon/hypermid/lifecycle.py", "checks/hypermid/test_memory_clients.py"]
+verify_cmd = "cargo test -p hypermid-memory api --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_clients.py"
+
+[task.mem-remote]
+title = "Local bus and remote-safe protocol"
+status = "pending"
+wave = 6
+owner_lane = "memory"
+requires = ["mem-clients"]
+reqs = ["mem-remote.1", "mem-remote.2"]
+acceptance = "A versioned transport offers equivalent in-process and authenticated local-bus semantics with bounded streams, cancellation, backpressure, cursor replay, and mutation idempotency."
+ac_1 = "Shared conformance vectors return equivalent records, errors, traces, cursors, and stream termination over both transports."
+ac_2 = "Forged transport identity, replayed mutation keys, disconnected consumers, and resumed cursors cannot broaden Scope authority or duplicate committed mutations."
+touches = ["crates/hypermid-memory/src/protocol.rs", "crates/hypermid-memory/src/bus.rs", "runtime/gideon/hypermid/transport.py", "runtime/gideon/hypermid/bus.py", "checks/hypermid/test_memory_transport.py"]
+verify_cmd = "cargo test -p hypermid-memory protocol --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_transport.py"
+
+[task.mem-portability]
+title = "Staged import and canonical export"
+status = "pending"
+wave = 7
+owner_lane = "memory"
+requires = ["mem-remote"]
+reqs = ["mem-portability.1", "mem-portability.2"]
+acceptance = "Canonical JSONL import/export preserves authoritative history and provenance, supports explicit authorized scope relocation, and excludes derivative and secret-bearing state."
+ac_1 = "Replaying the same staged import creates no duplicate records or mutation events, and rejected items remain inspectable without making partial batches visible."
+ac_2 = "An export verifies its manifest digest and contains no vector bytes, FTS content, lease token, job claim, credential, or secret reference."
+touches = ["crates/hypermid-memory/src/import.rs", "crates/hypermid-memory/src/export.rs", "runtime/gideon/hypermid/portability.py", "checks/hypermid/test_memory_portability.py"]
+verify_cmd = "cargo test -p hypermid-memory portability --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_portability.py"
+
+[task.mem-recovery]
+title = "Migration, backup, restore, and repair"
+status = "pending"
+wave = 7
+owner_lane = "memory"
+requires = ["mem-remote"]
+reqs = ["mem-recovery.1", "mem-recovery.2"]
+acceptance = "Schema fencing, transactional migrations, consistent snapshots, restore, integrity checks, and derivative rebuild operate without authoritative-data loss."
+ac_1 = "A newer unsupported schema fails closed, fresh and migrated stores have equivalent schema fingerprints, and destructive migration refuses without a verified backup manifest."
+ac_2 = "Recovery from a copied fixture preserves every authoritative revision, rebuilds indexes, detects lineage corruption, and exposes typed diagnostics through runtime/gideon/hypermid."
+touches = ["crates/hypermid-memory/src/migrations.rs", "crates/hypermid-memory/src/recovery.rs", "crates/hypermid-memory/src/snapshot.rs", "runtime/gideon/hypermid/diagnostics.py", "runtime/gideon/hypermid/recovery.py", "checks/hypermid/test_memory_recovery.py"]
+verify_cmd = "cargo test -p hypermid-memory migration recovery --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_recovery.py"
+
+[task.mem-release]
+title = "OSS memory release integration"
+status = "pending"
+wave = 8
+owner_lane = "memory"
+requires = ["mem-portability", "mem-recovery"]
+reqs = ["mem-release.1", "mem-release.2"]
+acceptance = "The complete memory slice is wired into the OSS Gideon lifecycle, packaged with diagnostics and compatibility gates, and exercised end to end without a hosted dependency."
+ac_1 = "A clean OSS profile performs create, retrieval, maintenance, canonical export, restore, and equivalent retrieval through the Python-to-Rust integration."
+ac_2 = "Release diagnostics cover schema, indexes, vectors, queues, leases, budgets, and recovery while redacting content and secret-bearing fields."
+touches = ["Cargo.toml", "crates/hypermid-memory/Cargo.toml", "runtime/gideon/hypermid/lifecycle.py", "runtime/gideon/engine/lifecycle.py", "runtime/gideon/hypermid/diagnostics.py", "checks/hypermid/test_memory_oss_integration.py", "checks/hypermid/test_memory_release_diagnostics.py"]
+verify_cmd = "cargo test -p hypermid-memory --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_oss_integration.py checks/hypermid/test_memory_release_diagnostics.py"

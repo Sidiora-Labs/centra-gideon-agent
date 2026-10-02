@@ -1,0 +1,168 @@
+[design.integration_artifacts]
+feature = "hypermid-integration"
+status = "pending"
+version = "1.0.0"
+scope = "oss"
+owner_lane = "integration"
+design = "spec/hypermid/design/gideon-integration.txt"
+seam_map = "spec/hypermid/maps/gideon-seams.json"
+config_schema = "spec/hypermid/schemas/config.schema.json"
+
+[design.gideon_architecture]
+contract = "Hypermid has four principal integration components (foundation/contracts, context, memory, daemon/fabric) backed by the shared Rust workspace and integrated only through runtime/gideon/hypermid. Shared wire types come from hypermid-protocol and hypermid-contracts; Gideon retains ConversationLog, the model/tool loop, provider credentials, approvals, usage ledger, final response, delivery, and product surfaces."
+delivery = "The complete local daemon, adapter, migration, rollback, CLI, console, packaging, and conformance journey ships in OSS before any separate deployment work."
+default = "Wave 1 is authenticated local pass-through and status only. Gideon remains the sole default writer. Hypermid ownership is opt-in from wave 2 onward after a scoped barrier and writer lease."
+
+[design.invariants]
+single_writer = "Exactly one context writer exists for each owner/project/workspace scope. Shadow is read-only and cannot summarize, append, mutate memory, or update an index."
+raw_integrity = "Raw Hypermid knowledge events are append-only and digest chained. Memory supersession, deletion, undo and rollback append new events. Gideon ConversationLog remains transcript authority, and derived summaries are admitted only against its covered source digest."
+runtime_authority = "NativeAgentRuntime, ModelProvider, ToolCatalog, McpClientRegistry, ApprovalGate, ConversationDirectory, run_chat, ResultDelivery and UsageJournal retain their current authority."
+cancellation = "ConversationDirectory remains the surface authority. Before daemon acceptance Python owns cancellation; after acceptance the daemon exclusively owns the request token and Rust children until it returns an effect-state receipt."
+secrets = "No provider, subscription, OAuth, MCP, channel or environment credential crosses the Hypermid protocol."
+compatibility = "Handshake negotiation, N and N-1 protocol support, copy-validate-cutover migration, retained rollback checkpoints and unknown-effect reconciliation are mandatory."
+
+[req.int-01]
+title = "Authenticated local daemon and pass-through integration"
+acceptance = "Install and supervise the local Hypermid daemon behind a scoped authenticated adapter without replacing any active Gideon writer or user path."
+ac_1 = "A real local daemon built from the shared Rust workspace completes an authenticated handshake carrying Scope(owner_id, project_id, optional workspace_id), protocol range, storage version, build version and capabilities; incompatible or unauthenticated clients are refused with the shared Error shape."
+ac_2 = "In off and pass-through modes, context, memory, model, tool, approval, usage, final delivery and persistence results are byte-for-byte or structurally identical to the existing Gideon path, and status proves Gideon is the sole writer."
+ac_3 = "RuntimeProcess starts, health-checks and drains the daemon over authenticated Unix sockets or Windows loopback TCP; process existence without protocol and digest health is reported unhealthy, and a non-loopback listener is refused."
+
+[task.int-01]
+title = "Implement integration slice 1: local daemon auth, pass-through journal adapter and status"
+status = "pending"
+wave = 1
+owner_lane = "integration"
+requires = ["base-02", "sec-02", "mem-foundation", "ctx-gideon-adapter", "ux-contract"]
+reqs = ["int-01.1", "int-01.2", "int-01.3"]
+touches = ["runtime/gideon/hypermid/__init__.py", "runtime/gideon/hypermid/config.py", "runtime/gideon/hypermid/models.py", "runtime/gideon/hypermid/adapter.py", "runtime/gideon/hypermid/lifecycle.py", "runtime/gideon/engine/lifecycle.py", "runtime/gideon/core/config/loader.py", "runtime/gideon/interfaces/dashboard/handlers/hypermid.py", "runtime/gideon/interfaces/dashboard/server.py", "checks/hypermid/verify_wave_01.py"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_01.py"
+acceptance = "The installed daemon is authenticated and supervised, pass-through is behavior-preserving, status is honest, and no Hypermid write or default replacement occurs."
+
+[req.int-02]
+title = "Durable summaries, memory CRUD and raw recovery"
+acceptance = "Make Hypermid an opt-in scoped writer for digest-bound context and the complete existing memory surface, with recoverable append-only raw data."
+ac_1 = "Shadow remains read-only; primary can start only after dirty Gideon writes flush, background summarization and consolidation quiesce, source digests validate, and a monotonically increasing scoped writer lease is granted."
+ac_2 = "Raw knowledge events are append-only, cursor ordered and digest chained; memory deletion, undo and supersession append events, summaries carry the covered Gideon source digest, and ConversationLog remains the sole transcript authority."
+ac_3 = "Semantic, episodic, lesson, slot, graph, page, event-audit, undo, embedding, keyword fallback, statistics and context-preview operations remain reachable through MemoryService-compatible results with privacy modes preserved."
+ac_4 = "A crash-recovery journey replays the knowledge event journal, discards summaries whose Gideon source digest no longer matches, reconstructs the same memory records, and resumes at the next cursor without duplicate writes."
+
+[task.int-02]
+title = "Implement integration slice 2: durable summaries, full memory CRUD, raw recovery and opt-in ownership"
+status = "pending"
+wave = 2
+owner_lane = "integration"
+requires = ["int-01", "base-03", "mem-records", "ctx-background-summary", "ctx-recovery", "fab-02-registry-routing", "sec-05", "ux-inspection"]
+reqs = ["int-02.1", "int-02.2", "int-02.3", "int-02.4"]
+touches = ["runtime/gideon/hypermid/context.py", "runtime/gideon/hypermid/memory.py", "runtime/gideon/hypermid/writer.py", "runtime/gideon/hypermid/host_model.py", "runtime/gideon/cognition/context_engine.py", "runtime/gideon/cognition/history.py", "runtime/gideon/cognition/bg_compress.py", "runtime/gideon/cognition/memory_service.py", "checks/hypermid/verify_wave_02.py"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_02.py"
+acceptance = "Opt-in primary ownership is single-writer and crash recoverable, while the complete existing summary and memory consumer surface remains usable."
+
+[req.int-03]
+title = "Cache policy, hybrid recall and native inspection"
+acceptance = "Compose deterministic cache-aware context and hybrid recall with explainable results in existing Gideon surfaces."
+ac_1 = "Context assembly preserves ordered components, source provenance, prompt-cache boundaries, provider-served context windows and headroom decisions; a summary or cached component is rejected when its covered digest or policy version differs."
+ac_2 = "Hybrid recall combines keyword, vector and graph arms without widening Scope, reports per-arm scores and omissions, and retains Gideon's keyword fallback when embeddings are absent or unhealthy."
+ac_3 = "The native console and CLI inspect the active writer, cursor, digest, cache state, recall arms and provenance without exposing raw private content or credentials."
+
+[task.int-03]
+title = "Implement integration slice 3: cache policy, hybrid recall and native inspection"
+status = "pending"
+wave = 3
+owner_lane = "integration"
+requires = ["int-02", "ctx-reclaim", "mem-embedding", "mem-retrieval", "fab-03-flow-lifecycle", "ux-configuration"]
+reqs = ["int-03.1", "int-03.2", "int-03.3"]
+touches = ["runtime/gideon/hypermid/inspect.py", "runtime/gideon/cognition/context.py", "runtime/gideon/cognition/context_headroom.py", "runtime/gideon/cognition/vector_memory.py", "runtime/gideon/integrations/llm/prompt_cache.py", "runtime/gideon/interfaces/cli/main.py", "runtime/gideon/interfaces/cli/terminal.py", "runtime/gideon/interfaces/dashboard/handlers/hypermid.py", "apps/console/src/features/settings/HypermidPanel.tsx", "apps/console/src/features/settings/SettingsPage.tsx", "apps/console/src/features/chat/ContextLedger.tsx", "apps/console/src/shared/data/api.ts", "checks/hypermid/verify_wave_03.py"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_03.py"
+acceptance = "Cache and recall decisions are digest- and scope-safe, explainable through native surfaces, and compatible with existing prompt assembly and fallback behavior."
+
+[req.int-04]
+title = "Background maintenance, notes, Git context and budgets"
+acceptance = "Integrate background Hypermid maintenance and context sources without bypassing Gideon's scheduling, Git egress or budget authorities."
+ac_1 = "Maintenance, summarization and consolidation run once per scoped lease, persist checkpoints and cursors, honor privacy modes, and cannot race the active writer or reprocess a completed cursor range."
+ac_2 = "Notes and Git-derived context enter as attributed, digest-addressed source records; Git access continues through guarded Git policy and no Hypermid component executes an unrestricted Git command."
+ac_3 = "All background model, embedding and maintenance work is admitted and stopped by existing run/day budgets, records measured usage through Gideon's ledgers, and reports no-call distinctly from zero cost."
+
+[task.int-04]
+title = "Implement integration slice 4: background maintenance, notes, Git context and budgets"
+status = "pending"
+wave = 4
+owner_lane = "integration"
+requires = ["int-03", "ctx-hooks", "mem-maintenance", "mem-indexes", "fab-04-control-diagnostics", "ux-operations", "base-04"]
+reqs = ["int-04.1", "int-04.2", "int-04.3"]
+touches = ["runtime/gideon/hypermid/maintenance.py", "runtime/gideon/hypermid/sources.py", "runtime/gideon/hypermid/subscriptions.py", "runtime/gideon/cognition/bg_compress.py", "runtime/gideon/cognition/history.py", "runtime/gideon/cognition/vault_pages.py", "runtime/gideon/security/net/git.py", "runtime/gideon/security/guardrails/budgets.py", "runtime/gideon/operations/usage_ledger.py", "runtime/gideon/engine/routing/usage.py", "apps/console/src/features/settings/UsagePanel.tsx", "checks/hypermid/verify_wave_04.py"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_04.py"
+acceptance = "Background capability is lease-safe, attributed, guarded and budget-accounted through the existing Gideon authorities."
+
+[req.int-05]
+title = "Supervised tool and model modules with SDK and MCP lifecycle"
+acceptance = "Expose Hypermid modules through Gideon's supervised SDK and MCP boundaries while retaining the native model loop, tool policy, approvals and credentials."
+ac_1 = "Hypermid module discovery and invocation enter through ToolCatalog-compatible definitions, portable schemas and existing approval/risk policy; the daemon cannot invoke a tool, resolve an approval or open an MCP connection independently."
+ac_2 = "Model work continues through ModelProvider.stream with served-model identity, provider fallback, cache usage and UsageJournal accounting intact; no provider or OAuth credential is serialized into a Hypermid request."
+ac_3 = "SDK and MCP connections are scoped, health-reported, cancelled and evicted with their Gideon session, and daemon shutdown leaves no live module child or pooled MCP connection."
+
+[task.int-05]
+title = "Implement integration slice 5: supervised modules, SDK, model and MCP lifecycle"
+status = "pending"
+wave = 5
+owner_lane = "integration"
+requires = ["int-04", "base-07", "fab-05-supervision", "mem-clients", "sec-03", "ux-integrations", "base-05"]
+reqs = ["int-05.1", "int-05.2", "int-05.3"]
+touches = ["runtime/gideon/hypermid/modules.py", "runtime/gideon/sdk/hypermid.py", "runtime/gideon/integrations/mcp_hypermid.py", "runtime/gideon/integrations/mcp_client.py", "runtime/gideon/integrations/tool_providers/registry.py", "runtime/gideon/engine/agents/native/tools.py", "runtime/gideon/engine/agents/native/runtime.py", "runtime/gideon/engine/session.py", "runtime/gideon/engine/lifecycle.py", "checks/hypermid/verify_wave_05.py"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_05.py"
+acceptance = "Hypermid modules are real supervised Gideon tools with session lifecycle cleanup, while model, credential, approval and MCP authority remain in their existing owners."
+
+[req.int-06]
+title = "Durable bus, federation, remote access and sandbox boundaries"
+acceptance = "Carry scoped Hypermid events across durable local and optional remote peers without weakening identity, ordering, writer or sandbox boundaries."
+ac_1 = "The bus persists scoped envelopes with event ID, Cursor, Digest and Trace, deduplicates identical retries, rejects divergent duplicates and resumes subscribers without loss or reordering across restart."
+ac_2 = "Federated or remote peers authenticate owner and project identity, negotiate versions and capabilities, cannot acquire a local writer lease implicitly, and cannot widen an absent workspace into another owner or project."
+ac_3 = "Remote module execution uses Gideon's sandbox provider and egress policy, carries cancellation and effect state end to end, and leaves approvals, tool dispatch and final delivery in Gideon."
+
+[task.int-06]
+title = "Implement integration slice 6: durable bus, federation, remote access and sandbox containment"
+status = "pending"
+wave = 6
+owner_lane = "integration"
+requires = ["int-05", "fab-06-effects-federation", "base-06", "ctx-subagents", "mem-remote", "ux-remote", "sec-06"]
+reqs = ["int-06.1", "int-06.2", "int-06.3"]
+touches = ["runtime/gideon/hypermid/subscriptions.py", "runtime/gideon/hypermid/federation.py", "runtime/gideon/hypermid/remote.py", "runtime/gideon/sdk/hypermid.py", "runtime/gideon/sdk/sandbox.py", "runtime/gideon/integrations/sandbox_providers/registry.py", "runtime/gideon/security/sandbox.py", "runtime/gideon/engine/session.py", "checks/hypermid/verify_wave_06.py"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_06.py"
+acceptance = "Bus and peer paths are durable, authenticated, versioned, scope-preserving, sandboxed and unable to seize writer, approval, tool or delivery authority."
+
+[req.int-07]
+title = "Migration, upgrade, export, restore and full native surfaces"
+acceptance = "Provide copy-validate-cutover migration and recoverable lifecycle operations through complete native CLI and console journeys."
+ac_1 = "Migration imports pages, semantic and episodic records, lessons, slots, graph links and audit events idempotently, records source and destination digests, admits existing summaries only after validating their Gideon source digest, leaves session JSONL in ConversationLog, and writes no cutover marker until complete validation passes."
+ac_2 = "Upgrade refuses unsupported protocol or newer storage, supports protocol N and N-1, opens supported older storage read-only pending explicit migration, and never performs an in-place downgrade."
+ac_3 = "Export and restore preserve Scope, cursor order, digest chain and unknown fields; rollback releases the lease at a higher epoch, refuses unknown effects, retains the Hypermid store and does not overwrite source files."
+ac_4 = "CLI and console expose status, doctor, migrate, cutover, export, restore and rollback with progress, errors, writer epoch, digest health and actionable recovery while preserving current chat, approval, stop and final-answer UX."
+
+[task.int-07]
+title = "Implement integration slice 7: migration, upgrade, export, restore and full native surfaces"
+status = "pending"
+wave = 7
+owner_lane = "integration"
+requires = ["int-06", "fab-07-registry-service", "ctx-portability", "mem-portability", "mem-recovery", "ux-lifecycle", "sec-07"]
+reqs = ["int-07.1", "int-07.2", "int-07.3", "int-07.4"]
+touches = ["runtime/gideon/hypermid/migration.py", "runtime/gideon/hypermid/export.py", "runtime/gideon/hypermid/handlers.py", "runtime/gideon/core/config/migrations.py", "runtime/gideon/interfaces/cli/main.py", "runtime/gideon/interfaces/dashboard/handlers/hypermid.py", "runtime/gideon/interfaces/dashboard/server.py", "apps/console/src/features/settings/HypermidPanel.tsx", "apps/console/src/shared/data/api.ts", "spec/hypermid/schemas/config.schema.json", "checks/hypermid/verify_wave_07.py"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_07.py"
+acceptance = "All lifecycle operations are digest-verified, resumable and reversible, and every operation is understandable and operable in the native CLI and console."
+
+[req.int-08]
+title = "Whole OSS conformance, packaging and release readiness"
+acceptance = "Qualify one installable OSS system across off, shadow and primary modes without any external control-plane dependency."
+ac_1 = "A clean local package and single-container install includes the daemon binary, Python adapter, schema, CLI and console, runs unprivileged over a local transport, persists under the configured root and remains off by default."
+ac_2 = "The real end-to-end matrix covers off, pass_through, shadow and primary and proves single-writer behavior, no shadow writes, raw recovery, migration and rollback, N/N-1 compatibility, scoped recall, cancellation ownership, MCP and sandbox cleanup, provider usage accounting, unchanged approvals and exactly-once final delivery."
+ac_3 = "The release-readiness report distinguishes source checks from live journeys, records every unsupported platform or unqualified path, and contains no claim of a separate deployment release."
+
+[task.int-08]
+title = "Implement integration slice 8: whole OSS conformance, packaging and release readiness"
+status = "pending"
+wave = 8
+owner_lane = "integration"
+requires = ["int-07", "base-08", "fab-08-integration", "ctx-gideon-integration", "mem-release", "ux-native", "sec-08"]
+reqs = ["int-08.1", "int-08.2", "int-08.3"]
+touches = ["Cargo.lock", "pyproject.toml", "setup.py", "infrastructure/docker/Dockerfile.backend", "infrastructure/website/install.sh", "runtime/gideon/hypermid/__init__.py", "runtime/gideon/engine/lifecycle.py", "runtime/gideon/interfaces/cli/main.py", "apps/console/src/features/settings/HypermidPanel.tsx", "checks/hypermid/verify_wave_08.py", "checks/hypermid/fixtures/n_minus_one_protocol.json", "checks/hypermid/fixtures/recovery_journal.jsonl", "spec/hypermid/release-readiness.kvx"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_08.py"
+acceptance = "The packaged OSS product passes the complete real-path conformance journey with explicit limitations and no dependency on a separate deployment environment."

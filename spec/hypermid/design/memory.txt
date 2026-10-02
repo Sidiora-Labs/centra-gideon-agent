@@ -1,0 +1,261 @@
+HYPERMID MEMORY DESIGN
+======================
+
+Status: implementation specification
+Release boundary: open-source Gideon only; no hosted rollout is planned by this lane.
+Primary integration: runtime/gideon/hypermid/
+Independent core: crates/hypermid-memory/
+
+1. Purpose and boundaries
+-------------------------
+
+Hypermid provides one durable, queryable memory substrate for facts, episodes,
+notes, conditional smart notes, source material, and derived summaries. Python
+owns Gideon integration and policy composition. The Rust crate owns persistence,
+transactions, indexing, authorization predicates, ranking primitives, migrations,
+and portable streams. Neither side is a mirror of the other; Python calls a
+versioned core contract and never writes the database directly.
+
+The source of truth is an append-only revision and mutation history. Search
+indexes, embeddings, summaries, and prompt projections are rebuildable views.
+Deleting a record creates a durable tombstone and invalidates every descendant
+and index row in the same transaction. Content is physically purged only by an
+explicit owner-authorized purge after the retention deadline.
+
+2. Shared identity and scope
+----------------------------
+
+All API documents use common.schema.json definitions for Id, Scope, Digest,
+Cursor, Error, and Trace. Scope carries owner_id and optional project_id and
+workspace_id. This design does not define competing user, tenant, agent, project,
+workspace, digest, cursor, error, or trace identities.
+
+Every durable row has one owning Scope. Read sharing is expressed through grants
+from the owning scope to another exact scope. A workspace membership or process
+role does not transfer ownership. Cross-project reads require a live grant and
+are labeled with their origin scope. Cross-project writes require a grant whose
+operations explicitly include the requested mutation.
+
+The same rule applies to background work. Indexers, summarizers, verifiers,
+embedding workers, importers, retention jobs, and repair jobs receive an actor
+scope and an operation. Before claiming work and again inside the commit
+transaction, the core proves that the actor owns the target scope or holds an
+unexpired matching grant. There is no maintenance, service, root-agent, or
+background-worker bypass. A revoked grant prevents a queued job from committing.
+This closes the broad background-agent cross-project mutation class.
+
+3. Durable records
+------------------
+
+MemoryRecord is the common envelope. Its kind is one of:
+
+* fact: a concise proposition with confidence, verification state, and optional
+  validity interval;
+* episode: a chronological account tied to source spans, participants, and an
+  observed time range;
+* note: owner-authored freeform material;
+* smart_note: a note with a declarative predicate evaluated against approved
+  metadata and events, never arbitrary code;
+* anchor: immutable chronological evidence preserved verbatim and retrieved with
+  high provenance weight;
+* summary: revisable connective tissue derived from other records.
+
+Anchors and summaries are deliberately different. An anchor revision cannot
+change its content; correction creates a new anchor linked by supersedes and
+tombstones the bad assertion if requested. Summaries may be replaced, decay,
+and disappear from retrieval. A summary never overwrites, shortens, or becomes
+the provenance of an anchor. Retrieval labels both kinds.
+
+Each record revision stores canonical content, content_digest, metadata, author
+scope, creation time, expected parent revision, and provenance edges. Optimistic
+concurrency uses the revision digest. Updates, archive, restore, merge, split,
+relocate, and delete are atomic mutations. Exact duplicate detection is scoped
+to owner scope, kind, category, and normalized content digest.
+
+Lineage edges use typed relations: derived_from, cites, supersedes, contradicts,
+merged_from, split_from, imported_from, and verifies. Cycles are refused for
+derived_from, supersedes, merged_from, and split_from. Tombstoning a source marks
+derived descendants stale in the same transaction; a bounded maintenance job
+then recomputes or tombstones those descendants under the same ownership rules.
+
+4. Provenance and verification
+------------------------------
+
+Provenance points to immutable source snapshots or external references with a
+digest, locator, observed time, capture method, and optional source record. A
+claim can cite multiple spans. Retrieval exposes provenance completeness,
+verification state, confidence, and staleness; it never presents generated
+summaries as primary evidence.
+
+Verification states are unverified, supported, disputed, refuted, and unknown.
+A verification event is append-only. The current state is a projection from the
+latest admissible event, preserving competing evidence rather than deleting it.
+Contradictions are returned as grouped results and remain visible until resolved.
+
+5. Mutation protocol and cache-safe observation
+-----------------------------------------------
+
+Every mutation follows one IMMEDIATE transaction:
+
+1. Resolve the target and current revision.
+2. Evaluate owner-or-grant authorization for the actor scope and operation.
+3. Compare the caller's expected revision or explicit create precondition.
+4. Write the new revision, lineage/provenance edges, and mutation event.
+5. Invalidate FTS, vector, ranking, and derived-summary rows whose input digest
+   no longer matches.
+6. Advance the owner scope epoch and commit one Cursor(epoch, sequence).
+
+Readers request changes after a Cursor. Baseline prompt memory and later deltas
+are separate projections. Additions, edits, archives, merges, and deletions are
+visible without inventing content. A missed epoch requires a bounded snapshot
+refresh. External edits advance the same cursor; no timestamp is used as an
+authority or freshness proof.
+
+6. Embeddings
+-------------
+
+Embedding modes are off, local, remote-compatible, and managed-service. Each
+registration binds provider kind, endpoint identity, model identifier,
+dimensions, distance metric, normalization, and a fingerprint. Credentials are
+referenced through the existing secret boundary and never stored in memory rows,
+logs, exports, or the schema artifact.
+
+Vectors are accepted only when the returned model and dimensions match the
+active registration and the record content digest still matches the job input.
+Provider substitution, malformed/non-finite vectors, zero norm, transport
+failure, refusal, missing credentials, and rate limits have distinct outcomes.
+Retiring a registration fences in-flight results. Mode off keeps lexical search
+fully operational. Provider failure degrades to lexical retrieval unless policy
+requires semantic search, in which case the request returns a typed error.
+
+Backfill prioritizes missing vectors, then stale fingerprints. Jobs are bounded
+by item, token, request, wall-time, and retry budgets. A persistent cooldown
+prevents stalled batches from being resubmitted continuously. Writes remain
+content-equality guarded. Embedding rows are derivative and may be rebuilt.
+
+7. Search and ranking
+---------------------
+
+One search request can select facts, episodes, notes, smart notes, anchors,
+summaries, raw messages, files, and git commits. Every source supports the same
+scope visibility and from/to time bounds. Full-text search uses FTS5 with an
+external-content row map. Semantic search uses cosine similarity over compatible
+vectors. Hybrid search normalizes source scores before fusion.
+
+The deterministic ranking pipeline is:
+
+1. Gather bounded lexical and semantic candidates per source.
+2. Remove tombstoned, archived (unless requested), expired, unauthorized, and
+   digest-stale candidates.
+3. Fuse reciprocal ranks with configurable lexical and semantic weights.
+4. Add bounded factors for importance, recency, verification, provenance,
+   anchor stability, and retrieval usefulness; subtract decay and contradiction.
+5. Deduplicate exact content and cluster related revisions.
+6. Optionally rerank only the top bounded candidate set within a model budget.
+7. Return score components, source labels, provenance, and a stable Cursor.
+
+Explicit retrieval may increment use counters after results are delivered.
+Automatic hinting never changes promotion statistics. Content already present in
+the caller's visible context can be suppressed by digest, with suppression counts
+reported. Smart-note predicates are evaluated from a declarative AST with
+allowlisted fields, operators, and bounded evaluation; no shell, network, file
+read, dynamic import, or arbitrary expression execution is allowed.
+
+8. Background extraction and maintenance
+-----------------------------------------
+
+Maintenance kinds are extract_facts, extract_episodes, verify_claims,
+evaluate_smart_notes, refresh_summaries, decay_summaries, embed_records,
+reembed_model, reconcile_fts, reconcile_sources, index_messages,
+index_git_commits, invalidate_lineage, sweep_orphans, compact_events,
+check_integrity, import_batch, export_batch, and purge_tombstones.
+
+Work is queued per owner scope and claimed with a fencing token, lease expiry,
+attempt number, and input cursor. Claim, heartbeat, publish, fail, abandon, and
+expiry transitions use compare-and-swap predicates. Publication rechecks the
+fencing token, current input digests, active configuration, budgets, and write
+authorization. An expired or superseded attempt cannot publish.
+
+Each run has hard limits for records, input tokens, output tokens, model calls,
+cost units, retries, and wall time. Limits are reserved before a model call and
+settled from actual usage. Missing usage is recorded as unknown, not zero. A run
+that reaches a limit checkpoints its cursor and yields. Model output is parsed
+as typed proposals and must pass provenance, ownership, length, and duplicate
+checks before a write transaction begins.
+
+Per-scope locks serialize conflicting maintenance while allowing reads and jobs
+for unrelated scopes. Lock order is scope, record, index family. Database busy
+timeouts are bounded. Long provider calls and repository scans occur outside
+write transactions. Publication transactions contain only predicate checks and
+writes.
+
+9. Message, file, and git indexes
+--------------------------------
+
+Message indexing consumes immutable message snapshots and records a dirty-floor
+cursor when incremental updates fail. Reconciliation resumes from the earliest
+dirty sequence. Orphan cleanup requires authoritative session inventory and is
+restricted to the same owner scope.
+
+File indexing applies explicit predicates: canonical path must be inside an
+authorized root; deny rules win; symlinks are resolved and rechecked; binary,
+size, generated, vendor, secret, and ignored-file policies are recorded; and the
+read digest must still match at publication. Predicate decisions are auditable
+without storing rejected file contents.
+
+Git indexing is opt-in per project. It resolves a repository identity, walks
+commits reachable from the configured refs, applies age/count limits, and skips
+merges when configured. Commit messages and metadata are indexed; patch bodies
+are included only under an explicit file/content policy. Repository reads happen
+outside database transactions. Ref and repository identity are rechecked before
+publication. Non-repositories and empty repositories receive a bounded recheck
+time rather than repeated error logs.
+
+10. Import, export, migration, and recovery
+-------------------------------------------
+
+Imports are staged. The parser writes a manifest and item digests without making
+them visible. Validation resolves scopes, maps supported versions, checks size
+and count budgets, detects duplicates, and records rejected items. Apply runs in
+bounded transactions with the same owner-or-grant authorization as interactive
+writes. Replaying an import is idempotent by source digest and item key.
+
+Exports are canonical JSON Lines with a manifest, schema version, ordered records,
+revisions, lineage, provenance, grants only when explicitly selected, and digest
+coverage. Derived vectors, FTS rows, leases, secret references, and transient
+jobs are excluded. Scope relocation requires an explicit mapping and destination
+write authorization. Export does not imply sharing.
+
+The database records migration version and compatibility floor. Open refuses a
+newer unsupported version. Each migration is transactional, idempotent under its
+version guard, and leaves a journaled start/finish record. Destructive migrations
+require a verified backup manifest. Fresh schema and migration result must match.
+
+Recovery validates SQLite integrity, migration history, revision chains, lineage
+acyclicity, source digests, and index fingerprints. Repair first copies the store,
+then reconstructs derivative indexes from authoritative revisions. Restore uses
+one consistent snapshot and removes stale WAL/SHM only while all writers are
+stopped. A recovery never silently drops authoritative records and never promotes
+an unverified summary into an anchor.
+
+11. Integration contract
+------------------------
+
+runtime/gideon/hypermid/ exposes typed Python services for mutation, retrieval,
+maintenance, import/export, diagnostics, and lifecycle wiring. It maps Gideon's
+authenticated principal to common Scope and passes Trace on every core call.
+crates/hypermid-memory/ provides the independent store, policy evaluator,
+indexes, ranking, migrations, and FFI/IPC boundary. All core results use the
+shared Error contract and return Cursor after durable changes.
+
+The boundary is transport-neutral and versioned. Wave 5 supplies the in-process
+Python client and lifecycle modules. Wave 6 supplies an authenticated local bus
+with identical conformance vectors, bounded streaming, cancellation, backpressure,
+and cursor replay. Transport identity is never accepted as memory authority; the
+authenticated actor Scope remains mandatory. Mutation idempotency keys prevent
+reconnect and replay from duplicating acknowledged writes.
+
+The first integration is local OSS Gideon. No hosted service, tenant router,
+hosted console, hosted deployment, or hosted migration is part of these tasks.
+Future verification commands in memory.kvx are planning records only and must
+not be executed during specification authoring.

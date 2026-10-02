@@ -1,0 +1,1544 @@
+[meta]
+feature = "hypermid"
+title = "Hypermid: persistent context, knowledge and local module infrastructure"
+status = "in_progress"
+version = "1.0.0"
+created_at = "2026-10-02"
+source_of_truth = "spec/hypermid/spec.kvx"
+delivery_scope = "Gideon OSS runtime, console, CLI, desktop integration and distributable SDKs"
+implementation_status = "in_progress"
+
+[design.intent]
+summary = "Hypermid gives Gideon durable project knowledge, recoverable long conversations and supervised local capabilities through one versioned system. Raw history stays authoritative; context projections are derived; every model call and module effect retains identity and ownership."
+outcome = "A user continues a project across restarts and long sessions, sees what the agent remembers and why, recovers original evidence, controls background costs, and manages local modules through native Gideon interfaces."
+scope = "Deliver context projection and recall, persistent knowledge and maintenance, shared storage and protocol foundations, process supervision and routing, event delivery, client SDKs, operator tooling and product surfaces."
+first_host = "The first complete vertical integration is Gideon OSS. A generic host adapter contract is included; additional agent-host adapters are not prerequisites for the Gideon release."
+excluded = ["Hosted control-plane changes or deployment", "Replacing Gideon's authoritative final-answer delivery", "Replacing provider authentication or approval policy", "Claims of unlimited active context or perfect recall"]
+
+[design.architecture]
+language_boundary = "A Python package under runtime/gideon/hypermid adapts Gideon's existing runtime lifecycle. Rust crates under crates/hypermid-* implement bounded transport, deterministic projection, durable stores and supervised services. TypeScript, Rust, Python and Swift clients implement the same versioned contracts."
+authority = "Gideon's journal owns original conversation events and final delivery. Hypermid owns derived projection state and its knowledge records. One context authority per session and one fenced mutation authority per project prevent duplicate compaction or maintenance."
+storage = "Owner-scoped durable storage supports SQLite first and an explicit PostgreSQL backend contract. Multi-store effects use a persisted intent and reconciliation; cross-store operations never pretend to be one SQLite transaction."
+integration = "Existing cognition, history, embeddings, permissions, MCP, lifecycle and console capabilities are inventoried before replacement. Existing records are migrated or adapted through source hashes and versioned checkpoints; no parallel hidden source of truth is introduced."
+contracts = "spec/hypermid/schemas/*.schema.json define Draft 2020-12 document shapes. Runtime authorization, cursor ordering, uniqueness across records, digest equality and transaction invariants are specified separately and cannot be established by JSON Schema alone."
+transport = "Hypermid v1 uses a four-byte unsigned big-endian body length followed by a UTF-8 JSON envelope, capped at eight MiB. Larger logical data uses ordered chunks capped at 64 KiB. Unix sockets are local defaults; Windows uses authenticated loopback. Every application session uses TLS 1.3 mutual authentication and ordered per-session sequence numbers. Remote access requires explicit configuration, TLS and scoped principals."
+ownership = "Authenticated connection state determines the owner identity. Request scope is checked against that identity, not trusted as a grant. Background workers obey the same project write boundary as foreground tools."
+
+[design.shared_types]
+authority = "schemas/common.schema.json is the only definition of Id, Scope, Digest, Cursor, Error and Trace. Other documents reference those types."
+ids = "Opaque case-sensitive identifiers are bounded ASCII strings. Display paths and labels are not identities. Owner and project identities remain stable across allowed renames and aliases."
+scope = "Every project operation carries owner_id and project_id; workspace_id is optional and never grants mutation authority by itself. Owner-wide operations require a separately authorized owner capability."
+cursor = "Cursor epoch is a positive integer and sequence a nonnegative integer, both bounded to the interoperable JSON safe-integer range. Sequence exhaustion rotates the epoch through an explicit durable transition rather than wrapping."
+digests = "Digest is a lowercase hexadecimal SHA-256 over the explicitly defined byte encoding; each producing contract identifies its canonicalization rule."
+errors = "Error code is stable and machine-readable, message is bounded/redacted, retryable does not imply safe effect replay. Unknown external-effect state requires reconciliation."
+
+[design.delivery]
+vertical_slices = "Every implementation wave closes with a Gideon consumer, durable state, observable output and a specified acceptance journey. Foundations are introduced alongside a consumer; no isolated crate milestone counts as product completion."
+workflow = "Requirements and tasks are normative in spec.kvx. Supporting design and schemas refine them; conflicts require an explicit spec revision before implementation. All implementation tasks begin pending."
+capability_accounting = "Every mapped product capability has a requirement, an owning task, implementation paths and observable acceptance. Build-time support is classified explicitly. No capability is considered implemented because a design or schema exists."
+verification = "Future verify_cmd entries are implementation acceptance commands, not evidence of execution. Document validation checks syntax, references, dependency order, coverage and schemas only."
+
+[design.rollout]
+stages = "Disabled, read-only shadow, project opt-in and default-on are separate durable configuration states. Shadow mode can compare projections but cannot publish facts, mutate the journal, issue duplicate maintenance calls or advance serving cursors."
+cutover = "A session changes context authority only at a quiescent turn boundary with a journal digest and migration checkpoint. Failed cutover retains the prior authority; resumed work reconciles the recorded intent."
+rollback = "Disable serving from the new projection while preserving original journals and accepted knowledge. Downgrade is allowed only across declared compatible schema versions; incompatible state requires a matching restore or forward repair."
+completion = "Final release acceptance covers the entire capability map and the OSS installation/upgrade/user journeys; earlier vertical slices do not imply full-system completion."
+
+[tasks]
+heading = "Hypermid implementation plan"
+
+[design.foundation]
+contract = "Hypermid provides OSS-only shared Rust crates for canonical identity, fenced storage, cache policy, model and usage contracts, encrypted push, fleet logging, message buses, and role protocols, with typed Python adapters under runtime/gideon/hypermid."
+identity = "Use common.schema.json Id, Scope, Digest, Cursor, Error, and Trace definitions. Canonical filesystem identity and transport binding generations remain distinct from those shared wire identities."
+maturity = "All 21 functional source crates are planned. Runner, compaction, and transform protocols are treated as alpha; compaction and transform require newly implemented live-route conformance suites before qualification."
+release = "First integration is open-source Gideon only. Hosted rollout, hosted migration, and hosted certification are excluded."
+
+[req.base-identity]
+title = "Canonical identities and shared descriptors"
+acceptance = "Provide stable project-root identity and dependency-light contracts without duplicating common schema definitions."
+ac_1 = "Existing path aliases, symlinks, trailing separators, platform prefixes, and drive-letter case converge while linked worktrees remain distinct."
+ac_2 = "Missing paths fail in strict admission; recovery resolution follows the longest existing prefix with a bounded symlink walk and cannot create new durable state."
+ac_3 = "Storage and API payloads reference common Id, Scope, Digest, Cursor, Error, and Trace definitions and expose relative home resolution instead of silently accepting it."
+
+[req.base-storage]
+title = "Lease-fenced SQLite and PostgreSQL stores"
+acceptance = "Open resolved least-privilege stores with single-writer liveness, monotonic epochs, ordered migrations, and store-ahead reporting."
+ac_1 = "A second live writer is refused, a crashed holder is reclaimable, and a write bearing an older epoch cannot commit after lease replacement."
+ac_2 = "SQLite and PostgreSQL apply each ordered migration once, reject duplicate or descending versions, and report rather than hide a database newer than the binary."
+ac_3 = "Local files are regular owner-only files, PostgreSQL uses a session advisory lock, and database names remain distinct for module Ids with the same readable slug."
+
+[req.base-cache-models]
+title = "Cache stability, model catalog, and provider usage"
+acceptance = "Freeze prompt bytes across deferred passes and expose exact model-price and provider-capacity data without conflating missing, zero, stale, or failed states."
+ac_1 = "A defer pass replays frozen bytes without rendering, a missing boundary schedules reconciliation, and full rebuild drains all deferred work under state CAS."
+ac_2 = "Catalog prices use exact integer nanodollars, preserve unknown ingestion data, distinguish absent from free, and refuse a nonzero value that rounds to zero."
+ac_3 = "Usage payloads represent windows, regeneration, breakdowns, balances, funding basis, account provenance, staleness, and in-band failures while missing providers remain missing."
+
+[req.base-observability]
+title = "Encrypted push and fleet logging"
+acceptance = "Protect bounded push payloads and produce shared, parseable, redacted, retention-safe fleet logs."
+ac_1 = "Anonymous and authenticated HPKE envelopes have distinct versions and openers; authenticated opening verifies a pinned sender key and never downgrades."
+ac_2 = "Logging applies fleet and module redaction before control-byte guarding and emits canonical lines with hierarchical filters and stable parse failures."
+ac_3 = "Shared daily segments use append-only writes without rename, while single-writer capture sinks rotate safely and expose fallback and swallowed-write health."
+
+[req.base-bus]
+title = "Message-plane contracts, topology, and backends"
+acceptance = "Provide backend-neutral streams, registers, queues, census guards, naming and grants with deterministic in-memory and production NATS implementations."
+ac_1 = "Stream ack, nak, terminal disposition, progress extension, revisioned register snapshot/update, queue exhaustion, and dead-letter-before-term semantics pass parity conformance."
+ac_2 = "Derived subjects, streams, buckets, durables, and allow-only grants reject malformed identities, overlaps, filter escapes, unauthorized publishers, and retention mismatches."
+ac_3 = "The in-memory backend declares persistence and server-enforcement cases inapplicable; the NATS backend passes restart, rekey, revocation, grant, leaf, and system-event cases."
+
+[req.base-tool-role]
+title = "Tool provider protocol and conformance"
+acceptance = "Define deterministic tool discovery, schema pinning, withdrawal, approval recovery, late results, and real-provider conformance."
+ac_1 = "Catalog digests bind the requested preset, composition, tools, and system text; structural schema digests ignore description text and calls refuse stale schema or semantics pins."
+ac_2 = "Withdrawal enforces stamped Scope and carrier authority and returns a byte-stable recorded outcome for every repeat."
+ac_3 = "Prepared or authorized effects do not auto-run after restart, late results are cursor/ack driven and deduplicable, and capability skips cannot be reported as passes."
+
+[req.base-runner-role]
+title = "Runner session protocol and crash conformance"
+acceptance = "Define capability-gated transcript, run, streaming, delivery, baseline, plan-change, compaction, hook, and tool-dispatch behavior."
+ac_1 = "Lineage-bound reads page by ordinal, message Id, count, and bytes; run results have one terminal state; subscriptions resume from an explicit cursored origin."
+ac_2 = "Owner sends are idempotent by send Id, support only declared queue, steer, or interrupt modes, and never redispatch an indeterminate tool effect."
+ac_3 = "Real-process crash cases preserve immutable history, unique identities, one terminal run state, at-most-once dispatch, and retry-safe sends."
+
+[req.base-context-roles]
+title = "Compaction and step-transform protocols"
+acceptance = "Finish the experimental compaction and transform roles as explicit Hypermid v1 contracts with live-route conformance."
+ac_1 = "Compaction uses bounded deltas, request/deadline fences, rising versions, half-open replacement ranges, bounded wait/ready, and durable last-applied state."
+ac_2 = "Transform declarations bound hooks, phases, tools, operations, budgets, order, grants, questions, and failure policy; a plan may tighten but never widen them."
+ac_3 = "New conformance suites drive real providers through crash points and cannot graduate either role while a draft choice remains unpinned."
+
+[task.base-01]
+title = "Canonical identity and shared contracts"
+status = "done"
+wave = 1
+owner_lane = "foundation"
+requires = []
+reqs = ["base-identity.1", "base-identity.2", "base-identity.3"]
+acceptance = "The Rust workspace and Python foundation adapter expose one canonical identity and descriptor vocabulary based on the shared schema."
+ac_1 = "Cross-platform fixtures prove equivalent live spellings converge, worktrees remain distinct, and strict versus recovery-only missing-path behavior stays separated."
+ac_2 = "Schema validation proves foundation payloads reference all six common definitions and do not redefine them."
+touches = ["Cargo.toml", "crates/hypermid-foundation/Cargo.toml", "crates/hypermid-foundation/src/lib.rs", "crates/hypermid-foundation/src/path.rs", "crates/hypermid-contracts/Cargo.toml", "crates/hypermid-contracts/src/lib.rs", "crates/hypermid-contracts/src/storage.rs", "runtime/gideon/hypermid/foundation.py", "checks/hypermid/test_base_identity.py"]
+verify_cmd = "cargo test -p hypermid-foundation -p hypermid-contracts --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_identity.py"
+
+[task.base-02]
+title = "Lease-fenced storage backends"
+status = "pending"
+wave = 1
+owner_lane = "foundation"
+requires = ["base-01"]
+reqs = ["base-storage.1", "base-storage.2", "base-storage.3"]
+acceptance = "SQLite and PostgreSQL present equivalent lease, migration, store-ahead, and fence behavior through the typed Python storage adapter."
+ac_1 = "Focused crash and contention cases prove lease reclamation and stale-epoch rejection with real local SQLite and PostgreSQL connections."
+ac_2 = "Fresh, migrated, malformed-chain, and store-ahead fixtures produce the specified outcome without partial schema or seed application."
+touches = ["crates/hypermid-leases/Cargo.toml", "crates/hypermid-leases/src/lib.rs", "crates/hypermid-store/Cargo.toml", "crates/hypermid-store/src/lib.rs", "crates/hypermid-store/src/sqlite.rs", "crates/hypermid-store-postgres/Cargo.toml", "crates/hypermid-store-postgres/src/lib.rs", "runtime/gideon/hypermid/storage.py", "checks/hypermid/test_base_storage.py"]
+verify_cmd = "cargo test -p hypermid-leases -p hypermid-store -p hypermid-store-postgres --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_storage.py"
+[task.base-03]
+title = "Cache, catalog, and usage contracts"
+status = "pending"
+wave = 2
+owner_lane = "foundation"
+requires = ["wave-1-close"]
+reqs = ["base-cache-models.1", "base-cache-models.2", "base-cache-models.3"]
+acceptance = "Frozen cache state, exact catalog prices, and complete usage payloads share stable Rust and Python representations."
+ac_1 = "Cache fixtures prove byte-identical defer replay, boundary-loss reconciliation, full-rebuild drainage, durability resets, and stale-version refusal."
+ac_2 = "Catalog and usage fixtures preserve missing versus zero, exact money, account provenance, degraded entries, rolling replenishment, and unknown source fields."
+touches = ["crates/hypermid-cache/Cargo.toml", "crates/hypermid-cache/src/lib.rs", "crates/hypermid-models/Cargo.toml", "crates/hypermid-models/src/lib.rs", "crates/hypermid-usage/Cargo.toml", "crates/hypermid-usage/src/lib.rs", "runtime/gideon/hypermid/shared_models.py", "checks/hypermid/test_base_cache_models.py"]
+verify_cmd = "cargo test -p hypermid-cache -p hypermid-models -p hypermid-usage --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_cache_models.py"
+[task.base-04]
+title = "Encrypted push and fleet logging"
+status = "pending"
+wave = 4
+owner_lane = "foundation"
+requires = ["wave-3-close"]
+reqs = ["base-observability.1", "base-observability.2", "base-observability.3"]
+acceptance = "Versioned HPKE envelopes and redacted fleet logs have explicit, cross-language-safe wire and failure contracts."
+ac_1 = "Seal/open fixtures cover anonymous, authenticated, downgrade, rotation-key, tamper, malformed, bad-key, and plaintext-limit behavior."
+ac_2 = "Logging fixtures prove canonical parsing, secret removal, control escaping, multi-writer complete lines, daily retention, capture rotation, and once-only fallback diagnostics."
+touches = ["crates/hypermid-push/Cargo.toml", "crates/hypermid-push/src/lib.rs", "crates/hypermid-log/Cargo.toml", "crates/hypermid-log/src/lib.rs", "crates/hypermid-log/src/filter.rs", "crates/hypermid-log/src/format.rs", "crates/hypermid-log/src/redaction.rs", "crates/hypermid-log/src/segment.rs", "crates/hypermid-log/src/sink.rs", "runtime/gideon/hypermid/observability.py", "checks/hypermid/test_base_observability.py"]
+verify_cmd = "cargo test -p hypermid-push -p hypermid-log --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_observability.py"
+[task.base-05]
+title = "Message-plane contracts and topology"
+status = "pending"
+wave = 5
+owner_lane = "foundation"
+requires = ["wave-4-close"]
+reqs = ["base-bus.1", "base-bus.2"]
+acceptance = "Bus traits, naming, limits, grants, queue disposal, and parity classifications are complete before backend binding."
+ac_1 = "Topology fixtures reject malformed tokens, overlapping subjects, escaping consumer filters, short backing-store retention, and permissions broader than the role."
+ac_2 = "Trait fixtures cover message digests, one-in-flight cursors, revision snapshots, neutral census disconnects, bounded queue exhaustion, and dead-letter-before-term ordering."
+touches = ["crates/hypermid-bus-contracts/Cargo.toml", "crates/hypermid-bus-contracts/src/lib.rs", "crates/hypermid-bus-contracts/src/stream.rs", "crates/hypermid-bus-contracts/src/register.rs", "crates/hypermid-bus-contracts/src/work_queue.rs", "crates/hypermid-bus-contracts/src/conformance.rs", "crates/hypermid-bus-naming/Cargo.toml", "crates/hypermid-bus-naming/src/lib.rs", "crates/hypermid-bus-naming/src/names.rs", "crates/hypermid-bus-naming/src/limits.rs", "crates/hypermid-bus-naming/src/grants.rs", "runtime/gideon/hypermid/bus.py", "checks/hypermid/test_base_bus_contracts.py"]
+verify_cmd = "cargo test -p hypermid-bus-contracts -p hypermid-bus-naming --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_bus_contracts.py"
+[task.base-06]
+title = "In-memory and NATS bus backends"
+status = "pending"
+wave = 6
+owner_lane = "foundation"
+requires = ["wave-5-close"]
+reqs = ["base-bus.1", "base-bus.3"]
+acceptance = "Both bus backends pass the applicable contract catalog and expose honest unsupported classifications."
+ac_1 = "The deterministic backend passes every parity property and reports every server, leaf, and process-persistence property as inapplicable with a reason."
+ac_2 = "The NATS backend binds only provisioned resources and passes restart, credential rotation, rekey, grant denial, revocation, sentinel attribution, leaf, and system-event cases."
+touches = ["crates/hypermid-bus-memory/Cargo.toml", "crates/hypermid-bus-memory/src/lib.rs", "crates/hypermid-bus-memory/src/backend.rs", "crates/hypermid-bus-nats/Cargo.toml", "crates/hypermid-bus-nats/src/lib.rs", "crates/hypermid-bus-nats/src/connection.rs", "crates/hypermid-bus-nats/src/stream.rs", "crates/hypermid-bus-nats/src/register.rs", "crates/hypermid-bus-nats/src/work_queue.rs", "checks/hypermid/test_base_bus_backends.py"]
+verify_cmd = "cargo test -p hypermid-bus-memory -p hypermid-bus-nats --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_bus_backends.py"
+[task.base-07]
+title = "Tool and runner role protocols"
+status = "pending"
+wave = 5
+owner_lane = "foundation"
+requires = ["wave-4-close"]
+reqs = ["base-tool-role.1", "base-tool-role.2", "base-tool-role.3", "base-runner-role.1", "base-runner-role.2", "base-runner-role.3"]
+acceptance = "Role contracts, harness, independent vectors, and live-route conformance cover the complete tool-provider and runner surfaces."
+ac_1 = "Tool conformance checks catalog purity, structural digests, schema pins, terminal frames, withdrawal authority, late results, and approval crash recovery against a real provider."
+ac_2 = "Runner conformance checks grouped capabilities, transcript and model views, run results, resumable events, delivery modes, session changes, tool attribution, and all crash guarantees against a real runner."
+touches = ["crates/hypermid-role-harness/Cargo.toml", "crates/hypermid-role-harness/src/lib.rs", "crates/hypermid-role-tool/Cargo.toml", "crates/hypermid-role-tool/src/lib.rs", "crates/hypermid-role-tool-conformance/Cargo.toml", "crates/hypermid-role-tool-conformance/src/lib.rs", "crates/hypermid-role-runner/Cargo.toml", "crates/hypermid-role-runner/src/lib.rs", "crates/hypermid-role-runner-conformance/Cargo.toml", "crates/hypermid-role-runner-conformance/src/lib.rs", "crates/hypermid-role-vectors/tool-v1", "crates/hypermid-role-vectors/runner-v1", "runtime/gideon/hypermid/roles.py", "checks/hypermid/test_base_roles.py"]
+verify_cmd = "cargo test -p hypermid-role-harness -p hypermid-role-tool-conformance -p hypermid-role-runner-conformance --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_roles.py"
+[task.base-08]
+title = "Compaction, transform, and OSS foundation integration"
+status = "pending"
+wave = 8
+owner_lane = "foundation"
+requires = ["wave-7-close"]
+reqs = ["base-context-roles.1", "base-context-roles.2", "base-context-roles.3"]
+acceptance = "Compaction and transform protocols are fully pinned, conformance-tested over real routes, and callable through the OSS Gideon Hypermid boundary."
+ac_1 = "Compaction conformance proves setup purity, delta cursor recovery, range structure, strict request/deadline fencing, rising versions, bounded wait/ready, and every crash point."
+ac_2 = "Transform conformance proves declaration bounds, ordering and exclusive replacement, phase-answer legality, explicit grants, questions, failure policy, purity, and crash recovery."
+ac_3 = "An OSS integration journey opens a fenced store, emits a redacted trace, exchanges a bus message, discovers roles, applies one transform and compaction decision, and returns shared Cursor or Error values."
+touches = ["crates/hypermid-role-compaction/Cargo.toml", "crates/hypermid-role-compaction/src/lib.rs", "crates/hypermid-role-compaction-conformance/Cargo.toml", "crates/hypermid-role-compaction-conformance/src/lib.rs", "crates/hypermid-role-transform/Cargo.toml", "crates/hypermid-role-transform/src/lib.rs", "crates/hypermid-role-transform-conformance/Cargo.toml", "crates/hypermid-role-transform-conformance/src/lib.rs", "crates/hypermid-role-vectors/compaction-v1", "crates/hypermid-role-vectors/transform-v1", "runtime/gideon/hypermid/compaction.py", "runtime/gideon/hypermid/transforms.py", "runtime/gideon/hypermid/foundation_service.py", "checks/hypermid/test_base_context_roles.py", "checks/hypermid/test_base_oss_integration.py"]
+verify_cmd = "cargo test -p hypermid-role-compaction-conformance -p hypermid-role-transform-conformance --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_context_roles.py checks/hypermid/test_base_oss_integration.py"
+[design.fabric]
+contract = "Hypermid is a local-first authenticated process fabric implemented in Rust and consumed by Gideon through a typed Python adapter. It owns module discovery, supervision, routing, flow control, durable effects, events, diagnostics, registry lifecycle, service integration, and optional federation."
+source = "spec/hypermid/design/fabric.txt"
+schema = "spec/hypermid/schemas/fabric.schema.json"
+capability_map = "spec/hypermid/maps/fabric.json"
+verification_policy = "verify_cmd values are future implementation gates and are not run during specification"
+protocol = "hypermid.v1"
+framing = "Four-byte unsigned big-endian JSON byte length, maximum 8 MiB; streamed event data uses digest-checked chunks no larger than 64 KiB."
+local_transport = "Owner-only Unix domain socket on Unix; owner-protected connection record and authenticated loopback on Windows."
+external_transport = "Disabled by default; explicit listener requires TLS 1.3 and principal scopes."
+trust = "Only authenticated principals and daemon-stamped supervised spawn identities grant authority. Client labels and payload fields never grant authority."
+
+[req.fab-001]
+title = "Versioned bounded JSON framing"
+status = "pending"
+ac_1 = "Every post-handshake message uses protocol hypermid.v1 and a four-byte unsigned big-endian JSON byte length that is rejected above 8 MiB before allocation."
+ac_2 = "Event bodies larger than 64 KiB are emitted as ordered chunks no larger than 64 KiB with a whole-event SHA-256 digest and deterministic reassembly refusal."
+
+[req.fab-002]
+title = "Authenticated local and external sessions"
+status = "pending"
+ac_1 = "Unix local sessions use an owner-only socket plus peer evidence and HMAC proof; Windows uses an owner-only connection record plus authenticated loopback."
+ac_2 = "External listeners remain absent by default and, when enabled, refuse sessions lacking TLS 1.3 identity and the required principal scopes."
+
+[req.fab-003]
+title = "Validated module discovery and manifests"
+status = "pending"
+ac_1 = "Discovery reads only configured roots, validates canonical executable paths, manifest versions, ids, dependency cycles, capability conflicts, and SHA-256 artifact digests before changing the registry generation."
+ac_2 = "A discovered module remains unroutable until its one-use launch secret proves the expected module id and spawn generation and its operation catalog validates."
+ac_3 = "The manifest vocabulary covers control surfaces, operation providers, pipeline stages, internal services, event publishers, event consumers, federation gateways, and maintenance workers without requiring a foreign service."
+
+[req.fab-004]
+title = "Epoch-safe route lifecycle"
+status = "pending"
+ac_1 = "Route creation becomes visible only after the selected ready module acknowledges the bind; failed binds release every reservation."
+ac_2 = "Every routed frame is checked against route id and route epoch, and stale epochs or revoked scope produce typed terminal closure without reaching a reused route slot."
+
+[req.fab-005]
+title = "Bounded flow control"
+status = "pending"
+ac_1 = "Each route has independent request and byte credits, while control traffic has a separate bounded queue."
+ac_2 = "Slow or disconnected consumers cannot grow memory without bound or consume another route's capacity, and terminal frames deterministically release request credit."
+
+[req.fab-006]
+title = "Cancellation and absolute deadlines"
+status = "pending"
+ac_1 = "A request deadline is converted once to a monotonic budget and is never extended across internal hops, route reopen, or retry."
+ac_2 = "Cancellation is idempotent by message id, reaches queued or running work, discards later non-terminal output, and yields at most one terminal classification."
+
+[req.fab-007]
+title = "Crash-contained module supervision"
+status = "pending"
+ac_1 = "Each module follows the declared lifecycle state machine with bounded restart windows, exponential backoff, drain deadlines, and retained terminal evidence."
+ac_2 = "Linux cgroups, Windows Job Objects, and pid-plus-start-time process identity contain descendants and prevent stale process ids from being killed after daemon restart."
+
+[req.fab-008]
+title = "Safe replacement and registry reconciliation"
+status = "pending"
+ac_1 = "Registry rescan provides preview and apply modes and atomically increments generation only after the complete candidate manifest set validates."
+ac_2 = "Overlap-safe modules may warm a replacement before atomic cutover; failed warmup leaves the incumbent serving and exclusive modules use ordered drain then restart."
+
+[req.fab-009]
+title = "Durable effect recovery"
+status = "pending"
+ac_1 = "Durable effects commit an intent with effect id and input digest before dispatch and commit a terminal result before acknowledging it."
+ac_2 = "Restart reconciliation returns committed, not_started, or unknown and never blindly replays an effect that may have begun."
+
+[req.fab-010]
+title = "Durable scoped event bus"
+status = "pending"
+ac_1 = "Publish and subscribe enforce principal scopes, record ordered cursors, and support atomic snapshot plus retained replay plus live continuation."
+ac_2 = "Delivery is at least once with explicit durable acknowledgement, bounded redelivery, and a dead-letter record preserving original id, topic, digest, delivery count, and reason."
+
+[req.fab-011]
+title = "Health and operational diagnostics"
+status = "pending"
+ac_1 = "Health combines process, registration, readiness, probe, resource, route-breaker, and dependency evidence without reporting unsupported measurements as zero."
+ac_2 = "Operators can read bounded stderr, durable terminal history, active routes, resource readings, provenance, and spawn events even when a module is unhealthy."
+
+[req.fab-012]
+title = "Scoped control RPC"
+status = "pending"
+ac_1 = "The control plane exposes describe, registry, route, supervisor, effect, and event operations through the same authenticated envelope with operation-specific scopes."
+ac_2 = "Mutations are idempotent by message id, responses identify their daemon or registry generation, and stale or lost subscription cursors return explicit recovery data."
+
+[req.fab-013]
+title = "Owned install update and uninstall"
+status = "pending"
+ac_1 = "Install and update accept only fresh signed index metadata and digest-verified artifacts, stage beside the active generation, and atomically activate or roll back."
+ac_2 = "Uninstall and replacement mutate only ownership-ledger paths whose current digest still matches, preserving user stores and unrelated configuration."
+
+[req.fab-014]
+title = "Cross-platform daemon service integration"
+status = "pending"
+ac_1 = "Linux systemd user units, macOS LaunchAgents, and Windows scheduled tasks start the per-user daemon and preserve its ordered child shutdown window."
+ac_2 = "Register, reload, start, stop, restart, and deregister return exact service-manager failures and apply changed definitions before restart."
+
+[req.fab-015]
+title = "Opt-in federated routing"
+status = "pending"
+ac_1 = "Paired peers use signed expiring discovery, direct-first dialing, mutually authenticated encrypted sessions, and separate single-use relay grants."
+ac_2 = "Remote catalogs expose only explicitly remote operations, and the receiving fabric intersects remote grants with local scopes before dispatch."
+
+[req.fab-016]
+title = "Durable outbound phone channel"
+status = "pending"
+ac_1 = "The phone channel uses outbound-only federation and reconciles unsettled mutation effects before admitting another mutation after reconnect."
+ac_2 = "Push notifications carry only opaque wake tokens and cannot contain commands, route credentials, request payloads, or assistant content."
+
+[req.fab-017]
+title = "Typed Gideon adapter"
+status = "pending"
+ac_1 = "The Python adapter maps the shared Id, Scope, Digest, Cursor, Error, and Trace contracts and exposes typed async control, route, event, cancellation, and effect-status calls."
+ac_2 = "On daemon epoch change it invalidates route epochs and event cursors, refreshes snapshots, and never retries a durable effect without a conclusive status."
+
+[task.fab-01-bootstrap]
+title = "Implement authenticated framing minimal daemon and passthrough adapter"
+status = "pending"
+wave = 1
+owner_lane = "fabric"
+requires = ["base-01"]
+reqs = ["fab-001.1", "fab-001.2", "fab-002.1", "fab-002.2", "fab-017.1", "fab-017.2"]
+touches = ["crates/hypermid-protocol/Cargo.toml", "crates/hypermid-protocol/src/lib.rs", "crates/hypermid-transport/Cargo.toml", "crates/hypermid-transport/src/lib.rs", "crates/hypermid-transport/src/framing.rs", "crates/hypermid-transport/src/handshake.rs", "crates/hypermid-transport/src/local.rs", "crates/hypermid-transport/src/tls.rs", "crates/hypermid-daemon/Cargo.toml", "crates/hypermid-daemon/src/main.rs", "runtime/gideon/hypermid/__init__.py", "runtime/gideon/hypermid/models.py", "runtime/gideon/hypermid/adapter.py", "crates/hypermid-transport/tests/protocol_vectors.rs", "checks/runtime/test_hypermid_adapter.py"]
+acceptance = "Authenticated hypermid.v1 framing runs through a minimal daemon and the typed Gideon passthrough adapter."
+ac_1 = "Golden vectors cover length boundaries, malformed JSON, handshake proof binding, and external TLS scope refusal."
+ac_2 = "The focused gate exercises a real local socket through the Rust daemon and runtime/gideon/hypermid adapter without fake protocol implementations."
+verify_cmd = "cargo test -p hypermid-protocol -p hypermid-transport -p hypermid-daemon && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_adapter.py"
+[task.fab-02-registry-routing]
+title = "Implement manifest registry and epoch-safe routing"
+status = "pending"
+wave = 2
+owner_lane = "fabric"
+requires = ["wave-1-close"]
+reqs = ["fab-003.1", "fab-003.2", "fab-003.3", "fab-004.1", "fab-004.2"]
+touches = ["crates/hypermid-control/Cargo.toml", "crates/hypermid-control/src/lib.rs", "crates/hypermid-daemon/Cargo.toml", "crates/hypermid-daemon/src/manifest.rs", "crates/hypermid-daemon/src/registry.rs", "crates/hypermid-daemon/src/router.rs", "crates/hypermid-daemon/tests/registry_routes.rs"]
+acceptance = "Validated manifests register operations and routes bind atomically with enforced epochs."
+ac_1 = "Invalid roots, digests, ids, dependency cycles, capability conflicts, and launch identities fail before the registry generation changes."
+ac_2 = "A stale route epoch cannot deliver to a new binding even when the route id is reused."
+verify_cmd = "cargo test -p hypermid-daemon --test registry_routes"
+[task.fab-03-flow-lifecycle]
+title = "Implement flow control cancellation and deadlines"
+status = "pending"
+wave = 3
+owner_lane = "fabric"
+requires = ["wave-2-close"]
+reqs = ["fab-005.1", "fab-005.2", "fab-006.1", "fab-006.2"]
+touches = ["crates/hypermid-daemon/src/flow.rs", "crates/hypermid-daemon/src/connection.rs", "crates/hypermid-daemon/src/deadline.rs", "crates/hypermid-daemon/src/cancellation.rs", "crates/hypermid-daemon/tests/flow_lifecycle.rs"]
+acceptance = "Every route and connection remains bounded while cancellation and deadline outcomes are terminal and race safe."
+ac_1 = "Credit exhaustion blocks or refuses only the affected route while control traffic remains responsive."
+ac_2 = "Cancel, timeout, response, and disconnect races produce exactly one terminal result and leave no credit or request entry leaked."
+verify_cmd = "cargo test -p hypermid-daemon --test flow_lifecycle"
+[task.fab-04-control-diagnostics]
+title = "Implement scoped control RPC health and diagnostics"
+status = "pending"
+wave = 4
+owner_lane = "fabric"
+requires = ["wave-3-close"]
+reqs = ["fab-011.1", "fab-011.2", "fab-012.1", "fab-012.2"]
+touches = ["crates/hypermid-control/Cargo.toml", "crates/hypermid-control/src/lib.rs", "crates/hypermid-control/src/operations.rs", "crates/hypermid-daemon/src/control.rs", "crates/hypermid-daemon/src/health.rs", "crates/hypermid-daemon/src/diagnostics.rs", "crates/hypermid-daemon/tests/control_diagnostics.rs", "runtime/gideon/hypermid/subscriptions.py"]
+acceptance = "Scoped control operations expose live and retained health evidence through Rust contracts and the Gideon adapter."
+ac_1 = "Every control operation enforces its principal scope and returns idempotent mutation results with daemon or registry generation."
+ac_2 = "Health and diagnostics remain readable during failure and report unavailable evidence and subscription gaps explicitly."
+verify_cmd = "cargo test -p hypermid-control && cargo test -p hypermid-daemon --test control_diagnostics && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_adapter.py"
+[task.fab-05-supervision]
+title = "Implement advanced contained module supervision and replacement"
+status = "pending"
+wave = 5
+owner_lane = "fabric"
+requires = ["base-07"]
+reqs = ["fab-007.1", "fab-007.2", "fab-008.1", "fab-008.2"]
+touches = ["crates/hypermid-daemon/src/supervisor.rs", "crates/hypermid-daemon/src/containment.rs", "crates/hypermid-daemon/src/replacement.rs", "crates/hypermid-daemon/src/child_journal.rs", "crates/hypermid-daemon/tests/supervision.rs"]
+acceptance = "All declared module system roles are contained, replaceable, health checked, and diagnosable through retained evidence without requiring a foreign service."
+ac_1 = "Crash, failed warmup, hung drain, daemon restart, and stale pid scenarios preserve the lifecycle and containment invariants."
+ac_2 = "Overlap-safe cutover and exclusive restart preserve route ownership and leave the incumbent serving when replacement warmup fails."
+verify_cmd = "cargo test -p hypermid-daemon --test supervision"
+[task.fab-06-effects-federation]
+title = "Implement durable event bus federation and phone effect channel"
+status = "pending"
+wave = 6
+owner_lane = "fabric"
+requires = ["base-06"]
+reqs = ["fab-009.1", "fab-009.2", "fab-010.1", "fab-010.2", "fab-015.1", "fab-015.2", "fab-016.1", "fab-016.2"]
+touches = ["crates/hypermid-bus/Cargo.toml", "crates/hypermid-bus/src/lib.rs", "crates/hypermid-bus/src/effects.rs", "crates/hypermid-bus/src/events.rs", "crates/hypermid-bus/src/journal.rs", "crates/hypermid-bus/src/dead_letter.rs", "crates/hypermid-bus/src/bridge.rs", "crates/hypermid-bus/src/remote_effects.rs", "crates/hypermid-transport/src/federation.rs", "crates/hypermid-transport/src/relay.rs", "crates/hypermid-daemon/src/federation.rs", "crates/hypermid-bus/tests/recovery.rs", "crates/hypermid-daemon/tests/federation.rs"]
+acceptance = "The self-contained durable bus, optional bridge, paired federation, and outbound phone origins preserve scoped ordering and effect recovery."
+ac_1 = "Kill-window recovery demonstrates intent-before-dispatch and result-before-ack without requiring a foreign broker."
+ac_2 = "Direct and relay reconnect scenarios enforce grants and settle committed or not_started mutations while uncertain mutations remain unknown."
+verify_cmd = "cargo test -p hypermid-transport && cargo test -p hypermid-bus --test recovery && cargo test -p hypermid-daemon --test federation"
+[task.fab-07-registry-service]
+title = "Implement owned install update and service lifecycle"
+status = "pending"
+wave = 7
+owner_lane = "fabric"
+requires = ["wave-6-close"]
+reqs = ["fab-013.1", "fab-013.2", "fab-014.1", "fab-014.2"]
+touches = ["crates/hypermid-registry/Cargo.toml", "crates/hypermid-registry/src/lib.rs", "crates/hypermid-registry/src/ownership.rs", "crates/hypermid-registry/src/release_index.rs", "crates/hypermid-registry/src/activation.rs", "crates/hypermid-registry/src/service/linux.rs", "crates/hypermid-registry/src/service/macos.rs", "crates/hypermid-registry/src/service/windows.rs", "crates/hypermid-registry/tests/lifecycle.rs"]
+acceptance = "Owned artifacts and per-user daemon services install, update, roll back, and uninstall without mutating unowned state."
+ac_1 = "Signature, freshness, digest, compatibility, collision, activation, and rollback failure paths stop at their declared boundary."
+ac_2 = "Each platform service definition preserves ordered child shutdown and returns exact manager errors through the registry API."
+verify_cmd = "cargo test -p hypermid-registry --test lifecycle"
+[task.fab-08-integration]
+title = "Qualify the complete OSS process fabric"
+status = "pending"
+wave = 8
+owner_lane = "fabric"
+requires = ["wave-7-close"]
+reqs = ["fab-001.1", "fab-001.2", "fab-002.1", "fab-002.2", "fab-003.1", "fab-003.2", "fab-003.3", "fab-004.1", "fab-004.2", "fab-005.1", "fab-005.2", "fab-006.1", "fab-006.2", "fab-007.1", "fab-007.2", "fab-008.1", "fab-008.2", "fab-009.1", "fab-009.2", "fab-010.1", "fab-010.2", "fab-011.1", "fab-011.2", "fab-012.1", "fab-012.2", "fab-013.1", "fab-013.2", "fab-014.1", "fab-014.2", "fab-015.1", "fab-015.2", "fab-016.1", "fab-016.2", "fab-017.1", "fab-017.2"]
+touches = ["crates/hypermid-daemon/tests/oss_fabric.rs", "checks/runtime/test_hypermid_adapter.py", "spec/hypermid/schemas/fabric.schema.json", "spec/hypermid/maps/fabric.json"]
+acceptance = "The complete OSS fabric runs end to end from Gideon adapter through authenticated daemon routing, supervised modules, durable events and effects, optional federation, registry update, and recovery."
+ac_1 = "The aggregate journey uses real processes and durable stores and records every required capability without placeholder or foreign-service dependencies."
+ac_2 = "Restart, route epoch, cursor gap, effect ambiguity, rollback, and service lifecycle evidence remain explicit and no partial gate is presented as release certification."
+verify_cmd = "cargo test -p hypermid-protocol -p hypermid-transport -p hypermid-control -p hypermid-daemon -p hypermid-bus -p hypermid-registry && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_adapter.py"
+[design.context]
+document = "spec/hypermid/design/context.txt"
+contract = "Hypermid owns immutable context state and deterministic projections behind a bounded versioned protocol; runtime/gideon/hypermid is the first adapter and Gideon remains the product authority for sessions, providers, tools, and authorization."
+
+[req.ctx-ownership]
+title = "Bounded protocol and context ownership"
+acceptance = "Define and enforce the authority boundary between Gideon and the independent Hypermid engine."
+ac_1 = "Each UTF-8 JSON envelope uses a four-byte unsigned big-endian length, stays within eight MiB, uses digest-checked ordered chunks of at most 64 KiB for larger logical inputs, and rejects unsupported, oversized, stale, incomplete, or scope-mismatched work before state changes."
+ac_2 = "Gideon owns authorization, provider credentials, tool execution, final delivery, session lifecycle, and the authoritative transcript while Hypermid owns only its source references and derived projection, summary, reduction, cache, lease, and diagnostic state."
+ac_3 = "Exactly one fenced writer lease can advance a session cursor, and repeated mutation idempotency keys return the recorded outcome without advancing it again."
+
+[req.ctx-identity]
+title = "Stable scoped context identity"
+acceptance = "Keep context identities stable through retries, restarts, provider changes, edits, forks, and imports."
+ac_1 = "Sessions, journal items, tool calls, derived summaries, projections, and subagent snapshots have stable non-empty identifiers and explicit relation fields instead of position-derived identity."
+ac_2 = "Owner or project mismatch fails closed, workspace changes require a recorded rebind, and reconnecting or replaying an acknowledged append cannot create a second item."
+
+[req.ctx-history]
+title = "Immutable history and exact recovery"
+acceptance = "Preserve an append-only context journal that can reproduce every accepted original item."
+ac_1 = "Ingest atomically validates Gideon source identity and digest, ordering, tool-call/result linkage, expected cursor, and idempotency before appending a reference or matching snapshot; summaries and reductions never overwrite source items."
+ac_2 = "Exact recovery by item id, reclaim tag, or cursor range resolves the authoritative Gideon content through the scoped adapter and verifies its digest, including content absent from the current projection."
+ac_3 = "Corrections, edits, tombstones, regeneration, and forks append explicit relations and do not renumber or silently mutate prior entries."
+
+[req.ctx-projection]
+title = "Deterministic context projection"
+acceptance = "Derive reproducible provider-ready context from a committed journal cursor."
+ac_1 = "A projection records source range and digest, policy revision, mode, provider profile, budget inputs, selected identities, region digests, and output digest."
+ac_2 = "The same journal cursor and request inputs produce byte-identical normalized projection output, and no projection mutates the journal."
+
+[req.ctx-provider-serialization]
+title = "Capability-driven provider serialization"
+acceptance = "Serialize valid provider requests without coupling the engine to provider credentials or SDKs."
+ac_1 = "Provider capability profiles cover context and output limits, supported roles and parts, tool adjacency, reasoning, attachments, and cache boundaries; unsupported combinations are rejected before dispatch."
+ac_2 = "The explicit host_serialized render mode returns language-independent normalized blocks and ModelBudget values; Gideon's HostSerializer preserves tool pairing and order, excludes internal metadata, and reports a canonical serialized digest before dispatch."
+ac_3 = "A provider-profile change creates a new projection generation and never reinterprets stored source bytes in place."
+
+[req.ctx-cache-policy]
+title = "Stable baseline and delta cache policy"
+acceptance = "Preserve reusable prompt prefixes while admitting new durable context at explicit boundaries."
+ac_1 = "Managed projections expose separately digested baseline, delta, and live-tail regions; replay returns byte-identical baseline and delta bytes."
+ac_2 = "Delta refresh changes only delta bytes, while baseline folds occur only for a declared hard-boundary reason and atomically advance the cache generation."
+ac_3 = "Reduction or decay changes that affect cached bytes wait for a compatible boundary unless the declared overflow policy records and returns a pressure refusal."
+
+[req.ctx-tier-decay]
+title = "Budgeted tier decay"
+acceptance = "Degrade older history predictably while protecting current work and important anchors."
+ac_1 = "Every summarized span has four ordered immutable detail tiers, and tier selection accounts for age, importance, protection, recurrence, dependency reach, and available budget."
+ac_2 = "Tier decisions remain fixed for a cache generation and reserve output, the live tail, active tool pairs, latest user request, approvals, and protected-window capacity first."
+
+[req.ctx-background-summary]
+title = "Background summary pipeline"
+acceptance = "Build derived historical summaries off the active turn with bounded, validated jobs."
+ac_1 = "Summary jobs carry source cursor range and digest, tier schema, locale, token limits, lease, and opaque job id; per-session single flight and bounded global concurrency prevent duplicate work."
+ac_2 = "Only a structurally valid candidate matching the current source digest and live lease commits atomically; stale, empty, malformed, cancelled, or timed-out work cannot alter projection state."
+ac_3 = "The immutable journal can rebuild all summary records after loss, and summary-model usage is recorded separately from foreground usage."
+
+[req.ctx-reduction]
+title = "Explicit recoverable reduction"
+acceptance = "Let agents request context removal by stable tags without losing authoritative content."
+ac_1 = "Reduction accepts tags and ranges idempotently, reports accepted and rejected targets individually, and rejects foreign, unknown, protected, provider-framing, active, or already summarized targets."
+ac_2 = "Applied reductions use typed markers with identity, size, and exact recovery instructions, while latest user input, active tool pairs, approvals, control messages, and the protected tail remain present."
+
+[req.ctx-reclaim]
+title = "Deterministic pressure reclaim"
+acceptance = "Recover context budget through safe ordered policies and refuse unsafe overflow."
+ac_1 = "Reclaim ranks explicit reductions, superseded edits, obsolete or completed tool output, historical detail, and unprotected prose by recoverable size, age, dependency safety, and content class."
+ac_2 = "Advisory, action, emergency, and hard-wall pressure bands use calibrated provider mass; the hard wall refuses the call when no safe plan fits instead of sending unmanaged or silently truncated input."
+ac_3 = "Every reclaim plan records chosen candidates, exclusions, reason codes, estimated savings, and the compatible boundary where it applied."
+
+[req.ctx-recovery]
+title = "Crash-safe projection recovery"
+acceptance = "Rebuild state from the journal and safely replay a compatible last-known-good projection."
+ac_1 = "The engine stores a complete last-known-good normalized projection with cursor, generation, provider-profile digest, policy revision, and region digests before publication."
+ac_2 = "Replay is allowed only when every binding and budget input still matches; otherwise the adapter returns a retryable refusal and never dispatches an unmanaged prompt."
+ac_3 = "Corrupt or partial derived records are quarantined and observable, and journal replay can reconstruct projection state without source loss."
+
+[req.ctx-subagents]
+title = "Isolated subagent context"
+acceptance = "Give delegated work bounded inherited context without sharing mutable context authority."
+ac_1 = "A child receives a distinct session identity and immutable spawn snapshot containing parent link, cursor, allowed regions, scope, mode ceiling, provider profile, and budget."
+ac_2 = "Child writes, summaries, reductions, and cache generations remain child-owned; a parent contribution requires Gideon authorization and appends as a new parent item with child identity and digest."
+ac_3 = "Child usage and context outcomes remain separately attributable while supporting bounded roll-up diagnostics."
+
+[req.ctx-hooks]
+title = "Context lifecycle hooks"
+acceptance = "Expose deterministic, bounded extension points around context operations."
+ac_1 = "Lifecycle events cover bind, ingest, projection, pressure, reduction, summary, recovery, subagent snapshot, and faults with scope, trace, session, cursor, policy revision, and redacted metadata."
+ac_2 = "Pre hooks may deny or return bounded synthetic blocks with identities and digests but cannot rewrite journal items; timeouts and exceptions cannot leave partial mutations."
+ac_3 = "Post hooks run after commit and are advisory, with every hook outcome recorded under the originating trace."
+
+[req.ctx-modes]
+title = "Optional context modes and features"
+acceptance = "Support off, pass-through, shadow, and primary operation with explicit overflow and refusal policy."
+ac_1 = "off leaves Hypermid inactive, pass_through observes health while preserving Gideon request bytes, shadow computes locally without model calls, durable mutation, publication, or serving-cursor advance, and primary serves verified projections under a fenced lease."
+ac_2 = "Background summaries, reduction tools, automatic reclaim, nudges, subagent contributions, and synthetic hook blocks are independently configurable with safe defaults."
+ac_3 = "Strict behavior is selected through overflow_policy and refusal_policy; configuration changes take effect only at a turn boundary, advance policy revision when bytes may change, and preserve prior and next digests."
+
+[req.ctx-diagnostics]
+title = "Context diagnostics and accounting"
+acceptance = "Make every context decision, cost, and failure inspectable without exposing content by default."
+ac_1 = "Status includes cursor, generation, scope binding, mode, provider-profile digest, journal and region sizes, calibrated mass, budget, selected tiers, protected items, pending reductions, summary work, and recovery eligibility."
+ac_2 = "Decision records carry one reason code and Trace, while accounting distinguishes no call, missing usage, zero usage, cache reads and writes, summaries, and subagents."
+ac_3 = "Diagnostic output is redacted and bounded by default, rotates safely, and remains available when the engine cannot answer."
+
+[req.ctx-portability]
+title = "Context migration, export, and restore"
+acceptance = "Move context state without changing authoritative history, scope, identity, or cache semantics."
+ac_1 = "Canonical export includes session binding, ordered source references, derived records, policy revisions, cache generations, reductions, and manifest digests while excluding credentials, live leases, transient queues, and SDK payloads."
+ac_2 = "Import is staged, bounded, scope checked, digest verified, idempotent, and invisible until the entire manifest commits."
+ac_3 = "Migration resumes from a committed cursor without duplication, restore rebuilds derived state from verified sources, and failed cutover retains the previous authority at a quiescent turn boundary."
+
+[req.ctx-gideon-adapter]
+title = "Installed Gideon pass-through adapter and status"
+acceptance = "Install and supervise Hypermid in Gideon without changing provider input before primary projection is enabled."
+ac_1 = "Gideon supervises the local engine, negotiates protocol version and transport limits, binds authenticated scope, and exposes redacted availability, version, mode, cursor, and lease status."
+ac_2 = "off and pass_through preserve Gideon's existing assembled provider request bytes and cannot publish context state; shadow may compare a local projection but makes no model calls or durable writes and advances no serving cursor."
+ac_3 = "Engine startup, handshake, timeout, or disconnect failure preserves the existing Gideon request path and records an unavailable status without claiming Hypermid served the turn."
+
+[req.ctx-gideon-integration]
+title = "OSS Gideon context integration"
+acceptance = "Use Hypermid for complete native-agent context management while preserving Gideon authority."
+ac_1 = "Before each primary-mode model turn Gideon binds the session, appends newly committed items, supplies provider capabilities and safe budget, runs hooks, requests a projection, serializes it, and verifies its digest before dispatch."
+ac_2 = "Assistant and tool events append after the turn, while stop, edit/resend, regenerate, fork, compaction, provider failover, and subagent spawn use explicit protocol operations."
+ac_3 = "Existing Gideon authorization, approval, cancellation, streaming, provider selection, and transcript persistence remain authoritative, and every primary-mode provider call has a recorded projection or policy-selected refusal."
+
+[task.ctx-ownership]
+title = "Implement the bounded context protocol and ownership fence"
+status = "pending"
+wave = 1
+owner_lane = "context"
+requires = ["sec-01"]
+reqs = ["ctx-ownership.1", "ctx-ownership.2", "ctx-ownership.3"]
+touches = ["crates/hypermid-core/src/protocol.rs", "crates/hypermid-context/src/engine.rs", "runtime/gideon/hypermid/protocol.py", "runtime/gideon/hypermid/ownership.py", "crates/hypermid-context/tests/protocol_contract.rs", "checks/runtime/test_hypermid_protocol.py"]
+verify_cmd = "cargo test -p hypermid-context --test protocol_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_protocol.py"
+[task.ctx-identity]
+title = "Implement stable scoped context identities"
+status = "pending"
+wave = 1
+owner_lane = "context"
+requires = ["ctx-ownership"]
+reqs = ["ctx-identity.1", "ctx-identity.2"]
+touches = ["crates/hypermid-core/src/identity.rs", "crates/hypermid-context/src/identity_store.rs", "runtime/gideon/hypermid/identity.py", "crates/hypermid-context/tests/identity_contract.rs", "checks/runtime/test_hypermid_identity.py"]
+verify_cmd = "cargo test -p hypermid-context --test identity_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_identity.py"
+[task.ctx-history]
+title = "Implement immutable history and exact expansion"
+status = "pending"
+wave = 1
+owner_lane = "context"
+requires = ["ctx-identity"]
+reqs = ["ctx-history.1", "ctx-history.2", "ctx-history.3"]
+touches = ["crates/hypermid-core/src/history.rs", "crates/hypermid-context/src/journal.rs", "runtime/gideon/hypermid/history.py", "crates/hypermid-context/tests/history_projection.rs", "checks/runtime/test_hypermid_history.py"]
+verify_cmd = "cargo test -p hypermid-context --test history_projection && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_history.py"
+[task.ctx-projection]
+title = "Implement deterministic context projections"
+status = "pending"
+wave = 3
+owner_lane = "context"
+requires = ["wave-2-close"]
+reqs = ["ctx-projection.1", "ctx-projection.2"]
+touches = ["crates/hypermid-core/src/projection.rs", "crates/hypermid-context/src/projector.rs", "runtime/gideon/hypermid/projection.py", "crates/hypermid-context/tests/projection_determinism.rs", "checks/runtime/test_hypermid_projection.py"]
+verify_cmd = "cargo test -p hypermid-context --test projection_determinism && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_projection.py"
+[task.ctx-provider-serialization]
+title = "Implement provider-capability serialization"
+status = "pending"
+wave = 3
+owner_lane = "context"
+requires = ["ctx-projection"]
+reqs = ["ctx-provider-serialization.1", "ctx-provider-serialization.2", "ctx-provider-serialization.3"]
+touches = ["crates/hypermid-core/src/provider.rs", "crates/hypermid-context/src/serializer.rs", "runtime/gideon/hypermid/provider.py", "crates/hypermid-context/tests/provider_serialization.rs", "checks/runtime/test_hypermid_provider_serialization.py"]
+verify_cmd = "cargo test -p hypermid-context --test provider_serialization && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_provider_serialization.py"
+[task.ctx-cache-policy]
+title = "Implement stable baseline and delta cache regions"
+status = "pending"
+wave = 3
+owner_lane = "context"
+requires = ["ctx-provider-serialization"]
+reqs = ["ctx-cache-policy.1", "ctx-cache-policy.2", "ctx-cache-policy.3"]
+touches = ["crates/hypermid-core/src/cache.rs", "crates/hypermid-context/src/cache_store.rs", "runtime/gideon/hypermid/cache.py", "crates/hypermid-context/tests/cache_policy.rs", "checks/runtime/test_hypermid_cache_policy.py"]
+verify_cmd = "cargo test -p hypermid-context --test cache_policy && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_cache_policy.py"
+[task.ctx-tier-decay]
+title = "Implement budgeted historical tier decay"
+status = "pending"
+wave = 3
+owner_lane = "context"
+requires = ["ctx-cache-policy"]
+reqs = ["ctx-tier-decay.1", "ctx-tier-decay.2"]
+touches = ["crates/hypermid-core/src/decay.rs", "crates/hypermid-core/src/budget.rs", "crates/hypermid-context/src/tier_selector.rs", "crates/hypermid-context/tests/tier_decay.rs"]
+verify_cmd = "cargo test -p hypermid-context --test tier_decay"
+[task.ctx-background-summary]
+title = "Implement leased background summarization"
+status = "pending"
+wave = 2
+owner_lane = "context"
+requires = ["sec-05", "fab-02-registry-routing"]
+reqs = ["ctx-background-summary.1", "ctx-background-summary.2", "ctx-background-summary.3"]
+touches = ["crates/hypermid-core/src/summary.rs", "crates/hypermid-context/src/summary_queue.rs", "runtime/gideon/hypermid/summarizer.py", "crates/hypermid-context/tests/summary_pipeline.rs", "checks/runtime/test_hypermid_summarizer.py"]
+verify_cmd = "cargo test -p hypermid-context --test summary_pipeline && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_summarizer.py"
+[task.ctx-reduction]
+title = "Implement explicit recoverable reduction"
+status = "pending"
+wave = 3
+owner_lane = "context"
+requires = ["ctx-cache-policy"]
+reqs = ["ctx-reduction.1", "ctx-reduction.2"]
+touches = ["crates/hypermid-core/src/reduction.rs", "crates/hypermid-context/src/reduction_store.rs", "runtime/gideon/hypermid/tools.py", "crates/hypermid-context/tests/reduction_contract.rs", "checks/runtime/test_hypermid_reduction.py"]
+verify_cmd = "cargo test -p hypermid-context --test reduction_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_reduction.py"
+[task.ctx-reclaim]
+title = "Implement deterministic pressure reclaim"
+status = "pending"
+wave = 3
+owner_lane = "context"
+requires = ["ctx-reduction", "ctx-tier-decay"]
+reqs = ["ctx-reclaim.1", "ctx-reclaim.2", "ctx-reclaim.3"]
+touches = ["crates/hypermid-core/src/reclaim.rs", "crates/hypermid-context/src/reclaimer.rs", "runtime/gideon/hypermid/pressure.py", "crates/hypermid-context/tests/reclaim_policy.rs", "checks/runtime/test_hypermid_reclaim.py"]
+verify_cmd = "cargo test -p hypermid-context --test reclaim_policy && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_reclaim.py"
+[task.ctx-recovery]
+title = "Implement journal rebuild and last-known-good recovery"
+status = "pending"
+wave = 2
+owner_lane = "context"
+requires = ["wave-1-close"]
+reqs = ["ctx-recovery.1", "ctx-recovery.2", "ctx-recovery.3"]
+touches = ["crates/hypermid-core/src/recovery.rs", "crates/hypermid-context/src/recovery_store.rs", "runtime/gideon/hypermid/recovery.py", "crates/hypermid-context/tests/recovery_contract.rs", "checks/runtime/test_hypermid_recovery.py"]
+verify_cmd = "cargo test -p hypermid-context --test recovery_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_recovery.py"
+[task.ctx-subagents]
+title = "Implement isolated subagent context snapshots"
+status = "pending"
+wave = 6
+owner_lane = "context"
+requires = ["wave-5-close"]
+reqs = ["ctx-subagents.1", "ctx-subagents.2", "ctx-subagents.3"]
+touches = ["crates/hypermid-core/src/subagent.rs", "crates/hypermid-context/src/subagent_context.rs", "runtime/gideon/hypermid/subagents.py", "runtime/gideon/engine/subagent.py", "crates/hypermid-context/tests/subagent_context.rs", "checks/runtime/test_hypermid_subagents.py"]
+verify_cmd = "cargo test -p hypermid-context --test subagent_context && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_subagents.py"
+[task.ctx-hooks]
+title = "Implement bounded context lifecycle hooks"
+status = "pending"
+wave = 4
+owner_lane = "context"
+requires = ["wave-3-close"]
+reqs = ["ctx-hooks.1", "ctx-hooks.2", "ctx-hooks.3"]
+touches = ["crates/hypermid-core/src/hooks.rs", "crates/hypermid-context/src/hook_dispatch.rs", "runtime/gideon/hypermid/hooks.py", "runtime/gideon/engine/hooks.py", "crates/hypermid-context/tests/hook_contract.rs", "checks/runtime/test_hypermid_hooks.py"]
+verify_cmd = "cargo test -p hypermid-context --test hook_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_hooks.py"
+[task.ctx-modes]
+title = "Implement optional modes and turn-boundary configuration"
+status = "pending"
+wave = 1
+owner_lane = "context"
+requires = ["ctx-ownership"]
+reqs = ["ctx-modes.1", "ctx-modes.2", "ctx-modes.3"]
+touches = ["crates/hypermid-core/src/mode.rs", "crates/hypermid-context/src/config.rs", "runtime/gideon/hypermid/config.py", "crates/hypermid-context/tests/mode_contract.rs", "checks/runtime/test_hypermid_modes.py"]
+verify_cmd = "cargo test -p hypermid-context --test mode_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_modes.py"
+[task.ctx-diagnostics]
+title = "Implement context diagnostics and accounting"
+status = "pending"
+wave = 1
+owner_lane = "context"
+requires = ["ctx-identity"]
+reqs = ["ctx-diagnostics.1", "ctx-diagnostics.2", "ctx-diagnostics.3"]
+touches = ["crates/hypermid-core/src/diagnostics.rs", "crates/hypermid-context/src/diagnostic_store.rs", "runtime/gideon/hypermid/diagnostics.py", "crates/hypermid-context/tests/diagnostics_contract.rs", "checks/runtime/test_hypermid_diagnostics.py"]
+verify_cmd = "cargo test -p hypermid-context --test diagnostics_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_diagnostics.py"
+[task.ctx-gideon-integration]
+title = "Integrate Hypermid with OSS Gideon model turns"
+status = "pending"
+wave = 8
+owner_lane = "context"
+requires = ["wave-7-close"]
+reqs = ["ctx-gideon-integration.1", "ctx-gideon-integration.2", "ctx-gideon-integration.3"]
+touches = ["runtime/gideon/hypermid/__init__.py", "runtime/gideon/hypermid/adapter.py", "runtime/gideon/cognition/context_engine.py", "runtime/gideon/engine/agents/native/runtime.py", "runtime/gideon/integrations/llm/prompt_cache.py", "checks/runtime/test_hypermid_gideon_integration.py"]
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_gideon_integration.py"
+[task.ctx-gideon-adapter]
+title = "Install the Gideon pass-through adapter and context status"
+status = "pending"
+wave = 1
+owner_lane = "context"
+requires = ["ctx-modes", "ctx-diagnostics", "sec-02"]
+reqs = ["ctx-gideon-adapter.1", "ctx-gideon-adapter.2", "ctx-gideon-adapter.3"]
+touches = ["runtime/gideon/hypermid/__init__.py", "runtime/gideon/hypermid/adapter.py", "runtime/gideon/hypermid/lifecycle.py", "runtime/gideon/hypermid/status.py", "runtime/gideon/cognition/context_engine.py", "checks/runtime/test_hypermid_passthrough.py"]
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_passthrough.py"
+[task.ctx-portability]
+title = "Implement context migration export and restore"
+status = "pending"
+wave = 7
+owner_lane = "context"
+requires = ["mem-portability", "mem-recovery"]
+reqs = ["ctx-portability.1", "ctx-portability.2", "ctx-portability.3"]
+touches = ["crates/hypermid-context/src/export.rs", "crates/hypermid-context/src/import.rs", "crates/hypermid-context/src/migration.rs", "runtime/gideon/hypermid/portability.py", "crates/hypermid-context/tests/portability.rs", "checks/runtime/test_hypermid_portability.py"]
+verify_cmd = "cargo test -p hypermid-context --test portability && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_portability.py"
+[design.memory]
+contract = "Hypermid memory is an OSS-only, source-grounded durable substrate backed by crates/hypermid-memory and integrated through runtime/gideon/hypermid. Authoritative revisions and mutation events are preserved; indexes, embeddings, summaries, and prompt projections are rebuildable."
+authorization = "Every mutation, including background maintenance, requires the actor Scope to own the target Scope or hold an unexpired grant for the exact operation. Process role, workspace membership, and maintenance status never confer write authority."
+identity = "Use common.schema.json Id, Scope, Digest, Cursor, Error, and Trace definitions; do not create a second identity contract."
+release = "First integration targets OSS Gideon only. No hosted rollout, hosted migration, or hosted service is included."
+
+[req.mem-foundation]
+title = "Memory core transaction and authorization foundation"
+acceptance = "Provide schema fencing, transactional revision preconditions, scope cursors, and owner-scoped authorization primitives for all later memory operations."
+ac_1 = "Schema open, immediate transaction, revision precondition, scope epoch, and mutation-sequence primitives fail atomically and return shared errors and cursors."
+ac_2 = "Interactive and maintenance authorization fails unless the actor owns the target Scope or holds an unexpired grant containing the exact operation; workspace membership and process role alone fail."
+
+[req.mem-records]
+title = "Authoritative memory records and raw recovery"
+acceptance = "Persist facts, episodes, notes, smart notes, anchors, and revisable summaries with immutable revision history and exact source recovery."
+ac_1 = "Create, update, archive, restore, merge, split, relocate, delete, and retention-gated purge use expected revisions and never leave partial record or event state."
+ac_2 = "Anchors remain immutable chronological evidence while summaries may be published, revised, and decayed without modifying source bytes, anchor content, or anchor provenance."
+
+[req.mem-lineage]
+title = "Provenance, lineage, invalidation, and deletion"
+acceptance = "Preserve source spans, revision ancestry, typed lineage, verification events, contradiction state, tombstones, and deterministic descendant invalidation."
+ac_1 = "Updating or tombstoning a source invalidates stale embeddings, FTS rows, rank features, and derived descendants atomically by input digest."
+ac_2 = "Derived lineage is acyclic, deletes remain observable as tombstones, and physical purge requires owner authorization plus an elapsed retention deadline."
+
+[req.mem-embedding]
+title = "Embedding modes and guarded backfill"
+acceptance = "Support off, local, remote-compatible, and managed-service embedding modes with model identity validation, bounded jobs, and lexical fallback."
+ac_1 = "Vectors with substituted models, wrong dimensions, non-finite values, zero norm, retired registrations, or stale content digests are rejected without replacing a valid vector."
+ac_2 = "Backfill and re-embedding obey item, token, request, retry, cost, and wall-time budgets and persist a cooldown for repeatedly stalled batches."
+
+[req.mem-retrieval]
+title = "Unified lexical, semantic, and hybrid retrieval"
+acceptance = "Search authorized memory, message, file, and git sources with FTS, semantic similarity, deterministic fusion, time bounds, suppression, and bounded optional reranking."
+ac_1 = "Every candidate is filtered by Scope visibility, tombstone/archive/expiry state, compatible vector fingerprint, and current input digest before ranking."
+ac_2 = "Results expose source kind, score components, provenance, verification and contradiction state, suppression counts, and a shared Cursor in stable order."
+
+[req.mem-maintenance]
+title = "Lease-fenced maintenance with model budgets"
+acceptance = "Run extraction, verification, smart-note evaluation, summary refresh/decay, indexing, reconciliation, invalidation, compaction, integrity, import/export, and purge as bounded jobs."
+ac_1 = "Claim, heartbeat, publish, fail, abandon, and expiry transitions use fencing tokens; an expired or superseded attempt cannot publish."
+ac_2 = "Publication rechecks ownership or exact grant, source digests, active configuration, and reserved model budgets inside the commit transaction."
+ac_3 = "Smart-note predicates use a bounded declarative AST and cannot execute code, access the network, or read arbitrary files."
+
+[req.mem-indexes]
+title = "Message, file, and git indexes"
+acceptance = "Maintain recoverable indexes with dirty-floor reconciliation, auditable file predicates, opt-in git traversal, and scope-safe orphan cleanup."
+ac_1 = "File indexing rechecks canonical authorized-root containment after symlink resolution and records deny, ignore, binary, size, generated, vendor, and secret-policy decisions without rejected content."
+ac_2 = "Git publication rechecks repository identity and refs after bounded scanning, while non-repositories and empty repositories enter a persistent recheck cooldown."
+ac_3 = "Failed incremental message writes lower a durable dirty floor and reconciliation covers the gap before advancing its cursor."
+
+[req.mem-portability]
+title = "Staged import and canonical export"
+acceptance = "Provide digest-covered, versioned, idempotent import/export with explicit scope relocation and without derivative or secret-bearing state."
+ac_1 = "Import parses and validates into a staging batch before visibility, applies in bounded transactions, and is idempotent by source digest and item key."
+ac_2 = "Export includes ordered authoritative records, revisions, lineage, and provenance while excluding vectors, FTS rows, leases, jobs, credentials, and secret references."
+
+[req.mem-recovery]
+title = "Migration fences, integrity, and recovery"
+acceptance = "Version the schema, refuse unsupported newer stores, migrate transactionally, and rebuild derivative state without silent authoritative-data loss."
+ac_1 = "Fresh schema and migrated schema converge, migration start/finish is journaled, and a destructive migration requires a verified backup manifest."
+ac_2 = "Recovery checks integrity, revision chains, lineage cycles, source digests, and index fingerprints, then repairs only from a copied consistent store."
+
+[req.mem-clients]
+title = "OSS Gideon client and module boundary"
+acceptance = "Expose the independent memory core through typed Python clients and lifecycle modules without direct Python database writes or a hosted dependency."
+ac_1 = "Every client call carries shared Scope and Trace values and maps core failures to the shared Error contract without losing conflict or authorization details."
+ac_2 = "Runtime lifecycle opens, health-checks, drains, and closes the core deterministically while preserving lexical service when embeddings are disabled."
+
+[req.mem-remote]
+title = "Versioned local bus and remote-safe protocol"
+acceptance = "Provide a versioned request/response and event boundary that can run in-process or across an authenticated local bus while preserving identical authorization and cursor semantics."
+ac_1 = "In-process and bus transports produce equivalent typed results, cursors, errors, cancellation, and backpressure for the same conformance vectors."
+ac_2 = "Transport identity cannot replace actor Scope, and reconnect or replay cannot duplicate an acknowledged mutation event."
+
+[req.mem-release]
+title = "OSS release qualification surface"
+acceptance = "Package schema, migration, diagnostics, compatibility, and end-to-end OSS lifecycle gates as one releasable memory slice with no hosted rollout."
+ac_1 = "A clean OSS profile can create, retrieve, maintain, export, restore, and retrieve the same authoritative record set through the Python-to-Rust path."
+ac_2 = "Release diagnostics report schema, index, vector, queue, lease, and recovery state without exposing memory content, credentials, or secret references."
+
+[task.mem-foundation]
+title = "Memory core foundation and authorization primitives"
+status = "pending"
+wave = 1
+owner_lane = "memory"
+requires = ["sec-01"]
+reqs = ["mem-foundation.1", "mem-foundation.2"]
+acceptance = "The independent Rust crate establishes shared-contract adapters, schema fencing, transaction primitives, owner/grant authorization, and cursor allocation for later vertical slices."
+ac_1 = "Real cross-project authorization predicates refuse an interactive actor and a maintenance actor unless an exact live grant exists."
+ac_2 = "Schema open, immediate transaction, revision precondition, scope epoch, and mutation-sequence primitives fail atomically and return typed shared errors."
+touches = ["crates/hypermid-memory/Cargo.toml", "crates/hypermid-memory/src/lib.rs", "crates/hypermid-memory/src/store.rs", "crates/hypermid-memory/src/auth.rs", "crates/hypermid-memory/src/model.rs", "crates/hypermid-memory/src/migrations.rs", "checks/hypermid/test_memory_foundation.py"]
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_foundation.py"
+[task.mem-records]
+title = "Record CRUD, raw recovery, summaries, and lineage"
+status = "pending"
+wave = 2
+owner_lane = "memory"
+requires = ["wave-1-close"]
+reqs = ["mem-records.1", "mem-records.2", "mem-lineage.1", "mem-lineage.2"]
+acceptance = "Facts, episodes, notes, smart notes, anchors, and summaries support complete CRUD, source recovery, provenance, revision lineage, contradiction grouping, tombstones, and invalidation."
+ac_1 = "Concurrent writes with one expected revision yield one commit and one conflict; raw source recovery remains exact after summary publication and tombstoning."
+ac_2 = "A source edit invalidates every digest-dependent projection transactionally, while cycle insertion and premature purge are refused."
+touches = ["crates/hypermid-memory/src/records.rs", "crates/hypermid-memory/src/lineage.rs", "crates/hypermid-memory/src/provenance.rs", "crates/hypermid-memory/src/invalidation.rs", "crates/hypermid-memory/src/summary.rs", "runtime/gideon/hypermid/records.py", "runtime/gideon/hypermid/lineage.py", "checks/hypermid/test_memory_records.py", "checks/hypermid/test_memory_lineage.py"]
+verify_cmd = "cargo test -p hypermid-memory lineage --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_lineage.py"
+[task.mem-embedding]
+title = "Embedding registry and guarded vector jobs"
+status = "pending"
+wave = 3
+owner_lane = "memory"
+requires = ["wave-2-close"]
+reqs = ["mem-embedding.1", "mem-embedding.2"]
+acceptance = "All embedding modes, fingerprints, guarded writes, failure classes, bounded backfill, retirement fencing, and lexical fallback work through real provider interfaces."
+ac_1 = "A content update or provider retirement during an in-flight call prevents that result from committing and preserves the last compatible valid vector."
+ac_2 = "Mode off and provider failure return lexical results; a semantic-required request returns a typed shared Error with its Trace."
+touches = ["crates/hypermid-memory/src/embedding.rs", "crates/hypermid-memory/src/jobs.rs", "runtime/gideon/hypermid/embeddings.py", "runtime/gideon/hypermid/providers.py", "checks/hypermid/test_memory_embeddings.py"]
+verify_cmd = "cargo test -p hypermid-memory embedding --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_embeddings.py"
+[task.mem-retrieval]
+title = "Unified search and deterministic ranking"
+status = "pending"
+wave = 3
+owner_lane = "memory"
+requires = ["wave-2-close"]
+reqs = ["mem-retrieval.1", "mem-retrieval.2"]
+acceptance = "FTS, semantic, and hybrid search enforce visibility and freshness, fuse bounded source candidates, expose score evidence, suppress visible content, and bound optional reranking."
+ac_1 = "Golden mixed-source queries produce stable ordering and explainable score components across lexical-only and hybrid modes."
+ac_2 = "Unauthorized, tombstoned, expired, archived-by-default, stale-vector, and already-visible candidates never leak content and produce accurate suppression counters."
+touches = ["crates/hypermid-memory/src/fts.rs", "crates/hypermid-memory/src/search.rs", "crates/hypermid-memory/src/rank.rs", "runtime/gideon/hypermid/search.py", "runtime/gideon/hypermid/prompt_projection.py", "checks/hypermid/test_memory_search.py"]
+verify_cmd = "cargo test -p hypermid-memory search --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_search.py"
+[task.mem-maintenance]
+title = "Ownership-safe maintenance scheduler"
+status = "pending"
+wave = 4
+owner_lane = "memory"
+requires = ["wave-3-close"]
+reqs = ["mem-maintenance.1", "mem-maintenance.2", "mem-maintenance.3"]
+acceptance = "The full maintenance catalog runs with per-scope leases, fencing, input predicates, model reservations, checkpoints, cooldowns, and declarative smart-note evaluation."
+ac_1 = "A grant revoked after claim but before publish prevents the background write, and stale, expired, or wrong-token workers cannot publish or release another worker's lease."
+ac_2 = "Every model run reserves and settles item, token, request, cost, retry, and wall-time budgets, recording unknown usage distinctly from zero."
+touches = ["crates/hypermid-memory/src/maintenance.rs", "crates/hypermid-memory/src/lease.rs", "crates/hypermid-memory/src/budget.rs", "crates/hypermid-memory/src/smart_note.rs", "runtime/gideon/hypermid/maintenance.py", "runtime/gideon/hypermid/model_budget.py", "checks/hypermid/test_memory_maintenance.py"]
+verify_cmd = "cargo test -p hypermid-memory maintenance --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_maintenance.py"
+[task.mem-indexes]
+title = "Message, file, and git indexing"
+status = "pending"
+wave = 4
+owner_lane = "memory"
+requires = ["wave-3-close"]
+reqs = ["mem-indexes.1", "mem-indexes.2", "mem-indexes.3"]
+acceptance = "Incremental and reconciled source indexes remain scope-safe and recoverable, with real filesystem and repository predicate enforcement."
+ac_1 = "Symlink escapes, ignored or secret files, changed read digests, and unauthorized roots are rejected before publication without persisting rejected bytes."
+ac_2 = "Message gaps recover from the earliest dirty cursor and git scans publish only if repository identity and requested refs remain current."
+touches = ["crates/hypermid-memory/src/source_index.rs", "crates/hypermid-memory/src/file_predicate.rs", "crates/hypermid-memory/src/git_index.rs", "runtime/gideon/hypermid/message_index.py", "runtime/gideon/hypermid/file_index.py", "runtime/gideon/hypermid/git_index.py", "checks/hypermid/test_memory_source_indexes.py"]
+verify_cmd = "cargo test -p hypermid-memory source_index --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_source_indexes.py"
+[task.mem-clients]
+title = "OSS Gideon clients and lifecycle modules"
+status = "pending"
+wave = 5
+owner_lane = "memory"
+requires = ["wave-4-close"]
+reqs = ["mem-clients.1", "mem-clients.2"]
+acceptance = "Typed Python clients expose records, search, maintenance, portability preparation, diagnostics, and lifecycle management over the independent core without direct database access."
+ac_1 = "Contract conformance preserves shared Scope, Cursor, Error, and Trace values across Python and Rust for success, conflict, authorization refusal, and cancellation."
+ac_2 = "OSS lifecycle startup, health, drain, and shutdown preserve durable work and keep lexical retrieval available when vector providers are disabled."
+touches = ["crates/hypermid-memory/src/api.rs", "crates/hypermid-memory/src/ffi.rs", "runtime/gideon/hypermid/__init__.py", "runtime/gideon/hypermid/contracts.py", "runtime/gideon/hypermid/client.py", "runtime/gideon/hypermid/lifecycle.py", "checks/hypermid/test_memory_clients.py"]
+verify_cmd = "cargo test -p hypermid-memory api --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_clients.py"
+[task.mem-remote]
+title = "Local bus and remote-safe protocol"
+status = "pending"
+wave = 6
+owner_lane = "memory"
+requires = ["wave-5-close"]
+reqs = ["mem-remote.1", "mem-remote.2"]
+acceptance = "A versioned transport offers equivalent in-process and authenticated local-bus semantics with bounded streams, cancellation, backpressure, cursor replay, and mutation idempotency."
+ac_1 = "Shared conformance vectors return equivalent records, errors, traces, cursors, and stream termination over both transports."
+ac_2 = "Forged transport identity, replayed mutation keys, disconnected consumers, and resumed cursors cannot broaden Scope authority or duplicate committed mutations."
+touches = ["crates/hypermid-memory/src/protocol.rs", "crates/hypermid-memory/src/bus.rs", "runtime/gideon/hypermid/transport.py", "runtime/gideon/hypermid/bus.py", "checks/hypermid/test_memory_transport.py"]
+verify_cmd = "cargo test -p hypermid-memory protocol --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_transport.py"
+[task.mem-portability]
+title = "Staged import and canonical export"
+status = "pending"
+wave = 7
+owner_lane = "memory"
+requires = ["wave-6-close"]
+reqs = ["mem-portability.1", "mem-portability.2"]
+acceptance = "Canonical JSONL import/export preserves authoritative history and provenance, supports explicit authorized scope relocation, and excludes derivative and secret-bearing state."
+ac_1 = "Replaying the same staged import creates no duplicate records or mutation events, and rejected items remain inspectable without making partial batches visible."
+ac_2 = "An export verifies its manifest digest and contains no vector bytes, FTS content, lease token, job claim, credential, or secret reference."
+touches = ["crates/hypermid-memory/src/import.rs", "crates/hypermid-memory/src/export.rs", "runtime/gideon/hypermid/portability.py", "checks/hypermid/test_memory_portability.py"]
+verify_cmd = "cargo test -p hypermid-memory portability --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_portability.py"
+[task.mem-recovery]
+title = "Migration, backup, restore, and repair"
+status = "pending"
+wave = 7
+owner_lane = "memory"
+requires = ["wave-6-close"]
+reqs = ["mem-recovery.1", "mem-recovery.2"]
+acceptance = "Schema fencing, transactional migrations, consistent snapshots, restore, integrity checks, and derivative rebuild operate without authoritative-data loss."
+ac_1 = "A newer unsupported schema fails closed, fresh and migrated stores have equivalent schema fingerprints, and destructive migration refuses without a verified backup manifest."
+ac_2 = "Recovery from a copied fixture preserves every authoritative revision, rebuilds indexes, detects lineage corruption, and exposes typed diagnostics through runtime/gideon/hypermid."
+touches = ["crates/hypermid-memory/src/migrations.rs", "crates/hypermid-memory/src/recovery.rs", "crates/hypermid-memory/src/snapshot.rs", "runtime/gideon/hypermid/diagnostics.py", "runtime/gideon/hypermid/recovery.py", "checks/hypermid/test_memory_recovery.py"]
+verify_cmd = "cargo test -p hypermid-memory migration recovery --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_recovery.py"
+[task.mem-release]
+title = "OSS memory release integration"
+status = "pending"
+wave = 8
+owner_lane = "memory"
+requires = ["wave-7-close"]
+reqs = ["mem-release.1", "mem-release.2"]
+acceptance = "The complete memory slice is wired into the OSS Gideon lifecycle, packaged with diagnostics and compatibility gates, and exercised end to end without a hosted dependency."
+ac_1 = "A clean OSS profile performs create, retrieval, maintenance, canonical export, restore, and equivalent retrieval through the Python-to-Rust integration."
+ac_2 = "Release diagnostics cover schema, indexes, vectors, queues, leases, budgets, and recovery while redacting content and secret-bearing fields."
+touches = ["Cargo.toml", "crates/hypermid-memory/Cargo.toml", "runtime/gideon/hypermid/lifecycle.py", "runtime/gideon/engine/lifecycle.py", "runtime/gideon/hypermid/diagnostics.py", "checks/hypermid/test_memory_oss_integration.py", "checks/hypermid/test_memory_release_diagnostics.py"]
+verify_cmd = "cargo test -p hypermid-memory --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_oss_integration.py checks/hypermid/test_memory_release_diagnostics.py"
+[design.surfaces]
+contract = "Native OSS Gideon console, CLI, desktop, HostAdapter, and generic client experience for Hypermid administration and inspection. The Rust daemon/core remains authoritative and Gideon's Python adapter owns host translation. No duplicate standalone web UI and no hosted rollout."
+wire = "Hypermid v1 uses a four-byte big-endian JSON length, an 8 MiB frame ceiling, ordered chunks no larger than 64 KiB, authenticated local Unix or Windows loopback transport, and explicit TLS opt-in for remote access."
+truth = "Surfaces adopt authoritative cursors, expected digests, typed effect outcomes, and terminal receipts. HTTP completion, process exit, schema presence, optimistic state, or reconnect alone never proves a mutation committed."
+navigation = "Use Gideon's existing Settings, Diagnostics, Connections, terminal, shared headers, cards, forms, tables, dialogs, and responsive shell. Hypermid is one native destination with progressive disclosure, not a catch-all panel or separate web application."
+clients = "Python is required for the Gideon HostAdapter. Rust, TypeScript, and Swift clients provide wire and outcome parity. Generic SDKs may ship in OSS; they do not imply hosted availability."
+integration = "A full HostAdapter negotiates identity, scopes, sessions, memory, configuration, credentials, lifecycle, cursors, and reconnect. An MCP bridge exposes bounded tools only and is labeled separately."
+accessibility = "Keyboard, touch, screen-reader, reduced-motion, focus, announcements, linear reading order, 44px targets, 320/390px layouts, and high-risk review flows are first-class acceptance criteria."
+
+[req.ux-contract]
+title = "Versioned clients and full HostAdapter negotiation"
+acceptance = "All language clients and Gideon's Python HostAdapter agree on framing, scope, correlation, cursor, error, chunk, cancellation, reconnect, and mutation-outcome behavior."
+ac_1 = "Python, Rust, TypeScript, and Swift clients decode the same golden request, response, event, error, and chunk vectors and reject a declared frame above 8 MiB before allocating its body."
+ac_2 = "The Python HostAdapter negotiates only implemented capabilities and refuses a request whose owner/project/workspace mapping cannot be proven; an MCP bridge never satisfies the full-host capability set."
+ac_3 = "After disconnect, a mutating call that may have been accepted returns outcome unknown and is not automatically retried; reconnect uses a new authenticated handshake and explicit cursor resume."
+
+[req.ux-inspection]
+title = "Native sessions, memory, and cache inspection"
+acceptance = "Users inspect live and durable Hypermid state inside Gideon's native console with scoped filters, linked evidence, stable cursors, and truthful empty or degraded states."
+ac_1 = "A session timeline renders turns, tool activity, memory and cache decisions, compaction boundaries, errors, and trace links once in cursor order across reconnect and snapshot adoption."
+ac_2 = "Memory detail exposes scope, revision, lineage, source, verification, contradiction, embedding, and retrieval evidence while preserving anchor immutability and draft-on-conflict behavior."
+ac_3 = "Cache inventory distinguishes complete, filtered, stale, rebuilding, unavailable, and unreadable states and plans clear/rebuild effects before mutation."
+
+[req.ux-configuration]
+title = "Scoped runtime, model, and credential configuration"
+acceptance = "Configuration surfaces show effective values, sources, editability, revisions, readiness, and redacted credential metadata without exposing secret values."
+ac_1 = "Runtime mode offers exactly off, pass_through, shadow, and primary; strictness remains a separate policy field, and a stale configuration or model-binding write is refused while the user's dirty fields remain available for compare, reload, or reapply."
+ac_2 = "Model readiness comes from a real required probe, and unknown cost, usage, context, or health remains unknown rather than zero or ready."
+ac_3 = "Credential list, replace, validate, and delete flows expose presence and consumers only; diagnostics, events, and exports contain no secret value or reusable local authentication material."
+
+[req.ux-operations]
+title = "Diagnostics and maintenance control plane"
+acceptance = "Operators can observe health and run authorized maintenance through bounded plans, cursored progress, and terminal receipts."
+ac_1 = "Diagnostics names observed state, timestamp, Scope, cache age, transport/adapter/client compatibility, process health, and a specific next action; reruns preserve the previous result until a new result arrives."
+ac_2 = "Maintenance apply requires the reviewed plan digest, rechecks authority and blockers, streams ordered progress, and ends in committed, failed, cancelled, or outcome-unknown state."
+ac_3 = "Live logs resume from a Cursor or display an explicit gap and redact secrets before storage, streaming, filtering, copying, or export."
+
+[req.ux-lifecycle]
+title = "Install, update, uninstall, migration, and export journeys"
+acceptance = "Every lifecycle mutation follows plan, review, apply, progress, and receipt stages with explicit data retention, rollback, and interruption semantics."
+ac_1 = "Install and update validate platform, permissions, protected connection material, compatibility floors, migrations, space, drain, restart, and rollback requirements before apply."
+ac_2 = "Uninstall inventories runtime wiring and user data separately and cannot purge data unless the reviewed plan explicitly chose purge and the current authority permits it."
+ac_3 = "Migration stages and validates before visibility and is idempotent; export returns a verified artifact digest and excludes derivatives, credentials, and local authentication material."
+
+[req.ux-integrations]
+title = "MCP bridge, supervised stdio, and bounded conditions"
+acceptance = "Tool bridges, child processes, and local conditions expose useful integration behavior without gaining undeclared host authority or arbitrary execution."
+ac_1 = "Connections labels Tool bridge and Full host integration separately, and tool availability alone never implies session, configuration, credential, lifecycle, or cursor-resume coverage."
+ac_2 = "A stdio child starts with an allowlisted environment, bounded initialization/request/frame/idle budgets, isolated failure, and close-wait-terminate-reap shutdown; post-write timeout or cancellation returns outcome unknown."
+ac_3 = "File and git conditions revalidate authorized roots and repository identity, use no shell interpolation or network, emit stable transition occurrences, and return bounded observed facts."
+
+[req.ux-remote]
+title = "Remote, mobile, and accessible operation"
+acceptance = "Opt-in TLS remote operation and responsive native views preserve scope, truth, safety, and accessibility across desktop and mobile."
+ac_1 = "Remote enablement requires TLS, named device enrollment, scoped expiry, and capability review; revocation blocks a fresh session and no transport silently downgrades."
+ac_2 = "At 320 and 390 CSS pixels inspection, filters, plan review, progress, cancellation, and receipt recovery work without horizontal page scrolling or hidden required actions."
+ac_3 = "Keyboard and screen-reader journeys announce validation, stream gaps, and terminal outcomes once, preserve focus and drafts, meet 44px touch targets, and provide a linear alternative to dense tables or timelines."
+
+[req.ux-native]
+title = "Complete first OSS native slice"
+acceptance = "The existing Gideon console route, CLI, and desktop shell complete the same real-daemon journey through the Python HostAdapter and Rust authority."
+ac_1 = "A user can inspect one session and linked memory/cache evidence, change an allowed setting, run a maintenance plan, and verify its receipt without entering raw identifiers or JSON."
+ac_2 = "The CLI provides human-readable and JSON modes for status, inspect, config, maintenance, lifecycle, conditions, and export, with stable exit classes and no interactive prompt when non-interactive input is detected."
+ac_3 = "Desktop local mode owns daemon start/stop and shutdown handoff without orphaning supervised children; web-only mode reports local operations unavailable instead of starting a local daemon."
+
+[task.ux-contract]
+title = "Hypermid v1 clients and Gideon HostAdapter"
+status = "pending"
+wave = 1
+owner_lane = "surfaces"
+requires = ["ctx-gideon-adapter"]
+reqs = ["ux-contract.1", "ux-contract.2", "ux-contract.3"]
+acceptance = "Four clients and the Gideon adapter share framing, negotiation, scope, cursor, chunk, cancellation, reconnect, and effect-outcome behavior against a real daemon."
+ac_1 = "Cross-language golden vectors and a live handshake prove identical bytes and additive-field tolerance, including oversized-frame and wrong-epoch refusals."
+ac_2 = "Capability negotiation demonstrates a full Python HostAdapter and a tool-only bridge with visibly different capability sets and authorization outcomes."
+touches = ["crates/hypermid-protocol/src/lib.rs", "crates/hypermid-client/src/lib.rs", "clients/hypermid-ts/src/client.ts", "clients/hypermid-swift/Sources/HypermidClient/Client.swift", "runtime/gideon/hypermid/client.py", "runtime/gideon/hypermid/adapter.py", "checks/hypermid/test_client_contracts.py", "checks/hypermid/vectors/client_v1.json"]
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_client_contracts.py"
+[task.ux-inspection]
+title = "Native session, memory, and cache inspector"
+status = "pending"
+wave = 2
+owner_lane = "surfaces"
+requires = ["wave-1-close"]
+reqs = ["ux-inspection.1", "ux-inspection.2", "ux-inspection.3"]
+acceptance = "The native console reads authoritative scoped snapshots and cursored events for sessions, memory, and caches, with linked details and conflict-safe edits."
+ac_1 = "A reconnecting live session journey renders each terminal turn and maintenance event once and makes an unrecoverable stream gap visible."
+ac_2 = "Memory and cache filters cannot replace complete cached collections, and stale edits retain their drafts with an explicit conflict treatment."
+touches = ["apps/console/src/features/settings/HypermidPanel.tsx", "apps/console/src/features/hypermid/HypermidOverview.tsx", "apps/console/src/features/hypermid/SessionInspector.tsx", "apps/console/src/features/hypermid/MemoryInspector.tsx", "apps/console/src/features/hypermid/CacheInspector.tsx", "apps/console/src/features/hypermid/hypermidState.ts", "apps/console/src/shared/data/api.ts", "runtime/gideon/interfaces/dashboard/handlers/hypermid.py", "checks/hypermid/test_surface_inspection.py"]
+verify_cmd = "cd apps/console && npx vitest run src/features/hypermid/hypermidInspection.test.tsx"
+[task.ux-configuration]
+title = "Runtime, model, and credential settings"
+status = "pending"
+wave = 3
+owner_lane = "surfaces"
+requires = ["wave-2-close"]
+reqs = ["ux-configuration.1", "ux-configuration.2", "ux-configuration.3"]
+acceptance = "Native forms manage scoped runtime settings, model bindings, and credential presence with validation, readiness probes, revisions, and one-way secret handling."
+ac_1 = "Runtime mode round-trips off, pass_through, shadow, and primary while strictness round-trips separately; a competing write produces a visible stale-write treatment without pairing an old draft with a new revision."
+ac_2 = "Credential values never appear in GET responses, DOM-readable metadata, logs, events, copied diagnostics, or export fixtures."
+touches = ["apps/console/src/features/hypermid/RuntimeConfig.tsx", "apps/console/src/features/hypermid/ModelBindings.tsx", "apps/console/src/features/hypermid/CredentialVault.tsx", "apps/console/src/features/hypermid/configState.ts", "runtime/gideon/hypermid/configuration.py", "runtime/gideon/interfaces/dashboard/handlers/hypermid.py", "checks/hypermid/test_surface_configuration.py"]
+verify_cmd = "cd apps/console && npx vitest run src/features/hypermid/hypermidConfiguration.test.tsx"
+[task.ux-operations]
+title = "Diagnostics, logs, and maintenance plans"
+status = "pending"
+wave = 4
+owner_lane = "surfaces"
+requires = ["wave-3-close"]
+reqs = ["ux-operations.1", "ux-operations.2", "ux-operations.3"]
+acceptance = "Operators see observed health and redacted logs and can execute maintenance only from a current reviewed plan with cursored progress and a terminal receipt."
+ac_1 = "Cached and fresh diagnostics remain distinguishable, a failed rerun leaves the last observation visible, and log reconnect either resumes or announces a gap."
+ac_2 = "Plan tampering, expiry, scope change, authorization loss, or blocker change prevents maintenance apply before any effect."
+touches = ["apps/console/src/features/hypermid/Diagnostics.tsx", "apps/console/src/features/hypermid/LiveLogs.tsx", "apps/console/src/features/hypermid/Maintenance.tsx", "apps/console/src/features/hypermid/PlanReviewDialog.tsx", "runtime/gideon/hypermid/operations.py", "runtime/gideon/interfaces/dashboard/handlers/hypermid.py", "checks/hypermid/test_surface_operations.py"]
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surface_operations.py"
+[task.ux-lifecycle]
+title = "Safe lifecycle and portability commands"
+status = "pending"
+wave = 7
+owner_lane = "surfaces"
+requires = ["fab-07-registry-service", "mem-portability", "mem-recovery", "sec-07"]
+reqs = ["ux-lifecycle.1", "ux-lifecycle.2", "ux-lifecycle.3"]
+acceptance = "Install, update, uninstall, migrate, and export provide deterministic plans, explicit data choices, resumable progress, and verified receipts in console and CLI."
+ac_1 = "Interrupted lifecycle fixtures recover to a reported committed, resumable, rollback-available, failed, or outcome-unknown state without claiming success from process exit."
+ac_2 = "Uninstall purge cannot run from a retain/export plan, while repeated migration and export preserve idempotency and artifact digest verification."
+touches = ["crates/hypermid-daemon/src/lifecycle.rs", "runtime/gideon/hypermid/lifecycle.py", "runtime/gideon/interfaces/cli/hypermid.py", "apps/console/src/features/hypermid/Lifecycle.tsx", "apps/console/src/features/hypermid/Portability.tsx", "checks/hypermid/test_surface_lifecycle.py"]
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surface_lifecycle.py"
+[task.ux-integrations]
+title = "Tool bridge, stdio supervision, and condition runner"
+status = "pending"
+wave = 5
+owner_lane = "surfaces"
+requires = ["sec-03"]
+reqs = ["ux-integrations.1", "ux-integrations.2", "ux-integrations.3"]
+acceptance = "Gideon exposes separate tool-bridge and full-host states, supervises stdio children with bounded lifecycle, and evaluates declarative file/git conditions inside authorized roots."
+ac_1 = "A wedged or oversized stdio child is terminated and reaped without blocking daemon health or another child, and a post-write timeout is never auto-retried."
+ac_2 = "Symlink escape, repository identity change, shell syntax, network request, excessive output, and expired evaluation budget are refused with typed errors and no event publication."
+touches = ["crates/hypermid-core/src/mcp_bridge.rs", "crates/hypermid-daemon/src/stdio_supervisor.rs", "crates/hypermid-core/src/conditions.rs", "crates/hypermid-core/src/file_conditions.rs", "crates/hypermid-core/src/git_conditions.rs", "runtime/gideon/hypermid/integrations.py", "apps/console/src/features/hypermid/Connections.tsx", "checks/hypermid/test_surface_integrations.py"]
+verify_cmd = "cargo test -p hypermid-core conditions mcp_bridge && cargo test -p hypermid-daemon stdio_supervisor"
+[task.ux-remote]
+title = "Remote, mobile, and accessible operator experience"
+status = "pending"
+wave = 6
+owner_lane = "surfaces"
+requires = ["fab-06-effects-federation"]
+reqs = ["ux-remote.1", "ux-remote.2", "ux-remote.3"]
+acceptance = "Opt-in TLS enrollment, device revocation, responsive operation, and assistive-technology behavior preserve all critical inspection and plan workflows."
+ac_1 = "Remote connection attempts without configured TLS, current enrollment, allowed Scope, and unexpired capability grant fail closed without transport downgrade."
+ac_2 = "Real keyboard, screen-reader, reduced-motion, 320px, and 390px journeys complete inspection and plan review with visible focus, announcements, 44px targets, and no horizontal page scroll."
+touches = ["crates/hypermid-daemon/src/remote.rs", "runtime/gideon/hypermid/remote.py", "apps/console/src/features/hypermid/RemoteAccess.tsx", "apps/console/src/features/hypermid/hypermid.css", "apps/console/src/features/hypermid/hypermidAccessibility.test.tsx", "checks/hypermid/test_surface_remote.py"]
+verify_cmd = "cd apps/console && npx vitest run src/features/hypermid/hypermidAccessibility.test.tsx"
+[task.ux-native]
+title = "OSS console, CLI, and desktop integration journey"
+status = "pending"
+wave = 8
+owner_lane = "surfaces"
+requires = ["wave-7-close"]
+reqs = ["ux-native.1", "ux-native.2", "ux-native.3"]
+acceptance = "The existing native console route, Gideon CLI, and desktop shell complete the first Hypermid journey against a real local daemon with no hosted dependency or duplicate web app."
+ac_1 = "The console and desktop complete inspect, configure, plan, apply, disconnect, reconnect, and receipt recovery against the same scoped daemon state."
+ac_2 = "Human and JSON CLI modes return equivalent authoritative results and stable exit classes, and desktop shutdown leaves no orphaned daemon-owned stdio child."
+touches = ["apps/console/src/app/shell/navigationModel.ts", "apps/console/src/features/settings/SettingsPage.tsx", "apps/console/src/features/hypermid/HypermidPage.tsx", "runtime/gideon/interfaces/cli/main.py", "runtime/gideon/interfaces/cli/hypermid.py", "apps/desktop/src/application/local-gateway.js", "apps/desktop/src/application/desktop-application.js", "checks/hypermid/test_surface_native_journey.py", "apps/desktop/test/hypermidLifecycle.test.js"]
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surface_native_journey.py"
+[design.integration_artifacts]
+feature = "hypermid-integration"
+status = "pending"
+version = "1.0.0"
+scope = "oss"
+owner_lane = "integration"
+design = "spec/hypermid/design/gideon-integration.txt"
+seam_map = "spec/hypermid/maps/gideon-seams.json"
+config_schema = "spec/hypermid/schemas/config.schema.json"
+
+[design.gideon_architecture]
+contract = "Hypermid has four principal integration components (foundation/contracts, context, memory, daemon/fabric) backed by the shared Rust workspace and integrated only through runtime/gideon/hypermid. Shared wire types come from hypermid-protocol and hypermid-contracts; Gideon retains ConversationLog, the model/tool loop, provider credentials, approvals, usage ledger, final response, delivery, and product surfaces."
+delivery = "The complete local daemon, adapter, migration, rollback, CLI, console, packaging, and conformance journey ships in OSS before any separate deployment work."
+default = "Wave 1 is authenticated local pass-through and status only. Gideon remains the sole default writer. Hypermid ownership is opt-in from wave 2 onward after a scoped barrier and writer lease."
+
+[design.invariants]
+single_writer = "Exactly one context writer exists for each owner/project/workspace scope. Shadow is read-only and cannot summarize, append, mutate memory, or update an index."
+raw_integrity = "Raw Hypermid knowledge events are append-only and digest chained. Memory supersession, deletion, undo and rollback append new events. Gideon ConversationLog remains transcript authority, and derived summaries are admitted only against its covered source digest."
+runtime_authority = "NativeAgentRuntime, ModelProvider, ToolCatalog, McpClientRegistry, ApprovalGate, ConversationDirectory, run_chat, ResultDelivery and UsageJournal retain their current authority."
+cancellation = "ConversationDirectory remains the surface authority. Before daemon acceptance Python owns cancellation; after acceptance the daemon exclusively owns the request token and Rust children until it returns an effect-state receipt."
+secrets = "No provider, subscription, OAuth, MCP, channel or environment credential crosses the Hypermid protocol."
+compatibility = "Handshake negotiation, N and N-1 protocol support, copy-validate-cutover migration, retained rollback checkpoints and unknown-effect reconciliation are mandatory."
+
+[req.int-01]
+title = "Authenticated local daemon and pass-through integration"
+acceptance = "Install and supervise the local Hypermid daemon behind a scoped authenticated adapter without replacing any active Gideon writer or user path."
+ac_1 = "A real local daemon built from the shared Rust workspace completes an authenticated handshake carrying Scope(owner_id, project_id, optional workspace_id), protocol range, storage version, build version and capabilities; incompatible or unauthenticated clients are refused with the shared Error shape."
+ac_2 = "In off and pass-through modes, context, memory, model, tool, approval, usage, final delivery and persistence results are byte-for-byte or structurally identical to the existing Gideon path, and status proves Gideon is the sole writer."
+ac_3 = "RuntimeProcess starts, health-checks and drains the daemon over authenticated Unix sockets or Windows loopback TCP; process existence without protocol and digest health is reported unhealthy, and a non-loopback listener is refused."
+
+[task.int-01]
+title = "Implement integration slice 1: local daemon auth, pass-through journal adapter and status"
+status = "pending"
+wave = 1
+owner_lane = "integration"
+requires = ["mem-foundation", "ux-contract"]
+reqs = ["int-01.1", "int-01.2", "int-01.3"]
+touches = ["runtime/gideon/hypermid/__init__.py", "runtime/gideon/hypermid/config.py", "runtime/gideon/hypermid/models.py", "runtime/gideon/hypermid/adapter.py", "runtime/gideon/hypermid/lifecycle.py", "runtime/gideon/engine/lifecycle.py", "runtime/gideon/core/config/loader.py", "runtime/gideon/interfaces/dashboard/handlers/hypermid.py", "runtime/gideon/interfaces/dashboard/server.py", "checks/hypermid/verify_wave_01.py"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_01.py"
+acceptance = "The installed daemon is authenticated and supervised, pass-through is behavior-preserving, status is honest, and no Hypermid write or default replacement occurs."
+[req.int-02]
+title = "Durable summaries, memory CRUD and raw recovery"
+acceptance = "Make Hypermid an opt-in scoped writer for digest-bound context and the complete existing memory surface, with recoverable append-only raw data."
+ac_1 = "Shadow remains read-only; primary can start only after dirty Gideon writes flush, background summarization and consolidation quiesce, source digests validate, and a monotonically increasing scoped writer lease is granted."
+ac_2 = "Raw knowledge events are append-only, cursor ordered and digest chained; memory deletion, undo and supersession append events, summaries carry the covered Gideon source digest, and ConversationLog remains the sole transcript authority."
+ac_3 = "Semantic, episodic, lesson, slot, graph, page, event-audit, undo, embedding, keyword fallback, statistics and context-preview operations remain reachable through MemoryService-compatible results with privacy modes preserved."
+ac_4 = "A crash-recovery journey replays the knowledge event journal, discards summaries whose Gideon source digest no longer matches, reconstructs the same memory records, and resumes at the next cursor without duplicate writes."
+
+[task.int-02]
+title = "Implement integration slice 2: durable summaries, full memory CRUD, raw recovery and opt-in ownership"
+status = "pending"
+wave = 2
+owner_lane = "integration"
+requires = ["mem-records", "ctx-background-summary", "ctx-recovery", "ux-inspection"]
+reqs = ["int-02.1", "int-02.2", "int-02.3", "int-02.4"]
+touches = ["runtime/gideon/hypermid/context.py", "runtime/gideon/hypermid/memory.py", "runtime/gideon/hypermid/writer.py", "runtime/gideon/hypermid/host_model.py", "runtime/gideon/cognition/context_engine.py", "runtime/gideon/cognition/history.py", "runtime/gideon/cognition/bg_compress.py", "runtime/gideon/cognition/memory_service.py", "checks/hypermid/verify_wave_02.py"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_02.py"
+acceptance = "Opt-in primary ownership is single-writer and crash recoverable, while the complete existing summary and memory consumer surface remains usable."
+[req.int-03]
+title = "Cache policy, hybrid recall and native inspection"
+acceptance = "Compose deterministic cache-aware context and hybrid recall with explainable results in existing Gideon surfaces."
+ac_1 = "Context assembly preserves ordered components, source provenance, prompt-cache boundaries, provider-served context windows and headroom decisions; a summary or cached component is rejected when its covered digest or policy version differs."
+ac_2 = "Hybrid recall combines keyword, vector and graph arms without widening Scope, reports per-arm scores and omissions, and retains Gideon's keyword fallback when embeddings are absent or unhealthy."
+ac_3 = "The native console and CLI inspect the active writer, cursor, digest, cache state, recall arms and provenance without exposing raw private content or credentials."
+
+[task.int-03]
+title = "Implement integration slice 3: cache policy, hybrid recall and native inspection"
+status = "pending"
+wave = 3
+owner_lane = "integration"
+requires = ["ctx-reclaim", "mem-embedding", "mem-retrieval", "fab-03-flow-lifecycle", "ux-configuration"]
+reqs = ["int-03.1", "int-03.2", "int-03.3"]
+touches = ["runtime/gideon/hypermid/inspect.py", "runtime/gideon/cognition/context.py", "runtime/gideon/cognition/context_headroom.py", "runtime/gideon/cognition/vector_memory.py", "runtime/gideon/integrations/llm/prompt_cache.py", "runtime/gideon/interfaces/cli/main.py", "runtime/gideon/interfaces/cli/terminal.py", "runtime/gideon/interfaces/dashboard/handlers/hypermid.py", "apps/console/src/features/settings/HypermidPanel.tsx", "apps/console/src/features/settings/SettingsPage.tsx", "apps/console/src/features/chat/ContextLedger.tsx", "apps/console/src/shared/data/api.ts", "checks/hypermid/verify_wave_03.py"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_03.py"
+acceptance = "Cache and recall decisions are digest- and scope-safe, explainable through native surfaces, and compatible with existing prompt assembly and fallback behavior."
+[req.int-04]
+title = "Background maintenance, notes, Git context and budgets"
+acceptance = "Integrate background Hypermid maintenance and context sources without bypassing Gideon's scheduling, Git egress or budget authorities."
+ac_1 = "Maintenance, summarization and consolidation run once per scoped lease, persist checkpoints and cursors, honor privacy modes, and cannot race the active writer or reprocess a completed cursor range."
+ac_2 = "Notes and Git-derived context enter as attributed, digest-addressed source records; Git access continues through guarded Git policy and no Hypermid component executes an unrestricted Git command."
+ac_3 = "All background model, embedding and maintenance work is admitted and stopped by existing run/day budgets, records measured usage through Gideon's ledgers, and reports no-call distinctly from zero cost."
+
+[task.int-04]
+title = "Implement integration slice 4: background maintenance, notes, Git context and budgets"
+status = "pending"
+wave = 4
+owner_lane = "integration"
+requires = ["ctx-hooks", "mem-maintenance", "mem-indexes", "fab-04-control-diagnostics", "ux-operations", "base-04"]
+reqs = ["int-04.1", "int-04.2", "int-04.3"]
+touches = ["runtime/gideon/hypermid/maintenance.py", "runtime/gideon/hypermid/sources.py", "runtime/gideon/hypermid/subscriptions.py", "runtime/gideon/cognition/bg_compress.py", "runtime/gideon/cognition/history.py", "runtime/gideon/cognition/vault_pages.py", "runtime/gideon/security/net/git.py", "runtime/gideon/security/guardrails/budgets.py", "runtime/gideon/operations/usage_ledger.py", "runtime/gideon/engine/routing/usage.py", "apps/console/src/features/settings/UsagePanel.tsx", "checks/hypermid/verify_wave_04.py"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_04.py"
+acceptance = "Background capability is lease-safe, attributed, guarded and budget-accounted through the existing Gideon authorities."
+[req.int-05]
+title = "Supervised tool and model modules with SDK and MCP lifecycle"
+acceptance = "Expose Hypermid modules through Gideon's supervised SDK and MCP boundaries while retaining the native model loop, tool policy, approvals and credentials."
+ac_1 = "Hypermid module discovery and invocation enter through ToolCatalog-compatible definitions, portable schemas and existing approval/risk policy; the daemon cannot invoke a tool, resolve an approval or open an MCP connection independently."
+ac_2 = "Model work continues through ModelProvider.stream with served-model identity, provider fallback, cache usage and UsageJournal accounting intact; no provider or OAuth credential is serialized into a Hypermid request."
+ac_3 = "SDK and MCP connections are scoped, health-reported, cancelled and evicted with their Gideon session, and daemon shutdown leaves no live module child or pooled MCP connection."
+
+[task.int-05]
+title = "Implement integration slice 5: supervised modules, SDK, model and MCP lifecycle"
+status = "pending"
+wave = 5
+owner_lane = "integration"
+requires = ["mem-clients", "ux-integrations", "base-05"]
+reqs = ["int-05.1", "int-05.2", "int-05.3"]
+touches = ["runtime/gideon/hypermid/modules.py", "runtime/gideon/sdk/hypermid.py", "runtime/gideon/integrations/mcp_hypermid.py", "runtime/gideon/integrations/mcp_client.py", "runtime/gideon/integrations/tool_providers/registry.py", "runtime/gideon/engine/agents/native/tools.py", "runtime/gideon/engine/agents/native/runtime.py", "runtime/gideon/engine/session.py", "runtime/gideon/engine/lifecycle.py", "checks/hypermid/verify_wave_05.py"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_05.py"
+acceptance = "Hypermid modules are real supervised Gideon tools with session lifecycle cleanup, while model, credential, approval and MCP authority remain in their existing owners."
+[req.int-06]
+title = "Durable bus, federation, remote access and sandbox boundaries"
+acceptance = "Carry scoped Hypermid events across durable local and optional remote peers without weakening identity, ordering, writer or sandbox boundaries."
+ac_1 = "The bus persists scoped envelopes with event ID, Cursor, Digest and Trace, deduplicates identical retries, rejects divergent duplicates and resumes subscribers without loss or reordering across restart."
+ac_2 = "Federated or remote peers authenticate owner and project identity, negotiate versions and capabilities, cannot acquire a local writer lease implicitly, and cannot widen an absent workspace into another owner or project."
+ac_3 = "Remote module execution uses Gideon's sandbox provider and egress policy, carries cancellation and effect state end to end, and leaves approvals, tool dispatch and final delivery in Gideon."
+
+[task.int-06]
+title = "Implement integration slice 6: durable bus, federation, remote access and sandbox containment"
+status = "pending"
+wave = 6
+owner_lane = "integration"
+requires = ["ctx-subagents", "mem-remote", "ux-remote", "sec-06"]
+reqs = ["int-06.1", "int-06.2", "int-06.3"]
+touches = ["runtime/gideon/hypermid/subscriptions.py", "runtime/gideon/hypermid/federation.py", "runtime/gideon/hypermid/remote.py", "runtime/gideon/sdk/hypermid.py", "runtime/gideon/sdk/sandbox.py", "runtime/gideon/integrations/sandbox_providers/registry.py", "runtime/gideon/security/sandbox.py", "runtime/gideon/engine/session.py", "checks/hypermid/verify_wave_06.py"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_06.py"
+acceptance = "Bus and peer paths are durable, authenticated, versioned, scope-preserving, sandboxed and unable to seize writer, approval, tool or delivery authority."
+[req.int-07]
+title = "Migration, upgrade, export, restore and full native surfaces"
+acceptance = "Provide copy-validate-cutover migration and recoverable lifecycle operations through complete native CLI and console journeys."
+ac_1 = "Migration imports pages, semantic and episodic records, lessons, slots, graph links and audit events idempotently, records source and destination digests, admits existing summaries only after validating their Gideon source digest, leaves session JSONL in ConversationLog, and writes no cutover marker until complete validation passes."
+ac_2 = "Upgrade refuses unsupported protocol or newer storage, supports protocol N and N-1, opens supported older storage read-only pending explicit migration, and never performs an in-place downgrade."
+ac_3 = "Export and restore preserve Scope, cursor order, digest chain and unknown fields; rollback releases the lease at a higher epoch, refuses unknown effects, retains the Hypermid store and does not overwrite source files."
+ac_4 = "CLI and console expose status, doctor, migrate, cutover, export, restore and rollback with progress, errors, writer epoch, digest health and actionable recovery while preserving current chat, approval, stop and final-answer UX."
+
+[task.int-07]
+title = "Implement integration slice 7: migration, upgrade, export, restore and full native surfaces"
+status = "pending"
+wave = 7
+owner_lane = "integration"
+requires = ["ctx-portability", "ux-lifecycle"]
+reqs = ["int-07.1", "int-07.2", "int-07.3", "int-07.4"]
+touches = ["runtime/gideon/hypermid/migration.py", "runtime/gideon/hypermid/export.py", "runtime/gideon/hypermid/handlers.py", "runtime/gideon/core/config/migrations.py", "runtime/gideon/interfaces/cli/main.py", "runtime/gideon/interfaces/dashboard/handlers/hypermid.py", "runtime/gideon/interfaces/dashboard/server.py", "apps/console/src/features/settings/HypermidPanel.tsx", "apps/console/src/shared/data/api.ts", "spec/hypermid/schemas/config.schema.json", "checks/hypermid/verify_wave_07.py"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_07.py"
+acceptance = "All lifecycle operations are digest-verified, resumable and reversible, and every operation is understandable and operable in the native CLI and console."
+[req.int-08]
+title = "Whole OSS conformance, packaging and release readiness"
+acceptance = "Qualify one installable OSS system across off, shadow and primary modes without any external control-plane dependency."
+ac_1 = "A clean local package and single-container install includes the daemon binary, Python adapter, schema, CLI and console, runs unprivileged over a local transport, persists under the configured root and remains off by default."
+ac_2 = "The real end-to-end matrix covers off, pass_through, shadow and primary and proves single-writer behavior, no shadow writes, raw recovery, migration and rollback, N/N-1 compatibility, scoped recall, cancellation ownership, MCP and sandbox cleanup, provider usage accounting, unchanged approvals and exactly-once final delivery."
+ac_3 = "The release-readiness report distinguishes source checks from live journeys, records every unsupported platform or unqualified path, and contains no claim of a separate deployment release."
+
+[task.int-08]
+title = "Implement integration slice 8: whole OSS conformance, packaging and release readiness"
+status = "pending"
+wave = 8
+owner_lane = "integration"
+requires = ["base-08", "fab-08-integration", "ctx-gideon-integration", "mem-release", "ux-native", "sec-08"]
+reqs = ["int-08.1", "int-08.2", "int-08.3"]
+touches = ["Cargo.lock", "pyproject.toml", "setup.py", "infrastructure/docker/Dockerfile.backend", "infrastructure/website/install.sh", "runtime/gideon/hypermid/__init__.py", "runtime/gideon/engine/lifecycle.py", "runtime/gideon/interfaces/cli/main.py", "apps/console/src/features/settings/HypermidPanel.tsx", "checks/hypermid/verify_wave_08.py", "checks/hypermid/fixtures/n_minus_one_protocol.json", "checks/hypermid/fixtures/recovery_journal.jsonl", "spec/hypermid/release-readiness.kvx"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_08.py"
+acceptance = "The packaged OSS product passes the complete real-path conformance journey with explicit limitations and no dependency on a separate deployment environment."
+[design.security]
+document = "spec/hypermid/design/security.txt"
+qualification = "spec/hypermid/design/qualification.txt"
+contract = "Hypermid enforces scoped authority, encrypted daemon access, sandboxed effects, bounded network and model use, provenance-aware memory, verified artifacts, durable lifecycle controls, and crash recovery across crates/hypermid-*, runtime/gideon/hypermid, and native Gideon UI."
+release = "The first implementation target is OSS Gideon only. All implementation and qualification remain pending; live-provider qualification is an explicit opt-in gate."
+
+[req.sec-01]
+title = "Scoped principals and least-privilege background workers"
+status = "pending"
+design = "design/security.txt#security.scope, design/security.txt#security.capabilities"
+acceptance = "Enforce owner, project, optional workspace, operation, resource, and expiry boundaries for foreground and background access without implicit cross-project mutation authority."
+ac_1 = "Every read and mutation is authorized by principal, owner_id, project_id, optional workspace_id, operation, resource, and expiry at both protocol and transaction boundaries."
+ac_2 = "Workspace sharing grants only declared reads; foreign records and shared workspace membership never grant mutation, and denials do not disclose record existence."
+ac_3 = "Each background job receives an expiring capability for enumerated records and operations, and no background role can acquire blanket cross-project write authority."
+
+[task.sec-01]
+title = "Implement scoped capability enforcement"
+status = "pending"
+wave = 1
+owner_lane = "security"
+requires = ["base-02"]
+reqs = ["sec-01.1", "sec-01.2", "sec-01.3"]
+acceptance = "Scoped authorization is enforced at protocol and transactional commit boundaries for foreground callers and narrowly delegated background jobs."
+ac_1 = "A real foreign-project read or write matrix yields no content leak and no changed row without an exact live capability."
+ac_2 = "Capability revocation between worker read and commit prevents publication and leaves the target cursor unchanged."
+touches = ["crates/hypermid-core/src/capability.rs", "crates/hypermid-store/src/authorization.rs", "crates/hypermid-daemon/src/dispatch.rs", "runtime/gideon/hypermid/authz.py", "checks/hypermid/test_security_capabilities.py"]
+verify_cmd = "cargo test -p hypermid-core capability && cargo test -p hypermid-store authorization && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_security_capabilities.py"
+[req.sec-02]
+title = "Authenticated encrypted daemon protocol and version fencing"
+status = "pending"
+design = "design/security.txt#security.auth_protocol"
+acceptance = "Authenticate and encrypt every daemon session and fence incompatible clients before they create durable state."
+ac_1 = "Local and explicitly enabled remote sessions use TLS 1.3 mutual authentication, scoped short-lived authorization, replay protection, and no plaintext or certificate-verification bypass."
+ac_2 = "Unsupported protocol or schema ranges are rejected before durable intent creation with stable supported-range details and no silent downgrade."
+ac_3 = "Certificate expiry, revocation, peer mismatch, wrong server name, reordered frames, and replayed frames fail closed and leave durable state unchanged."
+
+[task.sec-02]
+title = "Implement encrypted protocol authentication and compatibility negotiation"
+status = "pending"
+wave = 1
+owner_lane = "security"
+requires = ["sec-01", "fab-01-bootstrap"]
+reqs = ["sec-02.1", "sec-02.2", "sec-02.3"]
+acceptance = "Local and remote clients negotiate an authenticated encrypted protocol with replay resistance, revocation, and supported-range fencing."
+ac_1 = "Packet capture of successful local and remote journeys contains zero plaintext application frames and every invalid peer case changes zero durable rows."
+ac_2 = "Supported-boundary clients reconnect from the acknowledged cursor while below-range and above-range clients fail before intent creation."
+touches = ["crates/hypermid-protocol/src/handshake.rs", "crates/hypermid-protocol/src/frame.rs", "crates/hypermid-daemon/src/listener.rs", "runtime/gideon/hypermid/client.py", "apps/console/src/features/hypermid/ConnectionStatus.tsx", "checks/hypermid/test_auth_protocol.py"]
+verify_cmd = "cargo test -p hypermid-protocol handshake && cargo test -p hypermid-daemon listener && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_auth_protocol.py"
+[req.sec-03]
+title = "Sandboxed MCP and stdio effects"
+status = "pending"
+design = "design/security.txt#security.sandbox"
+acceptance = "Contain MCP and stdio processes and preserve truthful external-effect state through timeout, cancellation, disconnect, and crash."
+ac_1 = "Every MCP or stdio process runs with an executable digest, bounded framed I/O, explicit filesystem/network/environment grants, resource ceilings, deadline, descendant cancellation, and no implicit credential access."
+ac_2 = "External effects persist an idempotency key and distinguish not_started, committed, and unknown; timeout or lost acknowledgement is never reported as failed or retried without reconciliation."
+ac_3 = "Malformed schemas, frames, paths, unsolicited output, and inherited descriptor attempts terminate safely without daemon-store access or partial authoritative mutation."
+
+[task.sec-03]
+title = "Implement MCP and stdio sandbox with effect reconciliation"
+status = "pending"
+wave = 5
+owner_lane = "security"
+requires = ["fab-05-supervision"]
+reqs = ["sec-03.1", "sec-03.2", "sec-03.3"]
+acceptance = "The production sandbox enforces declared resources and the durable effect ledger prevents unsafe retries after ambiguous outcomes."
+ac_1 = "Traversal, descriptor inheritance, malformed frame, oversized output, network escape, and child-survival attempts all fail without daemon-store access."
+ac_2 = "Crash injection around dispatch produces no duplicate committed effect and never maps an unknown outcome to failed."
+touches = ["crates/hypermid-sandbox/src/lib.rs", "crates/hypermid-mcp/src/stdio.rs", "crates/hypermid-store/src/effects.rs", "runtime/gideon/hypermid/effects.py", "apps/console/src/features/hypermid/UnknownEffects.tsx", "checks/hypermid/test_sandbox_effects.py"]
+verify_cmd = "cargo test -p hypermid-sandbox && cargo test -p hypermid-mcp stdio && cargo test -p hypermid-store effects && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_sandbox_effects.py"
+[req.sec-04]
+title = "Egress, DNS, proxy, secret, and log containment"
+status = "pending"
+design = "design/security.txt#security.network_and_secrets"
+acceptance = "Deny undeclared egress and prevent credential values from entering model, persistence, process, diagnostic, export, or user-interface data paths."
+ac_1 = "Default-denied egress validates normalized destinations, resolved addresses, redirects, proxy routing, address classes, byte limits, and expiry for every connection attempt."
+ac_2 = "Secrets are resolved from scoped opaque handles only at dispatch and no registered secret can appear in prompts, durable state, arguments, logs, evidence, exports, or UI payloads."
+ac_3 = "DNS rebinding, mixed allowed and denied answers, metadata endpoints, proxy bypass, and redirect escalation fail closed with a redacted typed error."
+
+[task.sec-04]
+title = "Implement network and secret containment"
+status = "pending"
+wave = 2
+owner_lane = "security"
+requires = ["wave-1-close"]
+reqs = ["sec-04.1", "sec-04.2", "sec-04.3"]
+acceptance = "The daemon mediates destination resolution and secret use with default-deny policy and redaction before persistence or presentation."
+ac_1 = "Controlled DNS, redirect, metadata, private-address, and proxy-bypass attempts establish zero unauthorized connections."
+ac_2 = "Unique canary credentials appear zero times in captured prompts, logs, evidence, arguments, exports, and UI payloads."
+touches = ["crates/hypermid-daemon/src/egress.rs", "crates/hypermid-daemon/src/secrets.rs", "crates/hypermid-daemon/src/redaction.rs", "runtime/gideon/hypermid/network_policy.py", "apps/console/src/features/hypermid/NetworkGrants.tsx", "checks/hypermid/test_egress_secrets.py"]
+verify_cmd = "cargo test -p hypermid-daemon egress && cargo test -p hypermid-daemon redaction && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_egress_secrets.py"
+[req.sec-05]
+title = "Model budget enforcement and memory provenance"
+status = "pending"
+design = "design/security.txt#security.model_budget, design/security.txt#security.memory_provenance"
+acceptance = "Bound model spending before dispatch and prevent memory text from acquiring control authority without a recorded user promotion."
+ac_1 = "Foreground and background calls reserve owner-controlled per-call, concurrency, hourly, daily, and job-total budgets before dispatch and reconcile actual or unresolved usage after completion or crash."
+ac_2 = "Project content cannot select credentials, enable providers, raise limits, or change approved data-routing constraints, and background work pauses visibly when admission is denied."
+ac_3 = "Instruction-shaped memory remains provenance-labeled data and cannot alter capabilities, provider policy, approvals, or trust until a revision-checked user promotion is recorded."
+
+[task.sec-05]
+title = "Implement budget admission and provenance trust boundaries"
+status = "pending"
+wave = 2
+owner_lane = "security"
+requires = ["sec-04", "base-03"]
+reqs = ["sec-05.1", "sec-05.2", "sec-05.3"]
+acceptance = "Usage reservations, reconciliation, provider policy, and provenance trust transitions are owner-controlled and crash-safe."
+ac_1 = "Concurrent foreground and worker admissions never exceed configured call, concurrency, hourly, daily, or job ceilings, including unresolved charges."
+ac_2 = "Instruction-shaped untrusted memory cannot alter a capability, approval, provider, credential, route, or budget in the rendered request."
+touches = ["crates/hypermid-store/src/budget.rs", "crates/hypermid-core/src/provenance.rs", "crates/hypermid-daemon/src/model_admission.rs", "runtime/gideon/hypermid/budgets.py", "runtime/gideon/hypermid/render.py", "apps/console/src/features/hypermid/MemoryProvenance.tsx", "checks/hypermid/test_budget_provenance.py"]
+verify_cmd = "cargo test -p hypermid-store budget && cargo test -p hypermid-core provenance && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_budget_provenance.py"
+[req.sec-06]
+title = "Verified artifact installation and atomic update"
+status = "pending"
+design = "design/security.txt#security.artifact_supply_chain"
+acceptance = "Verify artifact identity and contents before atomic activation and require fresh approval for capability expansion."
+ac_1 = "Install and update verify immutable digest, platform, publisher signature, declared capabilities, archive paths, link targets, normalized-name uniqueness, and expansion limits before activation."
+ac_2 = "Activation is atomic, existing sessions remain version-pinned, and any failed or interrupted update leaves the prior verified artifact runnable."
+ac_3 = "An update that requests any new filesystem, network, model, secret, or mutation capability cannot activate without a fresh user-visible approval."
+
+[task.sec-06]
+title = "Implement artifact supply-chain verification"
+status = "pending"
+wave = 6
+owner_lane = "security"
+requires = ["wave-5-close"]
+reqs = ["sec-06.1", "sec-06.2", "sec-06.3"]
+acceptance = "Only signed, digest-matched, bounded artifacts activate, and update interruption preserves a pinned prior version."
+ac_1 = "Publisher, digest, platform, traversal, link, collision, decompression, and capability-escalation failures execute zero artifact code and write nothing outside staging."
+ac_2 = "A kill at every activation boundary leaves exactly one verified version active and existing sessions continue on their pinned version."
+touches = ["crates/hypermid-artifacts/src/manifest.rs", "crates/hypermid-artifacts/src/install.rs", "crates/hypermid-artifacts/src/activate.rs", "runtime/gideon/hypermid/artifacts.py", "apps/console/src/features/hypermid/ArtifactApproval.tsx", "checks/hypermid/test_artifact_supply_chain.py"]
+verify_cmd = "cargo test -p hypermid-artifacts && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_artifact_supply_chain.py"
+[req.sec-07]
+title = "Deletion, export, backup, restore, and migration integrity"
+status = "pending"
+design = "design/security.txt#security.lifecycle"
+acceptance = "Provide scope-safe deletion, export, encrypted backup, migration, and restore with complete digest and cursor verification."
+ac_1 = "Deletion excludes content from recall immediately, preserves an owner-scoped tombstone through the recovery window, and purges authoritative and derived copies without accepting stale worker output."
+ac_2 = "Export and encrypted backup use consistent scope-filtered snapshots with authenticated manifests and per-entry digests, excluding secrets and transient cache material."
+ac_3 = "Restore and migration stage separately, validate schemas, digests, scopes, provenance, tombstones, and cursors, and replace the active store atomically only on complete success."
+
+[task.sec-07]
+title = "Implement lifecycle portability and migrations"
+status = "pending"
+wave = 7
+owner_lane = "security"
+requires = ["wave-6-close"]
+reqs = ["sec-07.1", "sec-07.2", "sec-07.3"]
+acceptance = "Lifecycle operations preserve authorization, provenance, tombstones, manifests, and the active store across interruption and invalid input."
+ac_1 = "Deletion removes recall immediately and post-window purge removes authoritative content and all derived copies without resurrection from stale jobs or backups."
+ac_2 = "Corrupt, wrong-key, cross-scope, and interrupted restore attempts leave the active store byte-identical; a valid restore matches every manifest digest and cursor."
+touches = ["crates/hypermid-store/src/deletion.rs", "crates/hypermid-store/src/export.rs", "crates/hypermid-store/src/backup.rs", "crates/hypermid-store/src/migrate.rs", "runtime/gideon/hypermid/lifecycle.py", "apps/console/src/features/hypermid/DataLifecycle.tsx", "checks/hypermid/test_lifecycle_migration.py"]
+verify_cmd = "cargo test -p hypermid-store lifecycle && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_lifecycle_migration.py"
+[req.sec-08]
+title = "Crash-consistent recovery and release evidence"
+status = "pending"
+design = "design/security.txt#security.crash_consistency, design/qualification.txt#qualification.release_acceptance"
+acceptance = "Recover atomic authoritative state and produce same-revision real-path evidence for every mandatory security and recovery gate."
+ac_1 = "Authoritative mutation, lineage, cursor, usage reservation, and outbox reference commit atomically, while stale derived writes are rejected by source-digest comparison."
+ac_2 = "Startup reconciles migrations, intents, outbox entries, and effects without duplicating committed work or converting unknown effects to failures, and corrupt or future state opens read-only recovery."
+ac_3 = "Release evidence covers real daemon, store, Python adapter, sandbox, and native UI paths for cache bytes, long history, raw recovery, migration, crash, authentication, and client compatibility; live-provider success requires explicit opt-in and cannot be supplied by a mock."
+
+[task.sec-08]
+title = "Implement crash recovery and security acceptance gates"
+status = "pending"
+wave = 8
+owner_lane = "security"
+requires = ["wave-7-close"]
+reqs = ["sec-08.1", "sec-08.2", "sec-08.3"]
+acceptance = "Crash recovery preserves authoritative truth and the release gate records measurable real-path evidence without converting mocks or skips into product success."
+ac_1 = "Kill-point coverage preserves monotonic cursors, rejects stale derivatives, duplicates no committed effect, and exposes unresolved effects as unknown."
+ac_2 = "Cache-byte, long-history, raw-recovery, migration, crash, auth, compatibility, lifecycle, sandbox, budget, and supply-chain evidence passes on one source digest; live-provider evidence requires explicit opt-in."
+touches = ["crates/hypermid-store/src/recovery.rs", "crates/hypermid-daemon/src/startup.rs", "runtime/gideon/hypermid/recovery.py", "apps/console/src/features/hypermid/RecoveryStatus.tsx", "checks/hypermid/verify_security_acceptance.py", "spec/hypermid/schemas/evidence.schema.json"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_security_acceptance.py --evidence-dir .artifacts/hypermid/security"
+[req.wave-1]
+title = "Local session connection"
+ac_1 = "A local OSS user starts Gideon with Hypermid available, authenticates the adapter to the local daemon, sees module health, and completes a normal conversation through a byte-preserving pass-through projection."
+ac_2 = "Default context ownership remains with the existing runtime; missing daemon, invalid handshake and shutdown expose truthful status without losing the journal or duplicating a delivered answer."
+
+[task.wave-1-close]
+title = "Qualify vertical slice: Local session connection"
+status = "pending"
+wave = 1
+owner_lane = "integration"
+requires = ["ctx-history", "int-01"]
+reqs = ["wave-1.1", "wave-1.2"]
+touches = ["checks/hypermid/waves/test_wave_01.py", "spec/hypermid/qualification/wave-1.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_01.py -q"
+[req.wave-2]
+title = "Durable project continuity"
+ac_1 = "An opted-in project publishes a validated history segment and an owned memory, restarts Gideon and the daemon, and can recall the memory and expand the exact original source bytes."
+ac_2 = "A forced interruption at each declared publication boundary leaves either the prior checkpoint or a recoverable committed publication; a second context writer is fenced."
+
+[task.wave-2-close]
+title = "Qualify vertical slice: Durable project continuity"
+status = "pending"
+wave = 2
+owner_lane = "integration"
+requires = ["int-02"]
+reqs = ["wave-2.1", "wave-2.2"]
+touches = ["checks/hypermid/waves/test_wave_02.py", "spec/hypermid/qualification/wave-2.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_02.py -q"
+[req.wave-3]
+title = "Bounded cached context and recall"
+ac_1 = "A long conversation uses a stable serialized baseline and bounded delta, runs hybrid recall over the selected project sources, and shows source provenance and pressure in the native inspector."
+ac_2 = "Unchanged passes preserve exact prefix bytes, changes publish at allowed boundaries, every outgoing request fits its declared model budget, and lexical-only mode remains usable."
+
+[task.wave-3-close]
+title = "Qualify vertical slice: Bounded cached context and recall"
+status = "pending"
+wave = 3
+owner_lane = "integration"
+requires = ["int-03"]
+reqs = ["wave-3.1", "wave-3.2"]
+touches = ["checks/hypermid/waves/test_wave_03.py", "spec/hypermid/qualification/wave-3.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_03.py -q"
+[req.wave-4]
+title = "Budgeted background knowledge maintenance"
+ac_1 = "The user enables scheduled maintenance, sets its model and budget, observes one completed history and knowledge cycle, and inspects note conditions, code verification and git-derived recall."
+ac_2 = "Cancellation, stale content hashes, exceeded budget and foreign ownership prevent unintended writes; edited memories invalidate every affected embedding and sharing judgment."
+
+[task.wave-4-close]
+title = "Qualify vertical slice: Budgeted background knowledge maintenance"
+status = "pending"
+wave = 4
+owner_lane = "integration"
+requires = ["int-04"]
+reqs = ["wave-4.1", "wave-4.2"]
+touches = ["checks/hypermid/waves/test_wave_04.py", "spec/hypermid/qualification/wave-4.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_04.py -q"
+[req.wave-5]
+title = "Supervised capability ecosystem"
+ac_1 = "A scoped local module exposes a tool and a model capability through the daemon, the Python host and other SDKs consume versioned contracts, and the MCP bridge completes and cancels a real invocation."
+ac_2 = "Restart, route replacement, slow consumption and deadline expiry preserve attribution and flow control; an unknown external effect is reconciled rather than automatically reissued."
+
+[task.wave-5-close]
+title = "Qualify vertical slice: Supervised capability ecosystem"
+status = "pending"
+wave = 5
+owner_lane = "integration"
+requires = ["int-05"]
+reqs = ["wave-5.1", "wave-5.2"]
+touches = ["checks/hypermid/waves/test_wave_05.py", "spec/hypermid/qualification/wave-5.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_05.py -q"
+[req.wave-6]
+title = "Durable events and optional remote access"
+ac_1 = "The user subscribes to durable module events, resumes from a cursor after reconnect, and uses explicitly enabled remote transport with authenticated principals and OS containment."
+ac_2 = "Expired grants, wrong owner, stale route epoch and replayed delivery are refused; unacknowledged effects prevent destructive disposal, and remote transport remains disabled by default."
+
+[task.wave-6-close]
+title = "Qualify vertical slice: Durable events and optional remote access"
+status = "pending"
+wave = 6
+owner_lane = "integration"
+requires = ["int-06"]
+reqs = ["wave-6.1", "wave-6.2"]
+touches = ["checks/hypermid/waves/test_wave_06.py", "spec/hypermid/qualification/wave-6.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_06.py -q"
+[req.wave-7]
+title = "Lifecycle and native administration"
+ac_1 = "A local owner upgrades an installation, migrates existing Gideon knowledge, exports and restores a complete project, and operates diagnostics and maintenance from the native console and CLI."
+ac_2 = "Interrupted migrations resume safely, incompatible downgrades refuse, deletion removes derived copies according to policy, and rollback retains original journals and user credentials."
+
+[task.wave-7-close]
+title = "Qualify vertical slice: Lifecycle and native administration"
+status = "pending"
+wave = 7
+owner_lane = "integration"
+requires = ["int-07"]
+reqs = ["wave-7.1", "wave-7.2"]
+touches = ["checks/hypermid/waves/test_wave_07.py", "spec/hypermid/qualification/wave-7.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_07.py -q"
+[req.wave-8]
+title = "Complete OSS distribution"
+ac_1 = "A clean supported installation completes the full capability inventory through Gideon, including Python and other SDK contracts, native surfaces, SQLite and declared PostgreSQL backend behavior."
+ac_2 = "The release receipt binds exact artifacts and source revisions to required results; cost and latency measurements identify workload and provider, and incomplete external checks prevent a fully-qualified release claim."
+
+[task.wave-8-close]
+title = "Qualify vertical slice: Complete OSS distribution"
+status = "pending"
+wave = 8
+owner_lane = "integration"
+requires = ["int-08"]
+reqs = ["wave-8.1", "wave-8.2"]
+touches = ["checks/hypermid/waves/test_wave_08.py", "spec/hypermid/qualification/wave-8.json"]
+do_1 = "Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths."
+do_2 = "Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance."
+verify_cmd = "python -m pytest checks/hypermid/waves/test_wave_08.py -q"

@@ -1,0 +1,119 @@
+HYPERMID PROCESS FABRIC
+
+Purpose
+
+Hypermid is the local-first process fabric beneath Gideon. It starts and contains native modules, authenticates every connection, routes bounded request and event traffic, records durable effects, exposes operator diagnostics, and can extend selected routes to paired devices or remote machines. The daemon and its protocol are implemented in Rust. Gideon consumes the control plane through a narrow Python adapter.
+
+The fabric does not define assistant behavior, MCP presentation, client SDK ergonomics, or user interface flows. Those consumers use the contracts defined here.
+
+[fabric.boundaries]
+
+The daemon owns process lifecycle, connection authentication, route binding, flow control, deadlines, cancellation, health, diagnostic history, event delivery, and durable effect coordination. A module owns its operation payloads and business semantics. Gideon owns policy above the principal scopes stamped by the fabric.
+
+Local operation is the default. Every application session, including owner-only Unix and loopback transports, is wrapped in TLS 1.3 with mutual certificate authentication after device enrollment. Unix systems listen on one owner-only Unix domain socket. Windows listens on an unpredictable loopback port published in an owner-only connection record. An external listener is absent unless an operator enables it explicitly; when enabled it requires TLS 1.3, a configured trust root, and principal scopes on every authenticated session.
+
+The daemon never treats a module name, route label, project path, client-declared role, or payload field as authority. Authority comes from an authenticated principal and its scopes. Supervised modules additionally prove a one-use launch secret issued for that exact spawn generation.
+
+[fabric.transport.framing]
+
+The protocol name is hypermid.v1. Every post-handshake message is UTF-8 JSON preceded by a four-byte unsigned big-endian length. The length covers JSON bytes only. A peer must reject zero-length frames, invalid UTF-8, duplicate JSON keys, non-canonical integer values, and lengths above 8 MiB before allocating the declared body.
+
+The JSON envelope carries protocol, kind, message_id, optional reply_to, optional route_id and route_epoch, optional operation, optional scope and trace, optional deadline_ms, payload, and optional error. kind is hello, challenge, authenticate, accepted, request, response, event, credit, cancel, ping, pong, or close. Post-handshake traffic must say hypermid.v1 exactly.
+
+Event payloads larger than 64 KiB are split into ordered event chunks. Each chunk names the event id, zero-based chunk index, total chunk count, and whole-event SHA-256 digest. No chunk exceeds 64 KiB after base64 decoding. Receivers validate order, declared count, digest, and the enclosing 8 MiB frame bound before publishing the reassembled event.
+
+[fabric.transport.handshake]
+
+The client begins with hello containing supported protocols, a fresh 256-bit nonce, and its requested connection class. The daemon answers with a fresh nonce, daemon instance id, selected protocol, authentication method, and challenge expiry. The client authenticates by proving possession of its credential over both nonces, the selected protocol, daemon instance id, and connection class. The daemon answers accepted with the authenticated principal, granted scopes, session id, connection limits, and server time.
+
+Local user credentials are 256-bit random secrets stored in an owner-only connection record and used with HMAC-SHA-256 inside the authenticated TLS session. Unix peer credentials or Windows process ownership are additional local evidence and never replace the proof. Supervised modules use a one-use launch secret passed through an inherited descriptor where available and an owner-protected environment fallback otherwise. A secret is consumed only after the daemon has bound it to the expected module id and spawn generation.
+
+External sessions authenticate inside TLS 1.3 with a configured client certificate or short-lived signed token. The resulting principal contains an id, kind, and scopes. External access is denied when TLS identity, token audience, expiry, or required scope is absent. Authentication has one absolute deadline and a small unauthenticated connection budget so slow peers cannot exhaust the listener.
+
+[fabric.modules.discovery]
+
+Module discovery reads only operator-configured manifest directories. It does not search PATH, execute candidates to discover metadata, or follow symlinks outside an allowed root. A manifest declares schema version, module id, executable, arguments, environment allowlist, protocol, system roles, provided operations, required capabilities, concurrency policy, restart policy, health policy, resource limits, storage bindings, exposure policy, and artifact digest. System roles cover control surfaces, operation providers, pipeline stages, internal services, event publishers, event consumers, federation gateways, and maintenance workers; every role runs on the local fabric without requiring a foreign service.
+
+Module ids are stable identifiers and may not contain path separators or reserved prefixes. The executable is canonicalized, checked against the manifest root, and hashed before spawn. Duplicate ids, capability conflicts, invalid dependency cycles, unsupported manifest versions, and digest mismatches are explicit refusals. A registry generation increases only after a complete manifest set has validated and atomically replaced the prior generation.
+
+Discovery separates configured, installed, registered, ready, draining, and failed states. A configured process does not become routable until its authenticated hello matches the expected module id and spawn generation and its manifest-derived operation catalog passes validation.
+
+[fabric.routing]
+
+Clients open a route by target operation and optional scope. The daemon resolves the current ready module, authorizes the principal scopes, reserves a route id, increments that route slot's epoch, and relays a bind request to the module. The route becomes visible only after the module acknowledges the bind. A failed or timed-out bind releases the reservation and cannot leave a half-open route.
+
+Every routed frame carries route_id and route_epoch. Frames from an earlier epoch are rejected as stale even if the numeric route id has been reused. Registry changes, process replacement, capability loss, scope revocation, and deadline expiry close affected routes with a typed reason. A close notice is delivered best effort, while removal from the routing table is authoritative.
+
+Control traffic has an isolated bounded queue. Each route has independent request and byte credits. Request frames consume both; terminal response or error frames release request credit; credit frames replenish byte credit. Cancel, close, credit, ping, and pong bypass request credit but remain byte bounded. A slow route cannot consume the control queue or another route's credit.
+
+Each request may carry deadline_ms. The receiver converts the remaining wall-clock budget once to a monotonic deadline and never extends it on retries or internal hops. cancel targets message_id and is idempotent. A cancelled or expired request stops queued work, signals running work, and discards later non-terminal output. The caller receives exactly one terminal response, error, or close classification.
+
+[fabric.effects]
+
+An operation manifest classifies each operation as query, idempotent effect, or durable effect. Durable effects require an effect id and input digest. Before the first module write, the daemon commits an intent record containing principal, scope, module generation, operation, digest, and deadline. The same effect id with a different digest is refused.
+
+The terminal result is committed before it is acknowledged to the caller. Replays of a settled effect return the recorded result. On restart, intents without terminal results are reconciled with the responsible module by effect id. The daemon records committed, not_started, or unknown; it never blindly repeats an effect whose execution may have begun. Journal records use checksums, monotonic sequence numbers, atomic replacement for snapshots, and explicit recovery of a torn final record.
+
+[fabric.supervision]
+
+The supervisor has one state machine per configured module: disabled, starting, warming, ready, draining, stopping, backoff, failed, or retired. It records spawn generation, pid, executable digest, start time, readiness, health, restart count, next retry, resource readings, active route count, and last terminal reason.
+
+Crash restart uses a bounded restart count within a sliding window and exponential backoff with jitter. Planned restart first rejects new routes, sends a drain deadline, waits for in-flight routes within the configured ceiling, sends termination, and escalates only after the grace period. A replacement may warm beside the incumbent only when the manifest declares overlap safe; cutover is atomic and failure leaves the incumbent serving.
+
+Linux places each module in a delegated cgroup when available and kills the module subtree on teardown. Windows uses a kill-on-close Job Object and creates the process suspended until containment is established. Other Unix systems track process identity by pid plus start time and signal only a matching process. The daemon persists the live-child roster and, after its own restart, cleans only processes whose recorded identity still matches.
+
+Standard error is captured into a bounded line-and-byte ring with truncation markers. Terminal exits are stored in a durable journal and mirrored in a bounded memory ring. Resource readings report support or unavailable status explicitly; zero is never used for an unsupported measurement.
+
+[fabric.health]
+
+Health combines process liveness, authenticated registration, declared readiness, active probe results, resource ceilings, route bind breaker state, and dependency capability status. Probe cadence, deadline, failure threshold, and action are manifest policy. Actions are report, drain, or restart. Metrics are size bounded and secrets are redacted before storage.
+
+The daemon also probes itself through the published local endpoint using the normal handshake and server.describe request. Clock-step detection records wall-clock discontinuities without changing monotonic deadline decisions. Diagnostics expose current state and retained evidence separately so an operator can distinguish a healthy process from a recent crash or an unavailable probe.
+
+[fabric.control]
+
+Control RPC uses the same envelope on the control route and requires named scopes. Required operations are server.describe, registry.list, registry.rescan, route.open, route.poll, route.close, supervisor.list, supervisor.restart, supervisor.swap, supervisor.set_enabled, supervisor.health, supervisor.probe, supervisor.routes, supervisor.stderr, supervisor.terminals, supervisor.spawn_snapshot, supervisor.spawn_subscribe, effects.status, events.subscribe, and events.ack.
+
+Mutating control requests require a unique message id and return applied, refused, or already_applied. Rescan supports preview and apply as distinct operations. Control responses include the registry generation or daemon instance whose facts they describe. Subscriptions begin with a snapshot and cursor, then deliver ordered events after that cursor. A cursor from another epoch or older than retained history is refused with the current recovery cursor.
+
+[fabric.events]
+
+The event bus is a durable, scoped append log with topic names, event ids, producer principal, scope, timestamp, schema name and version, payload digest, trace, and cursor. Producers must hold publish scope for the topic; consumers must hold subscribe scope. Topic patterns are resolved server-side and never grant broader access than the principal already has.
+
+Subscribers receive an atomic snapshot cursor, retained replay after that cursor, and then live events. Delivery is at least once. Acknowledgement is explicit and per durable consumer. Redelivery is bounded; exhausted records enter a dead-letter topic with original event id, topic, digest, delivery count, and reason. Consumer lag, retention loss, epoch change, and permission revocation are terminal stream events that require a fresh snapshot.
+
+The local durable backend is authoritative and supports every system role without a foreign service. An optional broker bridge may replicate selected topic prefixes, but it records an outbox intent before publish and an inbox receipt before local delivery. Broker credentials are short lived, held in memory, scoped to exact subjects, rotated before expiry, and revoked when the supervised process generation ends.
+
+[fabric.registry_and_release]
+
+The module registry maintains an ownership ledger for installed binaries, manifests, service definitions, and configuration fragments. Installation is planned from current observations before mutation. Artifacts come from a signed, freshness-bounded release index; every downloaded archive and extracted executable is checked against its SHA-256 digest and platform tuple.
+
+Activation stages files beside the current generation, verifies identity and compatibility, then atomically switches the registry generation. Failure before switch removes the staging generation. Failure after switch restores the prior generation and restarts only affected modules. Updates never replace an unowned destination, delete user stores, or rewrite unrelated module configuration. Uninstall removes only paths whose current digest matches the ownership ledger.
+
+Per-user service integration uses a systemd user unit on Linux, a LaunchAgent on macOS, and Task Scheduler on Windows. Definitions start the daemon at login, restart on unexpected exit, set an ordered-stop timeout longer than the module drain ceiling, and preserve daemon ownership of child shutdown. Register, start, stop, restart, and deregister return the service manager's exact refusal text. A service definition change is reloaded before restart.
+
+[fabric.federation]
+
+Federation is optional and disabled without explicit configuration. A device has a long-lived signing identity stored in the operating system credential store. Pairing creates a mutually authorized peer record; discovery yields signed, expiring candidates. The dial ladder tries local network, public direct, then relay. Candidates are validated against private-address and stale-generation rules before dialing.
+
+Peer sessions use a mutually authenticated Noise IK handshake inside direct TCP or a TLS WebSocket relay. The relay receives only encrypted records and authenticates both sides with separate, single-use, expiring pipe grants. Session hello exchanges protocol features, peer incarnation, effect-ledger epoch, catalog digest, maximum record size, and keepalive policy. Rekey drains the old session before promotion of the new keys.
+
+Federated catalogs expose only operations explicitly marked remote. Remote requests retain the originating principal, scope, trace, deadline, and effect classification. The receiving fabric intersects remote grants with local policy before dispatch. Federation failure never widens local permissions or makes local routing depend on cloud availability.
+
+[fabric.phone_channel]
+
+A phone is a federated origin with outbound-only networking. It maintains a durable local effect log, commits mutation intent before sending, and reconciles unsettled effects on reconnect before admitting another mutation. Queries may resume after reconnect; mutations with an uncertain outcome remain blocked until the serving peer returns a committed result, proves not_started, or declares unknown.
+
+The phone channel uses the same signed discovery, relay authentication, encrypted session, catalog, deadline, cancellation, and chunking contracts as other federation peers. Push notifications may wake the application but carry only an opaque wake token; they are never a command channel and contain no request payload, route credential, or assistant content.
+
+[fabric.gideon_adapter]
+
+The Python adapter reads the owner-protected connection record, completes the handshake, and maintains a bounded reconnect loop. It maps shared Id, Scope, Digest, Cursor, Error, and Trace objects without redefining them. It exposes typed async calls for control RPC, route requests, event subscription, cancellation, and effect status.
+
+The adapter does not silently retry durable effects. It may reopen a route and retry a query only when the error is marked retryable and the original absolute deadline still has time. On daemon epoch change it invalidates route epochs and subscription cursors, obtains fresh snapshots, and surfaces any unrecoverable gap to Gideon.
+
+[fabric.implementation]
+
+The Rust workspace is divided into crates/hypermid-protocol, crates/hypermid-transport, crates/hypermid-control, crates/hypermid-daemon, crates/hypermid-bus, and crates/hypermid-registry. The executable is crates/hypermid-daemon/src/main.rs. The Gideon consumer lives in runtime/gideon/hypermid.
+
+No crate may depend on the Python runtime. hypermid-protocol contains data types and validation only. hypermid-transport owns framing and authentication. hypermid-control owns RPC shapes. hypermid-daemon owns supervision and routing. hypermid-bus owns durable events and effects. hypermid-registry owns discovery, signed installation, update, and service-manager integration.

@@ -1,0 +1,1380 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hypermid.gideon.dev/schemas/memory.schema.json",
+  "title": "Hypermid Memory Contract",
+  "description": "OSS Gideon contracts for durable scoped memory, retrieval, maintenance, and portability.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/MemoryRecord"
+    },
+    {
+      "$ref": "#/$defs/MutationRequest"
+    },
+    {
+      "$ref": "#/$defs/MutationResult"
+    },
+    {
+      "$ref": "#/$defs/SearchRequest"
+    },
+    {
+      "$ref": "#/$defs/SearchResponse"
+    },
+    {
+      "$ref": "#/$defs/MaintenanceJob"
+    },
+    {
+      "$ref": "#/$defs/ShareGrant"
+    },
+    {
+      "$ref": "#/$defs/ImportManifest"
+    },
+    {
+      "$ref": "#/$defs/ExportManifest"
+    },
+    {
+      "$ref": "#/$defs/ErrorResponse"
+    }
+  ],
+  "$defs": {
+    "RecordKind": {
+      "type": "string",
+      "enum": [
+        "fact",
+        "episode",
+        "note",
+        "smart_note",
+        "anchor",
+        "summary"
+      ]
+    },
+    "RecordStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "archived",
+        "stale",
+        "tombstoned"
+      ]
+    },
+    "VerificationState": {
+      "type": "string",
+      "enum": [
+        "unverified",
+        "supported",
+        "disputed",
+        "refuted",
+        "unknown"
+      ]
+    },
+    "LineageRelation": {
+      "type": "string",
+      "enum": [
+        "derived_from",
+        "cites",
+        "supersedes",
+        "contradicts",
+        "merged_from",
+        "split_from",
+        "imported_from",
+        "verifies"
+      ]
+    },
+    "Operation": {
+      "type": "string",
+      "enum": [
+        "create",
+        "update",
+        "archive",
+        "restore",
+        "merge",
+        "split",
+        "relocate",
+        "delete",
+        "purge",
+        "verify",
+        "embed",
+        "index",
+        "summarize",
+        "import",
+        "export"
+      ]
+    },
+    "GrantOperation": {
+      "type": "string",
+      "enum": [
+        "read",
+        "search",
+        "create",
+        "update",
+        "archive",
+        "restore",
+        "merge",
+        "split",
+        "relocate",
+        "delete",
+        "purge",
+        "verify",
+        "embed",
+        "index",
+        "summarize",
+        "import",
+        "export"
+      ]
+    },
+    "EmbeddingMode": {
+      "type": "string",
+      "enum": [
+        "off",
+        "local",
+        "remote-compatible",
+        "managed-service"
+      ]
+    },
+    "SearchMode": {
+      "type": "string",
+      "enum": [
+        "lexical",
+        "semantic",
+        "hybrid"
+      ]
+    },
+    "MaintenanceKind": {
+      "type": "string",
+      "enum": [
+        "extract_facts",
+        "extract_episodes",
+        "verify_claims",
+        "evaluate_smart_notes",
+        "refresh_summaries",
+        "decay_summaries",
+        "embed_records",
+        "reembed_model",
+        "reconcile_fts",
+        "reconcile_sources",
+        "index_messages",
+        "index_git_commits",
+        "invalidate_lineage",
+        "sweep_orphans",
+        "compact_events",
+        "check_integrity",
+        "import_batch",
+        "export_batch",
+        "purge_tombstones"
+      ]
+    },
+    "SourceKind": {
+      "type": "string",
+      "enum": [
+        "memory",
+        "message",
+        "file",
+        "git_commit",
+        "external"
+      ]
+    },
+    "Provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_kind",
+        "source_digest",
+        "observed_at",
+        "capture_method"
+      ],
+      "properties": {
+        "source_kind": {
+          "$ref": "#/$defs/SourceKind"
+        },
+        "source_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "source_digest": {
+          "$ref": "common.schema.json#/$defs/Digest"
+        },
+        "locator": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "span_start": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "span_end": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "capture_method": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "LineageEdge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parent_id",
+        "relation",
+        "parent_revision_digest"
+      ],
+      "properties": {
+        "parent_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "relation": {
+          "$ref": "#/$defs/LineageRelation"
+        },
+        "parent_revision_digest": {
+          "$ref": "common.schema.json#/$defs/Digest"
+        }
+      }
+    },
+    "SmartPredicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operator",
+        "clauses"
+      ],
+      "properties": {
+        "operator": {
+          "type": "string",
+          "enum": [
+            "all",
+            "any",
+            "none"
+          ]
+        },
+        "clauses": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "field",
+              "comparison",
+              "value"
+            ],
+            "properties": {
+              "field": {
+                "type": "string",
+                "enum": [
+                  "event.kind",
+                  "event.label",
+                  "record.kind",
+                  "record.category",
+                  "record.status",
+                  "time.hour",
+                  "time.weekday"
+                ]
+              },
+              "comparison": {
+                "type": "string",
+                "enum": [
+                  "eq",
+                  "neq",
+                  "in",
+                  "contains",
+                  "gte",
+                  "lte"
+                ]
+              },
+              "value": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "array"
+                ],
+                "items": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "MemoryRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "scope",
+        "kind",
+        "status",
+        "category",
+        "content",
+        "content_digest",
+        "revision",
+        "created_at",
+        "updated_at",
+        "verification",
+        "provenance",
+        "lineage",
+        "revision_digest"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "kind": {
+          "$ref": "#/$defs/RecordKind"
+        },
+        "status": {
+          "$ref": "#/$defs/RecordStatus"
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 262144
+        },
+        "content_digest": {
+          "$ref": "common.schema.json#/$defs/Digest"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "revision_digest": {
+          "$ref": "common.schema.json#/$defs/Digest"
+        },
+        "importance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "verification": {
+          "$ref": "#/$defs/VerificationState"
+        },
+        "valid_from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "valid_to": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "observed_from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "observed_to": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "retention_until": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "smart_predicate": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SmartPredicate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metadata": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": true
+        },
+        "provenance": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Provenance"
+          }
+        },
+        "lineage": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/LineageEdge"
+          }
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "deleted_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "smart_note"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "smart_predicate"
+            ],
+            "properties": {
+              "smart_predicate": {
+                "$ref": "#/$defs/SmartPredicate"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "anchor"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "expires_at": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ShareGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "owner_scope",
+        "grantee_scope",
+        "operations",
+        "granted_at",
+        "revision"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "owner_scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "grantee_scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/GrantOperation"
+          }
+        },
+        "categories": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "granted_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "revoked_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "MutationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "actor_scope",
+        "target_scope",
+        "trace"
+      ],
+      "properties": {
+        "operation": {
+          "$ref": "#/$defs/Operation"
+        },
+        "actor_scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "target_scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "record_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "expected_revision_digest": {
+          "$ref": "common.schema.json#/$defs/Digest"
+        },
+        "record": {
+          "$ref": "#/$defs/MemoryRecord"
+        },
+        "source_ids": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "common.schema.json#/$defs/Id"
+          }
+        },
+        "retention_until": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "trace": {
+          "$ref": "common.schema.json#/$defs/Trace"
+        },
+        "grant_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "destination_scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "expected_source_digests": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 256,
+          "propertyNames": {
+            "$ref": "common.schema.json#/$defs/Id"
+          },
+          "additionalProperties": {
+            "$ref": "common.schema.json#/$defs/Digest"
+          }
+        },
+        "replacement_records": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/MemoryRecord"
+          }
+        },
+        "job_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "manifest_digest": {
+          "$ref": "common.schema.json#/$defs/Digest"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "create"
+                ]
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "required": [
+              "record"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "update"
+                ]
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "required": [
+              "record_id",
+              "expected_revision_digest",
+              "record"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "archive",
+                  "restore",
+                  "delete",
+                  "purge",
+                  "verify"
+                ]
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "required": [
+              "record_id",
+              "expected_revision_digest"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "merge"
+                ]
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "required": [
+              "source_ids",
+              "expected_source_digests",
+              "record"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "split"
+                ]
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "required": [
+              "record_id",
+              "expected_revision_digest",
+              "replacement_records"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "relocate"
+                ]
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "required": [
+              "record_id",
+              "expected_revision_digest",
+              "destination_scope"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "embed",
+                  "index",
+                  "summarize"
+                ]
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "required": [
+              "record_id",
+              "expected_revision_digest",
+              "job_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "import",
+                  "export"
+                ]
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "required": [
+              "manifest_digest"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "merge"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source_ids": {
+                "minItems": 2,
+                "uniqueItems": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "MutationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record",
+        "cursor",
+        "trace"
+      ],
+      "properties": {
+        "record": {
+          "$ref": "#/$defs/MemoryRecord"
+        },
+        "cursor": {
+          "$ref": "common.schema.json#/$defs/Cursor"
+        },
+        "invalidated_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/Id"
+          }
+        },
+        "trace": {
+          "$ref": "common.schema.json#/$defs/Trace"
+        }
+      }
+    },
+    "SearchFilters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kinds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/RecordKind"
+          }
+        },
+        "sources": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/SourceKind"
+          }
+        },
+        "categories": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "to": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "include_archived": {
+          "type": "boolean",
+          "default": false
+        },
+        "verification": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/VerificationState"
+          }
+        }
+      }
+    },
+    "ModelBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_items",
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_requests",
+        "max_cost_units",
+        "max_retries",
+        "max_wall_ms"
+      ],
+      "properties": {
+        "max_items": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_cost_units": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_wall_ms": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "SearchRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query",
+        "scope",
+        "mode",
+        "limit",
+        "trace"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32768
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "mode": {
+          "$ref": "#/$defs/SearchMode"
+        },
+        "semantic_required": {
+          "type": "boolean",
+          "default": false
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "candidate_limit_per_source": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "filters": {
+          "$ref": "#/$defs/SearchFilters"
+        },
+        "visible_digests": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "$ref": "common.schema.json#/$defs/Digest"
+          }
+        },
+        "rerank_budget": {
+          "$ref": "#/$defs/ModelBudget"
+        },
+        "cursor": {
+          "$ref": "common.schema.json#/$defs/Cursor"
+        },
+        "trace": {
+          "$ref": "common.schema.json#/$defs/Trace"
+        }
+      }
+    },
+    "ScoreComponents": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lexical",
+        "semantic",
+        "fusion",
+        "importance",
+        "recency",
+        "verification",
+        "provenance",
+        "stability",
+        "decay",
+        "contradiction",
+        "total"
+      ],
+      "properties": {
+        "lexical": {
+          "type": "number"
+        },
+        "semantic": {
+          "type": "number"
+        },
+        "fusion": {
+          "type": "number"
+        },
+        "importance": {
+          "type": "number"
+        },
+        "recency": {
+          "type": "number"
+        },
+        "verification": {
+          "type": "number"
+        },
+        "provenance": {
+          "type": "number"
+        },
+        "stability": {
+          "type": "number"
+        },
+        "decay": {
+          "type": "number"
+        },
+        "contradiction": {
+          "type": "number"
+        },
+        "total": {
+          "type": "number"
+        }
+      }
+    },
+    "SearchHit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "scope",
+        "source",
+        "kind",
+        "content",
+        "content_digest",
+        "scores",
+        "verification",
+        "provenance"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceKind"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "content_digest": {
+          "$ref": "common.schema.json#/$defs/Digest"
+        },
+        "scores": {
+          "$ref": "#/$defs/ScoreComponents"
+        },
+        "verification": {
+          "$ref": "#/$defs/VerificationState"
+        },
+        "contradiction_group": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provenance": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Provenance"
+          }
+        }
+      }
+    },
+    "SearchResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hits",
+        "cursor",
+        "suppressed",
+        "degraded",
+        "trace"
+      ],
+      "properties": {
+        "hits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SearchHit"
+          }
+        },
+        "cursor": {
+          "$ref": "common.schema.json#/$defs/Cursor"
+        },
+        "suppressed": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "unauthorized",
+            "state",
+            "stale",
+            "visible",
+            "duplicate"
+          ],
+          "properties": {
+            "unauthorized": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "state": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "stale": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "visible": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "duplicate": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "degraded": {
+          "type": "boolean"
+        },
+        "degradation_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trace": {
+          "$ref": "common.schema.json#/$defs/Trace"
+        }
+      }
+    },
+    "MaintenanceJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "scope",
+        "actor_scope",
+        "state",
+        "input_cursor",
+        "budget",
+        "attempt",
+        "created_at",
+        "trace"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "kind": {
+          "$ref": "#/$defs/MaintenanceKind"
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "actor_scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "claimed",
+            "running",
+            "checkpointed",
+            "succeeded",
+            "failed",
+            "abandoned"
+          ]
+        },
+        "input_cursor": {
+          "$ref": "common.schema.json#/$defs/Cursor"
+        },
+        "checkpoint_cursor": {
+          "$ref": "common.schema.json#/$defs/Cursor"
+        },
+        "lease_token_digest": {
+          "$ref": "common.schema.json#/$defs/Digest"
+        },
+        "lease_expires_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "budget": {
+          "$ref": "#/$defs/ModelBudget"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "trace": {
+          "$ref": "common.schema.json#/$defs/Trace"
+        }
+      }
+    },
+    "ImportManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "source_digest",
+        "target_scope",
+        "item_count",
+        "created_at",
+        "trace"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source_digest": {
+          "$ref": "common.schema.json#/$defs/Digest"
+        },
+        "target_scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "item_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scope_mapping": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "common.schema.json#/$defs/Scope"
+          }
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "trace": {
+          "$ref": "common.schema.json#/$defs/Trace"
+        }
+      }
+    },
+    "ExportManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "scope",
+        "record_count",
+        "stream_digest",
+        "created_at",
+        "cursor",
+        "trace"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/Scope"
+        },
+        "record_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stream_digest": {
+          "$ref": "common.schema.json#/$defs/Digest"
+        },
+        "include_grants": {
+          "type": "boolean",
+          "default": false
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "cursor": {
+          "$ref": "common.schema.json#/$defs/Cursor"
+        },
+        "trace": {
+          "$ref": "common.schema.json#/$defs/Trace"
+        }
+      }
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error",
+        "trace"
+      ],
+      "properties": {
+        "error": {
+          "$ref": "common.schema.json#/$defs/Error"
+        },
+        "trace": {
+          "$ref": "common.schema.json#/$defs/Trace"
+        },
+        "cursor": {
+          "$ref": "common.schema.json#/$defs/Cursor"
+        }
+      }
+    }
+  }
+}

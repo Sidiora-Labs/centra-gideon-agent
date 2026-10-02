@@ -1,0 +1,166 @@
+[design.foundation]
+contract = "Hypermid provides OSS-only shared Rust crates for canonical identity, fenced storage, cache policy, model and usage contracts, encrypted push, fleet logging, message buses, and role protocols, with typed Python adapters under runtime/gideon/hypermid."
+identity = "Use common.schema.json Id, Scope, Digest, Cursor, Error, and Trace definitions. Canonical filesystem identity and transport binding generations remain distinct from those shared wire identities."
+maturity = "All 21 functional source crates are planned. Runner, compaction, and transform protocols are treated as alpha; compaction and transform require newly implemented live-route conformance suites before qualification."
+release = "First integration is open-source Gideon only. Hosted rollout, hosted migration, and hosted certification are excluded."
+
+[req.base-identity]
+title = "Canonical identities and shared descriptors"
+acceptance = "Provide stable project-root identity and dependency-light contracts without duplicating common schema definitions."
+ac_1 = "Existing path aliases, symlinks, trailing separators, platform prefixes, and drive-letter case converge while linked worktrees remain distinct."
+ac_2 = "Missing paths fail in strict admission; recovery resolution follows the longest existing prefix with a bounded symlink walk and cannot create new durable state."
+ac_3 = "Storage and API payloads reference common Id, Scope, Digest, Cursor, Error, and Trace definitions and expose relative home resolution instead of silently accepting it."
+
+[req.base-storage]
+title = "Lease-fenced SQLite and PostgreSQL stores"
+acceptance = "Open resolved least-privilege stores with single-writer liveness, monotonic epochs, ordered migrations, and store-ahead reporting."
+ac_1 = "A second live writer is refused, a crashed holder is reclaimable, and a write bearing an older epoch cannot commit after lease replacement."
+ac_2 = "SQLite and PostgreSQL apply each ordered migration once, reject duplicate or descending versions, and report rather than hide a database newer than the binary."
+ac_3 = "Local files are regular owner-only files, PostgreSQL uses a session advisory lock, and database names remain distinct for module Ids with the same readable slug."
+
+[req.base-cache-models]
+title = "Cache stability, model catalog, and provider usage"
+acceptance = "Freeze prompt bytes across deferred passes and expose exact model-price and provider-capacity data without conflating missing, zero, stale, or failed states."
+ac_1 = "A defer pass replays frozen bytes without rendering, a missing boundary schedules reconciliation, and full rebuild drains all deferred work under state CAS."
+ac_2 = "Catalog prices use exact integer nanodollars, preserve unknown ingestion data, distinguish absent from free, and refuse a nonzero value that rounds to zero."
+ac_3 = "Usage payloads represent windows, regeneration, breakdowns, balances, funding basis, account provenance, staleness, and in-band failures while missing providers remain missing."
+
+[req.base-observability]
+title = "Encrypted push and fleet logging"
+acceptance = "Protect bounded push payloads and produce shared, parseable, redacted, retention-safe fleet logs."
+ac_1 = "Anonymous and authenticated HPKE envelopes have distinct versions and openers; authenticated opening verifies a pinned sender key and never downgrades."
+ac_2 = "Logging applies fleet and module redaction before control-byte guarding and emits canonical lines with hierarchical filters and stable parse failures."
+ac_3 = "Shared daily segments use append-only writes without rename, while single-writer capture sinks rotate safely and expose fallback and swallowed-write health."
+
+[req.base-bus]
+title = "Message-plane contracts, topology, and backends"
+acceptance = "Provide backend-neutral streams, registers, queues, census guards, naming and grants with deterministic in-memory and production NATS implementations."
+ac_1 = "Stream ack, nak, terminal disposition, progress extension, revisioned register snapshot/update, queue exhaustion, and dead-letter-before-term semantics pass parity conformance."
+ac_2 = "Derived subjects, streams, buckets, durables, and allow-only grants reject malformed identities, overlaps, filter escapes, unauthorized publishers, and retention mismatches."
+ac_3 = "The in-memory backend declares persistence and server-enforcement cases inapplicable; the NATS backend passes restart, rekey, revocation, grant, leaf, and system-event cases."
+
+[req.base-tool-role]
+title = "Tool provider protocol and conformance"
+acceptance = "Define deterministic tool discovery, schema pinning, withdrawal, approval recovery, late results, and real-provider conformance."
+ac_1 = "Catalog digests bind the requested preset, composition, tools, and system text; structural schema digests ignore description text and calls refuse stale schema or semantics pins."
+ac_2 = "Withdrawal enforces stamped Scope and carrier authority and returns a byte-stable recorded outcome for every repeat."
+ac_3 = "Prepared or authorized effects do not auto-run after restart, late results are cursor/ack driven and deduplicable, and capability skips cannot be reported as passes."
+
+[req.base-runner-role]
+title = "Runner session protocol and crash conformance"
+acceptance = "Define capability-gated transcript, run, streaming, delivery, baseline, plan-change, compaction, hook, and tool-dispatch behavior."
+ac_1 = "Lineage-bound reads page by ordinal, message Id, count, and bytes; run results have one terminal state; subscriptions resume from an explicit cursored origin."
+ac_2 = "Owner sends are idempotent by send Id, support only declared queue, steer, or interrupt modes, and never redispatch an indeterminate tool effect."
+ac_3 = "Real-process crash cases preserve immutable history, unique identities, one terminal run state, at-most-once dispatch, and retry-safe sends."
+
+[req.base-context-roles]
+title = "Compaction and step-transform protocols"
+acceptance = "Finish the experimental compaction and transform roles as explicit Hypermid v1 contracts with live-route conformance."
+ac_1 = "Compaction uses bounded deltas, request/deadline fences, rising versions, half-open replacement ranges, bounded wait/ready, and durable last-applied state."
+ac_2 = "Transform declarations bound hooks, phases, tools, operations, budgets, order, grants, questions, and failure policy; a plan may tighten but never widen them."
+ac_3 = "New conformance suites drive real providers through crash points and cannot graduate either role while a draft choice remains unpinned."
+
+[task.base-01]
+title = "Canonical identity and shared contracts"
+status = "done"
+wave = 1
+owner_lane = "foundation"
+requires = []
+reqs = ["base-identity.1", "base-identity.2", "base-identity.3"]
+acceptance = "The Rust workspace and Python foundation adapter expose one canonical identity and descriptor vocabulary based on the shared schema."
+ac_1 = "Cross-platform fixtures prove equivalent live spellings converge, worktrees remain distinct, and strict versus recovery-only missing-path behavior stays separated."
+ac_2 = "Schema validation proves foundation payloads reference all six common definitions and do not redefine them."
+touches = ["Cargo.toml", "crates/hypermid-foundation/Cargo.toml", "crates/hypermid-foundation/src/lib.rs", "crates/hypermid-foundation/src/path.rs", "crates/hypermid-contracts/Cargo.toml", "crates/hypermid-contracts/src/lib.rs", "crates/hypermid-contracts/src/storage.rs", "runtime/gideon/hypermid/foundation.py", "checks/hypermid/test_base_identity.py"]
+verify_cmd = "cargo test -p hypermid-foundation -p hypermid-contracts --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_identity.py"
+
+[task.base-02]
+title = "Lease-fenced storage backends"
+status = "pending"
+wave = 1
+owner_lane = "foundation"
+requires = ["base-01"]
+reqs = ["base-storage.1", "base-storage.2", "base-storage.3"]
+acceptance = "SQLite and PostgreSQL present equivalent lease, migration, store-ahead, and fence behavior through the typed Python storage adapter."
+ac_1 = "Focused crash and contention cases prove lease reclamation and stale-epoch rejection with real local SQLite and PostgreSQL connections."
+ac_2 = "Fresh, migrated, malformed-chain, and store-ahead fixtures produce the specified outcome without partial schema or seed application."
+touches = ["crates/hypermid-leases/Cargo.toml", "crates/hypermid-leases/src/lib.rs", "crates/hypermid-store/Cargo.toml", "crates/hypermid-store/src/lib.rs", "crates/hypermid-store/src/sqlite.rs", "crates/hypermid-store-postgres/Cargo.toml", "crates/hypermid-store-postgres/src/lib.rs", "runtime/gideon/hypermid/storage.py", "checks/hypermid/test_base_storage.py"]
+verify_cmd = "cargo test -p hypermid-leases -p hypermid-store -p hypermid-store-postgres --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_storage.py"
+
+[task.base-03]
+title = "Cache, catalog, and usage contracts"
+status = "pending"
+wave = 2
+owner_lane = "foundation"
+requires = ["base-02"]
+reqs = ["base-cache-models.1", "base-cache-models.2", "base-cache-models.3"]
+acceptance = "Frozen cache state, exact catalog prices, and complete usage payloads share stable Rust and Python representations."
+ac_1 = "Cache fixtures prove byte-identical defer replay, boundary-loss reconciliation, full-rebuild drainage, durability resets, and stale-version refusal."
+ac_2 = "Catalog and usage fixtures preserve missing versus zero, exact money, account provenance, degraded entries, rolling replenishment, and unknown source fields."
+touches = ["crates/hypermid-cache/Cargo.toml", "crates/hypermid-cache/src/lib.rs", "crates/hypermid-models/Cargo.toml", "crates/hypermid-models/src/lib.rs", "crates/hypermid-usage/Cargo.toml", "crates/hypermid-usage/src/lib.rs", "runtime/gideon/hypermid/shared_models.py", "checks/hypermid/test_base_cache_models.py"]
+verify_cmd = "cargo test -p hypermid-cache -p hypermid-models -p hypermid-usage --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_cache_models.py"
+
+[task.base-04]
+title = "Encrypted push and fleet logging"
+status = "pending"
+wave = 4
+owner_lane = "foundation"
+requires = ["base-03"]
+reqs = ["base-observability.1", "base-observability.2", "base-observability.3"]
+acceptance = "Versioned HPKE envelopes and redacted fleet logs have explicit, cross-language-safe wire and failure contracts."
+ac_1 = "Seal/open fixtures cover anonymous, authenticated, downgrade, rotation-key, tamper, malformed, bad-key, and plaintext-limit behavior."
+ac_2 = "Logging fixtures prove canonical parsing, secret removal, control escaping, multi-writer complete lines, daily retention, capture rotation, and once-only fallback diagnostics."
+touches = ["crates/hypermid-push/Cargo.toml", "crates/hypermid-push/src/lib.rs", "crates/hypermid-log/Cargo.toml", "crates/hypermid-log/src/lib.rs", "crates/hypermid-log/src/filter.rs", "crates/hypermid-log/src/format.rs", "crates/hypermid-log/src/redaction.rs", "crates/hypermid-log/src/segment.rs", "crates/hypermid-log/src/sink.rs", "runtime/gideon/hypermid/observability.py", "checks/hypermid/test_base_observability.py"]
+verify_cmd = "cargo test -p hypermid-push -p hypermid-log --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_observability.py"
+
+[task.base-05]
+title = "Message-plane contracts and topology"
+status = "pending"
+wave = 5
+owner_lane = "foundation"
+requires = ["base-04"]
+reqs = ["base-bus.1", "base-bus.2"]
+acceptance = "Bus traits, naming, limits, grants, queue disposal, and parity classifications are complete before backend binding."
+ac_1 = "Topology fixtures reject malformed tokens, overlapping subjects, escaping consumer filters, short backing-store retention, and permissions broader than the role."
+ac_2 = "Trait fixtures cover message digests, one-in-flight cursors, revision snapshots, neutral census disconnects, bounded queue exhaustion, and dead-letter-before-term ordering."
+touches = ["crates/hypermid-bus-contracts/Cargo.toml", "crates/hypermid-bus-contracts/src/lib.rs", "crates/hypermid-bus-contracts/src/stream.rs", "crates/hypermid-bus-contracts/src/register.rs", "crates/hypermid-bus-contracts/src/work_queue.rs", "crates/hypermid-bus-contracts/src/conformance.rs", "crates/hypermid-bus-naming/Cargo.toml", "crates/hypermid-bus-naming/src/lib.rs", "crates/hypermid-bus-naming/src/names.rs", "crates/hypermid-bus-naming/src/limits.rs", "crates/hypermid-bus-naming/src/grants.rs", "runtime/gideon/hypermid/bus.py", "checks/hypermid/test_base_bus_contracts.py"]
+verify_cmd = "cargo test -p hypermid-bus-contracts -p hypermid-bus-naming --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_bus_contracts.py"
+
+[task.base-06]
+title = "In-memory and NATS bus backends"
+status = "pending"
+wave = 6
+owner_lane = "foundation"
+requires = ["base-05"]
+reqs = ["base-bus.1", "base-bus.3"]
+acceptance = "Both bus backends pass the applicable contract catalog and expose honest unsupported classifications."
+ac_1 = "The deterministic backend passes every parity property and reports every server, leaf, and process-persistence property as inapplicable with a reason."
+ac_2 = "The NATS backend binds only provisioned resources and passes restart, credential rotation, rekey, grant denial, revocation, sentinel attribution, leaf, and system-event cases."
+touches = ["crates/hypermid-bus-memory/Cargo.toml", "crates/hypermid-bus-memory/src/lib.rs", "crates/hypermid-bus-memory/src/backend.rs", "crates/hypermid-bus-nats/Cargo.toml", "crates/hypermid-bus-nats/src/lib.rs", "crates/hypermid-bus-nats/src/connection.rs", "crates/hypermid-bus-nats/src/stream.rs", "crates/hypermid-bus-nats/src/register.rs", "crates/hypermid-bus-nats/src/work_queue.rs", "checks/hypermid/test_base_bus_backends.py"]
+verify_cmd = "cargo test -p hypermid-bus-memory -p hypermid-bus-nats --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_bus_backends.py"
+
+[task.base-07]
+title = "Tool and runner role protocols"
+status = "pending"
+wave = 5
+owner_lane = "foundation"
+requires = ["base-03"]
+reqs = ["base-tool-role.1", "base-tool-role.2", "base-tool-role.3", "base-runner-role.1", "base-runner-role.2", "base-runner-role.3"]
+acceptance = "Role contracts, harness, independent vectors, and live-route conformance cover the complete tool-provider and runner surfaces."
+ac_1 = "Tool conformance checks catalog purity, structural digests, schema pins, terminal frames, withdrawal authority, late results, and approval crash recovery against a real provider."
+ac_2 = "Runner conformance checks grouped capabilities, transcript and model views, run results, resumable events, delivery modes, session changes, tool attribution, and all crash guarantees against a real runner."
+touches = ["crates/hypermid-role-harness/Cargo.toml", "crates/hypermid-role-harness/src/lib.rs", "crates/hypermid-role-tool/Cargo.toml", "crates/hypermid-role-tool/src/lib.rs", "crates/hypermid-role-tool-conformance/Cargo.toml", "crates/hypermid-role-tool-conformance/src/lib.rs", "crates/hypermid-role-runner/Cargo.toml", "crates/hypermid-role-runner/src/lib.rs", "crates/hypermid-role-runner-conformance/Cargo.toml", "crates/hypermid-role-runner-conformance/src/lib.rs", "crates/hypermid-role-vectors/tool-v1", "crates/hypermid-role-vectors/runner-v1", "runtime/gideon/hypermid/roles.py", "checks/hypermid/test_base_roles.py"]
+verify_cmd = "cargo test -p hypermid-role-harness -p hypermid-role-tool-conformance -p hypermid-role-runner-conformance --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_roles.py"
+
+[task.base-08]
+title = "Compaction, transform, and OSS foundation integration"
+status = "pending"
+wave = 8
+owner_lane = "foundation"
+requires = ["base-07"]
+reqs = ["base-context-roles.1", "base-context-roles.2", "base-context-roles.3"]
+acceptance = "Compaction and transform protocols are fully pinned, conformance-tested over real routes, and callable through the OSS Gideon Hypermid boundary."
+ac_1 = "Compaction conformance proves setup purity, delta cursor recovery, range structure, strict request/deadline fencing, rising versions, bounded wait/ready, and every crash point."
+ac_2 = "Transform conformance proves declaration bounds, ordering and exclusive replacement, phase-answer legality, explicit grants, questions, failure policy, purity, and crash recovery."
+ac_3 = "An OSS integration journey opens a fenced store, emits a redacted trace, exchanges a bus message, discovers roles, applies one transform and compaction decision, and returns shared Cursor or Error values."
+touches = ["crates/hypermid-role-compaction/Cargo.toml", "crates/hypermid-role-compaction/src/lib.rs", "crates/hypermid-role-compaction-conformance/Cargo.toml", "crates/hypermid-role-compaction-conformance/src/lib.rs", "crates/hypermid-role-transform/Cargo.toml", "crates/hypermid-role-transform/src/lib.rs", "crates/hypermid-role-transform-conformance/Cargo.toml", "crates/hypermid-role-transform-conformance/src/lib.rs", "crates/hypermid-role-vectors/compaction-v1", "crates/hypermid-role-vectors/transform-v1", "runtime/gideon/hypermid/compaction.py", "runtime/gideon/hypermid/transforms.py", "runtime/gideon/hypermid/foundation_service.py", "checks/hypermid/test_base_context_roles.py", "checks/hypermid/test_base_oss_integration.py"]
+verify_cmd = "cargo test -p hypermid-role-compaction-conformance -p hypermid-role-transform-conformance --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_context_roles.py checks/hypermid/test_base_oss_integration.py"

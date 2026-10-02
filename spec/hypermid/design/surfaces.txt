@@ -1,0 +1,105 @@
+Hypermid surfaces and client experience
+
+Purpose
+
+Hypermid gives Gideon users and local operators one coherent way to inspect, configure, maintain, and integrate the local memory service. The Rust daemon and core own durable state, authorization, framing, process supervision, and mutation outcomes. Gideon's Python HostAdapter translates Gideon identities and native application actions into that authority. The console, CLI, desktop shell, and language clients consume the same versioned contract.
+
+The first implementation is OSS-only. It integrates with Gideon's existing console routes, command framework, and desktop shell. It does not add a second web application, a hosted deployment, or a hosted control plane. Generic clients may ship in the OSS package, but remote operation remains an explicit user-enabled local-daemon mode.
+
+[surfaces.architecture.authority]
+
+Every surface sends an explicit Scope, Trace, operation, and protocol version. Mutating requests also carry an expected digest or an unexpired reviewed plan digest when the operation supports planning. The daemon returns authoritative cursors and receipts. The console never infers success from HTTP completion, process exit, an optimistic cache update, or a disconnected progress stream.
+
+The Python HostAdapter is the required Gideon integration. It maps Gideon owner, project, workspace, session, model, credential, and maintenance concepts to Hypermid contracts and declares only the capabilities it can actually fulfill. The Rust daemon validates scope and effects again. A surface cannot gain authority by claiming an operator role or by reaching a privileged route.
+
+All local and remote clients use Hypermid v1 framing: a four-byte big-endian JSON byte length followed by one JSON value. A frame is at most 8 MiB. Large result bodies are streamed as ordered chunks no larger than 64 KiB and completed by a terminal frame carrying the final cursor or error. Local transport uses authenticated Unix sockets or authenticated Windows loopback. Remote transport is disabled until the user opts in and configures TLS.
+
+[surfaces.architecture.capability-negotiation]
+
+The first call is capabilities.get. The reply identifies protocol limits, transport profile, daemon lifecycle, supported operations, effect class, scope requirements, cursor resume support, and HostAdapter coverage. Interfaces hide unavailable actions only when the absence is structural; otherwise they show the action disabled with the daemon's reason and remediation. Unknown capabilities and additive response fields remain visible to diagnostics and do not crash older clients.
+
+A HostAdapter is a full integration only when it can establish identity, translate scopes, expose session and memory semantics, surface configuration and credentials safely, forward lifecycle state, and reconcile cursors after reconnect. An MCP bridge exposes a bounded tool catalog and tool invocation. It does not become a full host integration merely because it can call memory or search tools. The UI and CLI label these two connection types separately and never imply session, configuration, lifecycle, or credential coverage from MCP availability.
+
+[surfaces.clients]
+
+Python is the essential client because Gideon's HostAdapter runs in Python. It provides typed request, response, event, error, scope, cursor, lifecycle plan, receipt, and subscription APIs; synchronous and asynchronous entry points; cancellation; deadline handling; cursor resume; and explicit not-started, committed, and unknown effect outcomes.
+
+Rust, TypeScript, and Swift clients expose the same wire vocabulary and outcome semantics. All clients validate the 8 MiB frame ceiling before allocation, reassemble 64 KiB chunks by cursor and request, reject mismatched terminal frames, ignore unknown additive fields, and stop automatic retries once a mutating request may have been accepted. Client parity is byte-vector and behavior based; method names may follow each language's conventions.
+
+Clients discover local endpoints from a permission-checked connection descriptor. Remote endpoints require an explicit TLS configuration and must never inherit local bearer material. Reconnection performs a fresh authenticated handshake, capability negotiation, and cursor-resume request. A stale connection, cursor from another epoch, or unsupported protocol produces a typed error instead of a silent reset.
+
+[surfaces.inspection.session-timeline]
+
+The native Gideon console adds a Hypermid entry under the existing settings and diagnostics information architecture. Its Overview shows daemon state, HostAdapter state, current Scope, store health, active maintenance, and the freshest authoritative cursor. The screen uses Gideon's existing headers, cards, forms, tables, dialogs, and status language.
+
+Sessions lists active, closed, archived, and unhealthy sessions with filters for project, workspace, lifecycle, model, time, and text. Opening a session shows an ordered timeline of user and assistant turns, tool activity, memory reads and writes, cache decisions, compaction boundaries, errors, and trace links. Streamed observations merge by epoch and sequence. Reconnect adopts an authoritative snapshot before applying newer events, so a terminal turn or maintenance result cannot render twice.
+
+[surfaces.inspection.memory]
+
+Memory inspection links records to their source session, scope, revision history, lineage, verification state, contradiction state, embeddings, retrieval score components, and maintenance jobs. The inspector distinguishes immutable chronological anchors from revisable summaries and derivative indexes. Search shows why a result matched and which candidates were suppressed without exposing unauthorized content.
+
+Every edit starts from the displayed revision and expected digest. Conflicts retain the user's draft and offer compare, reload, or reapply. Archive, restore, merge, split, relocate, delete, and purge use distinct wording and confirmation strength. Purge is never presented as reversible.
+
+[surfaces.inspection.cache]
+
+Cache inspection shows each cache or projection by owner, project, workspace, kind, generation, input digest, size, age, hit/miss counts, and freshness. Empty, unavailable, rebuilding, and unreadable states are distinct. Clear and rebuild actions begin with a scope-specific plan that lists affected entries and expected recovery behavior. The interface never reports a filtered cache response as the complete cache inventory.
+
+[surfaces.configuration]
+
+Configuration is grouped into Runtime, Models, Credentials, Indexes, Maintenance, Integrations, and Remote access. Reads show the effective value, its source, whether the setting is editable in the current Scope, and the revision that produced it. Writes validate before apply, use the revision paired with the displayed value, preserve dirty fields after refusal, and state whether a daemon restart is required.
+
+The Runtime mode control has exactly four values: off, pass-through, shadow, and primary. Strictness is a separate policy field and never appears as another lifecycle or context mode. Moving to primary uses the authority handoff plan rather than a simple toggle; moving away preserves authoritative journals and reports which component will serve new context.
+
+Model controls list available providers and models, readiness, embedding dimensions, active bindings, local residency, and last real self-test. Unknown price, usage, context, or health remains unknown. Binding changes preview affected duties and do not claim readiness until the selected model passes the required probe.
+
+Credential controls show names, scopes, backend, presence, last validation time, and consumers, never secret values. Adding or replacing a credential is one-way. Deleting a credential previews affected integrations and requires confirmation. Exports and diagnostics exclude values and reusable bearer material.
+
+[surfaces.operations.diagnostics]
+
+Diagnostics combines daemon health, store integrity, HostAdapter negotiation, transport, client compatibility, process supervision, embedding providers, indexes, and recent typed failures. Each check reports observed state, timestamp, scope, evidence summary, and a specific next action. A cached check is labeled cached; an explicit rerun is labeled running and replaces the card only when its result arrives.
+
+Live logs are bounded, redacted, filterable by severity, component, scope, session, trace, and time. Pause stops viewport movement without stopping collection. Reconnect resumes from a cursor or displays a visible gap. Exported diagnostics include schema and time bounds and omit credential values, request bodies classified as secret, and local authentication material.
+
+[surfaces.operations.maintenance]
+
+Maintenance lists supported actions such as integrity check, reconciliation, reindex, compaction, stale-cache cleanup, and derivative rebuild. Selecting an action first produces a plan with exact Scope, estimated work, budgets, blockers, destructive effect, restart requirement, and plan digest. Apply requires that digest and, for destructive work, a fresh confirmation. Progress uses cursored events and ends in a receipt with committed, failed, cancelled, or outcome-unknown state. Cancellation is best effort and never rewrites a committed receipt as cancelled.
+
+[surfaces.operations.lifecycle]
+
+Install, update, uninstall, migration, and export share the plan/review/apply/receipt pattern. Install checks platform support, directories, permissions, service integration, connection descriptor protection, and existing ownership before writing. Update verifies the candidate, compatibility floors, migration needs, free space, and rollback material before draining the daemon. Uninstall inventories daemon files, service wiring, configuration, and user data separately; retaining, exporting, or purging data is an explicit choice.
+
+Migration stages and validates all authoritative records before visibility, presents conflicts and unsupported rows, and applies idempotently. Export describes scope, included authoritative data, excluded derivatives and secrets, destination, size estimate, and manifest digest. A completed export returns the artifact digest and byte count. Partial or interrupted lifecycle work remains visible to diagnostics and can be resumed or rolled back only when the receipt says that is supported.
+
+[surfaces.integrations.mcp]
+
+The MCP bridge exposes discoverable memory, search, session, and diagnostic tools allowed by the current Scope. It owns a bounded catalog and call path, reports tool schemas and errors faithfully, and cannot expose daemon lifecycle, raw credentials, or broad host state unless a separately authorized operation is declared. The Connections surface displays it as Tool bridge, alongside the separate Full host integration status.
+
+[surfaces.integrations.stdio]
+
+Stdio integrations are supervised children, not anonymous shell commands. The operator sees configured executable identity, arguments with secret values redacted, allowed environment names, working directory, lifecycle state, last start and exit, active requests, restart cooldown, frame faults, and health. Children start lazily when configured, complete initialization within a budget, and receive only an allowlisted environment resolved immediately before spawn.
+
+Each child has a bounded request deadline, frame ceiling, idle-shed policy, and retry budget. Cancellation or deadline after a request write yields outcome unknown, tears down the unusable child, and does not retry the mutation automatically. Shutdown closes stdin, waits a bounded grace period, then terminates and reaps the child. A wedged or malformed child cannot block other configured children or the daemon health path.
+
+[surfaces.integrations.conditions]
+
+The condition runner accepts a bounded declarative expression over path existence, file content, modification time, commit ancestry, and tag matches. Expressions can use limited all, any, and not composition. They cannot run arbitrary commands, access the network, interpolate shell text, or escape authorized roots.
+
+File checks canonicalize the target and revalidate containment immediately before use. Git checks use argument-vector execution, verify repository identity and requested refs, enforce time and output limits, and return observed facts rather than raw command output. Each transition carries a stable occurrence identity so reconnect or repeated evaluation does not duplicate an event. The console provides human-readable builders and previews; the CLI supports JSON input and machine-readable output.
+
+[surfaces.remote-mobile]
+
+Remote operation is opt-in. Enabling it requires a TLS endpoint, named device enrollment, least-privilege scope, expiry, and an explicit review of exposed capabilities. Device removal revokes future sessions. The UI shows local, remote, reconnecting, degraded, and revoked states and never silently falls back from TLS to a local or unauthenticated path.
+
+Mobile uses the same Gideon route with a one-column layout, persistent state summary, filter sheet, and bottom action bar. Inspection works at 320 and 390 CSS pixels without horizontal scrolling. High-risk actions require a review screen that names target Scope and effect; lengthy maintenance can be started, monitored, cancelled, and resumed after backgrounding through authoritative receipts.
+
+[surfaces.accessibility]
+
+Every state and action has a text label independent of color or icon. Status changes, validation errors, stream gaps, and terminal receipts are announced through appropriate live regions without repeating the entire log. Tabs, tables, dialogs, filter controls, timelines, and plan reviews support keyboard-only use, visible focus, logical headings, and escape/back behavior that preserves drafts.
+
+Touch targets are at least 44 by 44 CSS pixels. Dense diagnostics have a linear reading order and an alternate list view. Motion follows reduced-motion preferences; live logs and progress do not steal focus. Secrets remain masked to assistive technology, and copy actions name exactly what will be copied.
+
+[surfaces.delivery]
+
+Wave 1 establishes the wire/client contract and Python HostAdapter. Wave 2 adds inspection, wave 3 configuration, wave 4 operator controls, wave 5 SDK/tool integration, wave 6 optional remote access, and wave 7 lifecycle and portability. Wave 8 qualifies the complete system through the existing console route, Gideon CLI and desktop shell. The integrated spec task graph is authoritative for ordering.
+
+Implementation states are explicit: unavailable, planned, connecting, ready, degraded, running, committed, failed, cancelled, and outcome unknown. Source presence, a schema, a rendered control, a passing isolated test, and a completed native journey are separate facts. No surface may label planned functionality as installed, connected, healthy, or complete.

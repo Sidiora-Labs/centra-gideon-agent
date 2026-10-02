@@ -1,0 +1,40 @@
+HYPERMID QUALIFICATION PLAN
+
+Current state: all implementation and every gate in this document are pending. No build, test, migration, provider call, service launch, install, or compatibility run was performed while preparing this specification. Generated fixtures, mocks, and simulated providers may support narrow component tests, but they do not establish product success or live-provider readiness.
+
+[qualification.evidence]
+Every future gate writes an instance of schemas/evidence.schema.json. Evidence records the exact command, revision digest, environment identity, scope, trace, start/end time, result, measurements, errors, and content-addressed artifacts. A passed product-acceptance claim requires a real execution path. Skips and opt-out live-provider runs remain visible and cannot be promoted to passed.
+
+[qualification.capability_matrix]
+Run a table-driven authorization suite for foreground principals and every background worker role across own project, shared workspace, foreign project, absent workspace, expired capability, revoked capability, and guessed identifier cases. For every operation, assert both response and unchanged durable state. Acceptance is zero unauthorized reads, zero unauthorized writes, indistinguishable foreign/missing denials, and an evidence record for every decision. A dedicated concurrency case revokes a worker capability between read and commit; the commit must fail with zero changed rows.
+
+[qualification.auth]
+Exercise the packaged client against the real daemon over the local endpoint and an isolated remote TLS endpoint. Cover first enrollment, peer mismatch, expired and revoked certificates, wrong server name, replayed sequence, reordered frame, modified ciphertext, stale authorization, downgrade request, and client versions one below, at both supported bounds, and one above. Acceptance is zero plaintext application bytes on captured transports, rejection before durable intent creation for every invalid or incompatible client, and successful reconnect from the last acknowledged Cursor for compatible clients.
+
+[qualification.cache_bytes]
+Capture the exact serialized model request bytes across at least 50 consecutive turns containing tool results, memory retrieval, deferred maintenance, and soft and hard context transitions. On turns declared cache-stable, acceptance is byte-for-byte equality and identical SHA-256 digest for the frozen prefix, with mutations confined to the declared delta and tail. Report stable-prefix bytes, changed-prefix bytes, cache eligibility, provider-reported cached input when available, and refusal reason. A digest-only comparison without retaining bounded diagnostic byte ranges does not pass.
+
+[qualification.long_history_and_raw_recovery]
+Run the real store, daemon, Python adapter, and console against a corpus of at least 20,000 turns, 2,000 tool results, 2,000 durable memories, supersessions, deletions, and mixed binary artifact references. Restart during ingestion and maintenance. Acceptance is monotonic cursors, no orphaned committed records, bounded model input within the configured limit, exact digest recovery for every sampled raw record, and successful expansion of at least 1,000 deterministically selected compressed spans. Compare exported raw content byte-for-byte with the source manifest. Summary similarity cannot substitute for raw recovery.
+
+[qualification.effect_recovery]
+Kill the daemon, adapter, and sandbox at each durable boundary before dispatch, after intent commit, during dispatch, after external acknowledgement, before result commit, and after result commit. Use an observable idempotent test service rather than an in-process double. Acceptance is no duplicated committed effect; each request resolves to not_started, committed, or unknown; no unknown is labeled failed; and automatic retry occurs only for proven not_started effects.
+
+[qualification.migration]
+For every published Hypermid schema fixture, copy the database and artifacts, migrate through each intermediate version with the real migration binary, interrupt once at every migration journal boundary, then resume. Acceptance is identical authoritative record counts and content digests, preserved scopes/provenance/tombstones/cursors, no active old-format writer, and either atomic success or continued readable pre-migration state. A future-version store must enter read-only recovery without mutation.
+
+[qualification.deletion_export_backup_restore]
+Create linked memories, embeddings, summaries, indexes, cache segments, artifacts, exports, and backups for two owners and a shared workspace. Exercise reversible delete, expiry, physical purge, export, encrypted backup, wrong-key restore, corrupted chunk, interrupted restore, and successful restore into a fresh store. Acceptance is immediate recall exclusion, complete post-window purge of all derived copies, no cross-owner export entry, rejection of every altered chunk, current-store preservation on failure, and exact manifest/digest/cursor equality after success.
+
+[qualification.network_secrets_and_sandbox]
+Use controlled DNS, HTTP, proxy, MCP, and stdio services to test redirects, rebinding, mixed DNS answers, private and metadata addresses, proxy tunneling, oversized frames, traversal archives, descriptor inheritance, cancellation, and child cleanup. Seed unique canary secrets in credential storage and all supported credential-shaped fields. Acceptance is zero unauthorized connection, file access, surviving child, or secret canary in prompts, logs, evidence, process arguments, exported state, and UI payload captures.
+
+[qualification.model_budget]
+Use a metered local endpoint and ledger fault injection to cover concurrent admissions, reservation exhaustion, provider timeout, partial usage, unknown charge, day-boundary reset, cancellation, and crash recovery. Acceptance is no admitted call above any configured limit, exact parent/background roll-up, unresolved charge retained as reservation, and a visible paused reason. Separately run a live billed provider gate only when an operator supplies explicit per-run opt-in, a hard monetary ceiling, and approved credentials. Acceptance requires provider-reported usage reconciliation and successful redaction. Absence, skip, or a mocked response is not live-provider success.
+
+[qualification.artifact_supply_chain]
+Install and update real signed fixtures through the production resolver and activation path. Cover wrong publisher, altered digest, unsupported platform, capability expansion, path traversal, link escape, case collision, decompression excess, interrupted download, interrupted activation, and rollback. Acceptance is zero execution before verification, no file outside staging, prior version remains runnable after every failed or interrupted update, immutable version pinning for active sessions, and explicit approval for every added capability.
+
+[qualification.release_acceptance]
+The release gate runs on a clean checkout with pinned dependencies and records its revision. It executes the real Rust daemon and stores, the Python Gideon adapter, MCP/stdio sandboxes, and the native console as one journey. It includes the capability, authentication, cache-byte, long-history, raw-recovery, crash, migration, lifecycle, network/secret, budget, supply-chain, and client-compatibility gates above. Product acceptance requires every mandatory gate to pass at the same revision. Live-provider evidence is reported separately and only when explicitly opted in.
+

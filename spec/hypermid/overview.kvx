@@ -1,0 +1,48 @@
+[meta]
+feature = "hypermid"
+title = "Hypermid: persistent context, knowledge and local module infrastructure"
+status = "in_progress"
+version = "1.0.0"
+created_at = "2026-10-02"
+source_of_truth = "spec/hypermid/spec.kvx"
+delivery_scope = "Gideon OSS runtime, console, CLI, desktop integration and distributable SDKs"
+implementation_status = "in_progress"
+
+[design.intent]
+summary = "Hypermid gives Gideon durable project knowledge, recoverable long conversations and supervised local capabilities through one versioned system. Raw history stays authoritative; context projections are derived; every model call and module effect retains identity and ownership."
+outcome = "A user continues a project across restarts and long sessions, sees what the agent remembers and why, recovers original evidence, controls background costs, and manages local modules through native Gideon interfaces."
+scope = "Deliver context projection and recall, persistent knowledge and maintenance, shared storage and protocol foundations, process supervision and routing, event delivery, client SDKs, operator tooling and product surfaces."
+first_host = "The first complete vertical integration is Gideon OSS. A generic host adapter contract is included; additional agent-host adapters are not prerequisites for the Gideon release."
+excluded = ["Hosted control-plane changes or deployment", "Replacing Gideon's authoritative final-answer delivery", "Replacing provider authentication or approval policy", "Claims of unlimited active context or perfect recall"]
+
+[design.architecture]
+language_boundary = "A Python package under runtime/gideon/hypermid adapts Gideon's existing runtime lifecycle. Rust crates under crates/hypermid-* implement bounded transport, deterministic projection, durable stores and supervised services. TypeScript, Rust, Python and Swift clients implement the same versioned contracts."
+authority = "Gideon's journal owns original conversation events and final delivery. Hypermid owns derived projection state and its knowledge records. One context authority per session and one fenced mutation authority per project prevent duplicate compaction or maintenance."
+storage = "Owner-scoped durable storage supports SQLite first and an explicit PostgreSQL backend contract. Multi-store effects use a persisted intent and reconciliation; cross-store operations never pretend to be one SQLite transaction."
+integration = "Existing cognition, history, embeddings, permissions, MCP, lifecycle and console capabilities are inventoried before replacement. Existing records are migrated or adapted through source hashes and versioned checkpoints; no parallel hidden source of truth is introduced."
+contracts = "spec/hypermid/schemas/*.schema.json define Draft 2020-12 document shapes. Runtime authorization, cursor ordering, uniqueness across records, digest equality and transaction invariants are specified separately and cannot be established by JSON Schema alone."
+transport = "Hypermid v1 uses a four-byte unsigned big-endian body length followed by a UTF-8 JSON envelope, capped at eight MiB. Larger logical data uses ordered chunks capped at 64 KiB. Unix sockets are local defaults; Windows uses authenticated loopback. Every application session uses TLS 1.3 mutual authentication and ordered per-session sequence numbers. Remote access requires explicit configuration, TLS and scoped principals."
+ownership = "Authenticated connection state determines the owner identity. Request scope is checked against that identity, not trusted as a grant. Background workers obey the same project write boundary as foreground tools."
+
+[design.shared_types]
+authority = "schemas/common.schema.json is the only definition of Id, Scope, Digest, Cursor, Error and Trace. Other documents reference those types."
+ids = "Opaque case-sensitive identifiers are bounded ASCII strings. Display paths and labels are not identities. Owner and project identities remain stable across allowed renames and aliases."
+scope = "Every project operation carries owner_id and project_id; workspace_id is optional and never grants mutation authority by itself. Owner-wide operations require a separately authorized owner capability."
+cursor = "Cursor epoch is a positive integer and sequence a nonnegative integer, both bounded to the interoperable JSON safe-integer range. Sequence exhaustion rotates the epoch through an explicit durable transition rather than wrapping."
+digests = "Digest is a lowercase hexadecimal SHA-256 over the explicitly defined byte encoding; each producing contract identifies its canonicalization rule."
+errors = "Error code is stable and machine-readable, message is bounded/redacted, retryable does not imply safe effect replay. Unknown external-effect state requires reconciliation."
+
+[design.delivery]
+vertical_slices = "Every implementation wave closes with a Gideon consumer, durable state, observable output and a specified acceptance journey. Foundations are introduced alongside a consumer; no isolated crate milestone counts as product completion."
+workflow = "Requirements and tasks are normative in spec.kvx. Supporting design and schemas refine them; conflicts require an explicit spec revision before implementation. All implementation tasks begin pending."
+capability_accounting = "Every mapped product capability has a requirement, an owning task, implementation paths and observable acceptance. Build-time support is classified explicitly. No capability is considered implemented because a design or schema exists."
+verification = "Future verify_cmd entries are implementation acceptance commands, not evidence of execution. Document validation checks syntax, references, dependency order, coverage and schemas only."
+
+[design.rollout]
+stages = "Disabled, read-only shadow, project opt-in and default-on are separate durable configuration states. Shadow mode can compare projections but cannot publish facts, mutate the journal, issue duplicate maintenance calls or advance serving cursors."
+cutover = "A session changes context authority only at a quiescent turn boundary with a journal digest and migration checkpoint. Failed cutover retains the prior authority; resumed work reconciles the recorded intent."
+rollback = "Disable serving from the new projection while preserving original journals and accepted knowledge. Downgrade is allowed only across declared compatible schema versions; incompatible state requires a matching restore or forward repair."
+completion = "Final release acceptance covers the entire capability map and the OSS installation/upgrade/user journeys; earlier vertical slices do not imply full-system completion."
+
+[tasks]
+heading = "Hypermid implementation plan"

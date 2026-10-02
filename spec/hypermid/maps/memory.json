@@ -1,0 +1,242 @@
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "mem-foundation",
+      "title": "Memory core foundation",
+      "behavior": "Establishes the independent store, shared-contract adapters, schema fence, transaction primitives, scope cursors, and owner-or-exact-grant authorization used by interactive and maintenance writes.",
+      "requirement": "mem-foundation",
+      "task": "mem-foundation",
+      "design_anchor": "design/memory.txt#3-durable-records",
+      "implementation_paths": [
+        "crates/hypermid-memory/src/store.rs",
+        "crates/hypermid-memory/src/auth.rs",
+        "crates/hypermid-memory/src/model.rs",
+        "crates/hypermid-memory/src/migrations.rs"
+      ],
+      "acceptance": [
+        "Schema, transaction, revision-precondition, and cursor primitives fail atomically with shared errors.",
+        "A background worker cannot mutate another project merely because it is a maintenance process or workspace member."
+      ],
+      "disposition": "implement"
+    },
+    {
+      "id": "mem-records",
+      "title": "Authoritative memory records",
+      "behavior": "Stores facts, episodes, notes, conditional smart notes, immutable chronological anchors, and revisable summaries with optimistic mutations and exact raw-source recovery.",
+      "requirement": "mem-records",
+      "task": "mem-records",
+      "design_anchor": "design/memory.txt#3-durable-records",
+      "implementation_paths": [
+        "crates/hypermid-memory/src/records.rs",
+        "crates/hypermid-memory/src/summary.rs",
+        "runtime/gideon/hypermid/records.py"
+      ],
+      "acceptance": [
+        "Concurrent updates using one expected revision produce one commit and one conflict without partial state.",
+        "Exact source recovery survives summary publication, and summary decay cannot alter anchor content or provenance."
+      ],
+      "disposition": "implement"
+    },
+    {
+      "id": "mem-lineage",
+      "title": "Provenance, lineage, and invalidation",
+      "behavior": "Preserves revision ancestry, source spans, verification history, contradiction groups, tombstones, acyclic lineage, and deterministic invalidation of derived state.",
+      "requirement": "mem-lineage",
+      "task": "mem-records",
+      "design_anchor": "design/memory.txt#4-provenance-and-verification",
+      "implementation_paths": [
+        "crates/hypermid-memory/src/lineage.rs",
+        "crates/hypermid-memory/src/provenance.rs",
+        "crates/hypermid-memory/src/invalidation.rs",
+        "runtime/gideon/hypermid/lineage.py"
+      ],
+      "acceptance": [
+        "Editing or tombstoning a source makes stale FTS, vector, rank, and derived-summary rows unreadable in the same transaction.",
+        "Lineage cycles and retention-early purges fail while tombstones and competing evidence remain queryable."
+      ],
+      "disposition": "implement"
+    },
+    {
+      "id": "mem-embedding",
+      "title": "Multi-mode embeddings",
+      "behavior": "Supports off, local, remote-compatible, and managed-service vectors with active-registration fingerprints, response validation, bounded backfill, failure classes, and lexical degradation.",
+      "requirement": "mem-embedding",
+      "task": "mem-embedding",
+      "design_anchor": "design/memory.txt#6-embeddings",
+      "implementation_paths": [
+        "crates/hypermid-memory/src/embedding.rs",
+        "crates/hypermid-memory/src/jobs.rs",
+        "runtime/gideon/hypermid/embeddings.py",
+        "runtime/gideon/hypermid/providers.py"
+      ],
+      "acceptance": [
+        "Model substitution, invalid dimensions, non-finite values, zero norm, retired registration, and stale content are refused without replacing valid vectors.",
+        "Backfills stop and checkpoint at item, token, request, retry, cost, or wall-time limits and cool down stalled batches."
+      ],
+      "disposition": "implement"
+    },
+    {
+      "id": "mem-retrieval",
+      "title": "Unified retrieval and ranking",
+      "behavior": "Searches authorized memories, messages, files, and commits using lexical, semantic, or hybrid modes, deterministic score fusion, date filters, visible-content suppression, and bounded reranking.",
+      "requirement": "mem-retrieval",
+      "task": "mem-retrieval",
+      "design_anchor": "design/memory.txt#7-search-and-ranking",
+      "implementation_paths": [
+        "crates/hypermid-memory/src/fts.rs",
+        "crates/hypermid-memory/src/search.rs",
+        "crates/hypermid-memory/src/rank.rs",
+        "runtime/gideon/hypermid/search.py",
+        "runtime/gideon/hypermid/prompt_projection.py"
+      ],
+      "acceptance": [
+        "Unauthorized, expired, tombstoned, stale, and already-visible candidates cannot leak through any search mode.",
+        "Stable results expose source, provenance, verification, contradiction, score components, suppression counts, and Cursor."
+      ],
+      "disposition": "implement"
+    },
+    {
+      "id": "mem-maintenance",
+      "title": "Fenced background maintenance",
+      "behavior": "Schedules extraction, verification, smart-note evaluation, summarization, decay, vector work, reconciliation, invalidation, compaction, integrity, portability, and purge with per-scope leases and model budgets.",
+      "requirement": "mem-maintenance",
+      "task": "mem-maintenance",
+      "design_anchor": "design/memory.txt#8-background-extraction-and-maintenance",
+      "implementation_paths": [
+        "crates/hypermid-memory/src/maintenance.rs",
+        "crates/hypermid-memory/src/lease.rs",
+        "crates/hypermid-memory/src/budget.rs",
+        "crates/hypermid-memory/src/smart_note.rs",
+        "runtime/gideon/hypermid/maintenance.py",
+        "runtime/gideon/hypermid/model_budget.py"
+      ],
+      "acceptance": [
+        "Grant revocation, lease expiry, token mismatch, changed input, or changed configuration prevents stale publication.",
+        "Model accounting distinguishes unknown usage from zero and cannot exceed reserved budgets.",
+        "Smart-note conditions execute only through the allowlisted bounded predicate interpreter."
+      ],
+      "disposition": "implement"
+    },
+    {
+      "id": "mem-indexes",
+      "title": "Message, file, and git indexes",
+      "behavior": "Maintains recoverable raw-message indexing, predicate-controlled file indexing, and opt-in bounded git indexing with pre-publication identity and digest checks.",
+      "requirement": "mem-indexes",
+      "task": "mem-indexes",
+      "design_anchor": "design/memory.txt#9-message-file-and-git-indexes",
+      "implementation_paths": [
+        "crates/hypermid-memory/src/source_index.rs",
+        "crates/hypermid-memory/src/file_predicate.rs",
+        "crates/hypermid-memory/src/git_index.rs",
+        "runtime/gideon/hypermid/message_index.py",
+        "runtime/gideon/hypermid/file_index.py",
+        "runtime/gideon/hypermid/git_index.py"
+      ],
+      "acceptance": [
+        "Message reconciliation resumes from the earliest durable dirty sequence before advancing its cursor.",
+        "File reads cannot publish after symlink escape, policy denial, scope loss, or digest change, and rejected content is not stored.",
+        "Git scans publish only against the same repository identity and refs and persist cooldown for non-repositories."
+      ],
+      "disposition": "implement"
+    },
+    {
+      "id": "mem-clients",
+      "title": "OSS Gideon clients and modules",
+      "behavior": "Exposes typed record, search, maintenance, diagnostics, and lifecycle clients from runtime/gideon/hypermid without allowing Python to write the core database directly.",
+      "requirement": "mem-clients",
+      "task": "mem-clients",
+      "design_anchor": "design/memory.txt#11-integration-contract",
+      "implementation_paths": [
+        "crates/hypermid-memory/src/api.rs",
+        "crates/hypermid-memory/src/ffi.rs",
+        "runtime/gideon/hypermid/contracts.py",
+        "runtime/gideon/hypermid/client.py",
+        "runtime/gideon/hypermid/lifecycle.py"
+      ],
+      "acceptance": [
+        "Python and Rust preserve shared Scope, Cursor, Error, and Trace semantics for success, conflict, authorization failure, and cancellation.",
+        "OSS lifecycle startup, health, drain, and shutdown preserve durable work and lexical-only operation."
+      ],
+      "disposition": "implement"
+    },
+    {
+      "id": "mem-remote",
+      "title": "Local bus and remote-safe protocol",
+      "behavior": "Provides a versioned, authenticated transport with equivalent in-process and local-bus request, stream, cancellation, backpressure, cursor replay, and mutation-idempotency behavior.",
+      "requirement": "mem-remote",
+      "task": "mem-remote",
+      "design_anchor": "design/memory.txt#11-integration-contract",
+      "implementation_paths": [
+        "crates/hypermid-memory/src/protocol.rs",
+        "crates/hypermid-memory/src/bus.rs",
+        "runtime/gideon/hypermid/transport.py",
+        "runtime/gideon/hypermid/bus.py"
+      ],
+      "acceptance": [
+        "Both transports pass the same conformance vectors with equivalent records, errors, traces, cursors, and termination.",
+        "Transport identity cannot replace actor Scope, and replay cannot duplicate an acknowledged mutation."
+      ],
+      "disposition": "implement"
+    },
+    {
+      "id": "mem-portability",
+      "title": "Staged import and canonical export",
+      "behavior": "Stages and validates versioned imports before visibility and emits digest-covered canonical JSON Lines containing authoritative records and provenance without derivative or secret-bearing state.",
+      "requirement": "mem-portability",
+      "task": "mem-portability",
+      "design_anchor": "design/memory.txt#10-import-export-migration-and-recovery",
+      "implementation_paths": [
+        "crates/hypermid-memory/src/import.rs",
+        "crates/hypermid-memory/src/export.rs",
+        "runtime/gideon/hypermid/portability.py"
+      ],
+      "acceptance": [
+        "Import replay is idempotent by source digest and item key, with rejected items inspectable and no partial batch visibility.",
+        "Scope relocation requires destination write authority, and export excludes vectors, indexes, leases, jobs, credentials, and secret references."
+      ],
+      "disposition": "implement"
+    },
+    {
+      "id": "mem-recovery",
+      "title": "Migration and recovery",
+      "behavior": "Fences unsupported stores, journals transactional migrations, creates consistent backups, validates authoritative graphs, and rebuilds derivative state through the OSS Gideon lifecycle.",
+      "requirement": "mem-recovery",
+      "task": "mem-recovery",
+      "design_anchor": "design/memory.txt#10-import-export-migration-and-recovery",
+      "implementation_paths": [
+        "crates/hypermid-memory/src/migrations.rs",
+        "crates/hypermid-memory/src/recovery.rs",
+        "crates/hypermid-memory/src/snapshot.rs",
+        "runtime/gideon/hypermid/diagnostics.py",
+        "runtime/gideon/hypermid/recovery.py"
+      ],
+      "acceptance": [
+        "Newer unsupported schemas fail closed and destructive migration requires a verified backup manifest.",
+        "Fresh and migrated schemas converge, and repair preserves authoritative revisions while rebuilding only derivative state.",
+        "The first complete integration runs locally in OSS Gideon without a hosted dependency or rollout."
+      ],
+      "disposition": "implement"
+    },
+    {
+      "id": "mem-release",
+      "title": "OSS release integration",
+      "behavior": "Packages the complete local memory slice with lifecycle wiring, compatibility gates, and content-safe diagnostics, with no hosted rollout or hosted dependency.",
+      "requirement": "mem-release",
+      "task": "mem-release",
+      "design_anchor": "design/memory.txt#11-integration-contract",
+      "implementation_paths": [
+        "Cargo.toml",
+        "crates/hypermid-memory/Cargo.toml",
+        "runtime/gideon/hypermid/lifecycle.py",
+        "runtime/gideon/engine/lifecycle.py",
+        "runtime/gideon/hypermid/diagnostics.py"
+      ],
+      "acceptance": [
+        "A clean OSS profile creates, retrieves, maintains, exports, restores, and re-retrieves the same authoritative records through Python and Rust.",
+        "Diagnostics cover schema, indexes, vectors, queues, leases, budgets, and recovery without exposing memory content or secrets."
+      ],
+      "disposition": "implement"
+    }
+  ]
+}

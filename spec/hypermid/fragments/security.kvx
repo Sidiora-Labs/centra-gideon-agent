@@ -1,0 +1,181 @@
+[design.security]
+document = "spec/hypermid/design/security.txt"
+qualification = "spec/hypermid/design/qualification.txt"
+contract = "Hypermid enforces scoped authority, encrypted daemon access, sandboxed effects, bounded network and model use, provenance-aware memory, verified artifacts, durable lifecycle controls, and crash recovery across crates/hypermid-*, runtime/gideon/hypermid, and native Gideon UI."
+release = "The first implementation target is OSS Gideon only. All implementation and qualification remain pending; live-provider qualification is an explicit opt-in gate."
+
+[req.sec-01]
+title = "Scoped principals and least-privilege background workers"
+status = "pending"
+design = "design/security.txt#security.scope, design/security.txt#security.capabilities"
+acceptance = "Enforce owner, project, optional workspace, operation, resource, and expiry boundaries for foreground and background access without implicit cross-project mutation authority."
+ac_1 = "Every read and mutation is authorized by principal, owner_id, project_id, optional workspace_id, operation, resource, and expiry at both protocol and transaction boundaries."
+ac_2 = "Workspace sharing grants only declared reads; foreign records and shared workspace membership never grant mutation, and denials do not disclose record existence."
+ac_3 = "Each background job receives an expiring capability for enumerated records and operations, and no background role can acquire blanket cross-project write authority."
+
+[task.sec-01]
+title = "Implement scoped capability enforcement"
+status = "pending"
+wave = 1
+owner_lane = "security"
+requires = ["base-02"]
+reqs = ["sec-01.1", "sec-01.2", "sec-01.3"]
+acceptance = "Scoped authorization is enforced at protocol and transactional commit boundaries for foreground callers and narrowly delegated background jobs."
+ac_1 = "A real foreign-project read or write matrix yields no content leak and no changed row without an exact live capability."
+ac_2 = "Capability revocation between worker read and commit prevents publication and leaves the target cursor unchanged."
+touches = ["crates/hypermid-core/src/capability.rs", "crates/hypermid-store/src/authorization.rs", "crates/hypermid-daemon/src/dispatch.rs", "runtime/gideon/hypermid/authz.py", "checks/hypermid/test_security_capabilities.py"]
+verify_cmd = "cargo test -p hypermid-core capability && cargo test -p hypermid-store authorization && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_security_capabilities.py"
+
+[req.sec-02]
+title = "Authenticated encrypted daemon protocol and version fencing"
+status = "pending"
+design = "design/security.txt#security.auth_protocol"
+acceptance = "Authenticate and encrypt every daemon session and fence incompatible clients before they create durable state."
+ac_1 = "Local and explicitly enabled remote sessions use TLS 1.3 mutual authentication, scoped short-lived authorization, replay protection, and no plaintext or certificate-verification bypass."
+ac_2 = "Unsupported protocol or schema ranges are rejected before durable intent creation with stable supported-range details and no silent downgrade."
+ac_3 = "Certificate expiry, revocation, peer mismatch, wrong server name, reordered frames, and replayed frames fail closed and leave durable state unchanged."
+
+[task.sec-02]
+title = "Implement encrypted protocol authentication and compatibility negotiation"
+status = "pending"
+wave = 1
+owner_lane = "security"
+requires = ["sec-01", "fab-01-bootstrap"]
+reqs = ["sec-02.1", "sec-02.2", "sec-02.3"]
+acceptance = "Local and remote clients negotiate an authenticated encrypted protocol with replay resistance, revocation, and supported-range fencing."
+ac_1 = "Packet capture of successful local and remote journeys contains zero plaintext application frames and every invalid peer case changes zero durable rows."
+ac_2 = "Supported-boundary clients reconnect from the acknowledged cursor while below-range and above-range clients fail before intent creation."
+touches = ["crates/hypermid-protocol/src/handshake.rs", "crates/hypermid-protocol/src/frame.rs", "crates/hypermid-daemon/src/listener.rs", "runtime/gideon/hypermid/client.py", "apps/console/src/features/hypermid/ConnectionStatus.tsx", "checks/hypermid/test_auth_protocol.py"]
+verify_cmd = "cargo test -p hypermid-protocol handshake && cargo test -p hypermid-daemon listener && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_auth_protocol.py"
+
+[req.sec-03]
+title = "Sandboxed MCP and stdio effects"
+status = "pending"
+design = "design/security.txt#security.sandbox"
+acceptance = "Contain MCP and stdio processes and preserve truthful external-effect state through timeout, cancellation, disconnect, and crash."
+ac_1 = "Every MCP or stdio process runs with an executable digest, bounded framed I/O, explicit filesystem/network/environment grants, resource ceilings, deadline, descendant cancellation, and no implicit credential access."
+ac_2 = "External effects persist an idempotency key and distinguish not_started, committed, and unknown; timeout or lost acknowledgement is never reported as failed or retried without reconciliation."
+ac_3 = "Malformed schemas, frames, paths, unsolicited output, and inherited descriptor attempts terminate safely without daemon-store access or partial authoritative mutation."
+
+[task.sec-03]
+title = "Implement MCP and stdio sandbox with effect reconciliation"
+status = "pending"
+wave = 5
+owner_lane = "security"
+requires = ["sec-02", "fab-05-supervision"]
+reqs = ["sec-03.1", "sec-03.2", "sec-03.3"]
+acceptance = "The production sandbox enforces declared resources and the durable effect ledger prevents unsafe retries after ambiguous outcomes."
+ac_1 = "Traversal, descriptor inheritance, malformed frame, oversized output, network escape, and child-survival attempts all fail without daemon-store access."
+ac_2 = "Crash injection around dispatch produces no duplicate committed effect and never maps an unknown outcome to failed."
+touches = ["crates/hypermid-sandbox/src/lib.rs", "crates/hypermid-mcp/src/stdio.rs", "crates/hypermid-store/src/effects.rs", "runtime/gideon/hypermid/effects.py", "apps/console/src/features/hypermid/UnknownEffects.tsx", "checks/hypermid/test_sandbox_effects.py"]
+verify_cmd = "cargo test -p hypermid-sandbox && cargo test -p hypermid-mcp stdio && cargo test -p hypermid-store effects && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_sandbox_effects.py"
+
+[req.sec-04]
+title = "Egress, DNS, proxy, secret, and log containment"
+status = "pending"
+design = "design/security.txt#security.network_and_secrets"
+acceptance = "Deny undeclared egress and prevent credential values from entering model, persistence, process, diagnostic, export, or user-interface data paths."
+ac_1 = "Default-denied egress validates normalized destinations, resolved addresses, redirects, proxy routing, address classes, byte limits, and expiry for every connection attempt."
+ac_2 = "Secrets are resolved from scoped opaque handles only at dispatch and no registered secret can appear in prompts, durable state, arguments, logs, evidence, exports, or UI payloads."
+ac_3 = "DNS rebinding, mixed allowed and denied answers, metadata endpoints, proxy bypass, and redirect escalation fail closed with a redacted typed error."
+
+[task.sec-04]
+title = "Implement network and secret containment"
+status = "pending"
+wave = 2
+owner_lane = "security"
+requires = ["sec-02"]
+reqs = ["sec-04.1", "sec-04.2", "sec-04.3"]
+acceptance = "The daemon mediates destination resolution and secret use with default-deny policy and redaction before persistence or presentation."
+ac_1 = "Controlled DNS, redirect, metadata, private-address, and proxy-bypass attempts establish zero unauthorized connections."
+ac_2 = "Unique canary credentials appear zero times in captured prompts, logs, evidence, arguments, exports, and UI payloads."
+touches = ["crates/hypermid-daemon/src/egress.rs", "crates/hypermid-daemon/src/secrets.rs", "crates/hypermid-daemon/src/redaction.rs", "runtime/gideon/hypermid/network_policy.py", "apps/console/src/features/hypermid/NetworkGrants.tsx", "checks/hypermid/test_egress_secrets.py"]
+verify_cmd = "cargo test -p hypermid-daemon egress && cargo test -p hypermid-daemon redaction && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_egress_secrets.py"
+
+[req.sec-05]
+title = "Model budget enforcement and memory provenance"
+status = "pending"
+design = "design/security.txt#security.model_budget, design/security.txt#security.memory_provenance"
+acceptance = "Bound model spending before dispatch and prevent memory text from acquiring control authority without a recorded user promotion."
+ac_1 = "Foreground and background calls reserve owner-controlled per-call, concurrency, hourly, daily, and job-total budgets before dispatch and reconcile actual or unresolved usage after completion or crash."
+ac_2 = "Project content cannot select credentials, enable providers, raise limits, or change approved data-routing constraints, and background work pauses visibly when admission is denied."
+ac_3 = "Instruction-shaped memory remains provenance-labeled data and cannot alter capabilities, provider policy, approvals, or trust until a revision-checked user promotion is recorded."
+
+[task.sec-05]
+title = "Implement budget admission and provenance trust boundaries"
+status = "pending"
+wave = 2
+owner_lane = "security"
+requires = ["sec-04", "base-03"]
+reqs = ["sec-05.1", "sec-05.2", "sec-05.3"]
+acceptance = "Usage reservations, reconciliation, provider policy, and provenance trust transitions are owner-controlled and crash-safe."
+ac_1 = "Concurrent foreground and worker admissions never exceed configured call, concurrency, hourly, daily, or job ceilings, including unresolved charges."
+ac_2 = "Instruction-shaped untrusted memory cannot alter a capability, approval, provider, credential, route, or budget in the rendered request."
+touches = ["crates/hypermid-store/src/budget.rs", "crates/hypermid-core/src/provenance.rs", "crates/hypermid-daemon/src/model_admission.rs", "runtime/gideon/hypermid/budgets.py", "runtime/gideon/hypermid/render.py", "apps/console/src/features/hypermid/MemoryProvenance.tsx", "checks/hypermid/test_budget_provenance.py"]
+verify_cmd = "cargo test -p hypermid-store budget && cargo test -p hypermid-core provenance && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_budget_provenance.py"
+
+[req.sec-06]
+title = "Verified artifact installation and atomic update"
+status = "pending"
+design = "design/security.txt#security.artifact_supply_chain"
+acceptance = "Verify artifact identity and contents before atomic activation and require fresh approval for capability expansion."
+ac_1 = "Install and update verify immutable digest, platform, publisher signature, declared capabilities, archive paths, link targets, normalized-name uniqueness, and expansion limits before activation."
+ac_2 = "Activation is atomic, existing sessions remain version-pinned, and any failed or interrupted update leaves the prior verified artifact runnable."
+ac_3 = "An update that requests any new filesystem, network, model, secret, or mutation capability cannot activate without a fresh user-visible approval."
+
+[task.sec-06]
+title = "Implement artifact supply-chain verification"
+status = "pending"
+wave = 6
+owner_lane = "security"
+requires = ["sec-05"]
+reqs = ["sec-06.1", "sec-06.2", "sec-06.3"]
+acceptance = "Only signed, digest-matched, bounded artifacts activate, and update interruption preserves a pinned prior version."
+ac_1 = "Publisher, digest, platform, traversal, link, collision, decompression, and capability-escalation failures execute zero artifact code and write nothing outside staging."
+ac_2 = "A kill at every activation boundary leaves exactly one verified version active and existing sessions continue on their pinned version."
+touches = ["crates/hypermid-artifacts/src/manifest.rs", "crates/hypermid-artifacts/src/install.rs", "crates/hypermid-artifacts/src/activate.rs", "runtime/gideon/hypermid/artifacts.py", "apps/console/src/features/hypermid/ArtifactApproval.tsx", "checks/hypermid/test_artifact_supply_chain.py"]
+verify_cmd = "cargo test -p hypermid-artifacts && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_artifact_supply_chain.py"
+
+[req.sec-07]
+title = "Deletion, export, backup, restore, and migration integrity"
+status = "pending"
+design = "design/security.txt#security.lifecycle"
+acceptance = "Provide scope-safe deletion, export, encrypted backup, migration, and restore with complete digest and cursor verification."
+ac_1 = "Deletion excludes content from recall immediately, preserves an owner-scoped tombstone through the recovery window, and purges authoritative and derived copies without accepting stale worker output."
+ac_2 = "Export and encrypted backup use consistent scope-filtered snapshots with authenticated manifests and per-entry digests, excluding secrets and transient cache material."
+ac_3 = "Restore and migration stage separately, validate schemas, digests, scopes, provenance, tombstones, and cursors, and replace the active store atomically only on complete success."
+
+[task.sec-07]
+title = "Implement lifecycle portability and migrations"
+status = "pending"
+wave = 7
+owner_lane = "security"
+requires = ["sec-06"]
+reqs = ["sec-07.1", "sec-07.2", "sec-07.3"]
+acceptance = "Lifecycle operations preserve authorization, provenance, tombstones, manifests, and the active store across interruption and invalid input."
+ac_1 = "Deletion removes recall immediately and post-window purge removes authoritative content and all derived copies without resurrection from stale jobs or backups."
+ac_2 = "Corrupt, wrong-key, cross-scope, and interrupted restore attempts leave the active store byte-identical; a valid restore matches every manifest digest and cursor."
+touches = ["crates/hypermid-store/src/deletion.rs", "crates/hypermid-store/src/export.rs", "crates/hypermid-store/src/backup.rs", "crates/hypermid-store/src/migrate.rs", "runtime/gideon/hypermid/lifecycle.py", "apps/console/src/features/hypermid/DataLifecycle.tsx", "checks/hypermid/test_lifecycle_migration.py"]
+verify_cmd = "cargo test -p hypermid-store lifecycle && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_lifecycle_migration.py"
+
+[req.sec-08]
+title = "Crash-consistent recovery and release evidence"
+status = "pending"
+design = "design/security.txt#security.crash_consistency, design/qualification.txt#qualification.release_acceptance"
+acceptance = "Recover atomic authoritative state and produce same-revision real-path evidence for every mandatory security and recovery gate."
+ac_1 = "Authoritative mutation, lineage, cursor, usage reservation, and outbox reference commit atomically, while stale derived writes are rejected by source-digest comparison."
+ac_2 = "Startup reconciles migrations, intents, outbox entries, and effects without duplicating committed work or converting unknown effects to failures, and corrupt or future state opens read-only recovery."
+ac_3 = "Release evidence covers real daemon, store, Python adapter, sandbox, and native UI paths for cache bytes, long history, raw recovery, migration, crash, authentication, and client compatibility; live-provider success requires explicit opt-in and cannot be supplied by a mock."
+
+[task.sec-08]
+title = "Implement crash recovery and security acceptance gates"
+status = "pending"
+wave = 8
+owner_lane = "security"
+requires = ["sec-07"]
+reqs = ["sec-08.1", "sec-08.2", "sec-08.3"]
+acceptance = "Crash recovery preserves authoritative truth and the release gate records measurable real-path evidence without converting mocks or skips into product success."
+ac_1 = "Kill-point coverage preserves monotonic cursors, rejects stale derivatives, duplicates no committed effect, and exposes unresolved effects as unknown."
+ac_2 = "Cache-byte, long-history, raw-recovery, migration, crash, auth, compatibility, lifecycle, sandbox, budget, and supply-chain evidence passes on one source digest; live-provider evidence requires explicit opt-in."
+touches = ["crates/hypermid-store/src/recovery.rs", "crates/hypermid-daemon/src/startup.rs", "runtime/gideon/hypermid/recovery.py", "apps/console/src/features/hypermid/RecoveryStatus.tsx", "checks/hypermid/verify_security_acceptance.py", "spec/hypermid/schemas/evidence.schema.json"]
+verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_security_acceptance.py --evidence-dir .artifacts/hypermid/security"

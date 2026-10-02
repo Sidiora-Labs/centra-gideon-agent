@@ -1,0 +1,528 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hypermid.gideon.dev/schemas/admin.schema.json",
+  "title": "Hypermid administration and surface protocol",
+  "oneOf": [
+    {"$ref": "#/$defs/AdminRequest"},
+    {"$ref": "#/$defs/AdminResponse"},
+    {"$ref": "#/$defs/AdminEvent"},
+    {"$ref": "#/$defs/ChunkFrame"},
+    {"$ref": "#/$defs/StreamTerminal"}
+  ],
+  "$defs": {
+    "ProtocolVersion": {"const": "hypermid.v1"},
+    "TransportProfile": {
+      "enum": ["local_unix", "local_windows", "remote_tls"]
+    },
+    "TransportLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["length_prefix", "max_frame_bytes", "max_chunk_bytes"],
+      "properties": {
+        "length_prefix": {"const": "u32_be"},
+        "max_frame_bytes": {"const": 8388608},
+        "max_chunk_bytes": {"const": 65536}
+      }
+    },
+    "LifecycleState": {
+      "enum": [
+        "absent", "starting", "ready", "degraded", "draining", "stopping",
+        "stopped", "updating", "failed"
+      ]
+    },
+    "HealthState": {"enum": ["unknown", "healthy", "degraded", "failing", "unavailable"]},
+    "EffectState": {"enum": ["not_started", "committed", "unknown"]},
+    "Availability": {"enum": ["available", "degraded", "unavailable", "unauthorized"]},
+    "HypermidMode": {"enum": ["off", "pass_through", "shadow", "primary"]},
+    "ModeConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "strictness_policy", "revision_digest"],
+      "properties": {
+        "mode": {"$ref": "#/$defs/HypermidMode"},
+        "strictness_policy": {"type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[a-z][a-z0-9_-]*$"},
+        "revision_digest": {"$ref": "common.schema.json#/$defs/Digest"}
+      }
+    },
+    "Operation": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)+$"
+    },
+    "CapabilityDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "effect", "availability", "scope_required"],
+      "properties": {
+        "name": {"$ref": "#/$defs/Operation"},
+        "version": {"type": "integer", "minimum": 1},
+        "effect": {"enum": ["read", "mutate", "stream"]},
+        "availability": {"$ref": "#/$defs/Availability"},
+        "scope_required": {"type": "boolean"},
+        "cursor_resume": {"type": "boolean"},
+        "reason": {"type": "string", "maxLength": 512},
+        "remediation": {"type": "string", "maxLength": 512}
+      }
+    },
+    "HostAdapterReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter_id", "full_host_integration", "capabilities"],
+      "properties": {
+        "adapter_id": {"$ref": "common.schema.json#/$defs/Id"},
+        "display_name": {"type": "string", "minLength": 1, "maxLength": 120},
+        "full_host_integration": {"type": "boolean"},
+        "capabilities": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {"$ref": "#/$defs/CapabilityDescriptor"}
+        },
+        "missing_full_host_capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/Operation"}
+        }
+      }
+    },
+    "CapabilityReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "transport", "limits", "daemon_state", "capabilities", "host_adapter"],
+      "properties": {
+        "protocol": {"$ref": "#/$defs/ProtocolVersion"},
+        "transport": {"$ref": "#/$defs/TransportProfile"},
+        "limits": {"$ref": "#/$defs/TransportLimits"},
+        "daemon_state": {"$ref": "#/$defs/LifecycleState"},
+        "capabilities": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {"$ref": "#/$defs/CapabilityDescriptor"}
+        },
+        "host_adapter": {"$ref": "#/$defs/HostAdapterReport"},
+        "server_version": {"type": "string", "minLength": 1, "maxLength": 80},
+        "schema_digest": {"$ref": "common.schema.json#/$defs/Digest"}
+      }
+    },
+    "AdminRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "type", "operation", "trace", "scope", "params"],
+      "properties": {
+        "protocol": {"$ref": "#/$defs/ProtocolVersion"},
+        "type": {"const": "request"},
+        "operation": {"$ref": "#/$defs/Operation"},
+        "trace": {"$ref": "common.schema.json#/$defs/Trace"},
+        "scope": {"$ref": "common.schema.json#/$defs/Scope"},
+        "expected_digest": {"$ref": "common.schema.json#/$defs/Digest"},
+        "plan_digest": {"$ref": "common.schema.json#/$defs/Digest"},
+        "deadline_ms": {"type": "integer", "minimum": 1, "maximum": 3600000},
+        "resume_after": {"$ref": "common.schema.json#/$defs/Cursor"},
+        "params": {"type": "object", "maxProperties": 128}
+      }
+    },
+    "AdminSuccess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "type", "operation", "trace", "ok", "effect_state", "result"],
+      "properties": {
+        "protocol": {"$ref": "#/$defs/ProtocolVersion"},
+        "type": {"const": "response"},
+        "operation": {"$ref": "#/$defs/Operation"},
+        "trace": {"$ref": "common.schema.json#/$defs/Trace"},
+        "ok": {"const": true},
+        "effect_state": {"$ref": "#/$defs/EffectState"},
+        "cursor": {"$ref": "common.schema.json#/$defs/Cursor"},
+        "result": {},
+        "result_digest": {"$ref": "common.schema.json#/$defs/Digest"}
+      }
+    },
+    "AdminFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "type", "operation", "trace", "ok", "effect_state", "error"],
+      "properties": {
+        "protocol": {"$ref": "#/$defs/ProtocolVersion"},
+        "type": {"const": "response"},
+        "operation": {"$ref": "#/$defs/Operation"},
+        "trace": {"$ref": "common.schema.json#/$defs/Trace"},
+        "ok": {"const": false},
+        "effect_state": {"$ref": "#/$defs/EffectState"},
+        "cursor": {"$ref": "common.schema.json#/$defs/Cursor"},
+        "error": {"$ref": "common.schema.json#/$defs/Error"}
+      }
+    },
+    "AdminResponse": {
+      "oneOf": [
+        {"$ref": "#/$defs/AdminSuccess"},
+        {"$ref": "#/$defs/AdminFailure"}
+      ]
+    },
+    "AdminEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "type", "topic", "trace", "scope", "cursor", "observed_at", "payload"],
+      "properties": {
+        "protocol": {"$ref": "#/$defs/ProtocolVersion"},
+        "type": {"const": "event"},
+        "topic": {"$ref": "#/$defs/Operation"},
+        "trace": {"$ref": "common.schema.json#/$defs/Trace"},
+        "scope": {"$ref": "common.schema.json#/$defs/Scope"},
+        "cursor": {"$ref": "common.schema.json#/$defs/Cursor"},
+        "resource_id": {"$ref": "common.schema.json#/$defs/Id"},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "payload": {"type": "object", "maxProperties": 128}
+      }
+    },
+    "ChunkFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "type", "trace", "stream_id", "index", "bytes", "data_base64"],
+      "properties": {
+        "protocol": {"$ref": "#/$defs/ProtocolVersion"},
+        "type": {"const": "chunk"},
+        "trace": {"$ref": "common.schema.json#/$defs/Trace"},
+        "stream_id": {"$ref": "common.schema.json#/$defs/Id"},
+        "index": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "bytes": {"type": "integer", "minimum": 0, "maximum": 65536},
+        "data_base64": {"type": "string", "maxLength": 87384},
+        "chunk_digest": {"$ref": "common.schema.json#/$defs/Digest"}
+      }
+    },
+    "StreamTerminal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "type", "trace", "stream_id", "chunks", "bytes", "effect_state"],
+      "properties": {
+        "protocol": {"$ref": "#/$defs/ProtocolVersion"},
+        "type": {"const": "stream_terminal"},
+        "trace": {"$ref": "common.schema.json#/$defs/Trace"},
+        "stream_id": {"$ref": "common.schema.json#/$defs/Id"},
+        "chunks": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "bytes": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "effect_state": {"$ref": "#/$defs/EffectState"},
+        "cursor": {"$ref": "common.schema.json#/$defs/Cursor"},
+        "content_digest": {"$ref": "common.schema.json#/$defs/Digest"},
+        "error": {"$ref": "common.schema.json#/$defs/Error"}
+      }
+    },
+    "DaemonStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "health", "started_at", "transport", "active_clients", "active_jobs"],
+      "properties": {
+        "state": {"$ref": "#/$defs/LifecycleState"},
+        "health": {"$ref": "#/$defs/HealthState"},
+        "started_at": {"type": ["string", "null"], "format": "date-time"},
+        "transport": {"$ref": "#/$defs/TransportProfile"},
+        "active_clients": {"type": "integer", "minimum": 0},
+        "active_jobs": {"type": "integer", "minimum": 0},
+        "cursor": {"$ref": "common.schema.json#/$defs/Cursor"},
+        "detail": {"type": "string", "maxLength": 1024}
+      }
+    },
+    "DiagnosticCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "health", "observed_at", "cached", "summary"],
+      "properties": {
+        "id": {"$ref": "common.schema.json#/$defs/Id"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 160},
+        "health": {"$ref": "#/$defs/HealthState"},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "cached": {"type": "boolean"},
+        "summary": {"type": "string", "maxLength": 2048},
+        "next_action": {"type": "string", "maxLength": 1024},
+        "evidence_digest": {"$ref": "common.schema.json#/$defs/Digest"}
+      }
+    },
+    "PlanStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "effect", "state"],
+      "properties": {
+        "id": {"$ref": "common.schema.json#/$defs/Id"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 240},
+        "effect": {"enum": ["read", "write_derivative", "write_authoritative", "delete_derivative", "delete_authoritative", "restart"]},
+        "state": {"enum": ["planned", "running", "committed", "skipped", "failed", "cancelled", "unknown"]},
+        "detail": {"type": "string", "maxLength": 2048}
+      }
+    },
+    "ActionPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan_id", "operation", "scope", "created_at", "expires_at", "plan_digest", "destructive", "steps", "blockers"],
+      "allOf": [
+        {
+          "if": {"properties": {"operation": {"const": "lifecycle.uninstall.apply"}}, "required": ["operation"]},
+          "then": {"required": ["data_disposition"]}
+        },
+        {
+          "if": {"properties": {"operation": {"enum": ["lifecycle.update.apply", "lifecycle.install.apply"]}}, "required": ["operation"]},
+          "then": {"required": ["target_version"]}
+        },
+        {
+          "if": {"properties": {"operation": {"const": "lifecycle.export.apply"}}, "required": ["operation"]},
+          "then": {"required": ["destination"]}
+        }
+      ],
+      "properties": {
+        "plan_id": {"$ref": "common.schema.json#/$defs/Id"},
+        "operation": {"$ref": "#/$defs/Operation"},
+        "scope": {"$ref": "common.schema.json#/$defs/Scope"},
+        "created_at": {"type": "string", "format": "date-time"},
+        "expires_at": {"type": "string", "format": "date-time"},
+        "plan_digest": {"$ref": "common.schema.json#/$defs/Digest"},
+        "destructive": {"type": "boolean"},
+        "restart_required": {"type": "boolean"},
+        "current_version": {"type": ["string", "null"], "maxLength": 80},
+        "target_version": {"type": ["string", "null"], "maxLength": 80},
+        "data_disposition": {"enum": ["retain", "export", "purge"]},
+        "source_digest": {"$ref": "common.schema.json#/$defs/Digest"},
+        "destination": {"type": "string", "maxLength": 4096},
+        "rollback_digest": {"$ref": "common.schema.json#/$defs/Digest"},
+        "estimated_items": {"type": ["integer", "null"], "minimum": 0},
+        "estimated_bytes": {"type": ["integer", "null"], "minimum": 0},
+        "steps": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/$defs/PlanStep"}},
+        "blockers": {"type": "array", "maxItems": 128, "items": {"type": "string", "maxLength": 1024}}
+      }
+    },
+    "ActionReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["job_id", "operation", "scope", "plan_digest", "state", "started_at", "steps"],
+      "properties": {
+        "job_id": {"$ref": "common.schema.json#/$defs/Id"},
+        "operation": {"$ref": "#/$defs/Operation"},
+        "scope": {"$ref": "common.schema.json#/$defs/Scope"},
+        "plan_digest": {"$ref": "common.schema.json#/$defs/Digest"},
+        "state": {"enum": ["running", "committed", "failed", "cancelled", "outcome_unknown"]},
+        "started_at": {"type": "string", "format": "date-time"},
+        "finished_at": {"type": ["string", "null"], "format": "date-time"},
+        "cursor": {"$ref": "common.schema.json#/$defs/Cursor"},
+        "steps": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/PlanStep"}},
+        "rollback_available": {"type": "boolean"},
+        "artifact_digest": {"$ref": "common.schema.json#/$defs/Digest"},
+        "error": {"$ref": "common.schema.json#/$defs/Error"}
+      }
+    },
+    "ConfigEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value", "source", "editable", "revision_digest"],
+      "properties": {
+        "key": {"$ref": "#/$defs/Operation"},
+        "value": {},
+        "source": {"enum": ["default", "file", "environment", "host_adapter", "runtime"]},
+        "editable": {"type": "boolean"},
+        "restart_required": {"type": "boolean"},
+        "revision_digest": {"$ref": "common.schema.json#/$defs/Digest"},
+        "validation": {"type": "array", "maxItems": 64, "items": {"type": "string", "maxLength": 512}}
+      }
+    },
+    "ModelDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "provider_id", "availability", "health"],
+      "properties": {
+        "id": {"$ref": "common.schema.json#/$defs/Id"},
+        "provider_id": {"$ref": "common.schema.json#/$defs/Id"},
+        "display_name": {"type": "string", "maxLength": 160},
+        "availability": {"$ref": "#/$defs/Availability"},
+        "health": {"$ref": "#/$defs/HealthState"},
+        "embedding_dimensions": {"type": ["integer", "null"], "minimum": 1},
+        "context_tokens": {"type": ["integer", "null"], "minimum": 1},
+        "resident": {"type": ["boolean", "null"]},
+        "last_probe_at": {"type": ["string", "null"], "format": "date-time"}
+      }
+    },
+    "CredentialMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "scope", "backend", "present", "consumers"],
+      "properties": {
+        "name": {"$ref": "common.schema.json#/$defs/Id"},
+        "scope": {"$ref": "common.schema.json#/$defs/Scope"},
+        "backend": {"enum": ["keychain", "protected_file", "host_adapter"]},
+        "present": {"type": "boolean"},
+        "last_validated_at": {"type": ["string", "null"], "format": "date-time"},
+        "consumers": {"type": "array", "uniqueItems": true, "maxItems": 128, "items": {"$ref": "common.schema.json#/$defs/Id"}}
+      }
+    },
+    "SessionSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "scope", "state", "updated_at", "title"],
+      "properties": {
+        "id": {"$ref": "common.schema.json#/$defs/Id"},
+        "scope": {"$ref": "common.schema.json#/$defs/Scope"},
+        "state": {"enum": ["active", "closed", "archived", "unhealthy"]},
+        "updated_at": {"type": "string", "format": "date-time"},
+        "title": {"type": "string", "maxLength": 240},
+        "model_id": {"$ref": "common.schema.json#/$defs/Id"},
+        "cursor": {"$ref": "common.schema.json#/$defs/Cursor"}
+      }
+    },
+    "TimelineItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "cursor", "kind", "occurred_at", "summary"],
+      "properties": {
+        "id": {"$ref": "common.schema.json#/$defs/Id"},
+        "cursor": {"$ref": "common.schema.json#/$defs/Cursor"},
+        "kind": {"enum": ["user", "assistant", "tool", "memory", "cache", "compaction", "diagnostic", "error"]},
+        "occurred_at": {"type": "string", "format": "date-time"},
+        "summary": {"type": "string", "maxLength": 4096},
+        "trace": {"$ref": "common.schema.json#/$defs/Trace"},
+        "detail_digest": {"$ref": "common.schema.json#/$defs/Digest"}
+      }
+    },
+    "MemoryRecordSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "scope", "kind", "revision_digest", "content_digest", "state"],
+      "properties": {
+        "id": {"$ref": "common.schema.json#/$defs/Id"},
+        "scope": {"$ref": "common.schema.json#/$defs/Scope"},
+        "kind": {"enum": ["fact", "episode", "note", "smart_note", "anchor", "summary"]},
+        "revision_digest": {"$ref": "common.schema.json#/$defs/Digest"},
+        "content_digest": {"$ref": "common.schema.json#/$defs/Digest"},
+        "state": {"enum": ["active", "archived", "tombstoned", "expired"]},
+        "verified": {"type": "boolean"},
+        "contradicted": {"type": "boolean"},
+        "source_session_id": {"$ref": "common.schema.json#/$defs/Id"}
+      }
+    },
+    "CacheEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "scope", "kind", "generation", "freshness", "bytes"],
+      "properties": {
+        "id": {"$ref": "common.schema.json#/$defs/Id"},
+        "scope": {"$ref": "common.schema.json#/$defs/Scope"},
+        "kind": {"type": "string", "minLength": 1, "maxLength": 80},
+        "generation": {"type": "integer", "minimum": 0},
+        "freshness": {"enum": ["fresh", "stale", "rebuilding", "unavailable", "unreadable"]},
+        "input_digest": {"$ref": "common.schema.json#/$defs/Digest"},
+        "bytes": {"type": "integer", "minimum": 0},
+        "hits": {"type": "integer", "minimum": 0},
+        "misses": {"type": "integer", "minimum": 0},
+        "observed_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "IntegrationStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "availability", "capabilities"],
+      "properties": {
+        "id": {"$ref": "common.schema.json#/$defs/Id"},
+        "kind": {"enum": ["tool_bridge", "full_host_integration"]},
+        "availability": {"$ref": "#/$defs/Availability"},
+        "capabilities": {"type": "array", "maxItems": 512, "items": {"$ref": "#/$defs/CapabilityDescriptor"}},
+        "detail": {"type": "string", "maxLength": 1024}
+      }
+    },
+    "StdioProcess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "state", "active_requests", "restart_failures", "environment_names"],
+      "properties": {
+        "id": {"$ref": "common.schema.json#/$defs/Id"},
+        "state": {"enum": ["idle", "starting", "initializing", "ready", "busy", "draining", "stopped", "cooldown", "failed"]},
+        "executable_digest": {"$ref": "common.schema.json#/$defs/Digest"},
+        "active_requests": {"type": "integer", "minimum": 0},
+        "restart_failures": {"type": "integer", "minimum": 0},
+        "cooldown_until": {"type": ["string", "null"], "format": "date-time"},
+        "last_started_at": {"type": ["string", "null"], "format": "date-time"},
+        "last_exit_code": {"type": ["integer", "null"]},
+        "environment_names": {"type": "array", "uniqueItems": true, "maxItems": 128, "items": {"type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$"}},
+        "last_error": {"$ref": "common.schema.json#/$defs/Error"}
+      }
+    },
+    "AtomicCondition": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "path", "exists"],
+          "properties": {"kind": {"const": "path_exists"}, "path": {"type": "string", "minLength": 1, "maxLength": 4096}, "exists": {"type": "boolean"}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "path", "needle", "contains"],
+          "properties": {"kind": {"const": "file_contains"}, "path": {"type": "string", "minLength": 1, "maxLength": 4096}, "needle": {"type": "string", "maxLength": 4096}, "contains": {"type": "boolean"}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "path", "after"],
+          "properties": {"kind": {"const": "mtime_after"}, "path": {"type": "string", "minLength": 1, "maxLength": 4096}, "after": {"type": "string", "format": "date-time"}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "repo_path", "ancestor"],
+          "properties": {"kind": {"const": "git_commit_after"}, "repo_path": {"type": "string", "minLength": 1, "maxLength": 4096}, "ref": {"type": "string", "maxLength": 512}, "ancestor": {"type": "string", "pattern": "^[a-f0-9]{40,64}$"}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "repo_path", "pattern"],
+          "properties": {"kind": {"const": "git_tag_matching"}, "repo_path": {"type": "string", "minLength": 1, "maxLength": 4096}, "pattern": {"type": "string", "minLength": 1, "maxLength": 256}, "above": {"type": "string", "maxLength": 80}}
+        }
+      ]
+    },
+    "ConditionExpression": {
+      "oneOf": [
+        {"$ref": "#/$defs/AtomicCondition"},
+        {
+          "type": "object", "additionalProperties": false, "required": ["all"],
+          "properties": {"all": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/ConditionExpression"}}}
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["any"],
+          "properties": {"any": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/ConditionExpression"}}}
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["not"],
+          "properties": {"not": {"$ref": "#/$defs/ConditionExpression"}}
+        }
+      ]
+    },
+    "ConditionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matched", "occurrence_id", "observed_at", "facts"],
+      "properties": {
+        "matched": {"type": "boolean"},
+        "occurrence_id": {"$ref": "common.schema.json#/$defs/Id"},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "facts": {"type": "object", "maxProperties": 64},
+        "source_digest": {"$ref": "common.schema.json#/$defs/Digest"}
+      }
+    },
+    "DeviceEnrollment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "display_name", "scope", "issued_at", "expires_at", "state", "capabilities"],
+      "properties": {
+        "device_id": {"$ref": "common.schema.json#/$defs/Id"},
+        "display_name": {"type": "string", "minLength": 1, "maxLength": 120},
+        "scope": {"$ref": "common.schema.json#/$defs/Scope"},
+        "issued_at": {"type": "string", "format": "date-time"},
+        "expires_at": {"type": "string", "format": "date-time"},
+        "state": {"enum": ["pending", "active", "expired", "revoked"]},
+        "capabilities": {"type": "array", "uniqueItems": true, "maxItems": 256, "items": {"$ref": "#/$defs/Operation"}}
+      }
+    },
+    "ClientCompatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime", "client_version", "protocol", "compatible", "checked_at"],
+      "properties": {
+        "runtime": {"enum": ["python", "rust", "typescript", "swift"]},
+        "client_version": {"type": "string", "minLength": 1, "maxLength": 80},
+        "protocol": {"$ref": "#/$defs/ProtocolVersion"},
+        "compatible": {"type": "boolean"},
+        "checked_at": {"type": "string", "format": "date-time"},
+        "reason": {"type": "string", "maxLength": 1024}
+      }
+    }
+  }
+}

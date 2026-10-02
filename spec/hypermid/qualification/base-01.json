@@ -1,0 +1,19 @@
+{
+  "task": "base-01",
+  "status": "passed",
+  "command": "cargo test -p hypermid-foundation -p hypermid-contracts --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_identity.py",
+  "exit_code": 0,
+  "source_sha256": {
+    "Cargo.toml": "22239d24ced3b5413d804c7eb8d66387f1117cade1b7ab9110cbcd088271e04a",
+    "Cargo.lock": "e9217500cd9c904305e3ad6c16bacb8be36e01e8712de70bccddf617c3edf04c",
+    "crates/hypermid-foundation/Cargo.toml": "c9620c66e7a1f6742416977cb3343eac7728095249006238650e694a86b7c900",
+    "crates/hypermid-foundation/src/lib.rs": "29c80a7a6682e4d4ce3d4868aa8f5aaa83dd58b1436c06ce1331ea1ca34dd244",
+    "crates/hypermid-foundation/src/path.rs": "e6fa1a18afb36cd362ae4bc15a1675b9e09ebcd2a17e129f4ff7a61b27387fef",
+    "crates/hypermid-contracts/Cargo.toml": "5a5979444981aacf4054fe77d6cfdc8b5846b286568fd841cadb20d55d8076e4",
+    "crates/hypermid-contracts/src/lib.rs": "7fb43b212e75a4f975df2d87de23779c43d2c7fdcec665d105bc479a24e308fa",
+    "crates/hypermid-contracts/src/storage.rs": "c28d25f0a70c95e7ae50f1b204ad84831fcce5740ebee563f6417516e3de6fb3",
+    "runtime/gideon/hypermid/foundation.py": "3a0640b8f5cde359fe44078c0e2a341f95e02a91ad9a38ef4abe2f0e5e89f224",
+    "checks/hypermid/test_base_identity.py": "a67b112bb090393d7e45c70d9f6f531c843c96900637b75c25614eb21b6c1eae"
+  },
+  "scope": "Focused foundation and identity checks; 5 Rust and 6 Python tests."
+}
