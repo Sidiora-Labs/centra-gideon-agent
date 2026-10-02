@@ -37,7 +37,7 @@
 - [x] ctx-diagnostics. Implement context diagnostics and accounting
   - _Requirements: ctx-diagnostics.1, ctx-diagnostics.2, ctx-diagnostics.3_
 
-- [ ] ctx-gideon-adapter. Install the Gideon pass-through adapter and context status
+- [x] ctx-gideon-adapter. Install the Gideon pass-through adapter and context status
   - _Requirements: ctx-gideon-adapter.1, ctx-gideon-adapter.2, ctx-gideon-adapter.3_
 
 - [ ] ctx-gideon-integration. Integrate Hypermid with OSS Gideon model turns

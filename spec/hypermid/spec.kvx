@@ -690,7 +690,7 @@ touches = ["runtime/gideon/hypermid/__init__.py", "runtime/gideon/hypermid/adapt
 verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_gideon_integration.py"
 [task.ctx-gideon-adapter]
 title = "Install the Gideon pass-through adapter and context status"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "context"
 requires = ["ctx-modes", "ctx-diagnostics", "sec-02"]

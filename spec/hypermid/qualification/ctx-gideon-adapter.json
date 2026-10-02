@@ -1,0 +1,25 @@
+{
+  "task": "ctx-gideon-adapter",
+  "status": "passed",
+  "declared_command": "PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_passthrough.py",
+  "recorded_portable_commands": [],
+  "successful_gate_count": 3,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/runtime/test_hypermid_passthrough.py": "5000deef3e86c336652f85935d7dda0bbd58d1347754d771de4ad75f4ca715cb",
+    "runtime/gideon/cognition/context_engine.py": "58c68290aa41a1b761e1faedc546234956973ad2f7db7c14cc733318b13ec425",
+    "runtime/gideon/hypermid/__init__.py": "d1b489b1d33d05a21c93516e26fe3dfeb1fbbfb0d6778056e690b8320ce7b7ab",
+    "runtime/gideon/hypermid/adapter.py": "c0fd225b3ef4011ced9ee0d392135a1c6be0deba8fbdda1990ccb318f2907f85",
+    "runtime/gideon/hypermid/lifecycle.py": "60cc7607ecc69c5c7f8668f9c578d9281abde4e2a9045d2aa3c6e86d90e23cd2",
+    "runtime/gideon/hypermid/status.py": "70d77995a71e3f5ab68902303ede36527bd47662cd9a4728fdda0153673f5283"
+  },
+  "tested_source_sha256": {
+    "runtime/gideon/hypermid/__init__.py": "001b7a448d505528ad9369fa25d05624873ac3bbe354594fc8cb438ac49e53de",
+    "runtime/gideon/hypermid/adapter.py": "aa2f944cfa617d1eabae9dc941eac6ab735656d683e2cf257494cb55e1964db6",
+    "runtime/gideon/hypermid/lifecycle.py": "103c294a7146464b1ea73163cda96bd0365b882c0fc8b7fccece8b566bd71659",
+    "runtime/gideon/hypermid/status.py": "a26025a91a34fe63a377fa358e207bcfad7b4e8e63bd3e6c4a9186d318c9ee33",
+    "checks/runtime/test_hypermid_passthrough.py": "5000deef3e86c336652f85935d7dda0bbd58d1347754d771de4ad75f4ca715cb"
+  },
+  "scope": "Passthrough and writer-authority acceptance is supported by the focused adapter, primary-runtime, and subsequent source-bound bootstrap journeys. Aggregate release qualification remains separate.",
+  "source_adjustments": []
+}

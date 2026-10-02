@@ -139,7 +139,7 @@ acceptance = "Gideon exposes separate tool-bridge and full-host states, supervis
 ac_1 = "A wedged or oversized stdio child is terminated and reaped without blocking daemon health or another child, and a post-write timeout is never auto-retried."
 ac_2 = "Symlink escape, repository identity change, shell syntax, network request, excessive output, and expired evaluation budget are refused with typed errors and no event publication."
 touches = ["crates/hypermid-core/src/mcp_bridge.rs", "crates/hypermid-daemon/src/stdio_supervisor.rs", "crates/hypermid-core/src/conditions.rs", "crates/hypermid-core/src/file_conditions.rs", "crates/hypermid-core/src/git_conditions.rs", "runtime/gideon/hypermid/integrations.py", "apps/console/src/features/hypermid/Connections.tsx", "checks/hypermid/test_surface_integrations.py"]
-verify_cmd = "cargo test -p hypermid-core conditions mcp_bridge && cargo test -p hypermid-daemon stdio_supervisor"
+verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_surface_integrations.py::test_scoped_canonical_smart_note_condition_reaches_connections && PYTHONPATH=runtime python checks/hypermid/verify_wave_05.py"
 
 [task.ux-remote]
 title = "Remote, mobile, and accessible operator experience"
