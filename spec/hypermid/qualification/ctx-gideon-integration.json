@@ -1,0 +1,24 @@
+{
+  "task": "ctx-gideon-integration",
+  "status": "passed",
+  "declared_command": "PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_gideon_integration.py",
+  "recorded_portable_commands": [],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-daemon/src/context_routes.rs": "4bb030fa84f5f1de9dbc9f29903d60f44e6b2539cb0c3a94c94fbf3fe7cedc84",
+    "runtime/gideon/hypermid/primary_engine.py": "4a2eec72cfebb832c326645a5e6e376a1b2492c64b300f64fe9c844ea794cd1d",
+    "runtime/gideon/hypermid/lifecycle.py": "60cc7607ecc69c5c7f8668f9c578d9281abde4e2a9045d2aa3c6e86d90e23cd2",
+    "checks/hypermid/verify_wave_03.py": "01ed0e57a1b733cd1e16816912c3ea7b9d3a0b696bf8099e320c1a0e4166b11e",
+    "checks/hypermid/waves/wave_03.py": "63fa3cc7944eb3d167a6280e3f7972d0603c54b07080f3172a2152b378704666"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-daemon/src/context_routes.rs": "4bb030fa84f5f1de9dbc9f29903d60f44e6b2539cb0c3a94c94fbf3fe7cedc84",
+    "runtime/gideon/hypermid/primary_engine.py": "4a2eec72cfebb832c326645a5e6e376a1b2492c64b300f64fe9c844ea794cd1d",
+    "runtime/gideon/hypermid/lifecycle.py": "60cc7607ecc69c5c7f8668f9c578d9281abde4e2a9045d2aa3c6e86d90e23cd2",
+    "checks/hypermid/verify_wave_03.py": "01ed0e57a1b733cd1e16816912c3ea7b9d3a0b696bf8099e320c1a0e4166b11e",
+    "checks/hypermid/waves/wave_03.py": "63fa3cc7944eb3d167a6280e3f7972d0603c54b07080f3172a2152b378704666"
+  },
+  "scope": "Focused real authenticated daemon knowledge to PrimaryContextEngine prompt journey; aggregate Wave 8 and release qualification remain separate.",
+  "source_adjustments": []
+}

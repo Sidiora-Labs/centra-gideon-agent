@@ -40,7 +40,7 @@
 - [x] ctx-gideon-adapter. Install the Gideon pass-through adapter and context status
   - _Requirements: ctx-gideon-adapter.1, ctx-gideon-adapter.2, ctx-gideon-adapter.3_
 
-- [ ] ctx-gideon-integration. Integrate Hypermid with OSS Gideon model turns
+- [x] ctx-gideon-integration. Integrate Hypermid with OSS Gideon model turns
   - _Requirements: ctx-gideon-integration.1, ctx-gideon-integration.2, ctx-gideon-integration.3_
 
 - [x] ctx-history. Implement immutable history and exact expansion

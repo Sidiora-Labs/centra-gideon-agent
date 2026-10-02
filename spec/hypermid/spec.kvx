@@ -681,7 +681,7 @@ touches = ["crates/hypermid-core/src/diagnostics.rs", "crates/hypermid-context/s
 verify_cmd = "cargo test -p hypermid-context --test diagnostics_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_diagnostics.py"
 [task.ctx-gideon-integration]
 title = "Integrate Hypermid with OSS Gideon model turns"
-status = "pending"
+status = "done"
 wave = 8
 owner_lane = "context"
 requires = ["wave-7-close"]
