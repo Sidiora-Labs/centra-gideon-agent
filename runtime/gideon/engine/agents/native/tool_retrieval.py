@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from gideon.engine.agents.native.tool_vectors import (
@@ -361,6 +363,20 @@ class ToolRetriever:
             }
             for _, name in ranked[:limit]
         ]
+
+    async def search_async(
+        self,
+        query: str,
+        limit: int = 20,
+        *,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> list[dict]:
+        if cancelled is not None and cancelled():
+            raise asyncio.CancelledError
+        matches = await asyncio.to_thread(self.search, query, limit)
+        if cancelled is not None and cancelled():
+            raise asyncio.CancelledError
+        return matches
 
     def catalog(self, *, exclude: set[str] | None = None, max_chars: int = 6000) -> str:
         groups: dict[str, list[tuple[str, str]]] = {}

@@ -1576,13 +1576,15 @@ class NativeAgentRuntime(AgentProvider):
             return name
         return self._tool_sanitized_index.get(name, name)
 
-    def _search_tools(self, args: dict) -> str:
+    async def _search_tools(self, args: dict) -> str:
         retriever = self._tool_retriever
         if retriever is None:
             return "Tool search is unavailable because the tool catalog is not initialized."
         retriever.mark_used("tool_search")
-        matches = retriever.search(
-            str(args.get("query", "")), int(args.get("limit", 20) or 20)
+        matches = await retriever.search_async(
+            str(args.get("query", "")),
+            int(args.get("limit", 20) or 20),
+            cancelled=lambda: self._cancelled,
         )
         if not matches:
             return "No tools matched. Try broader terms; all tools remain callable by name."
@@ -1662,7 +1664,7 @@ class NativeAgentRuntime(AgentProvider):
             return result
         if self._tool_retriever is not None:
             if tool_name == "tool_search":
-                result = self._search_tools(args)
+                result = await self._search_tools(args)
                 meta_sink.setdefault("ok", True)
                 return result
         provider = self._tool_index.get(tool_name)
