@@ -1404,7 +1404,7 @@ ac_3 = "Release evidence covers real daemon, store, Python adapter, sandbox, and
 
 [task.sec-08]
 title = "Implement crash recovery and security acceptance gates"
-status = "pending"
+status = "done"
 wave = 8
 owner_lane = "security"
 requires = ["wave-7-close"]

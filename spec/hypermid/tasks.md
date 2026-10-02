@@ -184,7 +184,7 @@
 - [x] sec-07. Implement lifecycle portability and migrations
   - _Requirements: sec-07.1, sec-07.2, sec-07.3_
 
-- [ ] sec-08. Implement crash recovery and security acceptance gates
+- [x] sec-08. Implement crash recovery and security acceptance gates
   - _Requirements: sec-08.1, sec-08.2, sec-08.3_
 
 - [x] ux-configuration. Runtime, model, and credential settings
