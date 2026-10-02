@@ -1,0 +1,31 @@
+{
+  "task": "mem-indexes",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-memory source_index --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_source_indexes.py",
+  "recorded_portable_commands": [
+    "cargo check -p hypermid-memory --manifest-path crates/hypermid-memory/Cargo.toml",
+    "cargo test -p hypermid-memory source_index --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_source_indexes.py"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-memory/src/source_index.rs": "112abf1fd9fad0060a25a869eb27903e8017d265fbce9f80b39ba22dd8b0a8f6",
+    "crates/hypermid-memory/src/file_predicate.rs": "6987b5ad23d3b3af73d123ab7e930585f89061b950ed6e3127539e415bf950b1",
+    "crates/hypermid-memory/src/git_index.rs": "988b3d43acd17f9fd7af892c86a46c0d1d28e392bb7b8ca54d2cbb745dc3ae40",
+    "runtime/gideon/hypermid/message_index.py": "666f6e14c9859c62e3b8dcc4acf47f2cbcba84444885f18a70f2586267ef2238",
+    "runtime/gideon/hypermid/file_index.py": "6005f8f922b047ffa84aea5e812b0f1c11af189b23d0932b29f9d8b05de39756",
+    "runtime/gideon/hypermid/git_index.py": "879cc8f421702eccf8e7b757ad301798531fcd3dcc84c7cfe52184721e1b422a",
+    "checks/hypermid/test_memory_source_indexes.py": "22c1a4fa252bba16e6db7595dbc2ed56189341df0b6502890540b95186070168"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-memory/src/source_index.rs": "112abf1fd9fad0060a25a869eb27903e8017d265fbce9f80b39ba22dd8b0a8f6",
+    "crates/hypermid-memory/src/file_predicate.rs": "6987b5ad23d3b3af73d123ab7e930585f89061b950ed6e3127539e415bf950b1",
+    "crates/hypermid-memory/src/git_index.rs": "988b3d43acd17f9fd7af892c86a46c0d1d28e392bb7b8ca54d2cbb745dc3ae40",
+    "runtime/gideon/hypermid/message_index.py": "666f6e14c9859c62e3b8dcc4acf47f2cbcba84444885f18a70f2586267ef2238",
+    "runtime/gideon/hypermid/file_index.py": "6005f8f922b047ffa84aea5e812b0f1c11af189b23d0932b29f9d8b05de39756",
+    "runtime/gideon/hypermid/git_index.py": "879cc8f421702eccf8e7b757ad301798531fcd3dcc84c7cfe52184721e1b422a",
+    "checks/hypermid/test_memory_source_indexes.py": "22c1a4fa252bba16e6db7595dbc2ed56189341df0b6502890540b95186070168"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}

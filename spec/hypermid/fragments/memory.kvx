@@ -145,7 +145,7 @@ verify_cmd = "cargo test -p hypermid-memory maintenance --manifest-path crates/h
 
 [task.mem-indexes]
 title = "Message, file, and git indexing"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "memory"
 requires = ["mem-retrieval"]

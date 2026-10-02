@@ -139,7 +139,7 @@
 - [x] mem-foundation. Memory core foundation and authorization primitives
   - _Requirements: mem-foundation.1, mem-foundation.2_
 
-- [ ] mem-indexes. Message, file, and git indexing
+- [x] mem-indexes. Message, file, and git indexing
   - _Requirements: mem-indexes.1, mem-indexes.2, mem-indexes.3_
 
 - [x] mem-maintenance. Ownership-safe maintenance scheduler

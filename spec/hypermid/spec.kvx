@@ -848,7 +848,7 @@ touches = ["crates/hypermid-memory/src/maintenance.rs", "crates/hypermid-memory/
 verify_cmd = "cargo test -p hypermid-memory maintenance --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_maintenance.py"
 [task.mem-indexes]
 title = "Message, file, and git indexing"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "memory"
 requires = ["wave-3-close"]
