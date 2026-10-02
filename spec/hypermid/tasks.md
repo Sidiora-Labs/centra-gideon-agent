@@ -124,7 +124,7 @@
 - [x] int-06. Implement integration slice 6: durable bus, federation, remote access and sandbox containment
   - _Requirements: int-06.1, int-06.2, int-06.3_
 
-- [ ] int-07. Implement integration slice 7: migration, upgrade, export, restore and full native surfaces
+- [x] int-07. Implement integration slice 7: migration, upgrade, export, restore and full native surfaces
   - _Requirements: int-07.1, int-07.2, int-07.3, int-07.4_
 
 - [ ] int-08. Implement integration slice 8: whole OSS conformance, packaging and release readiness

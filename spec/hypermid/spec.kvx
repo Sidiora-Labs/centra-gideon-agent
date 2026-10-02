@@ -1215,7 +1215,7 @@ ac_4 = "CLI and console expose status, doctor, migrate, cutover, export, restore
 
 [task.int-07]
 title = "Implement integration slice 7: migration, upgrade, export, restore and full native surfaces"
-status = "pending"
+status = "done"
 wave = 7
 owner_lane = "integration"
 requires = ["ctx-portability", "ux-lifecycle"]

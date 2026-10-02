@@ -1323,6 +1323,7 @@ Examples:
     cfg_unset.add_argument("key", help="Dot-separated key (e.g. dashboard.url)")
 
     _add_app_parser(sub)
+    _add_hypermid_parser(sub)
 
     skills_parser = sub.add_parser(
         "skills", help="Manage skills from the skills marketplace"
@@ -1587,6 +1588,10 @@ Examples:
         rc = _app_cmd(args)
         if rc:
             raise SystemExit(rc)
+    elif args.command == "hypermid":
+        rc = _hypermid_cmd(args)
+        if rc:
+            raise SystemExit(rc)
     elif args.command == "agent":
         _handle_agent(args)
     elif args.command == "skills":
@@ -1628,6 +1633,8 @@ from gideon.interfaces.cli.doctor import (
     _doctor_paths,
     _doctor_rebuild_routing_stats,
 )
+from gideon.interfaces.cli.hypermid import add_parser as _add_hypermid_parser  # noqa: E402
+from gideon.interfaces.cli.hypermid import hypermid_cmd as _hypermid_cmd  # noqa: E402
 from gideon.interfaces.cli.server import (
     _consolidate_cmd,
     _gateway,

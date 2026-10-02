@@ -1,0 +1,42 @@
+{
+  "task": "int-07",
+  "status": "passed",
+  "declared_command": "PYTHONPATH=runtime python checks/hypermid/verify_wave_07.py",
+  "recorded_portable_commands": [
+    "PYTHONPATH=runtime python -m pytest -q checks/hypermid/waves/test_wave_07.py"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "runtime/gideon/hypermid/migration.py": "ab08ba3144950d381a912494a35589f08e4a5bb3c1ec1bbde8836c90375d2005",
+    "runtime/gideon/hypermid/export.py": "f7e678f13064ca613c3359c0d304dca2d6243f3b49f9a3a3938668d22287e518",
+    "runtime/gideon/hypermid/handlers.py": "26fea089ba876dec1829b6f404b168473855c1614a22e2c76562f784ba12aed1",
+    "runtime/gideon/core/config/migrations.py": "5b49da8366e7392cf4b9534cc426a4eeef5580baa01452a0b4a6810eea22a57d",
+    "runtime/gideon/interfaces/cli/main.py": "cfeeecfdc22a27a88d7d604b81b2ea71cc2a6cb3c04490146d09f0beb639687e",
+    "runtime/gideon/interfaces/dashboard/handlers/hypermid.py": "c04cb34cf27f65d6038b4832c9fed54eef1c1d1fcd1031e17565de25001c72f8",
+    "runtime/gideon/interfaces/dashboard/server.py": "548cea3f9ff20211e818ad4490e436ee1ad9770673b915c700481a0f5e97e5af",
+    "apps/console/src/features/settings/HypermidPanel.tsx": "281df90129976bbec0ee84d42db4c6b42d5c4c564f8094488842ea622c58b746",
+    "apps/console/src/shared/data/api.ts": "f8447e31af485bd44476f07a58d029e9a2041b24591f53351e635ec7684f5ad4",
+    "spec/hypermid/schemas/config.schema.json": "52f39a8987aa0ceafda2ef651f7730ec15cb45a470d3d000940f985ba6d0cbb2",
+    "checks/hypermid/verify_wave_07.py": "bf54878d2c00d437d06b36cf1e7e828bc8fa8c18120b9c066f8f579fe2258b49",
+    "checks/hypermid/migration_observed_matrix.py": "8f7504f3a080da4704eb85198fe61da3f45b07672b83773e07565a449f2034fe"
+  },
+  "tested_source_sha256": {
+    "runtime/gideon/hypermid/migration.py": "ab08ba3144950d381a912494a35589f08e4a5bb3c1ec1bbde8836c90375d2005",
+    "runtime/gideon/hypermid/export.py": "f7e678f13064ca613c3359c0d304dca2d6243f3b49f9a3a3938668d22287e518",
+    "runtime/gideon/hypermid/handlers.py": "26fea089ba876dec1829b6f404b168473855c1614a22e2c76562f784ba12aed1",
+    "runtime/gideon/core/config/migrations.py": "5b49da8366e7392cf4b9534cc426a4eeef5580baa01452a0b4a6810eea22a57d",
+    "runtime/gideon/interfaces/cli/main.py": "cfeeecfdc22a27a88d7d604b81b2ea71cc2a6cb3c04490146d09f0beb639687e",
+    "runtime/gideon/interfaces/dashboard/handlers/hypermid.py": "c04cb34cf27f65d6038b4832c9fed54eef1c1d1fcd1031e17565de25001c72f8",
+    "runtime/gideon/interfaces/dashboard/server.py": "548cea3f9ff20211e818ad4490e436ee1ad9770673b915c700481a0f5e97e5af",
+    "apps/console/src/features/settings/HypermidPanel.tsx": "281df90129976bbec0ee84d42db4c6b42d5c4c564f8094488842ea622c58b746",
+    "apps/console/src/shared/data/api.ts": "f8447e31af485bd44476f07a58d029e9a2041b24591f53351e635ec7684f5ad4",
+    "spec/hypermid/schemas/config.schema.json": "52f39a8987aa0ceafda2ef651f7730ec15cb45a470d3d000940f985ba6d0cbb2",
+    "checks/hypermid/verify_wave_07.py": "bf54878d2c00d437d06b36cf1e7e828bc8fa8c18120b9c066f8f579fe2258b49",
+    "checks/hypermid/migration_observed_matrix.py": "8f7504f3a080da4704eb85198fe61da3f45b07672b83773e07565a449f2034fe"
+  },
+  "scope": "Actual authenticated Wave 7 migration, portability, lifecycle, security, administration, restart recovery, and source-bound evidence journey through the sealed daemon.",
+  "source_adjustments": [
+    "Contentless FTS assertions use the canonical rowid mapping table for exact token and record identity before deletion and after restored restart."
+  ]
+}
