@@ -88,7 +88,7 @@ verify_cmd = "cargo test -p hypermid-leases -p hypermid-store -p hypermid-store-
 
 [task.base-03]
 title = "Cache, catalog, and usage contracts"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "foundation"
 requires = ["base-02"]

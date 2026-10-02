@@ -1,0 +1,32 @@
+{
+  "task": "base-03",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-cache -p hypermid-models -p hypermid-usage --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_cache_models.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-cache -p hypermid-models -p hypermid-usage --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_cache_models.py"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/hypermid/test_base_cache_models.py": "8a7a5da754d183581453e88150c478f8c91859ed95aa1ec40a1ce07b120fd787",
+    "crates/hypermid-cache/Cargo.toml": "375922f382d5e9338ac03ac9d1ea1930133fe479e0f1e2ebefba3318acac5e8e",
+    "crates/hypermid-cache/src/lib.rs": "d9ca63679ad02ccaebd70b83e52dedf1d14181211d494ebf1e14b327c74d11f9",
+    "crates/hypermid-models/Cargo.toml": "4ab8fc085edd6d14d9d7251e83109dfa7371f430ab65e5972e0440d5c42a7079",
+    "crates/hypermid-models/src/lib.rs": "143b36d94d9226530121ba2432db90aae8f714e5e8e4fe4a867d4315f66797ff",
+    "crates/hypermid-usage/Cargo.toml": "20fdc094807301de9eda1340e1e9614bd1e9ee1858bfaa70a8ac6a767016ed3e",
+    "crates/hypermid-usage/src/lib.rs": "298b419781e88c26e3cdfefb36834b769ae48fc9fe2067868b352b10de38cdf1",
+    "runtime/gideon/hypermid/shared_models.py": "80832095cde22f0b5fa6fe6d388ac0267e1984a80fc6a4e0af38b40df5574c6c"
+  },
+  "tested_source_sha256": {
+    "checks/hypermid/test_base_cache_models.py": "8a7a5da754d183581453e88150c478f8c91859ed95aa1ec40a1ce07b120fd787",
+    "crates/hypermid-cache/Cargo.toml": "375922f382d5e9338ac03ac9d1ea1930133fe479e0f1e2ebefba3318acac5e8e",
+    "crates/hypermid-cache/src/lib.rs": "d9ca63679ad02ccaebd70b83e52dedf1d14181211d494ebf1e14b327c74d11f9",
+    "crates/hypermid-models/Cargo.toml": "4ab8fc085edd6d14d9d7251e83109dfa7371f430ab65e5972e0440d5c42a7079",
+    "crates/hypermid-models/src/lib.rs": "143b36d94d9226530121ba2432db90aae8f714e5e8e4fe4a867d4315f66797ff",
+    "crates/hypermid-usage/Cargo.toml": "20fdc094807301de9eda1340e1e9614bd1e9ee1858bfaa70a8ac6a767016ed3e",
+    "crates/hypermid-usage/src/lib.rs": "298b419781e88c26e3cdfefb36834b769ae48fc9fe2067868b352b10de38cdf1",
+    "runtime/gideon/hypermid/shared_models.py": "80832095cde22f0b5fa6fe6d388ac0267e1984a80fc6a4e0af38b40df5574c6c"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}

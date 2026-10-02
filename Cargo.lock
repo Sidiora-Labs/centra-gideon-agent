@@ -665,6 +665,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypermid-cache"
+version = "0.1.0"
+dependencies = [
+ "fs2",
+ "hypermid-contracts",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "hypermid-client"
 version = "0.1.0"
 dependencies = [
@@ -913,6 +925,15 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-rustls",
+]
+
+[[package]]
+name = "hypermid-usage"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

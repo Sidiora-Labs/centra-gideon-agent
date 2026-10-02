@@ -10,7 +10,7 @@
 - [x] base-02. Lease-fenced storage backends
   - _Requirements: base-storage.1, base-storage.2, base-storage.3_
 
-- [ ] base-03. Cache, catalog, and usage contracts
+- [x] base-03. Cache, catalog, and usage contracts
   - _Requirements: base-cache-models.1, base-cache-models.2, base-cache-models.3_
 
 - [ ] base-04. Encrypted push and fleet logging

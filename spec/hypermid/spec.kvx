@@ -136,7 +136,7 @@ touches = ["crates/hypermid-leases/Cargo.toml", "crates/hypermid-leases/src/lib.
 verify_cmd = "cargo test -p hypermid-leases -p hypermid-store -p hypermid-store-postgres --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_storage.py"
 [task.base-03]
 title = "Cache, catalog, and usage contracts"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "foundation"
 requires = ["wave-1-close"]
