@@ -408,7 +408,7 @@ ac_2 = "Each platform service definition preserves ordered child shutdown and re
 verify_cmd = "cargo test -p hypermid-registry --test lifecycle"
 [task.fab-08-integration]
 title = "Qualify the complete OSS process fabric"
-status = "pending"
+status = "done"
 wave = 8
 owner_lane = "fabric"
 requires = ["wave-7-close"]

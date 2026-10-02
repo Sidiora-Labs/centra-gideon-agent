@@ -206,7 +206,7 @@ verify_cmd = "cargo test -p hypermid-registry --test lifecycle"
 
 [task.fab-08-integration]
 title = "Qualify the complete OSS process fabric"
-status = "pending"
+status = "done"
 wave = 8
 owner_lane = "fabric"
 requires = ["fab-01-bootstrap", "fab-02-registry-routing", "fab-03-flow-lifecycle", "fab-04-control-diagnostics", "fab-05-supervision", "fab-06-effects-federation", "fab-07-registry-service"]

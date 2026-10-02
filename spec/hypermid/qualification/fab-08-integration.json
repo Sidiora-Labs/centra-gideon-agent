@@ -1,0 +1,28 @@
+{
+  "task": "fab-08-integration",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-protocol -p hypermid-transport -p hypermid-control -p hypermid-daemon -p hypermid-bus -p hypermid-registry && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_adapter.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-protocol -p hypermid-transport -p hypermid-control -p hypermid-daemon -p hypermid-bus -p hypermid-registry && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_adapter.py"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-daemon/tests/oss_fabric.rs": "d1723188f4e50d159e74ba62f89197b538ca9ce87f487684c127a6cc4f5c1c50",
+    "checks/runtime/test_hypermid_adapter.py": "6274a5b5b388cd3f24d2c7fb9312e5a2d5ae87bec5fe86d8d60db144a5c6d3f9",
+    "spec/hypermid/schemas/fabric.schema.json": "f18d3c1d54cb48b947042721dc42372198056ff229019ab0459bb65bae01dd4f",
+    "spec/hypermid/maps/fabric.json": "638475b8a9fe5a22c56a64b1b074bbc00c8cb7d4b9b96b18a46b7ec5f64f3e8a",
+    "crates/hypermid-daemon/tests/startup_recovery.rs": "17eb65f8402a74b3bcf7d904a358df676e5be7bcb12f6967038200115e9cbc98"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-daemon/tests/oss_fabric.rs": "d1723188f4e50d159e74ba62f89197b538ca9ce87f487684c127a6cc4f5c1c50",
+    "checks/runtime/test_hypermid_adapter.py": "6274a5b5b388cd3f24d2c7fb9312e5a2d5ae87bec5fe86d8d60db144a5c6d3f9",
+    "spec/hypermid/schemas/fabric.schema.json": "f18d3c1d54cb48b947042721dc42372198056ff229019ab0459bb65bae01dd4f",
+    "spec/hypermid/maps/fabric.json": "638475b8a9fe5a22c56a64b1b074bbc00c8cb7d4b9b96b18a46b7ec5f64f3e8a",
+    "crates/hypermid-daemon/tests/startup_recovery.rs": "17eb65f8402a74b3bcf7d904a358df676e5be7bcb12f6967038200115e9cbc98"
+  },
+  "scope": "The exact declared complete-fabric Rust matrix and real authenticated Python adapter gate passed on the recorded sources. Release evidence, packaging, and historical matrices remain separate.",
+  "source_adjustments": [
+    "The startup recovery test distinguishes the pre-enrollment activated-image digest from the authorized database mutation that installs the configured local operator."
+  ]
+}

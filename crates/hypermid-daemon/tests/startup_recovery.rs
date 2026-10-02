@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -5,11 +6,18 @@ use std::process::Command;
 
 use hypermid_bus::{BeginEffect, DurableEffectLedger, DurableEventBus, EventDraft};
 use hypermid_contracts::{Cursor, Digest, Id, Scope};
+use hypermid_core::capability::{
+    AuthenticatedPrincipal, CapabilityGrant, CapabilityOperation,
+    PrincipalKind as CapabilityPrincipalKind,
+};
+use hypermid_daemon::enrollment::LocalOperatorEnrollment;
 use hypermid_daemon::startup::{
     PendingRestoreIntent, RecoveryAuthority, StartupReconciler, StartupRecoveryMode,
 };
+use hypermid_daemon::ServerState;
 use hypermid_memory::{scope_digest, snapshot::create_memory_snapshot, MemoryStore};
 use hypermid_protocol::{Principal, PrincipalKind};
+use hypermid_store::authorization::put_grant;
 use rusqlite::Connection;
 use sha2::{Digest as _, Sha256};
 
@@ -139,6 +147,16 @@ fn real_crash_restart_reconciles_cursors_and_surfaces_unknown_effect_once() {
         .unwrap();
     assert_eq!(recovered.intent_id, id("startup-restore"));
     assert_eq!(recovered.cursor, Cursor::new(1, 0).unwrap());
+    assert_eq!(
+        recovered.source_manifest_digest,
+        digest_file(
+            &root
+                .path()
+                .join("recovery")
+                .join("startup-artifact")
+                .join("manifest.json")
+        )
+    );
     assert!(!recovered.replayed);
     assert!(RecoveryAuthority::new(root.path())
         .pending()
@@ -163,6 +181,151 @@ fn real_crash_restart_reconciles_cursors_and_surfaces_unknown_effect_once() {
     assert_eq!(restarted.memories[0].cursor, first.memories[0].cursor);
     assert_eq!(restarted.outbox_cursor, first.outbox_cursor);
     assert_eq!(restarted.unknown_effects, first.unknown_effects);
+}
+
+#[test]
+fn restored_authority_free_store_reenrolls_only_the_configured_local_operator() {
+    let directory = tempfile::tempdir().unwrap();
+    let state_root = directory.path().join("state");
+    std::fs::create_dir_all(&state_root).unwrap();
+    let memory_path = state_root.join("memory.sqlite3");
+    let target_scope = scope();
+    drop(MemoryStore::open(&memory_path).unwrap());
+    insert_scope(&memory_path, &target_scope);
+
+    let foreign_capability = id("foreign-capability");
+    let mut connection = Connection::open(&memory_path).unwrap();
+    let transaction = connection.transaction().unwrap();
+    put_grant(
+        &transaction,
+        &AuthenticatedPrincipal {
+            principal_id: id("foreign-issuer"),
+            owner_id: target_scope.owner_id.clone(),
+            kind: CapabilityPrincipalKind::Foreground,
+        },
+        &CapabilityGrant {
+            capability_id: foreign_capability.clone(),
+            issuer_owner_id: target_scope.owner_id.clone(),
+            principal_id: id("foreign-credential"),
+            claimed_scope: target_scope.clone(),
+            target_scope: target_scope.clone(),
+            operations: BTreeSet::from([CapabilityOperation::Read]),
+            resources: BTreeSet::from([id("memory")]),
+            expires_at_ms: u64::MAX / 2,
+        },
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    drop(connection);
+
+    let sanitized_path = directory.path().join("sanitized.sqlite3");
+    drop(MemoryStore::open(&sanitized_path).unwrap());
+    insert_scope(&sanitized_path, &target_scope);
+    let artifact_id = id("authority-free-artifact");
+    let artifact_path = state_root.join("recovery").join(artifact_id.as_str());
+    let sanitized = MemoryStore::open(&sanitized_path).unwrap();
+    let snapshot =
+        create_memory_snapshot(&sanitized, &artifact_path, target_scope.clone()).unwrap();
+    drop(sanitized);
+    let prior_active_digest = digest_file(&memory_path);
+    RecoveryAuthority::new(&state_root)
+        .queue_restore(PendingRestoreIntent {
+            intent_id: id("authority-free-restore"),
+            artifact_id: artifact_id.clone(),
+            scope: target_scope.clone(),
+            manifest_digest: snapshot.manifest_digest,
+            expected_active_digest: prior_active_digest,
+            created_at_ms: 10,
+        })
+        .unwrap();
+
+    let local_capability = id("local-capability");
+    let enrollment = LocalOperatorEnrollment {
+        credential_id: id("local-credential"),
+        scope: target_scope,
+        capability_id: local_capability.clone(),
+        operations: BTreeSet::from([CapabilityOperation::Append, CapabilityOperation::Read]),
+        resources: BTreeSet::from([id("memory")]),
+        expires_at_ms: u64::MAX / 2,
+    };
+    let state = ServerState::new(
+        "authority-free-daemon".into(),
+        &state_root,
+        &enrollment,
+        None,
+    )
+    .unwrap();
+    assert!(!state.read_only_recovery());
+    let startup_restore = state.startup_restore().unwrap();
+    assert_eq!(startup_restore.intent_id, id("authority-free-restore"));
+    assert_eq!(startup_restore.artifact_id, artifact_id);
+    assert_eq!(
+        startup_restore.source_manifest_digest,
+        snapshot.manifest_digest
+    );
+    assert_ne!(startup_restore.active_digest, prior_active_digest);
+    drop(state);
+
+    let connection = Connection::open(&memory_path).unwrap();
+    let capabilities = connection
+        .prepare(
+            "SELECT capability_id,principal_id FROM hypermid_capabilities ORDER BY capability_id",
+        )
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        capabilities,
+        vec![(
+            local_capability.to_string(),
+            enrollment.credential_id.to_string()
+        )]
+    );
+    let operation_count: u64 = connection
+        .query_row(
+            "SELECT count(*) FROM hypermid_capability_operations WHERE capability_id=?1",
+            [local_capability.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let resource_count: u64 = connection
+        .query_row(
+            "SELECT count(*) FROM hypermid_capability_resources WHERE capability_id=?1",
+            [local_capability.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(operation_count, 2);
+    assert_eq!(resource_count, 1);
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT count(*) FROM hypermid_capabilities WHERE capability_id=?1",
+                [foreign_capability.as_str()],
+                |row| row.get::<_, u64>(0),
+            )
+            .unwrap(),
+        0
+    );
+}
+
+fn insert_scope(path: &Path, target_scope: &Scope) {
+    let connection = Connection::open(path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO memory_scopes(\
+                 scope_digest,scope_json,epoch,sequence,created_at_ms,updated_at_ms\
+             ) VALUES (?1,?2,1,0,1,1)",
+            rusqlite::params![
+                scope_digest(target_scope).to_hex(),
+                serde_json::to_string(target_scope).unwrap()
+            ],
+        )
+        .unwrap();
 }
 
 fn digest_file(path: &Path) -> Digest {
