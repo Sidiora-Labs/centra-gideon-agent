@@ -185,6 +185,26 @@ pub fn create_sqlite_snapshot(
     schema_version: u64,
     source_digest: Digest,
 ) -> Result<SnapshotReceipt, LifecycleError> {
+    create_sqlite_snapshot_with_transform(
+        source,
+        artifact_path,
+        scope,
+        cursor,
+        schema_version,
+        source_digest,
+        |_| Ok(()),
+    )
+}
+
+pub fn create_sqlite_snapshot_with_transform(
+    source: &Connection,
+    artifact_path: impl AsRef<Path>,
+    scope: Scope,
+    cursor: Cursor,
+    schema_version: u64,
+    source_digest: Digest,
+    transform: impl FnOnce(&Connection) -> Result<(), String>,
+) -> Result<SnapshotReceipt, LifecycleError> {
     let artifact_path = artifact_path.as_ref();
     if artifact_path.exists() {
         return Err(LifecycleError::InvalidManifest);
@@ -202,6 +222,11 @@ pub fn create_sqlite_snapshot(
     {
         let backup = Backup::new(source, &mut destination)?;
         backup.run_to_completion(64, Duration::from_millis(5), None)?;
+    }
+    transform(&destination).map_err(LifecycleError::DomainValidation)?;
+    verify_integrity(&destination)?;
+    if recorded_schema_version(&destination)? != schema_version {
+        return Err(LifecycleError::SchemaMismatch);
     }
     drop(destination);
     private_file(&image_path)?;

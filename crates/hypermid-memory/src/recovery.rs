@@ -247,8 +247,8 @@ fn validate_revisions(connection: &Connection, owner: &str) -> Result<(u64, u64)
         let mut statement = connection
             .prepare(
                 "SELECT revision,revision_digest,parent_revision_digest,content,
-                        content_digest,metadata_json,author_scope_digest,authored_at_ms,
-                        immutable_anchor
+                        content_digest,metadata_json,smart_predicate_json,author_scope_digest,
+                        authored_at_ms,immutable_anchor
                  FROM memory_revisions WHERE record_id=?1 ORDER BY revision",
             )
             .map_err(sql)?;
@@ -261,9 +261,10 @@ fn validate_revisions(connection: &Connection, owner: &str) -> Result<(u64, u64)
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, u64>(7)?,
-                    row.get::<_, bool>(8)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, u64>(8)?,
+                    row.get::<_, bool>(9)?,
                 ))
             })
             .map_err(sql)?
@@ -281,6 +282,7 @@ fn validate_revisions(connection: &Connection, owner: &str) -> Result<(u64, u64)
                 content,
                 content_digest,
                 metadata,
+                smart_predicate,
                 author,
                 at,
                 anchor,
@@ -302,6 +304,7 @@ fn validate_revisions(connection: &Connection, owner: &str) -> Result<(u64, u64)
                 parent,
                 content_digest,
                 metadata.as_bytes(),
+                smart_predicate.as_deref().map(str::as_bytes),
                 author,
                 *at,
             );
@@ -448,16 +451,29 @@ fn validate_mutation_cursor(
     owner: &str,
     cursor: Cursor,
 ) -> Result<(), String> {
-    let (count, maximum): (u64, Option<u64>) = connection
+    let (count, distinct, maximum): (u64, u64, Option<u64>) = connection
         .query_row(
-            "SELECT count(*),max(sequence) FROM memory_mutation_events
+            "SELECT count(*),count(DISTINCT sequence),max(sequence) FROM memory_mutation_events
              WHERE owner_scope_digest=?1 AND epoch=?2",
             params![owner, cursor.epoch],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(sql)?;
-    if maximum.unwrap_or(0) != cursor.sequence || count != cursor.sequence {
-        return Err("memory mutation cursor contains a gap".to_owned());
+    if count != distinct || maximum.is_some_and(|sequence| sequence > cursor.sequence) {
+        return Err("memory mutation event exceeds or duplicates the scope cursor".to_owned());
+    }
+    let future_event: bool = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM memory_mutation_events
+                WHERE owner_scope_digest=?1 AND epoch>?2
+             )",
+            params![owner, cursor.epoch],
+            |row| row.get(0),
+        )
+        .map_err(sql)?;
+    if future_event {
+        return Err("memory mutation event belongs to a future cursor epoch".to_owned());
     }
     Ok(())
 }
@@ -867,6 +883,7 @@ fn revision_digest(
     parent: Option<Digest>,
     content: Digest,
     metadata: &[u8],
+    smart_predicate: Option<&[u8]>,
     author: Digest,
     authored_at_ms: u64,
 ) -> Digest {
@@ -883,6 +900,13 @@ fn revision_digest(
     }
     hasher.update(content.as_bytes());
     hash_part(&mut hasher, metadata);
+    match smart_predicate {
+        Some(value) => {
+            hasher.update([1]);
+            hash_part(&mut hasher, value);
+        }
+        None => hasher.update([0]),
+    }
     hasher.update(author.as_bytes());
     hasher.update(authored_at_ms.to_be_bytes());
     Digest::from_bytes(hasher.finalize().into())

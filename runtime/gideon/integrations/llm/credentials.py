@@ -185,13 +185,9 @@ class CredentialStore:
         return accepted
 
     def _load_env_file(self) -> dict[str, str]:
-        environment = {}
-        for line in (self._private_text(self._env_path) or "").splitlines():
-            line = line.strip()
-            key, separator, value = line.partition("=")
-            if separator and not line.startswith("#"):
-                environment[key.strip()] = value.strip()
-        return environment
+        return _core_credentials.parse_dotenv(
+            self._private_text(self._env_path) or ""
+        )
 
     def _enforce_perms(self, path: Path) -> None:
         try:

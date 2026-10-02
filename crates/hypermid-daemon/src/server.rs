@@ -41,6 +41,17 @@ use crate::{
 
 const HANDSHAKE_TIMEOUT_MS: u64 = 5_000;
 const CONTROL_ROUTE: &str = "control";
+const RECOVERY_CONTROL_OPERATIONS: &[&str] =
+    &["server.describe", "diagnostics.get", "operator.status"];
+const RECOVERY_LIFECYCLE_OPERATIONS: &[&str] = &[
+    "lifecycle.migrate.plan",
+    "lifecycle.migrate.apply",
+    "lifecycle.restore.plan",
+    "lifecycle.restore.apply",
+    "lifecycle.status",
+    "lifecycle.recover",
+    "lifecycle.resume",
+];
 
 #[derive(Clone, Debug)]
 pub struct ConnectionAuthorization {
@@ -54,17 +65,17 @@ pub struct ServerState {
     started_ms: u64,
     control: ControlPlane,
     bus_routes: Arc<BusRoutes>,
-    context_routes: Arc<ContextRoutes>,
+    context_routes: Option<Arc<ContextRoutes>>,
     effect_routes: Arc<EffectRoutes>,
     lifecycle_routes: Arc<LifecycleRoutes>,
-    memory_routes: Arc<MemoryRoutes>,
-    operator_routes: Arc<OperatorRoutes>,
+    memory_routes: Option<Arc<MemoryRoutes>>,
+    operator_routes: Option<Arc<OperatorRoutes>>,
     recovery_authority: Arc<RecoveryAuthority>,
-    security_routes: Arc<SecurityRoutes>,
+    security_routes: Option<Arc<SecurityRoutes>>,
     startup_recovery: StartupRecoveryReport,
     startup_restore: Option<StartupRestoreReceipt>,
-    writer_authority: Arc<DurableWriterAuthority>,
-    writer_routes: Arc<WriterRoutes>,
+    writer_authority: Option<Arc<DurableWriterAuthority>>,
+    writer_routes: Option<Arc<WriterRoutes>>,
     mcp_control: Option<Arc<McpControl>>,
 }
 
@@ -82,22 +93,47 @@ impl ServerState {
         let router = Router::new(registry.clone());
         let memory_path = state_root.join("memory.sqlite3");
         let recovery_authority = Arc::new(RecoveryAuthority::new(state_root));
-        let startup_restore = recovery_authority
-            .recover_pending(started_ms)
-            .map_err(|error| DaemonError::DurableStore(error.to_string()))?;
-        let durable_store =
-            DurableStore::bootstrap(&memory_path).map_err(DaemonError::DurableStore)?;
-        install_local_operator_grant(&memory_path, enrollment)
-            .map_err(|error| DaemonError::Enrollment(error.to_string()))?;
-        let startup_recovery = StartupReconciler::run(&memory_path, started_ms)
-            .map_err(|error| DaemonError::DurableStore(error.to_string()))?;
-        if !startup_recovery.is_ready() {
-            return Err(DaemonError::DurableStore(format!(
-                "startup recovery refused writable routes: {}",
-                serde_json::to_string(&startup_recovery.issues)
-                    .unwrap_or_else(|_| "unavailable recovery details".into())
-            )));
+        let startup_restore_result = recovery_authority.recover_pending(started_ms);
+        let startup_restore = startup_restore_result.as_ref().ok().cloned().flatten();
+
+        let memory_existed = memory_path.exists();
+        let mut startup_recovery = if memory_existed {
+            StartupReconciler::run(&memory_path, started_ms)
+                .map_err(|error| DaemonError::DurableStore(error.to_string()))?
+        } else {
+            let bootstrap =
+                DurableStore::bootstrap(&memory_path).map_err(DaemonError::DurableStore)?;
+            drop(bootstrap);
+            StartupReconciler::run(&memory_path, started_ms)
+                .map_err(|error| DaemonError::DurableStore(error.to_string()))?
+        };
+        if let Err(error) = &startup_restore_result {
+            startup_recovery.require_read_only(
+                "PENDING_RESTORE_FAILED",
+                format!("pending restore requires operator review: {error}"),
+            );
         }
+
+        let durable_store = if startup_recovery.is_ready() {
+            match DurableStore::bootstrap(&memory_path) {
+                Ok(store) => Some(store),
+                Err(error) => {
+                    startup_recovery.require_read_only(
+                        "MEMORY_BOOTSTRAP_FAILED",
+                        format!("durable memory bootstrap requires recovery: {error}"),
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let writable = durable_store.is_some() && startup_recovery.is_ready();
+        if writable {
+            install_local_operator_grant(&memory_path, enrollment)
+                .map_err(|error| DaemonError::Enrollment(error.to_string()))?;
+        }
+
         let lifecycle_routes = Arc::new(
             LifecycleRoutes::open(
                 state_root.join("lifecycle"),
@@ -108,55 +144,95 @@ impl ServerState {
                 DaemonError::DurableStore(format!("{}: {}", error.code, error.message))
             })?,
         );
-        let memory_routes = Arc::new(
-            MemoryRoutes::open(&memory_path)
-                .map_err(|error| DaemonError::DurableStore(error.to_string()))?,
-        );
         let effect_routes = Arc::new(
             EffectRoutes::open(state_root.join("effects.journal"), started_ms)
                 .map_err(|error| DaemonError::Bus(error.to_string()))?,
         );
-        let operator_routes = Arc::new(
-            OperatorRoutes::open(state_root, &memory_path, memory_routes.api(), enrollment)
-                .map_err(DaemonError::DurableStore)?,
-        );
-        let writer_authority = Arc::new(
-            DurableWriterAuthority::open(state_root.join("writer.sqlite3"))
-                .map_err(|error| DaemonError::DurableStore(error.to_string()))?,
-        );
-        let context_routes = Arc::new(ContextRoutes::open(
-            state_root.join("context"),
-            Arc::clone(&writer_authority),
-            memory_routes.api(),
-        )?);
-        let writer_routes = Arc::new(WriterRoutes::new(Arc::clone(&writer_authority)));
+        let (
+            memory_routes,
+            operator_routes,
+            writer_authority,
+            context_routes,
+            writer_routes,
+            security_routes,
+        ) = if writable {
+            let memory_routes = Arc::new(
+                MemoryRoutes::open(&memory_path)
+                    .map_err(|error| DaemonError::DurableStore(error.to_string()))?,
+            );
+            lifecycle_routes
+                .attach_memory_api(memory_routes.api())
+                .map_err(|error| {
+                    DaemonError::DurableStore(format!("{}: {}", error.code, error.message))
+                })?;
+            let operator_routes = Arc::new(
+                OperatorRoutes::open(state_root, &memory_path, memory_routes.api(), enrollment)
+                    .map_err(DaemonError::DurableStore)?,
+            );
+            let writer_authority = Arc::new(
+                DurableWriterAuthority::open(state_root.join("writer.sqlite3"))
+                    .map_err(|error| DaemonError::DurableStore(error.to_string()))?,
+            );
+            let context_routes = Arc::new(ContextRoutes::open(
+                state_root.join("context"),
+                Arc::clone(&writer_authority),
+                memory_routes.api(),
+            )?);
+            let writer_routes = Arc::new(WriterRoutes::new(Arc::clone(&writer_authority)));
+            let security_routes = Arc::new(
+                SecurityRoutes::open(state_root.join("security.sqlite3"), &memory_path)
+                    .map_err(|error| DaemonError::DurableStore(error.to_string()))?,
+            );
+            (
+                Some(memory_routes),
+                Some(operator_routes),
+                Some(writer_authority),
+                Some(context_routes),
+                Some(writer_routes),
+                Some(security_routes),
+            )
+        } else {
+            (None, None, None, None, None, None)
+        };
         let bus_routes = Arc::new(
             BusRoutes::open(state_root.join("events.sqlite3"), 1, 10_000, 5, 1_024)
                 .map_err(|error| DaemonError::Bus(error.to_string()))?,
         );
-        let security_routes = Arc::new(
-            SecurityRoutes::open(state_root.join("security.sqlite3"), &memory_path)
-                .map_err(|error| DaemonError::DurableStore(error.to_string()))?,
-        );
-        let mcp_control = mcp_configuration
-            .map(|configuration| McpControl::open(configuration, state_root, started_ms))
-            .transpose()
-            .map_err(|error| DaemonError::Mcp(error.to_string()))?
-            .map(Arc::new);
+        let mcp_control = if writable {
+            mcp_configuration
+                .map(|configuration| McpControl::open(configuration, state_root, started_ms))
+                .transpose()
+                .map_err(|error| DaemonError::Mcp(error.to_string()))?
+                .map(Arc::new)
+        } else {
+            None
+        };
         let diagnostics = DiagnosticsStore::default();
         diagnostics.set_resources(json!({
             "startup_recovery": &startup_recovery,
             "startup_restore": &startup_restore,
         }));
-        let control = ControlPlane::new(
-            daemon_instance_id.clone(),
-            started_ms,
-            registry,
-            router,
-            bootstrap_health(started_ms),
-            durable_store,
-            diagnostics,
-        );
+        let control = match durable_store {
+            Some(durable_store) if writable => ControlPlane::new(
+                daemon_instance_id.clone(),
+                started_ms,
+                registry,
+                router,
+                bootstrap_health(started_ms),
+                durable_store,
+                diagnostics,
+            ),
+            _ => ControlPlane::new_recovery(
+                daemon_instance_id.clone(),
+                started_ms,
+                registry,
+                router,
+                bootstrap_health(started_ms),
+                diagnostics,
+                serde_json::to_string(&startup_recovery.issues)
+                    .unwrap_or_else(|_| "memory validation requires recovery".into()),
+            ),
+        };
         Ok(Self {
             daemon_instance_id,
             started_ms,
@@ -190,6 +266,15 @@ impl ServerState {
     }
 
     pub fn operations(&self) -> Vec<String> {
+        if self.read_only_recovery() {
+            let mut operations = RECOVERY_CONTROL_OPERATIONS
+                .iter()
+                .chain(RECOVERY_LIFECYCLE_OPERATIONS.iter())
+                .map(|operation| (*operation).to_owned())
+                .collect::<Vec<_>>();
+            operations.sort();
+            return operations;
+        }
         let mut operations = ControlPlane::operations()
             .into_iter()
             .map(str::to_owned)
@@ -250,11 +335,15 @@ impl ServerState {
     }
 
     pub fn writer_authority(&self) -> &Arc<DurableWriterAuthority> {
-        &self.writer_authority
+        self.writer_authority
+            .as_ref()
+            .expect("writer authority is available in writable mode")
     }
 
     pub fn security_routes(&self) -> &Arc<SecurityRoutes> {
-        &self.security_routes
+        self.security_routes
+            .as_ref()
+            .expect("security routes are available in writable mode")
     }
 
     pub fn effect_routes(&self) -> &Arc<EffectRoutes> {
@@ -279,6 +368,10 @@ impl ServerState {
 
     pub fn mcp_control(&self) -> Option<&Arc<McpControl>> {
         self.mcp_control.as_ref()
+    }
+
+    pub fn read_only_recovery(&self) -> bool {
+        self.memory_routes.is_none()
     }
 }
 
@@ -644,6 +737,35 @@ async fn handle_request(
             )),
         );
     };
+    if request.scope.as_ref() != Some(&session.bound_scope) {
+        return response(
+            request,
+            None,
+            Some(protocol_error(
+                "SCOPE_DENIED",
+                "request scope does not match the authenticated session scope",
+                false,
+                None,
+            )),
+        );
+    }
+
+    if state.read_only_recovery()
+        && !RECOVERY_CONTROL_OPERATIONS.contains(&operation)
+        && !RECOVERY_LIFECYCLE_OPERATIONS.contains(&operation)
+    {
+        return response(
+            request,
+            None,
+            Some(protocol_error(
+                "READ_ONLY_RECOVERY",
+                "the durable memory store requires operator-reviewed recovery",
+                false,
+                Some(EffectState::NotStarted),
+            )),
+        );
+    }
+
     if !session
         .accepted
         .principal
@@ -657,18 +779,6 @@ async fn handle_request(
             Some(protocol_error(
                 "SCOPE_DENIED",
                 "the authenticated principal lacks the operation scope",
-                false,
-                None,
-            )),
-        );
-    }
-    if request.scope.as_ref() != Some(&session.bound_scope) {
-        return response(
-            request,
-            None,
-            Some(protocol_error(
-                "SCOPE_DENIED",
-                "request scope does not match the authenticated session scope",
                 false,
                 None,
             )),
@@ -688,7 +798,10 @@ async fn handle_request(
     }
 
     if MemoryRoutes::handles(operation) {
-        let reply = state.memory_routes.dispatch(session, request, now);
+        let Some(routes) = state.memory_routes.as_ref() else {
+            unreachable!("recovery-mode requests are refused before memory dispatch")
+        };
+        let reply = routes.dispatch(session, request, now);
         return response(request, reply.payload, reply.error);
     }
     if EffectRoutes::handles(operation) {
@@ -700,7 +813,10 @@ async fn handle_request(
         return response(request, reply.payload, reply.error);
     }
     if CONTEXT_OPERATIONS.contains(&operation) {
-        let reply = state.context_routes.dispatch(session, request, now);
+        let Some(routes) = state.context_routes.as_ref() else {
+            unreachable!("recovery-mode requests are refused before context dispatch")
+        };
+        let reply = routes.dispatch(session, request, now);
         return response(request, reply.payload, reply.error);
     }
     if BUS_OPERATIONS.contains(&operation) {
@@ -727,15 +843,24 @@ async fn handle_request(
         };
     }
     if WriterRoutes::handles(operation) {
-        let reply = state.writer_routes.dispatch(session, request, now);
+        let Some(routes) = state.writer_routes.as_ref() else {
+            unreachable!("recovery-mode requests are refused before writer dispatch")
+        };
+        let reply = routes.dispatch(session, request, now);
         return response(request, reply.payload, reply.error);
     }
     if SecurityRoutes::handles(operation) {
-        let reply = state.security_routes.dispatch(session, request, now);
+        let Some(routes) = state.security_routes.as_ref() else {
+            unreachable!("recovery-mode requests are refused before security dispatch")
+        };
+        let reply = routes.dispatch(session, request, now);
         return response(request, reply.payload, reply.error);
     }
     if OperatorRoutes::handles(operation) {
-        let reply = state.operator_routes.dispatch(session, request, now);
+        let Some(routes) = state.operator_routes.as_ref() else {
+            unreachable!("recovery-mode requests are refused before operator dispatch")
+        };
+        let reply = routes.dispatch(session, request, now);
         return response(request, reply.payload, reply.error);
     }
     if McpControl::handles(operation) {

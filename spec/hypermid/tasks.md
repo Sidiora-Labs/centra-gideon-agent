@@ -181,7 +181,7 @@
 - [x] sec-06. Implement artifact supply-chain verification
   - _Requirements: sec-06.1, sec-06.2, sec-06.3_
 
-- [ ] sec-07. Implement lifecycle portability and migrations
+- [x] sec-07. Implement lifecycle portability and migrations
   - _Requirements: sec-07.1, sec-07.2, sec-07.3_
 
 - [ ] sec-08. Implement crash recovery and security acceptance gates

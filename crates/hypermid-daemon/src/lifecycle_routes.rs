@@ -3,17 +3,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use hypermid_artifacts::{
     stage_verified, ArtifactCapability, ArtifactStore, InstallLimits, PinnedArtifact, Platform,
     SignedArtifactManifest, TrustStore,
 };
 use hypermid_contracts::{Cursor, Digest, EffectState, Error, Id, Scope, Trace};
-use hypermid_memory::snapshot::create_memory_snapshot;
-use hypermid_memory::MemoryStore;
+use hypermid_memory::MemoryApi;
 use hypermid_protocol::Envelope;
 use hypermid_registry::RegistryLifecycle;
+use hypermid_store::backup::SnapshotReceipt;
 use hypermid_transport::AuthenticatedSession;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -70,6 +70,7 @@ pub struct LifecycleRoutes {
     artifacts: ArtifactStore,
     journal: LifecycleJournal,
     recovery: Arc<RecoveryAuthority>,
+    memory_api: RwLock<Option<Arc<Mutex<MemoryApi>>>>,
     lock: Mutex<()>,
 }
 
@@ -110,12 +111,32 @@ impl LifecycleRoutes {
             artifacts,
             journal,
             recovery,
+            memory_api: RwLock::new(None),
             lock: Mutex::new(()),
         };
         if let Some(receipt) = startup_restore {
             routes.reconcile_startup_restore(receipt)?;
         }
         Ok(routes)
+    }
+
+    pub fn attach_memory_api(&self, api: Arc<Mutex<MemoryApi>>) -> Result<(), Error> {
+        let mut slot = self.memory_api.write().map_err(|_| {
+            lifecycle_error(
+                "LIFECYCLE_LOCK_FAILED",
+                "lifecycle memory authority lock is unavailable",
+                EffectState::Unknown,
+            )
+        })?;
+        if slot.is_some() {
+            return Err(lifecycle_error(
+                "LIFECYCLE_MEMORY_ALREADY_ATTACHED",
+                "lifecycle memory authority is already attached",
+                EffectState::NotStarted,
+            ));
+        }
+        *slot = Some(api);
+        Ok(())
     }
 
     pub fn handles(operation: &str) -> bool {
@@ -701,8 +722,7 @@ impl LifecycleRoutes {
                         .as_deref()
                         .ok_or_else(|| invalid("uninstall export artifact id is absent"))?;
                     let path = self.artifact_path(artifact_id)?;
-                    let store = MemoryStore::open(self.memory_path()).map_err(map_memory)?;
-                    Some(create_memory_snapshot(&store, &path, scope.clone()).map_err(map_memory)?)
+                    Some(self.create_snapshot(&path, scope)?)
                 } else {
                     None
                 };
@@ -750,9 +770,7 @@ impl LifecycleRoutes {
                     .as_deref()
                     .ok_or_else(|| invalid("export artifact id is absent"))?;
                 let path = self.artifact_path(artifact_id)?;
-                let store = MemoryStore::open(self.memory_path()).map_err(map_memory)?;
-                let receipt =
-                    create_memory_snapshot(&store, &path, scope.clone()).map_err(map_memory)?;
+                let receipt = self.create_snapshot(&path, scope)?;
                 Ok(EffectReceipt {
                     artifact_digest: Some(receipt.manifest_digest),
                     artifact_bytes: Some(
@@ -814,6 +832,44 @@ impl LifecycleRoutes {
                     EffectState::NotStarted,
                 )
             })
+    }
+
+    fn create_snapshot(&self, path: &Path, scope: &Scope) -> Result<SnapshotReceipt, Error> {
+        let api = self
+            .memory_api
+            .read()
+            .map_err(|_| {
+                lifecycle_error(
+                    "LIFECYCLE_LOCK_FAILED",
+                    "lifecycle memory authority lock is unavailable",
+                    EffectState::Unknown,
+                )
+            })?
+            .clone()
+            .ok_or_else(|| {
+                lifecycle_error(
+                    "MEMORY_AUTHORITY_UNAVAILABLE",
+                    "live memory authority is unavailable for snapshot",
+                    EffectState::NotStarted,
+                )
+            })?;
+        let snapshot = {
+            let mut api = api.lock().map_err(|_| {
+                lifecycle_error(
+                    "LIFECYCLE_LOCK_FAILED",
+                    "live memory authority lock is unavailable",
+                    EffectState::Unknown,
+                )
+            })?;
+            api.snapshot_scope(scope.clone(), path)
+        };
+        snapshot.map_err(|error| {
+            lifecycle_error(
+                "SNAPSHOT_FAILED",
+                error.to_string(),
+                EffectState::NotStarted,
+            )
+        })
     }
 
     fn reconcile_startup_restore(&self, startup: StartupRestoreReceipt) -> Result<(), Error> {

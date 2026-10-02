@@ -170,7 +170,7 @@ export function SecurityRecovery() {
     finally { setBusy('') }
   }
   return <div>
-    <PanelHeader title="Encrypted backup and recovery" hint="Create and restore encrypted, scope-bound recovery snapshots through reviewed security plans and authoritative receipts." />
+    <PanelHeader title="Encrypted backup and recovery" hint="Create and restore encrypted, scope-bound memory exports through reviewed security plans and authoritative receipts." />
     <Section title="Prepare a security plan" hint="The authenticated owner selects the configured credential. Secret material and internal handles never enter this page or request.">
       <RowGroup><Row label="Credential authority" hint="One owner-bound credential is configured for encrypted backup and restore.">
         <div className="flex flex-wrap items-center gap-s"><StatusPill label={configured ? 'configured' : 'not configured'} tone={configured ? 'ok' : 'warn'} />

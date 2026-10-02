@@ -147,7 +147,7 @@ ac_3 = "Restore and migration stage separately, validate schemas, digests, scope
 
 [task.sec-07]
 title = "Implement lifecycle portability and migrations"
-status = "pending"
+status = "done"
 wave = 7
 owner_lane = "security"
 requires = ["sec-06"]
