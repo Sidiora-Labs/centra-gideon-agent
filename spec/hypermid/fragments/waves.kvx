@@ -5,7 +5,7 @@ ac_2 = "Default context ownership remains with the existing runtime; missing dae
 
 [task.wave-1-close]
 title = "Qualify vertical slice: Local session connection"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "integration"
 requires = []
