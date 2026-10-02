@@ -1,0 +1,26 @@
+{
+  "task": "fab-05-supervision",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-daemon --test supervision",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-daemon --test supervision"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-daemon/src/supervisor.rs": "33784a94efae36ecee1e4c88cc8f02a96fc68c9344c969c9a6427390ffd3ad22",
+    "crates/hypermid-daemon/src/containment.rs": "c9004c1fc86619d6bc26caae6e8c922f67ced566cd26f3a19a49bbaca658b678",
+    "crates/hypermid-daemon/src/replacement.rs": "b7dbdecb7788d956b5dd3d01b33831d104446bd2c30dc5b2c346ee0b8e73569f",
+    "crates/hypermid-daemon/src/child_journal.rs": "bb3827a9f893b2f249e4421ad2ebb748288c47b34551e43234fb91c5bf5d7f23",
+    "crates/hypermid-daemon/tests/supervision.rs": "1c34d692733ee0bb9e58cffdca850428a38cec3f1047d8a339f942eaa043dd1b"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-daemon/src/supervisor.rs": "33784a94efae36ecee1e4c88cc8f02a96fc68c9344c969c9a6427390ffd3ad22",
+    "crates/hypermid-daemon/src/containment.rs": "c9004c1fc86619d6bc26caae6e8c922f67ced566cd26f3a19a49bbaca658b678",
+    "crates/hypermid-daemon/src/replacement.rs": "b7dbdecb7788d956b5dd3d01b33831d104446bd2c30dc5b2c346ee0b8e73569f",
+    "crates/hypermid-daemon/src/child_journal.rs": "bb3827a9f893b2f249e4421ad2ebb748288c47b34551e43234fb91c5bf5d7f23",
+    "crates/hypermid-daemon/tests/supervision.rs": "1c34d692733ee0bb9e58cffdca850428a38cec3f1047d8a339f942eaa043dd1b"
+  },
+  "scope": "Focused task acceptance using actual production types and, for supervision, real child processes; later integration and release gates remain separate.",
+  "source_adjustments": []
+}

@@ -372,7 +372,7 @@ ac_2 = "Health and diagnostics remain readable during failure and report unavail
 verify_cmd = "cargo test -p hypermid-control && cargo test -p hypermid-daemon --test control_diagnostics && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_adapter.py"
 [task.fab-05-supervision]
 title = "Implement advanced contained module supervision and replacement"
-status = "pending"
+status = "done"
 wave = 5
 owner_lane = "fabric"
 requires = ["base-07"]

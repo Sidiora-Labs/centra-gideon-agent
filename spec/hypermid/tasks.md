@@ -94,7 +94,7 @@
 - [x] fab-04-control-diagnostics. Implement scoped control RPC health and diagnostics
   - _Requirements: fab-011.1, fab-011.2, fab-012.1, fab-012.2_
 
-- [ ] fab-05-supervision. Implement advanced contained module supervision and replacement
+- [x] fab-05-supervision. Implement advanced contained module supervision and replacement
   - _Requirements: fab-007.1, fab-007.2, fab-008.1, fab-008.2_
 
 - [ ] fab-06-effects-federation. Implement durable event bus federation and phone effect channel

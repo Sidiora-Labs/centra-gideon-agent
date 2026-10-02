@@ -167,7 +167,7 @@ verify_cmd = "cargo test -p hypermid-control && cargo test -p hypermid-daemon --
 
 [task.fab-05-supervision]
 title = "Implement advanced contained module supervision and replacement"
-status = "pending"
+status = "done"
 wave = 5
 owner_lane = "fabric"
 requires = ["fab-01-bootstrap", "fab-02-registry-routing", "fab-03-flow-lifecycle", "fab-04-control-diagnostics", "base-07"]
