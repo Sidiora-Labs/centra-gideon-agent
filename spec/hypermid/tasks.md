@@ -169,7 +169,7 @@
 - [x] sec-02. Implement encrypted protocol authentication and compatibility negotiation
   - _Requirements: sec-02.1, sec-02.2, sec-02.3_
 
-- [ ] sec-03. Implement MCP and stdio sandbox with effect reconciliation
+- [x] sec-03. Implement MCP and stdio sandbox with effect reconciliation
   - _Requirements: sec-03.1, sec-03.2, sec-03.3_
 
 - [x] sec-04. Implement network and secret containment

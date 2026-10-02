@@ -321,7 +321,7 @@ async fn digest_file(path: &Path) -> Result<String, SandboxError> {
     use tokio::io::AsyncReadExt;
     let mut file = tokio::fs::File::open(path).await?;
     let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
+    let mut buffer = vec![0_u8; 64 * 1024];
     loop {
         let read = file.read(&mut buffer).await?;
         if read == 0 {

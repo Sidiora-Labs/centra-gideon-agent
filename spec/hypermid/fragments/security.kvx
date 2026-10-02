@@ -59,7 +59,7 @@ ac_3 = "Malformed schemas, frames, paths, unsolicited output, and inherited desc
 
 [task.sec-03]
 title = "Implement MCP and stdio sandbox with effect reconciliation"
-status = "pending"
+status = "done"
 wave = 5
 owner_lane = "security"
 requires = ["sec-02", "fab-05-supervision"]

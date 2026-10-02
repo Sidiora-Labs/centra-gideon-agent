@@ -810,6 +810,7 @@ dependencies = [
  "hypermid-contracts",
  "hypermid-control",
  "hypermid-core",
+ "hypermid-leases",
  "hypermid-mcp",
  "hypermid-memory",
  "hypermid-models",

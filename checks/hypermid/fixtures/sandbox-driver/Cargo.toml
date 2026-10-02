@@ -1,0 +1,15 @@
+[package]
+name = "hypermid-sandbox-acceptance-driver"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+hypermid-mcp = { path = "../../../../crates/hypermid-mcp" }
+hypermid-sandbox = { path = "../../../../crates/hypermid-sandbox" }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }
+

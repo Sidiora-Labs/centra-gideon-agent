@@ -15,6 +15,7 @@ hypermid-artifacts = { path = "../hypermid-artifacts" }
 hypermid-control = { path = "../hypermid-control" }
 hypermid-context = { path = "../hypermid-context" }
 hypermid-memory = { path = "../hypermid-memory" }
+hypermid-leases = { path = "../hypermid-leases" }
 hypermid-mcp = { path = "../hypermid-mcp" }
 hypermid-models = { path = "../hypermid-models" }
 hypermid-protocol = { path = "../hypermid-protocol" }
