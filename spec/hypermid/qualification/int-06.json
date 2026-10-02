@@ -1,0 +1,32 @@
+{
+  "task": "int-06",
+  "status": "passed",
+  "declared_command": "PYTHONPATH=runtime python checks/hypermid/verify_wave_06.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-daemon --test bus_rpc"
+  ],
+  "successful_gate_count": 3,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/hypermid/verify_wave_06.py": "109c23aca560c60f39db0bbb72ad7c71b8ce3bb2f31e623f91029d4ec247003a",
+    "crates/hypermid-daemon/src/bus_routes.rs": "f407141bde0c6806c8d5551a1809517f71c22c00743e0251bcdf0b074e41f2d2",
+    "runtime/gideon/hypermid/client.py": "6839d3f1c075ffa7fbf51b231b4b38cbf95f4c66003c1990c7f37326dfdf37f7",
+    "runtime/gideon/hypermid/federation.py": "7fc980e94c2553ce89b21dea760cabe27c1bf943f56a7aae2f73f11139590d8f",
+    "runtime/gideon/hypermid/remote.py": "51d0a4f399238e80960af1a4cf8b958e2840772c9f462a22eb09f8ebdb539ba3",
+    "runtime/gideon/hypermid/subscriptions.py": "85eea9033bfee4181b6a6e4faf2d0388a6e0572ac6f86f76dd75cbe9bc01142c",
+    "runtime/gideon/integrations/sandbox_providers/docker.py": "70285f6fabc400332e7d2ba1796ae7491d19b42b91e0354efeed56b51fab2f6c",
+    "runtime/gideon/sdk/hypermid.py": "0034ed99cef7dfc1852da59c6b218093dcf15577f511705a8fcf198e1c2e1db7"
+  },
+  "tested_source_sha256": {
+    "checks/hypermid/verify_wave_06.py": "109c23aca560c60f39db0bbb72ad7c71b8ce3bb2f31e623f91029d4ec247003a",
+    "crates/hypermid-daemon/src/bus_routes.rs": "f407141bde0c6806c8d5551a1809517f71c22c00743e0251bcdf0b074e41f2d2",
+    "runtime/gideon/hypermid/client.py": "6839d3f1c075ffa7fbf51b231b4b38cbf95f4c66003c1990c7f37326dfdf37f7",
+    "runtime/gideon/hypermid/federation.py": "7fc980e94c2553ce89b21dea760cabe27c1bf943f56a7aae2f73f11139590d8f",
+    "runtime/gideon/hypermid/remote.py": "51d0a4f399238e80960af1a4cf8b958e2840772c9f462a22eb09f8ebdb539ba3",
+    "runtime/gideon/hypermid/subscriptions.py": "85eea9033bfee4181b6a6e4faf2d0388a6e0572ac6f86f76dd75cbe9bc01142c",
+    "runtime/gideon/integrations/sandbox_providers/docker.py": "70285f6fabc400332e7d2ba1796ae7491d19b42b91e0354efeed56b51fab2f6c",
+    "runtime/gideon/sdk/hypermid.py": "0034ed99cef7dfc1852da59c6b218093dcf15577f511705a8fcf198e1c2e1db7"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}

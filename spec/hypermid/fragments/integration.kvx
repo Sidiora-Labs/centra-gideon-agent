@@ -121,7 +121,7 @@ ac_3 = "Remote module execution uses Gideon's sandbox provider and egress policy
 
 [task.int-06]
 title = "Implement integration slice 6: durable bus, federation, remote access and sandbox containment"
-status = "pending"
+status = "done"
 wave = 6
 owner_lane = "integration"
 requires = ["int-05", "fab-06-effects-federation", "base-06", "ctx-subagents", "mem-remote", "ux-remote", "sec-06"]

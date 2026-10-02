@@ -121,7 +121,7 @@
 - [x] int-05. Implement integration slice 5: supervised modules, SDK, model and MCP lifecycle
   - _Requirements: int-05.1, int-05.2, int-05.3_
 
-- [ ] int-06. Implement integration slice 6: durable bus, federation, remote access and sandbox containment
+- [x] int-06. Implement integration slice 6: durable bus, federation, remote access and sandbox containment
   - _Requirements: int-06.1, int-06.2, int-06.3_
 
 - [ ] int-07. Implement integration slice 7: migration, upgrade, export, restore and full native surfaces
