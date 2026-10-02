@@ -142,7 +142,7 @@
 - [ ] mem-indexes. Message, file, and git indexing
   - _Requirements: mem-indexes.1, mem-indexes.2, mem-indexes.3_
 
-- [ ] mem-maintenance. Ownership-safe maintenance scheduler
+- [x] mem-maintenance. Ownership-safe maintenance scheduler
   - _Requirements: mem-maintenance.1, mem-maintenance.2, mem-maintenance.3_
 
 - [ ] mem-portability. Staged import and canonical export

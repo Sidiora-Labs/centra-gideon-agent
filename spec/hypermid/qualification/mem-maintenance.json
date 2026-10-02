@@ -1,0 +1,31 @@
+{
+  "task": "mem-maintenance",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-memory maintenance --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_maintenance.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-memory maintenance_reclaims_expired_fence_and_records_unknown_usage --manifest-path crates/hypermid-memory/Cargo.toml",
+    "cargo test -p hypermid-memory knowledge_cycle_publishes_predicate_verification_sharing_and_git_recall_atomically --manifest-path crates/hypermid-memory/Cargo.toml"
+  ],
+  "successful_gate_count": 4,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-memory/src/maintenance.rs": "0e53fad2cd1fb793070fdb55846773e08c8a4b93ca771af24aa682d08202954f",
+    "crates/hypermid-memory/src/lease.rs": "3bd3102f028dfefab17c0679496d68c3d0c13149f50e74a96b2699f64a889e74",
+    "crates/hypermid-memory/src/budget.rs": "bbce4dbd104747c68368af5aec14a828d4126bca618fa6b93e3dd9ea7b7504b3",
+    "crates/hypermid-memory/src/smart_note.rs": "8d17602fb6ee5290999e70c8a2b83ada3d7eaac2c2caae42efaf5f9468e9df38",
+    "runtime/gideon/hypermid/maintenance.py": "26c6e06bc71a42be95b038008541d5432111c8a048409f5e9142b5f39127d25d",
+    "runtime/gideon/hypermid/model_budget.py": "bd87ecbc15c86b930e837541ccfa5ac61045b5153ff55aa224f01508c5ec95c8",
+    "checks/hypermid/test_memory_maintenance.py": "5e1accf82ccb19022f91c2ea8e7d9c51e40c91655d028a9af9df6ce42d78b949"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-memory/src/maintenance.rs": "0e53fad2cd1fb793070fdb55846773e08c8a4b93ca771af24aa682d08202954f",
+    "crates/hypermid-memory/src/lease.rs": "3bd3102f028dfefab17c0679496d68c3d0c13149f50e74a96b2699f64a889e74",
+    "crates/hypermid-memory/src/budget.rs": "bbce4dbd104747c68368af5aec14a828d4126bca618fa6b93e3dd9ea7b7504b3",
+    "crates/hypermid-memory/src/smart_note.rs": "8d17602fb6ee5290999e70c8a2b83ada3d7eaac2c2caae42efaf5f9468e9df38",
+    "runtime/gideon/hypermid/maintenance.py": "26c6e06bc71a42be95b038008541d5432111c8a048409f5e9142b5f39127d25d",
+    "runtime/gideon/hypermid/model_budget.py": "bd87ecbc15c86b930e837541ccfa5ac61045b5153ff55aa224f01508c5ec95c8",
+    "checks/hypermid/test_memory_maintenance.py": "5e1accf82ccb19022f91c2ea8e7d9c51e40c91655d028a9af9df6ce42d78b949"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}

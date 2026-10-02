@@ -132,7 +132,7 @@ verify_cmd = "cargo test -p hypermid-memory search --manifest-path crates/hyperm
 
 [task.mem-maintenance]
 title = "Ownership-safe maintenance scheduler"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "memory"
 requires = ["mem-embedding", "mem-retrieval", "sec-05"]

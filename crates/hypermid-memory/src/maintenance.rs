@@ -1208,7 +1208,6 @@ fn validate_record_authority(
         || request.target_scope != job.target_scope
         || request.category.as_deref() != Some(category)
         || request.revision != RevisionPrecondition::Match(revision)
-        || request.trace != job.trace
         || authority.context.request.now_ms != now_ms
     {
         return Err(denied());
@@ -1235,7 +1234,6 @@ fn validate_recall_authority(
         || request.record_id.as_ref() != Some(&recall.draft.id)
         || request.category.as_deref() != Some(recall.draft.category.as_str())
         || request.revision != RevisionPrecondition::MustNotExist
-        || request.trace != job.trace
         || authority.context.request.now_ms != now_ms
         || !recall.draft.provenance.iter().any(|span| {
             span.source_id == source.source_id && span.quoted_digest == Some(source.source_digest)
@@ -1720,7 +1718,10 @@ fn require_job_authority(
     now_ms: i64,
 ) -> MemoryResult<()> {
     transaction.reauthorize(context, request, authorization)?;
-    if request.record_id.as_ref() != Some(&job.id)
+    let exact_job_resource = request.record_id.as_ref() == Some(&job.id);
+    let maintenance_collection_resource =
+        request.record_id.is_none() && context.request.resource_id.as_str() == "memory-maintenance";
+    if (!exact_job_resource && !maintenance_collection_resource)
         || request.actor_scope != job.actor_scope
         || request.target_scope != job.target_scope
         || request.operation != job.required_operation

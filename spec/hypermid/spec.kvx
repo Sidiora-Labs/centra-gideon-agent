@@ -836,7 +836,7 @@ touches = ["crates/hypermid-memory/src/fts.rs", "crates/hypermid-memory/src/sear
 verify_cmd = "cargo test -p hypermid-memory search --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_search.py"
 [task.mem-maintenance]
 title = "Ownership-safe maintenance scheduler"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "memory"
 requires = ["wave-3-close"]
