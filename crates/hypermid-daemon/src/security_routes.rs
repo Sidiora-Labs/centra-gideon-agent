@@ -351,6 +351,7 @@ impl SecurityRoutes {
             params![owner, project, workspace, grant.grant_id, encoded],
         )?;
         transaction.commit()?;
+        drop(connection);
         self.network_status(scope, now_ms)
     }
 

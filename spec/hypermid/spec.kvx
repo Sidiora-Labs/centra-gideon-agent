@@ -1320,7 +1320,7 @@ ac_3 = "DNS rebinding, mixed allowed and denied answers, metadata endpoints, pro
 
 [task.sec-04]
 title = "Implement network and secret containment"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "security"
 requires = ["wave-1-close"]

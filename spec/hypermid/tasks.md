@@ -172,7 +172,7 @@
 - [ ] sec-03. Implement MCP and stdio sandbox with effect reconciliation
   - _Requirements: sec-03.1, sec-03.2, sec-03.3_
 
-- [ ] sec-04. Implement network and secret containment
+- [x] sec-04. Implement network and secret containment
   - _Requirements: sec-04.1, sec-04.2, sec-04.3_
 
 - [ ] sec-05. Implement budget admission and provenance trust boundaries

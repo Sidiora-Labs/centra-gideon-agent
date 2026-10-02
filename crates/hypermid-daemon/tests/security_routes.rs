@@ -314,6 +314,7 @@ async fn security_routes_persist_reviewed_trust_and_revocation_changes_egress() 
         .unwrap();
     assert_eq!(updated.revision, 2);
     assert!(!updated.is_privileged());
+    std::fs::remove_file(&daemon_config.connection_record).unwrap();
     let second_server = tokio::spawn(restarted.run());
     let (mut stream, mut codec, _) = connect(&daemon_config.connection_record).await;
     let status = exchange(

@@ -1,0 +1,43 @@
+{
+  "task": "sec-04",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-daemon egress && cargo test -p hypermid-daemon redaction && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_egress_secrets.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-daemon egress --manifest-path Cargo.toml && cargo test -p hypermid-daemon redaction --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_egress_secrets.py",
+    "cargo test -p hypermid-daemon --test egress_enforcement",
+    "cargo test -p hypermid-daemon --test security_routes",
+    "cd apps/console && npx vitest run src/features/hypermid/hypermidSecurity.test.tsx"
+  ],
+  "successful_gate_count": 4,
+  "exit_code": 0,
+  "source_sha256": {
+    "apps/console/src/features/hypermid/NetworkGrants.tsx": "eb3d49eea71b19cbdbddd21c1a567c099c7146c7ca0c27a6cc4a1b5590e5c13e",
+    "checks/hypermid/test_egress_secrets.py": "4ce3258e40affaebeeca93b340d03722594b4b70c79ea262e96e08aeee3c8b4e",
+    "checks/hypermid/test_security_status.py": "5671d6d8c4b2ef8507581469ad59a805a685c190491ffd88f84bffe565f4a10e",
+    "crates/hypermid-daemon/src/egress.rs": "e81c9c10f7ee59e039ce7f707bff3cd0c2ab11c3c0a0e0fd75dea1e7cb11e4fc",
+    "crates/hypermid-daemon/src/redaction.rs": "936747edd45962d0056c0bdc8025e3a977845608033a4474db12f35f17149fbe",
+    "crates/hypermid-daemon/src/secrets.rs": "e496a0964975f019a56fb68452fe51f41d1fa1365841b4b18e8e9a5968464931",
+    "crates/hypermid-daemon/src/security_routes.rs": "fce5f0c1bddc9bfb85a5f238aede3fe1d734a389ff47ed33e201c40ba5db4be8",
+    "crates/hypermid-daemon/tests/egress_enforcement.rs": "0ce83ec8d136dba10b6a50d4c48fe3dff6f476322f79a6360fd5b0155ec352de",
+    "crates/hypermid-daemon/tests/security_routes.rs": "fb009e91a9544343559e4369e76db7b32c15a817d0d48985efe994f32aaaebbf",
+    "runtime/gideon/hypermid/network_policy.py": "154fcd0cda682207506f64810d7b02bc8e1f6fea7b55ec636b4ae74b6db777b0",
+    "runtime/gideon/hypermid/security_status.py": "048f3687b60587b0c7c59a560fc87981612da6f526776e096b9b4cdfd38bb7af"
+  },
+  "tested_source_sha256": {
+    "apps/console/src/features/hypermid/NetworkGrants.tsx": "eb3d49eea71b19cbdbddd21c1a567c099c7146c7ca0c27a6cc4a1b5590e5c13e",
+    "checks/hypermid/test_egress_secrets.py": "4ce3258e40affaebeeca93b340d03722594b4b70c79ea262e96e08aeee3c8b4e",
+    "checks/hypermid/test_security_status.py": "5671d6d8c4b2ef8507581469ad59a805a685c190491ffd88f84bffe565f4a10e",
+    "crates/hypermid-daemon/src/egress.rs": "e81c9c10f7ee59e039ce7f707bff3cd0c2ab11c3c0a0e0fd75dea1e7cb11e4fc",
+    "crates/hypermid-daemon/src/redaction.rs": "936747edd45962d0056c0bdc8025e3a977845608033a4474db12f35f17149fbe",
+    "crates/hypermid-daemon/src/secrets.rs": "e496a0964975f019a56fb68452fe51f41d1fa1365841b4b18e8e9a5968464931",
+    "crates/hypermid-daemon/src/security_routes.rs": "fce5f0c1bddc9bfb85a5f238aede3fe1d734a389ff47ed33e201c40ba5db4be8",
+    "crates/hypermid-daemon/tests/egress_enforcement.rs": "0ce83ec8d136dba10b6a50d4c48fe3dff6f476322f79a6360fd5b0155ec352de",
+    "crates/hypermid-daemon/tests/security_routes.rs": "fb009e91a9544343559e4369e76db7b32c15a817d0d48985efe994f32aaaebbf",
+    "runtime/gideon/hypermid/network_policy.py": "154fcd0cda682207506f64810d7b02bc8e1f6fea7b55ec636b4ae74b6db777b0",
+    "runtime/gideon/hypermid/security_status.py": "048f3687b60587b0c7c59a560fc87981612da6f526776e096b9b4cdfd38bb7af"
+  },
+  "scope": "Task-level sec-04 acceptance: default-deny egress, DNS/redirect/proxy-bypass containment, scoped opaque secrets, redaction, durable grant revocation, and the native grant surface. Final release certification is separate.",
+  "source_adjustments": [
+    "The current egress source extends the original policy module with a guarded live HTTP connector and durable authority integration; current-source real-network evidence qualifies that extension."
+  ]
+}
