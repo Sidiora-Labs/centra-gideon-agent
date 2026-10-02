@@ -1,0 +1,17 @@
+[package]
+name = "hypermid-context"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hypermid-contracts = { path = "../hypermid-contracts" }
+hypermid-core = { path = "../hypermid-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+base64.workspace = true
+tempfile.workspace = true

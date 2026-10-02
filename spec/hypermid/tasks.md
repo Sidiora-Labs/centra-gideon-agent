@@ -55,7 +55,7 @@
 - [ ] ctx-modes. Implement optional modes and turn-boundary configuration
   - _Requirements: ctx-modes.1, ctx-modes.2, ctx-modes.3_
 
-- [ ] ctx-ownership. Implement the bounded context protocol and ownership fence
+- [x] ctx-ownership. Implement the bounded context protocol and ownership fence
   - _Requirements: ctx-ownership.1, ctx-ownership.2, ctx-ownership.3_
 
 - [ ] ctx-portability. Implement context migration export and restore

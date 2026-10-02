@@ -336,6 +336,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypermid-context"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "hypermid-contracts",
+ "hypermid-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "hypermid-contracts"
 version = "0.1.0"
 dependencies = [

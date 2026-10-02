@@ -546,7 +546,7 @@ ac_3 = "Existing Gideon authorization, approval, cancellation, streaming, provid
 
 [task.ctx-ownership]
 title = "Implement the bounded context protocol and ownership fence"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "context"
 requires = ["sec-01"]
