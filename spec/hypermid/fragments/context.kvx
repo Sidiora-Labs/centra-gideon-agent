@@ -236,7 +236,7 @@ verify_cmd = "cargo test -p hypermid-context --test recovery_contract && PYTHONP
 
 [task.ctx-subagents]
 title = "Implement isolated subagent context snapshots"
-status = "pending"
+status = "done"
 wave = 6
 owner_lane = "context"
 requires = ["ctx-hooks", "ctx-reclaim"]

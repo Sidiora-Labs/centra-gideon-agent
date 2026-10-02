@@ -645,7 +645,7 @@ touches = ["crates/hypermid-core/src/recovery.rs", "crates/hypermid-context/src/
 verify_cmd = "cargo test -p hypermid-context --test recovery_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_recovery.py"
 [task.ctx-subagents]
 title = "Implement isolated subagent context snapshots"
-status = "pending"
+status = "done"
 wave = 6
 owner_lane = "context"
 requires = ["wave-5-close"]

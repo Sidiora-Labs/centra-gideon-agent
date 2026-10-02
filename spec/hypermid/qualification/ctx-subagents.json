@@ -1,0 +1,28 @@
+{
+  "task": "ctx-subagents",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-context --test subagent_context && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_subagents.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-context --test subagent_context && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_subagents.py"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-core/src/subagent.rs": "bd0475c0ae43ccd9ec204bed7f213add0076f882644eb65134b3c23769ee415f",
+    "crates/hypermid-context/src/subagent_context.rs": "8181eafb11e123a038f4293c51fbcd6155226b885c7693a468b859d0493249d1",
+    "runtime/gideon/hypermid/subagents.py": "d74facc548ece939210dabbf42270eefa9e2ec82e4d1fb85493b09232a619236",
+    "runtime/gideon/engine/subagent.py": "107460dbca3cc096c96ae1949951c94170f6d361ac0312056803a9ef6888a7ae",
+    "crates/hypermid-context/tests/subagent_context.rs": "e7d7e733785b344cb4d47d8f7803a4c61e3e75dc9d265fb165c70b607432cdd5",
+    "checks/runtime/test_hypermid_subagents.py": "0193c26f50ff9e6cd63a1074d89d888916cf61fa306a6b74040bad48a3e56c25"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-core/src/subagent.rs": "bd0475c0ae43ccd9ec204bed7f213add0076f882644eb65134b3c23769ee415f",
+    "crates/hypermid-context/src/subagent_context.rs": "8181eafb11e123a038f4293c51fbcd6155226b885c7693a468b859d0493249d1",
+    "runtime/gideon/hypermid/subagents.py": "d74facc548ece939210dabbf42270eefa9e2ec82e4d1fb85493b09232a619236",
+    "runtime/gideon/engine/subagent.py": "107460dbca3cc096c96ae1949951c94170f6d361ac0312056803a9ef6888a7ae",
+    "crates/hypermid-context/tests/subagent_context.rs": "e7d7e733785b344cb4d47d8f7803a4c61e3e75dc9d265fb165c70b607432cdd5",
+    "checks/runtime/test_hypermid_subagents.py": "0193c26f50ff9e6cd63a1074d89d888916cf61fa306a6b74040bad48a3e56c25"
+  },
+  "scope": "Focused Rust and Python subagent context qualification; later wave and release gates remain separate.",
+  "source_adjustments": []
+}

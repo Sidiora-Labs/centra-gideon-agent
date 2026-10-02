@@ -76,7 +76,7 @@
 - [x] ctx-reduction. Implement explicit recoverable reduction
   - _Requirements: ctx-reduction.1, ctx-reduction.2_
 
-- [ ] ctx-subagents. Implement isolated subagent context snapshots
+- [x] ctx-subagents. Implement isolated subagent context snapshots
   - _Requirements: ctx-subagents.1, ctx-subagents.2, ctx-subagents.3_
 
 - [x] ctx-tier-decay. Implement budgeted historical tier decay
