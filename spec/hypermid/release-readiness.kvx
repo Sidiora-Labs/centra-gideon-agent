@@ -1,0 +1,41 @@
+[release]
+schema_version = 1
+product = "Hypermid OSS"
+implementation_status = "complete"
+task_tracking_status = "complete"
+qualification_status = "incomplete"
+wave_8_qualification_status = "incomplete"
+scope = "Local Linux OSS package qualification only; no deployment or hosted rollout is claimed."
+source_revision = "88effc0cabbb8afa5dfc2c533dc748ab697d7a4a"
+source_digest = "a4a0ec431fb293325e192d5979c5dbab083c1bc73ee854148f336e9411fdfffa"
+
+[qualification]
+mandatory_security_gates_required = 12
+mandatory_security_gates_passed = 12
+security_errors = 0
+real_release_journeys_required = 6
+real_release_journeys_completed = 1
+console_asset_build = "passed"
+wheel_build = "passed"
+wheel_install = "passed"
+docker_image_build = "interrupted"
+package_artifacts_release_qualified = false
+
+[artifacts.security_report]
+status = "passed"
+sha256 = "edc3eaca977a5454b8e50ccd91de0db53c69fd82bf18746a7521243ac71fa4bf"
+
+[artifacts.wheel]
+status = "built_and_installed_unqualified"
+sha256 = "b0ab32055fe6f0379501cd0f64cf690512a954c1eaca0a58969abdc1398f50b2"
+size_bytes = 31920878
+
+[journeys]
+completed = ["Published console asset build"]
+incomplete = ["Clean installed-wheel and single-container journey", "Live PostgreSQL lease and fencing journey", "Real daemon multi-language SDK journey", "Native Gideon CLI lifecycle journey", "Packaged desktop daemon lifecycle journey"]
+
+[limitations]
+package = "The container build was interrupted before the final package report and image identity were produced. The wheel identity above is partial build evidence only. Container persistence, PostgreSQL, SDK, CLI, and packaged desktop journeys were not completed; this record does not certify Wave 8 release readiness."
+platforms = "Operating systems, CPU architectures, devices, and runtime environments beyond the recorded local Linux scope remain unqualified."
+hosted = "Hosted installation, rollout, deployment, and upgrade paths remain unqualified."
+remote_accessibility = "Remote/mobile component interaction and stylesheet contracts do not certify rendered behavior. No real browser or screen-reader runtime was exercised; rendered 320px and 390px geometry, actual overflow or hidden actions, browser focus behavior, touch hit areas, assistive-technology announcements, and linear reading order remain unverified. Requirements ux-remote.2 and ux-remote.3 remain product requirements and are not runtime-certified by this qualification."

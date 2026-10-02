@@ -127,7 +127,7 @@
 - [x] int-07. Implement integration slice 7: migration, upgrade, export, restore and full native surfaces
   - _Requirements: int-07.1, int-07.2, int-07.3, int-07.4_
 
-- [ ] int-08. Implement integration slice 8: whole OSS conformance, packaging and release readiness
+- [x] int-08. Implement integration slice 8: whole OSS conformance, packaging and release readiness
   - _Requirements: int-08.1, int-08.2, int-08.3_
 
 - [x] mem-clients. OSS Gideon clients and lifecycle modules

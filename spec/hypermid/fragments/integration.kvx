@@ -158,7 +158,7 @@ ac_3 = "The release-readiness report distinguishes source checks from live journ
 
 [task.int-08]
 title = "Implement integration slice 8: whole OSS conformance, packaging and release readiness"
-status = "pending"
+status = "done"
 wave = 8
 owner_lane = "integration"
 requires = ["int-07", "base-08", "fab-08-integration", "ctx-gideon-integration", "mem-release", "ux-native", "sec-08"]

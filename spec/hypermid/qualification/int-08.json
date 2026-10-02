@@ -1,0 +1,44 @@
+{
+  "task": "int-08",
+  "task_status": "done",
+  "status": "incomplete",
+  "implementation_status": "complete",
+  "qualification_status": "incomplete",
+  "declared_command": "PYTHONPATH=runtime python checks/hypermid/verify_wave_08.py",
+  "gate_result": "interrupted",
+  "recorded_portable_commands": [],
+  "successful_gate_count": 0,
+  "source_revision": "88effc0cabbb8afa5dfc2c533dc748ab697d7a4a",
+  "source_digest": "a4a0ec431fb293325e192d5979c5dbab083c1bc73ee854148f336e9411fdfffa",
+  "source_sha256": {
+    "rust-toolchain.toml": "de931f447405de9a7f6222078eb61e528126d3017506107959935814ccf48a9a",
+    "setup.py": "26692d2a27ff096fff07b8b6b730022cd9bcfc168128c2ff57a4fcac242a1f6c",
+    "infrastructure/docker/Dockerfile.backend": "243d408e064364e8eb8094988f2a461b151c3c57fc40d3191cd01322ea25bfd8",
+    "checks/hypermid/packaging/clean_install.py": "0f16b3bf84f02fe7a1507b25f2a72584a47ed7c11e3d9972c94798ec7292b99d",
+    "checks/hypermid/packaging/container_probe.py": "fe4894902c22e4eceb0c699aa94c2b03a78ecb9ec41503218ce3153e0792f425",
+    "checks/hypermid/packaging/source_closure.py": "3b6a9743d09c02b43b16e6292bd901e044283f918caf8fef6e7b6505b7ce36ee",
+    "checks/hypermid/verify_wave_08.py": "4cb145e43fd8283fa871209016a83259a94633982931392b61fc25e99afb36e2",
+    "spec/hypermid/release-readiness.kvx": "76876b13cc2f28be4e788df8b40c91f707d72d1410e5ffb65afe353dd3883f2e"
+  },
+  "scope": "Task implementation is complete. Final package qualification remains incomplete; no release acceptance pass is recorded.",
+  "completed_stages": [
+    "console asset build",
+    "source closure",
+    "wheel and bundled daemon build",
+    "isolated wheel install"
+  ],
+  "interrupted_stage": "container image build",
+  "mandatory_security_gates_passed": 12,
+  "security_report_sha256": "edc3eaca977a5454b8e50ccd91de0db53c69fd82bf18746a7521243ac71fa4bf",
+  "remaining_journeys": [
+    "container persistence",
+    "PostgreSQL lease and fencing",
+    "packaged daemon multi-language SDK",
+    "native CLI lifecycle",
+    "packaged desktop lifecycle"
+  ],
+  "limitations": [
+    "Remote rendered geometry and real screen-reader runtime behavior remain unverified.",
+    "No hosted deployment or separate release is claimed."
+  ]
+}
