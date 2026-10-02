@@ -1,0 +1,16 @@
+{
+  "task": "mem-foundation",
+  "status": "passed",
+  "command": "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_foundation.py",
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-memory/Cargo.toml": "79c2e000d656df7ea60178882dda53e5747f43a2302814697e8e4cf896220711",
+    "crates/hypermid-memory/src/lib.rs": "6751847c39242e132de26158910cf7506004fadcaa81551826bdeba313e8c6fa",
+    "crates/hypermid-memory/src/model.rs": "c8f890fae815dc898216636f0824bf73ac7ac978d27f999fe1a6bb1a44cb6045",
+    "crates/hypermid-memory/src/store.rs": "4e9256bb52e121f0e62a3854d48619800afb37001dbcf0f9d84f73866f314edf",
+    "crates/hypermid-memory/src/auth.rs": "67d4d1843a65b1904403a48ec9bde49591b563ea2382102e25ecdd18dbcdc8bf",
+    "crates/hypermid-memory/src/migrations.rs": "c49864d723590815b6c396e9bff6599f4575bd1e49f9f842c49a850082eebcdf",
+    "checks/hypermid/test_memory_foundation.py": "b1b29a23fd1b1ffb736c1705ecbfe80745defc5ee8c29849008b6a073961508e"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate."
+}

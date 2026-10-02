@@ -136,7 +136,7 @@
 - [ ] mem-embedding. Embedding registry and guarded vector jobs
   - _Requirements: mem-embedding.1, mem-embedding.2_
 
-- [ ] mem-foundation. Memory core foundation and authorization primitives
+- [x] mem-foundation. Memory core foundation and authorization primitives
   - _Requirements: mem-foundation.1, mem-foundation.2_
 
 - [ ] mem-indexes. Message, file, and git indexing

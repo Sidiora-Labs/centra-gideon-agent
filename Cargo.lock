@@ -394,6 +394,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypermid-memory"
+version = "0.1.0"
+dependencies = [
+ "hypermid-contracts",
+ "hypermid-core",
+ "hypermid-store",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+]
+
+[[package]]
 name = "hypermid-store"
 version = "0.1.0"
 dependencies = [

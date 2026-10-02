@@ -80,7 +80,7 @@ ac_2 = "Release diagnostics report schema, index, vector, queue, lease, and reco
 
 [task.mem-foundation]
 title = "Memory core foundation and authorization primitives"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "memory"
 requires = ["base-02", "sec-01"]
@@ -206,7 +206,7 @@ acceptance = "Schema fencing, transactional migrations, consistent snapshots, re
 ac_1 = "A newer unsupported schema fails closed, fresh and migrated stores have equivalent schema fingerprints, and destructive migration refuses without a verified backup manifest."
 ac_2 = "Recovery from a copied fixture preserves every authoritative revision, rebuilds indexes, detects lineage corruption, and exposes typed diagnostics through runtime/gideon/hypermid."
 touches = ["crates/hypermid-memory/src/migrations.rs", "crates/hypermid-memory/src/recovery.rs", "crates/hypermid-memory/src/snapshot.rs", "runtime/gideon/hypermid/diagnostics.py", "runtime/gideon/hypermid/recovery.py", "checks/hypermid/test_memory_recovery.py"]
-verify_cmd = "cargo test -p hypermid-memory migration recovery --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_recovery.py"
+verify_cmd = "cargo test -p hypermid-memory migration_recovery --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_recovery.py"
 
 [task.mem-release]
 title = "OSS memory release integration"

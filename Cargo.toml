@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/hypermid-contracts", "crates/hypermid-foundation", "crates/hypermid-leases", "crates/hypermid-store", "crates/hypermid-store-postgres", "crates/hypermid-core", "crates/hypermid-context"]
+members = ["crates/hypermid-contracts", "crates/hypermid-foundation", "crates/hypermid-leases", "crates/hypermid-store", "crates/hypermid-store-postgres", "crates/hypermid-core", "crates/hypermid-context", "crates/hypermid-memory"]
 
 [workspace.package]
 version = "0.1.0"
