@@ -58,7 +58,7 @@
 - [x] ctx-ownership. Implement the bounded context protocol and ownership fence
   - _Requirements: ctx-ownership.1, ctx-ownership.2, ctx-ownership.3_
 
-- [ ] ctx-portability. Implement context migration export and restore
+- [x] ctx-portability. Implement context migration export and restore
   - _Requirements: ctx-portability.1, ctx-portability.2, ctx-portability.3_
 
 - [x] ctx-projection. Implement deterministic context projections

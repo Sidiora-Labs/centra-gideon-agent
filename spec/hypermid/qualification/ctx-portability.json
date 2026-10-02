@@ -1,0 +1,31 @@
+{
+  "task": "ctx-portability",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-context --test portability && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_portability.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-context --test portability && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_portability.py",
+    "PYTHONPATH=runtime python -m pytest -q checks/hypermid/waves/test_wave_07.py"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-context/src/export.rs": "6c85001eb9cfa2d582898bb4988ea766b38c0a7b47e18dd2c3de4f2552230d7c",
+    "crates/hypermid-context/src/import.rs": "c74306ec54ccadb6fe711afb9ec06ba3c68dfc098739d80545c4def506198437",
+    "crates/hypermid-context/src/migration.rs": "a2c362b57be3c7fa44a7fcc74e78b3c609fd6f103c5297b1355741809be44951",
+    "runtime/gideon/hypermid/portability.py": "ee085a36c1cdc552d1bca7f8bd96d1af4dd88f67e37de658daf0840c8757af10",
+    "crates/hypermid-context/tests/portability.rs": "98b81e48baa93f8237e34aedf866dcf1ee2c439686e742aa607b26ed5ec62e1a",
+    "checks/runtime/test_hypermid_portability.py": "3e6a6962256b0b329db6eb982d473bd040de5e3ea9b70ea320c693f9a41af4a3"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-context/src/export.rs": "6c85001eb9cfa2d582898bb4988ea766b38c0a7b47e18dd2c3de4f2552230d7c",
+    "crates/hypermid-context/src/import.rs": "c74306ec54ccadb6fe711afb9ec06ba3c68dfc098739d80545c4def506198437",
+    "crates/hypermid-context/src/migration.rs": "a2c362b57be3c7fa44a7fcc74e78b3c609fd6f103c5297b1355741809be44951",
+    "runtime/gideon/hypermid/portability.py": "ee085a36c1cdc552d1bca7f8bd96d1af4dd88f67e37de658daf0840c8757af10",
+    "crates/hypermid-context/tests/portability.rs": "98b81e48baa93f8237e34aedf866dcf1ee2c439686e742aa607b26ed5ec62e1a",
+    "checks/runtime/test_hypermid_portability.py": "3e6a6962256b0b329db6eb982d473bd040de5e3ea9b70ea320c693f9a41af4a3"
+  },
+  "scope": "Focused Rust and Python portability contracts plus a fresh full Wave7 real lifecycle journey covering canonical export, staged and same-scope restore, migration recovery, encrypted backup, writer handback and restart integrity.",
+  "source_adjustments": [
+    "The shared Python portability module includes the qualified context API and later compatible memory portability types; the current combined source is preserved."
+  ]
+}

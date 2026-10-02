@@ -699,7 +699,7 @@ touches = ["runtime/gideon/hypermid/__init__.py", "runtime/gideon/hypermid/adapt
 verify_cmd = "PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_passthrough.py"
 [task.ctx-portability]
 title = "Implement context migration export and restore"
-status = "pending"
+status = "done"
 wave = 7
 owner_lane = "context"
 requires = ["mem-portability", "mem-recovery"]

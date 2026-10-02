@@ -2,8 +2,12 @@
   "task": "base-05",
   "status": "passed",
   "declared_command": "cargo test -p hypermid-bus-contracts -p hypermid-bus-naming --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_bus_contracts.py",
-  "recorded_portable_commands": [],
-  "successful_gate_count": 0,
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-bus-contracts -p hypermid-bus-naming --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_bus_contracts.py",
+    "cargo test -p hypermid-memory protocol --manifest-path crates/hypermid-memory/Cargo.toml",
+    "PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_transport.py"
+  ],
+  "successful_gate_count": 3,
   "exit_code": 0,
   "source_sha256": {
     "checks/hypermid/test_base_bus_contracts.py": "10d07ce792e57247031a4101a66fcbdbebb0ec9a2821455fd898e5a53cd6ee78",
@@ -36,5 +40,7 @@
     "runtime/gideon/hypermid/bus.py": "d97b1daadcf7074c437c1357eb925f18996defb0c91e0c1fefa202d78a767f9a"
   },
   "scope": "Focused task acceptance; subsequent integration gates remain separate.",
-  "source_adjustments": []
+  "source_adjustments": [
+    "runtime/gideon/hypermid/bus.py was additively expanded after the original base-05 gate from tested SHA-256 d97b1daadcf7074c437c1357eb925f18996defb0c91e0c1fefa202d78a767f9a to published SHA-256 6351868fb4250a55f993a31acd1995b3063c50504f7e4b7aea9a3e4d09c6db15 with authenticated in-process and local-bus memory transport, cancellation, bounded backpressure, replay, and cursor resumption. The expanded current source is qualified by the two recorded mem-remote Rust and Python commands; the historical base-05 tested-source hash remains unchanged."
+  ]
 }
