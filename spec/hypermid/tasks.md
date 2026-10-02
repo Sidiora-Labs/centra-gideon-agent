@@ -246,7 +246,7 @@
   - Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance.
   - _Requirements: wave-7.1, wave-7.2_
 
-- [ ] wave-8-close. Qualify vertical slice: Complete OSS distribution
+- [x] wave-8-close. Qualify vertical slice: Complete OSS distribution
   - Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths.
   - Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance.
   - _Requirements: wave-8.1, wave-8.2_

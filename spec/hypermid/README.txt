@@ -1,7 +1,7 @@
 Hypermid specification
 
-Start with spec.kvx, the normative CG feature specification. The feature is
-planned; runtime implementation and qualification have not begun.
+Start with spec.kvx, the normative CG feature specification. All 77 implementation and wave-closure tasks are complete. Final package
+qualification is incomplete; read release-readiness.kvx for results and limits.
 
 Artifact layout:
   overview.kvx        Shared architecture and contract decisions.
@@ -20,7 +20,7 @@ The first product integration is Gideon OSS. The specification includes the
 context and knowledge engine, shared foundations, module process infrastructure,
 client contracts and native product/operator surfaces.
 
-All future acceptance commands require an implemented task before execution.
+Recorded task qualification is available under qualification/.
 Document/schema validation is distinct from runtime tests or release evidence.
 
 Authoring and document checks:
@@ -41,10 +41,8 @@ It never executes a task's verify_cmd, imports the application or starts a daemo
 
 Delivery inventory:
   87 requirements with 225 acceptance clauses
-  77 pending implementation and wave-closure tasks across eight waves
+  77 completed implementation and wave-closure tasks across eight waves
   149 capability and existing-integration records
   Eight JSON Schema documents plus a relational storage design
 
-Implementation paths and future acceptance programs may not exist yet; they are
-planned outputs owned by their tasks. The schema URLs are identifiers, not service
-endpoints or network dependencies.
+The schema URLs are identifiers, not service endpoints or network dependencies.

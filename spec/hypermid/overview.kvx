@@ -1,12 +1,14 @@
 [meta]
 feature = "hypermid"
 title = "Hypermid: persistent context, knowledge and local module infrastructure"
-status = "in_progress"
+status = "done"
 version = "1.0.0"
 created_at = "2026-10-02"
 source_of_truth = "spec/hypermid/spec.kvx"
 delivery_scope = "Gideon OSS runtime, console, CLI, desktop integration and distributable SDKs"
-implementation_status = "in_progress"
+implementation_status = "done"
+qualification_status = "incomplete"
+qualification_record = "spec/hypermid/release-readiness.kvx"
 
 [design.intent]
 summary = "Hypermid gives Gideon durable project knowledge, recoverable long conversations and supervised local capabilities through one versioned system. Raw history stays authoritative; context projections are derived; every model call and module effect retains identity and ownership."

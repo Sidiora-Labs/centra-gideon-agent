@@ -1,0 +1,38 @@
+{
+  "task": "wave-8-close",
+  "task_status": "done",
+  "status": "incomplete",
+  "implementation_status": "complete",
+  "qualification_status": "incomplete",
+  "declared_command": "python -m pytest checks/hypermid/waves/test_wave_08.py -q",
+  "gate_result": "interrupted",
+  "recorded_portable_commands": [],
+  "successful_gate_count": 0,
+  "source_revision": "88effc0cabbb8afa5dfc2c533dc748ab697d7a4a",
+  "source_digest": "a4a0ec431fb293325e192d5979c5dbab083c1bc73ee854148f336e9411fdfffa",
+  "source_sha256": {
+    "checks/hypermid/verify_wave_08.py": "4cb145e43fd8283fa871209016a83259a94633982931392b61fc25e99afb36e2",
+    "checks/hypermid/waves/test_wave_08.py": "04cccb728dff1e374eb01686355b5e7072748e40faaa2f05635e2325a81ff800"
+  },
+  "scope": "Task implementation is complete. Final package qualification remains incomplete; no release acceptance pass is recorded.",
+  "completed_stages": [
+    "console asset build",
+    "source closure",
+    "wheel and bundled daemon build",
+    "isolated wheel install"
+  ],
+  "interrupted_stage": "container image build",
+  "mandatory_security_gates_passed": 12,
+  "security_report_sha256": "edc3eaca977a5454b8e50ccd91de0db53c69fd82bf18746a7521243ac71fa4bf",
+  "remaining_journeys": [
+    "container persistence",
+    "PostgreSQL lease and fencing",
+    "packaged daemon multi-language SDK",
+    "native CLI lifecycle",
+    "packaged desktop lifecycle"
+  ],
+  "limitations": [
+    "Remote rendered geometry and real screen-reader runtime behavior remain unverified.",
+    "No hosted deployment or separate release is claimed."
+  ]
+}

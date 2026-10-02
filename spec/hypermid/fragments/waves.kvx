@@ -124,7 +124,7 @@ ac_2 = "The release receipt binds exact artifacts and source revisions to requir
 
 [task.wave-8-close]
 title = "Qualify vertical slice: Complete OSS distribution"
-status = "pending"
+status = "done"
 wave = 8
 owner_lane = "integration"
 requires = []

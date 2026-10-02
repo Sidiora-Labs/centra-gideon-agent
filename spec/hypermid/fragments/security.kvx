@@ -2,11 +2,11 @@
 document = "spec/hypermid/design/security.txt"
 qualification = "spec/hypermid/design/qualification.txt"
 contract = "Hypermid enforces scoped authority, encrypted daemon access, sandboxed effects, bounded network and model use, provenance-aware memory, verified artifacts, durable lifecycle controls, and crash recovery across crates/hypermid-*, runtime/gideon/hypermid, and native Gideon UI."
-release = "The first implementation target is OSS Gideon only. All implementation and qualification remain pending; live-provider qualification is an explicit opt-in gate."
+release = "The OSS implementation and mandatory security gates are complete. Package qualification and remaining limitations are recorded in spec/hypermid/release-readiness.kvx; live-provider qualification remains an explicit opt-in gate."
 
 [req.sec-01]
 title = "Scoped principals and least-privilege background workers"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.scope, design/security.txt#security.capabilities"
 acceptance = "Enforce owner, project, optional workspace, operation, resource, and expiry boundaries for foreground and background access without implicit cross-project mutation authority."
 ac_1 = "Every read and mutation is authorized by principal, owner_id, project_id, optional workspace_id, operation, resource, and expiry at both protocol and transaction boundaries."
@@ -28,7 +28,7 @@ verify_cmd = "cargo test -p hypermid-core capability && cargo test -p hypermid-s
 
 [req.sec-02]
 title = "Authenticated encrypted daemon protocol and version fencing"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.auth_protocol"
 acceptance = "Authenticate and encrypt every daemon session and fence incompatible clients before they create durable state."
 ac_1 = "Local and explicitly enabled remote sessions use TLS 1.3 mutual authentication, scoped short-lived authorization, replay protection, and no plaintext or certificate-verification bypass."
@@ -50,7 +50,7 @@ verify_cmd = "cargo test -p hypermid-protocol handshake && cargo test -p hypermi
 
 [req.sec-03]
 title = "Sandboxed MCP and stdio effects"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.sandbox"
 acceptance = "Contain MCP and stdio processes and preserve truthful external-effect state through timeout, cancellation, disconnect, and crash."
 ac_1 = "Every MCP or stdio process runs with an executable digest, bounded framed I/O, explicit filesystem/network/environment grants, resource ceilings, deadline, descendant cancellation, and no implicit credential access."
@@ -72,7 +72,7 @@ verify_cmd = "cargo test -p hypermid-sandbox && cargo test -p hypermid-mcp stdio
 
 [req.sec-04]
 title = "Egress, DNS, proxy, secret, and log containment"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.network_and_secrets"
 acceptance = "Deny undeclared egress and prevent credential values from entering model, persistence, process, diagnostic, export, or user-interface data paths."
 ac_1 = "Default-denied egress validates normalized destinations, resolved addresses, redirects, proxy routing, address classes, byte limits, and expiry for every connection attempt."
@@ -94,7 +94,7 @@ verify_cmd = "cargo test -p hypermid-daemon egress && cargo test -p hypermid-dae
 
 [req.sec-05]
 title = "Model budget enforcement and memory provenance"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.model_budget, design/security.txt#security.memory_provenance"
 acceptance = "Bound model spending before dispatch and prevent memory text from acquiring control authority without a recorded user promotion."
 ac_1 = "Foreground and background calls reserve owner-controlled per-call, concurrency, hourly, daily, and job-total budgets before dispatch and reconcile actual or unresolved usage after completion or crash."
@@ -116,7 +116,7 @@ verify_cmd = "cargo test -p hypermid-store budget && cargo test -p hypermid-core
 
 [req.sec-06]
 title = "Verified artifact installation and atomic update"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.artifact_supply_chain"
 acceptance = "Verify artifact identity and contents before atomic activation and require fresh approval for capability expansion."
 ac_1 = "Install and update verify immutable digest, platform, publisher signature, declared capabilities, archive paths, link targets, normalized-name uniqueness, and expansion limits before activation."
@@ -138,7 +138,7 @@ verify_cmd = "cargo test -p hypermid-artifacts && PYTHONPATH=runtime python -m p
 
 [req.sec-07]
 title = "Deletion, export, backup, restore, and migration integrity"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.lifecycle"
 acceptance = "Provide scope-safe deletion, export, encrypted backup, migration, and restore with complete digest and cursor verification."
 ac_1 = "Deletion excludes content from recall immediately, preserves an owner-scoped tombstone through the recovery window, and purges authoritative and derived copies without accepting stale worker output."
@@ -160,7 +160,7 @@ verify_cmd = "cargo test -p hypermid-store lifecycle && PYTHONPATH=runtime pytho
 
 [req.sec-08]
 title = "Crash-consistent recovery and release evidence"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.crash_consistency, design/qualification.txt#qualification.release_acceptance"
 acceptance = "Recover atomic authoritative state and produce same-revision real-path evidence for every mandatory security and recovery gate."
 ac_1 = "Authoritative mutation, lineage, cursor, usage reservation, and outbox reference commit atomically, while stale derived writes are rejected by source-digest comparison."

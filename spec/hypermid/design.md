@@ -151,5 +151,5 @@ spec/hypermid/design/qualification.txt
 
 Hypermid enforces scoped authority, encrypted daemon access, sandboxed effects, bounded network and model use, provenance-aware memory, verified artifacts, durable lifecycle controls, and crash recovery across crates/hypermid-*, runtime/gideon/hypermid, and native Gideon UI.
 
-The first implementation target is OSS Gideon only. All implementation and qualification remain pending; live-provider qualification is an explicit opt-in gate.
+The OSS implementation and mandatory security gates are complete. Package qualification and remaining limitations are recorded in spec/hypermid/release-readiness.kvx; live-provider qualification remains an explicit opt-in gate.
 

@@ -1,12 +1,14 @@
 [meta]
 feature = "hypermid"
 title = "Hypermid: persistent context, knowledge and local module infrastructure"
-status = "in_progress"
+status = "done"
 version = "1.0.0"
 created_at = "2026-10-02"
 source_of_truth = "spec/hypermid/spec.kvx"
 delivery_scope = "Gideon OSS runtime, console, CLI, desktop integration and distributable SDKs"
-implementation_status = "in_progress"
+implementation_status = "done"
+qualification_status = "incomplete"
+qualification_record = "spec/hypermid/release-readiness.kvx"
 
 [design.intent]
 summary = "Hypermid gives Gideon durable project knowledge, recoverable long conversations and supervised local capabilities through one versioned system. Raw history stays authoritative; context projections are derived; every model call and module effect retains identity and ownership."
@@ -221,104 +223,104 @@ trust = "Only authenticated principals and daemon-stamped supervised spawn ident
 
 [req.fab-001]
 title = "Versioned bounded JSON framing"
-status = "pending"
+status = "done"
 ac_1 = "Every post-handshake message uses protocol hypermid.v1 and a four-byte unsigned big-endian JSON byte length that is rejected above 8 MiB before allocation."
 ac_2 = "Event bodies larger than 64 KiB are emitted as ordered chunks no larger than 64 KiB with a whole-event SHA-256 digest and deterministic reassembly refusal."
 
 [req.fab-002]
 title = "Authenticated local and external sessions"
-status = "pending"
+status = "done"
 ac_1 = "Unix local sessions use an owner-only socket plus peer evidence and HMAC proof; Windows uses an owner-only connection record plus authenticated loopback."
 ac_2 = "External listeners remain absent by default and, when enabled, refuse sessions lacking TLS 1.3 identity and the required principal scopes."
 
 [req.fab-003]
 title = "Validated module discovery and manifests"
-status = "pending"
+status = "done"
 ac_1 = "Discovery reads only configured roots, validates canonical executable paths, manifest versions, ids, dependency cycles, capability conflicts, and SHA-256 artifact digests before changing the registry generation."
 ac_2 = "A discovered module remains unroutable until its one-use launch secret proves the expected module id and spawn generation and its operation catalog validates."
 ac_3 = "The manifest vocabulary covers control surfaces, operation providers, pipeline stages, internal services, event publishers, event consumers, federation gateways, and maintenance workers without requiring a foreign service."
 
 [req.fab-004]
 title = "Epoch-safe route lifecycle"
-status = "pending"
+status = "done"
 ac_1 = "Route creation becomes visible only after the selected ready module acknowledges the bind; failed binds release every reservation."
 ac_2 = "Every routed frame is checked against route id and route epoch, and stale epochs or revoked scope produce typed terminal closure without reaching a reused route slot."
 
 [req.fab-005]
 title = "Bounded flow control"
-status = "pending"
+status = "done"
 ac_1 = "Each route has independent request and byte credits, while control traffic has a separate bounded queue."
 ac_2 = "Slow or disconnected consumers cannot grow memory without bound or consume another route's capacity, and terminal frames deterministically release request credit."
 
 [req.fab-006]
 title = "Cancellation and absolute deadlines"
-status = "pending"
+status = "done"
 ac_1 = "A request deadline is converted once to a monotonic budget and is never extended across internal hops, route reopen, or retry."
 ac_2 = "Cancellation is idempotent by message id, reaches queued or running work, discards later non-terminal output, and yields at most one terminal classification."
 
 [req.fab-007]
 title = "Crash-contained module supervision"
-status = "pending"
+status = "done"
 ac_1 = "Each module follows the declared lifecycle state machine with bounded restart windows, exponential backoff, drain deadlines, and retained terminal evidence."
 ac_2 = "Linux cgroups, Windows Job Objects, and pid-plus-start-time process identity contain descendants and prevent stale process ids from being killed after daemon restart."
 
 [req.fab-008]
 title = "Safe replacement and registry reconciliation"
-status = "pending"
+status = "done"
 ac_1 = "Registry rescan provides preview and apply modes and atomically increments generation only after the complete candidate manifest set validates."
 ac_2 = "Overlap-safe modules may warm a replacement before atomic cutover; failed warmup leaves the incumbent serving and exclusive modules use ordered drain then restart."
 
 [req.fab-009]
 title = "Durable effect recovery"
-status = "pending"
+status = "done"
 ac_1 = "Durable effects commit an intent with effect id and input digest before dispatch and commit a terminal result before acknowledging it."
 ac_2 = "Restart reconciliation returns committed, not_started, or unknown and never blindly replays an effect that may have begun."
 
 [req.fab-010]
 title = "Durable scoped event bus"
-status = "pending"
+status = "done"
 ac_1 = "Publish and subscribe enforce principal scopes, record ordered cursors, and support atomic snapshot plus retained replay plus live continuation."
 ac_2 = "Delivery is at least once with explicit durable acknowledgement, bounded redelivery, and a dead-letter record preserving original id, topic, digest, delivery count, and reason."
 
 [req.fab-011]
 title = "Health and operational diagnostics"
-status = "pending"
+status = "done"
 ac_1 = "Health combines process, registration, readiness, probe, resource, route-breaker, and dependency evidence without reporting unsupported measurements as zero."
 ac_2 = "Operators can read bounded stderr, durable terminal history, active routes, resource readings, provenance, and spawn events even when a module is unhealthy."
 
 [req.fab-012]
 title = "Scoped control RPC"
-status = "pending"
+status = "done"
 ac_1 = "The control plane exposes describe, registry, route, supervisor, effect, and event operations through the same authenticated envelope with operation-specific scopes."
 ac_2 = "Mutations are idempotent by message id, responses identify their daemon or registry generation, and stale or lost subscription cursors return explicit recovery data."
 
 [req.fab-013]
 title = "Owned install update and uninstall"
-status = "pending"
+status = "done"
 ac_1 = "Install and update accept only fresh signed index metadata and digest-verified artifacts, stage beside the active generation, and atomically activate or roll back."
 ac_2 = "Uninstall and replacement mutate only ownership-ledger paths whose current digest still matches, preserving user stores and unrelated configuration."
 
 [req.fab-014]
 title = "Cross-platform daemon service integration"
-status = "pending"
+status = "done"
 ac_1 = "Linux systemd user units, macOS LaunchAgents, and Windows scheduled tasks start the per-user daemon and preserve its ordered child shutdown window."
 ac_2 = "Register, reload, start, stop, restart, and deregister return exact service-manager failures and apply changed definitions before restart."
 
 [req.fab-015]
 title = "Opt-in federated routing"
-status = "pending"
+status = "done"
 ac_1 = "Paired peers use signed expiring discovery, direct-first dialing, mutually authenticated encrypted sessions, and separate single-use relay grants."
 ac_2 = "Remote catalogs expose only explicitly remote operations, and the receiving fabric intersects remote grants with local scopes before dispatch."
 
 [req.fab-016]
 title = "Durable outbound phone channel"
-status = "pending"
+status = "done"
 ac_1 = "The phone channel uses outbound-only federation and reconciles unsettled mutation effects before admitting another mutation after reconnect."
 ac_2 = "Push notifications carry only opaque wake tokens and cannot contain commands, route credentials, request payloads, or assistant content."
 
 [req.fab-017]
 title = "Typed Gideon adapter"
-status = "pending"
+status = "done"
 ac_1 = "The Python adapter maps the shared Id, Scope, Digest, Cursor, Error, and Trace contracts and exposes typed async control, route, event, cancellation, and effect-status calls."
 ac_2 = "On daemon epoch change it invalidates route epochs and event cursors, refreshes snapshots, and never retries a durable effect without a conclusive status."
 
@@ -1244,11 +1246,11 @@ acceptance = "The packaged OSS product passes the complete real-path conformance
 document = "spec/hypermid/design/security.txt"
 qualification = "spec/hypermid/design/qualification.txt"
 contract = "Hypermid enforces scoped authority, encrypted daemon access, sandboxed effects, bounded network and model use, provenance-aware memory, verified artifacts, durable lifecycle controls, and crash recovery across crates/hypermid-*, runtime/gideon/hypermid, and native Gideon UI."
-release = "The first implementation target is OSS Gideon only. All implementation and qualification remain pending; live-provider qualification is an explicit opt-in gate."
+release = "The OSS implementation and mandatory security gates are complete. Package qualification and remaining limitations are recorded in spec/hypermid/release-readiness.kvx; live-provider qualification remains an explicit opt-in gate."
 
 [req.sec-01]
 title = "Scoped principals and least-privilege background workers"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.scope, design/security.txt#security.capabilities"
 acceptance = "Enforce owner, project, optional workspace, operation, resource, and expiry boundaries for foreground and background access without implicit cross-project mutation authority."
 ac_1 = "Every read and mutation is authorized by principal, owner_id, project_id, optional workspace_id, operation, resource, and expiry at both protocol and transaction boundaries."
@@ -1269,7 +1271,7 @@ touches = ["crates/hypermid-core/src/capability.rs", "crates/hypermid-store/src/
 verify_cmd = "cargo test -p hypermid-core capability && cargo test -p hypermid-store authorization && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_security_capabilities.py"
 [req.sec-02]
 title = "Authenticated encrypted daemon protocol and version fencing"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.auth_protocol"
 acceptance = "Authenticate and encrypt every daemon session and fence incompatible clients before they create durable state."
 ac_1 = "Local and explicitly enabled remote sessions use TLS 1.3 mutual authentication, scoped short-lived authorization, replay protection, and no plaintext or certificate-verification bypass."
@@ -1290,7 +1292,7 @@ touches = ["crates/hypermid-protocol/src/handshake.rs", "crates/hypermid-protoco
 verify_cmd = "cargo test -p hypermid-protocol handshake && cargo test -p hypermid-daemon listener && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_auth_protocol.py"
 [req.sec-03]
 title = "Sandboxed MCP and stdio effects"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.sandbox"
 acceptance = "Contain MCP and stdio processes and preserve truthful external-effect state through timeout, cancellation, disconnect, and crash."
 ac_1 = "Every MCP or stdio process runs with an executable digest, bounded framed I/O, explicit filesystem/network/environment grants, resource ceilings, deadline, descendant cancellation, and no implicit credential access."
@@ -1311,7 +1313,7 @@ touches = ["crates/hypermid-sandbox/src/lib.rs", "crates/hypermid-mcp/src/stdio.
 verify_cmd = "cargo test -p hypermid-sandbox && cargo test -p hypermid-mcp stdio && cargo test -p hypermid-bus --test recovery && cargo test -p hypermid-daemon --test effect_routes && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_sandbox_effects.py"
 [req.sec-04]
 title = "Egress, DNS, proxy, secret, and log containment"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.network_and_secrets"
 acceptance = "Deny undeclared egress and prevent credential values from entering model, persistence, process, diagnostic, export, or user-interface data paths."
 ac_1 = "Default-denied egress validates normalized destinations, resolved addresses, redirects, proxy routing, address classes, byte limits, and expiry for every connection attempt."
@@ -1332,7 +1334,7 @@ touches = ["crates/hypermid-daemon/src/egress.rs", "crates/hypermid-daemon/src/s
 verify_cmd = "cargo test -p hypermid-daemon egress && cargo test -p hypermid-daemon redaction && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_egress_secrets.py"
 [req.sec-05]
 title = "Model budget enforcement and memory provenance"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.model_budget, design/security.txt#security.memory_provenance"
 acceptance = "Bound model spending before dispatch and prevent memory text from acquiring control authority without a recorded user promotion."
 ac_1 = "Foreground and background calls reserve owner-controlled per-call, concurrency, hourly, daily, and job-total budgets before dispatch and reconcile actual or unresolved usage after completion or crash."
@@ -1353,7 +1355,7 @@ touches = ["crates/hypermid-store/src/budget.rs", "crates/hypermid-core/src/prov
 verify_cmd = "cargo test -p hypermid-store budget && cargo test -p hypermid-core provenance && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_budget_provenance.py"
 [req.sec-06]
 title = "Verified artifact installation and atomic update"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.artifact_supply_chain"
 acceptance = "Verify artifact identity and contents before atomic activation and require fresh approval for capability expansion."
 ac_1 = "Install and update verify immutable digest, platform, publisher signature, declared capabilities, archive paths, link targets, normalized-name uniqueness, and expansion limits before activation."
@@ -1374,7 +1376,7 @@ touches = ["crates/hypermid-artifacts/src/manifest.rs", "crates/hypermid-artifac
 verify_cmd = "cargo test -p hypermid-artifacts && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_artifact_supply_chain.py"
 [req.sec-07]
 title = "Deletion, export, backup, restore, and migration integrity"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.lifecycle"
 acceptance = "Provide scope-safe deletion, export, encrypted backup, migration, and restore with complete digest and cursor verification."
 ac_1 = "Deletion excludes content from recall immediately, preserves an owner-scoped tombstone through the recovery window, and purges authoritative and derived copies without accepting stale worker output."
@@ -1395,7 +1397,7 @@ touches = ["crates/hypermid-store/src/deletion.rs", "crates/hypermid-store/src/e
 verify_cmd = "cargo test -p hypermid-store lifecycle && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_lifecycle_migration.py"
 [req.sec-08]
 title = "Crash-consistent recovery and release evidence"
-status = "pending"
+status = "done"
 design = "design/security.txt#security.crash_consistency, design/qualification.txt#qualification.release_acceptance"
 acceptance = "Recover atomic authoritative state and produce same-revision real-path evidence for every mandatory security and recovery gate."
 ac_1 = "Authoritative mutation, lineage, cursor, usage reservation, and outbox reference commit atomically, while stale derived writes are rejected by source-digest comparison."
@@ -1533,7 +1535,7 @@ ac_2 = "The release receipt binds exact artifacts and source revisions to requir
 
 [task.wave-8-close]
 title = "Qualify vertical slice: Complete OSS distribution"
-status = "pending"
+status = "done"
 wave = 8
 owner_lane = "integration"
 requires = ["int-08"]
