@@ -1,3 +1,4 @@
+import { genUiScopeId } from '../../shared/ui/genui/hostScope';
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { reportActionFailure } from '../../app/shell/reportingWrite'
 import { Check, X, RefreshCw, Sparkles } from 'lucide-react'
@@ -207,7 +208,7 @@ function PinnedTile({ tile, onResolve, viewId }: { viewId: string; tile: Dashboa
         ? (genuiBody
           ? (
             <GenUiHostCtx.Provider
-              value={{ producer: { kind: 'tile', viewId, ref: tile.ref }, onResolved: refresh }}
+              value={{ producer: { kind: 'tile', viewId, ref: tile.ref }, conversationId: `${viewId}:${tile.ref}`, scopeId: genUiScopeId(), onResolved: refresh }}
             >
               <GenUiWidget content={genuiBody.html} title={artifact?.name || slug} slug={slug} />
             </GenUiHostCtx.Provider>

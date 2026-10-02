@@ -1,5 +1,24 @@
 import type { ComponentType, ReactNode } from 'react'
 import { LAYER_CORE, layerName, maxSurfaceLayer, type SurfaceLayer } from '../surfaces/layers'
+import rawGenUiV2Catalog from '../../../../../../runtime/gideon/workspace/genui_v2_catalog.json'
+
+export interface GenUiV2CatalogComponent {
+  name: string
+  group: string
+  description: string
+  propsSchema: string
+}
+export interface GenUiV2CatalogSchema {
+  $defs: Record<string, unknown>
+  properties: Record<string, unknown>
+  required: string[]
+  additionalProperties: boolean
+  'x-components': GenUiV2CatalogComponent[]
+  [key: string]: unknown
+}
+
+export const genUiV2Catalog = rawGenUiV2Catalog as GenUiV2CatalogSchema
+export const genUiV2ComponentNames = new Set(genUiV2Catalog['x-components'].map(component => component.name))
 
 export type GenUiArgType = 'string' | 'number' | 'boolean' | 'string[]' | 'number[]' | 'rows' | 'ref' | 'refs' | 'any'
 export interface GenUiArg { key: string; type: GenUiArgType; required?: boolean; note?: string }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useGenUiAction, type GenUiEmit } from './actions'
+import { useGenUiAction } from './actions'
 
 export const valueText = (value: unknown, fallback = ''): string => value == null ? fallback : String(value)
 export const valueList = (value: unknown): unknown[] => Array.isArray(value) ? value : []
@@ -23,15 +23,22 @@ export function useComponentAction() {
   const active = useRef(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [status, setStatus] = useState('')
   useEffect(() => { active.current = true; return () => { active.current = false } }, [])
-  const submit: GenUiEmit = async input => {
+  const submit = async (input: { action: string; label?: string; payload?: Record<string, unknown> }): Promise<void> => {
     if (pending.current) return
     pending.current = true
     setBusy(true)
     setError('')
-    try { await emit(input) }
+    setStatus('')
+    try {
+      const result = await emit(input)
+      if (!active.current || result === undefined) return
+      if (result.ok) setStatus(result.message || (result.outcome === 'chat-turn' ? 'Queued for this conversation.' : 'Action accepted.'))
+      else setError(result.message || 'That action could not be completed.')
+    }
     catch (failure) { if (active.current) setError((failure as Error)?.message || 'That action could not be completed.') }
     finally { pending.current = false; if (active.current) setBusy(false) }
   }
-  return { busy, error, submit }
+  return { busy, error, status, submit }
 }

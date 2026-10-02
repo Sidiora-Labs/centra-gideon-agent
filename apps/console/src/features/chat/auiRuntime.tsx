@@ -1,3 +1,5 @@
+import { GenUiHostCtx } from '../../shared/ui/genui/actions'
+import { genUiScopeId } from '../../shared/ui/genui/hostScope'
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import {
   AssistantRuntimeProvider,
@@ -183,7 +185,9 @@ export function GideonChatRuntimeProvider({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <TurnByAuiId.Provider value={turnByAuiId}>{children}</TurnByAuiId.Provider>
+      <GenUiHostCtx.Provider value={{ producer: { kind: 'chat' }, conversationId: sessionId ?? undefined, scopeId: genUiScopeId() }}>
+        <TurnByAuiId.Provider value={turnByAuiId}>{children}</TurnByAuiId.Provider>
+      </GenUiHostCtx.Provider>
     </AssistantRuntimeProvider>
   )
 }

@@ -1,3 +1,4 @@
+import { genUiScopeId } from '../../shared/ui/genui/hostScope';
 import { useState } from 'react'
 import { Check, Play, TriangleAlert, X } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
@@ -46,6 +47,7 @@ export function WorkflowAsk({ continuation, runId, busy, onAnswer, rerunCaption 
   const promptText = widgetlessText(ask.prompt || '')
   const gateHost = {
     producer: { kind: 'workflow-gate' as const, runId, token: continuation.resume_token },
+        conversationId: `${runId}:${continuation.node_id}`, scopeId: genUiScopeId(),
   }
 
   const hasContext = !!(handoff.checks_run?.length || handoff.outstanding?.length || handoff.risks?.length || handoff.attempted?.length)

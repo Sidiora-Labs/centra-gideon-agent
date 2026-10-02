@@ -12,8 +12,8 @@ export interface GenUiActionResult {
   outcome: 'chat-turn' | 'gate-resolved' | 'tile-refired' | 'refused' | 'error'
   message?: string
 }
-export type GenUiEmit = (input: { action: string; label?: string; payload?: Record<string, unknown> }) => void | Promise<void>
-export interface GenUiHost { producer: GenUiProducer; onResolved?: () => void }
+export type GenUiEmit = (input: { action: string; label?: string; payload?: Record<string, unknown> }) => void | GenUiActionResult | Promise<void | GenUiActionResult>
+export interface GenUiHost { producer: GenUiProducer; conversationId?: string; scopeId?: string; onResolved?: () => void }
 
 type RawAction = { action: string; payload?: Record<string, unknown> }
 export type GenUiActionPlan =
@@ -50,22 +50,26 @@ const routingMessages = {
   chat: { success: 'chat-turn', refused: '', failure: 'Could not send the widget action.' },
 } as const
 
+export function genUiActionReceipt(kind: 'workflow-gate' | 'tile', response: unknown): GenUiActionResult {
+  const receipt = response && typeof response === 'object' ? response as Record<string, unknown> : undefined
+  if (receipt?.ok !== true) {
+    return { ok: false, outcome: 'refused', message: typeof receipt?.message === 'string' && receipt.message ? receipt.message : routingMessages[kind].refused }
+  }
+  return { ok: true, outcome: routingMessages[kind].success, message: kind === 'workflow-gate' ? 'Answer accepted.' : 'Tile action accepted.' }
+}
+
 export async function routeGenUiAction(dual: DualPayload, producer: GenUiProducer, raw: RawAction): Promise<GenUiActionResult> {
   const plan = planGenUiAction(dual, producer, raw)
   const messages = routingMessages[plan.kind]
   try {
     if (plan.kind === 'chat') {
       publishWidgetAction(plan.text, { label: plan.label })
-      return { ok: true, outcome: 'chat-turn' }
+      return { ok: true, outcome: 'chat-turn', message: 'Queued for this conversation.' }
     }
     const response = plan.kind === 'workflow-gate'
       ? await api.resumeWorkflowRun(plan.runId, plan.request)
       : await api.tileWidgetAction(plan.viewId, plan.request)
-    if (response?.ok === false) {
-      const message = plan.kind === 'tile' && 'message' in response && typeof response.message === 'string' ? response.message : ''
-      return { ok: false, outcome: 'refused', message: message || messages.refused }
-    }
-    return { ok: true, outcome: messages.success }
+    return genUiActionReceipt(plan.kind, response)
   } catch (error) {
     return { ok: false, outcome: 'error', message: (error as Error)?.message || messages.failure }
   }

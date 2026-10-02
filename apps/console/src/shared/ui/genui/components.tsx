@@ -1,10 +1,12 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { type FormEvent, type ReactNode } from 'react'
 import { Surface } from '../Surface'
 import { Button } from '../Button'
 import { Meter } from '../Meter'
 import { cx } from '../cx'
 import { defineComponent, type GenUiComponentDef, type GenUiRenderProps } from './registry'
 import { chartSeries, fieldTitle, formFields, formPayload, progressValue, useComponentAction, valueList, valueText } from './componentState'
+import { advancedDefinitions } from './advancedComponents'
+import { useGenUiElementState } from './widgetState'
 
 const spacing: Record<string, string> = { s: 'gap-s', m: 'gap-m', l: 'gap-l' }
 const tones: Record<string, string> = {
@@ -16,8 +18,9 @@ const tones: Record<string, string> = {
 const tone = (value: unknown) => tones[valueText(value)] ?? tones.neutral
 
 function StackLayout({ args, children }: GenUiRenderProps) {
-  const orientation = valueText(args.direction) === 'row' ? 'flex-row flex-wrap items-start' : 'flex-col'
-  return <div className={cx('flex min-w-0', orientation, spacing[valueText(args.gap)] ?? spacing.m)}>{children.body}</div>
+  const direction = valueText(args.direction)
+  const orientation = direction === 'row' ? 'flex flex-row flex-wrap items-start' : direction === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2' : 'flex flex-col'
+  return <div className={cx('min-w-0', orientation, spacing[valueText(args.gap)] ?? spacing.m)}>{children.body}</div>
 }
 
 function CardLayout({ args, children }: GenUiRenderProps) {
@@ -95,6 +98,10 @@ function ActionFailure({ message }: { message: string }) {
   return message ? <p role="alert" data-type="caption" className="text-danger">{message}</p> : null
 }
 
+function ActionStatus({ message }: { message: string }) {
+  return message ? <p role="status" data-type="caption" className="text-on-surface-low">{message}</p> : null
+}
+
 function ActionTrigger({ args }: GenUiRenderProps) {
   const command = useComponentAction()
   const label = valueText(args.label, 'Submit')
@@ -102,28 +109,31 @@ function ActionTrigger({ args }: GenUiRenderProps) {
     <Button variant={valueText(args.tone) === 'danger' ? 'danger' : 'primary'} size="sm" loading={command.busy}
       onClick={() => { void command.submit({ action: valueText(args.action), label, payload: undefined }) }}>{label}</Button>
     <ActionFailure message={command.error} />
+    <ActionStatus message={command.status} />
   </div>
 }
 
 function ActionForm({ args }: GenUiRenderProps) {
   const fields = formFields(args.fields)
-  const [values, setValues] = useState(() => new Map<string, string>())
+  const { state, setState } = useGenUiElementState()
+  const values = state.fields ?? {}
   const command = useComponentAction()
   const label = valueText(args.submit, 'Submit')
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    void command.submit({ action: valueText(args.action), label, payload: formPayload(fields, Object.fromEntries(values)) })
+    void command.submit({ action: valueText(args.action), label, payload: formPayload(fields, values) })
   }
   return <form onSubmit={submit} className="flex flex-col gap-3" aria-busy={command.busy || undefined}>
     {args.title != null && <div data-type="label-m" className="font-medium text-on-surface">{valueText(args.title)}</div>}
     <div className="grid gap-3 sm:grid-cols-2">{fields.map((field, index) => <label key={`${field}:${index}`} className="flex min-w-0 flex-col gap-1">
       <span data-type="caption" className="text-on-surface-low">{fieldTitle(field)}</span>
-      <input type="text" name={field} value={values.get(field) ?? ''} data-type="body-s"
-        onChange={event => { const value = event.currentTarget.value; setValues(previous => new Map(previous).set(field, value)) }}
+      <input type="text" name={field} value={values[field] ?? ''} data-type="body-s"
+        onChange={event => { const value = event.currentTarget.value; setState(previous => ({ ...previous, fields: { ...previous.fields, [field]: value } })) }}
         className="w-full rounded-lg border border-outline-variant/50 bg-surface px-3 py-2 text-on-surface outline-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/25" />
     </label>)}</div>
     <Button type="submit" variant="primary" size="sm" className="w-fit" loading={command.busy}>{label}</Button>
     <ActionFailure message={command.error} />
+    <ActionStatus message={command.status} />
   </form>
 }
 
@@ -162,6 +172,7 @@ const coreDefinitions: GenUiComponentDef[] = [
     { key: 'fields', type: 'string[]', required: true, note: 'field names; values are sent as {name: value}' }, { key: 'action', type: 'string', required: true },
     { key: 'submit', type: 'string', note: 'submit button label (default "Submit")' }, { key: 'title', type: 'string' },
   ] },
+  ...advancedDefinitions,
 ]
 let installed = false
 export function registerCoreGenUiComponents(): void {
