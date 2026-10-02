@@ -221,7 +221,7 @@
   - Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance.
   - _Requirements: wave-2.1, wave-2.2_
 
-- [ ] wave-3-close. Qualify vertical slice: Bounded cached context and recall
+- [x] wave-3-close. Qualify vertical slice: Bounded cached context and recall
   - Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths.
   - Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance.
   - _Requirements: wave-3.1, wave-3.2_

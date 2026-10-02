@@ -1453,7 +1453,7 @@ ac_2 = "Unchanged passes preserve exact prefix bytes, changes publish at allowed
 
 [task.wave-3-close]
 title = "Qualify vertical slice: Bounded cached context and recall"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "integration"
 requires = ["int-03"]
