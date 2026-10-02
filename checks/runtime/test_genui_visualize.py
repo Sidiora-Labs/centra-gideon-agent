@@ -41,11 +41,14 @@ class TestGenUiCatalog:
         names = {c["name"] for c in man["components"]}
         assert names == {c.name for c in genui.CORE_COMPONENTS}
         assert man["prompt"] == genui.library_prompt()
+        assert len(man["v2"]["x-components"]) == 15
+        assert man["v2_prompt"]
         assert {c["group"] for c in man["components"]} == {
             "Layout",
             "Data",
             "Charts",
             "Feedback",
+            "Forms",
         }
 
 

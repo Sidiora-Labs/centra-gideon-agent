@@ -115,9 +115,30 @@ CORE_COMPONENTS: tuple[GenUiComponent, ...] = (
         "Determinate 0..100 progress bar",
         (GenUiArg("value", "number", True), GenUiArg("label", "string")),
     ),
+    GenUiComponent(
+        "Button",
+        "Forms",
+        "Action button — click sends its label as the turn",
+        (
+            GenUiArg("label", "string", True, "visible text AND the message the transcript shows"),
+            GenUiArg("action", "string", True, "the action name the agent/run receives"),
+            GenUiArg("tone", "string", note="primary (default) | danger"),
+        ),
+    ),
+    GenUiComponent(
+        "Form",
+        "Forms",
+        "Named text fields + one submit action",
+        (
+            GenUiArg("fields", "string[]", True, "field names; values are sent as {name: value}"),
+            GenUiArg("action", "string", True),
+            GenUiArg("submit", "string", note='submit button label (default "Submit")'),
+            GenUiArg("title", "string"),
+        ),
+    ),
 )
 
-_GROUP_ORDER = ("Layout", "Data", "Charts", "Feedback")
+_GROUP_ORDER = ("Layout", "Data", "Charts", "Feedback", "Forms")
 
 
 def _signature(comp: GenUiComponent) -> str:
@@ -158,6 +179,8 @@ def library_prompt() -> str:
 def library_manifest() -> dict:
     """The machine-readable catalog (for ``/api/genui/library`` + tests). Generated
     from ``CORE_COMPONENTS``, never hand-written."""
+    from gideon.workspace.genui_v2 import genui_v2_prompt, genui_v2_schema
+
     return {
         "components": [
             {
@@ -177,6 +200,8 @@ def library_manifest() -> dict:
             for c in CORE_COMPONENTS
         ],
         "prompt": library_prompt(),
+        "v2": genui_v2_schema(),
+        "v2_prompt": genui_v2_prompt(),
     }
 
 

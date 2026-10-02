@@ -1,0 +1,919 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gideon GenUI v2",
+  "x-components": [
+    {
+      "name": "Stack",
+      "group": "Layout",
+      "description": "Vertical, horizontal or grid layout",
+      "propsSchema": "#/$defs/StackProps"
+    },
+    {
+      "name": "Card",
+      "group": "Layout",
+      "description": "Titled card wrapping children",
+      "propsSchema": "#/$defs/CardProps"
+    },
+    {
+      "name": "StatTile",
+      "group": "Data",
+      "description": "One metric with optional percent delta",
+      "propsSchema": "#/$defs/StatTileProps"
+    },
+    {
+      "name": "Table",
+      "group": "Data",
+      "description": "Header row and body rows",
+      "propsSchema": "#/$defs/TableProps"
+    },
+    {
+      "name": "List",
+      "group": "Data",
+      "description": "Bulleted list of strings",
+      "propsSchema": "#/$defs/ListProps"
+    },
+    {
+      "name": "Bar",
+      "group": "Charts",
+      "description": "Bar chart of one numeric series",
+      "propsSchema": "#/$defs/BarProps"
+    },
+    {
+      "name": "Callout",
+      "group": "Feedback",
+      "description": "Tinted note band",
+      "propsSchema": "#/$defs/CalloutProps"
+    },
+    {
+      "name": "Badge",
+      "group": "Feedback",
+      "description": "Small status chip",
+      "propsSchema": "#/$defs/BadgeProps"
+    },
+    {
+      "name": "ProgressBar",
+      "group": "Feedback",
+      "description": "Determinate progress bar",
+      "propsSchema": "#/$defs/ProgressBarProps"
+    },
+    {
+      "name": "Button",
+      "group": "Forms",
+      "description": "Action button",
+      "propsSchema": "#/$defs/ButtonProps"
+    },
+    {
+      "name": "Form",
+      "group": "Forms",
+      "description": "Named text fields and one submit action",
+      "propsSchema": "#/$defs/FormProps"
+    },
+    {
+      "name": "Compare",
+      "group": "Data",
+      "description": "Filter and select grounded options",
+      "propsSchema": "#/$defs/CompareProps"
+    },
+    {
+      "name": "Timeline",
+      "group": "Data",
+      "description": "Ordered milestones and progress",
+      "propsSchema": "#/$defs/TimelineProps"
+    },
+    {
+      "name": "Sources",
+      "group": "Data",
+      "description": "Grounded source links",
+      "propsSchema": "#/$defs/SourcesProps"
+    },
+    {
+      "name": "ActionPreview",
+      "group": "Forms",
+      "description": "Review and explicitly confirm an action",
+      "propsSchema": "#/$defs/ActionPreviewProps"
+    }
+  ],
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 2
+    },
+    "id": {
+      "$ref": "#/$defs/Identifier"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "root": {
+      "$ref": "#/$defs/Identifier"
+    },
+    "elements": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/Identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/Element"
+      },
+      "minProperties": 1,
+      "maxProperties": 128
+    },
+    "state": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/Identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/ElementState"
+      },
+      "maxProperties": 128
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "id",
+    "revision",
+    "root",
+    "elements",
+    "state"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Text": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "SafeKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "not": {
+        "enum": [
+          "__proto__",
+          "constructor",
+          "prototype"
+        ]
+      }
+    },
+    "Identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+      "not": {
+        "enum": [
+          "__proto__",
+          "constructor",
+          "prototype"
+        ]
+      }
+    },
+    "Scalar": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Text"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "JsonValue": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Scalar"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "maxItems": 128
+        },
+        {
+          "$ref": "#/$defs/JsonObject"
+        }
+      ]
+    },
+    "JsonObject": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/SafeKey"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "maxProperties": 128
+    },
+    "ElementState": {
+      "type": "object",
+      "properties": {
+        "selected": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "filter": {
+          "$ref": "#/$defs/Text"
+        },
+        "fields": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/SafeKey"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/Text"
+          },
+          "maxProperties": 128
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "CompareDetail": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "$ref": "#/$defs/Text"
+        },
+        "value": {
+          "$ref": "#/$defs/Text"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "CompareItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "label": {
+          "$ref": "#/$defs/Text"
+        },
+        "description": {
+          "$ref": "#/$defs/Text"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CompareDetail"
+          },
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "TimelineItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "label": {
+          "$ref": "#/$defs/Text"
+        },
+        "description": {
+          "$ref": "#/$defs/Text"
+        },
+        "time": {
+          "$ref": "#/$defs/Text"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "active",
+            "done"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "SourceItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "label": {
+          "$ref": "#/$defs/Text"
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^https?://[^\\s/?#]+(?:[/?#][^\\s]*)?$"
+        },
+        "description": {
+          "$ref": "#/$defs/Text"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "StackProps": {
+      "type": "object",
+      "properties": {
+        "direction": {
+          "enum": [
+            "column",
+            "row",
+            "grid"
+          ]
+        },
+        "gap": {
+          "enum": [
+            "s",
+            "m",
+            "l"
+          ]
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "CardProps": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/Text"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "StatTileProps": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "$ref": "#/$defs/Text"
+        },
+        "value": {
+          "$ref": "#/$defs/Text"
+        },
+        "delta": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "TableProps": {
+      "type": "object",
+      "properties": {
+        "columns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Text"
+          },
+          "maxItems": 128
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Scalar"
+            },
+            "maxItems": 128
+          },
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "columns",
+        "rows"
+      ],
+      "additionalProperties": false
+    },
+    "ListProps": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Text"
+          },
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "BarProps": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 128
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Text"
+          },
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "CalloutProps": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/Text"
+        },
+        "tone": {
+          "enum": [
+            "info",
+            "ok",
+            "warn",
+            "danger",
+            "neutral"
+          ]
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "BadgeProps": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/Text"
+        },
+        "tone": {
+          "enum": [
+            "info",
+            "ok",
+            "warn",
+            "danger",
+            "neutral"
+          ]
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "ProgressBarProps": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "number"
+        },
+        "label": {
+          "$ref": "#/$defs/Text"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "ButtonProps": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "$ref": "#/$defs/Text"
+        },
+        "action": {
+          "$ref": "#/$defs/Text"
+        },
+        "tone": {
+          "enum": [
+            "primary",
+            "danger"
+          ]
+        }
+      },
+      "required": [
+        "label",
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "FormProps": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SafeKey"
+          },
+          "maxItems": 128,
+          "uniqueItems": true
+        },
+        "action": {
+          "$ref": "#/$defs/Text"
+        },
+        "submit": {
+          "$ref": "#/$defs/Text"
+        },
+        "title": {
+          "$ref": "#/$defs/Text"
+        }
+      },
+      "required": [
+        "fields",
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "CompareProps": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/Text"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CompareItem"
+          },
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "TimelineProps": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/Text"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TimelineItem"
+          },
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "SourcesProps": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/Text"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceItem"
+          },
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "ActionPreviewProps": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/Text"
+        },
+        "action": {
+          "$ref": "#/$defs/Text"
+        },
+        "label": {
+          "$ref": "#/$defs/Text"
+        },
+        "description": {
+          "$ref": "#/$defs/Text"
+        },
+        "payload": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SafeKey"
+          },
+          "maxItems": 128,
+          "uniqueItems": true
+        },
+        "selectionFrom": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "selectionField": {
+          "$ref": "#/$defs/SafeKey"
+        },
+        "confirmLabel": {
+          "$ref": "#/$defs/Text"
+        }
+      },
+      "required": [
+        "title",
+        "action",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "Element": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "Stack"
+            },
+            "props": {
+              "$ref": "#/$defs/StackProps"
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Identifier"
+              },
+              "maxItems": 128,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "type",
+            "props",
+            "children"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "Card"
+            },
+            "props": {
+              "$ref": "#/$defs/CardProps"
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Identifier"
+              },
+              "maxItems": 128,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "type",
+            "props",
+            "children"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "StatTile"
+            },
+            "props": {
+              "$ref": "#/$defs/StatTileProps"
+            }
+          },
+          "required": [
+            "type",
+            "props"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "Table"
+            },
+            "props": {
+              "$ref": "#/$defs/TableProps"
+            }
+          },
+          "required": [
+            "type",
+            "props"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "List"
+            },
+            "props": {
+              "$ref": "#/$defs/ListProps"
+            }
+          },
+          "required": [
+            "type",
+            "props"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "Bar"
+            },
+            "props": {
+              "$ref": "#/$defs/BarProps"
+            }
+          },
+          "required": [
+            "type",
+            "props"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "Callout"
+            },
+            "props": {
+              "$ref": "#/$defs/CalloutProps"
+            }
+          },
+          "required": [
+            "type",
+            "props"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "Badge"
+            },
+            "props": {
+              "$ref": "#/$defs/BadgeProps"
+            }
+          },
+          "required": [
+            "type",
+            "props"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ProgressBar"
+            },
+            "props": {
+              "$ref": "#/$defs/ProgressBarProps"
+            }
+          },
+          "required": [
+            "type",
+            "props"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "Button"
+            },
+            "props": {
+              "$ref": "#/$defs/ButtonProps"
+            }
+          },
+          "required": [
+            "type",
+            "props"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "Form"
+            },
+            "props": {
+              "$ref": "#/$defs/FormProps"
+            }
+          },
+          "required": [
+            "type",
+            "props"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "Compare"
+            },
+            "props": {
+              "$ref": "#/$defs/CompareProps"
+            }
+          },
+          "required": [
+            "type",
+            "props"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "Timeline"
+            },
+            "props": {
+              "$ref": "#/$defs/TimelineProps"
+            }
+          },
+          "required": [
+            "type",
+            "props"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "Sources"
+            },
+            "props": {
+              "$ref": "#/$defs/SourcesProps"
+            }
+          },
+          "required": [
+            "type",
+            "props"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ActionPreview"
+            },
+            "props": {
+              "$ref": "#/$defs/ActionPreviewProps"
+            }
+          },
+          "required": [
+            "type",
+            "props"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

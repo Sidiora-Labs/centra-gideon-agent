@@ -16,6 +16,31 @@ from gideon.integrations.mcp_core import _resolve_session_key
 logger = logging.getLogger(__name__)
 
 
+def _genui_authoring_description() -> str:
+    from gideon.workspace.genui_v2 import genui_v2_prompt
+
+    return (
+        "Prepared native GenUI or legacy data/UISpec. A candidate may add group to declare "
+        "2 to 4 complete same-fact component alternatives; use at most 6 groups. Ungrouped "
+        "candidates are mandatory. Jev chooses exactly one supplied alternative per group. "
+        + genui_v2_prompt()
+    )
+
+
+def _genui_prepared_schema() -> dict[str, Any]:
+    from gideon.workspace.genui_prepare import prepared_input_schema
+
+    schema = prepared_input_schema()
+    schema.pop("$defs")
+    return schema
+
+
+def _genui_catalog_defs() -> dict[str, Any]:
+    from gideon.workspace.genui_v2 import genui_v2_schema
+
+    return genui_v2_schema()["$defs"]
+
+
 def _current_project_id() -> str:
     """The Project this save scopes under (S5), resolved for BOTH runtimes.
 
@@ -473,6 +498,17 @@ def _list_tools() -> list[dict[str, Any]]:
         {
             "name": "visualize",
             "description": (
+                "For stateful native interfaces, prepare grounded data as {genui: "
+                "{id,revision,goal,candidates:[{id,type,props,group?}],state?,layouts?}}. "
+                "Use stable presentation/element IDs and increment revision for updates. "
+                "Supply complete real content and existing actions. Candidates without group are "
+                "mandatory. An optional group declares 2 to 4 component alternatives containing "
+                "the same facts; use at most 6 groups. Jev selects one supplied alternative per "
+                "group plus layout/order, and never authors content or actions. "
+                "Compare filters/selects locally; Sources links to evidence; Timeline shows progress; "
+                "ActionPreview edits supplied fields and requires confirmation before dispatch. "
+                "Layouts are stack, cards, grid. A valid source-order fallback is returned if Jev "
+                "is unavailable; report its decision status honestly. "
                 "Turn structured DATA into a generative-UI widget (charts, stat tiles, "
                 "tables, callouts) rendered inline — the agency-free two-step pattern: you "
                 "produce the data, this separate no-tools step renders it. Pass `data` (a "
@@ -487,10 +523,15 @@ def _list_tools() -> list[dict[str, Any]]:
                 "is invented. Unsupported actions remain unavailable."
             ),
             "inputSchema": {
+                "$defs": _genui_catalog_defs(),
                 "type": "object",
                 "properties": {
                     "data": {
-                        "description": "Data to visualize, or an explicit generative_ui v1 envelope with a real recordId and complete template bindings",
+                        "description": _genui_authoring_description(),
+                        "anyOf": [
+                            {"type": "object", "properties": {"genui": _genui_prepared_schema()}, "required": ["genui"], "additionalProperties": False},
+                            {"not": {"type": "object", "required": ["genui"]}},
+                        ],
                     },
                     "hint": {
                         "type": "string",
@@ -1075,14 +1116,7 @@ def regenerate_image_at_slug(
 
 
 def _visualize(args: dict[str, Any], _audit: Any) -> str:
-    """`visualize` — the agency-free data→genui-widget primitive (AMBIENT-SURFACES §5.3).
-
-    Thin wrapper over ``gideon.workspace.visualize.visualize`` (the ONE reasoning-axis
-    ``one_shot_completion`` call site — tools disabled by construction). Its degraded
-    floor (assistant_reasoning): no model → no visualization produced, and the caller
-    keeps the raw data — so this returns an honest, actionable message rather than
-    fabricating a widget.
-    """
+    """Render the shared primitive and expose selection or fallback status."""
     from gideon.workspace.visualize import visualize as _visualize_primitive
 
     if "data" not in args:
@@ -1104,8 +1138,11 @@ def _visualize(args: dict[str, Any], _audit: Any) -> str:
         _audit("error", error="empty visualization")
         return "Error: the model produced no renderable components. Present the data as text instead."
     _audit("success")
+    status = f"Presentation decision: {result.decision_source}."
+    if result.decision_reason:
+        status += f" {result.decision_reason}"
     return (
-        "Show this to the user by embedding the widget block below in your reply:\n\n"
+        f"{status}\nShow this to the user by embedding the widget block below in your reply:\n\n"
         f"{result.widget}"
     )
 

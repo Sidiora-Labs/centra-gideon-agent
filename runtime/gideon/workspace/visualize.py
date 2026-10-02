@@ -1,24 +1,15 @@
-"""``visualize(data, hint)`` — the one agency-free generative-UI primitive
-(AMBIENT-SURFACES §5.3).
+"""Render grounded native candidates through bounded Jev presentation decisions.
 
-The two-step pattern: a reasoning agent produces *data*; this SEPARATE, no-tools
-step renders it into a genui widget spec. It is "agency-free" by construction — it
-resolves through :func:`one_shot_completion` on the **reasoning** use-case axis,
-which builds a plain model provider (never the NativeAgentRuntime that ``chat``/
-``code_tools`` return), so there are no tools to call: it can only turn data into a
-widget spec, never act. Output is constrained to the registry DSL (``genui.py``'s
-catalog) and validated FE-side per §5.2 (unknown/invalid lines drop, never crash).
-
-One shared mechanism behind every producer — the ``visualize`` MCP tool, the
-WORKFLOWS-V2 ``visualize`` node, cockpit summaries, tiles, digests, "chart this"
-chat asks. Keeping the single ``one_shot_completion`` call here (not duplicated in
-each caller) is why only THIS file appears in the degraded-contract lint map.
+Prepared GenUI uses deterministic assembly and a truthful source-order fallback.
+Legacy DSL and explicit UISpec records retain the no-tools reasoning completion
+path shared by chat, workflow and tile producers.
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from html import escape
 from typing import Any
 
 from gideon.workspace.genui import library_prompt, uispec_library_prompt, validate_uispec_envelope
@@ -31,6 +22,8 @@ class Visualization:
 
     dsl: str
     widget: str
+    decision_source: str = "legacy"
+    decision_reason: str = ""
 
 
 def _coerce_data(data: Any) -> str:
@@ -87,7 +80,7 @@ def _clean_dsl(text: str) -> str:
 
 
 def _wrap_widget(dsl: str, title: str, kind: str = "genui") -> str:
-    safe_title = (title or "Visualization").replace('"', "'")
+    safe_title = escape(title or "Visualization", quote=True)
     return f'<widget kind="{kind}" title="{safe_title}">\n{dsl}\n</widget>'
 
 
@@ -98,13 +91,21 @@ async def visualize(
     title: str = "Visualization",
     completion: Any = None,
 ) -> Visualization:
-    """Turn ``(data, hint)`` into a genui widget spec, agency-free.
+    """Render prepared GenUI, legacy DSL data, or an explicit UISpec record.
 
-    ``completion`` is injected so tests (and the WF2 executor) can drive this
-    without a live provider; production leaves it ``None`` and this resolves
-    :func:`one_shot_completion` on the reasoning axis. Raises on a provider/model
-    failure (the caller maps it to its own surface's degraded floor: no
-    visualization produced, the raw data still available)."""
+    ``completion`` remains the legacy reasoning-path dependency. Prepared GenUI
+    always uses the bounded decision transport and reports its decision source.
+    Invalid grounded input is refused before selection.
+    """
+    if isinstance(data, dict) and "genui" in data:
+        from gideon.workspace.genui_prepare import render_prepared_genui
+
+        if set(data) != {"genui"}:
+            raise ValueError("Prepared GenUI must be the sole data envelope.")
+        envelope, source, reason = await render_prepared_genui(data["genui"])
+        body = json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
+        body = body.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+        return Visualization(dsl=body, widget=_wrap_widget(body, title), decision_source=source, decision_reason=reason)
     prompt = _build_prompt(data, hint)
     if completion is not None:
         text = await completion(prompt, use_case="reasoning")
