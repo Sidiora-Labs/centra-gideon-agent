@@ -1131,6 +1131,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypermid-role-compaction"
+version = "0.1.0"
+dependencies = [
+ "hypermid-contracts",
+ "hypermid-role-harness",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "hypermid-role-compaction-conformance"
+version = "0.1.0"
+dependencies = [
+ "hypermid-contracts",
+ "hypermid-role-compaction",
+ "hypermid-role-harness",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "hypermid-role-harness"
 version = "0.1.0"
 dependencies = [
@@ -1187,6 +1212,31 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "hypermid-role-transform"
+version = "0.1.0"
+dependencies = [
+ "hypermid-contracts",
+ "hypermid-role-harness",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "hypermid-role-transform-conformance"
+version = "0.1.0"
+dependencies = [
+ "hypermid-contracts",
+ "hypermid-role-harness",
+ "hypermid-role-transform",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]

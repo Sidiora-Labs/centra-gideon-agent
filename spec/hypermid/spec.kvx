@@ -196,7 +196,7 @@ touches = ["crates/hypermid-role-harness/Cargo.toml", "crates/hypermid-role-harn
 verify_cmd = "cargo test -p hypermid-role-harness -p hypermid-role-tool-conformance -p hypermid-role-runner-conformance --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_roles.py"
 [task.base-08]
 title = "Compaction, transform, and OSS foundation integration"
-status = "pending"
+status = "done"
 wave = 8
 owner_lane = "foundation"
 requires = ["wave-7-close"]

@@ -1,0 +1,19 @@
+[package]
+name = "hypermid-role-transform-conformance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hypermid-contracts = { path = "../hypermid-contracts" }
+hypermid-role-harness = { path = "../hypermid-role-harness" }
+hypermid-role-transform = { path = "../hypermid-role-transform" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true
+

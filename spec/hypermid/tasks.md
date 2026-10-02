@@ -25,7 +25,7 @@
 - [x] base-07. Tool and runner role protocols
   - _Requirements: base-tool-role.1, base-tool-role.2, base-tool-role.3, base-runner-role.1, base-runner-role.2, base-runner-role.3_
 
-- [ ] base-08. Compaction, transform, and OSS foundation integration
+- [x] base-08. Compaction, transform, and OSS foundation integration
   - _Requirements: base-context-roles.1, base-context-roles.2, base-context-roles.3_
 
 - [x] ctx-background-summary. Implement leased background summarization
