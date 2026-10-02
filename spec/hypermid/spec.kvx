@@ -396,7 +396,7 @@ ac_2 = "Direct and relay reconnect scenarios enforce grants and settle committed
 verify_cmd = "cargo test -p hypermid-transport && cargo test -p hypermid-bus --test recovery && cargo test -p hypermid-daemon --test federation"
 [task.fab-07-registry-service]
 title = "Implement owned install update and service lifecycle"
-status = "pending"
+status = "done"
 wave = 7
 owner_lane = "fabric"
 requires = ["wave-6-close"]

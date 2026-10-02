@@ -1,0 +1,38 @@
+{
+  "task": "fab-07-registry-service",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-registry --test lifecycle",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-registry --test lifecycle"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-registry/Cargo.toml": "9f45998d723ea671678702431a77b94ed301093d9f923a9c763d1ac081f290ed",
+    "crates/hypermid-registry/src/activation.rs": "ba2e34b1868c3cca273e5f21cf5ae6328e3cc3c82b1f8d6d2d2ba3da5ec21b3c",
+    "crates/hypermid-registry/src/lib.rs": "d6169f61a44b0baaa6ccc8461a453723957ddd54e24e78b6e6c069181b76d847",
+    "crates/hypermid-registry/src/ownership.rs": "99df6d46f81e218b8811b40710b68353a4feebfbf119a678634672696a089026",
+    "crates/hypermid-registry/src/release_index.rs": "9b991682e17869fb07197e4e1a9c49763efb9d31299387b8c3f21f279b0d96e2",
+    "crates/hypermid-registry/src/service/linux.rs": "3b47cc2a65e500a984a8866686c228f315155d519d99ff41262a9e3dcd99bbfd",
+    "crates/hypermid-registry/src/service/macos.rs": "ca29b6b39c4fa58860ea04212df776318510bdcae80a3cab9eb699a1b293dd33",
+    "crates/hypermid-registry/src/service/mod.rs": "0d8c043953b2ad54d2a66071fa7ad3950e7308468ca1e94cee39aceaadb37618",
+    "crates/hypermid-registry/src/service/windows.rs": "45a1182a374ab66dedc0e104205f02ca97d22133e0de7de55111b80cab5fed12",
+    "crates/hypermid-registry/tests/lifecycle.rs": "b134bfac836c71c15c057dc317852ff9a45955c86bf100111cfd1f36e99629ba"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-registry/Cargo.toml": "9f45998d723ea671678702431a77b94ed301093d9f923a9c763d1ac081f290ed",
+    "crates/hypermid-registry/src/activation.rs": "7fe65594865d17b366905ee3b2a649d7583509da03a00793cfa09addde4cf7f2",
+    "crates/hypermid-registry/src/lib.rs": "d6169f61a44b0baaa6ccc8461a453723957ddd54e24e78b6e6c069181b76d847",
+    "crates/hypermid-registry/src/ownership.rs": "99df6d46f81e218b8811b40710b68353a4feebfbf119a678634672696a089026",
+    "crates/hypermid-registry/src/release_index.rs": "9b991682e17869fb07197e4e1a9c49763efb9d31299387b8c3f21f279b0d96e2",
+    "crates/hypermid-registry/src/service/linux.rs": "3b47cc2a65e500a984a8866686c228f315155d519d99ff41262a9e3dcd99bbfd",
+    "crates/hypermid-registry/src/service/macos.rs": "ca29b6b39c4fa58860ea04212df776318510bdcae80a3cab9eb699a1b293dd33",
+    "crates/hypermid-registry/src/service/mod.rs": "0d8c043953b2ad54d2a66071fa7ad3950e7308468ca1e94cee39aceaadb37618",
+    "crates/hypermid-registry/src/service/windows.rs": "45a1182a374ab66dedc0e104205f02ca97d22133e0de7de55111b80cab5fed12",
+    "crates/hypermid-registry/tests/lifecycle.rs": "b134bfac836c71c15c057dc317852ff9a45955c86bf100111cfd1f36e99629ba"
+  },
+  "scope": "Focused task acceptance with real signed bytes, durable filesystem lifecycle, and native process behavior; aggregate release certification remains separate.",
+  "source_adjustments": [
+    "Current source preserves qualified activation, ownership recording, and digest-safe uninstall and adds only the ArtifactStore reviewed-pin deactivation wrapper; exact bytes were source-bound compiled and wired into the actual daemon lifecycle route."
+  ]
+}

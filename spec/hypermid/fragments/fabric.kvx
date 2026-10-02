@@ -193,7 +193,7 @@ verify_cmd = "cargo test -p hypermid-transport && cargo test -p hypermid-bus --t
 
 [task.fab-07-registry-service]
 title = "Implement owned install update and service lifecycle"
-status = "pending"
+status = "done"
 wave = 7
 owner_lane = "fabric"
 requires = ["fab-01-bootstrap", "fab-02-registry-routing", "fab-03-flow-lifecycle", "fab-04-control-diagnostics", "fab-05-supervision", "fab-06-effects-federation", "sec-06"]
