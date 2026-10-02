@@ -236,7 +236,7 @@
   - Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance.
   - _Requirements: wave-5.1, wave-5.2_
 
-- [ ] wave-6-close. Qualify vertical slice: Durable events and optional remote access
+- [x] wave-6-close. Qualify vertical slice: Durable events and optional remote access
   - Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths.
   - Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance.
   - _Requirements: wave-6.1, wave-6.2_

@@ -1,0 +1,18 @@
+{
+  "task": "wave-6-close",
+  "status": "passed",
+  "declared_command": "python -m pytest checks/hypermid/waves/test_wave_06.py -q",
+  "recorded_portable_commands": [],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/hypermid/verify_wave_06.py": "109c23aca560c60f39db0bbb72ad7c71b8ce3bb2f31e623f91029d4ec247003a",
+    "checks/hypermid/waves/test_wave_06.py": "f4d47f970fd6a9dcb0d75c000f23e105b59ba8199ea1e8be44ba790780b96517"
+  },
+  "tested_source_sha256": {
+    "checks/hypermid/verify_wave_06.py": "109c23aca560c60f39db0bbb72ad7c71b8ce3bb2f31e623f91029d4ec247003a",
+    "checks/hypermid/waves/test_wave_06.py": "f4d47f970fd6a9dcb0d75c000f23e105b59ba8199ea1e8be44ba790780b96517"
+  },
+  "scope": "Durable bus and federation phases passed; the repaired Docker remote-execution phase passed separately. Evidence composes these actual phase runs without claiming a fresh whole-run execution. Rendered mobile geometry and screen-reader runtime remain unverified.",
+  "source_adjustments": []
+}

@@ -90,7 +90,7 @@ ac_2 = "Expired grants, wrong owner, stale route epoch and replayed delivery are
 
 [task.wave-6-close]
 title = "Qualify vertical slice: Durable events and optional remote access"
-status = "pending"
+status = "done"
 wave = 6
 owner_lane = "integration"
 requires = []
