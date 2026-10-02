@@ -107,7 +107,7 @@ ac_2 = "Interrupted migrations resume safely, incompatible downgrades refuse, de
 
 [task.wave-7-close]
 title = "Qualify vertical slice: Lifecycle and native administration"
-status = "pending"
+status = "done"
 wave = 7
 owner_lane = "integration"
 requires = []

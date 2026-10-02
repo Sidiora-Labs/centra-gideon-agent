@@ -241,7 +241,7 @@
   - Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance.
   - _Requirements: wave-6.1, wave-6.2_
 
-- [ ] wave-7-close. Qualify vertical slice: Lifecycle and native administration
+- [x] wave-7-close. Qualify vertical slice: Lifecycle and native administration
   - Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths.
   - Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance.
   - _Requirements: wave-7.1, wave-7.2_

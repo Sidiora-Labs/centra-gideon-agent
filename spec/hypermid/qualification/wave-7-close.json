@@ -1,0 +1,24 @@
+{
+  "task": "wave-7-close",
+  "status": "passed",
+  "declared_command": "python -m pytest checks/hypermid/waves/test_wave_07.py -q",
+  "recorded_portable_commands": [
+    "PYTHONPATH=runtime python -m pytest -q checks/hypermid/waves/test_wave_07.py"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/hypermid/verify_wave_07.py": "bf54878d2c00d437d06b36cf1e7e828bc8fa8c18120b9c066f8f579fe2258b49",
+    "checks/hypermid/waves/test_wave_07.py": "ee9ba3084620812da783716ba86ee1602afbdf58a3d23634be7231500d7377bc",
+    "checks/hypermid/migration_observed_matrix.py": "8f7504f3a080da4704eb85198fe61da3f45b07672b83773e07565a449f2034fe"
+  },
+  "tested_source_sha256": {
+    "checks/hypermid/verify_wave_07.py": "bf54878d2c00d437d06b36cf1e7e828bc8fa8c18120b9c066f8f579fe2258b49",
+    "checks/hypermid/waves/test_wave_07.py": "ee9ba3084620812da783716ba86ee1602afbdf58a3d23634be7231500d7377bc",
+    "checks/hypermid/migration_observed_matrix.py": "8f7504f3a080da4704eb85198fe61da3f45b07672b83773e07565a449f2034fe"
+  },
+  "scope": "Actual authenticated Wave 7 migration, portability, lifecycle, security, administration, restart recovery, and source-bound evidence journey through the sealed daemon.",
+  "source_adjustments": [
+    "Contentless FTS assertions use the canonical rowid mapping table for exact token and record identity before deletion and after restored restart."
+  ]
+}
