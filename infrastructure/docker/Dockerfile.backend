@@ -108,6 +108,7 @@ RUN npm ci --workspace=apps/console --prefer-offline && \
 COPY apps/console/ apps/console/
 COPY apps/assistant/ apps/assistant/
 COPY runtime/gideon/security/scan_rule_gloss.json runtime/gideon/security/scan_rule_gloss.json
+COPY runtime/gideon/workspace/genui_v2_catalog.json runtime/gideon/workspace/genui_v2_catalog.json
 RUN npm exec --workspace=apps/console -- vite build
 
 FROM runtime AS single
