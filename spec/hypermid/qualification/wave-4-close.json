@@ -1,0 +1,34 @@
+{
+  "task": "wave-4-close",
+  "status": "passed",
+  "declared_command": "python -m pytest checks/hypermid/waves/test_wave_04.py -q",
+  "recorded_portable_commands": [],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/hypermid/verify_wave_04.py": "eaa3626ad9fd3fd35195d76260225848bc92940d56f0560c00161f504e3b6411",
+    "checks/hypermid/waves/wave_04.py": "174953c76473a8d10513aadfae73db5b6ab4b276e0150999229df4cb1fc01ca7",
+    "checks/hypermid/waves/test_wave_04.py": "cf44cb89470dd2cf859452c85ec0f274bb8f352db82b3d4324471685b0e2bb7f"
+  },
+  "tested_source_sha256": {
+    "checks/hypermid/verify_wave_04.py": "eaa3626ad9fd3fd35195d76260225848bc92940d56f0560c00161f504e3b6411",
+    "checks/hypermid/waves/wave_04.py": "174953c76473a8d10513aadfae73db5b6ab4b276e0150999229df4cb1fc01ca7",
+    "checks/hypermid/waves/test_wave_04.py": "cf44cb89470dd2cf859452c85ec0f274bb8f352db82b3d4324471685b0e2bb7f",
+    "checks/hypermid/verify_security_acceptance.py": "41dd5777a95d1c44984210fca23cf90102ee69603cac096575cd851c71dfe6eb",
+    "runtime/gideon/hypermid/background_coordinator.py": "cf05b79f1b2c4cc65041b8f3733f098575d5d02a3ac502a4a8f40d9d6946f56a",
+    "runtime/gideon/hypermid/maintenance.py": "26c6e06bc71a42be95b038008541d5432111c8a048409f5e9142b5f39127d25d",
+    "runtime/gideon/hypermid/memory_client.py": "e6b1334fb034c2bfd0178e901e2115500fbf15500f5da2ee04c9fec80390a60c",
+    "runtime/gideon/hypermid/contracts.py": "4e836a895cc22af8860ad65da2fb4dd1c6f9fbc017c7cb2804376beec2a604a1",
+    "runtime/gideon/hypermid/usage.py": "88c3a88b2f60352d0be15b38dbe1e0a49ca4b4c906080f024d18a144f0e2cf1d",
+    "runtime/gideon/hypermid/budgets.py": "c954dacbdfc3b790df187b987eb4964f6cdb25b4aafe07d00784add012960c11",
+    "crates/hypermid-memory/src/maintenance.rs": "0e53fad2cd1fb793070fdb55846773e08c8a4b93ca771af24aa682d08202954f",
+    "crates/hypermid-memory/src/sharing.rs": "8449588e3c2d2bced905eb1c27e27f18a98e3b3bb1a895f9c7dbac2c23a5dd1f",
+    "crates/hypermid-memory/src/invalidation.rs": "63771359001d6645a4d687576790c5bf4597beff1e2a33b1da570a07f6ea8dff",
+    "crates/hypermid-daemon/src/memory_routes.rs": "9463e53c63d6e9462698489594022730560a02ee72a1f4b769f413a78effb67f"
+  },
+  "scope": "The actual Wave 4 vertical journey through the immutable daemon, scheduled knowledge and history maintenance, one bounded live provider call, atomic publication, denial paths, and unresolved-cost accounting.",
+  "source_adjustments": [
+    "Only the exact qualified Wave 4 acceptance entrypoint, journey, and wrapper are publication-overridden.",
+    "Shared production sources remain at their newer repository versions; their exact tested hashes are retained as qualification evidence."
+  ]
+}

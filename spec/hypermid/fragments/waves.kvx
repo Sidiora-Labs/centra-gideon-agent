@@ -56,7 +56,7 @@ ac_2 = "Cancellation, stale content hashes, exceeded budget and foreign ownershi
 
 [task.wave-4-close]
 title = "Qualify vertical slice: Budgeted background knowledge maintenance"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "integration"
 requires = []
