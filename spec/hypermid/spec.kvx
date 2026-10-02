@@ -1437,7 +1437,7 @@ ac_2 = "A forced interruption at each declared publication boundary leaves eithe
 
 [task.wave-2-close]
 title = "Qualify vertical slice: Durable project continuity"
-status = "pending"
+status = "done"
 wave = 2
 owner_lane = "integration"
 requires = ["int-02"]

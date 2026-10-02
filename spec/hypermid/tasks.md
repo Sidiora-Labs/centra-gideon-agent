@@ -216,7 +216,7 @@
   - Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance.
   - _Requirements: wave-1.1, wave-1.2_
 
-- [ ] wave-2-close. Qualify vertical slice: Durable project continuity
+- [x] wave-2-close. Qualify vertical slice: Durable project continuity
   - Implement the declared vertical user journey with the actual OSS runtime, stores and module processes, including failure and recovery paths.
   - Record source-bound results using the evidence contract; do not substitute a schema check or synthetic success for runtime acceptance.
   - _Requirements: wave-2.1, wave-2.2_
