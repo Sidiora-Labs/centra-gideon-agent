@@ -1,0 +1,24 @@
+{
+  "task": "ctx-tier-decay",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-context --test tier_decay",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-context --test tier_decay"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-context/src/tier_selector.rs": "f6ae248ceafa6f8ed4ceeaa378c835582b0bc41fb6804a660d79c74e9a7fa9c2",
+    "crates/hypermid-context/tests/tier_decay.rs": "6b069b15a1f3fc92c9217b962a431948c3948f9fb27f1cb2123421988496a224",
+    "crates/hypermid-core/src/budget.rs": "9ead2303d4b5148bc5d849db00181aad64190e6f436a2ee3eb9557a512098664",
+    "crates/hypermid-core/src/decay.rs": "20e2044c7bc3720a1bac0d6e53b600ced12f13ef86dc77c37c1c1cb2e949676d"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-context/src/tier_selector.rs": "f6ae248ceafa6f8ed4ceeaa378c835582b0bc41fb6804a660d79c74e9a7fa9c2",
+    "crates/hypermid-context/tests/tier_decay.rs": "6b069b15a1f3fc92c9217b962a431948c3948f9fb27f1cb2123421988496a224",
+    "crates/hypermid-core/src/budget.rs": "9ead2303d4b5148bc5d849db00181aad64190e6f436a2ee3eb9557a512098664",
+    "crates/hypermid-core/src/decay.rs": "20e2044c7bc3720a1bac0d6e53b600ced12f13ef86dc77c37c1c1cb2e949676d"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}

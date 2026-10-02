@@ -600,7 +600,7 @@ touches = ["crates/hypermid-core/src/cache.rs", "crates/hypermid-context/src/cac
 verify_cmd = "cargo test -p hypermid-context --test cache_policy && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_cache_policy.py"
 [task.ctx-tier-decay]
 title = "Implement budgeted historical tier decay"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "context"
 requires = ["ctx-cache-policy"]

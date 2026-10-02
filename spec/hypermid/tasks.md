@@ -79,7 +79,7 @@
 - [ ] ctx-subagents. Implement isolated subagent context snapshots
   - _Requirements: ctx-subagents.1, ctx-subagents.2, ctx-subagents.3_
 
-- [ ] ctx-tier-decay. Implement budgeted historical tier decay
+- [x] ctx-tier-decay. Implement budgeted historical tier decay
   - _Requirements: ctx-tier-decay.1, ctx-tier-decay.2_
 
 - [x] fab-01-bootstrap. Implement authenticated framing minimal daemon and passthrough adapter
