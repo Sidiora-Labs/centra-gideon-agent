@@ -67,7 +67,7 @@ ac_3 = "The native console and CLI inspect the active writer, cursor, digest, ca
 
 [task.int-03]
 title = "Implement integration slice 3: cache policy, hybrid recall and native inspection"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "integration"
 requires = ["int-02", "ctx-reclaim", "mem-embedding", "mem-retrieval", "fab-03-flow-lifecycle", "ux-configuration"]

@@ -112,7 +112,7 @@
 - [x] int-02. Implement integration slice 2: durable summaries, full memory CRUD, raw recovery and opt-in ownership
   - _Requirements: int-02.1, int-02.2, int-02.3, int-02.4_
 
-- [ ] int-03. Implement integration slice 3: cache policy, hybrid recall and native inspection
+- [x] int-03. Implement integration slice 3: cache policy, hybrid recall and native inspection
   - _Requirements: int-03.1, int-03.2, int-03.3_
 
 - [ ] int-04. Implement integration slice 4: background maintenance, notes, Git context and budgets

@@ -1,0 +1,33 @@
+{
+  "task": "int-03",
+  "status": "passed",
+  "declared_command": "PYTHONPATH=runtime python checks/hypermid/verify_wave_03.py",
+  "recorded_portable_commands": [],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "runtime/gideon/hypermid/inspect.py": "25d9aa5546f10179445fa999e59a1989f5cf7880738868fe9174b7b017034684",
+    "runtime/gideon/cognition/context.py": "7a99c318f172f6a9bfd6c548fa3a9687ba2cf09739c48c70e1f97cbbea2a709a",
+    "runtime/gideon/cognition/context_headroom.py": "48fe568180a5412a257bd8c925444a2186ce1e4c94cbd71e23ad8ed8c3a5ea0f",
+    "runtime/gideon/cognition/vector_memory.py": "b6f991f99aa7f5b295d569f62a1ea9892c432de92d0ddfb9e1304bd21852da2c",
+    "runtime/gideon/integrations/llm/prompt_cache.py": "707e380053bccba1d12b84b31e683ed8fa39f7f1f0c47630ff10f72e9ad58ac1",
+    "checks/hypermid/verify_wave_03.py": "01ed0e57a1b733cd1e16816912c3ea7b9d3a0b696bf8099e320c1a0e4166b11e",
+    "checks/hypermid/waves/wave_03.py": "63fa3cc7944eb3d167a6280e3f7972d0603c54b07080f3172a2152b378704666",
+    "checks/hypermid/waves/test_wave_03.py": "196aa5aa71b74850132fd2504891f4779fe609e505377168995a7d994b4a3814"
+  },
+  "tested_source_sha256": {
+    "runtime/gideon/hypermid/inspect.py": "25d9aa5546f10179445fa999e59a1989f5cf7880738868fe9174b7b017034684",
+    "runtime/gideon/cognition/context.py": "7a99c318f172f6a9bfd6c548fa3a9687ba2cf09739c48c70e1f97cbbea2a709a",
+    "runtime/gideon/cognition/context_headroom.py": "48fe568180a5412a257bd8c925444a2186ce1e4c94cbd71e23ad8ed8c3a5ea0f",
+    "runtime/gideon/cognition/vector_memory.py": "b6f991f99aa7f5b295d569f62a1ea9892c432de92d0ddfb9e1304bd21852da2c",
+    "runtime/gideon/integrations/llm/prompt_cache.py": "707e380053bccba1d12b84b31e683ed8fa39f7f1f0c47630ff10f72e9ad58ac1",
+    "checks/hypermid/verify_wave_03.py": "01ed0e57a1b733cd1e16816912c3ea7b9d3a0b696bf8099e320c1a0e4166b11e",
+    "checks/hypermid/waves/wave_03.py": "63fa3cc7944eb3d167a6280e3f7972d0603c54b07080f3172a2152b378704666",
+    "checks/hypermid/waves/test_wave_03.py": "196aa5aa71b74850132fd2504891f4779fe609e505377168995a7d994b4a3814",
+    "runtime/gideon/hypermid/primary_engine.py": "4a2eec72cfebb832c326645a5e6e376a1b2492c64b300f64fe9c844ea794cd1d",
+    "runtime/gideon/hypermid/lifecycle.py": "60cc7607ecc69c5c7f8668f9c578d9281abde4e2a9045d2aa3c6e86d90e23cd2",
+    "crates/hypermid-daemon/src/context_routes.rs": "4bb030fa84f5f1de9dbc9f29903d60f44e6b2539cb0c3a94c94fbf3fe7cedc84"
+  },
+  "scope": "Current cache-aware primary context, daemon-backed scoped recall, prompt insertion and redacted inspection passed through a real authenticated daemon; prior focused evidence covers lexical fallback when embeddings are absent.",
+  "source_adjustments": []
+}
