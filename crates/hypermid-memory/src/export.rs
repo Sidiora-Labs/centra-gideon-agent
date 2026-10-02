@@ -113,42 +113,7 @@ pub fn export_scope(
         let tx = memory_tx.raw();
         let owner_digest = scope_digest(&request.target_scope).to_hex();
         let cursor = memory_tx.cursor(&request.target_scope)?;
-        let mut entries = Vec::new();
-        collect(
-            tx,
-            &mut entries,
-            ExportEntryKind::Scope,
-            "scope",
-            "SELECT scope_digest, json_object(
-                 'scope_digest', scope_digest, 'scope', json(scope_json),
-                 'epoch', epoch, 'sequence', sequence,
-                 'created_at_ms', created_at_ms, 'updated_at_ms', updated_at_ms)
-             FROM memory_scopes WHERE scope_digest=?1 ORDER BY scope_digest",
-            &[SqlValue::Text(owner_digest.clone())],
-        )?;
-        collect(
-            tx,
-            &mut entries,
-            ExportEntryKind::Grant,
-            "grant",
-            "SELECT grant_id, json_object(
-                     'grant_id', grant_id, 'owner_scope_digest', owner_scope_digest,
-                     'grantee_scope_digest', grantee_scope_digest,
-                     'operations', json(operations_json), 'categories', json(categories_json),
-                     'granted_at_ms', granted_at_ms, 'expires_at_ms', expires_at_ms,
-                     'revoked_at_ms', revoked_at_ms, 'revision', revision)
-                 FROM memory_share_grants
-                 WHERE owner_scope_digest=?1 AND (
-                    ?2=1 OR grant_id IN (
-                        SELECT grant_id FROM memory_mutation_events
-                        WHERE owner_scope_digest=?1 AND grant_id IS NOT NULL))
-                 ORDER BY grant_id",
-            &[
-                SqlValue::Text(owner_digest.clone()),
-                SqlValue::Integer(if include_grants { 1 } else { 0 }),
-            ],
-        )?;
-        collect_scope_rows(tx, &mut entries, &owner_digest)?;
+        let entries = canonical_scope_entries(tx, &owner_digest, include_grants)?;
         let record_count = entries
             .iter()
             .filter(|entry| entry.kind == ExportEntryKind::Record)
@@ -187,6 +152,50 @@ pub fn export_scope(
         bundle.verify()?;
         Ok(bundle)
     })
+}
+
+pub(crate) fn canonical_scope_entries(
+    tx: &Transaction<'_>,
+    owner_digest: &str,
+    include_grants: bool,
+) -> MemoryResult<Vec<MemoryExportEntry>> {
+    let mut entries = Vec::new();
+    collect(
+        tx,
+        &mut entries,
+        ExportEntryKind::Scope,
+        "scope",
+        "SELECT scope_digest, json_object(
+             'scope_digest', scope_digest, 'scope', json(scope_json),
+             'epoch', epoch, 'sequence', sequence,
+             'created_at_ms', created_at_ms, 'updated_at_ms', updated_at_ms)
+         FROM memory_scopes WHERE scope_digest=?1 ORDER BY scope_digest",
+        &[SqlValue::Text(owner_digest.to_owned())],
+    )?;
+    collect(
+        tx,
+        &mut entries,
+        ExportEntryKind::Grant,
+        "grant",
+        "SELECT grant_id, json_object(
+                 'grant_id', grant_id, 'owner_scope_digest', owner_scope_digest,
+                 'grantee_scope_digest', grantee_scope_digest,
+                 'operations', json(operations_json), 'categories', json(categories_json),
+                 'granted_at_ms', granted_at_ms, 'expires_at_ms', expires_at_ms,
+                 'revoked_at_ms', revoked_at_ms, 'revision', revision)
+             FROM memory_share_grants
+             WHERE owner_scope_digest=?1 AND (
+                ?2=1 OR grant_id IN (
+                    SELECT grant_id FROM memory_mutation_events
+                    WHERE owner_scope_digest=?1 AND grant_id IS NOT NULL))
+             ORDER BY grant_id",
+        &[
+            SqlValue::Text(owner_digest.to_owned()),
+            SqlValue::Integer(if include_grants { 1 } else { 0 }),
+        ],
+    )?;
+    collect_scope_rows(tx, &mut entries, owner_digest)?;
+    Ok(entries)
 }
 
 fn collect_scope_rows(

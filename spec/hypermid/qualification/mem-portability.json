@@ -1,0 +1,28 @@
+{
+  "task": "mem-portability",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-memory portability --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_portability.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-memory portability --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_portability.py",
+    "cargo test -p hypermid-memory legacy_import::tests::legacy_fixture_imports_through_memory_api_and_exports_canonical_records --manifest-path crates/hypermid-memory/Cargo.toml -- --exact",
+    "cargo test -p hypermid-memory import::portability_tests::same_scope_import_is_atomic_idempotent_and_rejects_conflicts --manifest-path crates/hypermid-memory/Cargo.toml -- --exact",
+    "cargo test -p hypermid-memory legacy_import::tests::legacy_fixture_imports_through_memory_api_and_exports_canonical_records --manifest-path crates/hypermid-memory/Cargo.toml -- --exact",
+    "cargo test -p hypermid-memory legacy_import::tests::legacy_fixture_rejects_future_import_schema_without_effects --manifest-path crates/hypermid-memory/Cargo.toml -- --exact"
+  ],
+  "successful_gate_count": 5,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-memory/src/import.rs": "e66cebbc64e7a22471a4560e75b8f416ccf7449275219d0b011cac4cd83c1037",
+    "crates/hypermid-memory/src/export.rs": "0a5092f1e57994c936fcfaf4dc35bd5e1086ce72a3fe03e76b98f24f589bdb94",
+    "runtime/gideon/hypermid/portability.py": "ee085a36c1cdc552d1bca7f8bd96d1af4dd88f67e37de658daf0840c8757af10",
+    "checks/hypermid/test_memory_portability.py": "881b13a1c5ff20fae20d9d8e65d5afe50031afbce5ba2b36e7cadf849c536892"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-memory/src/import.rs": "e66cebbc64e7a22471a4560e75b8f416ccf7449275219d0b011cac4cd83c1037",
+    "crates/hypermid-memory/src/export.rs": "0a5092f1e57994c936fcfaf4dc35bd5e1086ce72a3fe03e76b98f24f589bdb94",
+    "runtime/gideon/hypermid/portability.py": "ee085a36c1cdc552d1bca7f8bd96d1af4dd88f67e37de658daf0840c8757af10",
+    "checks/hypermid/test_memory_portability.py": "881b13a1c5ff20fae20d9d8e65d5afe50031afbce5ba2b36e7cadf849c536892"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}

@@ -884,7 +884,7 @@ touches = ["crates/hypermid-memory/src/protocol.rs", "crates/hypermid-memory/src
 verify_cmd = "cargo test -p hypermid-memory protocol --manifest-path crates/hypermid-memory/Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_memory_transport.py"
 [task.mem-portability]
 title = "Staged import and canonical export"
-status = "pending"
+status = "done"
 wave = 7
 owner_lane = "memory"
 requires = ["wave-6-close"]

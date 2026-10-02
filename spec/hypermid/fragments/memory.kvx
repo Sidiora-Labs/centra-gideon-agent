@@ -184,7 +184,7 @@ verify_cmd = "cargo test -p hypermid-memory protocol --manifest-path crates/hype
 
 [task.mem-portability]
 title = "Staged import and canonical export"
-status = "pending"
+status = "done"
 wave = 7
 owner_lane = "memory"
 requires = ["mem-remote"]

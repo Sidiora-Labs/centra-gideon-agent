@@ -1,4 +1,7 @@
-use crate::export::{canonical_json, reject_forbidden, stream_digest, MemoryExportBundle};
+use crate::export::{
+    canonical_json, canonical_scope_entries, reject_forbidden, stream_digest, ExportEntryKind,
+    MemoryExportBundle, MemoryExportEntry,
+};
 use crate::model::{scope_digest, MutationRequest, Operation};
 use crate::{
     error, AuthContext, Digest, EffectState, Id, MemoryResult, MemoryStore, MemoryTransaction,
@@ -203,6 +206,27 @@ pub fn apply_import(
     bundle: &MemoryExportBundle,
     applied_at_ms: u64,
 ) -> MemoryResult<MemoryImportBatch> {
+    let (batch, ()) = apply_import_with_finalizer(
+        store,
+        context,
+        request,
+        batch,
+        bundle,
+        applied_at_ms,
+        |_, _| Ok(()),
+    )?;
+    Ok(batch)
+}
+
+pub(crate) fn apply_import_with_finalizer<T>(
+    store: &mut MemoryStore,
+    context: &AuthContext,
+    request: &MutationRequest,
+    batch: &MemoryImportBatch,
+    bundle: &MemoryExportBundle,
+    applied_at_ms: u64,
+    finalize: impl FnOnce(&MemoryTransaction<'_>, bool) -> MemoryResult<T>,
+) -> MemoryResult<(MemoryImportBatch, T)> {
     if batch.state == ImportState::Rejected || request.operation != Operation::Import {
         return Err(invalid("only a validated import batch can be applied"));
     }
@@ -229,7 +253,8 @@ pub fn apply_import(
             let mut replay = batch.clone();
             replay.state = ImportState::Applied;
             replay.replayed = true;
-            return Ok(replay);
+            let finalized = finalize(tx, true)?;
+            return Ok((replay, finalized));
         }
         if state != "validated" {
             return Err(invalid("import batch is not validated"));
@@ -237,7 +262,8 @@ pub fn apply_import(
         let source_digest = scope_digest(&batch.manifest.source_scope).to_hex();
         let target_digest = scope_digest(&batch.manifest.target_scope).to_hex();
         tx.ensure_scope(&batch.manifest.target_scope, as_i64(applied_at_ms)?)?;
-        for entry in &bundle.entries {
+        let missing = preflight_entries(tx, bundle, &source_digest, &target_digest)?;
+        for entry in &missing {
             apply_entry(
                 tx,
                 &entry.item_key,
@@ -246,25 +272,40 @@ pub fn apply_import(
                 &target_digest,
             )?;
         }
-        tx.raw()
-            .execute(
-                "UPDATE memory_scopes
-                 SET epoch=?2, sequence=?3, updated_at_ms=MAX(updated_at_ms,?4)
-                 WHERE scope_digest=?1",
-                params![
-                    target_digest,
-                    bundle.manifest.cursor.epoch,
-                    bundle.manifest.cursor.sequence,
-                    applied_at_ms,
-                ],
-            )
-            .map_err(sql_error)?;
+        let current_cursor = tx.cursor(&batch.manifest.target_scope)?;
+        if missing.is_empty() {
+            if current_cursor != bundle.manifest.cursor {
+                return Err(conflict(
+                    "identical import rows have a different destination cursor",
+                ));
+            }
+        } else {
+            if current_cursor > bundle.manifest.cursor {
+                return Err(conflict(
+                    "import would regress the destination scope cursor",
+                ));
+            }
+            tx.raw()
+                .execute(
+                    "UPDATE memory_scopes
+                     SET epoch=?2, sequence=?3, updated_at_ms=MAX(updated_at_ms,?4)
+                     WHERE scope_digest=?1",
+                    params![
+                        target_digest,
+                        bundle.manifest.cursor.epoch,
+                        bundle.manifest.cursor.sequence,
+                        applied_at_ms,
+                    ],
+                )
+                .map_err(sql_error)?;
+        }
         tx.raw()
             .execute(
                 "UPDATE import_items SET state='applied' WHERE batch_id=?1 AND state='valid'",
                 [batch.batch_id.as_str()],
             )
             .map_err(sql_error)?;
+        let finalized = finalize(tx, false)?;
         tx.raw()
             .execute(
                 "UPDATE import_batches SET state='applied',applied_at_ms=?2
@@ -275,8 +316,82 @@ pub fn apply_import(
         let mut applied = batch.clone();
         applied.state = ImportState::Applied;
         applied.replayed = false;
-        Ok(applied)
+        Ok((applied, finalized))
     })
+}
+
+fn preflight_entries<'a>(
+    transaction: &MemoryTransaction<'_>,
+    bundle: &'a MemoryExportBundle,
+    source_scope: &str,
+    target_scope: &str,
+) -> MemoryResult<Vec<&'a MemoryExportEntry>> {
+    let destination = canonical_scope_entries(transaction.raw(), target_scope, true)?
+        .into_iter()
+        .filter(|entry| entry.kind != ExportEntryKind::Scope)
+        .map(|entry| (entry.item_key.clone(), entry))
+        .collect::<BTreeMap<_, _>>();
+    let expected_keys = bundle
+        .entries
+        .iter()
+        .filter(|entry| entry.kind != ExportEntryKind::Scope)
+        .map(|entry| entry.item_key.as_str())
+        .collect::<BTreeSet<_>>();
+    if destination.iter().any(|(item_key, entry)| {
+        entry.kind != ExportEntryKind::Grant && !expected_keys.contains(item_key.as_str())
+    }) {
+        return Err(conflict(
+            "destination contains authoritative rows outside the import bundle",
+        ));
+    }
+
+    let mut missing = Vec::new();
+    for entry in bundle
+        .entries
+        .iter()
+        .filter(|entry| entry.kind != ExportEntryKind::Scope)
+    {
+        let expected_payload = mapped_payload(entry, source_scope, target_scope)?;
+        let expected_digest = Digest::sha256(canonical_json(&expected_payload)?);
+        match destination.get(&entry.item_key) {
+            Some(current)
+                if current.kind == entry.kind
+                    && current.item_digest == expected_digest
+                    && current.payload == expected_payload => {}
+            Some(_) => {
+                return Err(conflict(
+                    "destination row conflicts with the canonical import entry",
+                ))
+            }
+            None => missing.push(entry),
+        }
+    }
+    Ok(missing)
+}
+
+fn mapped_payload(
+    entry: &MemoryExportEntry,
+    source_scope: &str,
+    target_scope: &str,
+) -> MemoryResult<Value> {
+    let mut payload = entry.payload.clone();
+    if source_scope == target_scope {
+        return Ok(payload);
+    }
+    let object = payload
+        .as_object_mut()
+        .ok_or_else(|| invalid("import payload must be an object"))?;
+    for key in [
+        "owner_scope_digest",
+        "author_scope_digest",
+        "actor_scope_digest",
+        "grantee_scope_digest",
+    ] {
+        if object.get(key).and_then(Value::as_str) == Some(source_scope) {
+            object.insert(key.to_owned(), Value::String(target_scope.to_owned()));
+        }
+    }
+    Ok(payload)
 }
 
 fn apply_entry(
@@ -418,6 +533,9 @@ fn invalid(message: &'static str) -> hypermid_contracts::Error {
 fn denied(message: &'static str) -> hypermid_contracts::Error {
     error("AUTHORIZATION_DENIED", message, EffectState::NotStarted)
 }
+fn conflict(message: &'static str) -> hypermid_contracts::Error {
+    error("IMPORT_CONFLICT", message, EffectState::NotStarted)
+}
 fn corrupt(message: &'static str) -> hypermid_contracts::Error {
     error("STORE_CORRUPT", message, EffectState::Unknown)
 }
@@ -512,7 +630,11 @@ mod portability_tests {
             resources: BTreeSet::from([
                 id("record-portability"),
                 id("export-portability"),
+                id("export-conflict-before"),
+                id("export-conflict-after"),
                 id("batch-portability"),
+                id("batch-same-scope"),
+                id("batch-conflict"),
                 id("batch-rejected"),
             ]),
             expires_at_ms: 10_000,
@@ -526,7 +648,7 @@ mod portability_tests {
     }
 
     #[test]
-    fn portability_stages_before_visibility_and_replays_without_duplicates() {
+    fn same_scope_import_is_atomic_idempotent_and_rejects_conflicts() {
         let directory = tempfile::tempdir().unwrap();
         let target = scope();
         let capability_id = id("cap-portability");
@@ -590,6 +712,159 @@ mod portability_tests {
                 "embedding" | "fts" | "lease" | "job"
             )
         }));
+
+        let same_scope_request =
+            request(&target, Operation::Import, "batch-same-scope", "same-scope");
+        let same_scope_context = context(
+            &target,
+            Operation::Import,
+            "batch-same-scope",
+            &capability_id,
+            250,
+        );
+        let same_scope_cursor = source.cursor(&target).unwrap();
+        let same_scope_batch = stage_import(
+            &mut source,
+            &same_scope_context,
+            &same_scope_request,
+            id("batch-same-scope"),
+            &bundle,
+            target.clone(),
+            BTreeMap::new(),
+            250,
+        )
+        .unwrap();
+        let same_scope_applied = apply_import(
+            &mut source,
+            &same_scope_context,
+            &same_scope_request,
+            &same_scope_batch,
+            &bundle,
+            250,
+        )
+        .unwrap();
+        assert_eq!(same_scope_applied.state, ImportState::Applied);
+        assert_eq!(source.cursor(&target).unwrap(), same_scope_cursor);
+
+        let mut conflicting =
+            MemoryStore::open(directory.path().join("conflicting.sqlite3")).unwrap();
+        install_capability(&mut conflicting, &target, &capability_id);
+        conflicting
+            .create_record(
+                &create_context,
+                &create_request,
+                &RecordDraft {
+                    id: id("record-portability"),
+                    scope: target.clone(),
+                    kind: RecordKind::Fact,
+                    category: "project_fact".to_owned(),
+                    content: "divergent local memory".to_owned(),
+                    metadata: Map::new(),
+                    smart_predicate: None,
+                    importance: 0.8,
+                    confidence: 0.9,
+                    expires_at_ms: None,
+                    retention_until_ms: None,
+                    provenance: Vec::new(),
+                    lineage: Vec::new(),
+                    summary: None,
+                },
+                &[],
+                100,
+            )
+            .unwrap();
+        let conflict_before = export_scope(
+            &mut conflicting,
+            &context(
+                &target,
+                Operation::Export,
+                "export-conflict-before",
+                &capability_id,
+                250,
+            ),
+            &request(
+                &target,
+                Operation::Export,
+                "export-conflict-before",
+                "conflict-before",
+            ),
+            id("export-conflict-before"),
+            false,
+            250,
+        )
+        .unwrap();
+        let conflict_request = request(&target, Operation::Import, "batch-conflict", "conflict");
+        let conflict_context = context(
+            &target,
+            Operation::Import,
+            "batch-conflict",
+            &capability_id,
+            275,
+        );
+        let conflict_batch = stage_import(
+            &mut conflicting,
+            &conflict_context,
+            &conflict_request,
+            id("batch-conflict"),
+            &bundle,
+            target.clone(),
+            BTreeMap::new(),
+            275,
+        )
+        .unwrap();
+        let conflict_cursor = conflicting.cursor(&target).unwrap();
+        let conflict = apply_import(
+            &mut conflicting,
+            &conflict_context,
+            &conflict_request,
+            &conflict_batch,
+            &bundle,
+            275,
+        )
+        .unwrap_err();
+        assert_eq!(conflict.code, "IMPORT_CONFLICT");
+        assert_eq!(conflict.effect_state, Some(EffectState::NotStarted));
+        assert_eq!(conflicting.cursor(&target).unwrap(), conflict_cursor);
+        let conflict_after = export_scope(
+            &mut conflicting,
+            &context(
+                &target,
+                Operation::Export,
+                "export-conflict-after",
+                &capability_id,
+                280,
+            ),
+            &request(
+                &target,
+                Operation::Export,
+                "export-conflict-after",
+                "conflict-after",
+            ),
+            id("export-conflict-after"),
+            false,
+            280,
+        )
+        .unwrap();
+        assert_eq!(
+            conflict_after.manifest.stream_digest,
+            conflict_before.manifest.stream_digest
+        );
+        assert_eq!(
+            conflict_after.manifest.cursor,
+            conflict_before.manifest.cursor
+        );
+        assert_eq!(
+            conflicting
+                .read(|connection| connection
+                    .query_row(
+                        "SELECT state FROM import_batches WHERE batch_id='batch-conflict'",
+                        [],
+                        |row| row.get::<_, String>(0)
+                    )
+                    .map_err(sql_error))
+                .unwrap(),
+            "validated"
+        );
 
         let mut destination =
             MemoryStore::open(directory.path().join("destination.sqlite3")).unwrap();

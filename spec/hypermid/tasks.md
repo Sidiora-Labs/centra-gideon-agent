@@ -145,7 +145,7 @@
 - [x] mem-maintenance. Ownership-safe maintenance scheduler
   - _Requirements: mem-maintenance.1, mem-maintenance.2, mem-maintenance.3_
 
-- [ ] mem-portability. Staged import and canonical export
+- [x] mem-portability. Staged import and canonical export
   - _Requirements: mem-portability.1, mem-portability.2_
 
 - [x] mem-records. Record CRUD, raw recovery, summaries, and lineage
