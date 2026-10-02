@@ -115,7 +115,7 @@
 - [x] int-03. Implement integration slice 3: cache policy, hybrid recall and native inspection
   - _Requirements: int-03.1, int-03.2, int-03.3_
 
-- [ ] int-04. Implement integration slice 4: background maintenance, notes, Git context and budgets
+- [x] int-04. Implement integration slice 4: background maintenance, notes, Git context and budgets
   - _Requirements: int-04.1, int-04.2, int-04.3_
 
 - [ ] int-05. Implement integration slice 5: supervised modules, SDK, model and MCP lifecycle

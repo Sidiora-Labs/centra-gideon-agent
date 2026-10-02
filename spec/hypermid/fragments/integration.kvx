@@ -85,7 +85,7 @@ ac_3 = "All background model, embedding and maintenance work is admitted and sto
 
 [task.int-04]
 title = "Implement integration slice 4: background maintenance, notes, Git context and budgets"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "integration"
 requires = ["int-03", "ctx-hooks", "mem-maintenance", "mem-indexes", "fab-04-control-diagnostics", "ux-operations", "base-04"]
