@@ -663,7 +663,7 @@ touches = ["crates/hypermid-core/src/hooks.rs", "crates/hypermid-context/src/hoo
 verify_cmd = "cargo test -p hypermid-context --test hook_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_hooks.py"
 [task.ctx-modes]
 title = "Implement optional modes and turn-boundary configuration"
-status = "pending"
+status = "done"
 wave = 1
 owner_lane = "context"
 requires = ["ctx-ownership"]

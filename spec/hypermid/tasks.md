@@ -52,7 +52,7 @@
 - [x] ctx-identity. Implement stable scoped context identities
   - _Requirements: ctx-identity.1, ctx-identity.2_
 
-- [ ] ctx-modes. Implement optional modes and turn-boundary configuration
+- [x] ctx-modes. Implement optional modes and turn-boundary configuration
   - _Requirements: ctx-modes.1, ctx-modes.2, ctx-modes.3_
 
 - [x] ctx-ownership. Implement the bounded context protocol and ownership fence

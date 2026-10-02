@@ -1,0 +1,14 @@
+{
+  "task": "ctx-modes",
+  "status": "passed",
+  "command": "cargo test -p hypermid-context --test mode_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_modes.py",
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-core/src/mode.rs": "06b5a1d35f4b2523f4eae3fd7339606691410396cb5f8bb04f916dc9a405a4f8",
+    "crates/hypermid-context/src/config.rs": "84977613d26db4a7926af4870a58bea187340d6d530d3c716ed43096249a4e45",
+    "runtime/gideon/hypermid/config.py": "da9a2008e53dccd60e7bb6f00cc7d66801af29bb7f2bcfb04afd6fda21d94571",
+    "crates/hypermid-context/tests/mode_contract.rs": "2a50d4adce3ab63c3b566bfbfb9d77912faa5379dacea1adee98b8c14a84fc56",
+    "checks/runtime/test_hypermid_modes.py": "71c1b0ddfabe45ae028193acb53d380c133c8f28ce42bbb9d0f69c4802ecfccf"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate."
+}
