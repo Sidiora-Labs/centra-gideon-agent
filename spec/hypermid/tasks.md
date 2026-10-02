@@ -13,7 +13,7 @@
 - [x] base-03. Cache, catalog, and usage contracts
   - _Requirements: base-cache-models.1, base-cache-models.2, base-cache-models.3_
 
-- [ ] base-04. Encrypted push and fleet logging
+- [x] base-04. Encrypted push and fleet logging
   - _Requirements: base-observability.1, base-observability.2, base-observability.3_
 
 - [ ] base-05. Message-plane contracts and topology

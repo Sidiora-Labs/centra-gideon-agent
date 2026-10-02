@@ -148,7 +148,7 @@ touches = ["crates/hypermid-cache/Cargo.toml", "crates/hypermid-cache/src/lib.rs
 verify_cmd = "cargo test -p hypermid-cache -p hypermid-models -p hypermid-usage --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_cache_models.py"
 [task.base-04]
 title = "Encrypted push and fleet logging"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "foundation"
 requires = ["wave-3-close"]

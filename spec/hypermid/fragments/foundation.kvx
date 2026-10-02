@@ -101,7 +101,7 @@ verify_cmd = "cargo test -p hypermid-cache -p hypermid-models -p hypermid-usage 
 
 [task.base-04]
 title = "Encrypted push and fleet logging"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "foundation"
 requires = ["base-03"]

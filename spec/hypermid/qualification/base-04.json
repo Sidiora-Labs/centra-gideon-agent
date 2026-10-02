@@ -1,0 +1,38 @@
+{
+  "task": "base-04",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-push -p hypermid-log --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_observability.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-push -p hypermid-log --manifest-path Cargo.toml && PYTHONPATH=runtime python -m pytest -q checks/hypermid/test_base_observability.py"
+  ],
+  "successful_gate_count": 1,
+  "exit_code": 0,
+  "source_sha256": {
+    "checks/hypermid/test_base_observability.py": "22d3d71dc2db42957f6423a6976f3f814ea44d009a07bdc62cd3f204732441f7",
+    "crates/hypermid-log/Cargo.toml": "09ffc5ba1752fa145ba17523b67010e2d5f9224dbf100b8f422ddc9712c5c9d8",
+    "crates/hypermid-log/src/filter.rs": "912ce57d3ee8baeea0d797e0e238f750e676b194673d6ca72665b032a956f5d8",
+    "crates/hypermid-log/src/format.rs": "60b87ca0b0530cadc5d1cfb0bb9019a51c9e5396333525a5b64c7de8d377a1fd",
+    "crates/hypermid-log/src/lib.rs": "f6b952cc97ecb7b5fdeaa69bd6144d0335ab748db413cb7a5b68c04a77409da8",
+    "crates/hypermid-log/src/redaction.rs": "96a5ecc2abe1e69f23a49a71fcd3672a8c4f8294c903c303228b2b3d277d260b",
+    "crates/hypermid-log/src/segment.rs": "4e251b10b4158c0291100bbdddf264cc62ee47680d5c643aadeee7cf1018f072",
+    "crates/hypermid-log/src/sink.rs": "8fee4d9a98a3efa1c924f856959f798b2fffd1ad379d95a6381ba2549d1df007",
+    "crates/hypermid-push/Cargo.toml": "f47820d4c420aaea13a41e2fb25d61c6a99371c950c24fcd8b1eb61877be7334",
+    "crates/hypermid-push/src/lib.rs": "27d97a57fff2d8bc65e489d56bc651aaf768c5f5da47c3c64f6224405fb43aaa",
+    "runtime/gideon/hypermid/observability.py": "0ab05234d4835db5369df33ef267f20446cb16c28ec81d5ef6a37f7a0d2a9202"
+  },
+  "tested_source_sha256": {
+    "checks/hypermid/test_base_observability.py": "22d3d71dc2db42957f6423a6976f3f814ea44d009a07bdc62cd3f204732441f7",
+    "crates/hypermid-log/Cargo.toml": "09ffc5ba1752fa145ba17523b67010e2d5f9224dbf100b8f422ddc9712c5c9d8",
+    "crates/hypermid-log/src/filter.rs": "912ce57d3ee8baeea0d797e0e238f750e676b194673d6ca72665b032a956f5d8",
+    "crates/hypermid-log/src/format.rs": "60b87ca0b0530cadc5d1cfb0bb9019a51c9e5396333525a5b64c7de8d377a1fd",
+    "crates/hypermid-log/src/lib.rs": "f6b952cc97ecb7b5fdeaa69bd6144d0335ab748db413cb7a5b68c04a77409da8",
+    "crates/hypermid-log/src/redaction.rs": "96a5ecc2abe1e69f23a49a71fcd3672a8c4f8294c903c303228b2b3d277d260b",
+    "crates/hypermid-log/src/segment.rs": "4e251b10b4158c0291100bbdddf264cc62ee47680d5c643aadeee7cf1018f072",
+    "crates/hypermid-log/src/sink.rs": "8fee4d9a98a3efa1c924f856959f798b2fffd1ad379d95a6381ba2549d1df007",
+    "crates/hypermid-push/Cargo.toml": "f47820d4c420aaea13a41e2fb25d61c6a99371c950c24fcd8b1eb61877be7334",
+    "crates/hypermid-push/src/lib.rs": "27d97a57fff2d8bc65e489d56bc651aaf768c5f5da47c3c64f6224405fb43aaa",
+    "runtime/gideon/hypermid/observability.py": "0ab05234d4835db5369df33ef267f20446cb16c28ec81d5ef6a37f7a0d2a9202"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}
