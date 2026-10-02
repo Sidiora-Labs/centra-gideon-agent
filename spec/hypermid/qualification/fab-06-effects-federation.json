@@ -1,0 +1,43 @@
+{
+  "task": "fab-06-effects-federation",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-transport && cargo test -p hypermid-bus --test recovery && cargo test -p hypermid-daemon --test federation",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-transport && cargo test -p hypermid-bus --test recovery && cargo test -p hypermid-daemon --test federation",
+    "cargo test -p hypermid-daemon --test federation relay_reconnect_preserves_grants_and_blocks_unknown_phone_mutations -- --exact"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-bus/Cargo.toml": "e84af2f2a2d8b3f6dd131fbc622983be6e226040f0a0537512c8c90584dafd0d",
+    "crates/hypermid-bus/src/bridge.rs": "eccb728da458554e754c4a3109e6927fdf3f9adf917d858c55df1f2c7b62c157",
+    "crates/hypermid-bus/src/dead_letter.rs": "7e35dbe7884e1e46d715fa0061d4e9172283b6f29f09dbbe4a01148417099fa4",
+    "crates/hypermid-bus/src/effects.rs": "08bb89062a8a98c0abc27d2b7f95a69f71ffc7a1532285c0777549ec3397a8d3",
+    "crates/hypermid-bus/src/events.rs": "09e629a2a09bdf6c3f2599b2cce71472c2308bd11d769a12f39b9ff783617ef4",
+    "crates/hypermid-bus/src/journal.rs": "7e4c148ff1a3f3790a944ce7e8853ce0bd02097d537964aac8ba0c04c0f41d98",
+    "crates/hypermid-bus/src/lib.rs": "dff7683d90356d2675f7ac728ee96d2990c6051b39e9038fa69d19c0b9148c98",
+    "crates/hypermid-bus/src/remote_effects.rs": "cd09b45968b8c6e1473c257deaa75f7ad8fb36cdc20acab434b7e1c6195e7fda",
+    "crates/hypermid-bus/tests/recovery.rs": "a708082f73f90b3f4826859c553c25aabf2f9b07e894ab481a0d3d5e634ee213",
+    "crates/hypermid-daemon/src/federation.rs": "e89cbc41a5e6a1771a954cf208a956e7eceb8805132369797c20426e68738be3",
+    "crates/hypermid-daemon/tests/federation.rs": "71e855d4bb3ef30c31db53fe3f014ebeb5949d6ca957655509aca3e53aa97d46",
+    "crates/hypermid-transport/src/federation.rs": "b0a42adc219bd1b9536292b434ea4f211f3a4e33308f22c8286629e09bbd425e",
+    "crates/hypermid-transport/src/relay.rs": "48800ddd0952a2f384234310f75ddc3c3d89a82a579ca84313052c6dbdd82886"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-bus/Cargo.toml": "e84af2f2a2d8b3f6dd131fbc622983be6e226040f0a0537512c8c90584dafd0d",
+    "crates/hypermid-bus/src/bridge.rs": "eccb728da458554e754c4a3109e6927fdf3f9adf917d858c55df1f2c7b62c157",
+    "crates/hypermid-bus/src/dead_letter.rs": "7e35dbe7884e1e46d715fa0061d4e9172283b6f29f09dbbe4a01148417099fa4",
+    "crates/hypermid-bus/src/effects.rs": "08bb89062a8a98c0abc27d2b7f95a69f71ffc7a1532285c0777549ec3397a8d3",
+    "crates/hypermid-bus/src/events.rs": "09e629a2a09bdf6c3f2599b2cce71472c2308bd11d769a12f39b9ff783617ef4",
+    "crates/hypermid-bus/src/journal.rs": "7e4c148ff1a3f3790a944ce7e8853ce0bd02097d537964aac8ba0c04c0f41d98",
+    "crates/hypermid-bus/src/lib.rs": "dff7683d90356d2675f7ac728ee96d2990c6051b39e9038fa69d19c0b9148c98",
+    "crates/hypermid-bus/src/remote_effects.rs": "cd09b45968b8c6e1473c257deaa75f7ad8fb36cdc20acab434b7e1c6195e7fda",
+    "crates/hypermid-bus/tests/recovery.rs": "a708082f73f90b3f4826859c553c25aabf2f9b07e894ab481a0d3d5e634ee213",
+    "crates/hypermid-daemon/src/federation.rs": "e89cbc41a5e6a1771a954cf208a956e7eceb8805132369797c20426e68738be3",
+    "crates/hypermid-daemon/tests/federation.rs": "71e855d4bb3ef30c31db53fe3f014ebeb5949d6ca957655509aca3e53aa97d46",
+    "crates/hypermid-transport/src/federation.rs": "b0a42adc219bd1b9536292b434ea4f211f3a4e33308f22c8286629e09bbd425e",
+    "crates/hypermid-transport/src/relay.rs": "48800ddd0952a2f384234310f75ddc3c3d89a82a579ca84313052c6dbdd82886"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}

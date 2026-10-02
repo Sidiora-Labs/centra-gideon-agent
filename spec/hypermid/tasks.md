@@ -97,7 +97,7 @@
 - [x] fab-05-supervision. Implement advanced contained module supervision and replacement
   - _Requirements: fab-007.1, fab-007.2, fab-008.1, fab-008.2_
 
-- [ ] fab-06-effects-federation. Implement durable event bus federation and phone effect channel
+- [x] fab-06-effects-federation. Implement durable event bus federation and phone effect channel
   - _Requirements: fab-009.1, fab-009.2, fab-010.1, fab-010.2, fab-015.1, fab-015.2, fab-016.1, fab-016.2_
 
 - [ ] fab-07-registry-service. Implement owned install update and service lifecycle

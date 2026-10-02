@@ -180,7 +180,7 @@ verify_cmd = "cargo test -p hypermid-daemon --test supervision"
 
 [task.fab-06-effects-federation]
 title = "Implement durable event bus federation and phone effect channel"
-status = "pending"
+status = "done"
 wave = 6
 owner_lane = "fabric"
 requires = ["fab-01-bootstrap", "fab-02-registry-routing", "fab-03-flow-lifecycle", "fab-04-control-diagnostics", "fab-05-supervision", "base-06"]

@@ -384,7 +384,7 @@ ac_2 = "Overlap-safe cutover and exclusive restart preserve route ownership and 
 verify_cmd = "cargo test -p hypermid-daemon --test supervision"
 [task.fab-06-effects-federation]
 title = "Implement durable event bus federation and phone effect channel"
-status = "pending"
+status = "done"
 wave = 6
 owner_lane = "fabric"
 requires = ["base-06"]
