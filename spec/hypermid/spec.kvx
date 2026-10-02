@@ -360,7 +360,7 @@ ac_2 = "Cancel, timeout, response, and disconnect races produce exactly one term
 verify_cmd = "cargo test -p hypermid-daemon --test flow_lifecycle"
 [task.fab-04-control-diagnostics]
 title = "Implement scoped control RPC health and diagnostics"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "fabric"
 requires = ["wave-3-close"]

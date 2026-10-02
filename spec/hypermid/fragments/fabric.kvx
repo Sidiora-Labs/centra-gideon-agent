@@ -154,7 +154,7 @@ verify_cmd = "cargo test -p hypermid-daemon --test flow_lifecycle"
 
 [task.fab-04-control-diagnostics]
 title = "Implement scoped control RPC health and diagnostics"
-status = "pending"
+status = "done"
 wave = 4
 owner_lane = "fabric"
 requires = ["fab-01-bootstrap", "fab-02-registry-routing", "fab-03-flow-lifecycle"]

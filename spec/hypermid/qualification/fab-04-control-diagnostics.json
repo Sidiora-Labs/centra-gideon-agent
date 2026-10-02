@@ -1,0 +1,36 @@
+{
+  "task": "fab-04-control-diagnostics",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-control && cargo test -p hypermid-daemon --test control_diagnostics && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_adapter.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-control",
+    "cargo test -p hypermid-daemon --test control_diagnostics",
+    "HYPERMID_DAEMON_BIN=<sealed-current-daemon> PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_adapter.py"
+  ],
+  "successful_gate_count": 3,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-control/Cargo.toml": "09b4081d2acf1695037624193c40638b3d9c2e3c92445c200c355b6c205354f4",
+    "crates/hypermid-control/src/lib.rs": "cc5d9048ec594c27ae71fc95d3416dba0ea9add06457106c3ab0ba6c1fa6e0c0",
+    "crates/hypermid-control/src/operations.rs": "85221e3dbd2b6f804c10ba7623b8491ffbd13d2037b1e5a24020357125ec49b9",
+    "crates/hypermid-daemon/src/control.rs": "91d4eda9f8af6892598682e7d0ad89e9a5bf2d4714f7e5f318439328304f3140",
+    "crates/hypermid-daemon/src/health.rs": "e5678b70891bda19ce16532e65e7634d8f4211bddd21a27c6c32c7466aaf60f5",
+    "crates/hypermid-daemon/src/diagnostics.rs": "ccfcf07b67242748fee73b144124958fefb7c3aa4b2fca0fbb8491cc40877d67",
+    "crates/hypermid-daemon/tests/control_diagnostics.rs": "977502c92667b06e4c2a03906feea7f8b7a000a49ae6fe66a0eefce071e1efc5",
+    "runtime/gideon/hypermid/subscriptions.py": "85eea9033bfee4181b6a6e4faf2d0388a6e0572ac6f86f76dd75cbe9bc01142c"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-control/Cargo.toml": "09b4081d2acf1695037624193c40638b3d9c2e3c92445c200c355b6c205354f4",
+    "crates/hypermid-control/src/lib.rs": "cc5d9048ec594c27ae71fc95d3416dba0ea9add06457106c3ab0ba6c1fa6e0c0",
+    "crates/hypermid-control/src/operations.rs": "85221e3dbd2b6f804c10ba7623b8491ffbd13d2037b1e5a24020357125ec49b9",
+    "crates/hypermid-daemon/src/control.rs": "91d4eda9f8af6892598682e7d0ad89e9a5bf2d4714f7e5f318439328304f3140",
+    "crates/hypermid-daemon/src/health.rs": "e5678b70891bda19ce16532e65e7634d8f4211bddd21a27c6c32c7466aaf60f5",
+    "crates/hypermid-daemon/src/diagnostics.rs": "ccfcf07b67242748fee73b144124958fefb7c3aa4b2fca0fbb8491cc40877d67",
+    "crates/hypermid-daemon/tests/control_diagnostics.rs": "977502c92667b06e4c2a03906feea7f8b7a000a49ae6fe66a0eefce071e1efc5",
+    "runtime/gideon/hypermid/subscriptions.py": "85eea9033bfee4181b6a6e4faf2d0388a6e0572ac6f86f76dd75cbe9bc01142c"
+  },
+  "scope": "Focused control/diagnostics task acceptance on current Rust sources plus the real authenticated adapter using the sealed current daemon; aggregate and release gates remain separate.",
+  "source_adjustments": [
+    "The control diagnostics fixture now derives its expected storage version from the production memory schema constant."
+  ]
+}

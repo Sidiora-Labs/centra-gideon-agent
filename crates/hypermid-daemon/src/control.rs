@@ -31,7 +31,8 @@ pub struct ControlPlane {
     registry: Registry,
     router: Router,
     health: HealthTracker,
-    durable_store: DurableStore,
+    durable_store: Option<DurableStore>,
+    recovery_reason: Option<String>,
     diagnostics: DiagnosticsStore,
     mutations: Arc<Mutex<HashMap<(Id, Id), CachedMutation>>>,
     event_epoch: u64,
@@ -54,7 +55,32 @@ impl ControlPlane {
             registry,
             router,
             health,
-            durable_store,
+            durable_store: Some(durable_store),
+            recovery_reason: None,
+            diagnostics,
+            mutations: Arc::new(Mutex::new(HashMap::new())),
+            event_epoch: 1,
+            oldest_event_sequence: 0,
+        }
+    }
+
+    pub fn new_recovery(
+        daemon_instance_id: Id,
+        started_ms: u64,
+        registry: Registry,
+        router: Router,
+        health: HealthTracker,
+        diagnostics: DiagnosticsStore,
+        reason: String,
+    ) -> Self {
+        Self {
+            daemon_instance_id,
+            started_ms,
+            registry,
+            router,
+            health,
+            durable_store: None,
+            recovery_reason: Some(reason),
             diagnostics,
             mutations: Arc::new(Mutex::new(HashMap::new())),
             event_epoch: 1,
@@ -293,13 +319,14 @@ impl ControlPlane {
     fn describe(&self, now_ms: u64) -> ControlReply {
         self.refresh_durable_health(now_ms);
         let health = self.health_snapshot(now_ms);
-        let durable = self.durable_store.probe();
+        let durable = self.durable_store.as_ref().map(DurableStore::probe);
         let storage_version = durable
             .as_ref()
-            .ok()
+            .and_then(|result| result.as_ref().ok())
             .map(|health| health.storage_version.to_string());
         let digest_health = durable
             .as_ref()
+            .and_then(|result| result.as_ref().ok())
             .map(|health| {
                 if health.digest_intact {
                     "healthy"
@@ -317,8 +344,10 @@ impl ControlPlane {
             "protocol_max": hypermid_protocol::PROTOCOL,
             "build_version": env!("CARGO_PKG_VERSION"),
             "storage_version": storage_version,
-            "storage_writable": durable.as_ref().is_ok_and(|health| health.writable),
+            "storage_writable": durable.as_ref().is_some_and(|result| result.as_ref().is_ok_and(|health| health.writable)),
             "digest_health": digest_health,
+            "recovery_mode": self.durable_store.is_none(),
+            "recovery_reason": self.recovery_reason.as_deref(),
             "started_ms": self.started_ms,
             "server_time_ms": now_ms,
             "operations": Self::operations(),
@@ -332,7 +361,31 @@ impl ControlPlane {
     }
 
     fn refresh_durable_health(&self, now_ms: u64) {
-        match self.durable_store.probe() {
+        let Some(durable_store) = self.durable_store.as_ref() else {
+            let reason = self
+                .recovery_reason
+                .as_deref()
+                .unwrap_or("durable memory requires recovery")
+                .to_owned();
+            self.health.set_daemon_evidence(
+                "storage",
+                Evidence::Unavailable {
+                    observed_at_ms: now_ms,
+                    reason: reason.clone(),
+                    last_good_ms: None,
+                },
+            );
+            self.health.set_daemon_evidence(
+                "digest_chain",
+                Evidence::Unavailable {
+                    observed_at_ms: now_ms,
+                    reason,
+                    last_good_ms: None,
+                },
+            );
+            return;
+        };
+        match durable_store.probe() {
             Ok(health) => {
                 self.health.set_daemon_evidence(
                     "storage",

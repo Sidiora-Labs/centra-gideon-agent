@@ -7,6 +7,7 @@ use hypermid_daemon::{
     registry::Registry,
     router::Router,
 };
+use hypermid_memory::MEMORY_SCHEMA_VERSION;
 use hypermid_protocol::{Principal, PrincipalKind};
 use serde_json::json;
 
@@ -66,7 +67,10 @@ fn live_store_health_redaction_and_mutation_receipts_are_reported() {
         100,
     );
     let description = description.payload.unwrap();
-    assert_eq!(description["storage_version"], "1");
+    assert_eq!(
+        description["storage_version"],
+        MEMORY_SCHEMA_VERSION.to_string()
+    );
     assert_eq!(description["digest_health"], "healthy");
     assert_eq!(description["health"]["status"], "healthy");
 

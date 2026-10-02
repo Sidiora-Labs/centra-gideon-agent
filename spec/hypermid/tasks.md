@@ -91,7 +91,7 @@
 - [x] fab-03-flow-lifecycle. Implement flow control cancellation and deadlines
   - _Requirements: fab-005.1, fab-005.2, fab-006.1, fab-006.2_
 
-- [ ] fab-04-control-diagnostics. Implement scoped control RPC health and diagnostics
+- [x] fab-04-control-diagnostics. Implement scoped control RPC health and diagnostics
   - _Requirements: fab-011.1, fab-011.2, fab-012.1, fab-012.2_
 
 - [ ] fab-05-supervision. Implement advanced contained module supervision and replacement
