@@ -73,7 +73,7 @@
 - [x] ctx-recovery. Implement journal rebuild and last-known-good recovery
   - _Requirements: ctx-recovery.1, ctx-recovery.2, ctx-recovery.3_
 
-- [ ] ctx-reduction. Implement explicit recoverable reduction
+- [x] ctx-reduction. Implement explicit recoverable reduction
   - _Requirements: ctx-reduction.1, ctx-reduction.2_
 
 - [ ] ctx-subagents. Implement isolated subagent context snapshots

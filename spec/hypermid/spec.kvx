@@ -618,7 +618,7 @@ touches = ["crates/hypermid-core/src/summary.rs", "crates/hypermid-context/src/s
 verify_cmd = "cargo test -p hypermid-context --test summary_pipeline && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_summarizer.py"
 [task.ctx-reduction]
 title = "Implement explicit recoverable reduction"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "context"
 requires = ["ctx-cache-policy"]

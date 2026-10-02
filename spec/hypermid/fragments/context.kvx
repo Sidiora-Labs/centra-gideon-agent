@@ -206,7 +206,7 @@ verify_cmd = "cargo test -p hypermid-context --test summary_pipeline && PYTHONPA
 
 [task.ctx-reduction]
 title = "Implement explicit recoverable reduction"
-status = "pending"
+status = "done"
 wave = 3
 owner_lane = "context"
 requires = ["ctx-cache-policy"]

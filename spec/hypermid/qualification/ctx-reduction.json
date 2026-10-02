@@ -1,0 +1,26 @@
+{
+  "task": "ctx-reduction",
+  "status": "passed",
+  "declared_command": "cargo test -p hypermid-context --test reduction_contract && PYTHONPATH=runtime python -m pytest -q checks/runtime/test_hypermid_reduction.py",
+  "recorded_portable_commands": [
+    "cargo test -p hypermid-context --test reduction_contract"
+  ],
+  "successful_gate_count": 2,
+  "exit_code": 0,
+  "source_sha256": {
+    "crates/hypermid-core/src/reduction.rs": "b190e1f6bb68fecb5fb835643a5bf84b0d5467502366c00adb1b22a2c3227aa4",
+    "crates/hypermid-context/src/reduction_store.rs": "88382c3553135a85540dab65c53cab4133b8d9e071a9abd0b59df76dc3acf48c",
+    "runtime/gideon/hypermid/tools.py": "b79f6c0509429223425a5bace87002f10eb46c2bd990b825c0a47990723fbf71",
+    "crates/hypermid-context/tests/reduction_contract.rs": "25f00a86888e57035d8711c041045e7918bb8292ed1f0147baeb6a3156790694",
+    "checks/runtime/test_hypermid_reduction.py": "682c981995dcd31b111b58a1ed2b0b6d696d5a22fc3affb2cca36fb1077fd67b"
+  },
+  "tested_source_sha256": {
+    "crates/hypermid-core/src/reduction.rs": "b190e1f6bb68fecb5fb835643a5bf84b0d5467502366c00adb1b22a2c3227aa4",
+    "crates/hypermid-context/src/reduction_store.rs": "88382c3553135a85540dab65c53cab4133b8d9e071a9abd0b59df76dc3acf48c",
+    "runtime/gideon/hypermid/tools.py": "b79f6c0509429223425a5bace87002f10eb46c2bd990b825c0a47990723fbf71",
+    "crates/hypermid-context/tests/reduction_contract.rs": "25f00a86888e57035d8711c041045e7918bb8292ed1f0147baeb6a3156790694",
+    "checks/runtime/test_hypermid_reduction.py": "682c981995dcd31b111b58a1ed2b0b6d696d5a22fc3affb2cca36fb1077fd67b"
+  },
+  "scope": "Focused task acceptance; subsequent integration gates remain separate.",
+  "source_adjustments": []
+}
