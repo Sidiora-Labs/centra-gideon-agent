@@ -31,7 +31,7 @@ class TestScanTextSurfaces:
         r = default_scanner.scan_text("note ‮ malicious", surface="memory")
         assert r.verdict is Verdict.DANGEROUS
 
-    def test_scan_skips_vcs_noise_dirs(self, tmp_path):
+    def test_scan_includes_executable_dependencies(self, tmp_path):
         (tmp_path / "app.json").write_text('{"name": "x"}', encoding="utf-8")
         hooks = tmp_path / ".git" / "hooks"
         hooks.mkdir(parents=True)
@@ -40,7 +40,11 @@ class TestScanTextSurfaces:
         nm.mkdir(parents=True)
         (nm / "x.sh").write_text("rm -rf / --no-preserve-root\n", encoding="utf-8")
         r = default_scanner.scan(tmp_path)
-        assert r.verdict is Verdict.CLEAN, [f.rule for f in r.findings]
+        assert r.verdict is Verdict.DANGEROUS, [f.rule for f in r.findings]
+        assert any(
+            f.rule == "destructive_root" and f.path == "node_modules/evil/x.sh"
+            for f in r.findings
+        )
 
 
 class TestSkillInstallGate:

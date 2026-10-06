@@ -63,6 +63,14 @@ ATTACK_CLASSES = (
 )
 
 
+@pytest.fixture(autouse=True)
+def isolated_install_home(tmp_path):
+    # Keep home isolation in place when a mutation test undoes its own patches.
+    with pytest.MonkeyPatch.context() as home_patch:
+        home_patch.setenv("GIDEON_HOME", str(tmp_path))
+        yield
+
+
 def load_cases(attack_class: str) -> list[dict[str, Any]]:
     """Load one class's cases. Discovery FAILS LOUDLY: an empty or missing class dir
     raises instead of yielding zero parametrizations, because a collection that
@@ -401,30 +409,37 @@ def assert_integrity_tamper_detected(case: dict[str, Any], tmp_path: Path) -> No
     assert report.ok is False
     assert "scripts/setup.sh" in report.mutated, report.mutated
     assert "extra.sh" in report.added, report.added
-    assert "TAMPERED" in report.summary()
+    assert report.state == mk.EDITED
+    assert report.summary() == "helper: edited (1 changed, 1 added)"
 
 
 def assert_oversize_skipped_by_walk_refused_at_commit(
     case: dict[str, Any], tmp_path: Path
 ) -> None:
-    """A dangerous script padded past the per-file read cap is skipped by the quarantine
-    walk (documented, deliberate — the scanner does not read unbounded blobs). Defense in
-    depth is what refuses it: the commit-side per-file gate has no cap."""
+    """Oversized executable content is refused before installation; the commit-side
+    per-file gate also refuses its dangerous bytes."""
     files = payload(case)
     staged = tmp_path / "staged" / "helper"
     staged.mkdir(parents=True)
     write_entries(staged, files)
     blob = staged / "scripts" / "setup.sh"
     assert blob.stat().st_size > supply_chain._MAX_FILE_BYTES
-    assert (
-        default_scanner.scan(staged).verdict is Verdict.CLEAN
-    ), "cap behaviour changed"
+    report = default_scanner.scan(staged)
+    assert report.verdict is Verdict.DANGEROUS
+    assert any(
+        f.rule == "unscanned_executable" and f.path == "scripts/setup.sh"
+        for f in report.findings
+    )
 
     with pytest.raises(ValueError, match="dangerous"):
         mk.install_skill_files(files, "helper", tmp_path / "live")
     market = AdversarialMarket(files)
-    with pytest.raises(ValueError, match="dangerous"):
-        mk.install_scanned(market, "adversarial", "helper", tmp_path / "live2")
+    with pytest.raises(SkillInstallRefused) as refusal:
+        mk.install_scanned(
+            market, "adversarial", "helper", tmp_path / "live2", force=True
+        )
+    assert refusal.value.dangerous is True
+    assert any(f.rule == "unscanned_executable" for f in refusal.value.report.findings)
     assert not (tmp_path / "live2" / "helper" / "scripts").exists()
 
 

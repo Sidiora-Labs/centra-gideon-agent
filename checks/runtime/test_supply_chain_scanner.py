@@ -370,3 +370,21 @@ def test_no_gloss_merely_restates_its_rule_name():
         ), f"{rule} gloss restates its own name"
         assert len(text.split()) >= 5, f"{rule} gloss is too short to explain anything"
         assert text.endswith("."), f"{rule} gloss is not a sentence"
+
+
+def test_pathless_script_retains_warning_rules():
+    for body, rule in (
+        ("subprocess.run(['program'])", "python_exec"),
+        ("curl https://example.invalid/data", "curl_network"),
+        ("sudo program", "sudo_use"),
+    ):
+        report = SkillScanner().scan_text(body, surface="script")
+        assert report.verdict is Verdict.WARNING
+        assert rule in _rules(report)
+
+
+def test_named_script_retains_language_specific_warning_scope(tmp_path):
+    root = _mk(
+        tmp_path, {"tool.js": "// subprocess.run is a Python API\nconst value = 1;\n"}
+    )
+    assert "python_exec" not in _rules(scan_dir(root))

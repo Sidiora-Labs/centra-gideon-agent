@@ -828,10 +828,11 @@ class TestFloors:
         for i, body in enumerate(bodies):
             files = {"provider.py": _INERT_PROVIDER, "m.py": body}
             root = _bundle(tmp_path / f"c{i}", files)
-            unscoped = default_scanner.scan_text(body, surface="script")
+            # Compare the same Python classification before and after reachability.
+            unscoped = default_scanner._scan_script(body, "m.py")
             scoped = [f for f in _scan(root).findings if f.path == "m.py"]
-            assert len(scoped) == len(unscoped.findings), body[:60]
-            for old, new in zip(unscoped.findings, scoped):
+            assert len(scoped) == len(unscoped), body[:60]
+            for old, new in zip(unscoped, scoped):
                 assert (old.rule, old.surface) == (new.rule, new.surface)
                 assert new.severity.rank <= old.severity.rank
                 assert new.evidence == old.evidence

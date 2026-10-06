@@ -199,7 +199,9 @@ _WARNING_SCRIPT: tuple[tuple[str, "re.Pattern[str]"], ...] = (
 )
 
 _WARNING_RULE_LANGUAGES = {
-    "eval_exec": frozenset({"python", "javascript", "shell", "ruby", "perl", "powershell"}),
+    "eval_exec": frozenset(
+        {"python", "javascript", "shell", "ruby", "perl", "powershell"}
+    ),
     "pipe_to_shell": frozenset({"shell"}),
     "curl_network": frozenset({"shell"}),
     "sudo_use": frozenset({"shell"}),
@@ -207,9 +209,17 @@ _WARNING_RULE_LANGUAGES = {
     "crontab_write": frozenset({"shell"}),
 }
 _LANGUAGE_EXTENSIONS = {
-    ".py": "python", ".pyw": "python", ".js": "javascript", ".mjs": "javascript",
-    ".cjs": "javascript", ".sh": "shell", ".bash": "shell", ".zsh": "shell",
-    ".rb": "ruby", ".pl": "perl", ".ps1": "powershell",
+    ".py": "python",
+    ".pyw": "python",
+    ".js": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".sh": "shell",
+    ".bash": "shell",
+    ".zsh": "shell",
+    ".rb": "ruby",
+    ".pl": "perl",
+    ".ps1": "powershell",
 }
 
 _INJECTION_PROSE: tuple[tuple[str, "re.Pattern[str]"], ...] = (
@@ -223,7 +233,9 @@ _INJECTION_PROSE: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     ),
     (
         "injection_coerce",
-        re.compile(r"you\s+must\s+(?:(?:now|always)\s+){0,2}(?:run|execute|call)\b", re.I),
+        re.compile(
+            r"you\s+must\s+(?:(?:now|always)\s+){0,2}(?:run|execute|call)\b", re.I
+        ),
     ),
     ("injection_override", re.compile(r"(?:new|updated)\s+system\s+prompt\s*:", re.I)),
 )
@@ -1592,20 +1604,28 @@ def _scan_native_destruction(text: str, rel: str) -> list[Finding]:
 
 
 def _scanner_executable(path: Path, rel: str = "") -> bool:
-    return (path.suffix.lower() in _SCRIPT_EXTS or _is_loader_name(path.name)
-            or _is_under_scripts(rel))
+    return (
+        path.suffix.lower() in _SCRIPT_EXTS
+        or _is_loader_name(path.name)
+        or _is_under_scripts(rel)
+    )
 
 
-def _scanner_tree(root: Path) -> tuple[list[tuple[str, tuple[int, int], int]], list[str]]:
+def _scanner_tree(
+    root: Path,
+) -> tuple[list[tuple[str, tuple[int, int], int]], list[str]]:
     """Enumerate entries without following links or exempting shipped directories."""
     files: list[tuple[str, tuple[int, int], int]] = []
     opaque_dirs: list[str] = []
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     root_fd = os.open(root, flags)
+
     def visit(fd: int, prefix: tuple[str, ...]) -> None:
         try:
             with os.scandir(fd) as children:
-                rows = [(item.name, item.stat(follow_symlinks=False)) for item in children]
+                rows = [
+                    (item.name, item.stat(follow_symlinks=False)) for item in children
+                ]
         except OSError:
             rel = "/".join(prefix)
             if rel and _is_under_scripts(rel):
@@ -1632,6 +1652,7 @@ def _scanner_tree(root: Path) -> tuple[list[tuple[str, tuple[int, int], int]], l
                     os.close(child_fd)
             elif stat.S_ISREG(st.st_mode):
                 files.append((rel, (st.st_dev, st.st_ino), st.st_size))
+
     try:
         visit(root_fd, ())
     finally:
@@ -1649,7 +1670,9 @@ def _open_scanner_file(root: Path, rel: str) -> int:
             child = os.open(part, flags, dir_fd=fd)
             os.close(fd)
             fd = child
-        file_fd = os.open(parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=fd)
+        file_fd = os.open(
+            parts[-1], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=fd
+        )
         return file_fd
     finally:
         os.close(fd)
@@ -1685,13 +1708,25 @@ class SkillScanner:
                         fd = _open_scanner_file(staged_dir, rel)
                         try:
                             opened = os.fstat(fd)
-                            if (not stat.S_ISREG(opened.st_mode) or size != opened.st_size
-                                    or (opened.st_dev, opened.st_ino) != identity):
+                            if (
+                                not stat.S_ISREG(opened.st_mode)
+                                or size != opened.st_size
+                                or (opened.st_dev, opened.st_ino) != identity
+                            ):
                                 raise OSError("file changed during scan")
-                            with os.fdopen(fd, "r", encoding="utf-8", errors="replace", closefd=False) as stream:
+                            with os.fdopen(
+                                fd,
+                                "r",
+                                encoding="utf-8",
+                                errors="replace",
+                                closefd=False,
+                            ) as stream:
                                 text = stream.read(_MAX_FILE_BYTES + 1)
                             after = os.fstat(fd)
-                            if (after.st_size, after.st_mtime_ns) != (opened.st_size, opened.st_mtime_ns):
+                            if (after.st_size, after.st_mtime_ns) != (
+                                opened.st_size,
+                                opened.st_mtime_ns,
+                            ):
                                 text = None
                         finally:
                             os.close(fd)
@@ -1722,8 +1757,13 @@ class SkillScanner:
                     findings.extend(self._scan_text(text, rel, surface))
 
         findings.extend(
-            Finding("script", Verdict.DANGEROUS, "unscanned_executable", rel,
-                    "executable candidate is oversized or unreadable")
+            Finding(
+                "script",
+                Verdict.DANGEROUS,
+                "unscanned_executable",
+                rel,
+                "executable candidate is oversized or unreadable",
+            )
             for rel in sorted(set(opaque))
         )
         findings = _scope_by_reachability(
@@ -1808,7 +1848,7 @@ class SkillScanner:
             )
         language = _LANGUAGE_EXTENSIONS.get(Path(rel).suffix.lower())
         for rule, pat in _WARNING_SCRIPT:
-            if language not in _WARNING_RULE_LANGUAGES.get(rule, frozenset()):
+            if rel and language not in _WARNING_RULE_LANGUAGES.get(rule, frozenset()):
                 continue
             m = pat.search(text)
             if m:

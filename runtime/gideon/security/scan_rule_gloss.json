@@ -45,5 +45,6 @@
   "injection_ignore": "Text here addresses your assistant and tells it to ignore its own instructions.",
   "injection_disregard": "Text here addresses your assistant and tells it to disregard what it was told.",
   "injection_coerce": "Text here addresses your assistant and orders it to run or call something.",
-  "injection_override": "Text here poses as a replacement for your assistant's instructions."
+  "injection_override": "Text here poses as a replacement for your assistant's instructions.",
+  "unscanned_executable": "Executable code here could not be inspected because it is too large or unreadable; installation is blocked."
 }
