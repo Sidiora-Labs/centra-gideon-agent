@@ -9,10 +9,10 @@ import pytest
 from gideon.extensions.apps.app_work import (
     AppWork,
     bind_session,
+    for_job,
     intersect,
     of_session,
     release_session,
-    for_job,
 )
 
 
@@ -45,12 +45,12 @@ def home(tmp_path, monkeypatch):
 
 
 def runtime(home, work):
+    from gideon.engine.agents.native.builtin_tools import (
+        PLATFORM_CATEGORIES,
+        NativeBuiltinToolProvider,
+    )
     from gideon.engine.agents.native.runtime import NativeAgentRuntime
     from gideon.engine.agents.provider import AgentRuntimeDefinition
-    from gideon.engine.agents.native.builtin_tools import (
-        NativeBuiltinToolProvider,
-        PLATFORM_CATEGORIES,
-    )
     from gideon.integrations.llm.scripted import ScriptedProvider
 
     return NativeAgentRuntime(
@@ -145,8 +145,8 @@ async def test_native_catalog_invocation_and_owner_auto_scope(home, tier):
 
 def test_acp_cannot_claim_app_tier(home):
     from gideon.extensions.providers.provider_bridge import (
-        resolve_provider_for_use_case,
         ProviderResolutionError,
+        resolve_provider_for_use_case,
     )
 
     install(home, "read")
@@ -158,10 +158,10 @@ def test_acp_cannot_claim_app_tier(home):
 
 @pytest.mark.asyncio
 async def test_actual_text_subagent_never_assembles_memory(home):
+    from gideon.cognition.context import PromptAssembler
     from gideon.core.config.loader import AppConfig
     from gideon.engine.session import ConversationDirectory
     from gideon.engine.subagent import DelegationSupervisor, SubagentInfo
-    from gideon.cognition.context import PromptAssembler
 
     install(home, "text")
     work = AppWork.for_app("tier-app")

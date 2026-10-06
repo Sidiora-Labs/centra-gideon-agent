@@ -462,7 +462,10 @@ class TestOfflineArgumentPaths:
     ) -> None:
         proc = self._run(sandbox_env, "--container")
         assert proc.returncode == 0, proc.stderr
-        assert "docker build -f infrastructure/docker/Dockerfile.backend --target single" in proc.stdout
+        assert (
+            "docker build -f infrastructure/docker/Dockerfile.backend --target single"
+            in proc.stdout
+        )
         assert "docker run -d --name gideon" in proc.stdout
         assert "-v gideon_home:/data" in proc.stdout
 
@@ -487,7 +490,10 @@ class TestOfflineArgumentPaths:
         """
         # An explicit package specification exercises bootstrap prerequisites independently
         # of the checkout's Rust and console build prerequisites.
-        wheel_env = {**sandbox_env, "GIDEON_PACKAGE_SOURCE": "gideon-agent-harness==0.1.3"}
+        wheel_env = {
+            **sandbox_env,
+            "GIDEON_PACKAGE_SOURCE": "gideon-agent-harness==0.1.3",
+        }
         proc = self._run(wheel_env)
         assert proc.returncode != 0, (
             "the installer exited 0 on a machine with no uv and no downloader. "

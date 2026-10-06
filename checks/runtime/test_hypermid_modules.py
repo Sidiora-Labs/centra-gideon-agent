@@ -37,9 +37,7 @@ async def test_real_role_module_is_session_scoped_and_retired(tmp_path) -> None:
         assert supervisor.providers_for_session("session-b") == ()
         assert supervisor.health()[0].connected is True
 
-        result = await provider.invoke(
-            "hypermid.file_digest", {"path": str(source)}
-        )
+        result = await provider.invoke("hypermid.file_digest", {"path": str(source)})
         assert result.success is True
         assert hashlib.sha256(source.read_bytes()).hexdigest() in result.output
 

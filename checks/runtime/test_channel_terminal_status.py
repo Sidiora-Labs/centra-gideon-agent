@@ -9,6 +9,7 @@ import pytest
 from gideon.core.config import AppConfig
 from gideon.engine.gateway import ApprovalExchange, ApprovalFlow, RuntimeCoordinator
 from gideon.engine.session import ConversationDirectory
+from gideon.integrations.acp.types import STOP_REASON_END_TURN
 from gideon.integrations.channel_trust import allow_sender
 from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
@@ -22,21 +23,26 @@ from gideon.interfaces.dashboard.chat_runner import (
 )
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.approval_answer import YOU
-from gideon.integrations.acp.types import STOP_REASON_END_TURN
 
 _DISCORD_APP = (
     Path(__file__).resolve().parents[2]
     / "runtime/gideon/extensions/apps/native/gideonai-discord-desk"
 )
 sys.path.insert(0, str(_DISCORD_APP))
-from discord_desk.delivery import (  # noqa: E402
-    _PendingApproval,
-    _approval_ending as discord_approval_ending,
+from discord_desk.delivery import (
     _apply_verified_interaction,
+)
+from discord_desk.delivery import (  # noqa: E402
+    _approval_ending as discord_approval_ending,
+)
+from discord_desk.delivery import (
+    _PendingApproval,
     _render_stream_tasks,
 )
 
-from gideon.integrations.telegram.delivery import _approval_ending as telegram_approval_ending
+from gideon.integrations.telegram.delivery import (
+    _approval_ending as telegram_approval_ending,
+)
 
 
 @pytest.mark.asyncio
@@ -109,7 +115,9 @@ async def test_task_and_approval_prompts_report_actual_terminal_outcomes(
     runtime = RuntimeCoordinator(cfg)
     runtime.sessions = directory
     runtime.dashboard_state = state
-    flow = ApprovalFlow(runtime, "channel-terminal", lambda request_id: "channel-session")
+    flow = ApprovalFlow(
+        runtime, "channel-terminal", lambda request_id: "channel-session"
+    )
 
     async def wait_for_dashboard_prompt(request_id: str, exchange: ApprovalExchange):
         assert exchange.dashboard_future is not None

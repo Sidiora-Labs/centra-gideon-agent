@@ -18,7 +18,9 @@ from gideon.automation.workflows.step_usage import CallLog
 from gideon.automation.workflows.tick import ReadyNode
 
 
-async def _settle_document(run: WorkflowRun, workspace, name: str, body: str, step: str):
+async def _settle_document(
+    run: WorkflowRun, workspace, name: str, body: str, step: str
+):
     spec = {"root": {"kind": "transform", "id": step, "config": {"expr": "'done'"}}}
     store.write_spec(run.id, spec)
     controller = RunController(run, spec, services=EngineServices(cwd=str(workspace)))
@@ -41,7 +43,11 @@ async def _settle_document(run: WorkflowRun, workspace, name: str, body: str, st
 
 
 def _new_run(workspace) -> WorkflowRun:
-    run = store.create(WorkflowRun(id="", workflow_name="goal-pursuit-open-ended", status=RunStatus.RUNNING))
+    run = store.create(
+        WorkflowRun(
+            id="", workflow_name="goal-pursuit-open-ended", status=RunStatus.RUNNING
+        )
+    )
     run.extra["workspace"] = {"path": str(workspace), "isolated": False}
     store.save(run)
     return run
@@ -82,5 +88,9 @@ async def test_shared_workspace_documents_are_retained_per_run(monkeypatch, tmp_
     assert [doc["name"] for doc in a["step_documents"]] == ["REPORT.md"]
     assert [doc["name"] for doc in b["step_documents"]] == ["REPORT.md"]
     assert "sensitive-value" not in a["step_documents"][0]["content"]
-    assert not (store.run_dir(run_a.id) / deliverable.STEP_DOCUMENTS_DIR / "outside.md").exists()
-    assert not (store.run_dir(run_a.id) / deliverable.STEP_DOCUMENTS_DIR / "oversized.md").exists()
+    assert not (
+        store.run_dir(run_a.id) / deliverable.STEP_DOCUMENTS_DIR / "outside.md"
+    ).exists()
+    assert not (
+        store.run_dir(run_a.id) / deliverable.STEP_DOCUMENTS_DIR / "oversized.md"
+    ).exists()

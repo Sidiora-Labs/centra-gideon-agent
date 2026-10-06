@@ -44,7 +44,9 @@ def _wheel(path: Path, version: str) -> Path:
     rows = csv.writer(record, lineterminator="\n")
     for name, contents in entries.items():
         raw = contents.encode()
-        digest = base64.urlsafe_b64encode(hashlib.sha256(raw).digest()).rstrip(b"=").decode()
+        digest = (
+            base64.urlsafe_b64encode(hashlib.sha256(raw).digest()).rstrip(b"=").decode()
+        )
         rows.writerow((name, f"sha256={digest}", len(raw)))
     rows.writerow((f"{dist_info}/RECORD", "", ""))
     entries[f"{dist_info}/RECORD"] = record.getvalue()
@@ -69,7 +71,7 @@ def test_real_prefix_upgrade_downgrade_and_child_bootstrap(tmp_path: Path) -> No
     home = tmp_path / "gideon-home"
     home.mkdir()
     runtime = Path(__file__).resolve().parents[2]
-    script = r'''
+    script = r"""
 import importlib
 import importlib.metadata
 import json
@@ -128,7 +130,7 @@ assert not [d for d in importlib.metadata.distributions(path=site_dirs)
 assert marker.read_text() == "preserved"
 assert not list((Path(os.environ["GIDEON_HOME"]) / "tmp").iterdir())
 print(json.dumps({"up": up, "down": down, "versions": versions, "collected": removed, "child": child.stdout.strip(), "hook": hook.stdout.strip(), "prefix": str(app_python.root())}))
-'''
+"""
     env = {
         **os.environ,
         "GIDEON_HOME": str(home),

@@ -8,7 +8,9 @@ from aiohttp.test_utils import TestClient, TestServer
 
 
 @pytest.mark.asyncio
-async def test_stale_file_draft_is_refused_without_replacing_current_bytes(tmp_path, monkeypatch):
+async def test_stale_file_draft_is_refused_without_replacing_current_bytes(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "home"
     workspace = tmp_path / "workspace"
     home.mkdir()
@@ -42,7 +44,11 @@ async def test_stale_file_draft_is_refused_without_replacing_current_bytes(tmp_p
         path.write_text("another editor's change\n", encoding="utf-8")
         refused = await client.post(
             "/api/file-write",
-            json={"path": str(path), "content": "my stale draft\n", "expected_validator": raw_validator},
+            json={
+                "path": str(path),
+                "content": "my stale draft\n",
+                "expected_validator": raw_validator,
+            },
             headers={"If-Match": f'"{base_revision}"'},
         )
         assert refused.status == 409

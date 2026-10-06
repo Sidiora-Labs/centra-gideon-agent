@@ -16,10 +16,10 @@ import json
 import os
 import re
 import shlex
-import socket
-import sys
 import shutil
+import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error

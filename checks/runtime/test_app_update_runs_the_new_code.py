@@ -21,7 +21,9 @@ def _isolated_home(tmp_path, monkeypatch):
         app_manager.force_uninstall("switchboard-app")
 
 
-def _source(tmp_path: Path, *, version: str, subdir: str = "source", update_hook: str = "") -> Path:
+def _source(
+    tmp_path: Path, *, version: str, subdir: str = "source", update_hook: str = ""
+) -> Path:
     root = tmp_path / subdir / "switchboard-app"
     (root / "ui").mkdir(parents=True)
     manifest = {
@@ -38,7 +40,9 @@ def _source(tmp_path: Path, *, version: str, subdir: str = "source", update_hook
         f"VERSION = {version!r}\n\ndef create_provider(config=None):\n    return None\n",
         encoding="utf-8",
     )
-    (root / "ui" / "page.js").write_text(f"export const version = {version!r};\n", encoding="utf-8")
+    (root / "ui" / "page.js").write_text(
+        f"export const version = {version!r};\n", encoding="utf-8"
+    )
     return root
 
 

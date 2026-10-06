@@ -195,7 +195,9 @@ async def test_gateway_cleanup_stops_watchdogs_and_children_across_homes(
         marker = _write_backend(home, "sweep-app")
         _isolate_home(monkeypatch, home)
         before = {
-            name: {id(thread) for thread in threading.enumerate() if thread.name == name}
+            name: {
+                id(thread) for thread in threading.enumerate() if thread.name == name
+            }
             for name in names
         }
         from gideon.core.config.loader import AppConfig
@@ -228,7 +230,9 @@ async def test_gateway_cleanup_stops_watchdogs_and_children_across_homes(
         assert not backend.is_alive()
         assert state._durability_svc._task is None
         assert state._durability_svc._stopping_task is None
-        assert all(not thread.is_alive() for threads in started.values() for thread in threads)
+        assert all(
+            not thread.is_alive() for threads in started.values() for thread in threads
+        )
         assert history_debounce.active() is prior_debouncer
         await asyncio.sleep(0.05)
         assert supervisor.get("sweep-app") is None

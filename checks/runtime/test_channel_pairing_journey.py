@@ -6,9 +6,9 @@ import json
 import ssl
 from contextlib import asynccontextmanager
 
+import httpx
 import pytest
 import websockets
-import httpx
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from cryptography import x509
@@ -20,7 +20,10 @@ from gideon.core.config import loader as config_loader
 from gideon.extensions.apps.manager import InstalledApp, app_dir
 from gideon.extensions.apps.manifest import AppManifest
 from gideon.extensions.apps.native_contract import NATIVE_DIR
-from gideon.extensions.providers.registry import get_provider_registry, reset_provider_registry
+from gideon.extensions.providers.registry import (
+    get_provider_registry,
+    reset_provider_registry,
+)
 from gideon.integrations.channel_transports import get_transport, unregister_transport
 from gideon.interfaces.dashboard.handlers.apps import register_app_routes
 from gideon.interfaces.dashboard.handlers.channels import api_channel_get
@@ -61,7 +64,9 @@ async def _save_app_config(client: TestClient, name: str, config: dict):
 
 
 @pytest.mark.asyncio
-async def test_whatsapp_apps_save_starts_pairing_and_clears_qr_on_connection(tmp_path, monkeypatch):
+async def test_whatsapp_apps_save_starts_pairing_and_clears_qr_on_connection(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(config_loader, "config_dir", lambda: tmp_path)
     reset_provider_registry()
     name = "whatsapp-channel"
@@ -71,7 +76,11 @@ async def test_whatsapp_apps_save_starts_pairing_and_clears_qr_on_connection(tmp
     (destination / "app.json").write_bytes(manifest_path.read_bytes())
     manifest = AppManifest.from_json_file(manifest_path)
     (destination / "installed.json").write_text(
-        json.dumps(InstalledApp(name=name, version=manifest.version, enabled=True, origin="builtin").to_dict())
+        json.dumps(
+            InstalledApp(
+                name=name, version=manifest.version, enabled=True, origin="builtin"
+            ).to_dict()
+        )
     )
     registry = get_provider_registry()
     registry.register(manifest, enabled=True)
@@ -99,10 +108,14 @@ async def test_whatsapp_apps_save_starts_pairing_and_clears_qr_on_connection(tmp
             async with TestClient(TestServer(app)) as client:
                 listing = await client.get("/api/apps")
                 apps = (await listing.json())["apps"]
-                assert any(entry["name"] == name and entry["hasConfig"] for entry in apps)
+                assert any(
+                    entry["name"] == name and entry["hasConfig"] for entry in apps
+                )
                 configuration = await client.get(f"/api/apps/{name}/config")
                 assert configuration.status == 200
-                assert "bridge_url" in (await configuration.json())["schema"]["properties"]
+                assert (
+                    "bridge_url" in (await configuration.json())["schema"]["properties"]
+                )
                 saved = await _save_app_config(
                     client,
                     name,
@@ -177,7 +190,9 @@ async def test_mochat_apps_save_adopts_settings_and_connects(tmp_path, monkeypat
                 current = get_transport("mochat")
                 assert current is not old and old._task is None
                 assert current.config["sessions"] == "room-1"
-                assert (await _health(client, "mochat", "ready"))["detail"] == "Connected"
+                assert (await _health(client, "mochat", "ready"))[
+                    "detail"
+                ] == "Connected"
                 assert "mochat-secret" in credentials
                 await current.stop_inbound()
     finally:
@@ -186,7 +201,9 @@ async def test_mochat_apps_save_adopts_settings_and_connects(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_weixin_apps_save_reaches_qr_and_confirmed_health(tmp_path, monkeypatch, capsys):
+async def test_weixin_apps_save_reaches_qr_and_confirmed_health(
+    tmp_path, monkeypatch, capsys
+):
     pytest.importorskip("qrcode")
     monkeypatch.setattr(config_loader, "config_dir", lambda: tmp_path)
     reset_provider_registry()
@@ -211,26 +228,36 @@ async def test_weixin_apps_save_reaches_qr_and_confirmed_health(tmp_path, monkey
         .issuer_name(subject)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=1))
-        .not_valid_after(datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1))
-        .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), critical=False)
+        .not_valid_before(
+            datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=1)
+        )
+        .not_valid_after(
+            datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)
+        )
+        .add_extension(
+            x509.SubjectAlternativeName([x509.DNSName("localhost")]), critical=False
+        )
         .sign(key, hashes.SHA256())
     )
     cert_path = tmp_path / "localhost.crt"
     key_path = tmp_path / "localhost.key"
     cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
-    key_path.write_bytes(key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.TraditionalOpenSSL,
-        serialization.NoEncryption(),
-    ))
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
+        )
+    )
     server_ssl = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     server_ssl.load_cert_chain(str(cert_path), str(key_path))
     monkeypatch.setenv("SSL_CERT_FILE", str(cert_path))
     paired = asyncio.Event()
 
     async def ticket(request):
-        return web.json_response({"qrcode": "ticket-123", "qrcode_img_content": "weixin-pairing-code"})
+        return web.json_response(
+            {"qrcode": "ticket-123", "qrcode_img_content": "weixin-pairing-code"}
+        )
 
     async def status(request):
         assert request.query["qrcode"] == "ticket-123"
@@ -252,7 +279,9 @@ async def test_weixin_apps_save_reaches_qr_and_confirmed_health(tmp_path, monkey
     try:
         async with _tls_vendor(vendor, server_ssl) as vendor_server:
             async with httpx.AsyncClient() as probe:
-                check = await probe.get(f"https://localhost:{vendor_server.port}/ilink/bot/get_bot_qrcode")
+                check = await probe.get(
+                    f"https://localhost:{vendor_server.port}/ilink/bot/get_bot_qrcode"
+                )
                 assert check.status_code == 200
             async with TestClient(TestServer(app)) as client:
                 saved = await _save_app_config(

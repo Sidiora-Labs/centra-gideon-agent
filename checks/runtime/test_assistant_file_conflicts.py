@@ -38,7 +38,9 @@ def native_files(tmp_path, monkeypatch):
 def _audit_outcomes(home):
     return [
         (event["operation"], event["outcome"])
-        for line in (home / "security_events.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (home / "security_events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
         if (event := json.loads(line))["operation"] == "file_write"
     ]
 
@@ -54,7 +56,9 @@ async def test_read_write_validator_rejects_stale_writer(native_files):
     async with TestClient(TestServer(app)) as client:
         listed = await client.get("/api/file-list", params={"path": str(project)})
         assert listed.status == 200
-        assert [row["path"] for row in (await listed.json())["entries"]] == [str(target)]
+        assert [row["path"] for row in (await listed.json())["entries"]] == [
+            str(target)
+        ]
 
         first = await client.get("/api/file-read", params={"path": str(target)})
         assert first.status == 200
@@ -62,22 +66,35 @@ async def test_read_write_validator_rejects_stale_writer(native_files):
         validator = first.headers["X-Content-Validator"]
         assert validator == hashlib.sha256(b"first").hexdigest()
 
-        written = await client.post("/api/file-write", json={
-            "path": str(target), "content": "second", "expected_validator": validator,
-        })
+        written = await client.post(
+            "/api/file-write",
+            json={
+                "path": str(target),
+                "content": "second",
+                "expected_validator": validator,
+            },
+        )
         assert written.status == 200
-        assert (await written.json())["validator"] == hashlib.sha256(b"second").hexdigest()
+        assert (await written.json())["validator"] == hashlib.sha256(
+            b"second"
+        ).hexdigest()
         assert target.read_text(encoding="utf-8") == "second"
 
-        stale = await client.post("/api/file-write", json={
-            "path": str(target), "content": "third", "expected_validator": validator,
-        })
+        stale = await client.post(
+            "/api/file-write",
+            json={
+                "path": str(target),
+                "content": "third",
+                "expected_validator": validator,
+            },
+        )
         assert stale.status == 409
         assert (await stale.json())["error"] == "file changed since read"
         assert target.read_text(encoding="utf-8") == "second"
 
     assert _audit_outcomes(home) == [
-        ("file_write", "success"), ("file_write", "conflict"),
+        ("file_write", "success"),
+        ("file_write", "conflict"),
     ]
 
 
@@ -94,9 +111,14 @@ async def test_concurrent_writes_with_one_validator_have_one_winner(native_files
         validator = first.headers["X-Content-Validator"]
 
         async def write(content):
-            response = await client.post("/api/file-write", json={
-                "path": str(target), "content": content, "expected_validator": validator,
-            })
+            response = await client.post(
+                "/api/file-write",
+                json={
+                    "path": str(target),
+                    "content": content,
+                    "expected_validator": validator,
+                },
+            )
             return response.status, await response.json()
 
         results = await asyncio.gather(write("second"), write("third"))
@@ -108,5 +130,6 @@ async def test_concurrent_writes_with_one_validator_have_one_winner(native_files
         assert winner["validator"] == hashlib.sha256(target.read_bytes()).hexdigest()
 
     assert sorted(_audit_outcomes(home)) == [
-        ("file_write", "conflict"), ("file_write", "success"),
+        ("file_write", "conflict"),
+        ("file_write", "success"),
     ]

@@ -17,9 +17,7 @@ from gideon.integrations.action_providers.services import ActionServices
 from gideon.interfaces.dashboard.state import ConsoleState
 
 
-def _create(
-    store: TriggerStore, *, max_fires: int = 0, debounce_secs: int = 0
-) -> str:
+def _create(store: TriggerStore, *, max_fires: int = 0, debounce_secs: int = 0) -> str:
     result = tools.create(
         store,
         name="Acme watch",
@@ -109,8 +107,14 @@ def test_matching_bus_event_runs_once_through_store_dispatch_and_history(
             _restore_services(previous)
 
     trigger_id, state, history = asyncio.run(scenario())
-    delivered = [row for row in state._notification_log if row.get("title", "").startswith("Acme changed")]
-    assert [row["title"] for row in delivered] == ["Acme changed: project.acme.deadline"]
+    delivered = [
+        row
+        for row in state._notification_log
+        if row.get("title", "").startswith("Acme changed")
+    ]
+    assert [row["title"] for row in delivered] == [
+        "Acme changed: project.acme.deadline"
+    ]
     assert [row["status"] for row in history] == ["success"]
     stored = TriggerStore(base_dir=tmp_path).get(trigger_id)
     assert stored is not None
@@ -177,15 +181,23 @@ def test_matching_event_without_router_spools_then_replays_once(tmp_path, monkey
             _restore_services(previous)
 
     state, history = asyncio.run(scenario())
-    delivered = [row for row in state._notification_log if row.get("title", "").startswith("Acme changed")]
-    assert [row["title"] for row in delivered] == ["Acme changed: project.acme.deadline"]
+    delivered = [
+        row
+        for row in state._notification_log
+        if row.get("title", "").startswith("Acme changed")
+    ]
+    assert [row["title"] for row in delivered] == [
+        "Acme changed: project.acme.deadline"
+    ]
     assert [row["status"] for row in history] == ["success"]
     stored = TriggerStore(base_dir=tmp_path).get(trigger_id)
     assert stored is not None and stored.trigger.run_count == 1
     assert not spool.read_text(encoding="utf-8").strip()
 
 
-def test_legacy_event_rows_keep_identity_budget_and_remain_disarmed(tmp_path, monkeypatch):
+def test_legacy_event_rows_keep_identity_budget_and_remain_disarmed(
+    tmp_path, monkeypatch
+):
     import json
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))

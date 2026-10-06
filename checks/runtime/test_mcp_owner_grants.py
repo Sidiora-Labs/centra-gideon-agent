@@ -8,14 +8,17 @@ import sys
 import textwrap
 from pathlib import Path
 
-import gideon
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
+import gideon
+
 
 @pytest.mark.asyncio
-async def test_owner_allow_gates_real_stdio_probe_and_definition_edits(tmp_path, monkeypatch):
+async def test_owner_allow_gates_real_stdio_probe_and_definition_edits(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -25,8 +28,7 @@ async def test_owner_allow_gates_real_stdio_probe_and_definition_edits(tmp_path,
     changed_marker = tmp_path / "changed-started.txt"
     server_script = tmp_path / "mcp_fixture.py"
     server_script.write_text(
-        textwrap.dedent(
-            f"""
+        textwrap.dedent(f"""
             import os
             import sys
 
@@ -36,8 +38,7 @@ async def test_owner_allow_gates_real_stdio_probe_and_definition_edits(tmp_path,
             with open(os.environ["MARKER"], "a", encoding="utf-8") as handle:
                 handle.write("started\\n")
             run_mcp_core_server()
-            """
-        ),
+            """),
         encoding="utf-8",
     )
     spec = {
@@ -49,15 +50,18 @@ async def test_owner_allow_gates_real_stdio_probe_and_definition_edits(tmp_path,
         json.dumps({"mcpServers": {"local-fixture": spec}}), encoding="utf-8"
     )
 
+    from gideon.extensions.apps.manifest import AppManifest
     from gideon.integrations.mcp_discovery import _server_from_spec, probe_server
     from gideon.interfaces.dashboard.api_version_gate import api_version_middleware
     from gideon.interfaces.dashboard.handlers.mcp import (
         api_mcp_server_allow,
         api_mcp_server_detail,
     )
-    from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
+    from gideon.interfaces.dashboard.token_auth import (
+        generate_token,
+        token_auth_middleware,
+    )
     from gideon.security import mcp_grants
-    from gideon.extensions.apps.manifest import AppManifest
 
     manifest = AppManifest.from_dict(
         {

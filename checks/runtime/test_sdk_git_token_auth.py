@@ -20,7 +20,9 @@ from gideon.sdk.git import run_git
 def test_token_auth_never_exposes_token_in_argv_or_git_config(tmp_path, caplog):
     openssl = shutil.which("openssl")
     if openssl is None:
-        pytest.skip("openssl is required to exercise Git over a local trusted HTTPS endpoint")
+        pytest.skip(
+            "openssl is required to exercise Git over a local trusted HTTPS endpoint"
+        )
 
     token = "sdk-token-never-write-this-value"
     store_home = tmp_path / "credentials"
@@ -74,7 +76,9 @@ def test_token_auth_never_exposes_token_in_argv_or_git_config(tmp_path, caplog):
             self._git_backend()
 
         def _git_backend(self):
-            expected = "Basic " + base64.b64encode(f"x-access-token:{token}".encode()).decode()
+            expected = (
+                "Basic " + base64.b64encode(f"x-access-token:{token}".encode()).decode()
+            )
             if self.headers.get("Authorization") != expected:
                 self.send_response(401)
                 self.send_header("WWW-Authenticate", 'Basic realm="git"')
@@ -144,8 +148,11 @@ def test_token_auth_never_exposes_token_in_argv_or_git_config(tmp_path, caplog):
     def perform():
         try:
             outcome["result"] = run_git(
-                ["ls-remote", url], credential="github", credentials=credentials,
-                timeout=15, ca_bundle=cert,
+                ["ls-remote", url],
+                credential="github",
+                credentials=credentials,
+                timeout=15,
+                ca_bundle=cert,
             )
         except BaseException as exc:  # surfaced below in the test thread
             outcome["failure"] = exc
@@ -153,7 +160,9 @@ def test_token_auth_never_exposes_token_in_argv_or_git_config(tmp_path, caplog):
     worker = threading.Thread(target=perform, daemon=True)
     try:
         worker.start()
-        assert authenticated.wait(10), "Git did not authenticate to the local Git HTTP backend"
+        assert authenticated.wait(
+            10
+        ), "Git did not authenticate to the local Git HTTP backend"
         for pid in os.listdir("/proc"):
             if not pid.isdecimal():
                 continue
@@ -188,4 +197,9 @@ def test_token_auth_never_exposes_token_in_argv_or_git_config(tmp_path, caplog):
     )
     assert local.returncode == 0, local.stderr
     assert token not in " ".join(local.args)
-    assert token not in local.stdout + local.stderr + (local_repo / ".git" / "config").read_text()
+    assert (
+        token
+        not in local.stdout
+        + local.stderr
+        + (local_repo / ".git" / "config").read_text()
+    )

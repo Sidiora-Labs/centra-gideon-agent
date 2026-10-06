@@ -57,7 +57,9 @@ def test_shell_refuses_sensitive_paths_across_home_and_cwd(tmp_path, monkeypatch
 
     (project / "README.md").write_text("ordinary", encoding="utf-8")
     assert is_sensitive_bash_command("cat README.md", cwd=project) is None
-    assert is_sensitive_bash_command("git@github.com:owner/repo.git", cwd=project) is None
+    assert (
+        is_sensitive_bash_command("git@github.com:owner/repo.git", cwd=project) is None
+    )
 
     absent_home = tmp_path / "must-not-be-created"
     monkeypatch.setenv("GIDEON_HOME", str(absent_home))

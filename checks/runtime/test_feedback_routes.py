@@ -37,7 +37,9 @@ def isolated(tmp_path, monkeypatch):
     fb._invalidate()
 
 
-def _make_app(app_token_name: str = "", state: ConsoleState | None = None) -> web.Application:
+def _make_app(
+    app_token_name: str = "", state: ConsoleState | None = None
+) -> web.Application:
     app = web.Application()
     if state is not None:
         app["state"] = state
@@ -147,51 +149,76 @@ class TestRecordRoute:
 
 class TestChatMessageFeedback:
     @pytest.mark.asyncio
-    async def test_assistant_turn_round_trip_and_generic_route_is_closed(self, isolated):
+    async def test_assistant_turn_round_trip_and_generic_route_is_closed(
+        self, isolated
+    ):
         state = _chat_state(isolated)
         async with TestClient(TestServer(_make_app(state=state))) as client:
             path = "/api/chat/sessions/chat-feedback/feedback/1"
             missing = await (await client.get(path)).json()
             assert missing["verdict"] is None
-            saved = await client.post(path, json={"verdict": "down", "reason": "Wrong fact"})
+            saved = await client.post(
+                path, json={"verdict": "down", "reason": "Wrong fact"}
+            )
             assert saved.status == 200
             assert (await saved.json())["verdict"] == "down"
             hydrated = await (await client.get(path)).json()
             assert hydrated == {"verdict": "down", "reason": "Wrong fact"}
-            assert fb.current_verdict("chat_message", "owner-a:chat-feedback:1").session_key == "chat-feedback"
-            bypass = await client.post("/api/feedback", json={
-                "target_kind": "chat_message", "target_id": "owner-a:chat-feedback:1", "verdict": "up",
-            })
+            assert (
+                fb.current_verdict(
+                    "chat_message", "owner-a:chat-feedback:1"
+                ).session_key
+                == "chat-feedback"
+            )
+            bypass = await client.post(
+                "/api/feedback",
+                json={
+                    "target_kind": "chat_message",
+                    "target_id": "owner-a:chat-feedback:1",
+                    "verdict": "up",
+                },
+            )
             assert bypass.status == 400
-            assert (await client.get(
-                "/api/feedback/target/chat_message/owner-a:chat-feedback:1"
-            )).status == 404
+            assert (
+                await client.get(
+                    "/api/feedback/target/chat_message/owner-a:chat-feedback:1"
+                )
+            ).status == 404
             assert (await (await client.get(path)).json())["verdict"] == "down"
 
     @pytest.mark.asyncio
-    async def test_only_existing_assistant_turn_in_current_owner_session(self, isolated):
+    async def test_only_existing_assistant_turn_in_current_owner_session(
+        self, isolated
+    ):
         owner = _chat_state(isolated)
         other_owner = _chat_state(isolated, owner_id="owner-b")
         other_owner._sessions.clear()
         async with TestClient(TestServer(_make_app(state=owner))) as client:
             for index in (0, 2, -1):
                 response = await client.post(
-                    f"/api/chat/sessions/chat-feedback/feedback/{index}", json={"verdict": "up"},
+                    f"/api/chat/sessions/chat-feedback/feedback/{index}",
+                    json={"verdict": "up"},
                 )
                 assert response.status == 404
-            assert (await client.get(
-                "/api/chat/sessions/chat-feedback/feedback/not-a-number"
-            )).status == 404
+            assert (
+                await client.get(
+                    "/api/chat/sessions/chat-feedback/feedback/not-a-number"
+                )
+            ).status == 404
             invalid = await client.post(
-                "/api/chat/sessions/chat-feedback/feedback/1", json={"verdict": "maybe"},
+                "/api/chat/sessions/chat-feedback/feedback/1",
+                json={"verdict": "maybe"},
             )
             assert invalid.status == 400
             recorded = await client.post(
-                "/api/chat/sessions/chat-feedback/feedback/1", json={"verdict": "up"},
+                "/api/chat/sessions/chat-feedback/feedback/1",
+                json={"verdict": "up"},
             )
             assert recorded.status == 200
         async with TestClient(TestServer(_make_app(state=other_owner))) as client:
-            assert (await client.get("/api/chat/sessions/chat-feedback/feedback/1")).status == 404
+            assert (
+                await client.get("/api/chat/sessions/chat-feedback/feedback/1")
+            ).status == 404
 
     @pytest.mark.asyncio
     async def test_disk_only_session_rehydrates_before_feedback(self, isolated):
@@ -201,19 +228,25 @@ class TestChatMessageFeedback:
         state.conversation_log.append("chat-feedback", "assistant", "Stored answer")
         async with TestClient(TestServer(_make_app(state=state))) as client:
             path = "/api/chat/sessions/chat-feedback/feedback/1"
-            saved = await client.post(path, json={"verdict": "down", "reason": "Outdated"})
+            saved = await client.post(
+                path, json={"verdict": "down", "reason": "Outdated"}
+            )
             assert saved.status == 200
             assert state._sessions["chat-feedback"].messages[1]["role"] == "assistant"
             assert (await (await client.get(path)).json())["reason"] == "Outdated"
-            assert (await client.get("/api/chat/sessions/unknown/feedback/1")).status == 404
+            assert (
+                await client.get("/api/chat/sessions/unknown/feedback/1")
+            ).status == 404
 
     @pytest.mark.asyncio
     async def test_paged_history_preserves_visible_indices(self, isolated):
         state = _chat_state(isolated)
         log = state.conversation_log
         for role, content in (
-            ("user", "First question"), ("assistant", "First answer"),
-            ("user", "Second question"), ("assistant", "Second answer"),
+            ("user", "First question"),
+            ("assistant", "First answer"),
+            ("user", "Second question"),
+            ("assistant", "Second answer"),
         ):
             log.append("chat-feedback", role, content)
         live = state._sessions["chat-feedback"]
@@ -229,11 +262,18 @@ class TestChatMessageFeedback:
             assert (await client.post(second, json={"verdict": "up"})).status == 200
             assert (await (await client.get(first)).json())["verdict"] == "down"
             assert (await (await client.get(second)).json())["verdict"] == "up"
-            assert (await client.post("/api/chat/sessions/chat-feedback/feedback/2", json={"verdict": "up"})).status == 404
+            assert (
+                await client.post(
+                    "/api/chat/sessions/chat-feedback/feedback/2",
+                    json={"verdict": "up"},
+                )
+            ).status == 404
 
     @pytest.mark.asyncio
     async def test_kill_switch_covers_chat_feedback(self, isolated):
-        (isolated / "config.json").write_text(json.dumps({"feedback": {"enabled": False}}))
+        (isolated / "config.json").write_text(
+            json.dumps({"feedback": {"enabled": False}})
+        )
         state = _chat_state(isolated)
         async with TestClient(TestServer(_make_app(state=state))) as client:
             path = "/api/chat/sessions/chat-feedback/feedback/1"
@@ -242,7 +282,9 @@ class TestChatMessageFeedback:
             assert fb.current_verdict("chat_message", "owner-a:chat-feedback:1") is None
 
     @pytest.mark.asyncio
-    async def test_missing_state_and_invalid_json_never_record_a_verdict(self, isolated):
+    async def test_missing_state_and_invalid_json_never_record_a_verdict(
+        self, isolated
+    ):
         path = "/api/chat/sessions/chat-feedback/feedback/1"
         async with TestClient(TestServer(_make_app())) as client:
             assert (await client.post(path, json={"verdict": "up"})).status == 404
@@ -252,14 +294,18 @@ class TestChatMessageFeedback:
             assert (await (await client.get(path)).json())["verdict"] is None
 
     @pytest.mark.asyncio
-    async def test_unreadable_paged_history_cannot_target_an_unverified_turn(self, isolated, monkeypatch):
+    async def test_unreadable_paged_history_cannot_target_an_unverified_turn(
+        self, isolated, monkeypatch
+    ):
         state = _chat_state(isolated)
         state._sessions["chat-feedback"]._disk_older_count = 1
 
         def unreadable_history(_key):
             raise OSError("conversation log is unavailable")
 
-        monkeypatch.setattr(state.conversation_log, "read_messages_chained", unreadable_history)
+        monkeypatch.setattr(
+            state.conversation_log, "read_messages_chained", unreadable_history
+        )
         async with TestClient(TestServer(_make_app(state=state))) as client:
             path = "/api/chat/sessions/chat-feedback/feedback/1"
             assert (await client.post(path, json={"verdict": "up"})).status == 404
@@ -267,7 +313,9 @@ class TestChatMessageFeedback:
         assert fb.current_verdict("chat_message", "owner-a:chat-feedback:1") is None
 
     @pytest.mark.asyncio
-    async def test_feedback_store_failure_reports_failure_and_preserves_unrated_turn(self, isolated):
+    async def test_feedback_store_failure_reports_failure_and_preserves_unrated_turn(
+        self, isolated
+    ):
         (isolated / "feedback.jsonl").mkdir()
         state = _chat_state(isolated)
         async with TestClient(TestServer(_make_app(state=state))) as client:

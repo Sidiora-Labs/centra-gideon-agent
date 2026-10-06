@@ -45,7 +45,7 @@ async def _start_gateway(log):
 
 
 def _headers(token):
-    from gideon.assurance.api_version import VERSION_HEADER, API_VERSION
+    from gideon.assurance.api_version import API_VERSION, VERSION_HEADER
 
     return {
         "Authorization": f"Bearer {token}",
@@ -85,6 +85,7 @@ async def test_creator_is_durable_and_app_listing_excludes_other_and_legacy_sess
     runner, restarted = await _start_gateway(log)
     try:
         from aiohttp import ClientSession
+
         from gideon.interfaces.dashboard.token_auth import generate_token
 
         app_a_token = generate_token("owner", app="app-a")
@@ -121,7 +122,10 @@ async def test_creator_is_durable_and_app_listing_excludes_other_and_legacy_sess
                 f"{base}/api/chat/sessions", headers=_headers(owner_token)
             )
             assert {row["key"] for row in await owner_rows.json()} == {
-                "owned-a", "owned-b", "owner-chat", "legacy"
+                "owned-a",
+                "owned-b",
+                "owner-chat",
+                "legacy",
             }
     finally:
         await runner.cleanup()

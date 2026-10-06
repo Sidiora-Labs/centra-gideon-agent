@@ -161,7 +161,8 @@ async def test_set_accepts_known_provider_ref(monkeypatch, tmp_path):
     async with TestClient(TestServer(app)) as c:
         current = await (await c.get("/api/models/active")).json()
         resp = await c.put(
-            "/api/models/active/chat", json={"models": ["OpenAI:gpt-anything-99"]},
+            "/api/models/active/chat",
+            json={"models": ["OpenAI:gpt-anything-99"]},
             headers={"If-Match": f'"{current["revisions"]["chat"]}"'},
         )
         assert resp.status == 200
@@ -181,7 +182,8 @@ async def test_set_allows_bare_id_and_bundled(monkeypatch, tmp_path):
         assert r1.status == 200
         current = await (await c.get("/api/models/active")).json()
         r2 = await c.put(
-            "/api/models/active/chat", json={"models": ["just-a-bare-id"]},
+            "/api/models/active/chat",
+            json={"models": ["just-a-bare-id"]},
             headers={"If-Match": f'"{current["revisions"]["chat"]}"'},
         )
         assert r2.status == 200

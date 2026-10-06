@@ -32,15 +32,19 @@ def test_run_workflow_uses_current_definition_required_and_typed_inputs(
                 {"workflow": "thesis-tracker", "inputs": {"thesis": 7}}
             )
         )
-        assert asyncio.run(
-            provider.config_problem(
-                {"workflow": "thesis-tracker", "inputs": {"thesis": "A testable claim"}}
+        assert (
+            asyncio.run(
+                provider.config_problem(
+                    {
+                        "workflow": "thesis-tracker",
+                        "inputs": {"thesis": "A testable claim"},
+                    }
+                )
             )
-        ) == ""
-
-        loaded = asyncio.run(
-            defs_mod.get_provider("bundled").get_def("thesis-tracker")
+            == ""
         )
+
+        loaded = asyncio.run(defs_mod.get_provider("bundled").get_def("thesis-tracker"))
         normalized, problem = _validated_inputs(
             loaded.to_dict(), {"thesis": "A testable claim"}
         )
@@ -69,7 +73,9 @@ def test_run_workflow_refuses_revised_definition_missing_old_trigger_inputs(
         root = template.to_dict()["root"]
         initial_inputs = {"thesis": {"type": "string", "required": True}}
         asyncio.run(
-            native.save_def(name=name, root=root, inputs=initial_inputs, create_only=True)
+            native.save_def(
+                name=name, root=root, inputs=initial_inputs, create_only=True
+            )
         )
         provider = RunWorkflowActionProvider()
         action = {"workflow": name, "inputs": {"thesis": "A saved trigger value"}}
@@ -88,7 +94,9 @@ def test_run_workflow_refuses_revised_definition_missing_old_trigger_inputs(
             )
         )
         result = asyncio.run(
-            provider.execute(action, ActionContext(event="clock", context="trigger:test"))
+            provider.execute(
+                action, ActionContext(event="clock", context="trigger:test")
+            )
         )
         assert result.success is False
         assert result.error == f"workflow '{name}': missing required input(s): evidence"
@@ -120,16 +128,12 @@ def test_missed_review_is_durable_single_decision_with_canonical_trigger(
     review_store = TriggerReviewStore(tmp_path)
     report = {
         "review": {
-            "rows": [
-                {"trigger_id": "clock:review-vector", "scheduled_for": 1200.0}
-            ],
+            "rows": [{"trigger_id": "clock:review-vector", "scheduled_for": 1200.0}],
             "summaries": [],
         }
     }
 
-    pending = review_store.add_boot_observations(
-        trigger_store, report, [], now=1500.0
-    )
+    pending = review_store.add_boot_observations(trigger_store, report, [], now=1500.0)
     assert len(pending) == 1
     card = pending[0]
     assert card["id"] == "missed:clock:review-vector"
@@ -138,13 +142,11 @@ def test_missed_review_is_durable_single_decision_with_canonical_trigger(
     assert card["latest_missed_at"] == 1200.0
     assert card["action_revision"]
     assert card["frozen_action_fingerprint"] == card["action_revision"]
-    assert review_store.resolve(
-        card["id"], decision="dismiss", outcome="dismissed"
-    )
+    assert review_store.resolve(card["id"], decision="dismiss", outcome="dismissed")
 
-    assert review_store.add_boot_observations(
-        trigger_store, report, [], now=1800.0
-    ) == []
+    assert (
+        review_store.add_boot_observations(trigger_store, report, [], now=1800.0) == []
+    )
     reloaded = TriggerReviewStore(tmp_path).get(card["id"])
     assert reloaded is not None
     assert reloaded["status"] == "resolved"

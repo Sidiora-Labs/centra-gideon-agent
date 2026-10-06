@@ -10,7 +10,9 @@ from aiohttp.test_utils import TestClient, TestServer
 
 
 @pytest.mark.asyncio
-async def test_knowledge_tag_operation_survives_stale_document_save(tmp_path, monkeypatch):
+async def test_knowledge_tag_operation_survives_stale_document_save(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -24,7 +26,9 @@ async def test_knowledge_tag_operation_survives_stale_document_save(tmp_path, mo
     sessions = ConversationDirectory(AppConfig())
     state = ConsoleState(sessions=sessions, start_time=0.0)
     store = state.knowledge_store
-    item_id = store.create_typed_item(item_type="note", title="Original", content="Body", tags=["kept"])
+    item_id = store.create_typed_item(
+        item_type="note", title="Original", content="Body", tags=["kept"]
+    )
     slow_handler_entered = asyncio.Event()
 
     @web.middleware

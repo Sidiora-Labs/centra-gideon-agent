@@ -313,7 +313,11 @@ def test_the_blind_spot_is_bounded():
     actual = _blind_sites()
     expected = {name: modules for name, (modules, _reason) in _BLIND_BY_DESIGN.items()}
     assert actual == expected, {
-        "new_or_moved": {name: sorted(modules) for name, modules in actual.items() if expected.get(name) != modules},
+        "new_or_moved": {
+            name: sorted(modules)
+            for name, modules in actual.items()
+            if expected.get(name) != modules
+        },
         "no_longer_blind": sorted(set(expected) - set(actual)),
     }
 
@@ -338,11 +342,20 @@ def test_rotated_security_archives_and_power_week_stores_are_manifested():
         claim = inv.claim_for(path)
         assert claim is not None and claim.id == entry_id, path
 
-    for pattern in (".outside-home-settled.json", ".shard-state.json", "pre-restore-*", "tmp"):
+    for pattern in (
+        ".outside-home-settled.json",
+        ".shard-state.json",
+        "pre-restore-*",
+        "tmp",
+    ):
         assert pattern in inv.IGNORED
-    assert {".env", ".env.pre-keychain", "credentials", "credentials.json", ".local_secret"} <= set(
-        inv.secret_paths()
-    )
+    assert {
+        ".env",
+        ".env.pre-keychain",
+        "credentials",
+        "credentials.json",
+        ".local_secret",
+    } <= set(inv.secret_paths())
     browser_sessions = inv.by_id("browser_customer_sessions")
     assert browser_sessions is not None and browser_sessions.derived
     assert "browser/customer_sessions.sqlite3" not in {

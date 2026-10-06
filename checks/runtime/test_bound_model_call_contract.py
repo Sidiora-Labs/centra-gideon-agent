@@ -4,6 +4,8 @@ import pytest
 
 from gideon.extensions.providers.provider_bridge import (
     ProviderResolutionError as BridgeResolutionError,
+)
+from gideon.extensions.providers.provider_bridge import (
     can_resolve_use_case,
     resolve_provider_for_use_case,
 )
@@ -18,7 +20,11 @@ from gideon.integrations.llm.openai import OpenAIProvider
 from gideon.integrations.llm.registry import (
     ProviderEntry,
     ProviderRegistry,
+)
+from gideon.integrations.llm.registry import (
     ProviderResolutionError as ModelResolutionError,
+)
+from gideon.integrations.llm.registry import (
     get_default_registry,
     set_default_registry,
 )
@@ -71,9 +77,7 @@ def isolated_registry(tmp_path, monkeypatch):
         set_default_registry(original)
 
 
-def test_bound_slash_model_reaches_real_provider_unchanged(
-    tmp_path, isolated_registry
-):
+def test_bound_slash_model_reaches_real_provider_unchanged(tmp_path, isolated_registry):
     (tmp_path / "active_models.json").write_text(
         json.dumps({"background": ["Bound:org/model/with/slashes"]}),
         encoding="utf-8",
@@ -102,9 +106,7 @@ def test_actual_protocol_requests_refuse_empty_model_before_dispatch():
     anthropic = AnthropicProvider(model="", credential=credential)
 
     with pytest.raises(ModelResolutionError, match="No model is chosen"):
-        openai._request(
-            [{"role": "user", "content": "hello"}], model="", tools=None
-        )
+        openai._request([{"role": "user", "content": "hello"}], model="", tools=None)
     with pytest.raises(ModelResolutionError, match="No model is chosen"):
         anthropic._request(
             [{"role": "user", "content": "hello"}],
@@ -165,4 +167,6 @@ def test_anthropic_sampling_uses_extra_body_and_records_model_refusals():
     )
     assert "extra_body" not in request
     assert set(refused.unsent_options) == {"temperature", "top_p"}
-    assert all("does not accept" in reason for reason in refused.unsent_options.values())
+    assert all(
+        "does not accept" in reason for reason in refused.unsent_options.values()
+    )

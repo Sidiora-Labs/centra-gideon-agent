@@ -11,7 +11,6 @@ from gideon.workspace.genui_v2 import (
     validate_genui_v2,
 )
 
-
 COMPONENTS = [
     "Stack",
     "Card",
@@ -77,7 +76,11 @@ def valid_surface() -> dict:
                 "type": "Sources",
                 "props": {
                     "items": [
-                        {"id": "pricing", "label": "Pricing", "url": "https://example.com/plans"}
+                        {
+                            "id": "pricing",
+                            "label": "Pricing",
+                            "url": "https://example.com/plans",
+                        }
                     ]
                 },
             },

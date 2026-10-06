@@ -51,7 +51,12 @@ def _app() -> web.Application:
 def config_file(tmp_path, monkeypatch):
     cfg = tmp_path / "config.json"
     cfg.write_text(
-        json.dumps({"tools": {"projection_rules": [RULE_A]}, "agent": {"approval_mode": "auto"}}),
+        json.dumps(
+            {
+                "tools": {"projection_rules": [RULE_A]},
+                "agent": {"approval_mode": "auto"},
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
@@ -77,7 +82,9 @@ async def _read(c: TestClient, path: str):
 async def _save(c: TestClient, path: str, value, base: str | None, **extra):
     headers = {"If-Match": f'"{base}"'} if base is not None else {}
     return await c.patch(
-        "/api/config/gideon", json={"path": path, "value": value, **extra}, headers=headers
+        "/api/config/gideon",
+        json={"path": path, "value": value, **extra},
+        headers=headers,
     )
 
 
@@ -99,9 +106,13 @@ class TestRevisionOf:
 
 class TestTwoTabsOneList:
     @pytest.mark.asyncio
-    async def test_the_second_save_from_the_same_base_is_refused(self, config_file) -> None:
+    async def test_the_second_save_from_the_same_base_is_refused(
+        self, config_file
+    ) -> None:
         async with TestClient(TestServer(_app())) as c:
-            rules, base = await _read(c, "tools.projection_rules")  # both tabs paint this
+            rules, base = await _read(
+                c, "tools.projection_rules"
+            )  # both tabs paint this
             tab_a = [*rules, RULE_B]
             tab_b = [*rules, RULE_C]
 
@@ -112,25 +123,38 @@ class TestTwoTabsOneList:
             assert second.status == 409
             err = (await second.json())["error"]
             assert err["code"] == "stale_write"
-            assert "replaces tools.projection_rules, which changed after" in err["message"]
+            assert (
+                "replaces tools.projection_rules, which changed after" in err["message"]
+            )
             # The refusal hands out no revision: only a read of the document does.
             assert "revision" not in json.dumps(err)
 
         # Tab A's rule survived; tab B's copy was never written over it.
-        assert _rule_names(_stored(config_file, "tools", "projection_rules")) == ["a", "b"]
+        assert _rule_names(_stored(config_file, "tools", "projection_rules")) == [
+            "a",
+            "b",
+        ]
 
     @pytest.mark.asyncio
     async def test_reread_and_reapplied_the_save_lands(self, config_file) -> None:
         async with TestClient(TestServer(_app())) as c:
             rules, base = await _read(c, "tools.projection_rules")
-            assert (await _save(c, "tools.projection_rules", [*rules, RULE_B], base)).status == 200
-            assert (await _save(c, "tools.projection_rules", [*rules, RULE_C], base)).status == 409
+            assert (
+                await _save(c, "tools.projection_rules", [*rules, RULE_B], base)
+            ).status == 200
+            assert (
+                await _save(c, "tools.projection_rules", [*rules, RULE_C], base)
+            ).status == 409
             # What "Reload and reapply" does: read again, put the change on top, save over that.
             latest, fresh = await _read(c, "tools.projection_rules")
             assert fresh != base
             again = await _save(c, "tools.projection_rules", [*latest, RULE_C], fresh)
             assert again.status == 200
-        assert _rule_names(_stored(config_file, "tools", "projection_rules")) == ["a", "b", "c"]
+        assert _rule_names(_stored(config_file, "tools", "projection_rules")) == [
+            "a",
+            "b",
+            "c",
+        ]
 
     @pytest.mark.asyncio
     async def test_a_write_that_names_no_base_is_refused(self, config_file) -> None:
@@ -141,7 +165,9 @@ class TestTwoTabsOneList:
         assert _rule_names(_stored(config_file, "tools", "projection_rules")) == ["a"]
 
     @pytest.mark.asyncio
-    async def test_the_quoted_and_weak_forms_of_the_header_both_match(self, config_file) -> None:
+    async def test_the_quoted_and_weak_forms_of_the_header_both_match(
+        self, config_file
+    ) -> None:
         async with TestClient(TestServer(_app())) as c:
             rules, base = await _read(c, "tools.projection_rules")
             resp = await c.patch(
@@ -162,14 +188,20 @@ class TestTwoTabsOneList:
             assert resp.status == 200
 
     @pytest.mark.asyncio
-    async def test_the_write_response_carries_the_new_revision(self, config_file) -> None:
+    async def test_the_write_response_carries_the_new_revision(
+        self, config_file
+    ) -> None:
         # A page that stays open saves again from the response, not from its first read.
         async with TestClient(TestServer(_app())) as c:
             rules, base = await _read(c, "tools.projection_rules")
-            body = await (await _save(c, "tools.projection_rules", [*rules, RULE_B], base)).json()
+            body = await (
+                await _save(c, "tools.projection_rules", [*rules, RULE_B], base)
+            ).json()
             nxt = body["revisions"]["tools.projection_rules"]
             assert nxt == revision_of(body["tools"]["projection_rules"])
-            assert (await _save(c, "tools.projection_rules", [RULE_A], nxt)).status == 200
+            assert (
+                await _save(c, "tools.projection_rules", [RULE_A], nxt)
+            ).status == 200
 
 
 class TestTheGatewayWritingTheSameData:
@@ -180,7 +212,9 @@ class TestTheGatewayWritingTheSameData:
         from gideon.core.config.loader import AppConfig, ProjectionRuleConfig
 
         async with TestClient(TestServer(_app())) as c:
-            rules, base = await _read(c, "tools.projection_rules")  # the page paints [a]
+            rules, base = await _read(
+                c, "tools.projection_rules"
+            )  # the page paints [a]
 
             # The gateway writes the same list itself — the load → mutate → save shape its own
             # config writers use (`AppConfig.save`), while the page is open.
@@ -191,14 +225,20 @@ class TestTheGatewayWritingTheSameData:
             resp = await _save(c, "tools.projection_rules", [*rules, RULE_C], base)
             assert resp.status == 409
             assert (await resp.json())["error"]["code"] == "stale_write"
-        assert _rule_names(_stored(config_file, "tools", "projection_rules")) == ["a", "b"]
+        assert _rule_names(_stored(config_file, "tools", "projection_rules")) == [
+            "a",
+            "b",
+        ]
 
     @pytest.mark.asyncio
-    async def test_a_writer_holding_the_config_lock_is_seen_by_the_check(self, config_file) -> None:
+    async def test_a_writer_holding_the_config_lock_is_seen_by_the_check(
+        self, config_file
+    ) -> None:
         """The check runs INSIDE the config transaction: a save sent while another writer — the
         CLI, a second process — holds config.json's lock waits for it, then compares against what
         that writer stored. Checked before the lock, it passed against the older list and wrote
-        over the other writer's, which put its own copy back after — both answered success."""
+        over the other writer's, which put its own copy back after — both answered success.
+        """
         import asyncio
         import threading
 
@@ -215,24 +255,37 @@ class TestTheGatewayWritingTheSameData:
             mutate_config(change)
 
         async with TestClient(TestServer(_app())) as c:
-            rules, base = await _read(c, "tools.projection_rules")  # the page paints [a]
+            rules, base = await _read(
+                c, "tools.projection_rules"
+            )  # the page paints [a]
             writer = threading.Thread(target=other_writer)
             writer.start()
-            assert await asyncio.to_thread(holding.wait, 10), "the other writer never took the lock"
-            save = asyncio.create_task(_save(c, "tools.projection_rules", [*rules, RULE_C], base))
+            assert await asyncio.to_thread(
+                holding.wait, 10
+            ), "the other writer never took the lock"
+            save = asyncio.create_task(
+                _save(c, "tools.projection_rules", [*rules, RULE_C], base)
+            )
             await asyncio.sleep(0.3)  # the save is waiting for the lock
-            assert not save.done(), "the save did not wait for the writer holding the lock"
+            assert (
+                not save.done()
+            ), "the save did not wait for the writer holding the lock"
             release.set()
             resp = await save
             await asyncio.to_thread(writer.join, 10)
             assert resp.status == 409, await resp.text()
             assert (await resp.json())["error"]["code"] == "stale_write"
-        assert _rule_names(_stored(config_file, "tools", "projection_rules")) == ["a", "b"]
+        assert _rule_names(_stored(config_file, "tools", "projection_rules")) == [
+            "a",
+            "b",
+        ]
 
 
 class TestOneNameInOrOut:
     @pytest.mark.asyncio
-    async def test_two_tabs_granting_different_servers_keep_both(self, config_file) -> None:
+    async def test_two_tabs_granting_different_servers_keep_both(
+        self, config_file
+    ) -> None:
         async with TestClient(TestServer(_app())) as c:
             for server in ("alpha", "beta"):  # each tab painted the same empty list
                 resp = await c.patch(
@@ -244,10 +297,15 @@ class TestOneNameInOrOut:
                     },
                 )
                 assert resp.status == 200
-        assert _stored(config_file, "security", "mcp_elicitation_servers") == ["alpha", "beta"]
+        assert _stored(config_file, "security", "mcp_elicitation_servers") == [
+            "alpha",
+            "beta",
+        ]
 
     @pytest.mark.asyncio
-    async def test_a_revoke_from_a_stale_tab_removes_only_that_server(self, config_file) -> None:
+    async def test_a_revoke_from_a_stale_tab_removes_only_that_server(
+        self, config_file
+    ) -> None:
         async with TestClient(TestServer(_app())) as c:
             for server in ("alpha", "beta"):
                 await c.patch(
@@ -282,7 +340,11 @@ class TestOneNameInOrOut:
             for place in ("agent-skills", "huggingface-cache"):
                 resp = await c.patch(
                     "/api/config/gideon",
-                    json={"path": "security.outside_home", "add": place, "confirm": True},
+                    json={
+                        "path": "security.outside_home",
+                        "add": place,
+                        "confirm": True,
+                    },
                 )
                 assert resp.status == 200
             off = await c.patch(
@@ -311,7 +373,9 @@ class TestOneNameInOrOut:
         assert _stored(config_file, "security", "mcp_elicitation_servers") == {}
 
     @pytest.mark.asyncio
-    async def test_removing_a_denied_pattern_still_needs_consent(self, config_file) -> None:
+    async def test_removing_a_denied_pattern_still_needs_consent(
+        self, config_file
+    ) -> None:
         async with TestClient(TestServer(_app())) as c:
             ok = await c.patch(
                 "/api/config/gideon",
@@ -330,16 +394,20 @@ class TestOneNameInOrOut:
     async def test_an_item_is_validated_as_the_list_would_be(self, config_file) -> None:
         async with TestClient(TestServer(_app())) as c:
             resp = await c.patch(
-                "/api/config/gideon", json={"path": "security.denied_commands", "add": "(["}
+                "/api/config/gideon",
+                json={"path": "security.denied_commands", "add": "(["},
             )
             assert resp.status == 400
             assert "invalid regex" in (await resp.json())["error"]
 
     @pytest.mark.asyncio
-    async def test_add_on_a_field_that_is_not_a_list_of_names_is_refused(self, config_file) -> None:
+    async def test_add_on_a_field_that_is_not_a_list_of_names_is_refused(
+        self, config_file
+    ) -> None:
         async with TestClient(TestServer(_app())) as c:
             resp = await c.patch(
-                "/api/config/gideon", json={"path": "tools.projection_rules", "add": "x"}
+                "/api/config/gideon",
+                json={"path": "tools.projection_rules", "add": "x"},
             )
             assert resp.status == 400
             assert "whole 'value'" in (await resp.json())["error"]
@@ -356,12 +424,16 @@ class TestOneNameInOrOut:
 
 class TestEgressIsOneDocument:
     @pytest.mark.asyncio
-    async def test_its_read_carries_the_revision_the_patch_compares(self, config_file) -> None:
+    async def test_its_read_carries_the_revision_the_patch_compares(
+        self, config_file
+    ) -> None:
         async with TestClient(TestServer(_app())) as c:
             eg = await (await c.get("/api/security/egress")).json()
             base = eg.pop("revision")
             assert eg == {"allow_hosts": [], "deny_hosts": [], "allow_private": False}
-            first = await _save(c, "security.egress", {**eg, "deny_hosts": ["evil.example"]}, base)
+            first = await _save(
+                c, "security.egress", {**eg, "deny_hosts": ["evil.example"]}, base
+            )
             assert first.status == 200
             # A second tab, from the same read, turning on private networks with consent:
             second = await _save(
@@ -380,12 +452,16 @@ class TestTheReadCarriesRevisions:
     async def test_every_document_field_has_one_and_it_describes_the_value_beside_it(
         self, config_file
     ) -> None:
-        from gideon.interfaces.dashboard.handlers.core import _EDITABLE_CONFIG, _path_value
+        from gideon.interfaces.dashboard.handlers.core import (
+            _EDITABLE_CONFIG,
+            _path_value,
+        )
 
         async with TestClient(TestServer(_app())) as c:
             body = await (await c.get("/api/config/gideon")).json()
         document_paths = {
-            path for path in _EDITABLE_CONFIG
+            path
+            for path in _EDITABLE_CONFIG
             if isinstance(_path_value(body, path), (dict, list))
         }
         assert set(body["revisions"]) == document_paths

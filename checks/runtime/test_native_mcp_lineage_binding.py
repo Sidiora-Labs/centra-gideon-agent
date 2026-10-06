@@ -13,8 +13,8 @@ from gideon.automation.workflows.models import Node
 from gideon.core.config.loader import config_path
 from gideon.engine.agents.native.tools import InProcessMcpToolProvider
 from gideon.extensions.apps import app_manager, manager
-from gideon.extensions.providers.provider_bridge import _build_native_runtime
 from gideon.extensions.providers import loader
+from gideon.extensions.providers.provider_bridge import _build_native_runtime
 from gideon.extensions.providers.registry import ProviderRegistry
 from gideon.extensions.providers.use_cases import active_models_path
 from gideon.integrations import mcp_automation, mcp_shared, mcp_subagents
@@ -117,12 +117,10 @@ async def test_leaf_lineage_is_request_scoped_and_read_only_posture_is_enforced(
     acp_leaf = AcpClient(session_key="lineage-acp-leaf", extra_env=research)
     acp_parent = AcpClient(session_key="lineage-acp-parent", extra_env={})
     leaf_server_env = {
-        item["name"]: item["value"]
-        for item in acp_leaf._core_mcp_servers()[0]["env"]
+        item["name"]: item["value"] for item in acp_leaf._core_mcp_servers()[0]["env"]
     }
     parent_server_env = {
-        item["name"]: item["value"]
-        for item in acp_parent._core_mcp_servers()[0]["env"]
+        item["name"]: item["value"] for item in acp_parent._core_mcp_servers()[0]["env"]
     }
     leaf_server_context = {
         key: value
@@ -152,18 +150,16 @@ async def test_leaf_lineage_is_request_scoped_and_read_only_posture_is_enforced(
                 mcp_shared.leaf_run_id(),
                 mcp_subagents._wf_depth(),
                 denial,
-                mcp_automation._resolve_resume_target({"resume_run_id": "self"})[
-                    0
-                ]["run_id"],
+                mcp_automation._resolve_resume_target({"resume_run_id": "self"})[0][
+                    "run_id"
+                ],
                 native_orchestration.output,
                 acp_write + "\n" + native_write.output,
             )
         finally:
             mcp_shared.reset_leaf_lineage(token)
 
-    restricted, writable = await asyncio.gather(
-        observe(research), observe(mutating)
-    )
+    restricted, writable = await asyncio.gather(observe(research), observe(mutating))
     assert restricted[:2] == ("leaf0001", 1)
     assert "read-only" in restricted[2].lower()
     assert restricted[3] == "leaf0001"

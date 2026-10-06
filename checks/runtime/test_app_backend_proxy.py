@@ -378,7 +378,9 @@ async def test_backend_restart_rotates_proxy_secret_safely(tmp_path, monkeypatch
             ready = False
             for _ in range(50):
                 try:
-                    async with session.get(f"{second_backend.base_url}/health") as health:
+                    async with session.get(
+                        f"{second_backend.base_url}/health"
+                    ) as health:
                         if health.status == 200:
                             ready = True
                             break
@@ -402,15 +404,11 @@ async def test_backend_restart_rotates_proxy_secret_safely(tmp_path, monkeypatch
 
     blocker = tmp_path / "not-a-directory"
     blocker.write_text("occupied", encoding="ascii")
-    monkeypatch.setattr(
-        app_secret_module, "app_dir", lambda name: blocker / name
-    )
+    monkeypatch.setattr(app_secret_module, "app_dir", lambda name: blocker / name)
     assert app_secret_module.rotate_app_secret("blocked") is None
     blocked_root = tmp_path / "apps" / "blocked"
     (blocked_root / "backend").mkdir(parents=True)
-    (blocked_root / "backend" / "server.py").write_text(
-        _BACKEND_SRC, encoding="utf-8"
-    )
+    (blocked_root / "backend" / "server.py").write_text(_BACKEND_SRC, encoding="utf-8")
     blocked_manifest = AppManifest.from_dict(
         {
             **manifest_data,

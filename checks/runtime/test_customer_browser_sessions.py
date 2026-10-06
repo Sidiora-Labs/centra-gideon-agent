@@ -12,7 +12,6 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.cognition.history import ConversationLog
-from gideon.security.auth import credentials
 from gideon.integrations.browse.customer_sessions import (
     CustomerBrowserSessionStore,
     SessionNotFound,
@@ -24,6 +23,7 @@ from gideon.interfaces.dashboard.handlers.browser_sessions import (
     register_browser_session_routes,
 )
 from gideon.interfaces.dashboard.state import ConsoleState
+from gideon.security.auth import credentials
 
 PORT = 10117
 COOKIE = f"gideon_token_{PORT}"
@@ -61,7 +61,10 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
     alice = token_auth.generate_token("alice", ttl_seconds=3600)
     rotated_owner = token_auth.generate_token("rotated-owner", ttl_seconds=3600)
 
-    async with TestClient(TestServer(app), cookie_jar=aiohttp.DummyCookieJar()) as client:
+    async with TestClient(
+        TestServer(app), cookie_jar=aiohttp.DummyCookieJar()
+    ) as client:
+
         def owned(token):
             return {COOKIE: token}
 
@@ -84,7 +87,10 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
         assert channel_only.status == 201
         channel_row = (await channel_only.json())["session"]
         assert channel_row["conversation_id"] == "channel-thread"
-        assert app[KEY].get(channel_row["id"], "local", "alice").canonical_key == "channel-thread"
+        assert (
+            app[KEY].get(channel_row["id"], "local", "alice").canonical_key
+            == "channel-thread"
+        )
 
         bare_collision = await client.post(
             "/api/browser/sessions",
@@ -102,8 +108,13 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
         assert bare_row["id"] != dashboard_row["id"]
         assert bare_row["conversation_id"] == "chat-two"
         assert dashboard_row["conversation_id"] == "dashboard:chat-two"
-        assert app[KEY].get(bare_row["id"], "local", "alice").canonical_key == "chat-two"
-        assert app[KEY].get(dashboard_row["id"], "local", "alice").canonical_key == "dashboard:chat-two"
+        assert (
+            app[KEY].get(bare_row["id"], "local", "alice").canonical_key == "chat-two"
+        )
+        assert (
+            app[KEY].get(dashboard_row["id"], "local", "alice").canonical_key
+            == "dashboard:chat-two"
+        )
 
         async def create():
             response = await client.post(
@@ -149,7 +160,8 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
         ):
             retry = await client.post(
                 "/api/browser/sessions",
-                json={"conversation_id": name}, cookies=owned(alice),
+                json={"conversation_id": name},
+                cookies=owned(alice),
             )
             assert retry.status == 200
             assert (await retry.json())["session"] == original
@@ -191,18 +203,25 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
         app_create = await client.post(
             "/api/browser/sessions",
             json={"conversation_id": "chat-one"},
-            cookies=owned(alice), headers=app_headers,
+            cookies=owned(alice),
+            headers=app_headers,
         )
         app_read = await client.get(
             f"/api/browser/sessions/{session_id}",
-            cookies=owned(alice), headers=app_headers,
+            cookies=owned(alice),
+            headers=app_headers,
         )
         app_mutation = await client.post(
             f"/api/browser/sessions/{session_id}/close",
             json={"expected_version": 1},
-            cookies=owned(alice), headers=app_headers,
+            cookies=owned(alice),
+            headers=app_headers,
         )
-        assert (app_create.status, app_read.status, app_mutation.status) == (401, 401, 401)
+        assert (app_create.status, app_read.status, app_mutation.status) == (
+            401,
+            401,
+            401,
+        )
 
         other_existing = await client.get(
             f"/api/browser/sessions/{session_id}", cookies=owned(rotated_owner)
@@ -211,7 +230,8 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
             "/api/browser/sessions/absent", cookies=owned(rotated_owner)
         )
         assert (other_existing.status, await other_existing.text()) == (
-            other_absent.status, await other_absent.text()
+            other_absent.status,
+            await other_absent.text(),
         )
         assert other_existing.status == 404
         cross_create = await client.post(
@@ -223,39 +243,51 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
 
         other_mutation = await client.post(
             f"/api/browser/sessions/{session_id}/close",
-            json={"expected_version": 1}, cookies=owned(rotated_owner),
+            json={"expected_version": 1},
+            cookies=owned(rotated_owner),
         )
         absent_mutation = await client.post(
             "/api/browser/sessions/absent/close",
-            json={"expected_version": 1}, cookies=owned(rotated_owner),
+            json={"expected_version": 1},
+            cookies=owned(rotated_owner),
         )
         assert (other_mutation.status, await other_mutation.text()) == (
-            absent_mutation.status, await absent_mutation.text()
+            absent_mutation.status,
+            await absent_mutation.text(),
         )
 
         closed = await client.post(
             f"/api/browser/sessions/{session_id}/close",
-            json={"expected_version": 1}, cookies=owned(alice),
+            json={"expected_version": 1},
+            cookies=owned(alice),
         )
         assert closed.status == 200
         closed_row = (await closed.json())["session"]
-        assert (closed_row["id"], closed_row["conversation_id"], closed_row["status"], closed_row["version"]) == (
-            session_id, "chat-one", "closed", 2
-        )
+        assert (
+            closed_row["id"],
+            closed_row["conversation_id"],
+            closed_row["status"],
+            closed_row["version"],
+        ) == (session_id, "chat-one", "closed", 2)
         stale = await client.post(
             f"/api/browser/sessions/{session_id}/reopen",
-            json={"expected_version": 1}, cookies=owned(alice),
+            json={"expected_version": 1},
+            cookies=owned(alice),
         )
         assert stale.status == 409
         reopened = await client.post(
             f"/api/browser/sessions/{session_id}/reopen",
-            json={"expected_version": 2}, cookies=owned(alice),
+            json={"expected_version": 2},
+            cookies=owned(alice),
         )
         assert reopened.status == 200
         reopened_row = (await reopened.json())["session"]
-        assert (reopened_row["id"], reopened_row["conversation_id"], reopened_row["status"], reopened_row["version"]) == (
-            session_id, "chat-one", "reserved", 3
-        )
+        assert (
+            reopened_row["id"],
+            reopened_row["conversation_id"],
+            reopened_row["status"],
+            reopened_row["version"],
+        ) == (session_id, "chat-one", "reserved", 3)
 
         store = CustomerBrowserSessionStore(path)
         with pytest.raises(SessionNotFound):
@@ -274,7 +306,8 @@ async def test_owner_conversation_binding(tmp_path, monkeypatch):
             "/api/browser/sessions/absent", cookies=owned(new_owner)
         )
         assert (rotated_existing.status, await rotated_existing.text()) == (
-            rotated_absent.status, await rotated_absent.text()
+            rotated_absent.status,
+            await rotated_absent.text(),
         )
         assert rotated_existing.status == 404
 

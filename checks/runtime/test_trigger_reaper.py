@@ -269,8 +269,7 @@ def test_sweeping_twice_is_idempotent(home, store):
 
 @pytest.mark.asyncio
 async def test_the_loop_sweeps_on_its_interval(home, store):
-    """The background loop releases overdue claims on its scheduled sweep.
-    """
+    """The background loop releases overdue claims on its scheduled sweep."""
     _trigger(store)
     _claim(home, age=OVER)
 

@@ -116,8 +116,8 @@ def test_a_match_INSIDE_the_cap_still_fires():
 
 def test_the_cap_does_not_truncate_what_is_STORED_or_FIRED(tmp_path, monkeypatch):
     from gideon.automation.event_triggers import emit_event
-    from gideon.automation.triggers.dispatch import drain_spool
     from gideon.automation.triggers import tools
+    from gideon.automation.triggers.dispatch import drain_spool
     from gideon.automation.triggers.store import TriggerStore
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
@@ -127,7 +127,9 @@ def test_the_cap_does_not_truncate_what_is_STORED_or_FIRED(tmp_path, monkeypatch
         name="Needle watch",
         kind="event",
         spec={"source": "memory", "pattern": "ContentMatch", "content_re": "NEEDLE"},
-        workflow={"inline": {"provider": "notify", "config": {"title_template": "Changed"}}},
+        workflow={
+            "inline": {"provider": "notify", "config": {"title_template": "Changed"}}
+        },
         created_by="user",
     )
     assert created.ok, created.text

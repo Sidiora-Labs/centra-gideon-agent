@@ -30,7 +30,9 @@ async def test_restart_cancel_closes_continuation_and_records_withdrawal():
             "config": {"kind": "approval", "prompt": "Continue?", "timeout_secs": 0},
         },
     }
-    run = store.create(WorkflowRun(id="", workflow_name="cancel-wait", mode="background"))
+    run = store.create(
+        WorkflowRun(id="", workflow_name="cancel-wait", mode="background")
+    )
     store.write_spec(run.id, spec)
     controller = RunController(run, spec, services=EngineServices())
     assert await controller.run_to_completion(timeout=10) == RunStatus.NEEDS_INPUT
@@ -40,7 +42,8 @@ async def test_restart_cancel_closes_continuation_and_records_withdrawal():
     assert await controller.run_to_completion(timeout=10) == RunStatus.CANCELLED
     assert human_input.load_continuation(run.id, continuation.token) is None
     resolved = [
-        row for row in journal.ledger(run.id)
+        row
+        for row in journal.ledger(run.id)
         if row.get("kind") == journal.GATE_RESOLVED
         and row.get("node_id") == continuation.node_id
     ]

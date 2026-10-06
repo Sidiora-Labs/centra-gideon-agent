@@ -73,7 +73,10 @@ class TestThreeChannelsCoexist:
 
         assert cd.registered_providers() == ["discord", "slack", "telegram"]
         for name in ("discord", "slack", "telegram"):
-            assert type(cd.delivery_for(name).delivery).__name__ == f"{name.title()}Delivery"
+            assert (
+                type(cd.delivery_for(name).delivery).__name__
+                == f"{name.title()}Delivery"
+            )
 
     def test_a_later_registration_does_not_displace_another_provider(self) -> None:
         """The mechanism, stated directly: registration order must not decide who can reply."""
@@ -133,7 +136,9 @@ class TestOwnerReachable:
         cd.register(None)
         cd.register(delivery("discord"))
         cd.register(delivery("telegram"))
-        assert type(cd.owner_reachable().delivery).__name__ == first == "DiscordDelivery"
+        assert (
+            type(cd.owner_reachable().delivery).__name__ == first == "DiscordDelivery"
+        )
 
 
 class TestClearing:

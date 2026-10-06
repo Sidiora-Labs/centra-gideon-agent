@@ -28,18 +28,17 @@ everything" is one `return 400` away from an endpoint that saves nothing at all.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
 import sys
 import time
-import asyncio
 from unittest.mock import patch
 
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-
 
 _HOLD_CONFIG_TRANSACTION = r"""
 import os, time
@@ -68,7 +67,9 @@ async def _start_config_transaction_holder(home):
     )
     deadline = time.monotonic() + 30
     while not (home / "config-transaction-held").exists():
-        assert time.monotonic() < deadline, "transaction holder did not acquire the config lock"
+        assert (
+            time.monotonic() < deadline
+        ), "transaction holder did not acquire the config lock"
         assert process.poll() is None, process.communicate()[1]
         await asyncio.sleep(0.01)
     return process

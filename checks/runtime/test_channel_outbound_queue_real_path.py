@@ -6,10 +6,13 @@ import asyncio
 
 import pytest
 
+from gideon.integrations import channel_delivery
+from gideon.integrations.channel_transports import (
+    register_transport,
+    unregister_transport,
+)
 from gideon.integrations.channel_transports.base import OutboundMessage
 from gideon.integrations.channel_transports.webui import WebUITransport
-from gideon.integrations.channel_transports import register_transport, unregister_transport
-from gideon.integrations import channel_delivery
 from gideon.integrations.messaging_channels.whatsapp import WhatsAppTransport
 from gideon.integrations.outbound_queue import QueuedDelivery
 

@@ -41,14 +41,26 @@ def _app() -> web.Application:
 @pytest.mark.asyncio
 async def test_signed_in_list_contains_browser_cli_and_pair_but_never_apps(home):
     browser = token_auth.generate_token(
-        "owner", ttl_seconds=3600, kind="browser", label="Firefox", client_ip="192.0.2.8"
+        "owner",
+        ttl_seconds=3600,
+        kind="browser",
+        label="Firefox",
+        client_ip="192.0.2.8",
     )
     cli = token_auth.generate_token(
-        "owner", ttl_seconds=3600, kind="cli", label="gideon token", client_ip="127.0.0.1"
+        "owner",
+        ttl_seconds=3600,
+        kind="cli",
+        label="gideon token",
+        client_ip="127.0.0.1",
     )
     app_token = token_auth.generate_token("owner", ttl_seconds=3600, app="notes")
     pair = token_auth.generate_token(
-        "paired-device", ttl_seconds=3600, kind="device", label="Phone", client_ip="192.0.2.9"
+        "paired-device",
+        ttl_seconds=3600,
+        kind="device",
+        label="Phone",
+        client_ip="192.0.2.9",
     )
     paired_nonce = token_auth.token_nonce(pair)
     ss.attach_device(
@@ -76,18 +88,24 @@ async def test_signed_in_list_contains_browser_cli_and_pair_but_never_apps(home)
 @pytest.mark.asyncio
 async def test_confirmation_gates_revoke_others_and_retains_current(home):
     current = token_auth.generate_token("owner", ttl_seconds=3600, kind="browser")
-    other = token_auth.generate_token("owner", ttl_seconds=3600, kind="browser", label="Other")
+    other = token_auth.generate_token(
+        "owner", ttl_seconds=3600, kind="browser", label="Other"
+    )
     other_nonce = token_auth.token_nonce(other)
 
     async with TestClient(TestServer(_app())) as client:
         refused = await client.post(
-            "/api/devices/revoke-others", json={"confirmed": False}, cookies={COOKIE: current}
+            "/api/devices/revoke-others",
+            json={"confirmed": False},
+            cookies={COOKIE: current},
         )
         assert refused.status == 400
         assert other_nonce in ss.load_sessions()
 
         accepted = await client.post(
-            "/api/devices/revoke-others", json={"confirmed": True}, cookies={COOKIE: current}
+            "/api/devices/revoke-others",
+            json={"confirmed": True},
+            cookies={COOKIE: current},
         )
         assert accepted.status == 200
         assert (await accepted.json()) == {"ok": True, "revoked": 1}

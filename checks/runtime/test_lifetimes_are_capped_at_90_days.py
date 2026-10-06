@@ -11,8 +11,8 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.interfaces.dashboard import session_store as ss
 from gideon.interfaces.dashboard import token_auth as ta
-from gideon.security.auth import lifetimes
 from gideon.interfaces.dashboard.handlers.core import api_token_local
+from gideon.security.auth import lifetimes
 
 
 @pytest.fixture()
@@ -33,7 +33,12 @@ def test_one_shared_policy_accepts_90_days_and_refuses_excessive_values():
     assert lifetimes.parse_lifetime("91d") is None
     assert ta.parse_duration("2160h") == lifetimes.MAX_SESSION_TTL_SECS
     assert ta.parse_duration("2161h") is None
-    assert ta.parse_config_duration("91d", default_secs=lifetimes.DEFAULT_BROWSER_SESSION_TTL_SECS) == lifetimes.DEFAULT_BROWSER_SESSION_TTL_SECS
+    assert (
+        ta.parse_config_duration(
+            "91d", default_secs=lifetimes.DEFAULT_BROWSER_SESSION_TTL_SECS
+        )
+        == lifetimes.DEFAULT_BROWSER_SESSION_TTL_SECS
+    )
     with pytest.raises(ValueError, match="90 days"):
         ta.generate_token("owner", ttl_seconds=lifetimes.MAX_SESSION_TTL_SECS + 1)
 
@@ -42,15 +47,28 @@ def test_a_legacy_long_claim_expires_at_issued_at_plus_90_days(home):
     issued_at = time.time() - 91 * 86400
     nonce = "legacy-long-session"
     payload = {
-        "sub": "owner", "exp": issued_at + ta.LINK_WINDOW_SECS,
-        "session_exp": issued_at + 365 * 86400, "iat": issued_at, "nonce": nonce,
+        "sub": "owner",
+        "exp": issued_at + ta.LINK_WINDOW_SECS,
+        "session_exp": issued_at + 365 * 86400,
+        "iat": issued_at,
+        "nonce": nonce,
     }
     encoded = ta._b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
     token = f"{encoded}.{ta._sign(ta._b64url_decode(encoded))}"
     ss.sessions_path().parent.mkdir(parents=True, exist_ok=True)
-    ss.sessions_path().write_text(json.dumps({"sessions": {nonce: {
-        "exp": payload["session_exp"], "issuer": "local",
-    }}}), encoding="utf-8")
+    ss.sessions_path().write_text(
+        json.dumps(
+            {
+                "sessions": {
+                    nonce: {
+                        "exp": payload["session_exp"],
+                        "issuer": "local",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
 
     valid, _, reason = ta.validate_token(token, use_session_exp=True)
 
@@ -61,11 +79,24 @@ def test_a_legacy_long_claim_expires_at_issued_at_plus_90_days(home):
 def test_legacy_store_records_are_capped_even_before_a_token_claim_is_checked(home):
     issued_at = time.time() - 10
     expiry = issued_at + 365 * 86400
-    ss.sessions_path().write_text(json.dumps({"sessions": {"legacy": {
-        "exp": expiry, "issuer": "local", "minted_at": issued_at,
-    }}}), encoding="utf-8")
+    ss.sessions_path().write_text(
+        json.dumps(
+            {
+                "sessions": {
+                    "legacy": {
+                        "exp": expiry,
+                        "issuer": "local",
+                        "minted_at": issued_at,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    assert ss.load_sessions()["legacy"] == pytest.approx(issued_at + lifetimes.MAX_SESSION_TTL_SECS)
+    assert ss.load_sessions()["legacy"] == pytest.approx(
+        issued_at + lifetimes.MAX_SESSION_TTL_SECS
+    )
 
 
 @pytest.mark.asyncio
@@ -79,7 +110,9 @@ async def test_local_cli_issuer_refuses_excessive_ttl_and_reports_the_policy(hom
             headers={"X-Local-Secret": "local-only-test-secret"},
         )
         assert refused.status == 400
-        assert (await refused.json())["maximum_seconds"] == lifetimes.MAX_SESSION_TTL_SECS
+        assert (await refused.json())[
+            "maximum_seconds"
+        ] == lifetimes.MAX_SESSION_TTL_SECS
 
         issued = await client.get(
             "/api/token/local?ttl=1h",

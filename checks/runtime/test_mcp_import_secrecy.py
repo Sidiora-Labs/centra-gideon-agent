@@ -11,7 +11,9 @@ from aiohttp.test_utils import TestClient, TestServer
 
 
 @pytest.mark.asyncio
-async def test_selected_import_is_opaque_and_safe_projection_never_returns_values(tmp_path, monkeypatch):
+async def test_selected_import_is_opaque_and_safe_projection_never_returns_values(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -35,12 +37,19 @@ async def test_selected_import_is_opaque_and_safe_projection_never_returns_value
         api_mcp_importable,
         api_mcp_server_detail,
     )
-    from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
+    from gideon.interfaces.dashboard.token_auth import (
+        generate_token,
+        token_auth_middleware,
+    )
 
-    app = web.Application(middlewares=[
-        api_version_middleware(),
-        token_auth_middleware(internal_paths=frozenset(), mixed_internal_paths=frozenset(), port=0),
-    ])
+    app = web.Application(
+        middlewares=[
+            api_version_middleware(),
+            token_auth_middleware(
+                internal_paths=frozenset(), mixed_internal_paths=frozenset(), port=0
+            ),
+        ]
+    )
     app.router.add_get("/api/mcp/importable", api_mcp_importable)
     app.router.add_post("/api/mcp/apply", api_mcp_apply)
     app.router.add_put("/api/mcp/servers/{name}", api_mcp_server_detail)
@@ -54,10 +63,16 @@ async def test_selected_import_is_opaque_and_safe_projection_never_returns_value
         listed = await client.get("/api/mcp/importable", headers=headers)
         assert listed.status == 200
         listing_text = await listed.text()
-        assert all(secret not in listing_text for secret in (
-            "url-secret-value", "argument-secret-value", "env-secret-value",
-            "second-line", "header-secret-value",
-        ))
+        assert all(
+            secret not in listing_text
+            for secret in (
+                "url-secret-value",
+                "argument-secret-value",
+                "env-secret-value",
+                "second-line",
+                "header-secret-value",
+            )
+        )
         candidate = (await listed.json())["servers"][0]
         assert re.fullmatch(r"[0-9a-f]{16}", candidate["id"])
         assert candidate["env"] == [{"name": "SERVICE_TOKEN", "configured": True}]
@@ -73,10 +88,16 @@ async def test_selected_import_is_opaque_and_safe_projection_never_returns_value
         assert server["allowed"] is False
         assert server["allowRevision"] and server["allowQuestion"]
         import_text = json.dumps(payload)
-        assert all(secret not in import_text for secret in (
-            "url-secret-value", "argument-secret-value", "env-secret-value",
-            "second-line", "header-secret-value",
-        ))
+        assert all(
+            secret not in import_text
+            for secret in (
+                "url-secret-value",
+                "argument-secret-value",
+                "env-secret-value",
+                "second-line",
+                "header-secret-value",
+            )
+        )
 
         from gideon.core.config.credentials import get_secret_value
 
@@ -90,24 +111,44 @@ async def test_selected_import_is_opaque_and_safe_projection_never_returns_value
         assert get_secret_value(header_ref[9:-2]) == "Bearer header-secret-value"
 
         edited = await client.put(
-            "/api/mcp/servers/remote-fixture", json={"transport": "sse"}, headers=headers
+            "/api/mcp/servers/remote-fixture",
+            json={"transport": "sse"},
+            headers=headers,
         )
         assert edited.status == 200
         edit_payload = await edited.json()
         edit_text = json.dumps(edit_payload)
-        assert all(secret not in edit_text for secret in (
-            "url-secret-value", "argument-secret-value", "env-secret-value",
-            "second-line", "header-secret-value",
-        ))
+        assert all(
+            secret not in edit_text
+            for secret in (
+                "url-secret-value",
+                "argument-secret-value",
+                "env-secret-value",
+                "second-line",
+                "header-secret-value",
+            )
+        )
         after_edit = json.loads((home / "mcp.json").read_text(encoding="utf-8"))
-        assert after_edit["mcpServers"]["remote-fixture"]["env"]["SERVICE_TOKEN"] == env_ref
-        assert after_edit["mcpServers"]["remote-fixture"]["headers"]["Authorization"] == header_ref
+        assert (
+            after_edit["mcpServers"]["remote-fixture"]["env"]["SERVICE_TOKEN"]
+            == env_ref
+        )
+        assert (
+            after_edit["mcpServers"]["remote-fixture"]["headers"]["Authorization"]
+            == header_ref
+        )
         from gideon.extensions.providers.mcp_instances import resolve_server_credentials
+
         stored_spec = after_edit["mcpServers"]["remote-fixture"]
-        assert resolve_server_credentials("remote-fixture", stored_spec)["args"] == source["args"]
+        assert (
+            resolve_server_credentials("remote-fixture", stored_spec)["args"]
+            == source["args"]
+        )
         assert "argument-secret-value" not in json.dumps(stored_spec)
 
-        deleted = await client.delete("/api/mcp/servers/remote-fixture", headers=headers)
+        deleted = await client.delete(
+            "/api/mcp/servers/remote-fixture", headers=headers
+        )
         assert deleted.status == 200
         assert not (home / "mcp.json").exists() or "remote-fixture" not in json.loads(
             (home / "mcp.json").read_text(encoding="utf-8")

@@ -89,18 +89,14 @@ def test_declared_schema_prompt_exposes_every_exact_output_key() -> None:
 
 
 def test_declared_output_parser_returns_only_a_schema_valid_json_value() -> None:
-    schema = {
-        "items": [{"title": "string", "body": "string", "evidence": "string"}]
-    }
+    schema = {"items": [{"title": "string", "body": "string", "evidence": "string"}]}
     raw = '```json\n{"items":[{"title":"Decision","body":"Ship","evidence":"line 3"}]}\n```'
 
     output, mismatch = parse_declared_output(raw, schema)
 
     assert mismatch == ""
     assert output == {
-        "items": [
-            {"title": "Decision", "body": "Ship", "evidence": "line 3"}
-        ]
+        "items": [{"title": "Decision", "body": "Ship", "evidence": "line 3"}]
     }
 
 

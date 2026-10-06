@@ -1,4 +1,5 @@
 """Store discovery keeps update versions attached to the installed source pointer."""
+
 from __future__ import annotations
 
 import json
@@ -13,7 +14,9 @@ from gideon.extensions.apps import catalog, manager, source
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("GIDEON_FIRST_PARTY_APPS_DIR", str(tmp_path / "absent-first-party"))
+    monkeypatch.setenv(
+        "GIDEON_FIRST_PARTY_APPS_DIR", str(tmp_path / "absent-first-party")
+    )
     monkeypatch.setenv("GIDEON_APP_CATALOG_URLS", "")
     monkeypatch.setenv("GIDEON_APP_REGISTRY_URL", "")
     for cache in (
@@ -39,9 +42,12 @@ def git(*args: str, cwd: Path) -> None:
     subprocess.run(
         [
             "git",
-            "-c", "user.email=fixture@example.invalid",
-            "-c", "user.name=Fixture",
-            "-c", "commit.gpgsign=false",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "commit.gpgsign=false",
             *args,
         ],
         cwd=cwd,
@@ -81,7 +87,9 @@ def install(name: str, version: str, pointer: str, origin: str = "external") -> 
     path = manager.apps_dir() / name
     path.mkdir(parents=True)
     (path / "installed.json").write_text(
-        json.dumps({"name": name, "version": version, "source": pointer, "origin": origin}),
+        json.dumps(
+            {"name": name, "version": version, "source": pointer, "origin": origin}
+        ),
         encoding="utf-8",
     )
     (path / "app.json").write_text(manifest(name, version), encoding="utf-8")
@@ -93,25 +101,36 @@ def updates() -> dict[str, dict]:
 
 def test_git_pointer_parser_owns_repository_and_subdirectory_split() -> None:
     assert source.git_pointer("https://example.invalid/apps.git#nested/tool/") == (
-        "https://example.invalid/apps.git", "nested/tool"
+        "https://example.invalid/apps.git",
+        "nested/tool",
     )
     assert source.git_pointer("/var/lib/apps/tool") is None
 
 
-def test_multi_app_and_single_app_sources_offer_only_the_installed_pointer(tmp_path: Path) -> None:
+def test_multi_app_and_single_app_sources_offer_only_the_installed_pointer(
+    tmp_path: Path,
+) -> None:
     multi = BareRepo(tmp_path / "multi")
     (multi.work / "alpha-app").mkdir()
-    (multi.work / "alpha-app" / "app.json").write_text(manifest("alpha-app", "1.0.0"), encoding="utf-8")
+    (multi.work / "alpha-app" / "app.json").write_text(
+        manifest("alpha-app", "1.0.0"), encoding="utf-8"
+    )
     (multi.work / "beta-app").mkdir()
-    (multi.work / "beta-app" / "app.json").write_text(manifest("beta-app", "1.0.0"), encoding="utf-8")
+    (multi.work / "beta-app" / "app.json").write_text(
+        manifest("beta-app", "1.0.0"), encoding="utf-8"
+    )
     multi.publish("publish two apps")
     catalog.add_git_source(multi.url)
     alpha_pointer = f"{multi.url}#alpha-app"
     install("alpha-app", "1.0.0", alpha_pointer)
     install("beta-app", "1.0.0", f"{multi.url}#beta-app")
 
-    (multi.work / "alpha-app" / "app.json").write_text(manifest("alpha-app", "1.2.0"), encoding="utf-8")
-    (multi.work / "beta-app" / "app.json").write_text(manifest("beta-app", "1.0.0"), encoding="utf-8")
+    (multi.work / "alpha-app" / "app.json").write_text(
+        manifest("alpha-app", "1.2.0"), encoding="utf-8"
+    )
+    (multi.work / "beta-app" / "app.json").write_text(
+        manifest("beta-app", "1.0.0"), encoding="utf-8"
+    )
     multi.publish("publish alpha update")
     catalog.available_catalog()
     offered = updates()
@@ -130,15 +149,31 @@ def test_multi_app_and_single_app_sources_offer_only_the_installed_pointer(tmp_p
     assert updates()["solo-app"]["latestSource"] == solo.url
 
 
-def test_registry_listing_offer_keeps_pointer_context_and_refused_sources_are_excluded(tmp_path: Path) -> None:
+def test_registry_listing_offer_keeps_pointer_context_and_refused_sources_are_excluded(
+    tmp_path: Path,
+) -> None:
     repo = BareRepo(tmp_path / "registry")
     external_pointer = "https://downloads.example.invalid/gamma.git#gamma"
     refused_pointer = f"{repo.url}#delta"
     (repo.work / "app-registry.json").write_text(
-        json.dumps({"apps": [
-            {"name": "gamma-app", "repo": "https://downloads.example.invalid/gamma.git", "subdirectory": "gamma", "version": "2.0.0"},
-            {"name": "delta-app", "repo": repo.url, "subdirectory": "delta", "version": "9.0.0"},
-        ]}),
+        json.dumps(
+            {
+                "apps": [
+                    {
+                        "name": "gamma-app",
+                        "repo": "https://downloads.example.invalid/gamma.git",
+                        "subdirectory": "gamma",
+                        "version": "2.0.0",
+                    },
+                    {
+                        "name": "delta-app",
+                        "repo": repo.url,
+                        "subdirectory": "delta",
+                        "version": "9.0.0",
+                    },
+                ]
+            }
+        ),
         encoding="utf-8",
     )
     repo.publish("publish registry")
@@ -154,16 +189,22 @@ def test_registry_listing_offer_keeps_pointer_context_and_refused_sources_are_ex
     assert "delta-app" not in offered
 
 
-def test_library_projection_uses_only_last_store_refresh_and_drops_removed_source(tmp_path: Path) -> None:
+def test_library_projection_uses_only_last_store_refresh_and_drops_removed_source(
+    tmp_path: Path,
+) -> None:
     repo = BareRepo(tmp_path / "catalog")
     (repo.work / "alpha-app").mkdir()
-    (repo.work / "alpha-app" / "app.json").write_text(manifest("alpha-app", "2.0.0"), encoding="utf-8")
+    (repo.work / "alpha-app" / "app.json").write_text(
+        manifest("alpha-app", "2.0.0"), encoding="utf-8"
+    )
     repo.publish("publish current version")
     catalog.add_git_source(repo.url)
     install("alpha-app", "1.0.0", f"{repo.url}#alpha-app")
     catalog.available_catalog()
 
-    (repo.work / "alpha-app" / "app.json").write_text(manifest("alpha-app", "3.0.0"), encoding="utf-8")
+    (repo.work / "alpha-app" / "app.json").write_text(
+        manifest("alpha-app", "3.0.0"), encoding="utf-8"
+    )
     repo.publish("publish unrefreshed version")
     assert updates()["alpha-app"]["latestVersion"] == "2.0.0"
 

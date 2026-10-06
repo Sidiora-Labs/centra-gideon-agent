@@ -17,7 +17,9 @@ def test_real_inventory_failure_has_a_remedy_and_lowers_health(tmp_path, monkeyp
     (home / "unclaimed-store").mkdir()
     (home / "unclaimed-store" / "state.json").write_text("{}", encoding="utf-8")
 
-    probes = [probe for probe in doctor.all_probes() if probe.id == "durability.inventory"]
+    probes = [
+        probe for probe in doctor.all_probes() if probe.id == "durability.inventory"
+    ]
     assert len(probes) == 1, "durability inventory probe is not registered"
     report = asyncio.run(doctor.run_doctor(DoctorContext(home=home), probes=probes))
     rows = [row for cap in report["capabilities"].values() for row in cap["probes"]]

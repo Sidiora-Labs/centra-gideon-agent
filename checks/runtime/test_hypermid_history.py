@@ -56,9 +56,7 @@ def test_history_is_append_only_idempotent_and_exactly_recoverable(tmp_path) -> 
     session_id = Id("session-1")
     raw = RawSourceJournal(tmp_path / "raw.sqlite3")
     journal_path = tmp_path / "history.sqlite3"
-    journal = HistoryJournal(
-        journal_path, scope=scope, session_id=session_id, epoch=7
-    )
+    journal = HistoryJournal(journal_path, scope=scope, session_id=session_id, epoch=7)
 
     original_bytes = b'{"role":"user","content":"keep exact bytes"}'
     original_digest = raw.append(
@@ -127,7 +125,9 @@ def test_history_is_append_only_idempotent_and_exactly_recoverable(tmp_path) -> 
         original_bytes,
         edited_bytes,
     ]
-    assert journal.source_digest(JournalRange(original.cursor, edited.cursor)) == Digest.sha256(
+    assert journal.source_digest(
+        JournalRange(original.cursor, edited.cursor)
+    ) == Digest.sha256(
         original.cursor.epoch.to_bytes(8, "big")
         + original.cursor.sequence.to_bytes(8, "big")
         + str(original.item_id).encode()
@@ -162,9 +162,7 @@ def test_history_is_append_only_idempotent_and_exactly_recoverable(tmp_path) -> 
     assert journal.cursor == edited.cursor
 
     journal._connection.execute("PRAGMA wal_checkpoint(FULL)")
-    reopened = HistoryJournal(
-        journal_path, scope=scope, session_id=session_id, epoch=7
-    )
+    reopened = HistoryJournal(journal_path, scope=scope, session_id=session_id, epoch=7)
     assert reopened.cursor == Cursor(7, 2)
     assert reopened.recover(raw, tags=(1,))[0].source_bytes == original_bytes
 

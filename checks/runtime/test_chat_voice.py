@@ -42,7 +42,9 @@ class TestVoiceSynthesize:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("request_id", ["", 17, "x" * 129])
-    async def test_request_id_must_be_a_bounded_non_empty_string(self, tmp_path, request_id):
+    async def test_request_id_must_be_a_bounded_non_empty_string(
+        self, tmp_path, request_id
+    ):
         from gideon.cognition.history import ConversationLog
         from gideon.core.config import AppConfig
         from gideon.engine.session import ConversationDirectory
@@ -233,7 +235,8 @@ async def test_empty_actual_tts_binding_reports_unbound(tmp_path):
     )
     async with TestClient(TestServer(_make_voice_app(state))) as client:
         response = await client.post(
-            "/api/voice/synthesize", json={"text": "Hello", "session": "s1"},
+            "/api/voice/synthesize",
+            json={"text": "Hello", "session": "s1"},
         )
         body = await response.json()
     assert response.status == 503

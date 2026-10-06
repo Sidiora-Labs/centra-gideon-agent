@@ -84,7 +84,7 @@ def test_codex_reader_preserves_remote_transport_headers_and_disabled_tools(tmp_
     (root / "config.toml").write_text(
         '[mcp_servers."research"]\n'
         'url = "https://mcp.example.test/mcp"\n'
-        'enabled = false\n'
+        "enabled = false\n"
         'disabled_tools = ["write", "delete"]\n'
         '[mcp_servers."research".http_headers]\n'
         'X-Workspace = "demo"\n',

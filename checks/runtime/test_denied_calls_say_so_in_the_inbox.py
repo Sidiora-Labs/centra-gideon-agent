@@ -69,7 +69,9 @@ async def test_expired_workflow_approval_becomes_a_redacted_exact_origin_row(
     assert await request is False
 
     store = state._inbox_svc.inbox
-    rows = [item for item in store.items.values() if item.refs.get("auto_denied") is True]
+    rows = [
+        item for item in store.items.values() if item.refs.get("auto_denied") is True
+    ]
     assert len(rows) == 1
     row = rows[0]
     assert row.refs["reason"] == "expired"

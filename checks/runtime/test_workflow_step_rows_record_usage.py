@@ -16,13 +16,13 @@ from gideon.automation.workflows.models import (
 )
 from gideon.automation.workflows.service import inspect_node, status
 from gideon.automation.workflows.step_usage import (
-    CallLog,
     NOT_RECORDED,
+    CallLog,
     bind_calls,
     measured,
 )
-from gideon.integrations.llm.events import AgentEvent as LLMEvent
 from gideon.integrations.llm.events import EVENT_COMPLETE, EVENT_TEXT_CHUNK
+from gideon.integrations.llm.events import AgentEvent as LLMEvent
 from gideon.security.guardrails.model_call import _workflow_stream_observation
 
 
@@ -58,7 +58,9 @@ def test_real_stream_events_measure_complete_and_cut_off_calls() -> None:
             "start", "second", provider="provider-b", model="model-b"
         )
         _workflow_stream_observation(
-            "event", "second", event=LLMEvent(kind=EVENT_TEXT_CHUNK, text="still working")
+            "event",
+            "second",
+            event=LLMEvent(kind=EVENT_TEXT_CHUNK, text="still working"),
         )
         _workflow_stream_observation("end", "second", completed=False)
 
@@ -75,7 +77,9 @@ def test_zero_usage_is_distinct_from_an_unreported_completed_call() -> None:
     assert NOT_RECORDED.fields()["model_calls_open"] is None
     zero = CallLog()
     with bind_calls(zero):
-        _workflow_stream_observation("start", "zero", provider="provider", model="model")
+        _workflow_stream_observation(
+            "start", "zero", provider="provider", model="model"
+        )
         _workflow_stream_observation(
             "event",
             "zero",
@@ -88,8 +92,12 @@ def test_zero_usage_is_distinct_from_an_unreported_completed_call() -> None:
 
     unknown = CallLog()
     with bind_calls(unknown):
-        _workflow_stream_observation("start", "unknown", provider="provider", model="model")
-        _workflow_stream_observation("event", "unknown", event=LLMEvent(kind=EVENT_COMPLETE))
+        _workflow_stream_observation(
+            "start", "unknown", provider="provider", model="model"
+        )
+        _workflow_stream_observation(
+            "event", "unknown", event=LLMEvent(kind=EVENT_COMPLETE)
+        )
         _workflow_stream_observation("end", "unknown", completed=True)
     assert measured(unknown).tokens is None
     assert measured(unknown).cost_usd is None
@@ -102,7 +110,9 @@ def test_terminal_attempt_usage_is_written_and_read_by_the_real_status_consumer(
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    run = store.create(WorkflowRun(id="", workflow_name="usage-run", status=RunStatus.FAILED))
+    run = store.create(
+        WorkflowRun(id="", workflow_name="usage-run", status=RunStatus.FAILED)
+    )
     spec = {
         "root": {
             "kind": "sequence",
@@ -118,7 +128,9 @@ def test_terminal_attempt_usage_is_written_and_read_by_the_real_status_consumer(
         "root.children[0]",
         "work",
         epoch=0,
-        failure=Failure(failure_class=FailureClass.NETWORK, cause_plain="connection refused"),
+        failure=Failure(
+            failure_class=FailureClass.NETWORK, cause_plain="connection refused"
+        ),
         attempt=1,
         usage=failed_usage,
     )
@@ -151,10 +163,18 @@ def test_terminal_attempt_usage_is_written_and_read_by_the_real_status_consumer(
     )
 
     rows = status(run.id)["nodes"][0]["attempts"]
-    assert [row["kind"] for row in rows] == ["step_failed", "step_completed", "step_cancelled"]
+    assert [row["kind"] for row in rows] == [
+        "step_failed",
+        "step_completed",
+        "step_cancelled",
+    ]
     assert [row["tokens"] for row in rows] == [7, 3, 2]
     inspected = inspect_node(run.id, "work")["attempts"]
-    assert [row["kind"] for row in inspected] == ["step_failed", "step_completed", "step_cancelled"]
+    assert [row["kind"] for row in inspected] == [
+        "step_failed",
+        "step_completed",
+        "step_cancelled",
+    ]
     assert [row["tokens"] for row in inspected] == [7, 3, 2]
     assert journal_mod.run_totals(run.id)["tokens"] == 10
 
@@ -173,7 +193,11 @@ async def test_real_failed_transform_attempt_records_zero_as_measured_usage(
             "kind": "sequence",
             "id": "root",
             "children": [
-                {"kind": "transform", "id": "work", "config": {"expr": "{{nodes.missing.output}}"}}
+                {
+                    "kind": "transform",
+                    "id": "work",
+                    "config": {"expr": "{{nodes.missing.output}}"},
+                }
             ],
         },
     }

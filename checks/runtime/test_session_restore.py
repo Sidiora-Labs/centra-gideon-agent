@@ -205,7 +205,9 @@ class TestRestoreRecentSessions:
         assert state._sessions["existing"].messages[0]["content"] == "already here"
 
     @pytest.mark.asyncio
-    async def test_restores_full_history_then_persists_new_turn(self, tmp_path, monkeypatch):
+    async def test_restores_full_history_then_persists_new_turn(
+        self, tmp_path, monkeypatch
+    ):
         monkeypatch.setattr(
             "gideon.interfaces.dashboard.state.config_dir", lambda: tmp_path
         )

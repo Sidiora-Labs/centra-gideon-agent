@@ -1,7 +1,7 @@
 from gideon.engine.agents.native.failover import NoModelAnswered
 from gideon.engine.subagent import DelegationSupervisor, SubagentInfo, _ExecutionPass
 from gideon.integrations.llm.base import ModelSubstitution
-from gideon.integrations.llm.events import AgentEvent, EVENT_COMPLETE
+from gideon.integrations.llm.events import EVENT_COMPLETE, AgentEvent
 from gideon.operations import usage_ledger
 
 
@@ -16,7 +16,9 @@ def test_model_substitution_carries_a_structured_and_readable_record():
 
     assert substitution.to_dict()["requested"] == "local:preferred:model"
     assert substitution.to_dict()["served"] == "cloud:backup:model"
-    assert substitution.notice().startswith("Ran on cloud:backup:model instead of this chat")
+    assert substitution.notice().startswith(
+        "Ran on cloud:backup:model instead of this chat"
+    )
 
 
 def test_terminal_event_attributes_usage_to_the_actual_responder(tmp_path, monkeypatch):
@@ -58,7 +60,9 @@ def test_all_failed_copy_keeps_each_named_model_and_repair_path():
     assert "Agents page" in text
 
 
-def test_subagent_completion_prices_and_records_the_terminal_responder(tmp_path, monkeypatch):
+def test_subagent_completion_prices_and_records_the_terminal_responder(
+    tmp_path, monkeypatch
+):
     import asyncio
 
     from gideon.operations.pricing import estimate_cost
@@ -86,7 +90,11 @@ def test_subagent_completion_prices_and_records_the_terminal_responder(tmp_path,
         served_model_ref="anthropic:claude-sonnet-4.5",
     )
 
-    asyncio.run(DelegationSupervisor._consume_completion(object.__new__(DelegationSupervisor), run, event))
+    asyncio.run(
+        DelegationSupervisor._consume_completion(
+            object.__new__(DelegationSupervisor), run, event
+        )
+    )
 
     assert info.model == "preferred-model"
     assert info.served_model_ref == "anthropic:claude-sonnet-4.5"
@@ -156,7 +164,9 @@ def test_fallback_formatting_keeps_the_actual_repair_path():
     from gideon.engine.agents.native.failover import ModelFailover
 
     notice = ModelFailover(
-        requested="local:preferred", who="Analyst", fix="Review the model order in Settings → Models."
+        requested="local:preferred",
+        who="Analyst",
+        fix="Review the model order in Settings → Models.",
     ).substitution("cloud:backup", [("local:preferred", "the provider timed out")])
     assert notice.fix == "Review the model order in Settings → Models."
     assert notice.to_dict()["fix"] == notice.fix

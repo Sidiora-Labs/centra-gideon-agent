@@ -12,7 +12,9 @@ WHEEL = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(WHEEL)
 
 
-def test_wheel_notice_reader_returns_the_packaged_customer_bytes(tmp_path: Path) -> None:
+def test_wheel_notice_reader_returns_the_packaged_customer_bytes(
+    tmp_path: Path,
+) -> None:
     wheel = tmp_path / "gideon-0.1.0-py3-none-any.whl"
     notice = b"Gideon third-party notices\nMIT License\n"
     with zipfile.ZipFile(wheel, "w") as archive:

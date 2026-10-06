@@ -289,7 +289,9 @@ class TestEffectLifecycle:
 
 
 class TestRedoBoundary:
-    @pytest.mark.parametrize("effect_status", [EffectStatus.ATTEMPTED, EffectStatus.COMMITTED])
+    @pytest.mark.parametrize(
+        "effect_status", [EffectStatus.ATTEMPTED, EffectStatus.COMMITTED]
+    )
     async def test_unreplayable_effect_outcome_blocks_interrupted_resume(
         self, effect_status: EffectStatus
     ) -> None:
@@ -305,12 +307,16 @@ class TestRedoBoundary:
             node_id="send",
             provider="notify",
         )
-        store.write_state(run.id, {"root.children[0]": NodeInstance(path="root.children[0]")})
+        store.write_state(
+            run.id, {"root.children[0]": NodeInstance(path="root.children[0]")}
+        )
         fired: list[dict] = []
         controller = RunController(
             run,
             spec,
-            services=EngineServices(get_provider=_provider(_Result(stdout='{"id":"repeat"}'), calls=fired)),
+            services=EngineServices(
+                get_provider=_provider(_Result(stdout='{"id":"repeat"}'), calls=fired)
+            ),
         )
 
         assert await controller.run_to_completion(timeout=20) == RunStatus.FAILED

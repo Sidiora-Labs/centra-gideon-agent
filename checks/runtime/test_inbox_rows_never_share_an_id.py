@@ -1,10 +1,14 @@
 from gideon.integrations.inbox import InboxState, InboxStore
 from gideon.integrations.inbox_providers.base import IncomingMessage
-from gideon.integrations.inbox_providers.filesystem_source import FilesystemSourceProvider
+from gideon.integrations.inbox_providers.filesystem_source import (
+    FilesystemSourceProvider,
+)
 from gideon.integrations.inbox_service import InboxService
 
 
-def test_same_provider_id_and_second_remain_distinct_by_channel_and_deduplicate(tmp_path):
+def test_same_provider_id_and_second_remain_distinct_by_channel_and_deduplicate(
+    tmp_path,
+):
     provider = FilesystemSourceProvider()
     store = InboxStore(tmp_path / "inbox.json")
     service = InboxService(

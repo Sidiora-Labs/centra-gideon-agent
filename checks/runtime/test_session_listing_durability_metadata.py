@@ -32,7 +32,8 @@ def test_real_session_listing_sidecar_is_derived_inside_sessions(tmp_path, monke
     assert entry is not None and entry.path == "sessions"
     assert entry.derived_within == ("*.summary.json", "session_listing.json")
     ignored = snapshot._derived_ignore(entry.path, sessions)(
-        str(sessions), [listing.name, summary_path.name, log._path("durability-vector").name]
+        str(sessions),
+        [listing.name, summary_path.name, log._path("durability-vector").name],
     )
     assert ignored == {listing.name, summary_path.name}
 

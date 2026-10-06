@@ -17,7 +17,9 @@ def _run_console_route_helpers(repo_root: Path, tmp_path: Path, refs: dict):
     notification_source = (
         repo_root / "apps/console/src/features/notifications/notificationMeta.ts"
     ).read_text()
-    inbox_source = (repo_root / "apps/console/src/features/inbox/inboxMeta.ts").read_text()
+    inbox_source = (
+        repo_root / "apps/console/src/features/inbox/inboxMeta.ts"
+    ).read_text()
     notification_start = notification_source.index("function routeIdentity(")
     notification_end = notification_source.index(
         "export function toneChipBg(", notification_start
@@ -35,8 +37,7 @@ def _run_console_route_helpers(repo_root: Path, tmp_path: Path, refs: dict):
     helper_path = tmp_path / "inbox_route_helpers.ts"
     helper_path.write_text(helpers)
     driver_path = tmp_path / "inbox_route_helpers.cjs"
-    driver_path.write_text(
-        """const fs = require('node:fs');
+    driver_path.write_text("""const fs = require('node:fs');
 const ts = require(require.resolve('typescript', { paths: [process.cwd()] }));
 const source = fs.readFileSync(process.argv[2], 'utf8');
 const emitted = ts.transpileModule(source, {
@@ -66,8 +67,7 @@ process.stdout.write(JSON.stringify({
   persistedItem: refTarget({ refs: persistedRefs }),
   typedRefs: typedRefs.map(refs => refTarget({ refs })),
 }));
-"""
-    )
+""")
     return subprocess.run(
         [node, str(driver_path), str(helper_path), json.dumps(refs)],
         cwd=repo_root / "apps/console",
@@ -129,9 +129,7 @@ def test_failed_trigger_inbox_item_opens_allowlisted_trigger_or_run(
         "dedup_key": "trigger_failure:schedule:weekly/report:run/2026 weekly",
     }
     assert len(state._notification_log) == 2
-    notifications_by_kind = {
-        entry["kind"]: entry for entry in state._notification_log
-    }
+    notifications_by_kind = {entry["kind"]: entry for entry in state._notification_log}
     assert notifications_by_kind["cron_failed"]["inbox_item"] == item.id
     ordinary_item = next(
         item

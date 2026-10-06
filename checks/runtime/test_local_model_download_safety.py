@@ -11,7 +11,6 @@ import pytest
 
 from gideon.integrations.local_models.fit import disk_precheck, size_text
 
-
 _MIB = 1024 * 1024
 
 
@@ -83,6 +82,7 @@ async def test_real_external_local_provider_warning_survives_http_job_failure(
     provider = module.create_provider({})
 
     from aiohttp import ClientSession
+
     from gideon.core.config import AppConfig
     from gideon.engine.session import ConversationDirectory
     from gideon.integrations.local_models.provider import LocalModelProvider
@@ -117,7 +117,9 @@ async def test_real_external_local_provider_warning_survives_http_job_failure(
             "X-Gideon-API-Version": "1",
         }
         async with ClientSession() as client:
-            async with client.get(f"{base}/api/models/available", headers=headers) as response:
+            async with client.get(
+                f"{base}/api/models/available", headers=headers
+            ) as response:
                 assert response.status == 200
                 catalog = await response.json()
             catalog_provider = next(
@@ -147,7 +149,9 @@ async def test_real_external_local_provider_warning_survives_http_job_failure(
                 ) as response:
                     assert response.status == 200
                     downloads = (await response.json())["downloads"]
-                job = next((item for item in downloads if item["id"] == created["id"]), None)
+                job = next(
+                    (item for item in downloads if item["id"] == created["id"]), None
+                )
                 if job and job["state"] == "error":
                     break
                 await asyncio.sleep(0.05)
@@ -168,7 +172,11 @@ async def test_real_external_local_provider_warning_survives_http_job_failure(
                 )
             assert b"event: snapshot" in frame
             snapshot = json.loads(
-                next(line[6:] for line in frame.decode().splitlines() if line.startswith("data: "))
+                next(
+                    line[6:]
+                    for line in frame.decode().splitlines()
+                    if line.startswith("data: ")
+                )
             )
             assert snapshot["state"] == "error"
             assert snapshot["warning"] == created["warning"]

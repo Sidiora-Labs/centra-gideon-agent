@@ -102,7 +102,9 @@ class TestPipes:
         assert resolve("{{nodes.empty_node.output | filter}}", ctx) == []
         assert resolve("{{nodes.empty_node.output | count}}", ctx) == 0
 
-    def test_nested_path_from_a_present_null_output_flows_through_filter(self, ctx) -> None:
+    def test_nested_path_from_a_present_null_output_flows_through_filter(
+        self, ctx
+    ) -> None:
         """A tolerated failed node is represented by an explicit null output."""
         assert resolve("{{nodes.empty_node.output.items | filter}}", ctx) == []
 

@@ -35,7 +35,9 @@ def _gateway() -> web.Application:
 def _skip_connectors() -> dict[str, dict[str, str]]:
     source = pack_bundled.get_bundled(PACK)
     assert source is not None
-    declared = json.loads((source.source / "connectors.json").read_text(encoding="utf-8"))
+    declared = json.loads(
+        (source.source / "connectors.json").read_text(encoding="utf-8")
+    )
     return {str(row["name"]): {"mode": "skip"} for row in declared}
 
 
@@ -67,7 +69,9 @@ async def _uninstall(
 
 
 @pytest.mark.asyncio
-async def test_dry_run_names_all_components_and_changes_no_pack_state(home: Path) -> None:
+async def test_dry_run_names_all_components_and_changes_no_pack_state(
+    home: Path,
+) -> None:
     async with TestClient(TestServer(_gateway())) as client:
         await _install(client)
         paths = _component_paths(home)
@@ -87,7 +91,9 @@ async def test_dry_run_names_all_components_and_changes_no_pack_state(home: Path
 
 
 @pytest.mark.asyncio
-async def test_confirmed_uninstall_removes_only_pack_files_then_ledger(home: Path) -> None:
+async def test_confirmed_uninstall_removes_only_pack_files_then_ledger(
+    home: Path,
+) -> None:
     async with TestClient(TestServer(_gateway())) as client:
         await _install(client)
         paths = _component_paths(home)
@@ -111,17 +117,26 @@ async def test_confirmed_uninstall_removes_only_pack_files_then_ledger(home: Pat
 
 
 @pytest.mark.asyncio
-async def test_edited_component_stays_while_unedited_siblings_are_removed(home: Path) -> None:
+async def test_edited_component_stays_while_unedited_siblings_are_removed(
+    home: Path,
+) -> None:
     async with TestClient(TestServer(_gateway())) as client:
         await _install(client)
         edited = home / "skills" / "cfo-budget-review" / "SKILL.md"
-        edited.write_text(edited.read_text(encoding="utf-8") + "\nMy own rule.\n", encoding="utf-8")
+        edited.write_text(
+            edited.read_text(encoding="utf-8") + "\nMy own rule.\n", encoding="utf-8"
+        )
         _, preview = await _uninstall(client, confirm=False)
         plan = preview["uninstall"]
         assert plan["kept"] == [
-            {"ref": "skill:cfo-budget-review", "reason": "you edited it after it was installed, so it stays"}
+            {
+                "ref": "skill:cfo-budget-review",
+                "reason": "you edited it after it was installed, so it stays",
+            }
         ]
-        status, body = await _uninstall(client, confirm=True, token=plan["confirmation_token"])
+        status, body = await _uninstall(
+            client, confirm=True, token=plan["confirmation_token"]
+        )
 
     assert status == 200, body
     assert body["uninstall"]["kept"] == plan["kept"]
@@ -154,19 +169,28 @@ async def test_wrong_ledger_destination_is_never_deleted(
             "computedHash": component_digest(victim),
             "path": recorded,
         }
-        (home / "packs" / "installed.json").write_text(json.dumps(ledger), encoding="utf-8")
+        (home / "packs" / "installed.json").write_text(
+            json.dumps(ledger), encoding="utf-8"
+        )
         _, preview = await _uninstall(client, confirm=False)
         plan = preview["uninstall"]
-        status, body = await _uninstall(client, confirm=True, token=plan["confirmation_token"])
+        status, body = await _uninstall(
+            client, confirm=True, token=plan["confirmation_token"]
+        )
 
     assert status == 200, body
     assert victim.read_text(encoding="utf-8") == "not the pack's"
     kept = {row["ref"]: row["reason"] for row in body["uninstall"]["kept"]}
-    assert "not where this component installs" in kept["prompt:cfo-spending-digest"] or "unsafe" in kept["prompt:cfo-spending-digest"]
+    assert (
+        "not where this component installs" in kept["prompt:cfo-spending-digest"]
+        or "unsafe" in kept["prompt:cfo-spending-digest"]
+    )
 
 
 @pytest.mark.asyncio
-async def test_symlinked_component_is_kept_without_following_it(home: Path, tmp_path: Path) -> None:
+async def test_symlinked_component_is_kept_without_following_it(
+    home: Path, tmp_path: Path
+) -> None:
     async with TestClient(TestServer(_gateway())) as client:
         await _install(client)
         prompt = home / "prompts" / "cfo-spending-digest.yaml"
@@ -176,11 +200,15 @@ async def test_symlinked_component_is_kept_without_following_it(home: Path, tmp_
         prompt.symlink_to(victim)
         _, preview = await _uninstall(client, confirm=False)
         plan = preview["uninstall"]
-        status, body = await _uninstall(client, confirm=True, token=plan["confirmation_token"])
+        status, body = await _uninstall(
+            client, confirm=True, token=plan["confirmation_token"]
+        )
 
     assert status == 200, body
     assert victim.exists() and prompt.is_symlink()
-    assert "prompt:cfo-spending-digest" in {row["ref"] for row in body["uninstall"]["kept"]}
+    assert "prompt:cfo-spending-digest" in {
+        row["ref"] for row in body["uninstall"]["kept"]
+    }
 
 
 @pytest.mark.asyncio
@@ -190,13 +218,18 @@ async def test_deployed_agent_and_automation_block_until_removed(home: Path) -> 
 
     async with TestClient(TestServer(_gateway())) as client:
         await _install(client)
-        assert (await client.post(f"/api/packs/{PACK}/roster/deploy", json={})).status == 200
-        assert (await client.post(f"/api/packs/{PACK}/triggers/deploy", json={})).status == 200
+        assert (
+            await client.post(f"/api/packs/{PACK}/roster/deploy", json={})
+        ).status == 200
+        assert (
+            await client.post(f"/api/packs/{PACK}/triggers/deploy", json={})
+        ).status == 200
         paths = _component_paths(home)
 
         dry_status, dry = await _uninstall(client, confirm=False)
         trigger_name = next(
-            row["name"] for row in dry["uninstall"]["in_use"]
+            row["name"]
+            for row in dry["uninstall"]["in_use"]
             if row["kind"] == "automation"
         )
         status, body = await _uninstall(
@@ -229,7 +262,9 @@ async def test_stale_confirmation_keeps_newly_edited_component(home: Path) -> No
         await _install(client)
         edited = home / "skills" / "cfo-budget-review" / "SKILL.md"
         _, preview = await _uninstall(client, confirm=False)
-        edited.write_text(edited.read_text(encoding="utf-8") + "\nNew edit.\n", encoding="utf-8")
+        edited.write_text(
+            edited.read_text(encoding="utf-8") + "\nNew edit.\n", encoding="utf-8"
+        )
         status, body = await _uninstall(
             client, confirm=True, token=preview["uninstall"]["confirmation_token"]
         )

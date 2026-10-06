@@ -18,7 +18,11 @@ def test_research_completion_waits_for_distinct_readable_pages(tmp_path, monkeyp
             name="Evidence review",
             kind="research",
             task="Compare two public methods",
-            kind_config={"goal_type": "open_ended", "evidence_min_pages": 2, "evidence_min_domains": 2},
+            kind_config={
+                "goal_type": "open_ended",
+                "evidence_min_pages": 2,
+                "evidence_min_domains": 2,
+            },
         )
     )
     key = f"loop-{loop.id}"

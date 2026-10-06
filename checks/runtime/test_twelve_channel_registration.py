@@ -46,7 +46,10 @@ def test_twelve_manifest_factories_register_real_transports() -> None:
             assert isinstance(provider, ChannelTransportProvider)
             assert provider.name == provider_name
             assert provider.capabilities().inbound
-            assert type(provider).start_inbound is not ChannelTransportProvider.start_inbound
+            assert (
+                type(provider).start_inbound
+                is not ChannelTransportProvider.start_inbound
+            )
             register_transport(provider)
             assert get_transport(provider_name) is provider
     finally:

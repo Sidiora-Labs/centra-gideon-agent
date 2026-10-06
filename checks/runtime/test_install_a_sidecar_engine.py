@@ -7,7 +7,9 @@ from gideon.extensions.apps import manager
 from gideon.integrations.local_models.sidecar import SidecarInstall
 
 
-def test_installer_reads_only_the_declared_sidecar_package_list(tmp_path: Path, monkeypatch):
+def test_installer_reads_only_the_declared_sidecar_package_list(
+    tmp_path: Path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "home"))
     app = manager.app_dir("service-client")
     app.mkdir(parents=True)

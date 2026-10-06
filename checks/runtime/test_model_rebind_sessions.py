@@ -9,12 +9,14 @@ import json
 import pytest
 
 
-def _configure_local_ollama(tmp_path, monkeypatch, *, model="model-a", endpoint="http://127.0.0.1:9"):
+def _configure_local_ollama(
+    tmp_path, monkeypatch, *, model="model-a", endpoint="http://127.0.0.1:9"
+):
     from gideon.core.config.loader import AppConfig, config_path
+    from gideon.engine.session import ConversationDirectory
     from gideon.extensions.providers.loader import register_extension_providers
     from gideon.extensions.providers.provider_bridge import create_provider_factory
     from gideon.extensions.providers.use_cases import save_active_models
-    from gideon.engine.session import ConversationDirectory
 
     home = tmp_path / "gideon-home"
     home.mkdir()
@@ -78,18 +80,14 @@ async def test_explicit_session_model_stays_pinned_across_chain_rebind(
 
     directory = _configure_local_ollama(tmp_path, monkeypatch, model="model-a")
     try:
-        save_active_models(
-            {"chat": ["ollama-models:model-a", "ollama-models:model-b"]}
-        )
+        save_active_models({"chat": ["ollama-models:model-a", "ollama-models:model-b"]})
         first, _, _ = await directory.get_or_create(
             "dashboard:pinned", model="ollama-models:model-b"
         )
         assert _served_model(first) == "model-b"
         directory.release("dashboard:pinned")
 
-        save_active_models(
-            {"chat": ["ollama-models:model-c", "ollama-models:model-b"]}
-        )
+        save_active_models({"chat": ["ollama-models:model-c", "ollama-models:model-b"]})
         second, _, _ = await directory.get_or_create("dashboard:pinned")
         assert second is not first
         assert _served_model(second) == "model-b"
@@ -178,7 +176,9 @@ async def test_provider_entry_model_and_endpoint_edits_refresh_implicit_runtime(
     from gideon.extensions.providers.use_cases import save_active_models
     from gideon.integrations.llm.registry import get_default_registry
 
-    directory = _configure_local_ollama(tmp_path, monkeypatch, endpoint="http://127.0.0.1:9")
+    directory = _configure_local_ollama(
+        tmp_path, monkeypatch, endpoint="http://127.0.0.1:9"
+    )
     registry = get_default_registry()
     try:
         save_active_models({})
@@ -206,10 +206,12 @@ async def test_provider_entry_model_and_endpoint_edits_refresh_implicit_runtime(
 
 
 def test_restored_stale_model_is_not_promoted_to_an_implicit_pin(tmp_path, monkeypatch):
+    from gideon.cognition.history import ConversationLog
     from gideon.core.config.loader import AppConfig
     from gideon.engine.session import ConversationDirectory
-    from gideon.cognition.history import ConversationLog
-    from gideon.interfaces.dashboard.chat_persistence import _rehydrate_session_from_history
+    from gideon.interfaces.dashboard.chat_persistence import (
+        _rehydrate_session_from_history,
+    )
     from gideon.interfaces.dashboard.state import ConsoleState
 
     directory = _configure_local_ollama(tmp_path, monkeypatch)

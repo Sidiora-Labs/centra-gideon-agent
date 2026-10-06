@@ -19,11 +19,11 @@ from gideon.integrations.llm.registry import (
     ProviderEntry,
     ProviderRegistry,
     get_default_registry,
-    set_default_registry,
     serving_is_local,
+    set_default_registry,
 )
-from gideon.security.guardrails.model_call import wrap_model_call_guard
 from gideon.sdk.provider_helpers import register_branded_app
+from gideon.security.guardrails.model_call import wrap_model_call_guard
 
 
 def test_rate_route_and_egress_follow_resolved_endpoint(tmp_path, monkeypatch):
@@ -35,7 +35,9 @@ def test_rate_route_and_egress_follow_resolved_endpoint(tmp_path, monkeypatch):
             Path(__file__).parents[2]
             / "runtime/gideon/extensions/apps/native/ollama-models/provider.py"
         )
-        spec = importlib.util.spec_from_file_location("ollama_provider_for_contract", provider_path)
+        spec = importlib.util.spec_from_file_location(
+            "ollama_provider_for_contract", provider_path
+        )
         assert spec is not None and spec.loader is not None
         ollama_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(ollama_module)
@@ -80,10 +82,18 @@ def test_rate_route_and_egress_follow_resolved_endpoint(tmp_path, monkeypatch):
         ) == ["OllamaLocal:qwen3:8b", "OllamaRemote:qwen3:8b"]
 
         remote_guard = wrap_model_call_guard(
-            remote, use_case="chat", provider_name="OllamaRemote", model="qwen3:8b", scan_mode="block"
+            remote,
+            use_case="chat",
+            provider_name="OllamaRemote",
+            model="qwen3:8b",
+            scan_mode="block",
         )
         local_guard = wrap_model_call_guard(
-            local, use_case="chat", provider_name="OllamaLocal", model="qwen3:8b", scan_mode="block"
+            local,
+            use_case="chat",
+            provider_name="OllamaLocal",
+            model="qwen3:8b",
+            scan_mode="block",
         )
         assert remote_guard._scan_mode == "block"
         assert local_guard._scan_mode == "warn"
@@ -93,7 +103,9 @@ def test_rate_route_and_egress_follow_resolved_endpoint(tmp_path, monkeypatch):
             default_base_url="https://default.example/v1",
             api_key_env="BRAND_ACME_KEY",
             credential_source="acme-subscription",
-            pricing={"brand-only-test-model": {"in_per_mtok": 2.0, "out_per_mtok": 4.0}},
+            pricing={
+                "brand-only-test-model": {"in_per_mtok": 2.0, "out_per_mtok": 4.0}
+            },
         )
         register_branded_app(branded_spec)
         registry.register_entry(
@@ -110,9 +122,9 @@ def test_rate_route_and_egress_follow_resolved_endpoint(tmp_path, monkeypatch):
         branded = registry.build("acme-instance")
         assert branded._base_url == "https://configured.example/v1"
         assert serving_is_local("acme-instance", actual_provider=branded) is False
-        assert rate_for("acme-instance", "brand-only-test-model", home=tmp_path) == ModelRate(
-            2.0, 4.0, source="app_default"
-        )
+        assert rate_for(
+            "acme-instance", "brand-only-test-model", home=tmp_path
+        ) == ModelRate(2.0, 4.0, source="app_default")
         assert registered_spec("acme-instance") is None
         assert spec_credential_source("acme-instance") == ""
     finally:

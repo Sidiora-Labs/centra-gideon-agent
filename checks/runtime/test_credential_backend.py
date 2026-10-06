@@ -303,7 +303,11 @@ def test_the_read_api_gives_the_caller_no_way_to_name_a_backend() -> None:
     params = list(inspect.signature(get_credential).parameters)
     assert params == ["key", "home"]
     assert "backend" not in params
-    assert list(inspect.signature(save_credential).parameters) == ["key", "value", "home"]
+    assert list(inspect.signature(save_credential).parameters) == [
+        "key",
+        "value",
+        "home",
+    ]
 
 
 def test_reads_are_transparent_across_both_stores_in_one_process(

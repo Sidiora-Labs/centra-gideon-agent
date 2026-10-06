@@ -15,7 +15,7 @@ def test_runtime_and_child_library_side_effects_stay_in_home(tmp_path: Path) -> 
     sibling_cache.mkdir(parents=True)
     (sibling_cache / "token").write_text("hf_sibling_cli_token_not_for_gideon\n")
 
-    script = r'''
+    script = r"""
 import json
 import os
 import subprocess
@@ -85,7 +85,7 @@ from tree_sitter_language_pack import cache_dir
 
 parser_cache = Path(cache_dir()).resolve()
 assert parser_cache.is_relative_to(gideon_home.resolve()), parser_cache
-'''
+"""
 
     env = os.environ.copy()
     env.update(
@@ -117,5 +117,7 @@ assert parser_cache.is_relative_to(gideon_home.resolve()), parser_cache
         timeout=300,
     )
 
-    assert (sibling_cache / "token").read_text() == "hf_sibling_cli_token_not_for_gideon\n"
+    assert (
+        sibling_cache / "token"
+    ).read_text() == "hf_sibling_cli_token_not_for_gideon\n"
     assert not (os_home / ".cache" / "tree-sitter-language-pack").exists()

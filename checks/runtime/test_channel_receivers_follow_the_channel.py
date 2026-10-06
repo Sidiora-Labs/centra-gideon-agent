@@ -12,9 +12,9 @@ from gideon.integrations import channel_delivery
 from gideon.integrations.channel_transports import (
     _safe_detail,
     bind_inbound,
+    register_transport,
     settled,
     unbind_inbound,
-    register_transport,
     unregister_transport,
 )
 from gideon.integrations.channel_transports.reference_echo import ReferenceEchoTransport
@@ -28,7 +28,9 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
 
 
-async def _await_owner(provider: ReferenceEchoTransport, gateway: RuntimeCoordinator) -> None:
+async def _await_owner(
+    provider: ReferenceEchoTransport, gateway: RuntimeCoordinator
+) -> None:
     for _ in range(100):
         await settled()
         if provider._runtime.services is gateway:

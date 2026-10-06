@@ -1,41 +1,52 @@
 """Retained streams close at actual short reader terminals/cancellation, without GC."""
+
 import asyncio
 from types import SimpleNamespace
+
 import pytest
-from gideon.automation.loop.judge import _stream
+from test_native_connection_recovery import _http_streams, _provider
+
 from gideon.assurance.eval.judge import LLMJudge
 from gideon.assurance.eval.runner import EvalRunner
 from gideon.assurance.eval.scenario import Turn
-from test_native_connection_recovery import _http_streams, _provider
+from gideon.automation.loop.judge import _stream
 
 ANSWER = '{"score": 4, "reason": "Source matched", "done": false, "regressed": false}'
-COMPLETE = ([({'content': ANSWER}, None), ({}, 'stop')], 'complete')
+COMPLETE = ([({"content": ANSWER}, None), ({}, "stop")], "complete")
 
 
 def retain(provider):
     actual_stream = provider.stream
     streams = []
+
     def retaining_stream(prompt):
         stream = actual_stream(prompt)
         streams.append(stream)
         return stream
+
     provider.stream = retaining_stream
     return streams
 
 
 def reader(kind, provider):
-    if kind == 'loop-judge':
-        return lambda: _stream(SimpleNamespace(_provider=provider), 'Judge the evidence')
-    if kind == 'eval-judge':
-        judge = LLMJudge(lambda: provider, prompt_template='{user_message}')
+    if kind == "loop-judge":
+        return lambda: _stream(
+            SimpleNamespace(_provider=provider), "Judge the evidence"
+        )
+    if kind == "eval-judge":
+        judge = LLMJudge(lambda: provider, prompt_template="{user_message}")
         judge._provider = provider
-        return lambda: judge.judge_turn('Inspection', 'Check source', 'Judge the evidence', 'Source proof')
+        return lambda: judge.judge_turn(
+            "Inspection", "Check source", "Judge the evidence", "Source proof"
+        )
     runner = EvalRunner(lambda _: provider)
-    return lambda: runner._run_turn(provider, Turn(user='Judge the evidence'), 'reader-eval')
+    return lambda: runner._run_turn(
+        provider, Turn(user="Judge the evidence"), "reader-eval"
+    )
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('kind', ['loop-judge', 'eval-judge', 'eval-runner'])
+@pytest.mark.parametrize("kind", ["loop-judge", "eval-judge", "eval-runner"])
 async def test_terminal_reader_closes_retained_actual_sdk_stream_before_next_call(kind):
     async with _http_streams([COMPLETE, COMPLETE]) as (endpoint, requests, _, __):
         provider = _provider(endpoint)
@@ -56,10 +67,15 @@ async def test_terminal_reader_closes_retained_actual_sdk_stream_before_next_cal
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('kind', ['loop-judge', 'eval-judge', 'eval-runner'])
+@pytest.mark.parametrize("kind", ["loop-judge", "eval-judge", "eval-runner"])
 async def test_cancelled_reader_closes_real_sdk_connection_and_accepts_next_call(kind):
-    held = ([({'content': 'Partial judgment'}, None)], 'hold')
-    async with _http_streams([held, COMPLETE]) as (endpoint, requests, started, disconnected):
+    held = ([({"content": "Partial judgment"}, None)], "hold")
+    async with _http_streams([held, COMPLETE]) as (
+        endpoint,
+        requests,
+        started,
+        disconnected,
+    ):
         provider = _provider(endpoint)
         streams = retain(provider)
         await provider.start()

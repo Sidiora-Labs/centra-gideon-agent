@@ -27,7 +27,9 @@ def _mail_delivery(tmp_path: Path):
     )
 
 
-def test_unusable_owner_routes_are_tried_in_order_then_reported_once(tmp_path, monkeypatch):
+def test_unusable_owner_routes_are_tried_in_order_then_reported_once(
+    tmp_path, monkeypatch
+):
     first, second = "mail-owner-route-a", "mail-owner-route-b"
     monkeypatch.setenv(owner_id_credential(first), "not-an-email-a")
     monkeypatch.setenv(owner_id_credential(second), "not-an-email-b")
@@ -70,7 +72,9 @@ def test_no_connected_owner_channel_does_not_create_fallback_noise():
         fallback_calls.append(reason)
 
     result = asyncio.run(
-        reach_owner(send, only=("channels-owner-unregistered-test",), inbox_fallback=inbox)
+        reach_owner(
+            send, only=("channels-owner-unregistered-test",), inbox_fallback=inbox
+        )
     )
     assert not result.delivered
     assert result.connected_channels == 0

@@ -40,7 +40,9 @@ def test_local_record_stores_wait_for_the_shared_file_lock(tmp_path, monkeypatch
 
     def write_trigger():
         started[0].set()
-        trigger_store.save_all([Trigger(id="local-trigger", name="Local", kind="manual")])
+        trigger_store.save_all(
+            [Trigger(id="local-trigger", name="Local", kind="manual")]
+        )
 
     def write_hook():
         started[1].set()
@@ -65,9 +67,14 @@ def test_local_record_stores_wait_for_the_shared_file_lock(tmp_path, monkeypatch
         for future in futures:
             future.result(timeout=5)
 
-    assert json.loads((home / "triggers.json").read_text())["triggers"][0]["id"] == "local-trigger"
+    assert (
+        json.loads((home / "triggers.json").read_text())["triggers"][0]["id"]
+        == "local-trigger"
+    )
     assert len(json.loads((home / "hooks.json").read_text())["hooks"]) == 1
-    assert [row["id"] for row in json.loads((home / "inbox.json").read_text())["items"]] == ["initial"]
+    assert [
+        row["id"] for row in json.loads((home / "inbox.json").read_text())["items"]
+    ] == ["initial"]
     assert any(view.name == "Local" for view in views_store.load_views())
 
     first = InboxStore(path=home / "inbox.json")

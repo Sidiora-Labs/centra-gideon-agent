@@ -19,13 +19,19 @@ def test_tzdata_is_an_unconditional_runtime_dependency() -> None:
     """A transitive or platform-marked dependency does not protect a minimal Linux install."""
     with (_REPO_ROOT / "pyproject.toml").open("rb") as handle:
         declared = tomllib.load(handle)["project"]["dependencies"]
-    matches = [Requirement(spec) for spec in declared if Requirement(spec).name == "tzdata"]
+    matches = [
+        Requirement(spec) for spec in declared if Requirement(spec).name == "tzdata"
+    ]
     assert len(matches) == 1
-    assert matches[0].marker is None, "tzdata must install on minimal Linux, not only one platform"
+    assert (
+        matches[0].marker is None
+    ), "tzdata must install on minimal Linux, not only one platform"
     assert str(matches[0].specifier) == ">=2024.1"
 
 
-def test_named_zone_uses_packaged_data_when_system_paths_are_unavailable(tmp_path) -> None:
+def test_named_zone_uses_packaged_data_when_system_paths_are_unavailable(
+    tmp_path,
+) -> None:
     """A fresh interpreter with an empty TZPATH must resolve data from the wheel dependency.
 
     The invalid-zone negative control matters: a test that only loads one known name could
@@ -75,7 +81,9 @@ def _dependency_site_without_tzdata(tmp_path: Path) -> Path:
         name = entry.name.casefold()
         if name == "tzdata" or name.startswith("tzdata-") or entry.suffix == ".pth":
             continue
-        (isolated_site / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
+        (isolated_site / entry.name).symlink_to(
+            entry, target_is_directory=entry.is_dir()
+        )
     return isolated_site
 
 
@@ -151,7 +159,15 @@ assert "gideon setup" not in doctor_zone["detail"]
     env["TZ"] = "America/New_York"
     env["GIDEON_HOME"] = str(tmp_path / "consumer-home")
     proc = subprocess.run(
-        [sys.executable, "-S", "-c", script, str(isolated_site), str(_REPO_ROOT / "runtime"), env["GIDEON_HOME"]],
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            script,
+            str(isolated_site),
+            str(_REPO_ROOT / "runtime"),
+            env["GIDEON_HOME"],
+        ],
         cwd=_REPO_ROOT,
         env=env,
         text=True,
@@ -178,7 +194,14 @@ assert not config_path().exists(), "setup saved an unchecked timezone"
     setup_env["GIDEON_HOME"] = str(setup_home)
     master, slave = pty.openpty()
     setup_proc = subprocess.Popen(
-        [sys.executable, "-S", "-c", setup_script, str(isolated_site), str(_REPO_ROOT / "runtime")],
+        [
+            sys.executable,
+            "-S",
+            "-c",
+            setup_script,
+            str(isolated_site),
+            str(_REPO_ROOT / "runtime"),
+        ],
         cwd=_REPO_ROOT,
         env=setup_env,
         stdin=slave,

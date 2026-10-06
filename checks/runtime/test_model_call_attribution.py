@@ -348,7 +348,11 @@ def test_ledgered_audit_id_is_excluded_from_uncounted_census(tmp_path, monkeypat
     from gideon.engine.routing.usage import fold_files
     from gideon.integrations.llm.base import EVENT_COMPLETE, LLMEvent
     from gideon.operations.usage_ledger import _iter_rows, record_from_event
-    from gideon.security.guardrails.audit import AttemptRecord, _audit_path, record_attempt
+    from gideon.security.guardrails.audit import (
+        AttemptRecord,
+        _audit_path,
+        record_attempt,
+    )
 
     monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     audit_id = "guarded-success-01"

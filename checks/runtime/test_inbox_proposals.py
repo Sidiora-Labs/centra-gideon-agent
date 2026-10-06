@@ -77,9 +77,9 @@ def _proposal_items(home):
 
 @pytest.mark.asyncio
 async def test_clear_reviewed_proposals_preserves_open_rows_and_does_not_refill(home):
-    from gideon.extensions.skills import proposals as pr
     from gideon.core.config.loader import AppConfig
     from gideon.engine.session import ConversationDirectory
+    from gideon.extensions.skills import proposals as pr
     from gideon.interfaces.dashboard.handlers_inbox import api_inbox_proposals_clear
     from gideon.interfaces.dashboard.state import ConsoleState
 
@@ -88,7 +88,15 @@ async def test_clear_reviewed_proposals_preserves_open_rows_and_does_not_refill(
     inbox = InboxStore()
     inbox.load()
     reviewed = next(iter(inbox.items.values()))
-    inbox.add(replace(reviewed, id="still-open", status=ItemStatus.PENDING, owner_states={}, refs={}))
+    inbox.add(
+        replace(
+            reviewed,
+            id="still-open",
+            status=ItemStatus.PENDING,
+            owner_states={},
+            refs={},
+        )
+    )
     inbox.save()
     app = web.Application()
     app["state"] = ConsoleState(

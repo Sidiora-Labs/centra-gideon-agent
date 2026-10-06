@@ -45,7 +45,10 @@ def test_systemd_and_launchd_render_selected_values_with_native_escaping(
     monkeypatch.setenv("OPENAI_API_KEY", "service-env-canary-secret-value")
 
     unit = linux.render_unit(
-        (r'GIDEON_PROFILE=desk "one"\two%done', "HTTPS_PROXY=https://proxy.example:8443"),
+        (
+            r'GIDEON_PROFILE=desk "one"\two%done',
+            "HTTPS_PROXY=https://proxy.example:8443",
+        ),
         (),
     )
     assert 'Environment="GIDEON_PROFILE=desk \\"one\\"\\\\two%%done"' in unit
@@ -55,7 +58,10 @@ def test_systemd_and_launchd_render_selected_values_with_native_escaping(
 
     plist = plistlib.loads(
         macos.render_plist(
-            (r'GIDEON_PROFILE=desk "one"\two%done', "HTTPS_PROXY=https://proxy.example:8443"),
+            (
+                r'GIDEON_PROFILE=desk "one"\two%done',
+                "HTTPS_PROXY=https://proxy.example:8443",
+            ),
             (),
         ).encode("utf-8")
     )
@@ -86,7 +92,8 @@ def test_service_owned_names_cannot_be_overridden_or_removed() -> None:
 
 
 def test_status_sanitizes_values_loaded_from_existing_service_files(
-    tmp_path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     marker = "service-status-canary-secret-value"
     values = {
@@ -101,10 +108,14 @@ def test_status_sanitizes_values_loaded_from_existing_service_files(
         encoding="utf-8",
     )
     plist = tmp_path / "gideon.plist"
-    plist.write_bytes(plistlib.dumps({
-        "EnvironmentVariables": values,
-        "GideonEnvironmentExcluded": ["OLD_API_KEY"],
-    }))
+    plist.write_bytes(
+        plistlib.dumps(
+            {
+                "EnvironmentVariables": values,
+                "GideonEnvironmentExcluded": ["OLD_API_KEY"],
+            }
+        )
+    )
     monkeypatch.setattr(linux, "UNIT_PATH", unit)
     monkeypatch.setattr(macos, "PLIST_PATH", plist)
 

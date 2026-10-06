@@ -6,7 +6,12 @@ import pytest
 
 from gideon.automation.workflows import journal, service, store
 from gideon.automation.workflows.controller import EngineServices
-from gideon.automation.workflows.models import InstanceState, NodeInstance, RunStatus, WorkflowRun
+from gideon.automation.workflows.models import (
+    InstanceState,
+    NodeInstance,
+    RunStatus,
+    WorkflowRun,
+)
 from gideon.automation.workflows.watchdog import WorkflowWatchdog
 from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
@@ -22,21 +27,33 @@ async def test_paused_recovery_applies_skip_without_replaying_an_uncertain_effec
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     marker = tmp_path / "must-not-replay"
     started_at = "2026-01-01T00:00:00+00:00"
-    run = store.create(WorkflowRun(
-        id="", workflow_name="recovery-loop", status=RunStatus.PAUSED,
-        started_at=started_at, policy_overrides={"attended": False},
-        extra={"loop_kind": "general"},
-    ))
-    spec = {"name": "recovery-loop", "root": {
-        "kind": "action", "id": "write",
-        "config": {"provider": "bash", "with": {"command": f"touch '{marker}'"}},
-    }}
+    run = store.create(
+        WorkflowRun(
+            id="",
+            workflow_name="recovery-loop",
+            status=RunStatus.PAUSED,
+            started_at=started_at,
+            policy_overrides={"attended": False},
+            extra={"loop_kind": "general"},
+        )
+    )
+    spec = {
+        "name": "recovery-loop",
+        "root": {
+            "kind": "action",
+            "id": "write",
+            "config": {"provider": "bash", "with": {"command": f"touch '{marker}'"}},
+        },
+    }
     store.write_spec(run.id, spec)
     store.write_state(run.id, {"root": NodeInstance(path="root")})
     store.request_pause(run.id)
     journal.Journal(run.id).effect(
-        "root", idempotency_key="uncertain-write", effect_status=effect_status,
-        epoch=0, node_id="write",
+        "root",
+        idempotency_key="uncertain-write",
+        effect_status=effect_status,
+        epoch=0,
+        node_id="write",
     )
     state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
     supervisor = WorkflowWatchdog(state, EngineServices(cwd=str(tmp_path)))
@@ -64,6 +81,8 @@ async def test_paused_recovery_applies_skip_without_replaying_an_uncertain_effec
         assert store.get(run.id).status == RunStatus.COMPLETE
         assert store.get(run.id).started_at == started_at
         assert not marker.exists()
-        assert not any(event["kind"] == journal.STEP_STARTED for event in journal.ledger(run.id))
+        assert not any(
+            event["kind"] == journal.STEP_STARTED for event in journal.ledger(run.id)
+        )
     finally:
         await supervisor.stop()

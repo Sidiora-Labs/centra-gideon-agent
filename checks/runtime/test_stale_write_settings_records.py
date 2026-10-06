@@ -70,7 +70,9 @@ async def test_a_second_model_chain_save_from_the_same_revision_is_refused(
     assert load_active_models()["chat"] == ["Ollama:llama3", "Ollama:qwen3"]
 
 
-async def test_a_model_chain_write_without_a_read_revision_is_refused(settings_home, settings_app):
+async def test_a_model_chain_write_without_a_read_revision_is_refused(
+    settings_home, settings_app
+):
     from gideon.extensions.providers.use_cases import load_active_models
 
     async with TestClient(TestServer(settings_app)) as client:

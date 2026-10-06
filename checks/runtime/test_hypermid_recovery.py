@@ -27,11 +27,17 @@ from gideon.hypermid.recovery import (
 
 def _canonical(value: object) -> bytes:
     return json.dumps(
-        value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
     ).encode()
 
 
-def test_recovery_replays_only_exact_bindings_and_quarantines_corruption(tmp_path) -> None:
+def test_recovery_replays_only_exact_bindings_and_quarantines_corruption(
+    tmp_path,
+) -> None:
     scope = Scope(Id("owner-1"), Id("project-1"))
     session_id = Id("session-1")
     source_bytes = b'{"role":"user","content":"recover this"}'

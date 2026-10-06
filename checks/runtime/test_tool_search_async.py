@@ -31,11 +31,15 @@ def test_native_search_discovers_visualize_and_preserves_result_limit():
         retriever = ToolRetriever(definitions)
         runtime = NativeAgentRuntime(
             definition=AgentRuntimeDefinition(name="search-regression"),
-            model_provider=AcpAgentProvider(command=[sys.executable, "-m", "gideon", "acp"]),
+            model_provider=AcpAgentProvider(
+                command=[sys.executable, "-m", "gideon", "acp"]
+            ),
         )
         runtime._tool_retriever = retriever
         result = await runtime._invoke(
-            "tool_search", {"query": "genui ui docs component catalog native candidates", "limit": 10}, meta_sink={}
+            "tool_search",
+            {"query": "genui ui docs component catalog native candidates", "limit": 10},
+            meta_sink={},
         )
         assert "Matching tools" in result
         assert "visualize:" in result

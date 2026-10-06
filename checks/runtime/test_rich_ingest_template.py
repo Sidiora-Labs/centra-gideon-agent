@@ -77,7 +77,9 @@ def test_classifier_prompt_names_all_five_declared_boolean_keys() -> None:
         ("lens-tasks", ("title", "owner", "due")),
     ],
 )
-def test_each_lens_prompt_names_its_schema_fields(lens: str, fields: tuple[str, ...]) -> None:
+def test_each_lens_prompt_names_its_schema_fields(
+    lens: str, fields: tuple[str, ...]
+) -> None:
     node = _nodes()[lens]
     prompt = resolve(node.config["prompt"], _ctx())
     prompt = with_declared_schema_prompt(prompt, node.config["schema"])
@@ -97,7 +99,9 @@ def test_each_fan_out_persists_every_item_its_lens_extracted(fan_out: str) -> No
 
 
 @pytest.mark.parametrize("fan_out", sorted(FAN_OUTS))
-def test_a_lens_that_came_back_null_is_an_empty_fan_out_not_a_stall(fan_out: str) -> None:
+def test_a_lens_that_came_back_null_is_an_empty_fan_out_not_a_stall(
+    fan_out: str,
+) -> None:
     lens = FAN_OUTS[fan_out]
     assert _resolve_items(_nodes()[fan_out], _ctx(frozenset({lens}))) == []
 
@@ -109,7 +113,9 @@ def test_the_judge_gate_is_shown_both_lenses_it_judges() -> None:
 
 
 def test_the_judge_gate_is_told_a_lens_found_nothing_rather_than_failing() -> None:
-    prompt = resolve(_nodes()[GATE].config["prompt"], _ctx(frozenset({"lens-decisions"})))
+    prompt = resolve(
+        _nodes()[GATE].config["prompt"], _ctx(frozenset({"lens-decisions"}))
+    )
     assert "Extracted decisions:\n[]\n" in prompt
     assert json.dumps(_items("lens-facts"), ensure_ascii=False) in prompt
 
@@ -203,12 +209,12 @@ def _terminal_subagent_controller(
     spec = template.to_dict()
     run = store.create(WorkflowRun(id="", workflow_name=TEMPLATE))
     store.write_spec(run.id, spec)
-    failed_path = {
-        node.id: path for path, node in walk(template.root) if node.id
-    }["lens-decisions"]
-    facts_path = {
-        node.id: path for path, node in walk(template.root) if node.id
-    }["lens-facts"]
+    failed_path = {node.id: path for path, node in walk(template.root) if node.id}[
+        "lens-decisions"
+    ]
+    facts_path = {node.id: path for path, node in walk(template.root) if node.id}[
+        "lens-facts"
+    ]
     partial = {"items": _items("partial decisions")}
     partial_ref = store.write_output(run.id, failed_path, partial)
     facts = {"items": _items("lens-facts")}
@@ -260,11 +266,11 @@ def test_terminal_allowed_lens_failure_publishes_null_and_keeps_diagnostics(
         if terminal_result == "provider_error"
         else ""
     )
-    result = "not a declared JSON object" if terminal_result == "schema_mismatch" else ""
+    result = (
+        "not a declared JSON object" if terminal_result == "schema_mismatch" else ""
+    )
     store, run, spec, failed_path, partial, partial_ref, controller = (
-        _terminal_subagent_controller(
-            tmp_path, monkeypatch, error=error, result=result
-        )
+        _terminal_subagent_controller(tmp_path, monkeypatch, error=error, result=result)
     )
 
     controller._reconcile_dispatched_stages()

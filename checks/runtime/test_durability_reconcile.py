@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import json
 
+from gideon.operations.durability import conflict_resolve, conflicts
 from gideon.operations.durability import inventory as inv
 from gideon.operations.durability import reconcile
-from gideon.operations.durability import conflict_resolve, conflicts
 from gideon.operations.durability.cursor import CONSUMED, PAYLOAD_BAD
 from gideon.operations.durability.shards import (
     _json_rows_from_entity_dir,
@@ -186,9 +186,7 @@ def test_peer_arrival_waits_for_local_consent_and_preserves_local_authority(tmp_
         home,
         entry,
         remote,
-        ancestors={
-            "alpha": conflicts.row_sha(inv.shared_value(entry, baseline))
-        },
+        ancestors={"alpha": conflicts.row_sha(inv.shared_value(entry, baseline))},
         queue=queue,
         now="2026-09-30T00:00:00Z",
     )
@@ -228,13 +226,15 @@ def test_peer_arrival_waits_for_local_consent_and_preserves_local_authority(tmp_
     agent_dir = home / agents.path
     agent_dir.mkdir(parents=True)
     (agent_dir / "local-agent.json").write_text(
-        json.dumps({
-            "name": "local-agent",
-            "description": "Before edit",
-            "enabled": True,
-            "allowed_tools": ["shell"],
-            "capabilities": ["local-execution"],
-        }),
+        json.dumps(
+            {
+                "name": "local-agent",
+                "description": "Before edit",
+                "enabled": True,
+                "allowed_tools": ["shell"],
+                "capabilities": ["local-execution"],
+            }
+        ),
         encoding="utf-8",
     )
     agent_update = reconcile.reconcile_entry(
@@ -265,7 +265,9 @@ def test_peer_arrival_waits_for_local_consent_and_preserves_local_authority(tmp_
     )
     assert agent_update.verdict == CONSUMED and agent_update.updated == 1
     assert agent_update.added == 1
-    local_agent = json.loads((agent_dir / "local-agent.json").read_text(encoding="utf-8"))
+    local_agent = json.loads(
+        (agent_dir / "local-agent.json").read_text(encoding="utf-8")
+    )
     peer_agent = json.loads((agent_dir / "peer-agent.json").read_text(encoding="utf-8"))
     assert local_agent["description"] == "Shared edit"
     assert local_agent["allowed_tools"] == ["shell"]
@@ -279,7 +281,9 @@ def test_peer_arrival_waits_for_local_consent_and_preserves_local_authority(tmp_
     workflow_dir = home / workflows.path
     workflow_dir.mkdir(parents=True)
     (workflow_dir / "local-workflow.json").write_text(
-        json.dumps({"name": "local-workflow", "description": "Before edit", "enabled": True}),
+        json.dumps(
+            {"name": "local-workflow", "description": "Before edit", "enabled": True}
+        ),
         encoding="utf-8",
     )
     workflow_update = reconcile.reconcile_entry(
@@ -301,8 +305,12 @@ def test_peer_arrival_waits_for_local_consent_and_preserves_local_authority(tmp_
         ],
     )
     assert workflow_update.verdict == CONSUMED
-    local_workflow = json.loads((workflow_dir / "local-workflow.json").read_text(encoding="utf-8"))
-    peer_workflow = json.loads((workflow_dir / "peer-workflow.json").read_text(encoding="utf-8"))
+    local_workflow = json.loads(
+        (workflow_dir / "local-workflow.json").read_text(encoding="utf-8")
+    )
+    peer_workflow = json.loads(
+        (workflow_dir / "peer-workflow.json").read_text(encoding="utf-8")
+    )
     assert local_workflow["description"] == "Shared edit"
     assert local_workflow["enabled"] is True
     assert peer_workflow["enabled"] is False
@@ -318,7 +326,11 @@ def test_peer_arrival_waits_for_local_consent_and_preserves_local_authority(tmp_
     from gideon.operations.durability import pull_engine
     from gideon.operations.durability.cursor import Cursor
     from gideon.operations.durability.registry import Registry, shard_prefix
-    from gideon.operations.durability.shards import ExportResult, _write_manifest, _write_shard
+    from gideon.operations.durability.shards import (
+        ExportResult,
+        _write_manifest,
+        _write_shard,
+    )
 
     runs = inv.by_id("workflow_runs_db")
     assert runs is not None and runs.machine_local

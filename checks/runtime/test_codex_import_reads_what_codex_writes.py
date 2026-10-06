@@ -5,10 +5,14 @@ from pathlib import Path
 from gideon.cognition.onboarding_import import ImportCategory, run_import
 from gideon.cognition.onboarding_import.sources import codex
 
-FIXTURE = Path(__file__).parent / "fixtures" / "agent_tool_homes" / "sampleowner" / ".codex"
+FIXTURE = (
+    Path(__file__).parent / "fixtures" / "agent_tool_homes" / "sampleowner" / ".codex"
+)
 
 
-def test_codex_fixture_scans_formats_and_prefers_plain_session_twin(tmp_path, monkeypatch):
+def test_codex_fixture_scans_formats_and_prefers_plain_session_twin(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "gideon-home"))
     result = codex.scan(FIXTURE, environ={}, isolated_home=FIXTURE.parent)
 
@@ -26,16 +30,26 @@ def test_codex_fixture_scans_formats_and_prefers_plain_session_twin(tmp_path, mo
     conversations = result.by_category(ImportCategory.CONVERSATIONS)
     assert any(item.key.endswith(".jsonl") for item in conversations)
     assert all(not item.key.endswith(".jsonl.zst") for item in conversations)
-    assert any(".jsonl.zst" in path.name for path in codex._session_files(FIXTURE / "sessions"))
-    assert any(item.name == "reviewer" for item in result.by_category(ImportCategory.AGENTS))
-    assert any(item.name == "triage-issue" for item in result.by_category(ImportCategory.PROMPTS))
+    assert any(
+        ".jsonl.zst" in path.name for path in codex._session_files(FIXTURE / "sessions")
+    )
+    assert any(
+        item.name == "reviewer" for item in result.by_category(ImportCategory.AGENTS)
+    )
+    assert any(
+        item.name == "triage-issue"
+        for item in result.by_category(ImportCategory.PROMPTS)
+    )
 
 
-def test_codex_compressed_session_import_keeps_call_names_not_tool_outputs(tmp_path, monkeypatch):
+def test_codex_compressed_session_import_keeps_call_names_not_tool_outputs(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "gideon-home"))
     result = codex.scan(FIXTURE, environ={}, isolated_home=FIXTURE.parent)
     compressed_only = [
-        item for item in result.by_category(ImportCategory.CONVERSATIONS)
+        item
+        for item in result.by_category(ImportCategory.CONVERSATIONS)
         if item.path.endswith(".jsonl.zst")
     ]
     assert compressed_only

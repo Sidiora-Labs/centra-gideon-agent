@@ -7,11 +7,16 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_native_publish_and_graph_save_share_revision_transaction(tmp_path, monkeypatch):
+async def test_native_publish_and_graph_save_share_revision_transaction(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     from gideon.automation.workflows import defs as workflow_defs
     from gideon.automation.workflows import service
-    from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider, _def_path
+    from gideon.automation.workflows.native_defs import (
+        NativeWorkflowDefProvider,
+        _def_path,
+    )
 
     provider = NativeWorkflowDefProvider()
     prior_provider = workflow_defs.get_provider("native")
@@ -68,7 +73,9 @@ async def test_native_publish_and_graph_save_share_revision_transaction(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_native_create_only_rejects_one_of_two_concurrent_same_name_saves(tmp_path, monkeypatch):
+async def test_native_create_only_rejects_one_of_two_concurrent_same_name_saves(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     from gideon.automation.workflows import defs as workflow_defs
     from gideon.automation.workflows import service
@@ -78,11 +85,16 @@ async def test_native_create_only_rejects_one_of_two_concurrent_same_name_saves(
     prior_provider = workflow_defs.get_provider("native")
     workflow_defs.register_provider(provider)
     try:
+
         async def create(description: str):
             return await service.author_def(
                 name="assistant-create-race",
                 description=description,
-                root={"id": "root", "kind": "transform", "config": {"expr": {"value": 1}}},
+                root={
+                    "id": "root",
+                    "kind": "transform",
+                    "config": {"expr": {"value": 1}},
+                },
                 provenance="user",
                 create_only=True,
             )

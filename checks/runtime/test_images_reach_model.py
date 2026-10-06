@@ -47,7 +47,9 @@ def test_image_bytes_reject_symlinks_and_extension_mismatch(tmp_path):
     assert image_part_url(str(link)) == ""
 
 
-async def test_image_preview_is_lazy_and_no_reader_does_not_start_model_work(tmp_path, monkeypatch):
+async def test_image_preview_is_lazy_and_no_reader_does_not_start_model_work(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "home"))
     clear_cache()
     image = Path(tmp_path / "home" / "uploads" / ("a" * 32 + "_screen.png"))

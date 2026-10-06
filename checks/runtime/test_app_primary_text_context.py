@@ -13,8 +13,8 @@ async def test_text_app_task_alone_on_real_primary_writer(tmp_path, monkeypatch)
     monkeypatch.setenv("GIDEON_HOME", str(home))
     from gideon.cognition.context_engine import (
         get_engine,
-        set_engine,
         prepare_context_turn,
+        set_engine,
     )
     from gideon.core.config.loader import AppConfig
     from gideon.engine.gateway import RuntimeCoordinator
@@ -37,8 +37,8 @@ async def test_text_app_task_alone_on_real_primary_writer(tmp_path, monkeypatch)
     )
     from gideon.hypermid.models import Scope
     from gideon.hypermid.primary_engine import PrimaryContextEngine
-    from gideon.security.session_credentials import begin_turn, end_turn
     from gideon.security.approval_answer import app
+    from gideon.security.session_credentials import begin_turn, end_turn
 
     folder = home / "apps" / "text-app"
     folder.mkdir(parents=True)

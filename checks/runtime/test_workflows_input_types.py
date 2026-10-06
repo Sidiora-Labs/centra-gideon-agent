@@ -61,21 +61,32 @@ async def test_declared_input_type_fails_before_stage_invocation(
 async def test_declared_values_are_typed_before_a_run_is_persisted() -> None:
     from gideon.automation.workflows.service import _coerce_declared_inputs
 
-    spec = {"inputs": {
-        "count": {"type": "integer"},
-        "ratio": {"type": "number"},
-        "enabled": {"type": "boolean"},
-        "items": {"type": "array"},
-        "options": {"type": "object"},
-    }}
-    values, invalid = _coerce_declared_inputs(spec, {
-        "count": "3", "ratio": "1.5", "enabled": "false",
-        "items": '["one"]', "options": '{"mode":"safe"}',
-    })
+    spec = {
+        "inputs": {
+            "count": {"type": "integer"},
+            "ratio": {"type": "number"},
+            "enabled": {"type": "boolean"},
+            "items": {"type": "array"},
+            "options": {"type": "object"},
+        }
+    }
+    values, invalid = _coerce_declared_inputs(
+        spec,
+        {
+            "count": "3",
+            "ratio": "1.5",
+            "enabled": "false",
+            "items": '["one"]',
+            "options": '{"mode":"safe"}',
+        },
+    )
     assert invalid == []
     assert values == {
-        "count": 3, "ratio": 1.5, "enabled": False,
-        "items": ["one"], "options": {"mode": "safe"},
+        "count": 3,
+        "ratio": 1.5,
+        "enabled": False,
+        "items": ["one"],
+        "options": {"mode": "safe"},
     }
 
     _, invalid = _coerce_declared_inputs(spec, {"count": "3.5", "items": "{}"})

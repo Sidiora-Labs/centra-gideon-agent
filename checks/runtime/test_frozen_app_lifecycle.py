@@ -1,16 +1,17 @@
 """Unsupported frozen app children refuse; allowlisted native launchers survive."""
+
 import os
 import subprocess
 import sys
 from pathlib import Path
 
-ROOT=Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_real_frozen_lifecycle_consumers_refuse_before_artifacts(tmp_path):
-    script=tmp_path/'parse.py'
+    script = tmp_path / "parse.py"
     script.write_text('raise AssertionError("unsupported child executed")\n')
-    code=f'''import sys
+    code = f"""import sys
 from pathlib import Path
 sys.frozen=True
 from gideon.core.python_children import NeedsInterpreter
@@ -42,10 +43,17 @@ assert supported.core_compatibility().admits
 missing=AppManifest.from_dict({{"name":"deps-probe","version":"1.0.0","dependencies":{{"pythonDependencies":["gideon-missing-frozen-probe==1"]}}}})
 assert not missing.core_compatibility().admits
 print("unsupported lifecycle refused; native launcher retained")
-'''
-    env=dict(os.environ,GIDEON_HOME=str(tmp_path/'home'),HOME=str(tmp_path),PYTHONPATH=str(ROOT/'runtime'))
-    result=subprocess.run([sys.executable,'-c',code],env=env,capture_output=True,text=True)
-    assert result.returncode==0, result.stderr
-    assert 'native launcher retained' in result.stdout
-    assert not (tmp_path/'home').exists()
-    assert not (tmp_path/'engine').exists()
+"""
+    env = dict(
+        os.environ,
+        GIDEON_HOME=str(tmp_path / "home"),
+        HOME=str(tmp_path),
+        PYTHONPATH=str(ROOT / "runtime"),
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert "native launcher retained" in result.stdout
+    assert not (tmp_path / "home").exists()
+    assert not (tmp_path / "engine").exists()

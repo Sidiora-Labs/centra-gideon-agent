@@ -7,7 +7,6 @@ import pytest
 
 from gideon.operations.durability import inventory, shards
 
-
 ENTRY_ID = "agent_prompt_override"
 PROMPT = b"You are terse, and you answer in one line.\n"
 TOKEN = b"ghp_fixture_hourly_backup_0123456789abcd"
@@ -142,7 +141,9 @@ def test_symlinked_entry_root_cannot_clean_or_write_outside(home: Path, tmp_path
     assert not (outside / "blobs").exists()
 
 
-def test_symlinked_digest_prefix_cannot_clean_or_write_outside(home: Path, tmp_path: Path):
+def test_symlinked_digest_prefix_cannot_clean_or_write_outside(
+    home: Path, tmp_path: Path
+):
     outside = tmp_path / "outside"
     outside.mkdir()
     sentinel = outside / "keep-me"
@@ -158,7 +159,9 @@ def test_symlinked_digest_prefix_cannot_clean_or_write_outside(home: Path, tmp_p
     assert not (outside / digest).exists()
 
 
-def test_directory_tree_export_still_exports_each_file(home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_directory_tree_export_still_exports_each_file(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     tree = home / "attachments"
     tree.mkdir()
     (tree / "one.bin").write_bytes(b"first attachment")

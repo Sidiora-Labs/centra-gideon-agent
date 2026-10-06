@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import asyncio
-import ssl
+import json
 import shutil
+import ssl
 import subprocess
 import time
 
@@ -14,28 +14,44 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
+
 @pytest.mark.asyncio
-async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, monkeypatch):
-    if not any(shutil.which(name) for name in ("chromium", "chromium-browser", "google-chrome")):
+async def test_owned_browser_readiness_preview_and_exclusive_control(
+    tmp_path, monkeypatch
+):
+    if not any(
+        shutil.which(name) for name in ("chromium", "chromium-browser", "google-chrome")
+    ):
         pytest.fail("Real Chromium is required for customer browser control acceptance")
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.delenv("GIDEON_DEV_NO_AUTH", raising=False)
     monkeypatch.delenv("GIDEON_BYPASS_LOCAL_NETWORKS", raising=False)
     from gideon.cognition.history import ConversationLog
+    from gideon.engine.agents.native.approval import ApprovalGate
     from gideon.integrations.browse.customer_control import ControlDenied
     from gideon.integrations.browse.grant import request_grant
     from gideon.integrations.browse.killswitch import engage, release
-    from gideon.engine.agents.native.approval import ApprovalGate
     from gideon.interfaces.dashboard import token_auth
-    from gideon.interfaces.dashboard.handlers.browser_sessions import CONTROL_KEY, register_browser_session_routes
+    from gideon.interfaces.dashboard.handlers.browser_sessions import (
+        CONTROL_KEY,
+        register_browser_session_routes,
+    )
     from gideon.interfaces.dashboard.state import ConsoleState
 
-    (tmp_path / "config.json").write_text(json.dumps({
-        "auth": {"login_enabled": True},
-        "security": {"egress": {"allow_hosts": ["127.0.0.1"]}},
-    }))
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "auth": {"login_enabled": True},
+                "security": {"egress": {"allow_hosts": ["127.0.0.1"]}},
+            }
+        )
+    )
     hits: list[str] = []
-    slow_seen, slow_release, slow_completed = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    slow_seen, slow_release, slow_completed = (
+        asyncio.Event(),
+        asyncio.Event(),
+        asyncio.Event(),
+    )
 
     async def page_response(request):
         hits.append(request.path)
@@ -55,16 +71,22 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, m
         if request.path == "/redirect":
             raise web.HTTPFound(f"http://127.0.0.2:{blocked_port}/redirect-blocked")
         if request.path == "/socket-page":
-            return web.Response(text=(
-                '<title>Socket page</title><script>'
-                f'let socket = new WebSocket("ws://127.0.0.1:{owned_port}/ws");'
-                'socket.onmessage = event => { window.socketReply = event.data; };'
-                '</script>'
-            ), content_type="text/html")
-        return web.Response(text=(
-            f'<title>Owned page</title><input id="entry">'
-            f'<img src="http://127.0.0.2:{blocked_port}/blocked">'
-        ), content_type="text/html")
+            return web.Response(
+                text=(
+                    "<title>Socket page</title><script>"
+                    f'let socket = new WebSocket("ws://127.0.0.1:{owned_port}/ws");'
+                    "socket.onmessage = event => { window.socketReply = event.data; };"
+                    "</script>"
+                ),
+                content_type="text/html",
+            )
+        return web.Response(
+            text=(
+                f'<title>Owned page</title><input id="entry">'
+                f'<img src="http://127.0.0.2:{blocked_port}/blocked">'
+            ),
+            content_type="text/html",
+        )
 
     async def socket_response(request):
         hits.append("/ws")
@@ -93,11 +115,28 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, m
     owned_port = owned_site._server.sockets[0].getsockname()[1]
     blocked_port = blocked_site._server.sockets[0].getsockname()[1]
     cert, key = tmp_path / "browser.crt", tmp_path / "browser.key"
-    subprocess.run([
-        "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-        "-keyout", str(key), "-out", str(cert), "-days", "1",
-        "-subj", "/CN=localhost", "-addext", "subjectAltName=IP:127.0.0.1",
-    ], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+            "-days",
+            "1",
+            "-subj",
+            "/CN=localhost",
+            "-addext",
+            "subjectAltName=IP:127.0.0.1",
+        ],
+        check=True,
+        capture_output=True,
+    )
     tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     tls.load_cert_chain(cert, key)
     secure_site = web.TCPSite(owned_runner, "127.0.0.1", 0, ssl_context=tls)
@@ -116,8 +155,14 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, m
     bob = token_auth.generate_token("bob", ttl_seconds=3600)
     cookie = lambda token: {"gideon_token_10129": token}
 
-    async with TestClient(TestServer(app), cookie_jar=aiohttp.DummyCookieJar()) as client:
-        created = await client.post("/api/browser/sessions", json={"conversation_id": "browser-chat"}, cookies=cookie(alice))
+    async with TestClient(
+        TestServer(app), cookie_jar=aiohttp.DummyCookieJar()
+    ) as client:
+        created = await client.post(
+            "/api/browser/sessions",
+            json={"conversation_id": "browser-chat"},
+            cookies=cookie(alice),
+        )
         assert created.status == 201
         row = (await created.json())["session"]
         session_id = row["id"]
@@ -125,18 +170,26 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, m
         assert not (tmp_path / "profiles" / session_id).exists()
         base = f"/api/browser/sessions/{session_id}"
         cross_preview = await client.get(base + "/preview", cookies=cookie(bob))
-        absent_preview = await client.get("/api/browser/sessions/absent/preview", cookies=cookie(bob))
+        absent_preview = await client.get(
+            "/api/browser/sessions/absent/preview", cookies=cookie(bob)
+        )
         assert cross_preview.status == absent_preview.status == 404
         assert await cross_preview.text() == await absent_preview.text()
-        denied = await client.post(base + "/start", json={"expected_version": 1}, cookies=cookie(bob))
+        denied = await client.post(
+            base + "/start", json={"expected_version": 1}, cookies=cookie(bob)
+        )
         assert denied.status == 404
 
-        started = await client.post(base + "/start", json={"expected_version": 1}, cookies=cookie(alice))
+        started = await client.post(
+            base + "/start", json={"expected_version": 1}, cookies=cookie(alice)
+        )
         assert started.status == 200, await started.text()
         active = (await started.json())["session"]
         assert active["status"] == "active" and active["version"] == 2
         assert active["control_holder"] == "assistant"
-        assert not any(key in str(active).lower() for key in ("cdp", "profile", "websocket"))
+        assert not any(
+            key in str(active).lower() for key in ("cdp", "profile", "websocket")
+        )
         assert (tmp_path / "profiles" / session_id / "DevToolsActivePort").exists()
         preview = await client.get(base + "/preview", cookies=cookie(alice))
         assert preview.status == 200
@@ -147,22 +200,35 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, m
         assert preview.headers["Cache-Control"] == "no-store"
 
         grant_gate = ApprovalGate()
-        grant_task = asyncio.create_task(request_grant(
-            task="Read browser page", scope=("127.0.0.1",), gate=grant_gate,
-            request_id="customer-browser-test", timeout=5, bound_device_id=session_id,
-        ))
+        grant_task = asyncio.create_task(
+            request_grant(
+                task="Read browser page",
+                scope=("127.0.0.1",),
+                gate=grant_gate,
+                request_id="customer-browser-test",
+                timeout=5,
+                bound_device_id=session_id,
+            )
+        )
         while not grant_gate.approve("customer-browser-test"):
             await asyncio.sleep(0.005)
         live_grant = await grant_task
         assert live_grant.granted
         controller = app[CONTROL_KEY]
-        navigated = await controller.navigate(session_id, "local", "alice", 2,
-                                              f"http://127.0.0.1:{owned_port}/page",
-                                              actor="assistant", grant=live_grant)
+        navigated = await controller.navigate(
+            session_id,
+            "local",
+            "alice",
+            2,
+            f"http://127.0.0.1:{owned_port}/page",
+            actor="assistant",
+            grant=live_grant,
+        )
         assert navigated.version == 3
         engine = controller._engines[session_id]
         unauthenticated_reader, unauthenticated_writer = await asyncio.open_connection(
-            "127.0.0.1", engine.proxy.port,
+            "127.0.0.1",
+            engine.proxy.port,
         )
         unauthenticated_writer.write(
             f"GET http://127.0.0.1:{owned_port}/unrelated HTTP/1.1\r\n"
@@ -184,18 +250,33 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, m
             if audit_path.exists() and any(
                 row.get("operation") == "proxy_connect"
                 and row.get("metadata", {}).get("host") == "127.0.0.2"
-                for row in (json.loads(line) for line in audit_path.read_text().splitlines())
+                for row in (
+                    json.loads(line) for line in audit_path.read_text().splitlines()
+                )
             ):
                 break
             await asyncio.sleep(0.05)
         else:
             pytest.fail("Denied image subresource did not reach the enforcing proxy")
         await engine.page._eval("document.querySelector('#entry').focus()")
-        entered = await controller.input(session_id, "local", "alice", 3, "text", "approved",
-                                         actor="assistant", grant=live_grant)
+        entered = await controller.input(
+            session_id,
+            "local",
+            "alice",
+            3,
+            "text",
+            "approved",
+            actor="assistant",
+            grant=live_grant,
+        )
         assert entered.version == 4
-        assert await engine.page._eval("document.querySelector('#entry').value") == "approved"
-        await engine.transport.send("Security.setIgnoreCertificateErrors", {"ignore": True})
+        assert (
+            await engine.page._eval("document.querySelector('#entry').value")
+            == "approved"
+        )
+        await engine.transport.send(
+            "Security.setIgnoreCertificateErrors", {"ignore": True}
+        )
         secure_url = f"https://127.0.0.1:{secure_port}/secure"
         assert (await engine.gate.navigate(secure_url)).ok
         for _ in range(100):
@@ -203,7 +284,9 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, m
                 break
             await asyncio.sleep(0.05)
         assert "/secure" in hits and await engine.page.current_url() == secure_url
-        assert (await engine.gate.navigate(f"http://127.0.0.1:{owned_port}/socket-page")).ok
+        assert (
+            await engine.gate.navigate(f"http://127.0.0.1:{owned_port}/socket-page")
+        ).ok
         for _ in range(100):
             if await engine.page._eval("window.socketReply || ''") == "real websocket":
                 break
@@ -212,21 +295,40 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, m
         assert await engine.page._eval("window.socketReply") == "real websocket"
         denied_target = f"http://127.0.0.2:{blocked_port}/blocked"
         with pytest.raises(ControlDenied):
-            await controller.navigate(session_id, "local", "alice", 4, denied_target,
-                                      actor="assistant", grant=live_grant)
+            await controller.navigate(
+                session_id,
+                "local",
+                "alice",
+                4,
+                denied_target,
+                actor="assistant",
+                grant=live_grant,
+            )
         assert "blocked" not in hits
 
         prior_url = await engine.page.current_url()
         prior_title = await engine.page._eval("document.title")
-        slow_action = asyncio.create_task(controller.navigate(
-            session_id, "local", "alice", 4, f"http://127.0.0.1:{owned_port}/slow",
-            actor="assistant", grant=live_grant,
-        ))
+        slow_action = asyncio.create_task(
+            controller.navigate(
+                session_id,
+                "local",
+                "alice",
+                4,
+                f"http://127.0.0.1:{owned_port}/slow",
+                actor="assistant",
+                grant=live_grant,
+            )
+        )
         await asyncio.wait_for(slow_seen.wait(), 5)
         assert not slow_action.done()
-        takeover = await asyncio.wait_for(client.post(
-            base + "/control/takeover", json={"expected_version": 4}, cookies=cookie(alice),
-        ), 1)
+        takeover = await asyncio.wait_for(
+            client.post(
+                base + "/control/takeover",
+                json={"expected_version": 4},
+                cookies=cookie(alice),
+            ),
+            1,
+        )
         assert await engine.page.current_url() == prior_url
         slow_release.set()
         await asyncio.wait_for(slow_completed.wait(), 5)
@@ -238,21 +340,51 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, m
         assert await engine.page.current_url() == prior_url
         assert await engine.page._eval("document.title") == prior_title
         with pytest.raises(ControlDenied, match="control"):
-            await controller.navigate(session_id, "local", "alice", 5,
-                                      f"http://127.0.0.1:{owned_port}/page", actor="assistant", grant=live_grant)
-        stale = await client.post(base + "/input", json={"expected_version": 4, "command": "scroll", "value": "down"}, cookies=cookie(alice))
+            await controller.navigate(
+                session_id,
+                "local",
+                "alice",
+                5,
+                f"http://127.0.0.1:{owned_port}/page",
+                actor="assistant",
+                grant=live_grant,
+            )
+        stale = await client.post(
+            base + "/input",
+            json={"expected_version": 4, "command": "scroll", "value": "down"},
+            cookies=cookie(alice),
+        )
         assert stale.status == 409
-        no_grant = await client.post(base + "/control/handback", json={"expected_version": 4}, cookies=cookie(alice))
+        no_grant = await client.post(
+            base + "/control/handback",
+            json={"expected_version": 4},
+            cookies=cookie(alice),
+        )
         assert no_grant.status == 409
-        scroll = await client.post(base + "/input", json={"expected_version": 5, "command": "scroll", "value": "down"}, cookies=cookie(alice))
+        scroll = await client.post(
+            base + "/input",
+            json={"expected_version": 5, "command": "scroll", "value": "down"},
+            cookies=cookie(alice),
+        )
         assert scroll.status == 200, await scroll.text()
         assert (await scroll.json())["session"]["version"] == 6
-        egress = await client.post(base + "/navigate", json={"expected_version": 6, "url": denied_target}, cookies=cookie(alice))
+        egress = await client.post(
+            base + "/navigate",
+            json={"expected_version": 6, "url": denied_target},
+            cookies=cookie(alice),
+        )
         assert egress.status == 409
-        assert (await (await client.get(base, cookies=cookie(alice))).json())["session"]["version"] == 6
-        redirect = await client.post(base + "/navigate", json={
-            "expected_version": 6, "url": f"http://127.0.0.1:{owned_port}/redirect",
-        }, cookies=cookie(alice))
+        assert (await (await client.get(base, cookies=cookie(alice))).json())[
+            "session"
+        ]["version"] == 6
+        redirect = await client.post(
+            base + "/navigate",
+            json={
+                "expected_version": 6,
+                "url": f"http://127.0.0.1:{owned_port}/redirect",
+            },
+            cookies=cookie(alice),
+        )
         assert redirect.status == 200, await redirect.text()
         assert (await redirect.json())["session"]["version"] == 7
         redirect_target = f"http://127.0.0.2:{blocked_port}/redirect-blocked"
@@ -263,41 +395,77 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, m
                 and event.get("outcome") == "denied"
                 and event.get("metadata", {}).get("url") == redirect_target
                 and event.get("metadata", {}).get("phase") == "proxy"
-                for event in (json.loads(line) for line in audit_path.read_text().splitlines())
+                for event in (
+                    json.loads(line) for line in audit_path.read_text().splitlines()
+                )
             ):
                 break
             await asyncio.sleep(0.05)
         else:
             pytest.fail("Redirect destination produced no enforcing proxy SEL denial")
         assert "/redirect" in hits and "blocked" not in hits
-        handback = await client.post(base + "/control/handback", json={"expected_version": 7}, cookies=cookie(alice))
+        handback = await client.post(
+            base + "/control/handback",
+            json={"expected_version": 7},
+            cookies=cookie(alice),
+        )
         assert handback.status == 200
         returned = (await handback.json())["session"]
         assert returned["control_holder"] == "assistant" and returned["version"] == 8
         with pytest.raises(ControlDenied) as denied_navigation:
-            await controller.navigate(session_id, "local", "alice", 8, denied_target,
-                                      actor="assistant", grant=live_grant)
+            await controller.navigate(
+                session_id,
+                "local",
+                "alice",
+                8,
+                denied_target,
+                actor="assistant",
+                grant=live_grant,
+            )
         assert "control" not in str(denied_navigation.value).lower()
         engage("test stop")
         try:
             with pytest.raises(ControlDenied):
-                await controller.input(session_id, "local", "alice", 8, "text", "stopped",
-                                       actor="assistant", grant=live_grant)
+                await controller.input(
+                    session_id,
+                    "local",
+                    "alice",
+                    8,
+                    "text",
+                    "stopped",
+                    actor="assistant",
+                    grant=live_grant,
+                )
         finally:
             release()
-        user_after_handback = await client.post(base + "/input", json={"expected_version": 8, "command": "scroll", "value": "up"}, cookies=cookie(alice))
+        user_after_handback = await client.post(
+            base + "/input",
+            json={"expected_version": 8, "command": "scroll", "value": "up"},
+            cookies=cookie(alice),
+        )
         assert user_after_handback.status == 409
-        closed = await client.post(base + "/close", json={"expected_version": 8}, cookies=cookie(alice))
+        closed = await client.post(
+            base + "/close", json={"expected_version": 8}, cookies=cookie(alice)
+        )
         assert closed.status == 200
         assert (await closed.json())["session"]["status"] == "closed"
-        assert (await client.get(base + "/preview", cookies=cookie(alice))).status == 503
-        reopened = await client.post(base + "/reopen", json={"expected_version": 9}, cookies=cookie(alice))
+        assert (
+            await client.get(base + "/preview", cookies=cookie(alice))
+        ).status == 503
+        reopened = await client.post(
+            base + "/reopen", json={"expected_version": 9}, cookies=cookie(alice)
+        )
         assert reopened.status == 200
         assert (await reopened.json())["session"]["id"] == session_id
-        restarted = await client.post(base + "/start", json={"expected_version": 10}, cookies=cookie(alice))
+        restarted = await client.post(
+            base + "/start", json={"expected_version": 10}, cookies=cookie(alice)
+        )
         assert restarted.status == 200, await restarted.text()
         restarted_session = (await restarted.json())["session"]
-        assert restarted_session["status"] == "active" and restarted_session["version"] == 11
+        assert (
+            restarted_session["status"] == "active"
+            and restarted_session["version"] == 11
+        )
         new_preview = await client.get(base + "/preview", cookies=cookie(alice))
         assert new_preview.status == 200
         assert (await new_preview.read()).startswith(b"\x89PNG\r\n\x1a\n")
@@ -308,7 +476,9 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(tmp_path, m
 
 def test_existing_reservation_schema_upgrades_for_active_state(tmp_path):
     import sqlite3
+
     from gideon.integrations.browse.customer_sessions import CustomerBrowserSessionStore
+
     path = tmp_path / "old.sqlite3"
     db = sqlite3.connect(path)
     db.execute("""CREATE TABLE customer_browser_sessions (
@@ -317,8 +487,15 @@ def test_existing_reservation_schema_upgrades_for_active_state(tmp_path):
         status TEXT NOT NULL CHECK(status IN ('reserved', 'closed', 'error')),
         version INTEGER NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL,
         UNIQUE(account_id, canonical_key))""")
-    db.execute("INSERT INTO customer_browser_sessions VALUES ('s','local','alice','c','c','reserved',1,1,1)")
+    db.execute(
+        "INSERT INTO customer_browser_sessions VALUES ('s','local','alice','c','c','reserved',1,1,1)"
+    )
     db.commit()
     db.close()
     store = CustomerBrowserSessionStore(path)
-    assert store.transition("s", "local", "alice", expected_version=1, action="activate").status == "active"
+    assert (
+        store.transition(
+            "s", "local", "alice", expected_version=1, action="activate"
+        ).status
+        == "active"
+    )

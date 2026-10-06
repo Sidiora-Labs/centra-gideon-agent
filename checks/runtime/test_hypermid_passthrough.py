@@ -67,4 +67,3 @@ async def test_unavailable_passthrough_preserves_gideon_context_bytes_and_author
         "message": request,
         "bytes": list(request.encode("utf-8")),
     }
-

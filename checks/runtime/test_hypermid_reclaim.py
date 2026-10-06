@@ -59,9 +59,7 @@ def test_pressure_gate_latches_priced_decisions_and_refuses_unsafe_overflow() ->
     snapshot = _snapshot()
     assert calibrate_pressure(snapshot) is PressureBand.HARD_WALL
 
-    refused = parse_reclaim_plan(
-        _plan(disposition="refused", savings=3), snapshot
-    )
+    refused = parse_reclaim_plan(_plan(disposition="refused", savings=3), snapshot)
     assert refused.disposition is ReclaimDisposition.REFUSED
     assert not refused.dispatch_allowed
     with pytest.raises(PressureError) as refusal:

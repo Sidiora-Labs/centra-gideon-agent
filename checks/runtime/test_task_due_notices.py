@@ -36,7 +36,12 @@ def _notification_settings(home: Path, *, quiet: bool) -> None:
 
 
 @pytest.mark.asyncio
-async def test_due_notice_waits_for_quiet_hours_and_survives_restart(active_home, tmp_path):
+async def test_due_notice_waits_for_quiet_hours_and_survives_restart(
+    active_home, tmp_path
+):
+    import argparse
+    import tarfile
+
     from gideon.engine.tasks import registry
     from gideon.engine.tasks.due_notices import LEDGER_NAME, sweep
     from gideon.engine.tasks.native import NativeTaskProvider
@@ -44,14 +49,17 @@ async def test_due_notice_waits_for_quiet_hours_and_survives_restart(active_home
     from gideon.operations.durability import shards
     from gideon.operations.durability.inventory import INVENTORY
     from gideon.workspace.snapshot import snapshot_main
-    import argparse
-    import tarfile
 
     registry.register_provider(NativeTaskProvider())
-    now = datetime.now().astimezone().replace(hour=10, minute=0, second=0, microsecond=0)
+    now = (
+        datetime.now().astimezone().replace(hour=10, minute=0, second=0, microsecond=0)
+    )
     due = (now.date() + timedelta(days=1)).isoformat()
     task = await registry.create_task(
-        provider_name="native", title="Ship the release notes", due=due, due_reminder=True
+        provider_name="native",
+        title="Ship the release notes",
+        due=due,
+        due_reminder=True,
     )
     opted_out = await registry.create_task(
         provider_name="native", title="No reminder", due=due, due_reminder=False
@@ -77,15 +85,25 @@ async def test_due_notice_waits_for_quiet_hours_and_survives_restart(active_home
     assert payload == {"notified": {task.id: due}}
     notes = [
         json.loads(line)
-        for line in (active_home / "notifications.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (active_home / "notifications.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
     note = next(row for row in notes if row.get("task_id") == task.id)
     assert note["statusUrl"] == f"#/tasks?open={task.id}"
-    assert all(row.get("task_id") not in {opted_out.id, foreign.id, finished.id} for row in notes)
+    assert all(
+        row.get("task_id") not in {opted_out.id, foreign.id, finished.id}
+        for row in notes
+    )
 
-    await registry.update_task(task.id, provider_name="native", due=now.date().isoformat())
+    await registry.update_task(
+        task.id, provider_name="native", due=now.date().isoformat()
+    )
     assert await sweep(state, now=now) == 1
-    assert json.loads(ledger.read_text(encoding="utf-8"))["notified"][task.id] == now.date().isoformat()
+    assert (
+        json.loads(ledger.read_text(encoding="utf-8"))["notified"][task.id]
+        == now.date().isoformat()
+    )
 
     out = tmp_path / "shards"
     shards.export_shards(active_home, out, entries=["tasks"])
@@ -95,9 +113,18 @@ async def test_due_notice_waits_for_quiet_hours_and_survives_restart(active_home
     assert all(row["id"] != LEDGER_NAME.removesuffix(".json") for row in rows)
 
     snapshots = tmp_path / "snapshots"
-    assert snapshot_main(parsed=argparse.Namespace(output_dir=str(snapshots), keep=10, list_snapshots=False)) == 0
+    assert (
+        snapshot_main(
+            parsed=argparse.Namespace(
+                output_dir=str(snapshots), keep=10, list_snapshots=False
+            )
+        )
+        == 0
+    )
     archive = next(snapshots.glob("gideon-snapshot-*.tar.gz"))
     with tarfile.open(archive, "r:gz") as snapshot:
-        assert not any(name.endswith(f"tasks/{LEDGER_NAME}") for name in snapshot.getnames())
+        assert not any(
+            name.endswith(f"tasks/{LEDGER_NAME}") for name in snapshot.getnames()
+        )
     tasks_entry = next(entry for entry in INVENTORY if entry.id == "tasks")
     assert tasks_entry.derived_within == (LEDGER_NAME,)

@@ -19,11 +19,72 @@ from gideon.integrations.llm.events import (
 )
 from gideon.security.guardrails import loop_breaker as lb
 
-
 _ORDER = [
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 9, 13, 14, 15, 9, 16, 17, 18, 0, 19,
-    20, 21, 22, 9, 17, 0, 23, 24, 25, 9, 0, 18, 26, 27, 28, 13, 29, 24, 24, 0, 17,
-    30, 31, 17, 22, 32, 33, 34, 5, 35, 0, 26, 24, 17, 0, 24, 0, 36, 37, 35, 17, 22,
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    9,
+    13,
+    14,
+    15,
+    9,
+    16,
+    17,
+    18,
+    0,
+    19,
+    20,
+    21,
+    22,
+    9,
+    17,
+    0,
+    23,
+    24,
+    25,
+    9,
+    0,
+    18,
+    26,
+    27,
+    28,
+    13,
+    29,
+    24,
+    24,
+    0,
+    17,
+    30,
+    31,
+    17,
+    22,
+    32,
+    33,
+    34,
+    5,
+    35,
+    0,
+    26,
+    24,
+    17,
+    0,
+    24,
+    0,
+    36,
+    37,
+    35,
+    17,
+    22,
 ]
 _REPEATED = {
     0: "ls -F",
@@ -54,7 +115,11 @@ def _runtime(workspace: Path) -> tuple[NativeAgentRuntime, NativeBuiltinToolProv
         cwd=workspace,
         session_key="repeating-tool-loop-test",
     )
-    bash = next(item for item in provider._all_tool_defs({"type": "object"}) if item.name == "bash")
+    bash = next(
+        item
+        for item in provider._all_tool_defs({"type": "object"})
+        if item.name == "bash"
+    )
     runtime._tool_defs = [bash]
     runtime._tool_index = {"bash": provider}
     runtime._tool_wire_to_canonical = {"bash": "bash"}
@@ -110,7 +175,9 @@ def test_read_cycle_is_refused_and_stopped():
             if (result.tool_meta or {}).get("loop_breaker_refusal") is True
         ]
         assert refusals, "the recorded read cycle was not refused"
-        assert len(delivered) < len(_ORDER), "the run-level repeated-read circuit did not stop dispatch"
+        assert len(delivered) < len(
+            _ORDER
+        ), "the run-level repeated-read circuit did not stop dispatch"
         assert runtime._cancelled
         assert runtime._breaker.repeat_circuit_message().startswith(
             "Run aborted by the loop breaker: "
@@ -143,7 +210,8 @@ def test_read_cycle_is_refused_and_stopped():
             for index in range(12)
         ]
         assert not any(
-            (result.tool_meta or {}).get("loop_breaker_refusal") for result in poll_results
+            (result.tool_meta or {}).get("loop_breaker_refusal")
+            for result in poll_results
         )
         assert runtime._breaker.repeat_count(poll_key) == 0
         assert runtime._breaker.total_repeats == repeat_total
@@ -156,7 +224,8 @@ def test_read_cycle_is_refused_and_stopped():
         ]
         assert len(write_results) == 6
         assert not any(
-            (result.tool_meta or {}).get("loop_breaker_refusal") for result in write_results
+            (result.tool_meta or {}).get("loop_breaker_refusal")
+            for result in write_results
         )
         assert any(
             "same tool call produced the same result" in str(result.tool_output)

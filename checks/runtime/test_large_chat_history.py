@@ -83,7 +83,9 @@ def test_large_history_lists_from_metadata_and_reports_search_coverage(
             "chat-00000",
         }
 
-        app_scoped = answer(log, "needle", limit=10, rest=True, request_app="sample-app")
+        app_scoped = answer(
+            log, "needle", limit=10, rest=True, request_app="sample-app"
+        )
         assert app_scoped["searched"]["of"] == 1
         assert app_scoped["complete"] is True
     finally:

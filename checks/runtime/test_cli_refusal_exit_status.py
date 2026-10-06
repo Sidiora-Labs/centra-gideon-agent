@@ -40,7 +40,9 @@ def _cli(home: Path, *args: str, cwd: Path | None = None, **overrides: str):
     )
 
 
-def _refusal(home: Path, *args: str, reason: str, **overrides: str) -> subprocess.CompletedProcess:
+def _refusal(
+    home: Path, *args: str, reason: str, **overrides: str
+) -> subprocess.CompletedProcess:
     result = _cli(home, *args, **overrides)
     assert result.returncode == 1, (
         f"expected exit 1, got {result.returncode}; stdout={result.stdout!r}; "
@@ -182,7 +184,13 @@ def test_skills_install_unknown_marketplace_does_not_create_target(tmp_path):
 
 
 def test_skills_remove_missing_skill_refuses(tmp_path):
-    _refusal(tmp_path, "skills", "remove", "missing-skill", reason="Skill 'missing-skill' not found")
+    _refusal(
+        tmp_path,
+        "skills",
+        "remove",
+        "missing-skill",
+        reason="Skill 'missing-skill' not found",
+    )
 
 
 def test_skills_verify_reports_tampering_and_exits_nonzero(tmp_path):
@@ -222,7 +230,10 @@ def test_memory_import_missing_file_refuses_without_importing(tmp_path):
         str(missing),
         reason=f"File not found: {missing}",
     )
-    assert hashlib.sha256((tmp_path / "memory.db").read_bytes()).hexdigest() == memory_before
+    assert (
+        hashlib.sha256((tmp_path / "memory.db").read_bytes()).hexdigest()
+        == memory_before
+    )
 
 
 def test_learn_remove_without_matches_refuses(tmp_path):

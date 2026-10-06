@@ -7,8 +7,8 @@ import json
 from gideon.engine.routing import rates, stats, telemetry, usage
 from gideon.integrations.llm.base import LLMEvent
 from gideon.operations import pricing, usage_ledger
-from gideon.security.guardrails.budgets import SpendMeter
 from gideon.security.guardrails.audit import AttemptRecord, record_attempt
+from gideon.security.guardrails.budgets import SpendMeter
 
 
 def test_resolved_rate_matches_budget_audit_ledger_and_usage(tmp_path, monkeypatch):
@@ -45,14 +45,17 @@ def test_resolved_rate_matches_budget_audit_ledger_and_usage(tmp_path, monkeypat
     expected = 0.0076
     assert resolved.cost_usd == expected and resolved.priced
     assert resolved.source == "overlay" and resolved.estimated
-    assert pricing.estimate_cost(
-        "qwen3",
-        event.input_tokens,
-        event.output_tokens,
-        event.cache_read_tokens,
-        event.cache_creation_tokens,
-        provider="acme",
-    ) == expected
+    assert (
+        pricing.estimate_cost(
+            "qwen3",
+            event.input_tokens,
+            event.output_tokens,
+            event.cache_read_tokens,
+            event.cache_creation_tokens,
+            provider="acme",
+        )
+        == expected
+    )
 
     meter = SpendMeter(config_dir=tmp_path)
     meter.charge(event.input_tokens + event.output_tokens, resolved.cost_usd)
@@ -106,7 +109,9 @@ def test_resolved_rate_matches_budget_audit_ledger_and_usage(tmp_path, monkeypat
     provider_cost = rates.resolve_effective_price(
         "acme", "qwen3", reported_cost_usd=0.25
     )
-    assert provider_cost.cost_usd == 0.25 and provider_cost.source == "provider_reported"
+    assert (
+        provider_cost.cost_usd == 0.25 and provider_cost.source == "provider_reported"
+    )
     reported_event = LLMEvent(
         kind="complete",
         input_tokens=event.input_tokens,
@@ -114,9 +119,9 @@ def test_resolved_rate_matches_budget_audit_ledger_and_usage(tmp_path, monkeypat
         cost_usd=0.25,
         tool_meta={"usage_reported": True},
     )
-    reported_row = usage_ledger.EventAccounting(
-        reported_event, "qwen3", True
-    ).record("chat", "reported-session", "", "acme")
+    reported_row = usage_ledger.EventAccounting(reported_event, "qwen3", True).record(
+        "chat", "reported-session", "", "acme"
+    )
     assert reported_row.cost_usd == 0.25
     assert reported_row.priced and not reported_row.estimated
     assert reported_row.price_source == "provider_reported"

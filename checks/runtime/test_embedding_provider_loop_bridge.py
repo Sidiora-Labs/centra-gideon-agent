@@ -14,9 +14,7 @@ def test_worker_calls_reuse_shared_loop_and_keep_batch_slots():
     loop_ids: list[int] = []
     batch_sizes: list[int] = []
 
-    async def pooled_batch(
-        texts: list[str], *, model: str
-    ) -> list[list[float] | None]:
+    async def pooled_batch(texts: list[str], *, model: str) -> list[list[float] | None]:
         loop_ids.append(id(asyncio.get_running_loop()))
         batch_sizes.append(len(texts))
 
@@ -31,10 +29,7 @@ def test_worker_calls_reuse_shared_loop_and_keep_batch_slots():
 
         if len(texts) > 1:
             raise RuntimeError("provider batch limit")
-        return [
-            None if text == "unavailable" else [float(len(text))]
-            for text in texts
-        ]
+        return [None if text == "unavailable" else [float(len(text))] for text in texts]
 
     binding = _DirectBinding(provider=None, model_id="test-model")
     embed_many = partial(binding.many, pooled_batch)

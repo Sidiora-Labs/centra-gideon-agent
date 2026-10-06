@@ -8,10 +8,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from gideon.extensions.apps import app_python
 from gideon.extensions.apps.app_python import PackageInstallError
 from gideon.operations.durability import inventory
-import pytest
 
 
 def test_prefix_paths_are_appended_and_inventory_ignores_rebuildable_tree(
@@ -26,15 +27,27 @@ def test_prefix_paths_are_appended_and_inventory_ignores_rebuildable_tree(
     app_python.activate()
     stdlib = str(Path(sysconfig_path("stdlib")).resolve())
     site_index = sys.path.index(str(app_sites[0]))
-    assert site_index > next(index for index, value in enumerate(sys.path) if value and Path(value).resolve() == Path(stdlib))
+    assert site_index > next(
+        index
+        for index, value in enumerate(sys.path)
+        if value and Path(value).resolve() == Path(stdlib)
+    )
     assert all(value in sys.path for value in before)
     assert inventory.is_ignored("app-python/lib/site-packages/probe.py")
 
     env = app_python.app_packages_env()
-    assert env["GIDEON_APP_PYTHON_PATH"] == os.pathsep.join(str(path) for path in app_sites)
-    assert Path(env["PYTHONPATH"]).resolve() == (app_python.root() / "bootstrap").resolve()
+    assert env["GIDEON_APP_PYTHON_PATH"] == os.pathsep.join(
+        str(path) for path in app_sites
+    )
+    assert (
+        Path(env["PYTHONPATH"]).resolve() == (app_python.root() / "bootstrap").resolve()
+    )
     child = subprocess.run(
-        [sys.executable, "-c", "import json, pathlib, sys; print(json.dumps([pathlib.__file__, sys.path]))"],
+        [
+            sys.executable,
+            "-c",
+            "import json, pathlib, sys; print(json.dumps([pathlib.__file__, sys.path]))",
+        ],
         cwd=tmp_path,
         env=env,
         capture_output=True,

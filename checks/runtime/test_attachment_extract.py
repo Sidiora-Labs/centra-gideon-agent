@@ -132,11 +132,13 @@ class TestAttachmentInjectionRoots:
         extractor = AttachmentExtractor()
         monkeypatch.setattr(attachment_extract, "_INSTANCE", extractor)
         session = _ChatSession("attachment-image-no-reader")
-        session.messages.append({
-            "role": "user",
-            "content": "look",
-            "meta": {"files": [str(up), str(shot)]},
-        })
+        session.messages.append(
+            {
+                "role": "user",
+                "content": "look",
+                "meta": {"files": [str(up), str(shot)]},
+            }
+        )
 
         out = _run(chat_runner._inject_attachment_content(session, "look"))
 

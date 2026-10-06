@@ -31,7 +31,11 @@ def _spec() -> dict:
                 {
                     "kind": "gate",
                     "id": "approval",
-                    "config": {"kind": "approval", "prompt": "Ship?", "timeout_secs": 0},
+                    "config": {
+                        "kind": "approval",
+                        "prompt": "Ship?",
+                        "timeout_secs": 0,
+                    },
                 }
             ],
         },
@@ -40,13 +44,17 @@ def _spec() -> dict:
 
 async def test_rewind_replaces_the_ask_and_rejects_its_old_token():
     spec = _spec()
-    run = store.create(WorkflowRun(id="", workflow_name="rewind-at-gate", mode="background"))
+    run = store.create(
+        WorkflowRun(id="", workflow_name="rewind-at-gate", mode="background")
+    )
     store.write_spec(run.id, spec)
     controller = RunController(run, spec, services=EngineServices())
     assert await controller.run_to_completion(timeout=10) == RunStatus.NEEDS_INPUT
     old = human_input.list_continuations(run.id)[0]
 
-    queued = controller.submit_mutation([{"op": "rewind", "node_id": "approval"}], confirm=True)
+    queued = controller.submit_mutation(
+        [{"op": "rewind", "node_id": "approval"}], confirm=True
+    )
     assert queued["ok"] and queued["queued"]
     assert await controller.run_to_completion(timeout=10) == RunStatus.NEEDS_INPUT
     assert human_input.load_continuation(run.id, old.token) is None

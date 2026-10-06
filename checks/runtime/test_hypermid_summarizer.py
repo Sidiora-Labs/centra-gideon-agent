@@ -16,7 +16,6 @@ from gideon.hypermid.summarizer import (
 from gideon.integrations.llm.credentials import Credential
 from gideon.integrations.llm.openai import OpenAIProvider
 
-
 pytestmark = pytest.mark.skipif(
     os.environ.get("HYPERMID_REAL_MODEL_TEST") != "1",
     reason="requires an explicitly enabled real model call",

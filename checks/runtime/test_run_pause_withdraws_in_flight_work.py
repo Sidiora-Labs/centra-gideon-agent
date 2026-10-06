@@ -26,7 +26,9 @@ async def test_stopping_real_session_manager_withdraws_waiting_chat_approval(
     chat.messages.append(
         {
             "role": "permission",
-            "cls": json.dumps({"request_id": "request-1", "asked_by": "agent:chat-pause"}),
+            "cls": json.dumps(
+                {"request_id": "request-1", "asked_by": "agent:chat-pause"}
+            ),
         }
     )
     state.broadcast_ws(
@@ -43,7 +45,9 @@ async def test_stopping_real_session_manager_withdraws_waiting_chat_approval(
 
 
 @pytest.mark.asyncio
-async def test_real_workflow_pause_withdraws_its_pending_approval(tmp_path, monkeypatch):
+async def test_real_workflow_pause_withdraws_its_pending_approval(
+    tmp_path, monkeypatch
+):
     from gideon.automation.workflows import store as workflow_store
     from gideon.automation.workflows.controller import EngineServices, RunController
     from gideon.automation.workflows.models import RunStatus, WorkflowRun

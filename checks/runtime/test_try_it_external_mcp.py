@@ -12,7 +12,9 @@ from aiohttp.test_utils import TestClient, TestServer
 
 
 @pytest.mark.asyncio
-async def test_try_it_uses_the_agent_catalog_without_a_provider_selector(tmp_path, monkeypatch):
+async def test_try_it_uses_the_agent_catalog_without_a_provider_selector(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
     from gideon.integrations import mcp_client
@@ -24,8 +26,7 @@ async def test_try_it_uses_the_agent_catalog_without_a_provider_selector(tmp_pat
 
     script = tmp_path / "mcp_try_it.py"
     script.write_text(
-        textwrap.dedent(
-            """
+        textwrap.dedent("""
             from mcp.server.fastmcp import FastMCP
 
             mcp = FastMCP("try-it-fixture")
@@ -37,8 +38,7 @@ async def test_try_it_uses_the_agent_catalog_without_a_provider_selector(tmp_pat
 
             if __name__ == "__main__":
                 mcp.run()
-            """
-        ),
+            """),
         encoding="utf-8",
     )
     spec = {"command": sys.executable, "args": [str(script)]}
@@ -58,7 +58,10 @@ async def test_try_it_uses_the_agent_catalog_without_a_provider_selector(tmp_pat
         ),
         Principal(OWNER, "mcp04-try-owner"),
     )
-    from gideon.interfaces.dashboard.handlers.tools import api_tool_invoke, api_tools_list
+    from gideon.interfaces.dashboard.handlers.tools import (
+        api_tool_invoke,
+        api_tools_list,
+    )
 
     app = web.Application()
     app.router.add_get("/api/tools", api_tools_list)

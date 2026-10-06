@@ -45,7 +45,9 @@ def test_grant_and_timeout_settings_are_read_per_decision(isolated_config):
     assert approval_mode_now() == "auto"
     assert approval_window_secs() == 300
     config_path.write_text(
-        json.dumps({"agent": {"approval_mode": "interactive", "approval_timeout_minutes": 9}}),
+        json.dumps(
+            {"agent": {"approval_mode": "interactive", "approval_timeout_minutes": 9}}
+        ),
         encoding="utf-8",
     )
     assert approval_mode_now() == "interactive"
@@ -100,7 +102,6 @@ def test_approval_gates_use_the_live_window_but_keep_explicit_and_unattended_lim
     assert gate_timeout_secs({}) == 540
     assert gate_timeout_secs({"timeout_secs": 7}) == 7
     assert (
-        gate_timeout_secs({}, unattended=True)
-        == DEFAULT_BACKGROUND_GATE_TIMEOUT_SECS
+        gate_timeout_secs({}, unattended=True) == DEFAULT_BACKGROUND_GATE_TIMEOUT_SECS
     )
     assert gate_timeout_secs({"kind": "event"}, mode="blocking") == 1800

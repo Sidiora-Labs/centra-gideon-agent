@@ -97,8 +97,13 @@ def test_setup_step_that_raises_does_not_abort(_isolate, capsys):
     failures = app_cli.run_app_setup_steps()
     out = capsys.readouterr().out
     assert "a-bad" in out and "boom" in out
-    assert any("a-bad: RuntimeError: from-app-package boom" == failure for failure in failures)
-    assert any("b-missing: ImportError:" in failure and "missing_setup" in failure for failure in failures)
+    assert any(
+        "a-bad: RuntimeError: from-app-package boom" == failure for failure in failures
+    )
+    assert any(
+        "b-missing: ImportError:" in failure and "missing_setup" in failure
+        for failure in failures
+    )
     assert "z-good ran" in out
     assert str(bad_dir.resolve()) not in sys.path
 

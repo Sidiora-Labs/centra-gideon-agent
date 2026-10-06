@@ -25,7 +25,9 @@ def database(path: Path) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as connection:
         connection.execute("CREATE TABLE documents (id INTEGER PRIMARY KEY, body BLOB)")
-        connection.executemany("INSERT INTO documents(body) VALUES(?)", [(b"x" * 8192,)] * 100)
+        connection.executemany(
+            "INSERT INTO documents(body) VALUES(?)", [(b"x" * 8192,)] * 100
+        )
         connection.execute("DELETE FROM documents WHERE id > 1")
     return path.stat().st_size
 
@@ -58,7 +60,9 @@ def test_real_locked_store_does_not_stop_other_compaction(home):
     finally:
         locked.rollback()
         locked.close()
-    memory_id = next(entry.id for entry in inventory.sqlite_entries() if entry.path == "memory.db")
+    memory_id = next(
+        entry.id for entry in inventory.sqlite_entries() if entry.path == "memory.db"
+    )
     assert result.skipped[memory_id] == "database is busy"
     assert compact_path.stat().st_size < before
     assert result.freed_bytes > 0

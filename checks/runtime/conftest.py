@@ -130,7 +130,9 @@ def _isolate_real_home_writers(tmp_path_factory, monkeypatch):
         if getattr(module, "config_dir", None) is original_config_dir:
             monkeypatch.setattr(module, "config_dir", guarded_config_dir)
         if getattr(module, "resolve_config_dir", None) is original_resolve_config_dir:
-            monkeypatch.setattr(module, "resolve_config_dir", guarded_resolve_config_dir)
+            monkeypatch.setattr(
+                module, "resolve_config_dir", guarded_resolve_config_dir
+            )
 
 
 @pytest.fixture(autouse=True)

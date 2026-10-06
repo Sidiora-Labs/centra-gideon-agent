@@ -1125,15 +1125,20 @@ class TestMediaItems:
     @staticmethod
     def _store_file_item(store, path, filename, mime=None):
         import asyncio
-        from gideon.workspace.uploads.content_intake import approve_path
+
         from gideon.cognition.knowledge.file_items import store_approved_file
+        from gideon.workspace.uploads.content_intake import approve_path
+
         async def store_source():
-            snapshot = await approve_path(path, mime, filename=filename, surface='knowledge')
+            snapshot = await approve_path(
+                path, mime, filename=filename, surface="knowledge"
+            )
             try:
                 return await store_approved_file(store, snapshot)
             finally:
                 snapshot.close()
                 Path(path).unlink(missing_ok=True)
+
         return asyncio.run(store_source())
 
     def _files_dir(self, tmp_path, monkeypatch):
@@ -1176,7 +1181,9 @@ class TestMediaItems:
         assert item["mime_type"] == "audio/webm"
         src2 = tmp_path / "clip.webm"
         src2.write_bytes(b"\x1a\x45\xdf\xa3" + b"y" * 64)
-        item2, _ = self._store_file_item(store, str(src2), "clip.webm", mime="video/webm")
+        item2, _ = self._store_file_item(
+            store, str(src2), "clip.webm", mime="video/webm"
+        )
         assert item2["type"] == "video" and item2["mime_type"] == "video/webm"
 
     def test_store_file_item_dedups_identical_content(

@@ -509,8 +509,10 @@ def test_an_unmeasured_arm_is_reported_not_averaged(bench_home, loader):
 async def test_benchmark_not_run_names_its_actual_home(tmp_path, monkeypatch):
     import json
     import shlex
+
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
+
     from gideon.core.config import loader
     from gideon.interfaces.dashboard.handlers import evals
 
@@ -520,7 +522,9 @@ async def test_benchmark_not_run_names_its_actual_home(tmp_path, monkeypatch):
     monkeypatch.setattr(loader, "config_dir", lambda: home)
     (home / "config.json").write_text(json.dumps({"evals": {"enabled": True}}))
     app = web.Application()
-    app.router.add_get("/api/evals/learning-benchmark", evals.api_evals_learning_benchmark)
+    app.router.add_get(
+        "/api/evals/learning-benchmark", evals.api_evals_learning_benchmark
+    )
     async with TestClient(TestServer(app)) as client:
         response = await client.get("/api/evals/learning-benchmark")
         assert response.status == 200

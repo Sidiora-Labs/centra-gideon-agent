@@ -75,11 +75,17 @@ def test_files_roots_never_expose_active_home(_isolated_home, tmp_path):
         os.path.join(active_home, "uploads")
     ), f"Uploads must live under the active home; got {rp_by_label['Uploads']!r}"
 
-    assert active_home not in rp_by_label.values(), f"active home exposed as a Files root: {rp_by_label}"
-    assert all(_under(root, active_home) or root == ws_root for root in rp_by_label.values())
+    assert (
+        active_home not in rp_by_label.values()
+    ), f"active home exposed as a Files root: {rp_by_label}"
+    assert all(
+        _under(root, active_home) or root == ws_root for root in rp_by_label.values()
+    )
 
 
-def test_workspace_equal_to_home_or_symlink_alias_is_never_a_files_root(_isolated_home, tmp_path, monkeypatch):
+def test_workspace_equal_to_home_or_symlink_alias_is_never_a_files_root(
+    _isolated_home, tmp_path, monkeypatch
+):
     from gideon.interfaces.dashboard.handlers.files import _dashboard_roots
 
     home = _isolated_home.resolve()

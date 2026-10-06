@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from gideon.extensions.skills import ephemeral, loader as loader_mod, proposals, refine
+from gideon.extensions.skills import ephemeral
+from gideon.extensions.skills import loader as loader_mod
+from gideon.extensions.skills import proposals, refine
 from gideon.extensions.skills.loader import ProcedureLibrary
 
 
@@ -24,10 +26,16 @@ def test_redaction_failure_withholds_draft_and_refinement_text(home, monkeypatch
     )
     assert draft is not None
     assert secret not in draft.body
-    assert secret not in (home / "skills" / ".ephemeral" / "normal-session" / "safe-draft.json").read_text()
+    assert (
+        secret
+        not in (
+            home / "skills" / ".ephemeral" / "normal-session" / "safe-draft.json"
+        ).read_text()
+    )
 
     assert ProcedureLibrary(install_builtins=False).create_skill(
-        "deployment", "---\nname: deployment\ndescription: deployment\n---\n\nDeploy safely.\n"
+        "deployment",
+        "---\nname: deployment\ndescription: deployment\n---\n\nDeploy safely.\n",
     )
     proposal = refine.propose_refinement(
         trigger="correction",

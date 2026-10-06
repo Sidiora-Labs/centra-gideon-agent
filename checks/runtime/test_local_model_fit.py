@@ -411,7 +411,9 @@ def test_disk_precheck_refuses_with_actual_free_space_and_a_typed_reason(tmp_pat
     assert not result.ok and result.measured
     assert result.need_bytes > result.free_bytes > 0
     assert result.code == "insufficient_disk_space"
-    assert result.reason.startswith("Not enough free disk space for this download: it needs ")
+    assert result.reason.startswith(
+        "Not enough free disk space for this download: it needs "
+    )
     assert ", and " in result.reason and result.reason.endswith(" is free.")
     assert not result.warning
 

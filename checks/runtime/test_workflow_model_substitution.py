@@ -8,7 +8,9 @@ from gideon.automation.workflows.journal import JOURNAL_FILE, Journal
 from gideon.automation.workflows.models import NodeInstance
 
 
-def test_workflow_responder_metadata_survives_real_codec_and_journal(tmp_path, monkeypatch):
+def test_workflow_responder_metadata_survives_real_codec_and_journal(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     substitution = {
         "requested": "local:preferred",

@@ -73,12 +73,10 @@ def test_staged_configuration_survives_restart_and_applies_at_one_boundary(
 
     connection = sqlite3.connect(path)
     try:
-        rows = connection.execute(
-            """
+        rows = connection.execute("""
             SELECT policy_revision, config_digest, previous_config_digest
             FROM hypermid_context_config_revisions ORDER BY policy_revision
-            """
-        ).fetchall()
+            """).fetchall()
         assert rows == [
             (1, original.config_digest, None),
             (2, transition.next.config_digest, original.config_digest),

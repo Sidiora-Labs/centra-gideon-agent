@@ -6,20 +6,21 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.automation.workflows import journal as journal_mod, service, store
+from gideon.automation.workflows import journal as journal_mod
+from gideon.automation.workflows import service, store
 from gideon.automation.workflows.controller import EngineServices
 from gideon.automation.workflows.models import RunStatus, WorkflowRun
 from gideon.automation.workflows.watchdog import WorkflowWatchdog
 from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
+from gideon.integrations.action_providers.registry import (
+    _ensure_default_providers_registered,
+)
 from gideon.interfaces.dashboard.handlers.loop_routes import (
     api_loop_action,
     api_loop_get,
 )
 from gideon.interfaces.dashboard.state import ConsoleState
-from gideon.integrations.action_providers.registry import (
-    _ensure_default_providers_registered,
-)
 
 
 @pytest.fixture(autouse=True)
@@ -43,9 +44,7 @@ async def test_pause_waits_for_real_action_process_and_resume_survives_restart(
 ):
     _ensure_default_providers_registered()
     state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
-    state.workflows = WorkflowWatchdog(
-        state, EngineServices(cwd=str(isolated_home))
-    )
+    state.workflows = WorkflowWatchdog(state, EngineServices(cwd=str(isolated_home)))
     app = web.Application()
     app["state"] = state
     app.router.add_get("/api/loops/{id}", api_loop_get)
@@ -54,8 +53,7 @@ async def test_pause_waits_for_real_action_process_and_resume_survives_restart(
     started = isolated_home / "action-started"
     finished = isolated_home / "action-finished"
     command = (
-        f"printf started > '{started}'; sleep 60; "
-        f"printf finished > '{finished}'"
+        f"printf started > '{started}'; sleep 60; " f"printf finished > '{finished}'"
     )
     run = store.create(
         WorkflowRun(

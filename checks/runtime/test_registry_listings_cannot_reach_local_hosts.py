@@ -8,8 +8,8 @@ import pytest
 from gideon.extensions.apps import catalog, source
 from gideon.extensions.apps.catalog import CatalogEntry
 from gideon.extensions.apps.source import SourceRefused
-from gideon.security.net.guard import evaluate
 from gideon.security.net.git import GitEgressRefused, GuardedTunnel, run_git_guarded
+from gideon.security.net.guard import evaluate
 from gideon.security.net.policy import LISTING
 
 
@@ -64,14 +64,24 @@ def test_local_registry_entries_refuse_nonpublic_and_malformed_repos_without_dns
     active[0] = False
 
     by_name = {entry.name: entry for entry in entries}
-    for name in ("loopback", "private", "metadata", "local-file", "file-url", "credential", "port"):
+    for name in (
+        "loopback",
+        "private",
+        "metadata",
+        "local-file",
+        "file-url",
+        "credential",
+        "port",
+    ):
         assert not by_name[name].installable
         assert by_name[name].refused
     assert "secret" not in by_name["credential"].refused
     assert by_name["hostname"].installable
     assert by_name["public-ip"].installable
     assert by_name["hostname"].listedBy == str(local_registry)
-    assert catalog.listing_source_for("https://127.0.0.1/apps.git") == str(local_registry)
+    assert catalog.listing_source_for("https://127.0.0.1/apps.git") == str(
+        local_registry
+    )
     assert observed_dns == []
 
     direct_public_ip = evaluate("https://8.8.8.8/apps.git", policy)
@@ -82,7 +92,11 @@ def test_local_registry_entries_refuse_nonpublic_and_malformed_repos_without_dns
     active[0] = True
 
     def observe_git(event, args):
-        if active[0] and event == "subprocess.Popen" and Path(str(args[0])).name == "git":
+        if (
+            active[0]
+            and event == "subprocess.Popen"
+            and Path(str(args[0])).name == "git"
+        ):
             git_spawns.append(args)
 
     sys.addaudithook(observe_git)
@@ -96,11 +110,16 @@ def test_local_registry_entries_refuse_nonpublic_and_malformed_repos_without_dns
 def test_installable_duplicate_beats_refused_registry_card(tmp_path, monkeypatch):
     _isolate_home(tmp_path, monkeypatch)
     refused = CatalogEntry(
-        name="same-app", displayName="Same app", sourceKind="git",
-        installable=False, refused="This listed destination is not allowed.",
+        name="same-app",
+        displayName="Same app",
+        sourceKind="git",
+        installable=False,
+        refused="This listed destination is not allowed.",
     )
     installable = CatalogEntry(
-        name="same-app", displayName="Same app", sourceKind="git",
+        name="same-app",
+        displayName="Same app",
+        sourceKind="git",
         installable=True,
     )
     assert catalog.resolve_catalog_entries([refused, installable]) == [installable]
@@ -113,9 +132,7 @@ def test_owner_added_loopback_registry_exception_is_applied_by_real_policy(
     _isolate_home(tmp_path, monkeypatch)
     registry = "https://127.0.0.1/registry.git"
     catalog.add_git_source(registry)
-    decision = evaluate(
-        "https://127.0.0.1/apps.git", catalog.listing_policy(registry)
-    )
+    decision = evaluate("https://127.0.0.1/apps.git", catalog.listing_policy(registry))
     assert decision.allow
     assert decision.pinned_ips == ["127.0.0.1"]
 
@@ -151,7 +168,10 @@ def test_guarded_tunnel_refuses_private_metadata_port_and_plain_http_hops():
         assert b"403 Forbidden" in responses[2]
         assert b"405 Method Not Allowed" in responses[3]
         assert [refusal.category for refusal in tunnel.refused] == [
-            "loopback", "deny_list", "port", "method"
+            "loopback",
+            "deny_list",
+            "port",
+            "method",
         ]
         assert tunnel.unreachable == []
 
@@ -164,9 +184,7 @@ def test_git_uses_guard_for_loopback_and_ignores_inherited_config_and_proxy(
         "[safe]\n\tmarker = home-config-marker\n", encoding="utf-8"
     )
     injected = tmp_path / "injected.gitconfig"
-    injected.write_text(
-        "[safe]\n\tmarker = file-config-marker\n", encoding="utf-8"
-    )
+    injected.write_text("[safe]\n\tmarker = file-config-marker\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("GIT_CONFIG", str(injected))
     monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'safe.marker=parameter-config-marker'")

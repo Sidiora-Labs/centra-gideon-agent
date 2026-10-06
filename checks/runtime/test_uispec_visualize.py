@@ -8,7 +8,11 @@ import unittest
 from unittest.mock import patch
 
 from gideon.integrations.mcp_artifacts import _call_tool
-from gideon.workspace.genui import uispec_catalog, uispec_library_prompt, validate_uispec_envelope
+from gideon.workspace.genui import (
+    uispec_catalog,
+    uispec_library_prompt,
+    validate_uispec_envelope,
+)
 from gideon.workspace.visualize import visualize
 
 
@@ -17,10 +21,28 @@ def real_record(template: str) -> dict:
     bindings = {}
     for key, kind in entry["bindings"].items():
         bindings[key] = (
-            [] if kind == "array" else 7 if kind == "number" else True if kind == "boolean"
-            else "https://example.test/image.png" if key.endswith(".src") else f"Record {key}"
+            []
+            if kind == "array"
+            else (
+                7
+                if kind == "number"
+                else (
+                    True
+                    if kind == "boolean"
+                    else (
+                        "https://example.test/image.png"
+                        if key.endswith(".src")
+                        else f"Record {key}"
+                    )
+                )
+            )
         )
-    return {"schemaVersion": 1, "template": template, "recordId": f"record-{template}", "bindings": bindings}
+    return {
+        "schemaVersion": 1,
+        "template": template,
+        "recordId": f"record-{template}",
+        "bindings": bindings,
+    }
 
 
 class UISpecVisualizeTests(unittest.TestCase):
@@ -34,7 +56,9 @@ class UISpecVisualizeTests(unittest.TestCase):
         for entry in catalog:
             self.assertIn(entry["template"], prompt)
             self.assertTrue(entry["bindings"])
-            self.assertIsNotNone(validate_uispec_envelope(real_record(entry["template"])))
+            self.assertIsNotNone(
+                validate_uispec_envelope(real_record(entry["template"]))
+            )
 
     def test_incomplete_or_changed_records_are_refused(self) -> None:
         record = real_record("create-task")
@@ -44,7 +68,9 @@ class UISpecVisualizeTests(unittest.TestCase):
         record["bindings"]["children.0.src"] = "javascript:alert(1)"
         self.assertIsNone(validate_uispec_envelope(record))
 
-    def test_visualize_emits_distinct_widget_only_for_exact_supplied_record(self) -> None:
+    def test_visualize_emits_distinct_widget_only_for_exact_supplied_record(
+        self,
+    ) -> None:
         record = real_record("chart-bars")
         seen = {}
 
@@ -53,7 +79,11 @@ class UISpecVisualizeTests(unittest.TestCase):
             seen["axis"] = use_case
             return json.dumps(record)
 
-        result = asyncio.run(visualize({"generative_ui": record}, "show support counts", completion=completion))
+        result = asyncio.run(
+            visualize(
+                {"generative_ui": record}, "show support counts", completion=completion
+            )
+        )
         self.assertEqual(seen["axis"], "reasoning")
         self.assertIn("chart-bars (Support tickets)", seen["prompt"])
         self.assertTrue(result.widget.startswith('<widget kind="uispec"'))
@@ -68,7 +98,9 @@ class UISpecVisualizeTests(unittest.TestCase):
     def test_tool_response_contains_block_and_refuses_incomplete_input(self) -> None:
         record = real_record("create-task")
 
-        async def completion(prompt: str, *, use_case: str = "background", **kwargs) -> str:
+        async def completion(
+            prompt: str, *, use_case: str = "background", **kwargs
+        ) -> str:
             return json.dumps(record)
 
         with patch("gideon.integrations.llm_helpers.one_shot_completion", completion):
@@ -87,10 +119,14 @@ class UISpecVisualizeTests(unittest.TestCase):
         async def completion(prompt: str, *, use_case: str) -> str:
             return json.dumps(record)
 
-        result = asyncio.run(visualize({"generative_ui": record}, completion=completion))
+        result = asyncio.run(
+            visualize({"generative_ui": record}, completion=completion)
+        )
         self.assertEqual(result.widget.count("</widget>"), 1)
         self.assertIn("\\u003c/widget\\u003e", result.widget)
-        self.assertEqual(json.loads(result.dsl)["bindings"]["title"], record["bindings"]["title"])
+        self.assertEqual(
+            json.loads(result.dsl)["bindings"]["title"], record["bindings"]["title"]
+        )
 
 
 if __name__ == "__main__":

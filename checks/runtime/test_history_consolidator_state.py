@@ -2,21 +2,28 @@ import asyncio
 import os
 import time
 from functools import wraps
+
+from gideon.cognition.consolidation_cycle import ConsolidationUnavailable
 from gideon.security.approval_answer import YOU
 from gideon.security.session_credentials import begin_turn, end_turn
-from gideon.cognition.consolidation_cycle import ConsolidationUnavailable
+
 
 def bound(key):
     def decorate(function):
         @wraps(function)
         async def invoke(*args, **kwargs):
-            credential = begin_turn(key, YOU, turn_id="consolidation-test", memory_mode="persistent")
+            credential = begin_turn(
+                key, YOU, turn_id="consolidation-test", memory_mode="persistent"
+            )
             try:
                 return await function(*args, **kwargs)
             finally:
                 end_turn(credential)
+
         return invoke
+
     return decorate
+
 
 import pytest
 
@@ -423,6 +430,7 @@ def test_curator_tick_prunes_real_surfacing_history(local_consolidator):
         events.close()
         usage.close()
 
+
 @pytest.mark.asyncio
 @bound("dashboard:owned")
 async def test_failed_formation_retains_sources_and_avoids_fallback(local_consolidator):
@@ -430,10 +438,22 @@ async def test_failed_formation_retains_sources_and_avoids_fallback(local_consol
     extraction = _round(owner)
     extraction.render()
     with pytest.raises(ConsolidationUnavailable):
-        await extraction.apply({"history_entry": "must not commit", "semantic": [{"key": "project.test", "value": "must not fallback", "confidence": 0.95}]})
+        await extraction.apply(
+            {
+                "history_entry": "must not commit",
+                "semantic": [
+                    {
+                        "key": "project.test",
+                        "value": "must not fallback",
+                        "confidence": 0.95,
+                    }
+                ],
+            }
+        )
     assert owner._log.unconsolidated_count("dashboard:owned") == 1
     assert "must not commit" not in owner._memory.read_history()
     assert not owner._svc.get_records()
+
 
 @pytest.mark.asyncio
 async def test_unbound_work_is_terminal_policy_denial(local_consolidator):
@@ -444,6 +464,7 @@ async def test_unbound_work_is_terminal_policy_denial(local_consolidator):
     assert "unbound" not in owner._schedule.debt
     assert owner._log.unconsolidated_count("unbound") == 1
 
+
 @pytest.mark.asyncio
 @bound("actor-a")
 async def test_owner_grant_cannot_write_unrelated_session(local_consolidator):
@@ -453,16 +474,28 @@ async def test_owner_grant_cannot_write_unrelated_session(local_consolidator):
     assert "actor-b" in owner._schedule.denied
     assert "actor-b" not in owner._schedule.debt
 
+
 @pytest.mark.asyncio
 @bound("process-locked")
-async def test_external_process_lease_preserves_debt_and_prevents_seal(local_consolidator):
+async def test_external_process_lease_preserves_debt_and_prevents_seal(
+    local_consolidator,
+):
     import sys
+
     owner, _ = local_consolidator
     owner._log.append("process-locked", "user", "pending source")
     code = "from gideon.core.concurrency import single_flight; import sys; lease=single_flight('consolidate:process-locked'); acquired=lease.__enter__(); print(acquired, flush=True); sys.stdin.readline(); lease.__exit__(None,None,None)"
-    process = await asyncio.create_subprocess_exec(sys.executable, "-c", code, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        code,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+    )
     try:
-        assert await asyncio.wait_for(process.stdout.readline(), timeout=10) == b"True\n"
+        assert (
+            await asyncio.wait_for(process.stdout.readline(), timeout=10) == b"True\n"
+        )
         assert await owner.consolidate_session("process-locked") is False
         assert "process-locked" in owner._schedule.debt
         assert owner._log.get_metadata("process-locked")[owner._schedule.SEAL_PENDING]
@@ -471,6 +504,7 @@ async def test_external_process_lease_preserves_debt_and_prevents_seal(local_con
         process.stdin.write(b"release\n")
         await process.stdin.drain()
         await asyncio.wait_for(process.wait(), timeout=10)
+
 
 @pytest.mark.asyncio
 async def test_queued_turn_revocation_denies_without_retry(local_consolidator):
@@ -487,6 +521,7 @@ async def test_queued_turn_revocation_denies_without_retry(local_consolidator):
     owner._schedule.concurrent.release()
     result = await asyncio.gather(*tasks, return_exceptions=True)
     from gideon.cognition.consolidation_cycle import ConsolidationPolicyDenied
+
     assert isinstance(result[0], ConsolidationPolicyDenied)
     assert "revoked" in owner._schedule.denied
     assert "revoked" not in owner._schedule.debt
@@ -496,6 +531,7 @@ async def test_queued_turn_revocation_denies_without_retry(local_consolidator):
 
 def test_recovery_reads_canonical_pending_sources(local_consolidator):
     from gideon.cognition.consolidation_cycle import ConsolidationTasks
+
     owner, _ = local_consolidator
     owner._log.append("recover", "user", "still owed")
     restarted = ConsolidationTasks(owner)

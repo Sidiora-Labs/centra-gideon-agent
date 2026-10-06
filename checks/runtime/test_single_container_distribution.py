@@ -31,15 +31,24 @@ def test_single_container_serves_console_and_preserves_workspace():
 
     def start() -> None:
         _docker(
-            "run", "-d", "--name", name, "-p", "127.0.0.1::10000",
-            "-v", f"{volume}:/data", image,
+            "run",
+            "-d",
+            "--name",
+            name,
+            "-p",
+            "127.0.0.1::10000",
+            "-v",
+            f"{volume}:/data",
+            image,
         )
         deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
             try:
                 port = _docker("port", name, "10000/tcp").rsplit(":", 1)[-1]
             except subprocess.CalledProcessError:
-                pytest.fail(f"gateway stopped before it was healthy:\n{_docker('logs', name)}")
+                pytest.fail(
+                    f"gateway stopped before it was healthy:\n{_docker('logs', name)}"
+                )
             try:
                 with urllib.request.urlopen(
                     f"http://127.0.0.1:{port}/api/healthz", timeout=2
@@ -54,7 +63,10 @@ def test_single_container_serves_console_and_preserves_workspace():
         _docker("volume", "create", volume)
         start()
         _docker(
-            "exec", name, "python", "-c",
+            "exec",
+            name,
+            "python",
+            "-c",
             "from pathlib import Path; "
             "from gideon.core.config.loader import workspace_root; "
             "from gideon.core.layout import package_path; "

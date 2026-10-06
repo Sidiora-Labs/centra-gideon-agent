@@ -544,7 +544,9 @@ def _breach(monkeypatch: pytest.MonkeyPatch, *, exceeded: bool) -> None:
     )
     verdict = budgets.BudgetVerdict.EXCEEDED if exceeded else budgets.BudgetVerdict.OK
     reason = "day token budget exceeded (2500/1000)" if exceeded else ""
-    meter = types.SimpleNamespace(check_day_before_work=lambda budget: (verdict, reason))
+    meter = types.SimpleNamespace(
+        check_day_before_work=lambda budget: (verdict, reason)
+    )
     monkeypatch.setattr(budgets, "get_meter", lambda: meter)
 
 

@@ -67,9 +67,10 @@ def test_configuration_changes_are_digest_fenced_and_turn_boundary_applied() -> 
 
 def test_identical_configuration_does_not_advance_policy_revision() -> None:
     state = TurnBoundaryConfig()
-    assert state.stage(
-        state.active.config, expected_digest=state.active.config_digest
-    ) is None
+    assert (
+        state.stage(state.active.config, expected_digest=state.active.config_digest)
+        is None
+    )
     assert state.apply_at_turn_boundary() is None
     assert state.active.policy_revision == 1
 

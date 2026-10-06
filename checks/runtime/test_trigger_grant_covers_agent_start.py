@@ -76,9 +76,7 @@ def test_trigger_allow_covers_only_unchanged_agent_start(tmp_path, monkeypatch):
         lambda: ActionServices(None, spawn_background, manager),
     )
     provider = provider_module.InvokeAgentActionProvider()
-    context = ActionContext(
-        event="clock.fired", payload={"trigger_id": trigger.id}
-    )
+    context = ActionContext(event="clock.fired", payload={"trigger_id": trigger.id})
 
     async def scenario():
         result = await provider.execute(action, context)

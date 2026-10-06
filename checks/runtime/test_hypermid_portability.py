@@ -6,8 +6,8 @@ from gideon.hypermid.foundation import Cursor, Digest, Id, Scope
 from gideon.hypermid.history import RawSourceJournal
 from gideon.hypermid.portability import (
     ContextAuthority,
-    ContextExportBundle,
     ContextExportBuilder,
+    ContextExportBundle,
     ContextImportStore,
     ContextMigrationCoordinator,
     ContextPortabilityEntryKind,
@@ -165,23 +165,16 @@ def test_migration_resume_is_idempotent_and_rejects_duplicate_sources() -> None:
 
 def test_cutover_failure_keeps_previous_authority_and_requires_quiescence() -> None:
     migration = ContextMigrationCoordinator()
-    migration.begin(
-        Id("migration-1"), _scope(), Id("session-1"), Cursor(2, 0)
-    )
+    migration.begin(Id("migration-1"), _scope(), Id("session-1"), Cursor(2, 0))
     with pytest.raises(ContextPortabilityError) as failed:
-        migration.cutover(
-            Id("migration-1"), quiescent=True, validation_passed=False
-        )
+        migration.cutover(Id("migration-1"), quiescent=True, validation_passed=False)
     assert failed.value.code == "VALIDATION_FAILED"
     assert (
-        migration.checkpoint(Id("migration-1")).authority
-        is ContextAuthority.PREVIOUS
+        migration.checkpoint(Id("migration-1")).authority is ContextAuthority.PREVIOUS
     )
 
     with pytest.raises(ContextPortabilityError) as active_turn:
-        migration.cutover(
-            Id("migration-1"), quiescent=False, validation_passed=True
-        )
+        migration.cutover(Id("migration-1"), quiescent=False, validation_passed=True)
     assert active_turn.value.code == "NOT_QUIESCENT"
     assert (
         migration.cutover(

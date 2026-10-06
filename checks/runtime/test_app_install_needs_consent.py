@@ -11,8 +11,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.extensions.apps.backend_runtime import BackendSupervisor
 from gideon.extensions.apps import backend_runtime
+from gideon.extensions.apps.backend_runtime import BackendSupervisor
 from gideon.interfaces.dashboard.handlers.apps import register_app_routes
 
 
@@ -34,7 +34,9 @@ async def _client(home: Path):
                 os.environ["GIDEON_HOME"] = previous_home
 
 
-def _bundle(root: Path, *, version: str = "1.0.0", permissions: dict | None = None) -> Path:
+def _bundle(
+    root: Path, *, version: str = "1.0.0", permissions: dict | None = None
+) -> Path:
     root.mkdir(parents=True)
     manifest = {
         "name": "reviewed-app",
@@ -51,18 +53,23 @@ def _bundle(root: Path, *, version: str = "1.0.0", permissions: dict | None = No
 
 async def _review(client: TestClient, source: Path, **extra) -> dict:
     response = await client.post(
-        "/api/apps/preview", json={"name": extra.pop("name", ""), "source": str(source), **extra}
+        "/api/apps/preview",
+        json={"name": extra.pop("name", ""), "source": str(source), **extra},
     )
     assert response.status == 200, await response.text()
     return await response.json()
 
 
 @pytest.mark.asyncio
-async def test_clean_install_returns_review_and_commits_only_its_digest(tmp_path: Path) -> None:
+async def test_clean_install_returns_review_and_commits_only_its_digest(
+    tmp_path: Path,
+) -> None:
     async with _client(tmp_path / "home") as client:
         source = _bundle(tmp_path / "source" / "reviewed-app")
 
-        bare = await client.post("/api/apps", json={"name": "reviewed-app", "source": str(source)})
+        bare = await client.post(
+            "/api/apps", json={"name": "reviewed-app", "source": str(source)}
+        )
         assert bare.status == 409, await bare.text()
         refused = await bare.json()
         assert refused["needs_consent"] is True
@@ -78,7 +85,12 @@ async def test_clean_install_returns_review_and_commits_only_its_digest(tmp_path
         assert not quarantine.exists() or not list(quarantine.iterdir())
 
         installed = await client.post(
-            "/api/apps", json={"name": "reviewed-app", "source": str(source), "review_digest": review["review_digest"]}
+            "/api/apps",
+            json={
+                "name": "reviewed-app",
+                "source": str(source),
+                "review_digest": review["review_digest"],
+            },
         )
         assert installed.status == 201, await installed.text()
         assert (await installed.json())["ok"] is True
@@ -94,7 +106,12 @@ async def test_any_staged_byte_change_returns_a_fresh_review_without_installing(
         (source / "provider.py").write_text("VALUE = 'changed'\n", encoding="utf-8")
 
         stale = await client.post(
-            "/api/apps", json={"name": "reviewed-app", "source": str(source), "review_digest": first["review_digest"]}
+            "/api/apps",
+            json={
+                "name": "reviewed-app",
+                "source": str(source),
+                "review_digest": first["review_digest"],
+            },
         )
         assert stale.status == 409, await stale.text()
         fresh = await stale.json()
@@ -103,7 +120,12 @@ async def test_any_staged_byte_change_returns_a_fresh_review_without_installing(
         assert not (tmp_path / "home" / "apps" / "reviewed-app").exists()
 
         accepted = await client.post(
-            "/api/apps", json={"name": "reviewed-app", "source": str(source), "review_digest": fresh["review_digest"]}
+            "/api/apps",
+            json={
+                "name": "reviewed-app",
+                "source": str(source),
+                "review_digest": fresh["review_digest"],
+            },
         )
         assert accepted.status == 201, await accepted.text()
 
@@ -116,7 +138,12 @@ async def test_changed_update_needs_review_but_unchanged_disclosure_does_not(
         first_source = _bundle(tmp_path / "source-v1" / "reviewed-app")
         first_review = await _review(client, first_source)
         installed = await client.post(
-            "/api/apps", json={"name": "reviewed-app", "source": str(first_source), "review_digest": first_review["review_digest"]}
+            "/api/apps",
+            json={
+                "name": "reviewed-app",
+                "source": str(first_source),
+                "review_digest": first_review["review_digest"],
+            },
         )
         assert installed.status == 201, await installed.text()
 
@@ -126,7 +153,12 @@ async def test_changed_update_needs_review_but_unchanged_disclosure_does_not(
         no_change_review = await _review(client, same_disclosure, name="reviewed-app")
         assert no_change_review["needs_consent"] is False
         no_change_update = await client.post(
-            "/api/apps/reviewed-app/update", json={"name": "reviewed-app", "source": str(same_disclosure), "review_digest": no_change_review["review_digest"]}
+            "/api/apps/reviewed-app/update",
+            json={
+                "name": "reviewed-app",
+                "source": str(same_disclosure),
+                "review_digest": no_change_review["review_digest"],
+            },
         )
         assert no_change_update.status == 200, await no_change_update.text()
 
@@ -136,7 +168,8 @@ async def test_changed_update_needs_review_but_unchanged_disclosure_does_not(
             permissions={"api": ["/api/tasks"], "agent": True, "cron": True},
         )
         refused_update = await client.post(
-            "/api/apps/reviewed-app/update", json={"name": "reviewed-app", "source": str(changed)}
+            "/api/apps/reviewed-app/update",
+            json={"name": "reviewed-app", "source": str(changed)},
         )
         assert refused_update.status == 409, await refused_update.text()
         refusal = await refused_update.json()
@@ -146,7 +179,12 @@ async def test_changed_update_needs_review_but_unchanged_disclosure_does_not(
         installed_detail = await (await client.get("/api/apps/reviewed-app")).json()
         assert installed_detail["installed"]["version"] == "1.1.0"
         accepted_update = await client.post(
-            "/api/apps/reviewed-app/update", json={"name": "reviewed-app", "source": str(changed), "review_digest": refusal["review_digest"]}
+            "/api/apps/reviewed-app/update",
+            json={
+                "name": "reviewed-app",
+                "source": str(changed),
+                "review_digest": refusal["review_digest"],
+            },
         )
         assert accepted_update.status == 200, await accepted_update.text()
         installed_detail = await (await client.get("/api/apps/reviewed-app")).json()
@@ -183,7 +221,12 @@ async def test_typed_preview_fields_are_rejected_before_a_real_remote_fetch(
             assert body["error"]["code"] == "field_not_a_string"
             assert body["error"]["field"] == "name"
             response = await client.post(
-                "/api/apps/preview", json={"source": source, "name": "reviewed-app", "registry": {"bad": "type"}}
+                "/api/apps/preview",
+                json={
+                    "source": source,
+                    "name": "reviewed-app",
+                    "registry": {"bad": "type"},
+                },
             )
             assert response.status == 400, await response.text()
             registry_error = await response.json()

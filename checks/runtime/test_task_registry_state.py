@@ -5,8 +5,8 @@ import pytest
 
 from gideon.automation.workflows import pool
 from gideon.engine.tasks import registry
-from gideon.engine.tasks.native import NativeTaskProvider
 from gideon.engine.tasks.models import Task
+from gideon.engine.tasks.native import NativeTaskProvider
 
 
 @pytest.fixture

@@ -11,7 +11,9 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 
-@pytest.mark.skipif(shutil.which("tmux") is None, reason="requires the real tmux executable")
+@pytest.mark.skipif(
+    shutil.which("tmux") is None, reason="requires the real tmux executable"
+)
 def test_real_worker_is_hidden_from_terminal_list_and_survives_terminal_delete(
     tmp_path, monkeypatch
 ):
@@ -53,17 +55,24 @@ def test_real_worker_is_hidden_from_terminal_list_and_survives_terminal_delete(
             kinds = dict(await tmux_substrate.list_session_kinds())
             assert kinds[worker_name] == tmux_substrate.WORKER_KIND
             async with TestClient(TestServer(app)) as client:
-                created = await client.post("/api/terminal/sessions", json={"sandbox": "none"})
+                created = await client.post(
+                    "/api/terminal/sessions", json={"sandbox": "none"}
+                )
                 terminal_id = (await created.json())["session_id"]
                 async with client.ws_connect(f"/api/ws/terminal/{terminal_id}"):
                     listed = await client.get("/api/terminal/sessions")
                     rows = (await listed.json())["sessions"]
-                    assert all(row["session_id"] != worker_name.removeprefix("gideon-") for row in rows)
+                    assert all(
+                        row["session_id"] != worker_name.removeprefix("gideon-")
+                        for row in rows
+                    )
                     refused = await client.delete(
                         "/api/terminal/sessions/deadbeef0000@none"
                     )
                     assert refused.status == 409
-                assert (await client.delete(f"/api/terminal/sessions/{terminal_id}")).status == 200
+                assert (
+                    await client.delete(f"/api/terminal/sessions/{terminal_id}")
+                ).status == 200
                 assert await tmux_substrate.has_session(worker_name)
         finally:
             await tmux_substrate.kill_session(worker_name)
@@ -71,7 +80,9 @@ def test_real_worker_is_hidden_from_terminal_list_and_survives_terminal_delete(
     asyncio.run(exercise())
 
 
-@pytest.mark.skipif(shutil.which("tmux") is None, reason="requires the real tmux executable")
+@pytest.mark.skipif(
+    shutil.which("tmux") is None, reason="requires the real tmux executable"
+)
 def test_completed_durable_step_is_not_repeated_by_bare_fallback(tmp_path, monkeypatch):
     from gideon.automation.workflows.provisioning import run_step
     from gideon.engine import tmux_substrate

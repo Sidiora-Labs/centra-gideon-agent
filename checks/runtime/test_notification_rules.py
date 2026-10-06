@@ -163,7 +163,9 @@ def test_unknown_target_is_dropped_but_known_ones_survive(home):
         home,
         {
             "rules": {
-                "cron/result": {"targets": ["dashboard", "hologram", "channel_dm", "push"]}
+                "cron/result": {
+                    "targets": ["dashboard", "hologram", "channel_dm", "push"]
+                }
             }
         },
     )

@@ -7,7 +7,9 @@ import sys
 from pathlib import Path
 
 
-def test_dotenv_credentials_roundtrip_exact_values_without_extra_entries(tmp_path, monkeypatch):
+def test_dotenv_credentials_roundtrip_exact_values_without_extra_entries(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -21,7 +23,9 @@ def test_dotenv_credentials_roundtrip_exact_values_without_extra_entries(tmp_pat
     for key in values:
         monkeypatch.delenv(key, raising=False)
     env_path = home / ".env"
-    env_path.write_text("# sample configuration\nLEGACY_SAMPLE=legacy-value\n", encoding="utf-8")
+    env_path.write_text(
+        "# sample configuration\nLEGACY_SAMPLE=legacy-value\n", encoding="utf-8"
+    )
 
     from gideon.core.config import credentials
 
@@ -30,7 +34,10 @@ def test_dotenv_credentials_roundtrip_exact_values_without_extra_entries(tmp_pat
         assert credentials.get_secret_value(key) == value
         assert key not in os.environ
     assert credentials.get_secret_value("LEGACY_SAMPLE") == "legacy-value"
-    assert set(credentials.DotenvDocument(env_path).names()) == {"LEGACY_SAMPLE", *values}
+    assert set(credentials.DotenvDocument(env_path).names()) == {
+        "LEGACY_SAMPLE",
+        *values,
+    }
     assert env_path.stat().st_mode & 0o777 == 0o600
     assert len(env_path.read_text(encoding="utf-8").splitlines()) == len(values) + 2
 
@@ -47,7 +54,10 @@ def test_dotenv_credentials_roundtrip_exact_values_without_extra_entries(tmp_pat
         input=json.dumps(values),
         text=True,
         capture_output=True,
-        env={**os.environ, "PYTHONPATH": str(Path(credentials.__file__).resolve().parents[3])},
+        env={
+            **os.environ,
+            "PYTHONPATH": str(Path(credentials.__file__).resolve().parents[3]),
+        },
         check=False,
     )
     assert restarted.returncode == 0, restarted.stderr

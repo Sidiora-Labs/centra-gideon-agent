@@ -418,10 +418,16 @@ class TestProviderImagePart:
         }
         assert runtime._messages == persisted_before
 
-        runtime._messages.extend([
-            {"role": "assistant", "content": "", "tool_calls": [{"id": "call-1"}]},
-            {"role": "tool", "tool_call_id": "call-1", "content": "Image dimensions verified."},
-        ])
+        runtime._messages.extend(
+            [
+                {"role": "assistant", "content": "", "tool_calls": [{"id": "call-1"}]},
+                {
+                    "role": "tool",
+                    "tool_call_id": "call-1",
+                    "content": "Image dimensions verified.",
+                },
+            ]
+        )
         persisted_after_tool = json.loads(json.dumps(runtime._messages))
         post_tool_messages = runtime._messages_with_staged_images(runtime._messages)
         post_tool_request = provider._request(post_tool_messages, model="gpt-4o")
@@ -430,7 +436,9 @@ class TestProviderImagePart:
             "type": "image_url",
             "image_url": {"url": data_url},
         }
-        assert post_tool_request["messages"][-1]["content"] == "Image dimensions verified."
+        assert (
+            post_tool_request["messages"][-1]["content"] == "Image dimensions verified."
+        )
         assert runtime._messages == persisted_after_tool
         assert runtime.staged_image_parts[0]["image_url"]["url"] == data_url
 

@@ -8,7 +8,9 @@ from aiohttp.test_utils import TestClient, TestServer
 
 
 @pytest.mark.asyncio
-async def test_native_task_stale_save_preserves_atomic_checklist_toggle(tmp_path, monkeypatch):
+async def test_native_task_stale_save_preserves_atomic_checklist_toggle(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))

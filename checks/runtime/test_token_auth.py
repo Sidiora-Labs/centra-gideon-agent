@@ -607,7 +607,9 @@ def test_evict_expired_removes_old_entries() -> None:
     with _state._lock:
         assert token not in _state._ip_bindings, "expired IP binding should be evicted"
         assert token not in _state._consumed, "expired consumed token should be evicted"
-        assert "expired_nonce" not in _state._nonces["token"], "expired nonce should be evicted"
+        assert (
+            "expired_nonce" not in _state._nonces["token"]
+        ), "expired nonce should be evicted"
 
 
 def test_token_reusable_across_multiple_validations() -> None:

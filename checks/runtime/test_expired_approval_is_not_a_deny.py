@@ -29,18 +29,22 @@ async def test_expiry_is_a_distinct_terminal_outcome(tmp_path, monkeypatch):
     state._hold_approval(entry)
     from gideon.security.approval_answer import YOU
 
-    assert state.resolve_approval_revision(
-        approval_id, True, "stale-revision", by=YOU
-    ) == "revision_conflict"
+    assert (
+        state.resolve_approval_revision(approval_id, True, "stale-revision", by=YOU)
+        == "revision_conflict"
+    )
     assert not future.done()
 
     state.end_approval(approval_id, outcome="expired")
 
     assert future.result() is False
     assert state.ended_as(approval_id) == "expired"
-    assert state.resolve_approval_revision(
-        approval_id, False, "captured-revision", by=None
-    ) == "expired"
+    assert (
+        state.resolve_approval_revision(
+            approval_id, False, "captured-revision", by=None
+        )
+        == "expired"
+    )
 
 
 @pytest.mark.asyncio
@@ -52,9 +56,7 @@ async def test_captured_revision_resolves_pending_owner_decision(tmp_path, monke
     home = tmp_path / "owner-home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
-    workflow_store.create(
-        WorkflowRun(id="run-approved", workflow_name="approval-test")
-    )
+    workflow_store.create(WorkflowRun(id="run-approved", workflow_name="approval-test"))
     state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0.0)
     approval_id = "workflow:run-approved:node-a"
     future = asyncio.get_running_loop().create_future()
@@ -70,9 +72,10 @@ async def test_captured_revision_resolves_pending_owner_decision(tmp_path, monke
     )
     from gideon.security.approval_answer import YOU
 
-    assert state.resolve_approval_revision(
-        approval_id, True, "owner-revision", by=YOU
-    ) == "resolved"
+    assert (
+        state.resolve_approval_revision(approval_id, True, "owner-revision", by=YOU)
+        == "resolved"
+    )
     assert future.result() is True
     assert state.ended_as(approval_id) == "approved"
     owner_row = next(
@@ -84,9 +87,7 @@ async def test_captured_revision_resolves_pending_owner_decision(tmp_path, monke
 
     from gideon.security.approval_answer import on_channel
 
-    workflow_store.create(
-        WorkflowRun(id="run-channel", workflow_name="approval-test")
-    )
+    workflow_store.create(WorkflowRun(id="run-channel", workflow_name="approval-test"))
     channel_id = "workflow:run-channel:node-a"
     channel_future = asyncio.get_running_loop().create_future()
     state._approval_futures[channel_id] = channel_future
@@ -99,9 +100,12 @@ async def test_captured_revision_resolves_pending_owner_decision(tmp_path, monke
             "asked_by": "run:run-channel",
         }
     )
-    assert state.resolve_approval_revision(
-        channel_id, True, "channel-revision", by=on_channel("telegram", "12")
-    ) == "resolved"
+    assert (
+        state.resolve_approval_revision(
+            channel_id, True, "channel-revision", by=on_channel("telegram", "12")
+        )
+        == "resolved"
+    )
     rows = [
         json.loads(line)
         for line in sel()._path.read_text(encoding="utf-8").splitlines()

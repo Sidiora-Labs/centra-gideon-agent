@@ -1,4 +1,5 @@
 """Home keychain identity uses real filesystem state and fails closed."""
+
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -13,7 +14,11 @@ def test_namespace_identity_is_lazy_private_stable_and_distinct(tmp_path, monkey
     assert credentials.keychain_service(first) == ""
     assert not first.exists()
     with ThreadPoolExecutor(max_workers=8) as executor:
-        services = list(executor.map(lambda _: credentials.keychain_service(first, mint=True), range(16)))
+        services = list(
+            executor.map(
+                lambda _: credentials.keychain_service(first, mint=True), range(16)
+            )
+        )
     assert len(set(services)) == 1
     assert services[0].startswith("gideon-")
     assert credentials.keychain_service(second, mint=True) != services[0]
@@ -23,13 +28,16 @@ def test_namespace_identity_is_lazy_private_stable_and_distinct(tmp_path, monkey
     first.rename(moved)
     assert credentials.keychain_service(moved) == services[0]
     assert credentials.KEYCHAIN_NAMESPACE_FILE in IGNORED
-    from gideon.workspace.portability import _is_excluded
     from pathlib import PurePosixPath
+
+    from gideon.workspace.portability import _is_excluded
 
     assert _is_excluded(PurePosixPath(credentials.KEYCHAIN_NAMESPACE_FILE))
 
 
-def test_default_keeps_legacy_service_and_invalid_identity_fails_closed(tmp_path, monkeypatch):
+def test_default_keeps_legacy_service_and_invalid_identity_fails_closed(
+    tmp_path, monkeypatch
+):
     default = tmp_path / "default"
     monkeypatch.setattr(loader, "default_config_dir", lambda: default)
     assert credentials.keychain_service(default) == "gideon"

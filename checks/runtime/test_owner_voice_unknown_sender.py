@@ -29,8 +29,12 @@ from gideon.interfaces.dashboard.state import ConsoleState
 
 
 def _real_transport(provider: str):
-    native = Path(__file__).resolve().parents[2] / "runtime/gideon/extensions/apps/native"
-    app_name = {"mail-desk": "gideonai-mail-desk", "telegram": "telegram-channel"}[provider]
+    native = (
+        Path(__file__).resolve().parents[2] / "runtime/gideon/extensions/apps/native"
+    )
+    app_name = {"mail-desk": "gideonai-mail-desk", "telegram": "telegram-channel"}[
+        provider
+    ]
     manifest = AppManifest.from_json_file(native / app_name / "app.json")
     channel = next(item for item in manifest.all_providers() if item.type == "channel")
     factory = load_factory(
@@ -60,9 +64,18 @@ if (!resolve(valid) || resolve({ ...valid, created_by_app: 'sample' }) || resolv
 }
 """
     if not compiler.exists():
-        raise AssertionError("installed TypeScript compiler is required for the real UI resolver path")
+        raise AssertionError(
+            "installed TypeScript compiler is required for the real UI resolver path"
+        )
     result = subprocess.run(
-        ["node", "-e", script, str(compiler / "lib/typescript.js"), str(source), str(dependency_console / "package.json")],
+        [
+            "node",
+            "-e",
+            script,
+            str(compiler / "lib/typescript.js"),
+            str(source),
+            str(dependency_console / "package.json"),
+        ],
         cwd=console,
         check=False,
         capture_output=True,
@@ -73,7 +86,9 @@ if (!resolve(valid) || resolve({ ...valid, created_by_app: 'sample' }) || resolv
 
 
 @pytest.mark.asyncio
-async def test_stranger_is_held_until_owner_replies_pairs_or_ignores(tmp_path, monkeypatch):
+async def test_stranger_is_held_until_owner_replies_pairs_or_ignores(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     (tmp_path / "config.json").write_text('{"providers": []}', encoding="utf-8")
     channel_inbound.reset_admissions()
@@ -110,8 +125,12 @@ async def test_stranger_is_held_until_owner_replies_pairs_or_ignores(tmp_path, m
 
     try:
         paired_message = ChannelMessage(
-            "mailbox", "private held body https://visitor:private-password@example.test/path", sender="pair@example.test",
-            thread_id="thread-pair", message_id="message-pair", ts=1727700000.0,
+            "mailbox",
+            "private held body https://visitor:private-password@example.test/path",
+            sender="pair@example.test",
+            thread_id="thread-pair",
+            message_id="message-pair",
+            ts=1727700000.0,
             metadata={"sender_name": "Pair Sender"},
         )
         held = await gateway.deliver_channel_inbound("mail-desk", paired_message)
@@ -123,7 +142,9 @@ async def test_stranger_is_held_until_owner_replies_pairs_or_ignores(tmp_path, m
 
         store = InboxStore()
         store.load()
-        held_rows = [row for row in store.items.values() if row.sender_id == "pair@example.test"]
+        held_rows = [
+            row for row in store.items.values() if row.sender_id == "pair@example.test"
+        ]
         assert len(held_rows) == 1
         held_item = held_rows[0]
         assert held_item.owner == "operator-a"
@@ -131,7 +152,13 @@ async def test_stranger_is_held_until_owner_replies_pairs_or_ignores(tmp_path, m
         assert "private-password" not in held_item.message
         assert held_item.refs["someone_new"] == "mail-desk"
         assert (tmp_path / "inbox.json").is_file()
-        assert sum(note.get("sender_id") == "pair@example.test" for note in state._notification_log) == 1
+        assert (
+            sum(
+                note.get("sender_id") == "pair@example.test"
+                for note in state._notification_log
+            )
+            == 1
+        )
 
         async with TestClient(TestServer(app)) as client:
             owner_send = await client.post(
@@ -139,12 +166,14 @@ async def test_stranger_is_held_until_owner_replies_pairs_or_ignores(tmp_path, m
             )
             assert owner_send.status == 503
             malformed_pair = await client.post(
-                f"/api/inbox/{held_item.id}/pair", data="not-json",
+                f"/api/inbox/{held_item.id}/pair",
+                data="not-json",
                 headers={"Content-Type": "application/json"},
             )
             assert malformed_pair.status == 400
             app_pair = await client.post(
-                f"/api/inbox/{held_item.id}/pair", json={"confirm": True},
+                f"/api/inbox/{held_item.id}/pair",
+                json={"confirm": True},
                 headers={"X-Test-App": "sample"},
             )
             assert app_pair.status == 403
@@ -162,21 +191,32 @@ async def test_stranger_is_held_until_owner_replies_pairs_or_ignores(tmp_path, m
             assert pair.status == 200
             assert channel_trust.is_allowed_sender("mail-desk", "pair@example.test")
             store.load()
-            assert store.items[held_item.id].status_for("operator-a") == ItemStatus.HANDLED.value
+            assert (
+                store.items[held_item.id].status_for("operator-a")
+                == ItemStatus.HANDLED.value
+            )
 
             denied_message = ChannelMessage(
-                "mailbox", "please do not process", sender="deny@example.test",
-                thread_id="thread-deny", message_id="message-deny", ts=1727700100.0,
+                "mailbox",
+                "please do not process",
+                sender="deny@example.test",
+                thread_id="thread-deny",
+                message_id="message-deny",
+                ts=1727700100.0,
                 metadata={"sender_name": "Deny Sender"},
             )
-            denied_verdict = await gateway.deliver_channel_inbound("mail-desk", denied_message)
+            denied_verdict = await gateway.deliver_channel_inbound(
+                "mail-desk", denied_message
+            )
             assert not denied_verdict.allowed and denied_verdict.canned_reply == ""
             deny_note = next(
-                note for note in state._notification_log
+                note
+                for note in state._notification_log
                 if note.get("sender_id") == "deny@example.test"
             )
             malformed_answer = await client.post(
-                "/api/notifications/trust", data="[]",
+                "/api/notifications/trust",
+                data="[]",
                 headers={"Content-Type": "application/json"},
             )
             empty_answer = await client.post("/api/notifications/trust", json={})
@@ -209,14 +249,21 @@ async def test_stranger_is_held_until_owner_replies_pairs_or_ignores(tmp_path, m
             )
 
             allowed_message = ChannelMessage(
-                "mailbox", "please let me speak", sender="allow@example.test",
-                thread_id="thread-allow", message_id="message-allow", ts=1727700150.0,
+                "mailbox",
+                "please let me speak",
+                sender="allow@example.test",
+                thread_id="thread-allow",
+                message_id="message-allow",
+                ts=1727700150.0,
                 metadata={"sender_name": "Allow Sender"},
             )
-            allowed_verdict = await gateway.deliver_channel_inbound("mail-desk", allowed_message)
+            allowed_verdict = await gateway.deliver_channel_inbound(
+                "mail-desk", allowed_message
+            )
             assert not allowed_verdict.allowed and allowed_verdict.canned_reply == ""
             allow_note = next(
-                note for note in state._notification_log
+                note
+                for note in state._notification_log
                 if note.get("sender_id") == "allow@example.test"
             )
             allow = await client.post(
@@ -229,24 +276,37 @@ async def test_stranger_is_held_until_owner_replies_pairs_or_ignores(tmp_path, m
             assert allow_note["trust_answer"] == "allowed"
             store.load()
             allowed_item = next(
-                row for row in store.items.values()
+                row
+                for row in store.items.values()
                 if row.sender_id == "allow@example.test"
             )
             assert allowed_item.refs["paired"] is True
             assert allowed_item.status_for("operator-a") == ItemStatus.HANDLED.value
             next_message = ChannelMessage(
-                "mailbox", "a later message", sender="allow@example.test",
-                thread_id="thread-allow", message_id="message-allow-next", ts=1727700160.0,
+                "mailbox",
+                "a later message",
+                sender="allow@example.test",
+                thread_id="thread-allow",
+                message_id="message-allow-next",
+                ts=1727700160.0,
             )
             assert channel_inbound.admit(state, "mail-desk", next_message).allowed
 
             ignored_message = ChannelMessage(
-                "mailbox", "ignore me", sender="ignore@example.test",
-                thread_id="thread-ignore", message_id="message-ignore", ts=1727700200.0,
+                "mailbox",
+                "ignore me",
+                sender="ignore@example.test",
+                thread_id="thread-ignore",
+                message_id="message-ignore",
+                ts=1727700200.0,
             )
             await gateway.deliver_channel_inbound("mail-desk", ignored_message)
             store.load()
-            ignored = next(row for row in store.items.values() if row.sender_id == "ignore@example.test")
+            ignored = next(
+                row
+                for row in store.items.values()
+                if row.sender_id == "ignore@example.test"
+            )
             ignore_response = await client.put(
                 f"/api/inbox/{ignored.id}", json={"status": ItemStatus.DISMISSED.value}
             )
@@ -259,8 +319,12 @@ async def test_stranger_is_held_until_owner_replies_pairs_or_ignores(tmp_path, m
             assert len(store.items) == before
 
             muted_message = ChannelMessage(
-                "mailbox", "muted sender", sender="muted@example.test",
-                thread_id="muted-thread", message_id="muted-message", ts=1727700300.0,
+                "mailbox",
+                "muted sender",
+                sender="muted@example.test",
+                thread_id="muted-thread",
+                message_id="muted-message",
+                ts=1727700300.0,
             )
             mute_key = thread_mute_key("channel:mail-desk", "mailbox", "muted-thread")
             state._inbox_state.muted_threads.add(mute_key)

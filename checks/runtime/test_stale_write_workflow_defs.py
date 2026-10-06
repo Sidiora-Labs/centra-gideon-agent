@@ -20,7 +20,10 @@ async def test_workflow_editor_requires_captured_revision_and_preserves_versione
 
     from gideon.automation.workflows import defs
     from gideon.automation.workflows.handlers import register_workflow_routes
-    from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider, defs_root
+    from gideon.automation.workflows.native_defs import (
+        NativeWorkflowDefProvider,
+        defs_root,
+    )
     from gideon.stale_write import revision_of
 
     previous_provider = defs.get_provider("native")
@@ -98,7 +101,9 @@ async def test_workflow_editor_requires_captured_revision_and_preserves_versione
             )
             assert copied.status == 201, await copied.text()
             copied_document = json.loads(
-                (defs_root() / "weekly-copy" / "workflow.json").read_text(encoding="utf-8")
+                (defs_root() / "weekly-copy" / "workflow.json").read_text(
+                    encoding="utf-8"
+                )
             )
             assert copied_document["version"] == 1
             assert copied_document["root"]["config"]["expr"] == "one"

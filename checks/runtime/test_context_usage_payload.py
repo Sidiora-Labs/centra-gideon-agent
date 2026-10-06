@@ -1,19 +1,21 @@
 import json
 
-from aiohttp import ClientSession, web
 import pytest
+from aiohttp import ClientSession, web
 
-from gideon.engine.agents.native.runtime import _ModelExchange, _TurnTotals
-from gideon.engine.agents.native.runtime import NativeAgentRuntime
+from gideon.core.config import AppConfig
+from gideon.engine.agents.native.runtime import (
+    NativeAgentRuntime,
+    _ModelExchange,
+    _TurnTotals,
+)
 from gideon.engine.agents.provider import AgentRuntimeDefinition
 from gideon.engine.hooks import ScriptHookStore
 from gideon.engine.session import ConversationDirectory
-from gideon.core.config import AppConfig
 from gideon.integrations.llm.anthropic import _MessagesDecoder
-from gideon.integrations.llm.events import AgentEvent, ContextUsage, EVENT_COMPLETE
-from gideon.integrations.llm.openai import _ChatDecoder
-from gideon.integrations.llm.openai import OpenAIProvider
 from gideon.integrations.llm.credentials import Credential
+from gideon.integrations.llm.events import EVENT_COMPLETE, AgentEvent, ContextUsage
+from gideon.integrations.llm.openai import OpenAIProvider, _ChatDecoder
 from gideon.integrations.llm.protocol_turn import TurnUsage
 from gideon.interfaces.dashboard.chat_runner import run_chat
 from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
@@ -46,9 +48,7 @@ def test_anthropic_decoder_preserves_reported_cache_buckets():
 
 def test_anthropic_missing_cache_fields_remain_unknown():
     decoder = _MessagesDecoder()
-    decoder.feed(
-        {"type": "message_start", "message": {"usage": {"input_tokens": 0}}}
-    )
+    decoder.feed({"type": "message_start", "message": {"usage": {"input_tokens": 0}}})
     usage = decoder.usage.terminal(None).context_usage
     assert usage is not None
     assert usage.input_tokens == 0
@@ -111,7 +111,9 @@ def test_openai_invalid_cache_details_do_not_become_measured_buckets(cached):
 async def test_native_terminal_uses_last_model_call_not_turn_sum():
     runtime = NativeAgentRuntime(
         definition=AgentRuntimeDefinition(name="usage"),
-        model_provider=OpenAIProvider(model="local-wire", credential=Credential("local", "api_key", "local")),
+        model_provider=OpenAIProvider(
+            model="local-wire", credential=Credential("local", "api_key", "local")
+        ),
     )
     totals = _TurnTotals()
     for input_tokens, cached, window in [(100, 0, 2000), (50, 30, 4000)]:
@@ -149,7 +151,9 @@ async def test_native_terminal_uses_last_model_call_not_turn_sum():
 async def test_native_unmeasured_last_call_does_not_reuse_earlier_measurement():
     runtime = NativeAgentRuntime(
         definition=AgentRuntimeDefinition(name="usage"),
-        model_provider=OpenAIProvider(model="local-wire", credential=Credential("local", "api_key", "local")),
+        model_provider=OpenAIProvider(
+            model="local-wire", credential=Credential("local", "api_key", "local")
+        ),
     )
     totals = _TurnTotals()
     for usage in [ContextUsage(input_tokens=20), None]:
@@ -166,8 +170,11 @@ async def test_native_unmeasured_last_call_does_not_reuse_earlier_measurement():
     "wire_usage,expected",
     [
         (
-            {"prompt_tokens": 50, "prompt_tokens_details": {"cached_tokens": 10},
-             "completion_tokens": 5},
+            {
+                "prompt_tokens": 50,
+                "prompt_tokens_details": {"cached_tokens": 10},
+                "completion_tokens": 5,
+            },
             {
                 "input_tokens": 40,
                 "cache_creation_tokens": None,
@@ -196,13 +203,21 @@ async def test_chat_runner_broadcasts_optional_measured_last_call(
     state = None
 
     async def inference(_request):
-        frame = {"id": "usage-turn", "object": "chat.completion.chunk",
-                 "created": 1, "model": "local-wire", "choices": [
-                     {"index": 0, "delta": {"content": "answer"}, "finish_reason": "stop"}]}
+        frame = {
+            "id": "usage-turn",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "local-wire",
+            "choices": [
+                {"index": 0, "delta": {"content": "answer"}, "finish_reason": "stop"}
+            ],
+        }
         if wire_usage is not None:
             frame["usage"] = wire_usage
-        return web.Response(text=f"data: {json.dumps(frame)}\n\ndata: [DONE]\n\n",
-                            content_type="text/event-stream")
+        return web.Response(
+            text=f"data: {json.dumps(frame)}\n\ndata: [DONE]\n\n",
+            content_type="text/event-stream",
+        )
 
     async def websocket(request):
         ws = web.WebSocketResponse()
@@ -228,7 +243,8 @@ async def test_chat_runner_broadcasts_optional_measured_last_call(
         return NativeAgentRuntime(
             definition=AgentRuntimeDefinition(name="usage", model="local-wire"),
             model_provider=OpenAIProvider(
-                model="local-wire", credential=Credential("local", "api_key", "local"),
+                model="local-wire",
+                credential=Credential("local", "api_key", "local"),
                 base_url=f"http://127.0.0.1:{port}/v1",
                 extra_options={"context_window": 1000},
             ),
@@ -255,7 +271,9 @@ async def test_chat_runner_broadcasts_optional_measured_last_call(
                     if message.type != web.WSMsgType.TEXT:
                         break
                     frames.append(json.loads(message.data))
-        payloads = [frame["data"] for frame in frames if frame["type"] == "context_usage"]
+        payloads = [
+            frame["data"] for frame in frames if frame["type"] == "context_usage"
+        ]
         assert len(payloads) == 1
         assert payloads[0]["session"] == session.key
         assert payloads[0]["usage"] == expected

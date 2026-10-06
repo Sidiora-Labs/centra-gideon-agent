@@ -182,7 +182,9 @@ async def test_openai_served_windows_stay_bound_to_each_endpoint(tmp_path, monke
                 "object": "chat.completion.chunk",
                 "created": 1,
                 "model": "same-model",
-                "choices": [{"index": 0, "delta": {"content": "ok"}, "finish_reason": "stop"}],
+                "choices": [
+                    {"index": 0, "delta": {"content": "ok"}, "finish_reason": "stop"}
+                ],
                 "usage": {
                     "prompt_tokens": 100,
                     "prompt_tokens_details": {"cached_tokens": 0},
@@ -213,10 +215,12 @@ async def test_openai_served_windows_stay_bound_to_each_endpoint(tmp_path, monke
         return provider
 
     try:
-        first = await serve([
-            {"id": "other-embedding", "context_length": 4000},
-            {"id": "same-model", "context_window": 8192},
-        ])
+        first = await serve(
+            [
+                {"id": "other-embedding", "context_length": 4000},
+                {"id": "same-model", "context_window": 8192},
+            ]
+        )
         second = await serve([{"id": "same-model", "context_length": 16384}])
         third = await serve([{"id": "same-model", "context_length": "unknown"}])
         first_events = [event async for event in first.stream("hello")]

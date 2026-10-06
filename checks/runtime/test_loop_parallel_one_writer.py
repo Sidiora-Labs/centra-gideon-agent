@@ -28,9 +28,7 @@ async def test_stage_and_task_workers_never_write_same_tree_concurrently(
         message="stage",
         idle_secs=60,
     )
-    child = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(60)"]
-    )
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     note = tmp_path / f"session_pid_{child.pid}.txt"
     note.write_text(stage_key, encoding="utf-8")
     state = SimpleNamespace(_sessions={})

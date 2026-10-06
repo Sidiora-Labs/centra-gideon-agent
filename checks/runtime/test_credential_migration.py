@@ -552,11 +552,15 @@ def test_corrupt_namespace_falls_back_without_modifying_keychain(home, monkeypat
     assert namespace.read_text() == "broken"
 
 
-def test_descriptor_store_reads_its_home_when_active_home_differs(home, tmp_path, monkeypatch):
+def test_descriptor_store_reads_its_home_when_active_home_differs(
+    home, tmp_path, monkeypatch
+):
     _stub_keyring(monkeypatch)
     monkeypatch.setenv(CREDENTIAL_BACKEND_ENV, "keychain")
     cred.save_credential("SH2_ALPHA", "first", home)
-    (home / "credentials.json").write_text(json.dumps({"SH2_ALPHA": {"type": "api_key", "value_ref": "SH2_ALPHA"}}))
+    (home / "credentials.json").write_text(
+        json.dumps({"SH2_ALPHA": {"type": "api_key", "value_ref": "SH2_ALPHA"}})
+    )
     other = tmp_path / "other"
     other.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(other))

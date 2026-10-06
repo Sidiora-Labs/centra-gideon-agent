@@ -25,12 +25,15 @@ def test_tmux_socket_identity_and_tmpdir_are_per_home(monkeypatch):
             assert first_env["TMUX_TMPDIR"] == str(first / "tmux")
             assert second_env["TMUX_TMPDIR"] == str(second / "tmux")
             assert tmux_substrate._argv("list-sessions")[2] == second_socket
-            assert tmux_substrate.terminal_attach_argv(
-                "terminal-1", ["sh", "-l"]
-            )[2] == second_socket
+            assert (
+                tmux_substrate.terminal_attach_argv("terminal-1", ["sh", "-l"])[2]
+                == second_socket
+            )
 
 
-def test_long_home_uses_bounded_socket_path_with_distinct_identity(tmp_path, monkeypatch):
+def test_long_home_uses_bounded_socket_path_with_distinct_identity(
+    tmp_path, monkeypatch
+):
     from gideon.engine import tmux_substrate
 
     first = tmp_path / ("a" * 60) / ("b" * 60)
@@ -58,7 +61,11 @@ def test_sessions_from_two_homes_are_invisible_to_each_other(tmp_path, monkeypat
     name = tmux_substrate.durable_session_name("project", "run", "private")
     monkeypatch.setenv("GIDEON_HOME", str(first))
     try:
-        assert asyncio.run(tmux_substrate.new_session(name, workspace=str(first), command=["sleep", "30"]))
+        assert asyncio.run(
+            tmux_substrate.new_session(
+                name, workspace=str(first), command=["sleep", "30"]
+            )
+        )
         assert tmux_substrate.has_session_sync(name)
         monkeypatch.setenv("GIDEON_HOME", str(second))
         assert not tmux_substrate.has_session_sync(name)

@@ -32,9 +32,7 @@ def test_hook_dispatch_is_bounded_redacted_and_reports_retention_gap() -> None:
         dispatcher = HookDispatcher(store, failure_policy="deny")
 
         async def inject(_event: HookEvent) -> HookDecision:
-            return HookDecision.inject(
-                (SyntheticBlockRef("synthetic-1", "0" * 64, 4),)
-            )
+            return HookDecision.inject((SyntheticBlockRef("synthetic-1", "0" * 64, 4),))
 
         def deny(_event: HookEvent) -> HookDecision:
             return HookDecision.deny("policy_denied")
@@ -57,12 +55,17 @@ def test_hook_dispatch_is_bounded_redacted_and_reports_retention_gap() -> None:
             assert result.allowed is False
             assert result.reason_code == "policy_denied"
             assert result.synthetic_blocks == ()
-            assert [record.hook_id for record in result.outcomes] == ["hook-a", "hook-b"]
+            assert [record.hook_id for record in result.outcomes] == [
+                "hook-a",
+                "hook-b",
+            ]
 
         replay = await store.read_after(0)
         assert replay.gap is True
         assert replay.next_cursor == 4
         assert len(replay.outcomes) == 2
-        assert "secret-value" not in str([record.to_wire() for record in replay.outcomes])
+        assert "secret-value" not in str(
+            [record.to_wire() for record in replay.outcomes]
+        )
 
     asyncio.run(run())

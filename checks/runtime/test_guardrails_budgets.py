@@ -316,15 +316,27 @@ async def test_local_provider_forced_to_warn(tmp_path, monkeypatch):
     """A localhost/ollama provider is forced to warn even if config says block —
     the content never leaves the machine (§2.2)."""
     monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
+    from gideon.integrations.llm.capabilities import ProviderCapability
+    from gideon.integrations.llm.registry import ProviderEntry, get_default_registry
     from gideon.security.guardrails.model_call import wrap_model_call_guard
 
-    from gideon.integrations.llm.registry import get_default_registry, ProviderEntry
-    from gideon.integrations.llm.capabilities import ProviderCapability
     registry = get_default_registry()
-    registry.register_type(ProviderCapability('test-host', frozenset(), True, True, False, False, 0, hosts_model=True), lambda **kw: None)
-    registry.register_entry(ProviderEntry('test-local', 'test-host', model='llama3', options={'base_url': 'http://localhost:11434'}))
+    registry.register_type(
+        ProviderCapability(
+            "test-host", frozenset(), True, True, False, False, 0, hosts_model=True
+        ),
+        lambda **kw: None,
+    )
+    registry.register_entry(
+        ProviderEntry(
+            "test-local",
+            "test-host",
+            model="llama3",
+            options={"base_url": "http://localhost:11434"},
+        )
+    )
     local = FakeProvider()
-    local.served_model_ref = 'test-local:llama3'
+    local.served_model_ref = "test-local:llama3"
     local._base_url = "http://localhost:11434"
     guard = wrap_model_call_guard(
         local,
@@ -500,7 +512,9 @@ def test_the_guard_charges_the_ambient_scope():
     from gideon.security.guardrails import model_call
 
     source = inspect.getsource(model_call)
-    assert "run_key = current_run_key() or None" in source and "run_key=run_key" in source, (
+    assert (
+        "run_key = current_run_key() or None" in source and "run_key=run_key" in source
+    ), (
         "the guard must pass the ambient run scope to charge(); without it run_totals is "
         "permanently empty and every run-scoped cap reads zero"
     )

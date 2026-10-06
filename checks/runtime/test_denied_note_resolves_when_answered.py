@@ -51,7 +51,9 @@ async def test_only_exact_owner_retried_call_resolves_the_original_note(
     from gideon.automation.workflows.models import RunStatus, WorkflowRun
 
     store.create(
-        WorkflowRun(id=run_id, workflow_name="denied-call-retry", status=RunStatus.RUNNING)
+        WorkflowRun(
+            id=run_id, workflow_name="denied-call-retry", status=RunStatus.RUNNING
+        )
     )
     session = f"workflow:{run_id}:{node_id}"
     source = session
@@ -96,9 +98,12 @@ async def test_only_exact_owner_retried_call_resolves_the_original_note(
     assert pending["_auto_denied_origin_kind"] == "workflow"
     assert pending["_auto_denied_origin_id"] == run_id
     assert pending["_auto_denied_attempt_id"] == "rewind:root.extract:1:1"
-    assert state.resolve_approval_revision(
-        approval_id, True, pending["revision"], by=principal
-    ) == "resolved"
+    assert (
+        state.resolve_approval_revision(
+            approval_id, True, pending["revision"], by=principal
+        )
+        == "resolved"
+    )
     assert await task is True
     row = state._inbox_svc.inbox.items[note_id]
     assert row.status_for("") == ItemStatus.HANDLED.value
@@ -128,9 +133,12 @@ async def test_only_exact_owner_retried_call_resolves_the_original_note(
     )
     wrong_pending = await _pending(state, wrong_approval_id)
     assert wrong_pending.get("_auto_denied_note_id", "") == ""
-    assert state.resolve_approval_revision(
-        wrong_approval_id, True, wrong_pending["revision"], by=principal
-    ) == "resolved"
+    assert (
+        state.resolve_approval_revision(
+            wrong_approval_id, True, wrong_pending["revision"], by=principal
+        )
+        == "resolved"
+    )
     assert await wrong_task is True
     assert state._inbox_svc.inbox.items[second_id].status_for("") not in {
         ItemStatus.HANDLED.value,
@@ -138,32 +146,47 @@ async def test_only_exact_owner_retried_call_resolves_the_original_note(
     }
 
 
-def test_queued_workflow_retry_proof_is_transient_and_epoch_bound(tmp_path, monkeypatch):
+def test_queued_workflow_retry_proof_is_transient_and_epoch_bound(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "gideon"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
 
     from gideon.automation.workflows import store
     from gideon.automation.workflows.controller import EngineServices, RunController
-    from gideon.automation.workflows.models import InstanceState, RunStatus, WorkflowRun, walk
+    from gideon.automation.workflows.models import (
+        InstanceState,
+        RunStatus,
+        WorkflowRun,
+        walk,
+    )
 
     state = _state(home)
     principal = Principal(OWNER, "owner-session")
     node_id = "extract"
     run = store.create(
-        WorkflowRun(id="run-queued-retry", workflow_name="queued-retry", status=RunStatus.PAUSED)
+        WorkflowRun(
+            id="run-queued-retry", workflow_name="queued-retry", status=RunStatus.PAUSED
+        )
     )
     spec = {
         "name": "queued-retry",
         "root": {
             "kind": "sequence",
             "id": "root",
-            "children": [{"kind": "transform", "id": node_id, "config": {"expr": {"ok": True}}}],
+            "children": [
+                {"kind": "transform", "id": node_id, "config": {"expr": {"ok": True}}}
+            ],
         },
     }
     store.write_spec(run.id, spec)
-    controller = RunController(run, spec, services=EngineServices(attention_state=state))
-    target_path = next(path for path, node in walk(controller.root) if node.id == node_id)
+    controller = RunController(
+        run, spec, services=EngineServices(attention_state=state)
+    )
+    target_path = next(
+        path for path, node in walk(controller.root) if node.id == node_id
+    )
     controller._instance(target_path).state = InstanceState.FAILED
     store.write_state(run.id, controller.instances)
     raw_input = json.dumps({"query": "same raw call"})
@@ -200,7 +223,9 @@ def test_queued_workflow_retry_proof_is_transient_and_epoch_bound(tmp_path, monk
     assert proof["instance_path"] == target_path
 
     restored = RunController(
-        store.get(run.id), store.read_spec(run.id), services=EngineServices(attention_state=state)
+        store.get(run.id),
+        store.read_spec(run.id),
+        services=EngineServices(attention_state=state),
     )
     assert restored._pending_owner_reentry == {}
     assert all(entry[2] is None for entry in restored._pending_mutations)

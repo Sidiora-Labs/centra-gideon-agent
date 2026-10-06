@@ -11,7 +11,9 @@ from gideon.integrations.tool_providers import tool_prefs
 
 
 @pytest.mark.asyncio
-async def test_remote_mcp_disable_is_canonical_and_sibling_stays_callable(tmp_path, monkeypatch):
+async def test_remote_mcp_disable_is_canonical_and_sibling_stays_callable(
+    tmp_path, monkeypatch
+):
     import uvicorn
     from mcp.server.fastmcp import FastMCP
 
@@ -20,6 +22,7 @@ async def test_remote_mcp_disable_is_canonical_and_sibling_stays_callable(tmp_pa
     home.mkdir(parents=True, exist_ok=True)
 
     from gideon.core.config.loader import AppConfig
+
     operator_config = AppConfig.load()
     operator_config.security.egress.allow_hosts = ["127.0.0.1"]
     operator_config.save()
@@ -38,14 +41,16 @@ async def test_remote_mcp_disable_is_canonical_and_sibling_stays_callable(tmp_pa
     listener.bind(("127.0.0.1", 0))
     endpoint = f"http://127.0.0.1:{listener.getsockname()[1]}/mcp"
     application = server.streamable_http_app()
-    process = uvicorn.Server(uvicorn.Config(application, log_level="critical", lifespan="on"))
+    process = uvicorn.Server(
+        uvicorn.Config(application, log_level="critical", lifespan="on")
+    )
     server_task = asyncio.create_task(process.serve(sockets=[listener]))
 
-    from gideon.security.approval_answer import OWNER, Principal
-    from gideon.security import mcp_grants
+    from gideon.engine.agents.native.runtime import _ToolInventory
     from gideon.integrations import mcp_client
     from gideon.integrations.tool_providers import registry
-    from gideon.engine.agents.native.runtime import _ToolInventory
+    from gideon.security import mcp_grants
+    from gideon.security.approval_answer import OWNER, Principal
 
     name = "mcp05-disable"
     spec = {
@@ -64,7 +69,9 @@ async def test_remote_mcp_disable_is_canonical_and_sibling_stays_callable(tmp_pa
             await asyncio.sleep(0.01)
         assert process.started
 
-        mcp_grants.give(server_doc, Principal(OWNER, "mcp05-test-owner", "mcp05-test-tenant"))
+        mcp_grants.give(
+            server_doc, Principal(OWNER, "mcp05-test-owner", "mcp05-test-tenant")
+        )
         grant = True
         (home / "mcp.json").write_text(
             json.dumps({"mcpServers": {name: spec}}), encoding="utf-8"
@@ -84,7 +91,9 @@ async def test_remote_mcp_disable_is_canonical_and_sibling_stays_callable(tmp_pa
         provider = catalog.providers[f"mcp/{name}/sibling_tool"]
         refused = await provider.invoke(f"mcp/{name}/disabled_tool", {})
         assert refused.success is False
-        result = await provider.invoke(f"mcp/{name}/sibling_tool", {"value": "still live"})
+        result = await provider.invoke(
+            f"mcp/{name}/sibling_tool", {"value": "still live"}
+        )
         assert result.success is True
         assert "STILL LIVE" in result.output
     finally:

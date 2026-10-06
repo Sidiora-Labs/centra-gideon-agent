@@ -255,7 +255,9 @@ async def test_saving_the_mask_back_does_not_erase_the_stored_key(tmp_path):
         )
         assert r.status == 200, await r.text()
         stored = _stored(tmp_path, instance_id)
-        assert stored["api_key"].startswith("{{secret:GIDEON_SECRET_INSTANCE_"), "the mask sentinel overwrote a working key"
+        assert stored["api_key"].startswith(
+            "{{secret:GIDEON_SECRET_INSTANCE_"
+        ), "the mask sentinel overwrote a working key"
         assert stored["default_model"] == "gpt-4o-mini", "the real edit was still saved"
 
 
@@ -285,7 +287,11 @@ async def test_a_real_rotated_key_still_overwrites(tmp_path):
         assert r.status == 200, await r.text()
         assert "sk-ROTATED-fixture" not in json.dumps(_stored(tmp_path, instance_id))
         from gideon.extensions.providers.instances import get_instance
-        assert get_instance("fake-models", instance_id).config["api_key"] == "sk-ROTATED-fixture"
+
+        assert (
+            get_instance("fake-models", instance_id).config["api_key"]
+            == "sk-ROTATED-fixture"
+        )
 
 
 @pytest.mark.asyncio

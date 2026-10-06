@@ -450,9 +450,16 @@ def test_a_manual_fire_does_not_spend_the_budget(state, event_store, monkeypatch
 
 
 def test_event_dry_run_reports_match_without_running_or_charging(state, event_store):
-    _ev(event_store, pattern="MemoryKeyPattern", key_glob="project.*", action_provider="ghost")
+    _ev(
+        event_store,
+        pattern="MemoryKeyPattern",
+        key_glob="project.*",
+        action_provider="ghost",
+    )
     req = _req(
-        "POST", "/api/triggers/event:ev1/run", state,
+        "POST",
+        "/api/triggers/event:ev1/run",
+        state,
         body={"dry_run": True, "key": "project.ship"},
         match_info={"id": "event:ev1"},
     )

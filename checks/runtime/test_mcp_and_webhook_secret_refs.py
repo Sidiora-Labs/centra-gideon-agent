@@ -43,7 +43,12 @@ def test_mcp_credentials_are_owner_refs_and_resolve_at_consumer(tmp_path, monkey
     credentials.put_secret_value(backend_key, "weather-stable-reference-rotation")
     reloaded = json.loads(path.read_text(encoding="utf-8"))["mcpServers"]["weather"]
     assert reloaded["env"]["WEATHER_API_TOKEN"] == old_reference
-    assert mcp_instances.resolve_server_credentials("weather", reloaded)["env"]["WEATHER_API_TOKEN"] == "weather-stable-reference-rotation"
+    assert (
+        mcp_instances.resolve_server_credentials("weather", reloaded)["env"][
+            "WEATHER_API_TOKEN"
+        ]
+        == "weather-stable-reference-rotation"
+    )
 
     mcp_instances.update_instance(
         "weather",
@@ -69,7 +74,9 @@ def test_mcp_credentials_are_owner_refs_and_resolve_at_consumer(tmp_path, monkey
         raise AssertionError("a different MCP owner resolved this server's credentials")
 
 
-def test_webhook_token_is_persisted_by_reference_and_used_by_real_handler(tmp_path, monkeypatch):
+def test_webhook_token_is_persisted_by_reference_and_used_by_real_handler(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "gideon-home"
     monkeypatch.setenv("GIDEON_HOME", str(home))
     monkeypatch.setenv("GIDEON_CREDENTIAL_BACKEND", "dotenv")
@@ -86,14 +93,20 @@ def test_webhook_token_is_persisted_by_reference_and_used_by_real_handler(tmp_pa
 
     async def journey():
         async def verify(request):
-            return web.Response(status=204 if hooks._verify_hook_token(request) else 401)
+            return web.Response(
+                status=204 if hooks._verify_hook_token(request) else 401
+            )
 
         app = web.Application()
         app.router.add_post("/verify", verify)
         async with TestServer(app) as server:
             async with TestClient(server) as client:
-                accepted = await client.post("/verify", headers={"Authorization": f"Bearer {token}"})
-                rejected = await client.post("/verify", headers={"Authorization": "Bearer wrong-owner-value"})
+                accepted = await client.post(
+                    "/verify", headers={"Authorization": f"Bearer {token}"}
+                )
+                rejected = await client.post(
+                    "/verify", headers={"Authorization": "Bearer wrong-owner-value"}
+                )
                 return accepted.status, rejected.status
 
     assert asyncio.run(journey()) == (204, 401)

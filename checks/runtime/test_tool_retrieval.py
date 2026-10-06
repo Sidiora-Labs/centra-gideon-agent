@@ -196,7 +196,9 @@ def test_request_structural_hint_carries_for_one_answer_turn():
         _Def(name="web_fetch", description="fetch a URL"),
     ]
     r = ToolRetriever(defs, k=10)
-    first = {d.name for d in r.select("When a new PDF lands, set that up as an automation")}
+    first = {
+        d.name for d in r.select("When a new PDF lands, set that up as an automation")
+    }
     second = {d.name for d in r.select("It's ~/Notes/Garden/kitchen.md")}
     third = {d.name for d in r.select("Thanks, that is all")}
     assert "automation_create" in first and "automation_create" in second

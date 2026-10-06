@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from gideon.engine.agents.skill_list import AgentSkills, held, hold, let_go
 from gideon.engine.agents.tool_list import AgentTools, agent_tools, widens
-from gideon.engine.agents.skill_list import AgentSkills, hold, let_go, held
 from gideon.extensions.skills.loader import ProcedureLibrary
 
 
@@ -142,11 +142,11 @@ def test_actual_prompt_skill_parts_withheld(tmp_path):
 
 @pytest.mark.asyncio
 async def test_actual_native_inventory_and_both_execution_paths(tmp_path, monkeypatch):
-    from gideon.integrations.llm.scripted import ScriptedProvider
-    from gideon.engine.agents.provider import AgentRuntimeDefinition
-    from gideon.engine.agents.native.runtime import NativeAgentRuntime
     from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
+    from gideon.engine.agents.native.runtime import NativeAgentRuntime
     from gideon.engine.agents.native.tools import InProcessMcpToolProvider
+    from gideon.engine.agents.provider import AgentRuntimeDefinition
+    from gideon.integrations.llm.scripted import ScriptedProvider
 
     script = tmp_path / "model.json"
     script.write_text(json.dumps({"version": 1, "turns": [{"text": "ready"}]}))

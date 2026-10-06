@@ -17,7 +17,9 @@ from gideon.engine.automation_boot import AutomationBoot
 def test_boot_only_terminalizes_claim_with_provably_dead_owner(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     store = TriggerStore(base_dir=tmp_path)
-    dead_process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    dead_process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"]
+    )
     dead_process.terminate()
     dead_process.wait(timeout=5)
     dead = Trigger(
@@ -29,7 +31,9 @@ def test_boot_only_terminalizes_claim_with_provably_dead_owner(tmp_path, monkeyp
     )
     store.upsert(dead)
     claims.write_claim(Claim(dead.id, "dead-owner", time.time()), base_dir=tmp_path)
-    live_process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    live_process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"]
+    )
     try:
         live = Trigger(
             id="clock:live-owner",
@@ -41,7 +45,9 @@ def test_boot_only_terminalizes_claim_with_provably_dead_owner(tmp_path, monkeyp
         store.upsert(live)
         claims.write_claim(Claim(live.id, "live-owner", time.time()), base_dir=tmp_path)
 
-        boot = AutomationBoot(None, home=lambda: tmp_path, logger=logging.getLogger(__name__))
+        boot = AutomationBoot(
+            None, home=lambda: tmp_path, logger=logging.getLogger(__name__)
+        )
         interrupted = asyncio.run(boot.recover_interrupted(store))
 
         assert interrupted == [dead.id]

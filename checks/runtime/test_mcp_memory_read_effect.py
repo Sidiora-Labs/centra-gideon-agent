@@ -6,6 +6,7 @@ import time
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
+
 from gideon.assurance.validation import ValidationError
 
 
@@ -140,7 +141,8 @@ async def test_read_rule_needs_no_write_grant_and_mutation_still_requires_approv
         )
     with pytest.raises(ValidationError):
         mcp_memory._validate_args(
-            "memory_remember", {"rule": "x", "category": "knowledge", "scope": "operator"}
+            "memory_remember",
+            {"rule": "x", "category": "knowledge", "scope": "operator"},
         )
     with pytest.raises(ValueError):
         resolve_lesson_scope("operator", None)

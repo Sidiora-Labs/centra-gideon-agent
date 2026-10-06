@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-
 _WORKER = r"""
 import os, sys, time
 from pathlib import Path
@@ -95,7 +94,9 @@ def test_real_processes_serialize_updates_without_lost_writes(home):
     ]
     deadline = time.monotonic() + 30
     while not all((home / f"ready-{name}").exists() for name in ("one", "two")):
-        assert time.monotonic() < deadline, "workers did not reach the real-process barrier"
+        assert (
+            time.monotonic() < deadline
+        ), "workers did not reach the real-process barrier"
         for proc in workers:
             assert proc.poll() is None, proc.communicate()[1]
         time.sleep(0.01)
@@ -125,7 +126,9 @@ def test_nested_and_unreadable_transactions_write_nothing(home):
     mutate_config(lambda doc: doc.update(kept="yes"))
     before = (home / "config.json").read_bytes()
     with pytest.raises(NestedConfigTransaction):
-        mutate_config(lambda doc: mutate_config(lambda nested: nested.update(lost=True)))
+        mutate_config(
+            lambda doc: mutate_config(lambda nested: nested.update(lost=True))
+        )
     assert (home / "config.json").read_bytes() == before
 
 
@@ -201,7 +204,9 @@ def test_lock_timeout_refuses_without_writing(home):
     )
     deadline = time.monotonic() + 30
     while not (home / "holding").exists():
-        assert time.monotonic() < deadline, "holder did not acquire the real config lock"
+        assert (
+            time.monotonic() < deadline
+        ), "holder did not acquire the real config lock"
         assert holder.poll() is None, holder.communicate()[1]
         time.sleep(0.01)
     with pytest.raises(ConfigLockTimeout, match="nothing was written"):
@@ -229,14 +234,18 @@ def test_config_secret_is_stored_as_an_owner_reference(home):
     reference = stored["providers"][0]["options"]["api_key"]
     assert reference.startswith("gideon-config-secret:v1:")
     assert secret not in (home / "config.json").read_text(encoding="utf-8")
-    assert resolve_config_secrets(stored)["providers"][0]["options"]["api_key"] == secret
+    assert (
+        resolve_config_secrets(stored)["providers"][0]["options"]["api_key"] == secret
+    )
 
 
 def test_replace_snapshot_rejects_malformed_config_without_overwriting(home):
     from gideon.core.config.transactions import mutate_config
     from gideon.workspace.snapshot import _do_replace
 
-    mutate_config(lambda document: document.update(agent={"approval_timeout_minutes": 37}))
+    mutate_config(
+        lambda document: document.update(agent={"approval_timeout_minutes": 37})
+    )
     config = home / "config.json"
     before = config.read_bytes()
     snap = home / "snapshot-malformed"
@@ -281,7 +290,9 @@ def test_empty_snapshot_config_is_created_for_replace_and_merge(home):
     replace_home = home / "replace-empty"
     replace_home.mkdir()
     replace_path = replace_home / "config.json"
-    _replace_config_from_snapshot(source, replace_path, replace_home / "backup" / "config.json")
+    _replace_config_from_snapshot(
+        source, replace_path, replace_home / "backup" / "config.json"
+    )
     assert json.loads(replace_path.read_text(encoding="utf-8")) == {}
 
     merge_home = home / "merge-empty"
@@ -304,7 +315,9 @@ def test_merge_snapshot_copy_if_missing_rechecks_after_real_writer(home):
     )
     deadline = time.monotonic() + 30
     while not (home / "holding").exists():
-        assert time.monotonic() < deadline, "holder did not acquire the real config lock"
+        assert (
+            time.monotonic() < deadline
+        ), "holder did not acquire the real config lock"
         assert holder.poll() is None, holder.communicate()[1]
         time.sleep(0.01)
 

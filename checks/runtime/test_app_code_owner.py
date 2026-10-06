@@ -103,7 +103,9 @@ def test_installed_dotted_package_uses_same_registered_owner(app_source, monkeyp
     extension = RegisteredProvider(
         name=app,
         manifest=AppManifest(name=app),
-        provider_config=ProviderConfig(type="tool", implementation=package + ":callback"),
+        provider_config=ProviderConfig(
+            type="tool", implementation=package + ":callback"
+        ),
     )
     module = _load_ext_module(extension, package)
     assert module.at_import == app
@@ -111,7 +113,9 @@ def test_installed_dotted_package_uses_same_registered_owner(app_source, monkeyp
     assert code_provenance.loaded_app(str(source)) == app
 
 
-def test_imported_core_module_body_keeps_core_identity(app_source, tmp_path, monkeypatch):
+def test_imported_core_module_body_keeps_core_identity(
+    app_source, tmp_path, monkeypatch
+):
     app, root = app_source
     library = "library_" + app.replace("-", "_")
     (tmp_path / (library + ".py")).write_text(

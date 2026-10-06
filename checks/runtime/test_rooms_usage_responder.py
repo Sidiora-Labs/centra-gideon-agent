@@ -1,9 +1,11 @@
 from gideon.engine.rooms.store import RoomStore
-from gideon.integrations.llm.events import AgentEvent, EVENT_COMPLETE
+from gideon.integrations.llm.events import EVENT_COMPLETE, AgentEvent
 from gideon.operations import usage_ledger
 
 
-def test_room_transcript_and_usage_keep_notice_before_actual_responder(tmp_path, monkeypatch):
+def test_room_transcript_and_usage_keep_notice_before_actual_responder(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     rooms = RoomStore(tmp_path)
     room = rooms.create(

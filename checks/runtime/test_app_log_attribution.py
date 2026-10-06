@@ -16,9 +16,17 @@ from gideon.extensions.apps.backend_runtime import BackendSupervisor
 from gideon.extensions.apps.manifest import AppManifest
 from gideon.extensions.apps.native_contract import load_bundle_module
 from gideon.extensions.apps.worker_runtime import WorkerSupervisor
-from gideon.interfaces.dashboard.handlers.updates import _QueueLogHandler, _RingLogHandler
 from gideon.integrations.local_models.sidecar import SidecarRunner
-from gideon.operations.child_output import ChildOutput, LINE_MAX_CHARS, TAIL_LINES, relay
+from gideon.interfaces.dashboard.handlers.updates import (
+    _QueueLogHandler,
+    _RingLogHandler,
+)
+from gideon.operations.child_output import (
+    LINE_MAX_CHARS,
+    TAIL_LINES,
+    ChildOutput,
+    relay,
+)
 
 
 def test_loaded_app_reaches_console_file_ring_and_threadsafe_stream(tmp_path):
@@ -29,8 +37,12 @@ def test_loaded_app_reaches_console_file_ring_and_threadsafe_stream(tmp_path):
         ring = collections.deque(maxlen=10)
         queue = asyncio.Queue(maxsize=10)
         file = tmp_path / "gateway.log"
-        sinks = [logging.StreamHandler(console), RotatingFileHandler(file),
-                 _RingLogHandler(ring), _QueueLogHandler(queue)]
+        sinks = [
+            logging.StreamHandler(console),
+            RotatingFileHandler(file),
+            _RingLogHandler(ring),
+            _QueueLogHandler(queue),
+        ]
         for sink in sinks:
             log_sinks.attach(sink)
         source = tmp_path / "provider.py"
@@ -79,9 +91,12 @@ def test_real_child_drains_both_streams_masked_with_bounded_tail(tmp_path):
         "for i in range(500): print('stderr-line-' + str(i), file=sys.stderr)\n"
         "sys.exit(7)\n"
     )
-    proc = subprocess.Popen([sys.executable, "-c", program], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    output = ChildOutput(app="child-proof", process="worker", pid=proc.pid,
-                         env={"API_SECRET": secret})
+    proc = subprocess.Popen(
+        [sys.executable, "-c", program], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    output = ChildOutput(
+        app="child-proof", process="worker", pid=proc.pid, env={"API_SECRET": secret}
+    )
     try:
         relay(proc, output)
         assert proc.wait(timeout=10) == 7
@@ -109,13 +124,17 @@ def test_real_backend_worker_and_engine_output(tmp_path, monkeypatch):
     root = home / "apps" / app
     root.mkdir(parents=True)
     metadata = {
-        "name": app, "version": "1.0.0", "displayName": app,
+        "name": app,
+        "version": "1.0.0",
+        "displayName": app,
         "description": "Process output verification",
         "backend": {"entryPoint": "backend.py", "type": "python"},
         "permissions": {"backgroundTasks": True},
     }
     (root / "app.json").write_text(json.dumps(metadata))
-    (root / "installed.json").write_text(json.dumps({"name": app, "version": "1.0.0", "enabled": True}))
+    (root / "installed.json").write_text(
+        json.dumps({"name": app, "version": "1.0.0", "enabled": True})
+    )
     (root / "backend.py").write_text(
         "import os,sys\n"
         "print('backend stdout', flush=True)\n"
@@ -150,7 +169,10 @@ def test_real_backend_worker_and_engine_output(tmp_path, monkeypatch):
         assert any("worker stdout" in line for line in records[0].output.lines())
         assert runner.call("load", {}) == {"ready": True}
         deadline = time.monotonic() + 5
-        while not any("engine output" in line for line in runner.log_tail) and time.monotonic() < deadline:
+        while (
+            not any("engine output" in line for line in runner.log_tail)
+            and time.monotonic() < deadline
+        ):
             time.sleep(0.05)
         assert any("engine output" in line for line in runner.log_tail)
     finally:

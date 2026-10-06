@@ -1352,6 +1352,7 @@ class TestOutputContractCrossCheck:
         for read in contract_reads_for_root(Node.from_dict(spec["root"])):
             assert (read.reader_id, read.producer_id) in edges
 
+
 def _piped(call: str) -> dict:
     """A foreach whose items read a null input through one pipe call — the `rich-ingest` shape."""
     return _wrap(
@@ -1373,13 +1374,23 @@ class TestPipeCallsParseAsResolutionReadsThem:
     """
 
     def test_a_non_literal_argument_is_refused_with_what_to_write_instead(self) -> None:
-        issues = [i for i in validate_spec(_piped("default([])")).issues if i.code == "WF_BAD_PIPE"]
-        assert len(issues) == 1, [i.to_dict() for i in validate_spec(_piped("default([])")).issues]
+        issues = [
+            i
+            for i in validate_spec(_piped("default([])")).issues
+            if i.code == "WF_BAD_PIPE"
+        ]
+        assert len(issues) == 1, [
+            i.to_dict() for i in validate_spec(_piped("default([])")).issues
+        ]
         message = issues[0].message
         assert "'[]' is not a literal" in message
         assert "a quoted string, a number, true, false or null" in message
-        assert "`| filter`" in message, "the refusal must say how to write an empty-list fallback"
-        assert "{{inputs.empty | default([])}}" in message, "the refusal must name the expression"
+        assert (
+            "`| filter`" in message
+        ), "the refusal must say how to write an empty-list fallback"
+        assert (
+            "{{inputs.empty | default([])}}" in message
+        ), "the refusal must name the expression"
         assert issues[0].path == "root"
 
     @pytest.mark.parametrize(
@@ -1442,9 +1453,13 @@ class TestPipeCallsParseAsResolutionReadsThem:
         )
 
         try:
-            resolve_expr(f"inputs.empty | {call}", BindingContext(inputs={"empty": None}))
+            resolve_expr(
+                f"inputs.empty | {call}", BindingContext(inputs={"empty": None})
+            )
             resolution_refuses = False
         except BindingError:
             resolution_refuses = True
-        authoring_refuses = bool(_codes(_piped(call)) & {"WF_BAD_PIPE", "WF_UNKNOWN_PIPE"})
+        authoring_refuses = bool(
+            _codes(_piped(call)) & {"WF_BAD_PIPE", "WF_UNKNOWN_PIPE"}
+        )
         assert authoring_refuses == resolution_refuses, (call, authoring_refuses)

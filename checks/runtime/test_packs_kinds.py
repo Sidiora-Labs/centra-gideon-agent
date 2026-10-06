@@ -812,7 +812,9 @@ def test_bundled_install_route_drives_the_whole_flow(fresh_home):
     assert body["deployed"] == ["cfo"] and body["dormant"] == ["cfo-tax-analyst"]
     status, body = _call(
         handlers.api_pack_triggers_deploy,
-        _json_request("POST", "/api/packs/personal-cfo/triggers/deploy", {}, name="personal-cfo"),
+        _json_request(
+            "POST", "/api/packs/personal-cfo/triggers/deploy", {}, name="personal-cfo"
+        ),
     )
     assert status == 200
     assert body["deployed"] == ["pack-personal-cfo-spending-digest"]

@@ -11,8 +11,8 @@ async def test_linked_chat_continues_and_reports_compaction_and_terminal_outcome
     from gideon.core.config.loader import AppConfig
     from gideon.engine.session import ConversationDirectory
     from gideon.integrations.llm.events import (
-        AgentEvent,
         EVENT_COMPACTION_STATUS,
+        AgentEvent,
     )
     from gideon.interfaces.dashboard.chat_persistence import (
         _rehydrate_session_from_history,
@@ -45,7 +45,9 @@ async def test_linked_chat_continues_and_reports_compaction_and_terminal_outcome
     assert state.get_linked_session("thread-42") is session
     assert state.channel_provider_for("dashboard:linked-chat") == "discord"
 
-    restored_state = ConsoleState(directory, start_time=time.time(), conversation_log=log)
+    restored_state = ConsoleState(
+        directory, start_time=time.time(), conversation_log=log
+    )
     restored = _rehydrate_session_from_history(restored_state, "dashboard:linked-chat")
     assert restored is not None
     assert restored._channel_thread_ts == "thread-42"
@@ -67,16 +69,16 @@ async def test_linked_chat_continues_and_reports_compaction_and_terminal_outcome
                 title=(
                     "retained context"
                     if status == "completed"
-                    else "provider unavailable"
-                    if status == "failed"
-                    else ""
+                    else "provider unavailable" if status == "failed" else ""
                 ),
             ),
         )
         assert result == notice
 
     assert compaction_result_notice("noop", "") == expected["noop"]
-    assert compaction_result_notice("failed", "provider unavailable") == expected["failed"]
+    assert (
+        compaction_result_notice("failed", "provider unavailable") == expected["failed"]
+    )
     assert compaction_result_notice("timeout") == "Compaction timed out."
 
     state.wire_session_compact_callback()
@@ -88,7 +90,9 @@ async def test_linked_chat_continues_and_reports_compaction_and_terminal_outcome
     )
 
     before = len(restored_state._background_tasks)
-    schedule_linked_channel_notice(restored_state, restored, "Turn stopped at your request.")
+    schedule_linked_channel_notice(
+        restored_state, restored, "Turn stopped at your request."
+    )
     assert len(restored_state._background_tasks) == before
 
     await directory.close_all()

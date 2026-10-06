@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -16,12 +16,12 @@ from gideon.engine.task_modes import (
     resolve_effective_risk,
     task_mode_denies,
 )
+from gideon.security.approval_brief import derive_blast_radius
 from gideon.security.owner_only import (
     OWNER_ONLY_OPERATION_MESSAGE,
     owner_only_command_reason,
     owner_only_path_reason,
 )
-from gideon.security.approval_brief import derive_blast_radius
 from gideon.security.sandbox import wrap_argv
 
 
@@ -89,15 +89,19 @@ def test_agent_file_and_shell_tools_refuse_reserved_paths(
     provider = NativeBuiltinToolProvider(cwd=workspace, sandbox_mode="off")
     protected = home / "hooks" / "pre.py"
 
-    write_result = asyncio.run(provider._t_write_file({"path": str(protected), "content": "x"}))
-    read_result = asyncio.run(provider._t_read_file({"path": str(protected)}))
-    shell_result = asyncio.run(
-        provider._t_bash({"command": f"cat {protected}"})
+    write_result = asyncio.run(
+        provider._t_write_file({"path": str(protected), "content": "x"})
     )
+    read_result = asyncio.run(provider._t_read_file({"path": str(protected)}))
+    shell_result = asyncio.run(provider._t_bash({"command": f"cat {protected}"}))
 
-    assert not write_result.success and OWNER_ONLY_OPERATION_MESSAGE in write_result.error
+    assert (
+        not write_result.success and OWNER_ONLY_OPERATION_MESSAGE in write_result.error
+    )
     assert not read_result.success and OWNER_ONLY_OPERATION_MESSAGE in read_result.error
-    assert not shell_result.success and OWNER_ONLY_OPERATION_MESSAGE in shell_result.error
+    assert (
+        not shell_result.success and OWNER_ONLY_OPERATION_MESSAGE in shell_result.error
+    )
     assert not protected.exists()
 
 
@@ -188,7 +192,9 @@ print(json.dumps({
     }
 
 
-def test_chat_permission_policy_refuses_owner_paths_before_offering_approval(tmp_path, monkeypatch):
+def test_chat_permission_policy_refuses_owner_paths_before_offering_approval(
+    tmp_path, monkeypatch
+):
     from gideon.integrations.llm.events import AgentEvent
     from gideon.interfaces.dashboard.chat_runner import _permission_policy_denial
     from gideon.interfaces.dashboard.state import _ChatSession
@@ -202,7 +208,9 @@ def test_chat_permission_policy_refuses_owner_paths_before_offering_approval(tmp
     session = _ChatSession("policy-test", workspace_dir=str(workspace))
     session._task_mode = "ask"
     event = AgentEvent(
-        kind="permission_request", title="read_document", tool_kind="read",
+        kind="permission_request",
+        title="read_document",
+        tool_kind="read",
         tool_input={"path": "../gideon/grants/policy.json"},
     )
     reason, source = _permission_policy_denial(session, event)

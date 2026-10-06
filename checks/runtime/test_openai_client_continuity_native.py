@@ -1,37 +1,46 @@
 from __future__ import annotations
+
 import asyncio
 import json
 import os
 import re
 from pathlib import Path
 from typing import Any
+
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from openai import AsyncOpenAI, APIStatusError
-from gideon.integrations.llm.openai import OpenAIProvider
-from gideon.integrations.llm.credentials import Credential
-from gideon.interfaces.dashboard import token_auth
-from gideon.interfaces.dashboard.handlers import external_access as ea
-from gideon.interfaces.dashboard.chat_handlers import _run_chat_scoped, api_chat_sessions
-from gideon.interfaces.dashboard.chat_persistence import resolve_session, save_session_to_history
+from openai import APIStatusError, AsyncOpenAI
+
+from gideon.cognition.context import PromptAssembler
+from gideon.cognition.history import ConversationLog
+from gideon.cognition.memory import MemoryJournal
 from gideon.core.config.external_access import ExternalAccessConfig
 from gideon.core.config.external_access import ExternalAccessSurfaceConfig as Surface
 from gideon.core.config.loader import AgentProfile, AppConfig
 from gideon.core.config.transactions import mutate_config
-from gideon.cognition.context import PromptAssembler
-from gideon.interfaces.dashboard.state import ConsoleState
-from gideon.cognition.history import ConversationLog
+from gideon.engine.session import ConversationDirectory
+from gideon.extensions.providers.provider_bridge import create_provider_factory
+from gideon.extensions.providers.use_cases import save_active_models
+from gideon.extensions.skills.loader import ProcedureLibrary
 from gideon.integrations.inbound import auth, caps, clients
 from gideon.integrations.inbound import openai_dialect as dialect
 from gideon.integrations.llm.base import EVENT_COMPLETE, EVENT_TEXT_CHUNK, LLMEvent
 from gideon.integrations.llm.capabilities import Capability, ProviderCapability
+from gideon.integrations.llm.credentials import Credential
+from gideon.integrations.llm.openai import OpenAIProvider
 from gideon.integrations.llm.registry import ProviderEntry, ProviderRegistry
-from gideon.cognition.memory import MemoryJournal
-from gideon.extensions.providers.provider_bridge import create_provider_factory
-from gideon.extensions.providers.use_cases import save_active_models
-from gideon.engine.session import ConversationDirectory
-from gideon.extensions.skills.loader import ProcedureLibrary
+from gideon.interfaces.dashboard import token_auth
+from gideon.interfaces.dashboard.chat_handlers import (
+    _run_chat_scoped,
+    api_chat_sessions,
+)
+from gideon.interfaces.dashboard.chat_persistence import (
+    resolve_session,
+    save_session_to_history,
+)
+from gideon.interfaces.dashboard.handlers import external_access as ea
+from gideon.interfaces.dashboard.state import ConsoleState
 
 _SURFACES = ("OPENAI", "MCP", "A2A", "CAPTURE", "BRIDGE")
 
@@ -78,10 +87,20 @@ class _World:
                 supports_vision=False,
                 max_context_tokens=32768,
             ),
-            lambda *, entry, session_key=None, **kw: OpenAIProvider(model=entry.model, credential=Credential("local-test", "api_key", "controlled-local-token"), base_url=self.model_url),
+            lambda *, entry, session_key=None, **kw: OpenAIProvider(
+                model=entry.model,
+                credential=Credential(
+                    "local-test", "api_key", "controlled-local-token"
+                ),
+                base_url=self.model_url,
+            ),
         )
-        registry.register_entry(ProviderEntry(name=ENTRY, type=ENTRY, model="research-1"))
-        monkeypatch.setattr("gideon.integrations.llm.registry.get_default_registry", lambda: registry)
+        registry.register_entry(
+            ProviderEntry(name=ENTRY, type=ENTRY, model="research-1")
+        )
+        monkeypatch.setattr(
+            "gideon.integrations.llm.registry.get_default_registry", lambda: registry
+        )
         # Short deadlines, so a reader left waiting on a turn it is never handed fails in seconds.
         monkeypatch.setattr(dialect, "TURN_TIMEOUT_SECS", 8.0)
         monkeypatch.setattr(dialect, "_POLL_TIMEOUT_SECS", 0.5)
@@ -102,14 +121,18 @@ class _World:
         )
         save_active_models({"chat": [f"{ENTRY}:research-1"]})
 
-        self.sessions = ConversationDirectory(AppConfig.load(), provider_factory=create_provider_factory())
+        self.sessions = ConversationDirectory(
+            AppConfig.load(), provider_factory=create_provider_factory()
+        )
         self.log = ConversationLog(base_dir=tmp_path / "history")
         self.state = ConsoleState(
             sessions=self.sessions, start_time=0.0, conversation_log=self.log
         )
         self.state.context_builder = PromptAssembler(
             memory=MemoryJournal(workspace=tmp_path / "ws"),
-            skills=ProcedureLibrary(skills_path=tmp_path / "skills", install_builtins=False),
+            skills=ProcedureLibrary(
+                skills_path=tmp_path / "skills", install_builtins=False
+            ),
             conversation_log=self.log,
         )
         self.state._hook_store = None
@@ -121,74 +144,149 @@ class _World:
     async def start(self) -> None:
         async def model_response(request):
             body = await request.json()
-            handed = body['messages']
+            handed = body["messages"]
             marker = _asked_for(handed)
             if marker:
                 self.asked.append(handed)
                 self.was_asked.set()
                 await self.hold.wait()
-            answer = f'answered {marker}' if marker else 'Local notes'
-            common = {'id': 'controlled-local', 'created': 1, 'model': 'research-1'}
-            if body.get('stream'):
-                response = web.StreamResponse(headers={'Content-Type': 'text/event-stream'})
+            answer = f"answered {marker}" if marker else "Local notes"
+            common = {"id": "controlled-local", "created": 1, "model": "research-1"}
+            if body.get("stream"):
+                response = web.StreamResponse(
+                    headers={"Content-Type": "text/event-stream"}
+                )
                 await response.prepare(request)
                 for packet in [
-                    {**common, 'object': 'chat.completion.chunk', 'choices': [{'index':0,'delta': {'role':'assistant','content':answer}, 'finish_reason':None}]},
-                    {**common, 'object': 'chat.completion.chunk', 'choices': [{'index':0,'delta': {}, 'finish_reason':'stop'}], 'usage': {'prompt_tokens':3,'completion_tokens':2,'total_tokens':5}},
+                    {
+                        **common,
+                        "object": "chat.completion.chunk",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"role": "assistant", "content": answer},
+                                "finish_reason": None,
+                            }
+                        ],
+                    },
+                    {
+                        **common,
+                        "object": "chat.completion.chunk",
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                        "usage": {
+                            "prompt_tokens": 3,
+                            "completion_tokens": 2,
+                            "total_tokens": 5,
+                        },
+                    },
                 ]:
-                    await response.write(('data: ' + json.dumps(packet) + '\n\n').encode())
-                await response.write(b'data: [DONE]\n\n')
+                    await response.write(
+                        ("data: " + json.dumps(packet) + "\n\n").encode()
+                    )
+                await response.write(b"data: [DONE]\n\n")
                 await response.write_eof()
                 return response
-            return web.json_response({**common, 'object':'chat.completion', 'choices':[{'index':0,'message':{'role':'assistant','content':answer},'finish_reason':'stop'}], 'usage':{'prompt_tokens':3,'completion_tokens':2,'total_tokens':5}})
+            return web.json_response(
+                {
+                    **common,
+                    "object": "chat.completion",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": answer},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 3,
+                        "completion_tokens": 2,
+                        "total_tokens": 5,
+                    },
+                }
+            )
+
         model_app = web.Application()
-        model_app.router.add_post('/v1/chat/completions', model_response)
+        model_app.router.add_post("/v1/chat/completions", model_response)
+
         async def models(request):
-            return web.json_response({'object':'list','data':[{'id':'research-1','object':'model','created':1,'owned_by':'local','context_window':32768}]})
-        model_app.router.add_get('/v1/models', models)
+            return web.json_response(
+                {
+                    "object": "list",
+                    "data": [
+                        {
+                            "id": "research-1",
+                            "object": "model",
+                            "created": 1,
+                            "owned_by": "local",
+                            "context_window": 32768,
+                        }
+                    ],
+                }
+            )
+
+        model_app.router.add_get("/v1/models", models)
         self.model_server = TestClient(TestServer(model_app))
         await self.model_server.start_server()
-        self.model_url = str(self.model_server.make_url('/v1'))
+        self.model_url = str(self.model_server.make_url("/v1"))
         # The gateway's own route table, behind the boundary every route runs behind (it answers a
         # refused field): the routes a client is registered through, and the endpoint it then asks.
-        token_auth.use_ephemeral_secret(b'openai-conversation-owner')
+        token_auth.use_ephemeral_secret(b"openai-conversation-owner")
         token_auth.revoke_all_sessions()
-        self.owner = token_auth.generate_token('continuity-owner', kind='desktop')
+        self.owner = token_auth.generate_token("continuity-owner", kind="desktop")
         app = web.Application(middlewares=[token_auth.token_auth_middleware(port=0)])
-        app['port'] = 0
-        app['allowed_origins'] = set()
+        app["port"] = 0
+        app["allowed_origins"] = set()
         app["state"] = self.state
-        dialect.register_routes(app, turn_runner=_run_chat_scoped, persist_turn=save_session_to_history, restore_session=resolve_session)
-        app.router.add_get('/api/chat/sessions', api_chat_sessions)
-        app.router.add_get('/api/external-access', ea.api_external_access)
+        dialect.register_routes(
+            app,
+            turn_runner=_run_chat_scoped,
+            persist_turn=save_session_to_history,
+            restore_session=resolve_session,
+        )
+        app.router.add_get("/api/chat/sessions", api_chat_sessions)
+        app.router.add_get("/api/external-access", ea.api_external_access)
         app.router.add_post(CLIENTS, ea.api_external_access_client)
-        app.router.add_post(CLIENTS + '/{client_id}/persistent-sessions', ea.api_external_access_client_persistent_sessions)
+        app.router.add_post(
+            CLIENTS + "/{client_id}/persistent-sessions",
+            ea.api_external_access_client_persistent_sessions,
+        )
         self.http = TestClient(TestServer(app))
         await self.http.start_server()
 
     async def register(self, *, surfaces: tuple[str, ...] = ("openai",), **fields: Any):
         """Register a client the way Settings documents it: ``(status, payload)``."""
         body = {"label": "notes app", "surfaces": list(surfaces), **fields}
-        resp = await self.http.post(CLIENTS, json=body, headers={"Authorization": "Bearer " + self.owner})
+        resp = await self.http.post(
+            CLIENTS, json=body, headers={"Authorization": "Bearer " + self.owner}
+        )
         return resp.status, await resp.json()
 
     async def choose(self, client_id: str, body: Any) -> tuple[int, dict]:
         """Change whether *client_id* keeps its conversation: ``(status, payload)``."""
         resp = await self.http.post(
-            f"{CLIENTS}/{client_id}/persistent-sessions", json=body, headers={"Authorization": "Bearer " + self.owner}
+            f"{CLIENTS}/{client_id}/persistent-sessions",
+            json=body,
+            headers={"Authorization": "Bearer " + self.owner},
         )
         return resp.status, await resp.json()
 
     async def listed(self, client_id: str) -> dict:
         """The client's row as Settings → External Access reads it."""
-        resp = await self.http.get("/api/external-access", headers={"Authorization": "Bearer " + self.owner})
+        resp = await self.http.get(
+            "/api/external-access", headers={"Authorization": "Bearer " + self.owner}
+        )
         assert resp.status == 200
         rows = (await resp.json())["clients"]
         return next(row for row in rows if row["client_id"] == client_id)
 
-    async def post(self, token: str, text: str, *, user: str | None = TAG) -> tuple[int, dict]:
+    async def post(
+        self, token: str, text: str, *, user: str | None = TAG
+    ) -> tuple[int, dict]:
         """One request to the endpoint, read to its end."""
-        body: dict[str, Any] = {"model": AGENT, "messages": [{"role": "user", "content": text}]}
+        body: dict[str, Any] = {
+            "model": AGENT,
+            "messages": [{"role": "user", "content": text}],
+        }
         if user is not None:
             body["user"] = user
         resp = await self.http.post(
@@ -196,7 +294,9 @@ class _World:
         )
         return resp.status, await resp.json()
 
-    async def ask(self, token: str, text: str, *, user: str | None = TAG) -> tuple[int, dict]:
+    async def ask(
+        self, token: str, text: str, *, user: str | None = TAG
+    ) -> tuple[int, dict]:
         """One request, and every turn settled after it."""
         status, payload = await self.post(token, text, user=user)
         await self.settled()
@@ -225,7 +325,10 @@ class _World:
                 task.cancel()
                 try:
                     await asyncio.wait_for(task, timeout=10)
-                except (asyncio.CancelledError, Exception):  # noqa: BLE001 - teardown only
+                except (
+                    asyncio.CancelledError,
+                    Exception,
+                ):  # noqa: BLE001 - teardown only
                     pass
         await self.sessions.close_all()
         await self.model_server.close()
@@ -234,85 +337,128 @@ class _World:
 
 
 @pytest.mark.asyncio
-async def test_actual_sdk_client_conversation_rounds_restart_and_refusals(tmp_path, monkeypatch):
-    monkeypatch.setenv('GIDEON_HOME', str(tmp_path / 'home'))
-    monkeypatch.setenv('GIDEON_WORKSPACE', str(tmp_path / 'workspace'))
+async def test_actual_sdk_client_conversation_rounds_restart_and_refusals(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("GIDEON_WORKSPACE", str(tmp_path / "workspace"))
     for surface in _SURFACES:
-        monkeypatch.delenv(f'GIDEON_INBOUND_{surface}_TOKEN', raising=False)
+        monkeypatch.delenv(f"GIDEON_INBOUND_{surface}_TOKEN", raising=False)
     caps.reset_for_tests()
     world = _World(tmp_path, monkeypatch)
     await world.start()
     sdk = None
     try:
-        for headers in [{}, {'Authorization':'Bearer invalid-client'}]:
-            denied = await world.http.post(dialect.ROUTE_CHAT, json={'model':AGENT,'messages':[{'role':'user','content':'Refuse before execution'}]}, headers=headers)
-            assert denied.status in {401,403}
+        for headers in [{}, {"Authorization": "Bearer invalid-client"}]:
+            denied = await world.http.post(
+                dialect.ROUTE_CHAT,
+                json={
+                    "model": AGENT,
+                    "messages": [
+                        {"role": "user", "content": "Refuse before execution"}
+                    ],
+                },
+                headers=headers,
+            )
+            assert denied.status in {401, 403}
         status, made = await world.register(persistent_sessions=True)
         assert status == 200, made
-        sdk = AsyncOpenAI(api_key=made['token'], base_url=str(world.http.make_url('/v1')), max_retries=0)
+        sdk = AsyncOpenAI(
+            api_key=made["token"],
+            base_url=str(world.http.make_url("/v1")),
+            max_retries=0,
+        )
+
         async def ask(text, user=TAG):
-            reply = await sdk.chat.completions.create(model=AGENT, messages=[{'role': 'user', 'content': text}], user=user)
+            reply = await sdk.chat.completions.create(
+                model=AGENT, messages=[{"role": "user", "content": text}], user=user
+            )
             await world.settled()
             return reply
+
         await ask(FIRST)
         await ask(SECOND)
-        assert FIRST_SECRET in world.handed('[q2]')
-        assert 'answered [q1]' in world.handed('[q2]')
-        await ask('[q3] Separate person?', user='separate-person')
-        assert FIRST_SECRET not in world.handed('[q3]')
-        status, unchanged = await world.choose(made['client_id'], {'persistent_sessions': True})
+        assert FIRST_SECRET in world.handed("[q2]")
+        assert "answered [q1]" in world.handed("[q2]")
+        await ask("[q3] Separate person?", user="separate-person")
+        assert FIRST_SECRET not in world.handed("[q3]")
+        status, unchanged = await world.choose(
+            made["client_id"], {"persistent_sessions": True}
+        )
         assert status == 200
-        await ask('[q4] Same round?')
-        assert FIRST_SECRET in world.handed('[q4]')
+        await ask("[q4] Same round?")
+        assert FIRST_SECRET in world.handed("[q4]")
         # Drain native sessions, create a new ConsoleState on the same durable native history.
         old = world.state
         await world.sessions.close_all()
-        world.sessions = ConversationDirectory(AppConfig.load(), provider_factory=create_provider_factory())
-        world.state = ConsoleState(sessions=world.sessions, start_time=0.0, conversation_log=world.log)
+        world.sessions = ConversationDirectory(
+            AppConfig.load(), provider_factory=create_provider_factory()
+        )
+        world.state = ConsoleState(
+            sessions=world.sessions, start_time=0.0, conversation_log=world.log
+        )
         world.state.context_builder = old.context_builder
         world.state._hook_store = None
-        world.http.app['state'] = world.state
-        await ask('[q5] After restart?')
-        assert FIRST_SECRET in world.handed('[q5]')
+        world.http.app["state"] = world.state
+        await ask("[q5] After restart?")
+        assert FIRST_SECRET in world.handed("[q5]")
         world.was_asked.clear()
         world.hold.clear()
-        inflight = asyncio.create_task(ask('[q6] Captured old round?'))
+        inflight = asyncio.create_task(ask("[q6] Captured old round?"))
         await asyncio.wait_for(world.was_asked.wait(), 5)
-        status, changed = await world.choose(made['client_id'], {'persistent_sessions': False})
+        status, changed = await world.choose(
+            made["client_id"], {"persistent_sessions": False}
+        )
         assert status == 200
         world.hold.set()
         await inflight
-        assert FIRST_SECRET in world.handed('[q6]')
-        await ask('[q6b] New round answered alone?')
-        assert FIRST_SECRET not in world.handed('[q6b]')
-        await world.choose(made['client_id'], {'persistent_sessions': True})
-        await ask('[q7] New kept round?')
-        assert FIRST_SECRET not in world.handed('[q7]')
-        status, refused = await world.choose(made['client_id'], {'persistent_sessions': 'true'})
+        assert FIRST_SECRET in world.handed("[q6]")
+        await ask("[q6b] New round answered alone?")
+        assert FIRST_SECRET not in world.handed("[q6b]")
+        await world.choose(made["client_id"], {"persistent_sessions": True})
+        await ask("[q7] New kept round?")
+        assert FIRST_SECRET not in world.handed("[q7]")
+        status, refused = await world.choose(
+            made["client_id"], {"persistent_sessions": "true"}
+        )
         assert status == 400
-        status, wrong = await world.register(surfaces=('mcp',), persistent_sessions=True)
+        status, wrong = await world.register(
+            surfaces=("mcp",), persistent_sessions=True
+        )
         assert status == 400
         # Integration credentials never become owner settings permissions or private history readers.
-        response = await world.http.get('/api/chat/sessions', headers={'Authorization': 'Bearer ' + made['token']})
-        assert response.status in {401,403}
+        response = await world.http.get(
+            "/api/chat/sessions", headers={"Authorization": "Bearer " + made["token"]}
+        )
+        assert response.status in {401, 403}
         # Integration credentials never become owner settings permissions.
-        response = await world.http.post(CLIENTS + '/' + made['client_id'] + '/persistent-sessions', json={'persistent_sessions':False}, headers={'Authorization': 'Bearer ' + made['token']})
-        assert response.status in {401,403}
+        response = await world.http.post(
+            CLIENTS + "/" + made["client_id"] + "/persistent-sessions",
+            json={"persistent_sessions": False},
+            headers={"Authorization": "Bearer " + made["token"]},
+        )
+        assert response.status in {401, 403}
         with pytest.raises(APIStatusError):
-            await sdk.chat.completions.create(model='other-agent', messages=[{'role':'user','content':'No privilege widening'}])
-        assert clients.load_clients()[made['client_id']].conversation_round == 2
+            await sdk.chat.completions.create(
+                model="other-agent",
+                messages=[{"role": "user", "content": "No privilege widening"}],
+            )
+        assert clients.load_clients()[made["client_id"]].conversation_round == 2
     finally:
-        if sdk is not None: await sdk.close()
+        if sdk is not None:
+            await sdk.close()
         await world.close()
         caps.reset_for_tests()
 
 
 @pytest.mark.asyncio
-async def test_actual_sdk_unfinished_restart_toggle_and_private_client_consumers(tmp_path, monkeypatch):
-    monkeypatch.setenv('GIDEON_HOME', str(tmp_path / 'home'))
-    monkeypatch.setenv('GIDEON_WORKSPACE', str(tmp_path / 'workspace'))
+async def test_actual_sdk_unfinished_restart_toggle_and_private_client_consumers(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("GIDEON_WORKSPACE", str(tmp_path / "workspace"))
     for surface in _SURFACES:
-        monkeypatch.delenv(f'GIDEON_INBOUND_{surface}_TOKEN', raising=False)
+        monkeypatch.delenv(f"GIDEON_INBOUND_{surface}_TOKEN", raising=False)
     caps.reset_for_tests()
     world = _World(tmp_path, monkeypatch)
     await world.start()
@@ -320,82 +466,136 @@ async def test_actual_sdk_unfinished_restart_toggle_and_private_client_consumers
     try:
         status, made = await world.register(persistent_sessions=True, agent=AGENT)
         assert status == 200, made
-        sdk = AsyncOpenAI(api_key=made['token'], base_url=str(world.http.make_url('/v1')), max_retries=0)
+        sdk = AsyncOpenAI(
+            api_key=made["token"],
+            base_url=str(world.http.make_url("/v1")),
+            max_retries=0,
+        )
+
         async def ask(text, user=TAG):
-            reply = await sdk.chat.completions.create(model=AGENT, messages=[{'role': 'user', 'content': text}], user=user)
+            reply = await sdk.chat.completions.create(
+                model=AGENT, messages=[{"role": "user", "content": text}], user=user
+            )
             await world.settled()
             return reply
+
         await ask(FIRST)
         # Drain native sessions, create a new ConsoleState on the same durable native history.
         old = world.state
         await world.sessions.close_all()
-        world.sessions = ConversationDirectory(AppConfig.load(), provider_factory=create_provider_factory())
-        world.state = ConsoleState(sessions=world.sessions, start_time=0.0, conversation_log=world.log)
+        world.sessions = ConversationDirectory(
+            AppConfig.load(), provider_factory=create_provider_factory()
+        )
+        world.state = ConsoleState(
+            sessions=world.sessions, start_time=0.0, conversation_log=world.log
+        )
         world.state.context_builder = old.context_builder
         world.state._hook_store = None
-        world.http.app['state'] = world.state
-        await ask('[q5] After restart?')
-        assert FIRST_SECRET in world.handed('[q5]')
+        world.http.app["state"] = world.state
+        await ask("[q5] After restart?")
+        assert FIRST_SECRET in world.handed("[q5]")
         world.was_asked.clear()
         world.hold.clear()
-        inflight = asyncio.create_task(ask('[q6] Captured old round?'))
+        inflight = asyncio.create_task(ask("[q6] Captured old round?"))
         await asyncio.wait_for(world.was_asked.wait(), 5)
-        status, changed = await world.choose(made['client_id'], {'persistent_sessions': False})
+        status, changed = await world.choose(
+            made["client_id"], {"persistent_sessions": False}
+        )
         assert status == 200
         world.hold.set()
         await inflight
-        assert FIRST_SECRET in world.handed('[q6]')
-        await ask('[q6b] New round answered alone?')
-        assert FIRST_SECRET not in world.handed('[q6b]')
-        await world.choose(made['client_id'], {'persistent_sessions': True})
-        await ask('[q7] New kept round?')
-        assert FIRST_SECRET not in world.handed('[q7]')
-        status, refused = await world.choose(made['client_id'], {'persistent_sessions': 'true'})
+        assert FIRST_SECRET in world.handed("[q6]")
+        await ask("[q6b] New round answered alone?")
+        assert FIRST_SECRET not in world.handed("[q6b]")
+        await world.choose(made["client_id"], {"persistent_sessions": True})
+        await ask("[q7] New kept round?")
+        assert FIRST_SECRET not in world.handed("[q7]")
+        status, refused = await world.choose(
+            made["client_id"], {"persistent_sessions": "true"}
+        )
         assert status == 400
-        status, wrong = await world.register(surfaces=('mcp',), persistent_sessions=True)
+        status, wrong = await world.register(
+            surfaces=("mcp",), persistent_sessions=True
+        )
         assert status == 400
         # Integration credentials never become owner settings permissions or private history readers.
-        response = await world.http.get('/api/chat/sessions', headers={'Authorization': 'Bearer ' + made['token']})
-        assert response.status in {401,403}
+        response = await world.http.get(
+            "/api/chat/sessions", headers={"Authorization": "Bearer " + made["token"]}
+        )
+        assert response.status in {401, 403}
         # Integration credentials never become owner settings permissions.
-        response = await world.http.post(CLIENTS + '/' + made['client_id'] + '/persistent-sessions', json={'persistent_sessions':False}, headers={'Authorization': 'Bearer ' + made['token']})
-        assert response.status in {401,403}
+        response = await world.http.post(
+            CLIENTS + "/" + made["client_id"] + "/persistent-sessions",
+            json={"persistent_sessions": False},
+            headers={"Authorization": "Bearer " + made["token"]},
+        )
+        assert response.status in {401, 403}
         with pytest.raises(APIStatusError):
-            await sdk.chat.completions.create(model='other-agent', messages=[{'role':'user','content':'No privilege widening'}])
-        assert clients.load_clients()[made['client_id']].conversation_round == 2
-        await ask('[qOwner] Untrusted user field is not owner identity.', user='owner')
-        key = dialect.session_key_for(made['client_id'], 'owner', conversation_round=2)
+            await sdk.chat.completions.create(
+                model="other-agent",
+                messages=[{"role": "user", "content": "No privilege widening"}],
+            )
+        assert clients.load_clients()[made["client_id"]].conversation_round == 2
+        await ask("[qOwner] Untrusted user field is not owner identity.", user="owner")
+        key = dialect.session_key_for(made["client_id"], "owner", conversation_round=2)
         resident = world.state._sessions[key]
-        assert resident._initiator == {'kind':'bridge', 'name':made['client_id'], 'tenant':''}
-        ingress = next(row['meta']['ingress'] for row in reversed(resident.messages) if row.get('role') == 'user')
-        assert ingress['principal'] == resident._initiator
-        owner_history = await world.http.get('/api/chat/sessions', headers={'Authorization':'Bearer ' + world.owner})
+        assert resident._initiator == {
+            "kind": "bridge",
+            "name": made["client_id"],
+            "tenant": "",
+        }
+        ingress = next(
+            row["meta"]["ingress"]
+            for row in reversed(resident.messages)
+            if row.get("role") == "user"
+        )
+        assert ingress["principal"] == resident._initiator
+        owner_history = await world.http.get(
+            "/api/chat/sessions", headers={"Authorization": "Bearer " + world.owner}
+        )
         assert owner_history.status == 200
         # A registered native handler at the same path cannot acquire OpenAI delegation.
-        guarded = web.Application(middlewares=[token_auth.token_auth_middleware(port=0)])
-        guarded['state'] = world.state
-        guarded['port'] = 0
-        guarded['allowed_origins'] = set()
+        guarded = web.Application(
+            middlewares=[token_auth.token_auth_middleware(port=0)]
+        )
+        guarded["state"] = world.state
+        guarded["port"] = 0
+        guarded["allowed_origins"] = set()
         guarded.router.add_post(dialect.ROUTE_CHAT, ea.api_external_access)
         guarded.router.add_get(dialect.ROUTE_CHAT, dialect.handle_models)
-        guarded.router.add_get('/v1/private-data', ea.api_external_access)
+        guarded.router.add_get("/v1/private-data", ea.api_external_access)
         probe = TestClient(TestServer(guarded))
         await probe.start_server()
         try:
-            for method, path in [('POST', dialect.ROUTE_CHAT), ('GET', dialect.ROUTE_CHAT), ('GET','/v1/private-data')]:
-                response = await probe.request(method, path, headers={'Authorization':'Bearer ' + made['token']})
-                assert response.status in {401,403}
+            for method, path in [
+                ("POST", dialect.ROUTE_CHAT),
+                ("GET", dialect.ROUTE_CHAT),
+                ("GET", "/v1/private-data"),
+            ]:
+                response = await probe.request(
+                    method, path, headers={"Authorization": "Bearer " + made["token"]}
+                )
+                assert response.status in {401, 403}
         finally:
             await probe.close()
     finally:
-        if sdk is not None: await sdk.close()
+        if sdk is not None:
+            await sdk.close()
         await world.close()
         caps.reset_for_tests()
 
 
 def test_round_count_and_session_names_are_disjoint():
     assert clients._round_of(True) == 0
-    assert clients._round_of('2') == 0
+    assert clients._round_of("2") == 0
     assert clients._round_of(-1) == 0
     assert clients._round_of(2) == 2
-    assert len({dialect.session_key_for('client', 'tag', conversation_round=i) for i in range(4)}) == 4
+    assert (
+        len(
+            {
+                dialect.session_key_for("client", "tag", conversation_round=i)
+                for i in range(4)
+            }
+        )
+        == 4
+    )

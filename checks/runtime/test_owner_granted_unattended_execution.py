@@ -9,11 +9,13 @@ import pytest
 from aiohttp import ClientSession
 
 
-def test_heartbeat_tasks_wait_for_a_revision_specific_owner_grant(tmp_path, monkeypatch):
+def test_heartbeat_tasks_wait_for_a_revision_specific_owner_grant(
+    tmp_path, monkeypatch
+):
     from gideon.engine.heartbeat import (
+        _HEADER,
         HEARTBEAT_FILE,
         HeartbeatService,
-        _HEADER,
         allow_heartbeat_task,
         heartbeat_path,
         heartbeat_task_rows,
@@ -41,12 +43,18 @@ def test_heartbeat_tasks_wait_for_a_revision_specific_owner_grant(tmp_path, monk
     row = heartbeat_task_rows()[0]
     before = _HEADER
     after = before + "- Refresh my task list\n"
-    assert record_owner_file_added_tasks(
-        before, after, principal=Principal("owner", "customer")
-    ) == 1
-    assert record_owner_file_added_tasks(
-        before, after, principal=Principal("agent", "session")
-    ) == 0
+    assert (
+        record_owner_file_added_tasks(
+            before, after, principal=Principal("owner", "customer")
+        )
+        == 1
+    )
+    assert (
+        record_owner_file_added_tasks(
+            before, after, principal=Principal("agent", "session")
+        )
+        == 0
+    )
     assert allow_heartbeat_task(
         row["id"], seen=row["revision"], principal=Principal("owner", "customer").label
     )

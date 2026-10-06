@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-import pytest
 import json
+
+import pytest
 
 from gideon.core.config.edit_spec import security_control, security_loosening
 from gideon.extensions.apps.permissions import (
+    ROUTE_AUTHORITY,
     AppMay,
     OwnedTarget,
     OwnerOnly,
-    ROUTE_AUTHORITY,
     _owner_only_reason,
-    route_authority,
     app_request_denial,
+    route_authority,
 )
 
 
@@ -39,9 +40,10 @@ def test_owner_security_routes_override_manifest_api_prefixes(method, route, pat
 
 
 def test_route_catalog_is_method_and_template_specific_and_fails_closed():
-    assert route_authority("HEAD", "/api/providers/{name}/config") == ROUTE_AUTHORITY[
-        "GET /api/providers/{name}/config"
-    ]
+    assert (
+        route_authority("HEAD", "/api/providers/{name}/config")
+        == ROUTE_AUTHORITY["GET /api/providers/{name}/config"]
+    )
     assert isinstance(route_authority("PATCH", "/api/providers/{name}/config"), AppMay)
     assert route_authority("DELETE", "/api/providers/{name}/config") is None
     assert route_authority("GET", "") is None
@@ -56,9 +58,14 @@ def test_provider_routes_bind_the_target_to_the_calling_app():
     assert isinstance(policy, AppMay)
     assert policy.owns == OwnedTarget("name")
     assert route_authority("POST", "/api/providers/{name}/enable") is None
-    assert _owner_only_reason(
-        "/api/providers/model-app/instances", "GET", "/api/providers/{name}/instances"
-    ) == ""
+    assert (
+        _owner_only_reason(
+            "/api/providers/model-app/instances",
+            "GET",
+            "/api/providers/{name}/instances",
+        )
+        == ""
+    )
 
 
 @pytest.mark.parametrize(
@@ -103,7 +110,9 @@ def test_security_fields_are_not_grantable_to_app_config():
     assert any("owner-only security state" in error for error in manifest.validate())
 
 
-def test_real_app_identity_is_limited_by_method_route_and_owned_target(tmp_path, monkeypatch):
+def test_real_app_identity_is_limited_by_method_route_and_owned_target(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     app_dir = tmp_path / "apps" / "broad-app"
     app_dir.mkdir(parents=True)

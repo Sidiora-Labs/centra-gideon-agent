@@ -564,7 +564,12 @@ async def test_clause_4_revoke_locks_the_device_out_across_a_restart(_isolated) 
     token_auth.reset_secret_cache()
     valid, _user, reason = token_auth.validate_token(token, use_session_exp=True)
     assert valid is False, "a revoke that un-revokes on reboot is worse than no revoke"
-    assert reason in ("no active sessions", "token superseded", "session expired", "revoked")
+    assert reason in (
+        "no active sessions",
+        "token superseded",
+        "session expired",
+        "revoked",
+    )
     assert ss.device_sessions() == {}
 
 

@@ -17,8 +17,11 @@ def test_resolved_stop_record_reaches_session_detail(outcome, state):
     session.append("user", "Answer briefly", "msg msg-u")
     session.append("assistant", "Partial answer", "msg msg-a")
     stop = {
-        "kind": "stop_event", "id": "stop-source-1", "state": "stopping",
-        "outcome": None, "ts_start": "2026-09-26T00:00:00+00:00",
+        "kind": "stop_event",
+        "id": "stop-source-1",
+        "state": "stopping",
+        "outcome": None,
+        "ts_start": "2026-09-26T00:00:00+00:00",
     }
     session._stop_event_id = stop["id"]
     serialized = json.dumps(stop)

@@ -6,8 +6,8 @@ import re
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-
 from chat_test_helpers import _make_state
+
 from gideon.interfaces.dashboard.handlers.sessions import (
     api_approval_resolve,
     api_approvals,
@@ -32,11 +32,16 @@ async def test_revision_targets_one_native_approval_and_rejects_reused_id(tmp_pa
     app.router.add_post("/api/approvals/{id}/{action}", api_approval_resolve)
 
     async with TestClient(TestServer(app)) as client:
-        first_request = asyncio.create_task(state.request_approval(
-            "native-approval-7", "dashboard", "send_message",
-            tool_input='{"to":"room-a","text":"first request"}',
-            tool_purpose="Send the requested first message", session="chat-native-7",
-        ))
+        first_request = asyncio.create_task(
+            state.request_approval(
+                "native-approval-7",
+                "dashboard",
+                "send_message",
+                tool_input='{"to":"room-a","text":"first request"}',
+                tool_purpose="Send the requested first message",
+                session="chat-native-7",
+            )
+        )
         first_native = await _wait_for_pending(state, "native-approval-7")
         first_revision = first_native["revision"]
         assert re.fullmatch(r"[a-f0-9]{32}", first_revision)
@@ -57,11 +62,16 @@ async def test_revision_targets_one_native_approval_and_rejects_reused_id(tmp_pa
         )
         assert duplicate.status == 404
 
-        second_request = asyncio.create_task(state.request_approval(
-            "native-approval-7", "dashboard", "delete_file",
-            tool_input='{"path":"/workspace/second.txt"}',
-            tool_purpose="Delete the second request target", session="chat-native-8",
-        ))
+        second_request = asyncio.create_task(
+            state.request_approval(
+                "native-approval-7",
+                "dashboard",
+                "delete_file",
+                tool_input='{"path":"/workspace/second.txt"}',
+                tool_purpose="Delete the second request target",
+                session="chat-native-8",
+            )
+        )
         second_native = await _wait_for_pending(state, "native-approval-7")
         second_revision = second_native["revision"]
         assert second_revision != first_revision
@@ -69,8 +79,11 @@ async def test_revision_targets_one_native_approval_and_rejects_reused_id(tmp_pa
         assert second_native["tool_input"] == '{"path":"/workspace/second.txt"}'
 
         concurrent_duplicate = await state.request_approval(
-            "native-approval-7", "dashboard", "overwrite_file",
-            tool_input='{"path":"/workspace/other.txt"}', session="chat-native-9",
+            "native-approval-7",
+            "dashboard",
+            "overwrite_file",
+            tool_input='{"path":"/workspace/other.txt"}',
+            session="chat-native-9",
         )
         assert concurrent_duplicate is False
         assert state._pending_approvals["native-approval-7"] is second_native

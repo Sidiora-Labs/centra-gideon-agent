@@ -8,7 +8,9 @@ from aiohttp.test_utils import TestClient, TestServer
 
 
 @pytest.mark.asyncio
-async def test_mcp_oauth_status_uses_authenticated_owner_route_without_returning_tokens(tmp_path, monkeypatch):
+async def test_mcp_oauth_status_uses_authenticated_owner_route_without_returning_tokens(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "gideon-home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -23,7 +25,10 @@ async def test_mcp_oauth_status_uses_authenticated_owner_route_without_returning
 
     from gideon.interfaces.dashboard.api_version_gate import api_version_middleware
     from gideon.interfaces.dashboard.handlers.mcp import api_mcp_oauth_status
-    from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
+    from gideon.interfaces.dashboard.token_auth import (
+        generate_token,
+        token_auth_middleware,
+    )
     from gideon.security import mcp_grants
     from gideon.security.approval_answer import OWNER, Principal
 
@@ -32,7 +37,9 @@ async def test_mcp_oauth_status_uses_authenticated_owner_route_without_returning
     app = web.Application(
         middlewares=[
             api_version_middleware(),
-            token_auth_middleware(internal_paths=frozenset(), mixed_internal_paths=frozenset(), port=0),
+            token_auth_middleware(
+                internal_paths=frozenset(), mixed_internal_paths=frozenset(), port=0
+            ),
         ]
     )
     app.router.add_get("/api/mcp/servers/{name}/oauth", api_mcp_oauth_status)
@@ -51,6 +58,9 @@ async def test_mcp_oauth_status_uses_authenticated_owner_route_without_returning
 
         denied = await client.get(
             "/api/mcp/servers/catalog-index/oauth",
-            headers={"Authorization": f"Bearer {app_token}", "X-Gideon-API-Version": "1"},
+            headers={
+                "Authorization": f"Bearer {app_token}",
+                "X-Gideon-API-Version": "1",
+            },
         )
         assert denied.status == 403

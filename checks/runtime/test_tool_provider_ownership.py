@@ -4,9 +4,9 @@ import asyncio
 
 from gideon.engine.agents.native.tools import InProcessMcpToolProvider
 from gideon.integrations.tool_providers.registry import (
+    list_providers,
     register_provider,
     resolve_tool_catalog,
-    list_providers,
     unregister_provider,
 )
 
@@ -47,7 +47,9 @@ def test_core_precedes_apps_and_app_winner_is_restart_order_independent() -> Non
                 owner_type=owner_type,
                 owner=owner,
                 instance_id=instance,
-                status_callback=lambda status, key=owner: statuses.__setitem__(key, status),
+                status_callback=lambda status, key=owner: statuses.__setitem__(
+                    key, status
+                ),
             )
         catalog = asyncio.run(resolve_tool_catalog([later, first, app, core]))
         core_names = {tool.name for tool in asyncio.run(core.list_tools())}

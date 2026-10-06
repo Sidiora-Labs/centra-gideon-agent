@@ -1,6 +1,12 @@
 """The run deliverable reader must confine reads to declared roots."""
 
-from gideon.automation.workflows.deliverable import NOT_WRITTEN, ROOT_RUN_DIR, Root, Roots, read_document
+from gideon.automation.workflows.deliverable import (
+    NOT_WRITTEN,
+    ROOT_RUN_DIR,
+    Root,
+    Roots,
+    read_document,
+)
 
 SECRET = "sk-ant-api03-" + ("A" * 20) + ("B" * 20) + ("C" * 15)
 

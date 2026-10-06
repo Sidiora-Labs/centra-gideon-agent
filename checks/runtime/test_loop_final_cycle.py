@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from gideon.automation.loop.tick import Action, StepConfig, TickConfig, TickState, evaluate
+from gideon.automation.loop.tick import (
+    Action,
+    StepConfig,
+    TickConfig,
+    TickState,
+    evaluate,
+)
 from gideon.automation.workflows.models import Node
 from gideon.automation.workflows.tick import loop_should_continue
 

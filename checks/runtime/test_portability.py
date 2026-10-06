@@ -1374,7 +1374,7 @@ class TestImportReadsTheWidenedExport:
 
 
 def test_archive_merge_uses_peer_arrival_policy_and_preserves_local_runtime_state(
-    tmp_path
+    tmp_path,
 ):
     target = tmp_path / "arrival-home"
     target.mkdir()
@@ -1388,9 +1388,7 @@ def test_archive_merge_uses_peer_arrival_policy_and_preserves_local_runtime_stat
         "run_owner_pid": 7331,
         "state": "running",
     }
-    (target / "triggers.json").write_text(
-        json.dumps({"triggers": [local_trigger]})
-    )
+    (target / "triggers.json").write_text(json.dumps({"triggers": [local_trigger]}))
     archive = tmp_path / "foreign-export.zip"
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr(

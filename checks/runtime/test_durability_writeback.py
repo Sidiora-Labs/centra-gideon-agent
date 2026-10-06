@@ -14,8 +14,7 @@ import threading
 import pytest
 
 from gideon.operations.durability import inventory as inv
-from gideon.operations.durability import record_files
-from gideon.operations.durability import writeback
+from gideon.operations.durability import record_files, writeback
 from gideon.operations.durability.shards import (
     _json_rows_from_entity_dir,
     _jsonl_rows_by_year,

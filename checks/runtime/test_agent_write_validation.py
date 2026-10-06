@@ -241,8 +241,14 @@ async def test_agents_directory_reports_active_and_running_sessions(home):
     app = web.Application()
     app["state"] = state
     try:
-        response = await api_gideon_agents(make_mocked_request("GET", "/api/agents", app=app))
-        profile = next(agent for agent in _body(response)["agents"] if agent["name"] == "file-helper")
+        response = await api_gideon_agents(
+            make_mocked_request("GET", "/api/agents", app=app)
+        )
+        profile = next(
+            agent
+            for agent in _body(response)["agents"]
+            if agent["name"] == "file-helper"
+        )
         assert profile["active_sessions"] == 2
         assert profile["running_sessions"] == 1
     finally:

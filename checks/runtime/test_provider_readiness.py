@@ -18,7 +18,8 @@ from gideon.integrations.llm.registry import ProviderEntry
 def acp_entry():
     import gideon.integrations.llm as llm_package
     from gideon.engine.agents import registry as agent_registry
-    from gideon.integrations.llm import acp_agent, registry as llm_registry
+    from gideon.integrations.llm import acp_agent
+    from gideon.integrations.llm import registry as llm_registry
     from gideon.interfaces.dashboard.handlers import providers
 
     previous_registry = llm_registry._default_registry
@@ -66,9 +67,9 @@ def _payload(response) -> dict:
 
 
 def test_listing_is_read_only_and_explicit_test_requires_output(acp_entry, monkeypatch):
-    from gideon.interfaces.dashboard.handlers import providers
     from gideon.extensions.providers.connection import get_connection_board
     from gideon.integrations.llm.registry import get_default_registry
+    from gideon.interfaces.dashboard.handlers import providers
 
     listing_entry = ProviderEntry(
         name="read-only-model-listing",

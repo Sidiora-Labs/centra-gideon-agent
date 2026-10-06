@@ -112,7 +112,9 @@ def test_unavailable_catalogue_is_named_and_reachable_results_remain(
         assert body["counts"]["catalog:reachable"] == 1
         assert body["installable_sources"] == 2
         (unreachable,) = [
-            item for item in body["unreachable"] if item["source"] == "catalog:unavailable"
+            item
+            for item in body["unreachable"]
+            if item["source"] == "catalog:unavailable"
         ]
         assert "connection was refused" in unreachable["reason"]
         assert str(tmp_path) not in json.dumps(body["unreachable"])

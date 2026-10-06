@@ -165,7 +165,9 @@ signal.signal(signal.SIGUSR1, enable_observer)
                 assert response.status == 200
                 assert result == {"ok": True, "status": "restarting"}
         except urllib.error.URLError as error:
-            raise AssertionError(f"restart endpoint was unavailable: {error}") from error
+            raise AssertionError(
+                f"restart endpoint was unavailable: {error}"
+            ) from error
 
     def trace_rows() -> list[dict]:
         if not trace.exists():
@@ -191,7 +193,9 @@ signal.signal(signal.SIGUSR1, enable_observer)
         first_retire = next(
             index for index, row in enumerate(rows) if row["event"] == "retire-finished"
         )
-        first_exec = next(index for index, row in enumerate(rows) if row["event"] == "exec")
+        first_exec = next(
+            index for index, row in enumerate(rows) if row["event"] == "exec"
+        )
         second_start = [
             index for index, row in enumerate(rows) if row["event"] == "start"
         ][1]
@@ -211,7 +215,9 @@ signal.signal(signal.SIGUSR1, enable_observer)
 
         post_restart(second["port"])
         return_code = process.wait(timeout=30)
-        assert return_code == 0, f"gateway exited {return_code}; output={''.join(output)}"
+        assert (
+            return_code == 0
+        ), f"gateway exited {return_code}; output={''.join(output)}"
         rows = trace_rows()
         assert [row["event"] for row in rows].count("stop-sent") == 1
         assert [row["event"] for row in rows].count("exec") == 1

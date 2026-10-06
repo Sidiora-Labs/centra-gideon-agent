@@ -283,7 +283,9 @@ class TestBothEndsAgree:
             assert loaded.can_mark_complete()
             assert loaded.prerequisite_ids() == ["task-one", "task-two"]
 
-    @pytest.mark.parametrize("value", ["plain text", "[broken", '{"key": "value"}', '"text"', "42", "null"])
+    @pytest.mark.parametrize(
+        "value", ["plain text", "[broken", '{"key": "value"}', '"text"', "42", "null"]
+    )
     def test_non_array_text_keeps_its_original_list_field_meaning(self, value):
         assert coerce_task_field("labels", value) == [value]
         assert coerce_task_field("exit_criteria", value)[0]["description"] == value

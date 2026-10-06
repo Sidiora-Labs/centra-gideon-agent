@@ -23,9 +23,21 @@ async def test_saved_deck_renders_real_version_bound_slide_png(tmp_path, monkeyp
     monkeypatch.setattr(registry, "get_provider", lambda name=None: provider)
     figure = io.BytesIO()
     Image.new("RGB", (320, 200), "#2879bb").save(figure, format="PNG")
-    image = provider.create_binary(name="Figure", data=figure.getvalue(), mime="image/png")
-    model = DeckModel(slides=[Slide(title="Finding", bullets=[Bullet("Source result " * 150)], artifact_slug=image.slug)])
-    deck = provider.create_binary(name="Report deck", data=render_pptx(model), mime=MIME, kind="pptx")
+    image = provider.create_binary(
+        name="Figure", data=figure.getvalue(), mime="image/png"
+    )
+    model = DeckModel(
+        slides=[
+            Slide(
+                title="Finding",
+                bullets=[Bullet("Source result " * 150)],
+                artifact_slug=image.slug,
+            )
+        ]
+    )
+    deck = provider.create_binary(
+        name="Report deck", data=render_pptx(model), mime=MIME, kind="pptx"
+    )
 
     app = web.Application()
     app["state"] = SimpleNamespace(_restricted_keys=set(), _sessions={})
@@ -52,7 +64,11 @@ async def test_saved_deck_renders_real_version_bound_slide_png(tmp_path, monkeyp
 
         again = await client.post(url, headers={"If-Match": "1"})
         assert (await again.json())["slides"][0]["slug"] == preview["slug"]
-        provider.update_binary(deck.slug, data=render_pptx(DeckModel(slides=[Slide(title="Revised")])), mime=MIME)
+        provider.update_binary(
+            deck.slug,
+            data=render_pptx(DeckModel(slides=[Slide(title="Revised")])),
+            mime=MIME,
+        )
         stale = await client.post(url, headers={"If-Match": "1"})
         assert stale.status == 409
         revised = await client.post(url, headers={"If-Match": "2"})

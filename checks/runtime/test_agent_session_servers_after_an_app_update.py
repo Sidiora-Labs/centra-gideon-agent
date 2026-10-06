@@ -25,13 +25,18 @@ def _source(tmp_path: Path, version: str, subdir: str) -> Path:
     root = tmp_path / subdir / "session-server-app"
     root.mkdir(parents=True)
     (root / "app.json").write_text(
-        json.dumps({
-            "name": "session-server-app",
-            "version": version,
-            "displayName": "Session Server",
-            "description": "An installed app with a live server process.",
-            "provider": {"type": "channel", "implementation": "provider:create_provider"},
-        }),
+        json.dumps(
+            {
+                "name": "session-server-app",
+                "version": version,
+                "displayName": "Session Server",
+                "description": "An installed app with a live server process.",
+                "provider": {
+                    "type": "channel",
+                    "implementation": "provider:create_provider",
+                },
+            }
+        ),
         encoding="utf-8",
     )
     (root / "provider.py").write_text(
@@ -82,7 +87,9 @@ def test_disabled_backend_stays_held_across_a_watchdog_sweep(tmp_path, monkeypat
 
     try:
         assert app_manager.install(source).ok
-        live_manifest = AppManifest.from_json_file(manager.app_dir(app_name) / "app.json")
+        live_manifest = AppManifest.from_json_file(
+            manager.app_dir(app_name) / "app.json"
+        )
         supervisor = backend_runtime.get_backend_supervisor()
         process = supervisor.get(app_name)
         assert process is not None and process.is_alive()

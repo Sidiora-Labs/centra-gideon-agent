@@ -8,7 +8,9 @@ import pytest
 from gideon.extensions.apps.staging import UnsafeBundleError, survey
 
 
-def test_outbound_link_is_refused_and_internal_link_stays_a_link(tmp_path: Path) -> None:
+def test_outbound_link_is_refused_and_internal_link_stays_a_link(
+    tmp_path: Path,
+) -> None:
     outside = tmp_path / "outside-secret"
     outside.write_text("must not be read", encoding="utf-8")
     app = tmp_path / "app"

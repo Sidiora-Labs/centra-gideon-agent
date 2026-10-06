@@ -40,9 +40,7 @@ def test_cron_wall_clock_gap_and_fold_vectors():
 
     # A scheduled 02:30 does not exist on this date; it advances to the 03:00 gap edge.
     spring_gap = _clock("30 2 * * *")
-    assert next_fire(spring_gap, now=_epoch(2026, 3, 8, 6, 59)) == _epoch(
-        2026, 3, 8, 7
-    )
+    assert next_fire(spring_gap, now=_epoch(2026, 3, 8, 6, 59)) == _epoch(2026, 3, 8, 7)
 
     # The repeated 01:30 resolves to its first instant. Re-arming after that fire,
     # even while the local clock is in the second 01:00 hour, skips the duplicate.

@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 
 from gideon.extensions.apps.app_manager import _run_hook
-from gideon.integrations.mcp_discovery import McpServerInfo, probe_server
 from gideon.integrations.local_models.sidecar import SidecarInstall
+from gideon.integrations.mcp_discovery import McpServerInfo, probe_server
 from gideon.security.sandbox import build_child_env
 
 _SENTINELS = {
@@ -26,8 +26,12 @@ def _plant(monkeypatch, home: Path) -> None:
     monkeypatch.setenv("GIDEON_HOME", str(home / ".gideon"))
     for name, value in _SENTINELS.items():
         monkeypatch.setenv(name, value)
-    monkeypatch.setenv("HTTPS_PROXY", f"http://operator:{_PROXY_SECRET}@proxy.example.test:3128")
-    monkeypatch.setenv("PIP_INDEX_URL", "https://installer:index-secret@pypi.example.test/simple")
+    monkeypatch.setenv(
+        "HTTPS_PROXY", f"http://operator:{_PROXY_SECRET}@proxy.example.test:3128"
+    )
+    monkeypatch.setenv(
+        "PIP_INDEX_URL", "https://installer:index-secret@pypi.example.test/simple"
+    )
     monkeypatch.setenv("PIP_TRUSTED_HOST", "pypi.example.test")
     monkeypatch.setenv("PIP_TARGET", str(home / "elsewhere"))
     monkeypatch.setenv("npm_config_registry", "https://npm.example.test/")
@@ -50,7 +54,9 @@ def _recorder_script(path: Path) -> str:
     )
 
 
-def test_child_builder_keeps_safe_installer_settings_and_strips_logins(monkeypatch, tmp_path):
+def test_child_builder_keeps_safe_installer_settings_and_strips_logins(
+    monkeypatch, tmp_path
+):
     _plant(monkeypatch, tmp_path / "home")
     pip_env = build_child_env(site="test-pip", installer="pip")
     npm_env = build_child_env(site="test-npm", installer="npm")
@@ -63,7 +69,9 @@ def test_child_builder_keeps_safe_installer_settings_and_strips_logins(monkeypat
     assert "npm_config_registry" not in build_child_env(site="test-acp")
 
 
-def test_app_setup_hook_runs_with_the_allowlisted_child_environment(monkeypatch, tmp_path):
+def test_app_setup_hook_runs_with_the_allowlisted_child_environment(
+    monkeypatch, tmp_path
+):
     home = tmp_path / "home"
     home.mkdir()
     _plant(monkeypatch, home)
@@ -76,22 +84,24 @@ def test_app_setup_hook_runs_with_the_allowlisted_child_environment(monkeypatch,
     _assert_safe(seen)
 
 
-def test_sidecar_install_child_gets_pip_settings_without_gateway_secrets(monkeypatch, tmp_path):
+def test_sidecar_install_child_gets_pip_settings_without_gateway_secrets(
+    monkeypatch, tmp_path
+):
     home = tmp_path / "home"
     home.mkdir()
     _plant(monkeypatch, home)
     record = tmp_path / "sidecar-env.json"
     installer = SidecarInstall("probe", venv=tmp_path / "venv")
-    installer._run(
-        [sys.executable, "-c", _recorder_script(record)], timeout=15
-    )
+    installer._run([sys.executable, "-c", _recorder_script(record)], timeout=15)
     seen = json.loads(record.read_text(encoding="utf-8"))
     _assert_safe(seen)
     assert seen["PIP_INDEX_URL"] == "https://pypi.example.test/simple"
     assert "PIP_TARGET" not in seen
 
 
-def test_mcp_probe_child_gets_declared_values_without_gateway_secrets(monkeypatch, tmp_path):
+def test_mcp_probe_child_gets_declared_values_without_gateway_secrets(
+    monkeypatch, tmp_path
+):
     home = tmp_path / "home"
     home.mkdir()
     _plant(monkeypatch, home)

@@ -31,13 +31,23 @@ async def test_declined_gate_stops_following_stage():
                 {
                     "kind": "gate",
                     "id": "approval",
-                    "config": {"kind": "approval", "prompt": "Ship?", "timeout_secs": 0},
+                    "config": {
+                        "kind": "approval",
+                        "prompt": "Ship?",
+                        "timeout_secs": 0,
+                    },
                 },
-                {"kind": "transform", "id": "after", "config": {"expr": "must not run"}},
+                {
+                    "kind": "transform",
+                    "id": "after",
+                    "config": {"expr": "must not run"},
+                },
             ],
         },
     }
-    run = store.create(WorkflowRun(id="", workflow_name="terminal-gate", mode="background"))
+    run = store.create(
+        WorkflowRun(id="", workflow_name="terminal-gate", mode="background")
+    )
     store.write_spec(run.id, spec)
     controller = RunController(run, spec, services=EngineServices())
     assert await controller.run_to_completion(timeout=10) == RunStatus.NEEDS_INPUT

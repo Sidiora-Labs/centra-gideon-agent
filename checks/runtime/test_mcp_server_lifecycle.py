@@ -15,37 +15,59 @@ def test_server_credentials_are_owner_bound_and_purge_isolated(tmp_path, monkeyp
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("GIDEON_HOME", str(home))
 
-    from gideon.core.config.secret_refs import ForeignSecretReference, SecretOwner, purge
+    from gideon.core.config.secret_refs import (
+        ForeignSecretReference,
+        SecretOwner,
+        purge,
+    )
     from gideon.extensions.providers.mcp_instances import resolve_server_credentials
     from gideon.integrations.mcp_secret_refs import store_server_credentials
 
-    alpha = store_server_credentials("alpha", {
-        "url": "https://alpha.example.test/mcp",
-        "transport": "streamable_http",
-        "headers": {"Authorization": "Bearer alpha-secret"},
-        "env": {"SERVICE_TOKEN": "alpha-env-secret"},
-    })
-    beta = store_server_credentials("beta", {
-        "url": "https://beta.example.test/mcp",
-        "transport": "sse",
-        "headers": {"Authorization": "Bearer beta-secret"},
-        "env": {"SERVICE_TOKEN": "beta-env-secret"},
-    })
+    alpha = store_server_credentials(
+        "alpha",
+        {
+            "url": "https://alpha.example.test/mcp",
+            "transport": "streamable_http",
+            "headers": {"Authorization": "Bearer alpha-secret"},
+            "env": {"SERVICE_TOKEN": "alpha-env-secret"},
+        },
+    )
+    beta = store_server_credentials(
+        "beta",
+        {
+            "url": "https://beta.example.test/mcp",
+            "transport": "sse",
+            "headers": {"Authorization": "Bearer beta-secret"},
+            "env": {"SERVICE_TOKEN": "beta-env-secret"},
+        },
+    )
 
-    assert alpha["headers"]["Authorization"].startswith("{{secret:GIDEON_SECRET_MCP_ALPHA_")
-    assert beta["headers"]["Authorization"].startswith("{{secret:GIDEON_SECRET_MCP_BETA_")
-    assert resolve_server_credentials("alpha", alpha)["headers"]["Authorization"] == "Bearer alpha-secret"
+    assert alpha["headers"]["Authorization"].startswith(
+        "{{secret:GIDEON_SECRET_MCP_ALPHA_"
+    )
+    assert beta["headers"]["Authorization"].startswith(
+        "{{secret:GIDEON_SECRET_MCP_BETA_"
+    )
+    assert (
+        resolve_server_credentials("alpha", alpha)["headers"]["Authorization"]
+        == "Bearer alpha-secret"
+    )
     with pytest.raises(ForeignSecretReference):
         resolve_server_credentials("beta", {"headers": alpha["headers"]})
 
     purge([SecretOwner("MCP", "alpha").prefix])
-    assert resolve_server_credentials("beta", beta)["headers"]["Authorization"] == "Bearer beta-secret"
+    assert (
+        resolve_server_credentials("beta", beta)["headers"]["Authorization"]
+        == "Bearer beta-secret"
+    )
     with pytest.raises(ValueError):
         resolve_server_credentials("alpha", alpha)
 
 
 @pytest.mark.asyncio
-async def test_masked_provider_card_round_trip_preserves_owner_secret(tmp_path, monkeypatch):
+async def test_masked_provider_card_round_trip_preserves_owner_secret(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "gideon-home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -67,7 +89,9 @@ async def test_masked_provider_card_round_trip_preserves_owner_secret(tmp_path, 
                         "args": ["--header", f"Authorization: Bearer {secret}"],
                         "env": {"API_TOKEN": secret},
                     },
-                    "remote": {"url": f"https://gateway.example.test/path?token={secret}"},
+                    "remote": {
+                        "url": f"https://gateway.example.test/path?token={secret}"
+                    },
                 }
             }
         ),
@@ -109,7 +133,10 @@ async def test_masked_provider_card_round_trip_preserves_owner_secret(tmp_path, 
         assert "[REDACTED: credential]" in instance["config"]["command"]
         assert "[REDACTED: credential]" in instance["config"]["args"]
         revision = instance["revision"]
-        config = {**instance["config"], "args": instance["config"]["args"] + " --verbose"}
+        config = {
+            **instance["config"],
+            "args": instance["config"]["args"] + " --verbose",
+        }
 
         saved = await client.put(
             "/api/providers/mcp-tools/instances/cli",
@@ -124,7 +151,11 @@ async def test_masked_provider_card_round_trip_preserves_owner_secret(tmp_path, 
         from gideon.extensions.providers.mcp_instances import resolve_server_credentials
 
         assert resolve_server_credentials("cli", spec)["env"]["API_TOKEN"] == secret
-        assert spec["args"] == ["--header", f"Authorization: Bearer {secret}", "--verbose"]
+        assert spec["args"] == [
+            "--header",
+            f"Authorization: Bearer {secret}",
+            "--verbose",
+        ]
 
         stale = await client.put(
             "/api/providers/mcp-tools/instances/cli",

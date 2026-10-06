@@ -4,16 +4,18 @@ import asyncio
 import json
 import time
 from pathlib import Path
+
 import pytest
-from gideon.integrations.telegram.format import to_markdown_v2, split_text
-from gideon.integrations.telegram.transport import (
-    normalize,
-    mentioned,
-    TelegramTransport,
-)
-from gideon.integrations.telegram.delivery import PendingApproval, thread_options
-from gideon.integrations.telegram.api import TelegramAPI, TelegramError
+
 from gideon.integrations.channel_trust import allow_sender, deny_sender
+from gideon.integrations.telegram.api import TelegramAPI, TelegramError
+from gideon.integrations.telegram.delivery import PendingApproval, thread_options
+from gideon.integrations.telegram.format import split_text, to_markdown_v2
+from gideon.integrations.telegram.transport import (
+    TelegramTransport,
+    mentioned,
+    normalize,
+)
 
 VECTORS = json.loads(
     (Path(__file__).parent / "fixtures/telegram/agentcore.json").read_text()
@@ -131,8 +133,8 @@ async def test_write_guard_blocks_all_outbound_api_methods(monkeypatch):
 
 def test_attachment_metadata_reaches_real_conversation(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.interfaces.dashboard.state import ConsoleState
     from gideon.integrations.channel_inbound import _SessionIngress
+    from gideon.interfaces.dashboard.state import ConsoleState
 
     state = ConsoleState(None, time.time())
     cm = normalize(
@@ -169,6 +171,7 @@ def test_native_manifest_has_masked_token_and_no_model_selection():
 
 def test_http_logs_redact_bot_token():
     import logging
+
     from gideon.integrations.telegram.api import TelegramLogFilter
 
     record = logging.LogRecord(
@@ -187,8 +190,8 @@ def test_http_logs_redact_bot_token():
 
 def test_topic_restore_is_durable_and_cannot_cross_owner_or_chat(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.interfaces.dashboard.state import ConsoleState
     from gideon.integrations.telegram.topics import TopicStore
+    from gideon.interfaces.dashboard.state import ConsoleState
 
     state = ConsoleState(None, time.time())
     store = TopicStore(tmp_path / "topics.json")
@@ -230,9 +233,9 @@ def test_topic_restore_is_durable_and_cannot_cross_owner_or_chat(tmp_path, monke
 def test_configured_group_access_never_grants_dm_access(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     from gideon.integrations.telegram.policy import (
-        settings,
-        configured_admission,
         command_allowed,
+        configured_admission,
+        settings,
     )
 
     config = settings(
@@ -302,6 +305,7 @@ async def test_typed_clarification_and_approval_require_bound_prompt(
 
 def test_network_fallback_preserves_tls_identity():
     import httpx
+
     from gideon.integrations.telegram.network import (
         _rewrite_request_for_ip,
         parse_fallback_ip_env,
@@ -321,8 +325,8 @@ def test_network_fallback_preserves_tls_identity():
 
 def test_raw_audio_is_marked_without_automatic_extraction(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
-    from gideon.interfaces.dashboard.state import ConsoleState
     from gideon.integrations.channel_inbound import _SessionIngress
+    from gideon.interfaces.dashboard.state import ConsoleState
 
     state = ConsoleState(None, time.time())
     cm = normalize(
@@ -370,6 +374,7 @@ async def test_webhook_authentication_and_durable_duplicate_receipt(
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
+
     from gideon.integrations import channel_delivery
     from gideon.integrations.telegram.webhook import receive_webhook
 
@@ -473,31 +478,32 @@ def test_multiple_bots_reject_ambiguous_tokens_and_webhooks():
 async def test_setup_pairing_code_redeems_once_and_replaces_old_code():
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
+
+    from gideon.integrations.channel_trust import is_allowed_sender, redeem_pairing_code
     from gideon.interfaces.dashboard.handlers.channel_trust import api_telegram_pairing
-    from gideon.integrations.channel_trust import redeem_pairing_code, is_allowed_sender
 
     app = web.Application()
-    app.router.add_post('/api/channels/telegram/pairing', api_telegram_pairing)
+    app.router.add_post("/api/channels/telegram/pairing", api_telegram_pairing)
     async with TestClient(TestServer(app)) as client:
-        response = await client.post('/api/channels/telegram/pairing')
+        response = await client.post("/api/channels/telegram/pairing")
         assert response.status == 200
-        assert response.headers['Cache-Control'] == 'no-store'
+        assert response.headers["Cache-Control"] == "no-store"
         first = await response.json()
-        assert len(first['code']) == 8 and first['code'].isdigit()
-        assert first['expires_in'] > 0
-        response = await client.post('/api/channels/telegram/pairing')
+        assert len(first["code"]) == 8 and first["code"].isdigit()
+        assert first["expires_in"] > 0
+        response = await client.post("/api/channels/telegram/pairing")
         second = await response.json()
-        assert not redeem_pairing_code('telegram', '773', first['code'])
-        assert redeem_pairing_code('telegram', '773', second['code'])
-        assert is_allowed_sender('telegram', '773')
-        assert not redeem_pairing_code('telegram', '774', second['code'])
+        assert not redeem_pairing_code("telegram", "773", first["code"])
+        assert redeem_pairing_code("telegram", "773", second["code"])
+        assert is_allowed_sender("telegram", "773")
+        assert not redeem_pairing_code("telegram", "774", second["code"])
 
 
 def test_telegram_reply_resolves_the_runners_history_session_key():
-    from gideon.interfaces.dashboard.state import ConsoleState
-    from gideon.interfaces.dashboard.chat_utils import _history_key_for
-    from gideon.integrations.telegram.manager import TelegramManager
     from gideon.integrations import channel_delivery
+    from gideon.integrations.telegram.manager import TelegramManager
+    from gideon.interfaces.dashboard.chat_utils import _history_key_for
+    from gideon.interfaces.dashboard.state import ConsoleState
 
     state = ConsoleState(None, time.time())
     session = state.get_or_create_session(app="telegram")
@@ -508,10 +514,23 @@ def test_telegram_reply_resolves_the_runners_history_session_key():
     try:
         assert state.channel_provider_for(session.key) == "telegram"
         assert state.channel_provider_for(_history_key_for(session.key)) == "telegram"
-        assert state.delivery_for(state.channel_provider_for(_history_key_for(session.key))).delivery is manager.delivery
+        assert (
+            state.delivery_for(
+                state.channel_provider_for(_history_key_for(session.key))
+            ).delivery
+            is manager.delivery
+        )
         session._app = ""
         from gideon.integrations.channel_inbound import _SessionIngress
-        message = normalize({"message_id": 7, "chat": {"id": 672, "type": "private"}, "from": {"id": 672}, "text": "hello"})
+
+        message = normalize(
+            {
+                "message_id": 7,
+                "chat": {"id": 672, "type": "private"},
+                "from": {"id": 672},
+                "text": "hello",
+            }
+        )
         assert _SessionIngress(state, "telegram", message, "hello").resolve() is session
         assert state.channel_provider_for(_history_key_for(session.key)) == "telegram"
         local = state.get_or_create_session()

@@ -35,7 +35,11 @@ class TestChatSession:
 
         assert first_turn == {"stream_epoch": epoch, "stream_turn": 1, "stream_seq": 0}
         assert first_chunk == {"stream_epoch": epoch, "stream_turn": 1, "stream_seq": 1}
-        assert second_chunk == {"stream_epoch": epoch, "stream_turn": 1, "stream_seq": 2}
+        assert second_chunk == {
+            "stream_epoch": epoch,
+            "stream_turn": 1,
+            "stream_seq": 2,
+        }
         assert next_turn == {"stream_epoch": epoch, "stream_turn": 2, "stream_seq": 0}
         assert restored._stream_epoch != epoch
         assert restored.stream_cursor() == {
@@ -1928,14 +1932,20 @@ class TestRunChatSegmentFlush:
         assert len(chunk_frames) == 4
         assert [frame["seq"] for frame in chunk_frames] == [1, 2, 3, 4]
         assert [frame["stream_seq"] for frame in chunk_frames] == [1, 2, 3, 4]
-        assert {frame["stream_epoch"] for frame in chunk_frames} == {session._stream_epoch}
+        assert {frame["stream_epoch"] for frame in chunk_frames} == {
+            session._stream_epoch
+        }
         assert {frame["stream_turn"] for frame in chunk_frames} == {1}
         assert session.stream_cursor() == {
             "stream_epoch": session._stream_epoch,
             "stream_turn": 1,
             "stream_seq": 4,
         }
-        assistant_meta = [message["meta"] for message in session.messages if message["role"] == "assistant"]
+        assistant_meta = [
+            message["meta"]
+            for message in session.messages
+            if message["role"] == "assistant"
+        ]
         assert max(meta["stream_seq"] for meta in assistant_meta) == 4
 
 
@@ -2199,7 +2209,9 @@ class TestPrepareMessagesInterleaved:
 
 class TestSessionStreamCursor:
     @pytest.mark.asyncio
-    async def test_detail_cursor_matches_full_paginated_and_terminal_snapshots(self, tmp_path):
+    async def test_detail_cursor_matches_full_paginated_and_terminal_snapshots(
+        self, tmp_path
+    ):
         state = _make_state(tmp_path)
         session = _ChatSession("stream-cursor")
         state._sessions[session.key] = session
@@ -2219,14 +2231,24 @@ class TestSessionStreamCursor:
                 assert response.status == 200
                 assert full["running"] is True
                 assert full["stream_cursor"] == {**cursor, "stream_seq": 2}
-                active = next(message for message in full["messages"] if message["role"] == "streaming")
+                active = next(
+                    message
+                    for message in full["messages"]
+                    if message["role"] == "streaming"
+                )
                 assert active["content"] == "haha"
                 assert active["meta"] == second
 
-                response = await client.get("/api/chat/sessions/stream-cursor?limit=1&before=2")
+                response = await client.get(
+                    "/api/chat/sessions/stream-cursor?limit=1&before=2"
+                )
                 partial = await response.json()
                 assert partial["stream_cursor"] == {**cursor, "stream_seq": 1}
-                streamed = next(message for message in partial["messages"] if message["role"] == "streaming")
+                streamed = next(
+                    message
+                    for message in partial["messages"]
+                    if message["role"] == "streaming"
+                )
                 assert streamed["content"] == "ha"
                 assert streamed["meta"]["stream_seq"] == 1
 

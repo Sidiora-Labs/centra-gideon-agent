@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -10,7 +10,9 @@ from pathlib import Path
 import pytest
 
 
-def test_active_home_and_default_workspace_follow_environment_after_import(tmp_path, monkeypatch):
+def test_active_home_and_default_workspace_follow_environment_after_import(
+    tmp_path, monkeypatch
+):
     from gideon.core.config import loader
 
     first = tmp_path / "first"
@@ -35,12 +37,17 @@ def test_configuration_home_allows_var_tree_without_creating_it(tmp_path):
     existed_before = candidate.exists()
     default = tmp_path / "default-home"
 
-    assert configuration_home(str(candidate), default, logging.getLogger(__name__)) == candidate.resolve()
+    assert (
+        configuration_home(str(candidate), default, logging.getLogger(__name__))
+        == candidate.resolve()
+    )
     assert candidate.exists() is existed_before
     assert not default.exists()
 
 
-def test_files_rejects_parent_and_symlink_escape_from_an_admitted_workspace(tmp_path, monkeypatch):
+def test_files_rejects_parent_and_symlink_escape_from_an_admitted_workspace(
+    tmp_path, monkeypatch
+):
     from gideon.interfaces.dashboard.handlers.files import _validate_dashboard_path
 
     home = tmp_path / "gideon"
@@ -54,13 +61,20 @@ def test_files_rejects_parent_and_symlink_escape_from_an_admitted_workspace(tmp_
     monkeypatch.setenv("GIDEON_HOME", str(home))
     monkeypatch.setenv("GIDEON_WORKSPACE", str(workspace))
 
-    assert _validate_dashboard_path(str(workspace / "note.md")) == str(workspace / "note.md")
-    assert _validate_dashboard_path(str(workspace / ".." / "outside" / "secret.txt")) is None
+    assert _validate_dashboard_path(str(workspace / "note.md")) == str(
+        workspace / "note.md"
+    )
+    assert (
+        _validate_dashboard_path(str(workspace / ".." / "outside" / "secret.txt"))
+        is None
+    )
     assert _validate_dashboard_path(str(link / "secret.txt")) is None
     assert _validate_dashboard_path(str(home / "config.json")) is None
 
 
-def test_outside_home_is_named_and_denied_until_config_allows_read(tmp_path, monkeypatch):
+def test_outside_home_is_named_and_denied_until_config_allows_read(
+    tmp_path, monkeypatch
+):
     from gideon.core.config.loader import AppConfig
     from gideon.core.outside_home import allowed_paths
     from gideon.engine.agent import _all_skill_paths
@@ -109,7 +123,7 @@ def test_generated_audio_and_sandbox_files_stay_in_home_and_clean_up(
     tmp_path, monkeypatch
 ):
     from gideon.integrations.tts.audio_output import AudioDestination
-    from gideon.integrations.voice_reply import _StitchTarget, _concat_manifest
+    from gideon.integrations.voice_reply import _concat_manifest, _StitchTarget
     from gideon.security.sandbox import _sandbox_temp_file, namespace_argv
 
     home = tmp_path / "gideon-home"
@@ -219,7 +233,9 @@ def test_namespace_launcher_cleans_scratch_after_real_child_exit(
         "'credential_visible':Path(sys.argv[1]).exists()}),flush=True); "
         "sys.exit(int(sys.argv[2]))"
     )
-    argv = namespace_argv([sys.executable, "-c", child, str(credential), str(exit_code)])
+    argv = namespace_argv(
+        [sys.executable, "-c", child, str(credential), str(exit_code)]
+    )
     launcher = Path(argv[1])
     try:
         result = subprocess.run(argv, capture_output=True, text=True, timeout=30)

@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 import gideon.extensions.skills.surfacing as surf
-from gideon.extensions.skills.surfacing import _EmbedCache, _semantic_standout, surface_skills
+from gideon.extensions.skills.surfacing import (
+    _EmbedCache,
+    _semantic_standout,
+    surface_skills,
+)
 
 
 def _skill(
@@ -118,13 +122,29 @@ def test_suppression_only_bites_matches():
 
 def test_clear_semantic_lead_excludes_short_ambiguous_reply():
     keys = (
-        "artifacts", "best-of-n", "check-work", "delegation", "document-authoring",
-        "editorial-document", "grill", "infographic-syntax", "knowledge-grounding",
-        "loop-worker", "memory-discipline", "gideon-api", "gideon-features",
-        "research-campaign", "task-and-project", "visual-output", "web-verify",
-        "imported/claude_code/feedsmith-release", "imported/claude_code/incident-writeup",
-        "imported/claude_code/postgres-migration-review", "imported/claude_code/trip-research",
-        "imported/claude_code/yt-transcript", "imported/codex/feedsmith-bench",
+        "artifacts",
+        "best-of-n",
+        "check-work",
+        "delegation",
+        "document-authoring",
+        "editorial-document",
+        "grill",
+        "infographic-syntax",
+        "knowledge-grounding",
+        "loop-worker",
+        "memory-discipline",
+        "gideon-api",
+        "gideon-features",
+        "research-campaign",
+        "task-and-project",
+        "visual-output",
+        "web-verify",
+        "imported/claude_code/feedsmith-release",
+        "imported/claude_code/incident-writeup",
+        "imported/claude_code/postgres-migration-review",
+        "imported/claude_code/trip-research",
+        "imported/claude_code/yt-transcript",
+        "imported/codex/feedsmith-bench",
     )
     measured = {
         "yes, go ahead": (
@@ -142,14 +162,18 @@ def test_clear_semantic_lead_excludes_short_ambiguous_reply():
     }
     outcomes = {
         message: _semantic_standout(
-            list(zip(keys, map(float, scores.split()), strict=True)), surf.DEFAULT_SEMANTIC_THRESHOLD
+            list(zip(keys, map(float, scores.split()), strict=True)),
+            surf.DEFAULT_SEMANTIC_THRESHOLD,
         )
         for message, scores in measured.items()
     }
 
     assert outcomes["yes, go ahead"].key == ""
     assert outcomes["It's ~/Notes/Garden/Home/kitchen-reno.md."].key == ""
-    assert outcomes["release feedsmith 0.9.0"].key == "imported/claude_code/feedsmith-release"
+    assert (
+        outcomes["release feedsmith 0.9.0"].key
+        == "imported/claude_code/feedsmith-release"
+    )
 
 
 class _StubEmbedder:

@@ -155,7 +155,9 @@ def test_the_store_is_capped(home):
     """Every issuer pool has its own durable bound."""
     now = time.time()
     ss.save_session_records(
-        _records(**{f"n{i}": now + 3600 + i for i in range(ss.POOL_LIMITS["token"] + 50)})
+        _records(
+            **{f"n{i}": now + 3600 + i for i in range(ss.POOL_LIMITS["token"] + 50)}
+        )
     )
     assert len(ss.load_sessions()) == ss.POOL_LIMITS["token"]
 
@@ -164,7 +166,9 @@ def test_the_cap_keeps_the_longest_lived(home):
     """A session about to expire anyway is the cheapest one to lose."""
     now = time.time()
     ss.save_session_records(
-        _records(**{f"n{i}": now + 100 + i for i in range(ss.POOL_LIMITS["token"] + 10)})
+        _records(
+            **{f"n{i}": now + 100 + i for i in range(ss.POOL_LIMITS["token"] + 10)}
+        )
     )
     kept = ss.load_sessions()
     assert f"n{ss.POOL_LIMITS['token'] + 9}" in kept, "the longest-lived survived"

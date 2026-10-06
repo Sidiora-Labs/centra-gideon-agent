@@ -99,7 +99,9 @@ async def test_allowed_folder_reaches_spawn_and_foreign_home_is_refused(
         assert expected in rejection["metadata"]["reason"]
         assert supervisor._running_count == 0
 
-    await invoke({"task_template": "resolved link", "cwd": str(allowed / "project-link")})
+    await invoke(
+        {"task_template": "resolved link", "cwd": str(allowed / "project-link")}
+    )
     linked = list(supervisor._agents.values())[-1]
     assert linked.cwd == str(project.resolve())
 

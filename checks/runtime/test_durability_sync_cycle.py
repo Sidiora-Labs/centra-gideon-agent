@@ -195,9 +195,7 @@ def test_encryption_salt_read_failure_is_reported_as_failed_pull(tmp_path, monke
     cursor_before = cursor_path.read_bytes()
     transport = SaltReadFailureTransport(remote)
 
-    report = run_sync_cycle(
-        transport, home, self_id="local", now="t", encrypt="on"
-    )
+    report = run_sync_cycle(transport, home, self_id="local", now="t", encrypt="on")
 
     assert report.ok is False
     assert report.error.startswith("pull: encryption metadata read failed:")

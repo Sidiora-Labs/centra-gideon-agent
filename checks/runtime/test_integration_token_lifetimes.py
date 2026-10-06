@@ -7,7 +7,9 @@ import time
 import pytest
 
 
-def test_surface_tokens_are_capped_replaced_revoked_and_digest_only(tmp_path, monkeypatch):
+def test_surface_tokens_are_capped_replaced_revoked_and_digest_only(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     from gideon.integrations.inbound import tokens
 
@@ -26,7 +28,11 @@ def test_surface_tokens_are_capped_replaced_revoked_and_digest_only(tmp_path, mo
     tokens.issue_surface_token("mcp", second, now=2_000)
     assert tokens.surface_token("mcp", first, now=2_001)["state"] == tokens.REPLACED
     assert not tokens.surface_usable("mcp", first, now=2_001)
-    row = next(row for row in tokens.surface_rows(now=2_002) if row["surface"] == "mcp" and row["issued_at"] == 2_000)
+    row = next(
+        row
+        for row in tokens.surface_rows(now=2_002)
+        if row["surface"] == "mcp" and row["issued_at"] == 2_000
+    )
     assert tokens.revoke_surface_id("mcp", int(row["issued_at"] * 1_000_000), now=2_003)
     assert not tokens.surface_usable("mcp", second, now=2_004)
     assert "revoked" in (tokens.refusal("mcp", second) or "")
@@ -36,7 +42,9 @@ def test_real_client_ledger_expires_and_revokes_across_lookup(tmp_path, monkeypa
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     from gideon.integrations.inbound import clients, tokens
 
-    client, bearer = clients.create_client("Calendar bridge", surfaces=["mcp"], ttl="1m")
+    client, bearer = clients.create_client(
+        "Calendar bridge", surfaces=["mcp"], ttl="1m"
+    )
     assert clients.lookup_by_token(bearer, "mcp")[0] == client
     registry = json.loads(tokens.registry_path().read_text(encoding="utf-8"))
     token_row = registry["tokens"][client.token_hash]

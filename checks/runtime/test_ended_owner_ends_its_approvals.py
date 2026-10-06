@@ -24,7 +24,9 @@ async def test_finished_chat_owner_withdraws_pending_approval(tmp_path, monkeypa
     session.messages.append(
         {
             "role": "permission",
-            "cls": json.dumps({"request_id": "tool-request", "asked_by": "agent:chat-ended"}),
+            "cls": json.dumps(
+                {"request_id": "tool-request", "asked_by": "agent:chat-ended"}
+            ),
         }
     )
     state.broadcast_ws(
@@ -38,12 +40,15 @@ async def test_finished_chat_owner_withdraws_pending_approval(tmp_path, monkeypa
     assert state.refuse_ended_owner(approval_id)
     assert approval_id not in state._pending_approvals
     assert state.ended_as(approval_id) == "cancelled"
-    assert state.resolve_approval_revision(
-        approval_id, True, entry["revision"], by=None
-    ) == "owner_ended"
+    assert (
+        state.resolve_approval_revision(approval_id, True, entry["revision"], by=None)
+        == "owner_ended"
+    )
 
 
-async def test_recognized_subagent_without_supervisor_fails_closed(tmp_path, monkeypatch):
+async def test_recognized_subagent_without_supervisor_fails_closed(
+    tmp_path, monkeypatch
+):
     state = _state(tmp_path, monkeypatch)
     state._pending_approvals["spawn:child-1"] = {
         "id": "spawn:child-1",
@@ -51,7 +56,9 @@ async def test_recognized_subagent_without_supervisor_fails_closed(tmp_path, mon
         "source": "subagent",
         "asked_by": "agent:child-1",
     }
-    state._approval_futures["spawn:child-1"] = asyncio.get_running_loop().create_future()
+    state._approval_futures["spawn:child-1"] = (
+        asyncio.get_running_loop().create_future()
+    )
 
     assert state.refuse_ended_owner("spawn:child-1")
     assert state.ended_as("spawn:child-1") == "cancelled"

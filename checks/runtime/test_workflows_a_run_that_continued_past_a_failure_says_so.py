@@ -43,7 +43,9 @@ async def _run(children: list[dict]) -> tuple[RunController, list[dict]]:
         "name": "terminal-sentence",
         "root": {"kind": "sequence", "id": "steps", "children": children},
     }
-    run = store.create(WorkflowRun(id="", workflow_name=spec["name"], mode="background"))
+    run = store.create(
+        WorkflowRun(id="", workflow_name=spec["name"], mode="background")
+    )
     store.write_spec(run.id, spec)
     published: list[dict] = []
 
@@ -81,7 +83,10 @@ async def test_failed_last_step_does_not_claim_a_continuation():
     controller, _ = await _run([_gate()])
 
     assert controller.run.status == RunStatus.FAILED
-    assert controller.run.error_message == "“source check” failed: gate condition is false: 1 == 2."
+    assert (
+        controller.run.error_message
+        == "“source check” failed: gate condition is false: 1 == 2."
+    )
 
 
 async def test_parallel_successful_sibling_is_not_reported_as_continued_work():
@@ -93,8 +98,13 @@ async def test_parallel_successful_sibling_is_not_reported_as_continued_work():
     controller, _ = await _run([parallel])
 
     assert controller.run.status == RunStatus.FAILED
-    assert controller.instances["root.children[0].children[1]"].state == InstanceState.DONE
-    assert controller.run.error_message == "“source check” failed: gate condition is false: 1 == 2."
+    assert (
+        controller.instances["root.children[0].children[1]"].state == InstanceState.DONE
+    )
+    assert (
+        controller.run.error_message
+        == "“source check” failed: gate condition is false: 1 == 2."
+    )
 
 
 async def test_tolerated_failure_is_omitted_and_clean_completion_has_no_sentence():
@@ -107,7 +117,9 @@ async def test_tolerated_failure_is_omitted_and_clean_completion_has_no_sentence
     assert clean.run.error_message == ""
 
 
-async def test_restart_review_history_keeps_the_actual_action_outcome_and_trace(tmp_path):
+async def test_restart_review_history_keeps_the_actual_action_outcome_and_trace(
+    tmp_path,
+):
     from gideon.automation.schedule_history import ExecutionJournal, ExecutionRecord
     from gideon.automation.triggers.review import record_review_outcome
 

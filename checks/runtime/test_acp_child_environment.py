@@ -24,7 +24,9 @@ def test_acp_child_is_allowlisted_with_sandbox_auto_and_off(monkeypatch, tmp_pat
     monkeypatch.setenv("ACME_DEPLOY_PAT", "planted-unknown-sentinel")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "planted-cloud-sentinel")
     monkeypatch.setenv("SSH_AUTH_SOCK", str(tmp_path / "agent.sock"))
-    monkeypatch.setenv("HTTPS_PROXY", "http://operator:proxy-sentinel@proxy.example.test:3128")
+    monkeypatch.setenv(
+        "HTTPS_PROXY", "http://operator:proxy-sentinel@proxy.example.test:3128"
+    )
     monkeypatch.setenv("npm_config_registry", "https://npm.example.test/")
     monkeypatch.setenv("npm_config__authToken", "planted-npm-token")
 

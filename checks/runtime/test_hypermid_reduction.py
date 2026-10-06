@@ -12,7 +12,9 @@ from gideon.hypermid.tools import (
 )
 
 
-def test_reduction_wire_adapter_keeps_recovery_identity_without_source_content() -> None:
+def test_reduction_wire_adapter_keeps_recovery_identity_without_source_content() -> (
+    None
+):
     scope = Scope(Id("owner-1"), Id("project-1"))
     trace = Trace(Id("trace-1"), Id("request-1"))
     targets = targets_from_tool_input(
@@ -85,7 +87,9 @@ def test_reduction_wire_adapter_keeps_recovery_identity_without_source_content()
     assert result.outcomes[1].reason_code == "active_tool_arc"
     assert result.outcomes[2].status == "queued"
 
-    unsafe = result.outcomes[0].marker | {"source_content": "authoritative source bytes"}
+    unsafe = result.outcomes[0].marker | {
+        "source_content": "authoritative source bytes"
+    }
     with pytest.raises(ReductionToolError, match="source content"):
         parse_reduction_result(
             {

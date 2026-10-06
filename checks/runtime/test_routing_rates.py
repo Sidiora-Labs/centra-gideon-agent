@@ -98,17 +98,30 @@ def test_local_provider_prices_zero_and_is_not_absent(tmp_path):
     original = get_default_registry()
     registry = ProviderRegistry()
     from gideon.integrations.llm.capabilities import ProviderCapability
-    registry.register_type(ProviderCapability(type="ollama", capabilities=frozenset(),
-        supports_streaming=True, supports_tools=True, supports_embeddings=True,
-        supports_vision=False, max_context_tokens=0, hosts_model=True,
-        default_endpoint="http://localhost:11434"), lambda **kwargs: None)
+
+    registry.register_type(
+        ProviderCapability(
+            type="ollama",
+            capabilities=frozenset(),
+            supports_streaming=True,
+            supports_tools=True,
+            supports_embeddings=True,
+            supports_vision=False,
+            max_context_tokens=0,
+            hosts_model=True,
+            default_endpoint="http://localhost:11434",
+        ),
+        lambda **kwargs: None,
+    )
     registry.register_entry(
         ProviderEntry(name="ollama-models", type="ollama", model="qwen3:8b")
     )
     set_default_registry(registry)
     try:
         rate = rate_for("ollama-models", "qwen3:8b", home=tmp_path)
-        cost = cost_for("ollama-models", "qwen3:8b", input_tokens=1_000_000, home=tmp_path)
+        cost = cost_for(
+            "ollama-models", "qwen3:8b", input_tokens=1_000_000, home=tmp_path
+        )
     finally:
         set_default_registry(original)
 

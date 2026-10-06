@@ -1,6 +1,5 @@
 from gideon.operations import self_update as su
 
-
 ORDERING = [
     ("0.3.0-rc.1", "0.3.0-rc.2"),
     ("0.3.0-rc.2", "0.3.0"),
@@ -27,12 +26,18 @@ def assert_update_offer_vectors() -> None:
         assert su.is_newer(newer, older)
         assert not su.is_newer(older, newer)
         assert not su.same_version(older, newer)
-        assert su.UpdateStatus("pip", older, {"tag": newer}, None).wire()[
-            "update_available"
-        ] is True
-        assert su.UpdateStatus("pip", newer, {"tag": older}, None).wire()[
-            "update_available"
-        ] is False
+        assert (
+            su.UpdateStatus("pip", older, {"tag": newer}, None).wire()[
+                "update_available"
+            ]
+            is True
+        )
+        assert (
+            su.UpdateStatus("pip", newer, {"tag": older}, None).wire()[
+                "update_available"
+            ]
+            is False
+        )
     for target, running, pin, moves in MOVES:
         assert su.moves_to(target, running, pin) is moves
         if not pin:
@@ -44,4 +49,3 @@ def assert_update_offer_vectors() -> None:
 def test_channels_only_move_forward_and_pins_allow_explicit_rollback() -> None:
     assert_update_offer_vectors()
     assert not su.moves_to("v0.1.2", "0.2.0", "0.1.3")
-

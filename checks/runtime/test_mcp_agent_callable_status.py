@@ -10,9 +10,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-
-_SERVER = textwrap.dedent(
-    """
+_SERVER = textwrap.dedent("""
     from typing import Any
     from mcp.server.fastmcp import FastMCP
 
@@ -30,8 +28,7 @@ _SERVER = textwrap.dedent(
 
     if __name__ == "__main__":
         mcp.run()
-    """
-)
+    """)
 
 
 async def _reset_client_registry() -> None:
@@ -53,10 +50,12 @@ def _configure_server(tmp_path, monkeypatch):
     spec = {"command": sys.executable, "args": [str(script)]}
     config = config_dir() / "mcp.json"
     config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text(json.dumps({"mcpServers": {"catalog-demo": spec}}), encoding="utf-8")
+    config.write_text(
+        json.dumps({"mcpServers": {"catalog-demo": spec}}), encoding="utf-8"
+    )
     from gideon.integrations.mcp_discovery import McpServerInfo
-    from gideon.security.approval_answer import OWNER, Principal
     from gideon.security import mcp_grants
+    from gideon.security.approval_answer import OWNER, Principal
 
     mcp_grants.give(
         McpServerInfo(
@@ -71,7 +70,9 @@ def _configure_server(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_all_mcp_status_routes_use_the_portable_agent_catalog(tmp_path, monkeypatch):
+async def test_all_mcp_status_routes_use_the_portable_agent_catalog(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
     await _reset_client_registry()
@@ -99,12 +100,16 @@ async def test_all_mcp_status_routes_use_the_portable_agent_catalog(tmp_path, mo
         assert not row["unservedReason"]
 
         response = await client.get("/api/mcp")
-        row = next(item for item in await response.json() if item["name"] == "catalog-demo")
+        row = next(
+            item for item in await response.json() if item["name"] == "catalog-demo"
+        )
         assert row["status"] == "ready"
         assert row["agentCallable"] is True
 
         response = await client.get("/api/mcp/probe")
-        row = next(item for item in await response.json() if item["name"] == "catalog-demo")
+        row = next(
+            item for item in await response.json() if item["name"] == "catalog-demo"
+        )
         assert row["status"] == "ready"
 
         response = await client.post("/api/mcp/probe/catalog-demo")
@@ -116,7 +121,9 @@ async def test_all_mcp_status_routes_use_the_portable_agent_catalog(tmp_path, mo
         document["mcpServers"]["catalog-demo"]["disabledTools"] = ["greet"]
         config.write_text(json.dumps(document), encoding="utf-8")
         response = await client.get("/api/mcp")
-        row = next(item for item in await response.json() if item["name"] == "catalog-demo")
+        row = next(
+            item for item in await response.json() if item["name"] == "catalog-demo"
+        )
         assert row["status"] == "unserved"
         assert row["healthStatus"] in {"ok", "outdated", "unknown"}
         assert row["agentCallable"] is False

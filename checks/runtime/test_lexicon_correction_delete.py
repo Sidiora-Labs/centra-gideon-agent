@@ -6,11 +6,13 @@ from aiohttp.test_utils import TestClient, TestServer
 
 
 @pytest.mark.asyncio
-async def test_delete_correction_preserves_neighboring_vocabulary(tmp_path, monkeypatch):
+async def test_delete_correction_preserves_neighboring_vocabulary(
+    tmp_path, monkeypatch
+):
     from gideon.cognition.lexicon import service
+    from gideon.cognition.lexicon.handlers import register_lexicon_routes
     from gideon.cognition.lexicon.service import LexiconService
     from gideon.cognition.lexicon.store import LexiconStore
-    from gideon.cognition.lexicon.handlers import register_lexicon_routes
 
     store = LexiconStore(str(tmp_path / "lexicon.db"))
     first = store.upsert_correction("Niro", "Nero")

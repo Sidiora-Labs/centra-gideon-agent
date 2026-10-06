@@ -9,7 +9,9 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 
-def test_terminal_creation_and_legacy_refusal_use_real_http_and_pty(tmp_path, monkeypatch):
+def test_terminal_creation_and_legacy_refusal_use_real_http_and_pty(
+    tmp_path, monkeypatch
+):
     from gideon.interfaces.dashboard.handlers import terminal
 
     home = tmp_path / "home"
@@ -38,7 +40,9 @@ def test_terminal_creation_and_legacy_refusal_use_real_http_and_pty(tmp_path, mo
 
     async def exercise():
         async with TestClient(TestServer(app)) as client:
-            created = await client.post("/api/terminal/sessions", json={"sandbox": "none"})
+            created = await client.post(
+                "/api/terminal/sessions", json={"sandbox": "none"}
+            )
             assert created.status == 200
             session_id = (await created.json())["session_id"]
             assert session_id.endswith("@none")

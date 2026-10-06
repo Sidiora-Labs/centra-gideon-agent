@@ -1,4 +1,5 @@
 """ACP terminal ownership through a real stdio server and local SDK requests."""
+
 import asyncio
 import json
 import os
@@ -26,7 +27,12 @@ def test_deny_selects_continuing_refusal_before_turn_end(dialect):
     assert dialect.select_reject_option_id(offered) == "rejectContinue"
     assert dialect.deny_ends_turn(offered) is False
     assert dialect.deny_ends_turn(offered[:1]) is True
-    assert dialect.select_reject_option_id([{"id": "denyAndAllow", "label": "Deny or allow"}]) == ""
+    assert (
+        dialect.select_reject_option_id(
+            [{"id": "denyAndAllow", "label": "Deny or allow"}]
+        )
+        == ""
+    )
 
 
 async def _read_terminal(stream):
@@ -39,7 +45,9 @@ async def _read_terminal(stream):
 
 
 @pytest.mark.asyncio
-async def test_terminal_error_and_partial_close_release_before_next_prompt(tmp_path, monkeypatch):
+async def test_terminal_error_and_partial_close_release_before_next_prompt(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
@@ -51,10 +59,36 @@ async def test_terminal_error_and_partial_close_release_before_next_prompt(tmp_p
         requests.append(text)
         response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
         await response.prepare(request)
+
         def frame(delta, finish=None):
-            return ("data: " + json.dumps({"id": "local", "object": "chat.completion.chunk", "created": 1, "model": "local-contract", "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}) + "\n\n").encode()
+            return (
+                "data: "
+                + json.dumps(
+                    {
+                        "id": "local",
+                        "object": "chat.completion.chunk",
+                        "created": 1,
+                        "model": "local-contract",
+                        "choices": [
+                            {"index": 0, "delta": delta, "finish_reason": finish}
+                        ],
+                    }
+                )
+                + "\n\n"
+            ).encode()
+
         try:
-            await response.write(frame({"content": "[Tool call interrupted]" if text == "slow" else "Local answer."}))
+            await response.write(
+                frame(
+                    {
+                        "content": (
+                            "[Tool call interrupted]"
+                            if text == "slow"
+                            else "Local answer."
+                        )
+                    }
+                )
+            )
             await asyncio.sleep(0.2 if text == "slow" else 0.01)
             await response.write(frame({}, "stop"))
             await response.write(b"data: [DONE]\n\n")
@@ -65,20 +99,31 @@ async def test_terminal_error_and_partial_close_release_before_next_prompt(tmp_p
     app = web.Application()
     app.router.add_post("/v1/chat/completions", completion)
     async with TestServer(app) as http:
-        program = "\n".join([
-            "import asyncio",
-            "from gideon.integrations.acp.server import AcpStdioServer",
-            "from gideon.integrations.llm.openai import OpenAIProvider",
-            "from gideon.integrations.llm.credentials import Credential",
-            "async def main():",
-            f"    provider = OpenAIProvider(model='local-contract', credential=Credential(name='local', kind='api_key', secret='local-only'), base_url={str(http.make_url('/v1'))!r})",
-            "    await provider.start()",
-            "    server = AcpStdioServer()",
-            "    server.sessions['local'] = provider",
-            "    await server.serve()",
-            "asyncio.run(main())",
-        ])
-        client = AcpClient(work_dir=tmp_path, command=[sys.executable, "-c", program], sandbox_mode="none", extra_env={"PYTHONPATH": str(Path(__file__).resolve().parents[2] / "runtime"), "GIDEON_HOME": str(home), "GIDEON_CREDENTIAL_BACKEND": "dotenv"})
+        program = "\n".join(
+            [
+                "import asyncio",
+                "from gideon.integrations.acp.server import AcpStdioServer",
+                "from gideon.integrations.llm.openai import OpenAIProvider",
+                "from gideon.integrations.llm.credentials import Credential",
+                "async def main():",
+                f"    provider = OpenAIProvider(model='local-contract', credential=Credential(name='local', kind='api_key', secret='local-only'), base_url={str(http.make_url('/v1'))!r})",
+                "    await provider.start()",
+                "    server = AcpStdioServer()",
+                "    server.sessions['local'] = provider",
+                "    await server.serve()",
+                "asyncio.run(main())",
+            ]
+        )
+        client = AcpClient(
+            work_dir=tmp_path,
+            command=[sys.executable, "-c", program],
+            sandbox_mode="none",
+            extra_env={
+                "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "runtime"),
+                "GIDEON_HOME": str(home),
+                "GIDEON_CREDENTIAL_BACKEND": "dotenv",
+            },
+        )
         retained = []
         try:
             await client._open_connection()
@@ -87,11 +132,15 @@ async def test_terminal_error_and_partial_close_release_before_next_prompt(tmp_p
             client._session_id = "local"
             first = client.stream_events("first", timeout=5)
             retained.append(first)
-            assert (await asyncio.wait_for(_read_terminal(first), 5))[-1].kind == EVENT_COMPLETE
+            assert (await asyncio.wait_for(_read_terminal(first), 5))[
+                -1
+            ].kind == EVENT_COMPLETE
             assert not client._session._turn_lock.locked()
             second = client.stream_events("second", timeout=5)
             retained.append(second)
-            assert (await asyncio.wait_for(_read_terminal(second), 5))[-1].kind == EVENT_COMPLETE
+            assert (await asyncio.wait_for(_read_terminal(second), 5))[
+                -1
+            ].kind == EVENT_COMPLETE
             failed = client._session.stream_command("/unsupported", timeout=5)
             retained.append(failed)
             with pytest.raises(AcpMethodNotFound):
@@ -107,7 +156,9 @@ async def test_terminal_error_and_partial_close_release_before_next_prompt(tmp_p
             assert client._session._owed_answer is None
             third = client.stream_events("third", timeout=5)
             retained.append(third)
-            assert (await asyncio.wait_for(_read_terminal(third), 5))[-1].kind == EVENT_COMPLETE
+            assert (await asyncio.wait_for(_read_terminal(third), 5))[
+                -1
+            ].kind == EVENT_COMPLETE
             assert requests == ["first", "second", "slow", "third"]
         finally:
             for stream in retained:

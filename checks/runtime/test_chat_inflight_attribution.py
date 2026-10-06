@@ -10,7 +10,9 @@ def test_skill_and_tool_records_stay_with_their_initiating_turn():
     session = _ChatSession("turn-attribution")
     session.append("user", "repeat this request", "msg msg-u", ts="old-turn")
     session.append("assistant", "Earlier answer", "msg msg-a")
-    session.append("inject", "repeat this request", "msg msg-inject", ts="automation-turn")
+    session.append(
+        "inject", "repeat this request", "msg msg-inject", ts="automation-turn"
+    )
 
     origin_index = in_flight_index(session, "repeat this request")
     assert origin_index == 2
@@ -29,7 +31,9 @@ def test_skill_and_tool_records_stay_with_their_initiating_turn():
     tool_row = session.messages[-1]
     tag_turn_message(tool_row, turn_id)
     session._skills_used = skills
-    _flush_segment(None, session, "The incident record is ready.", broadcast=False, turn_id=turn_id)
+    _flush_segment(
+        None, session, "The incident record is ready.", broadcast=False, turn_id=turn_id
+    )
 
     assert origin["meta"]["turn_id"] == "automation-turn"
     assert origin["meta"]["skills_used"] == skills

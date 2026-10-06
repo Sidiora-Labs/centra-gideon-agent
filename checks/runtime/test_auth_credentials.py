@@ -274,9 +274,14 @@ def test_disable_totp_deletes_and_audits_seed(_isolated_home, monkeypatch) -> No
     assert creds.status()["totp_enabled"] is True
     assert cred_store.get_credential(creds.TOTP_SECRET_KEY) == new_seed
     assert totp.verify_code(creds.totp_secret(), old_code, at=1_700_000_000) is False
-    assert totp.verify_code(
-        creds.totp_secret(), totp.code_now(new_seed, at=1_700_000_000), at=1_700_000_000
-    ) is True
+    assert (
+        totp.verify_code(
+            creds.totp_secret(),
+            totp.code_now(new_seed, at=1_700_000_000),
+            at=1_700_000_000,
+        )
+        is True
+    )
 
     audit_text = sel()._path.read_text(encoding="utf-8")
     events = [json.loads(line) for line in audit_text.splitlines()]

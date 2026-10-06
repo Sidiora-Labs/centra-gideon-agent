@@ -10,14 +10,14 @@ from gideon.automation.workflows import service, store, supervisor_policy
 from gideon.automation.workflows.context_block import active_workflows_block
 from gideon.automation.workflows.loop_view import list_loop_views
 from gideon.automation.workflows.models import RunStatus
+from gideon.automation.workflows.watchdog import WorkflowWatchdog
+from gideon.core.config.loader import AppConfig
+from gideon.engine.session import ConversationDirectory
 from gideon.interfaces.dashboard.handlers.loop_routes import (
     api_loop_create,
     api_loop_get,
     api_loop_list,
 )
-from gideon.automation.workflows.watchdog import WorkflowWatchdog
-from gideon.core.config.loader import AppConfig
-from gideon.engine.session import ConversationDirectory
 from gideon.interfaces.dashboard.state import ConsoleState
 
 TASK = "Write a three-item checklist for the weekly team update."
@@ -48,9 +48,7 @@ async def test_general_loop_policy_and_run_projection_use_the_real_store():
     assert run.extra["loop_name"] == "Weekly update checklist"
     assert run.policy_overrides == {"attended": False, "max_cycles": 1}
 
-    policy = supervisor_policy.policy_for_run(
-        "general", overrides=run.policy_overrides
-    )
+    policy = supervisor_policy.policy_for_run("general", overrides=run.policy_overrides)
     assert policy.hitl_posture.value == "afk"
     assert supervisor_policy.tick_config(policy).max_cycles == 1
 

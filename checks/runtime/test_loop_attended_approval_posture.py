@@ -11,10 +11,17 @@ from gideon.engine.session import ConversationDirectory
 from gideon.interfaces.dashboard.approval_state import chat_approval_id
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.approval_answer import YOU, agent, asker_of_chat
-from gideon.security.guardrails.policy import HEADLESS, INTERACTIVE, is_unattended_session, profile_for_session
+from gideon.security.guardrails.policy import (
+    HEADLESS,
+    INTERACTIVE,
+    is_unattended_session,
+    profile_for_session,
+)
 
 
-def test_loop_worker_rearms_with_current_attended_approval_posture(tmp_path, monkeypatch):
+def test_loop_worker_rearms_with_current_attended_approval_posture(
+    tmp_path, monkeypatch
+):
     tenant_a = tmp_path / "tenant-a"
     tenant_b = tmp_path / "tenant-b"
     home = tmp_path / "operator-home"
@@ -44,15 +51,27 @@ def test_loop_worker_rearms_with_current_attended_approval_posture(tmp_path, mon
     assert profile_for_session(main_key, unattended=True).name == HEADLESS.name
     assert profile_for_session("loop-deadbeef").name == HEADLESS.name
 
-    unattended = worker_approval_posture(Loop(id="deadbeef", name="U", kind="goal", task="t"))
+    unattended = worker_approval_posture(
+        Loop(id="deadbeef", name="U", kind="goal", task="t")
+    )
     attended = worker_approval_posture(loop)
-    assert (attended.trust, attended.unattended, attended.acp_mode, attended.approval_policy) == (
+    assert (
+        attended.trust,
+        attended.unattended,
+        attended.acp_mode,
+        attended.approval_policy,
+    ) == (
         False,
         False,
         "",
         "",
     )
-    assert (unattended.trust, unattended.unattended, unattended.acp_mode, unattended.approval_policy) == (
+    assert (
+        unattended.trust,
+        unattended.unattended,
+        unattended.acp_mode,
+        unattended.approval_policy,
+    ) == (
         True,
         True,
         "bypassPermissions",
@@ -82,9 +101,7 @@ def test_loop_worker_rearms_with_current_attended_approval_posture(tmp_path, mon
         future = asyncio.get_running_loop().create_future()
         session._approval_futures[request_id] = future
         created_by_app = str(
-            getattr(session, "_app", "")
-            or getattr(session, "created_by_app", "")
-            or ""
+            getattr(session, "_app", "") or getattr(session, "created_by_app", "") or ""
         )
         session.append(
             "permission",
@@ -113,9 +130,7 @@ def test_loop_worker_rearms_with_current_attended_approval_posture(tmp_path, mon
             session, request_id, "approved", by=agent("intruder")
         )
         assert not future.done()
-        assert state.resolve_session_approval(
-            session, request_id, "approved", by=YOU
-        )
+        assert state.resolve_session_approval(session, request_id, "approved", by=YOU)
         assert await future == "approved"
 
     asyncio.run(owner_approval_path())

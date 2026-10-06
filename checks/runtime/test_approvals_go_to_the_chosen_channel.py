@@ -13,11 +13,18 @@ def isolated_home(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_approval_channel_is_decoded_and_unavailable_origin_does_not_pick_another(isolated_home):
-    config = decode_configuration({"agent": {"approval_channel": "telegram"}}, AppConfig)
+def test_approval_channel_is_decoded_and_unavailable_origin_does_not_pick_another(
+    isolated_home,
+):
+    config = decode_configuration(
+        {"agent": {"approval_channel": "telegram"}}, AppConfig
+    )
     assert config.agent.approval_channel == "telegram"
 
-    previous = {name: channel_delivery.raw_delivery_for(name) for name in channel_delivery.registered_providers()}
+    previous = {
+        name: channel_delivery.raw_delivery_for(name)
+        for name in channel_delivery.registered_providers()
+    }
     channel_delivery.register(None)
     try:
         assert channel_delivery.approval_delivery("unavailable-origin") is None

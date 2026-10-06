@@ -7,8 +7,7 @@ import pytest
 from gideon.core.config.loader import AppConfig
 from gideon.engine.gateway import RuntimeCoordinator
 from gideon.engine.session import ConversationDirectory
-from gideon.integrations import channel_inbound
-from gideon.integrations import channel_trust
+from gideon.integrations import channel_inbound, channel_trust
 from gideon.integrations.channel_transports.base import ChannelMessage
 from gideon.interfaces.dashboard.state import ConsoleState
 
@@ -50,7 +49,9 @@ async def test_mid_turn_message_is_queued_once_with_provider_and_no_transcript_e
     session = channel_inbound._SessionIngress(
         state, provider, original, original.text
     ).resolve()
-    channel_inbound._SessionIngress(state, provider, original, original.text).record(session)
+    channel_inbound._SessionIngress(state, provider, original, original.text).record(
+        session
+    )
     before = list(session.messages)
 
     release = asyncio.Event()

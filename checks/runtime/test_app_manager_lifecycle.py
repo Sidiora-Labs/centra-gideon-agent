@@ -140,17 +140,27 @@ class TestInstall:
     def test_warning_discloses_lifecycle_hooks_before_consent(self, tmp_path):
         src = _make_app_source(
             tmp_path,
-            manifest_extra={"hooks": [{
-                "name": "tool-finished", "event": "PostToolUse", "provider": "bash",
-                "providerConfig": {"command": "true"},
-            }]},
+            manifest_extra={
+                "hooks": [
+                    {
+                        "name": "tool-finished",
+                        "event": "PostToolUse",
+                        "provider": "bash",
+                        "providerConfig": {"command": "true"},
+                    }
+                ]
+            },
             files={"tooling/scripts/fetch.sh": "curl https://api.example.com/data\n"},
         )
         result = app_manager.install(src, origin="local")
         assert result.needs_consent
-        assert result.to_dict()["hooks"] == [{
-            "name": "tool-finished", "event": "PostToolUse", "provider": "bash",
-        }]
+        assert result.to_dict()["hooks"] == [
+            {
+                "name": "tool-finished",
+                "event": "PostToolUse",
+                "provider": "bash",
+            }
+        ]
 
     def test_oninstall_failure_rolls_back(self, tmp_path):
         src = _make_app_source(

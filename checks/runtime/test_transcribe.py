@@ -388,7 +388,9 @@ class TestTranscriptContract:
 
 
 @pytest.mark.asyncio
-async def test_disabled_failure_is_distinct_from_empty_silence(tmp_path, monkeypatch, caplog):
+async def test_disabled_failure_is_distinct_from_empty_silence(
+    tmp_path, monkeypatch, caplog
+):
     import asyncio
     import traceback
     from pathlib import Path
@@ -404,9 +406,9 @@ async def test_disabled_failure_is_distinct_from_empty_silence(tmp_path, monkeyp
         transcript_text,
     )
     from gideon.integrations.transcribe import (
+        _require_transcript,
         _TranscriptAssembly,
         _TranscriptionRequest,
-        _require_transcript,
         transcribe_audio_detailed,
     )
 
@@ -434,10 +436,13 @@ async def test_disabled_failure_is_distinct_from_empty_silence(tmp_path, monkeyp
     assert transcript_text(silence) == ""
     assert transcript_text(TranscriptResult(text="  ")) == ""
     assert _require_transcript(silence, detailed=True) is silence
-    assert _require_transcript(
-        await bounded_transcription(asyncio.to_thread(audio.read_text), "local"),
-        detailed=False,
-    ) == ""
+    assert (
+        _require_transcript(
+            await bounded_transcription(asyncio.to_thread(audio.read_text), "local"),
+            detailed=False,
+        )
+        == ""
+    )
     assembly = _TranscriptAssembly()
     assembly.append(silence, 0)
     assembly.append(silence, 2)

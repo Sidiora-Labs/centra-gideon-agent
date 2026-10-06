@@ -7,7 +7,7 @@ from gideon.integrations.mcp_oauth import (
     consume_callback_state,
     issue_callback_state,
 )
-from gideon.security.approval_answer import Principal, OWNER
+from gideon.security.approval_answer import OWNER, Principal
 
 
 def test_oauth_callback_state_is_bound_to_owner_tenant_server_resource_and_revision():
@@ -93,7 +93,9 @@ def test_oauth_callback_state_rejects_tampering_and_non_owner_principals():
         )
 
 
-def test_oauth_endpoint_http_metadata_is_refused_by_production_transport(tmp_path, monkeypatch):
+def test_oauth_endpoint_http_metadata_is_refused_by_production_transport(
+    tmp_path, monkeypatch
+):
     import asyncio
 
     from mcp.client.auth.oauth2 import OAuthContext
@@ -107,7 +109,12 @@ def test_oauth_endpoint_http_metadata_is_refused_by_production_transport(tmp_pat
     server = "transport-check"
 
     async def denied_before_network():
-        for field in ("token_endpoint", "registration_endpoint", "revocation_endpoint", "introspection_endpoint"):
+        for field in (
+            "token_endpoint",
+            "registration_endpoint",
+            "revocation_endpoint",
+            "introspection_endpoint",
+        ):
             endpoints = {
                 "issuer": "https://issuer.example.test",
                 "authorization_endpoint": "https://issuer.example.test/authorize",
@@ -121,7 +128,9 @@ def test_oauth_endpoint_http_metadata_is_refused_by_production_transport(tmp_pat
             context = OAuthContext(
                 server_url=resource,
                 client_metadata=OAuthClientMetadata(
-                    redirect_uris=["https://dashboard.example.test/api/mcp/oauth/callback"]
+                    redirect_uris=[
+                        "https://dashboard.example.test/api/mcp/oauth/callback"
+                    ]
                 ),
                 storage=McpOAuthStorage(server, resource),
                 redirect_handler=None,
@@ -145,15 +154,24 @@ def test_oauth_endpoint_http_metadata_is_refused_by_production_transport(tmp_pat
 def test_resource_metadata_challenge_accepts_parameter_after_scheme():
     from gideon.integrations.mcp_client import _resource_metadata_from_challenge
 
-    assert _resource_metadata_from_challenge(
-        'Bearer resource_metadata="https://metadata.example/path"'
-    ) == "https://metadata.example/path"
-    assert _resource_metadata_from_challenge(
-        'Bearer realm="mcp", resource_metadata="https://metadata.example/path"'
-    ) == "https://metadata.example/path"
-    assert _resource_metadata_from_challenge(
-        'Bearer resource_metadata="http://metadata.example/path"'
-    ) == "http://metadata.example/path"
+    assert (
+        _resource_metadata_from_challenge(
+            'Bearer resource_metadata="https://metadata.example/path"'
+        )
+        == "https://metadata.example/path"
+    )
+    assert (
+        _resource_metadata_from_challenge(
+            'Bearer realm="mcp", resource_metadata="https://metadata.example/path"'
+        )
+        == "https://metadata.example/path"
+    )
+    assert (
+        _resource_metadata_from_challenge(
+            'Bearer resource_metadata="http://metadata.example/path"'
+        )
+        == "http://metadata.example/path"
+    )
 
 
 def test_rejected_oauth_issuer_cleans_exact_callback_future_and_task():

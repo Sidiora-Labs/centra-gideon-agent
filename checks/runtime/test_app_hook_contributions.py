@@ -6,7 +6,9 @@ from gideon.extensions.apps.manager import InstalledApp, _write_installed, app_d
 from gideon.extensions.apps.manifest import AppManifest
 
 
-def test_app_hooks_follow_installed_lifecycle_without_touching_user_hooks(tmp_path, monkeypatch):
+def test_app_hooks_follow_installed_lifecycle_without_touching_user_hooks(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     manifest = AppManifest.from_dict(
         {
@@ -28,10 +30,19 @@ def test_app_hooks_follow_installed_lifecycle_without_touching_user_hooks(tmp_pa
     app = app_dir("test-app")
     app.mkdir(parents=True)
     (app / "app.json").write_text(json.dumps(manifest.to_dict()), encoding="utf-8")
-    meta = InstalledApp(name="test-app", version="1.0.0", displayName="Test App", enabled=True)
+    meta = InstalledApp(
+        name="test-app", version="1.0.0", displayName="Test App", enabled=True
+    )
     _write_installed("test-app", meta)
     store = ScriptHookStore(tmp_path)
-    user = store.create({"id": "my-hook", "event": "PostToolUse", "provider": "bash", "provider_config": {"command": "true"}})
+    user = store.create(
+        {
+            "id": "my-hook",
+            "event": "PostToolUse",
+            "provider": "bash",
+            "provider_config": {"command": "true"},
+        }
+    )
 
     reconcile_app_hooks(store)
     contributed = store.get("app:test-app:tool-finished")

@@ -74,7 +74,9 @@ async def test_pwa_root_file_states_its_content_type(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("handler_name", ["manifest_webmanifest", "service_worker", "third_party_notices"])
+@pytest.mark.parametrize(
+    "handler_name", ["manifest_webmanifest", "service_worker", "third_party_notices"]
+)
 async def test_pwa_root_file_missing_returns_404_and_does_not_raise(
     tmp_path, handler_name: str
 ) -> None:

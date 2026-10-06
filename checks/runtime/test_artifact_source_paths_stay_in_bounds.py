@@ -4,7 +4,9 @@ from gideon.core.file_roots import dashboard_roots
 from gideon.workspace.artifacts import source_files
 
 
-def test_artifact_source_admission_matches_files_and_refuses_escapes(tmp_path, monkeypatch):
+def test_artifact_source_admission_matches_files_and_refuses_escapes(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "home"
     workspace = tmp_path / "workspace"
     home.mkdir()
@@ -29,7 +31,9 @@ def test_artifact_source_admission_matches_files_and_refuses_escapes(tmp_path, m
     assert source_files.admitted(str(link)) is None
 
 
-def test_read_only_outside_home_grant_never_becomes_an_artifact_source(tmp_path, monkeypatch):
+def test_read_only_outside_home_grant_never_becomes_an_artifact_source(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "home"
     workspace = tmp_path / "workspace"
     external = tmp_path / "external"

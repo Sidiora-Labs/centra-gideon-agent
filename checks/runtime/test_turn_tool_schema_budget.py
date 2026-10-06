@@ -9,7 +9,6 @@ from gideon.engine.agents.native.tool_retrieval import (
 )
 from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition
 
-
 _CORE = ("bash", "read_file", "write_file", "edit_file", "grep", "glob", "list_dir")
 
 

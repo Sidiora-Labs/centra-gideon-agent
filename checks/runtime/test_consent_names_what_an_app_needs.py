@@ -56,7 +56,9 @@ def test_manifest_disclosure_and_store_card_keep_engine_and_external_needs_separ
     assert disclosure["providerExecution"] == "sidecar"
 
     catalog.add_local_source(str(source))
-    [entry] = [item for item in catalog._scan_local_sources() if item.name == "service-client"]
+    [entry] = [
+        item for item in catalog._scan_local_sources() if item.name == "service-client"
+    ]
     assert entry.sidecarDependencies == ["engine-addon>=2"]
     assert entry.requires == disclosure["requires"]
     assert entry.providerExecution == "sidecar"
@@ -64,14 +66,20 @@ def test_manifest_disclosure_and_store_card_keep_engine_and_external_needs_separ
 
 def test_malformed_or_unbounded_engine_and_prerequisite_declarations_are_rejected():
     malformed_requirement = AppManifest.from_dict(
-        _manifest(dependencies={"sidecarDependencies": ["--index-url=https://example.invalid"]})
+        _manifest(
+            dependencies={
+                "sidecarDependencies": ["--index-url=https://example.invalid"]
+            }
+        )
     )
     assert any("valid PEP 508" in error for error in malformed_requirement.validate())
 
     no_sidecar = _manifest()
     no_sidecar["provider"]["execution"] = "in-process"
     invalid_cross_field = AppManifest.from_dict(no_sidecar)
-    assert any("require a provider" in error for error in invalid_cross_field.validate())
+    assert any(
+        "require a provider" in error for error in invalid_cross_field.validate()
+    )
 
     incomplete = AppManifest.from_dict(
         _manifest(requires=[{"name": "Image service", "why": "Remote processing."}])

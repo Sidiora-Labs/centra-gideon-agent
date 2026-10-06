@@ -16,7 +16,7 @@ from gideon.engine.session import ConversationDirectory
 from gideon.extensions.providers.use_cases import save_use_case_settings
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge_capture import register
 from gideon.interfaces.dashboard.state import ConsoleState
-from gideon.interfaces.dashboard.token_auth import token_auth_middleware, generate_token
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.knowledge.capture import CaptureError, CaptureInbox
 
 
@@ -141,7 +141,9 @@ async def test_stale_route_is_refused_without_mutation(inbox):
     original = await inbox.create("capture-stale-1", "Original")
     routed = await inbox.route(original["id"], route_payload(original))
     with pytest.raises(CaptureError) as refused:
-        await inbox.route(original["id"], route_payload(original, key="another-stale-route"))
+        await inbox.route(
+            original["id"], route_payload(original, key="another-stale-route")
+        )
     assert refused.value.status == 409
     assert inbox.get(original["id"]) == routed
 
@@ -152,7 +154,9 @@ async def test_removed_destination_does_not_resurrect(inbox):
     routed = await inbox.route(original["id"], route_payload(original))
     inbox.store.delete_item(routed["destination_id"])
     with pytest.raises(CaptureError) as refused:
-        await inbox.route(original["id"], route_payload(routed, key="route-after-delete"))
+        await inbox.route(
+            original["id"], route_payload(routed, key="route-after-delete")
+        )
     assert refused.value.status == 409
     assert inbox.get(original["id"])["text"] == "Original"
     assert inbox.db.execute("SELECT count(*) FROM items").fetchone()[0] == 0
@@ -174,7 +178,9 @@ async def test_durable_pending_route_recovers_existing_destination(inbox):
         guid=f"capture:route:{original['id']}",
     )
     with pytest.raises(CaptureError):
-        await inbox.route(original["id"], payload | {"request_id": "conflicting-pending"})
+        await inbox.route(
+            original["id"], payload | {"request_id": "conflicting-pending"}
+        )
     recovered = await inbox.route(original["id"], payload)
     assert recovered["destination_id"] == destination
     assert recovered["status"] == "routed"
@@ -205,16 +211,17 @@ async def test_reopen_retains_original_receipts_and_route(tmp_path):
     path = str(tmp_path / "knowledge.db")
     first_store = KnowledgeStore(path)
     first = CaptureInbox(first_store)
-    original = await first.create("capture-persist", "Original preserved across restart")
+    original = await first.create(
+        "capture-persist", "Original preserved across restart"
+    )
     routed = await first.route(original["id"], route_payload(original))
     first_store.close()
     second_store = KnowledgeStore(path)
     second = CaptureInbox(second_store)
     assert second.get(original["id"]) == routed
     assert (
-        (await second.create("capture-persist", "Original preserved across restart"))["id"]
-        == original["id"]
-    )
+        await second.create("capture-persist", "Original preserved across restart")
+    )["id"] == original["id"]
     assert (
         second_store.get_item(routed["destination_id"])["content"] == "Reviewed content"
     )
@@ -224,7 +231,8 @@ async def test_reopen_retains_original_receipts_and_route(tmp_path):
 @pytest.mark.asyncio
 async def test_chronology_and_bounded_pages(inbox):
     created = [
-        await inbox.create(f"capture-page-{index}", f"Thought {index}") for index in range(5)
+        await inbox.create(f"capture-page-{index}", f"Thought {index}")
+        for index in range(5)
     ]
     first = inbox.list(limit=2)
     second = inbox.list(limit=2, offset=first["next_offset"])
@@ -279,8 +287,12 @@ async def test_route_validation_cannot_create_destination(inbox, change):
 @pytest.mark.asyncio
 async def test_real_audio_bytes_are_preserved_and_deduplicated(inbox):
     data = audio_bytes()
-    voice = await inbox.save_audio("capture-audio-01", data, "recording.wav", "audio/wav")
-    repeated = await inbox.save_audio("capture-audio-01", data, "renamed.wav", "audio/wav")
+    voice = await inbox.save_audio(
+        "capture-audio-01", data, "recording.wav", "audio/wav"
+    )
+    repeated = await inbox.save_audio(
+        "capture-audio-01", data, "renamed.wav", "audio/wav"
+    )
     assert repeated == voice
     assert voice["input_origin"] == "voice"
     assert voice["audio_sha256"] == hashlib.sha256(data).hexdigest()
@@ -375,8 +387,12 @@ def test_http_capture_review_retry_and_cross_store_isolation(tmp_path):
             TestClient(TestServer(app)) as client,
             TestClient(TestServer(other)) as isolated,
         ):
-            client.session.headers["Authorization"] = "Bearer " + generate_token("capture-owner")
-            isolated.session.headers["Authorization"] = "Bearer " + generate_token("capture-owner")
+            client.session.headers["Authorization"] = "Bearer " + generate_token(
+                "capture-owner"
+            )
+            isolated.session.headers["Authorization"] = "Bearer " + generate_token(
+                "capture-owner"
+            )
             response = await client.post(
                 root,
                 json={"request_id": "http-text-capture", "text": "An actual input"},

@@ -106,14 +106,16 @@ def test_active_chat_prompt_and_agent_voice_are_layered_with_policy(tmp_path):
     )
     save_active_prompts({"chat": "native:bound-chat"})
 
-    from gideon.core.config.loader import AgentProfile, AppConfig, resolve_agent_bindings
+    from gideon.core.config.loader import (
+        AgentProfile,
+        AppConfig,
+        resolve_agent_bindings,
+    )
 
     config = AppConfig()
     config.default_agent = "Gideon"
     config.agents = {
-        "Gideon": AgentProfile(
-            system_prompt="", voice="Warm, concise, and candid."
-        )
+        "Gideon": AgentProfile(system_prompt="", voice="Warm, concise, and candid.")
     }
     bindings = resolve_agent_bindings(config, "Gideon")
 

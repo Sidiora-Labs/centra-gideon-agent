@@ -18,7 +18,10 @@ def test_restart_reads_only_vectors_for_exact_model_and_text(tmp_path):
 
     restarted = tool_vectors.ToolVectors()
     loaded = restarted.vectors(path, model, (first, second))
-    assert loaded == {first: [0.6000000238418579, 0.800000011920929], second: [0.800000011920929, 0.6000000238418579]}
+    assert loaded == {
+        first: [0.6000000238418579, 0.800000011920929],
+        second: [0.800000011920929, 0.6000000238418579],
+    }
     assert restarted.vectors(path, "local:embed-b", (first, second)) == {}
     assert restarted.vectors(path, model, ("read_file: read a document",)) == {}
 
@@ -26,4 +29,6 @@ def test_restart_reads_only_vectors_for_exact_model_and_text(tmp_path):
 def test_corrupt_cache_fails_open_as_empty(tmp_path):
     path = tmp_path / tool_vectors.TOOL_VECTORS_FILE
     path.write_text("{not json", encoding="utf-8")
-    assert tool_vectors.ToolVectors().vectors(path, "local:embed-a", ("tool: text",)) == {}
+    assert (
+        tool_vectors.ToolVectors().vectors(path, "local:embed-a", ("tool: text",)) == {}
+    )

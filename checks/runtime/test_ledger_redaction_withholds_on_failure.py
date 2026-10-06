@@ -9,12 +9,11 @@ LOGIN_URL = f"https://ada:{SECRET}@git.example.com/r.git"
 WITHHELD = "[redaction failed; text withheld]"
 
 
-def test_append_only_ledger_withholds_text_when_redaction_raises(
-    monkeypatch, tmp_path
-):
+def test_append_only_ledger_withholds_text_when_redaction_raises(monkeypatch, tmp_path):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
 
     for redactor in ("redact_exfiltration_urls", "redact_credentials"):
+
         def broken(*_args, **_kwargs):
             raise RuntimeError(f"masking {LOGIN_URL} failed")
 

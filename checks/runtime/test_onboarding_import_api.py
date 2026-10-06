@@ -30,8 +30,8 @@ The load-bearing tests, one per clause the atom names:
 
 from __future__ import annotations
 
-import asyncio
 import ast
+import asyncio
 import json
 from pathlib import Path
 
@@ -63,7 +63,10 @@ def foreign(tmp_path: Path) -> Path:
                     "weather": {
                         "command": "npx",
                         "args": ["-y", "weather-mcp"],
-                        "env": {"WEATHER_API_KEY": "fixture-weather-key", "REGION": "eu"},
+                        "env": {
+                            "WEATHER_API_KEY": "fixture-weather-key",
+                            "REGION": "eu",
+                        },
                     }
                 }
             }
@@ -167,10 +170,15 @@ async def test_the_scan_writes_nothing_to_the_home(make_client, home):
 async def _import(client, **body):
     scan = await (await client.get("/api/onboarding/import")).json()
     items = [item for source in scan["sources"] for item in source["items"]]
-    fingerprints = [item["fingerprint"] for item in items if
-                    ("sources" not in body or item["source"] in body["sources"]) and
-                    ("categories" not in body or item["category"] in body["categories"])]
-    resp = await client.post("/api/onboarding/import", json={"fingerprints": fingerprints})
+    fingerprints = [
+        item["fingerprint"]
+        for item in items
+        if ("sources" not in body or item["source"] in body["sources"])
+        and ("categories" not in body or item["category"] in body["categories"])
+    ]
+    resp = await client.post(
+        "/api/onboarding/import", json={"fingerprints": fingerprints}
+    )
     payload = await resp.json()
     job = await _wait_job(client, payload["job"])
     return resp.status, job["report"]
@@ -261,7 +269,10 @@ async def test_a_write_failure_is_reported_with_the_secret_redacted(
     monkeypatch.setattr("gideon.cognition.onboarding_import.run_import", boom)
     async with make_client() as client:
         scan = await (await client.get("/api/onboarding/import")).json()
-        resp = await client.post("/api/onboarding/import", json={"fingerprints": [scan["sources"][0]["items"][0]["fingerprint"]]})
+        resp = await client.post(
+            "/api/onboarding/import",
+            json={"fingerprints": [scan["sources"][0]["items"][0]["fingerprint"]]},
+        )
         assert resp.status == 202
         body = await _wait_job(client, (await resp.json())["job"])
         raw = json.dumps(body)
@@ -395,10 +406,24 @@ async def test_commit_accepts_only_rescanned_fingerprints(make_client, home):
         scan = await (await client.get("/api/onboarding/import")).json()
         items = [item for source in scan["sources"] for item in source["items"]]
         chosen = next(item for item in items if item["category"] == "mcp_servers")
-        for extra in [{"sources": [chosen["source"]]}, {"categories": [chosen["category"]]}, {"path": "/tmp/other"}, {"text": "replacement"}, {"items": [chosen]}]:
-            response = await client.post("/api/onboarding/import", json={"fingerprints": [chosen["fingerprint"]], **extra})
+        for extra in [
+            {"sources": [chosen["source"]]},
+            {"categories": [chosen["category"]]},
+            {"path": "/tmp/other"},
+            {"text": "replacement"},
+            {"items": [chosen]},
+        ]:
+            response = await client.post(
+                "/api/onboarding/import",
+                json={"fingerprints": [chosen["fingerprint"]], **extra},
+            )
             assert response.status == 400
-        response = await client.post("/api/onboarding/import", json={"fingerprints": [chosen["fingerprint"], chosen["fingerprint"], "0" * 16]})
+        response = await client.post(
+            "/api/onboarding/import",
+            json={
+                "fingerprints": [chosen["fingerprint"], chosen["fingerprint"], "0" * 16]
+            },
+        )
         assert response.status == 202
         report = (await _wait_job(client, (await response.json())["job"]))["report"]
         assert len(report["results"]) == 1
@@ -420,12 +445,19 @@ async def test_import_job_can_stop_between_real_item_writes(make_client, foreign
 
     async with make_client() as client:
         scan = await (await client.get("/api/onboarding/import")).json()
-        items = [item for source in scan["sources"] for item in source["items"]
-                 if item["category"] == "memories"]
+        items = [
+            item
+            for source in scan["sources"]
+            for item in source["items"]
+            if item["category"] == "memories"
+        ]
         assert len(items) == 1600
-        accepted = await client.post("/api/onboarding/import", json={
-            "fingerprints": [item["fingerprint"] for item in items],
-        })
+        accepted = await client.post(
+            "/api/onboarding/import",
+            json={
+                "fingerprints": [item["fingerprint"] for item in items],
+            },
+        )
         assert accepted.status == 202
         start = await accepted.json()
         assert start["job"]["total"] == len(items)
@@ -435,7 +467,9 @@ async def test_import_job_can_stop_between_real_item_writes(make_client, foreign
             if progress["done"] > 0 or progress["status"] != "running":
                 break
             await asyncio.sleep(0.01)
-            progress = (await (await client.get("/api/onboarding/import/job")).json())["job"]
+            progress = (await (await client.get("/api/onboarding/import/job")).json())[
+                "job"
+            ]
         assert progress["done"] > 0, progress
 
         stopped = await client.delete("/api/onboarding/import/job")

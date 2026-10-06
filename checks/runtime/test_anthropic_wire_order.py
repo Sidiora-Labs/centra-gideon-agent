@@ -120,11 +120,16 @@ def test_multiple_volatile_notes_each_ship_once_in_order():
     system, out = _translate_messages(messages)
 
     assert system == ""
-    assert out == [{"role": "user", "content": [
-        {"type": "text", "text": "context"},
-        {"type": "text", "text": "note A"},
-        {"type": "text", "text": "note B"},
-    ]}]
+    assert out == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "context"},
+                {"type": "text", "text": "note A"},
+                {"type": "text", "text": "note B"},
+            ],
+        }
+    ]
 
 
 def test_content_equivalence_note_relocated_not_lost_or_duplicated():

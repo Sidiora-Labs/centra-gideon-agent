@@ -24,13 +24,18 @@ def _source(tmp_path: Path) -> Path:
     root = tmp_path / "source" / "startup-path-app"
     root.mkdir(parents=True)
     (root / "app.json").write_text(
-        json.dumps({
-            "name": "startup-path-app",
-            "version": "1.0.0",
-            "displayName": "Startup Path",
-            "description": "Lifecycle registration fixture.",
-            "provider": {"type": "channel", "implementation": "provider:create_provider"},
-        }),
+        json.dumps(
+            {
+                "name": "startup-path-app",
+                "version": "1.0.0",
+                "displayName": "Startup Path",
+                "description": "Lifecycle registration fixture.",
+                "provider": {
+                    "type": "channel",
+                    "implementation": "provider:create_provider",
+                },
+            }
+        ),
         encoding="utf-8",
     )
     (root / "provider.py").write_text(

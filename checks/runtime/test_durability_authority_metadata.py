@@ -16,13 +16,22 @@ def test_trigger_review_authority_is_not_exported_or_rewound(tmp_path, monkeypat
             name="Review metadata",
             kind="clock",
             spec={"kind": "interval", "interval_secs": 900},
-            workflow={"inline": {"provider": "run-workflow", "config": {"workflow": "sample"}}},
+            workflow={
+                "inline": {"provider": "run-workflow", "config": {"workflow": "sample"}}
+            },
         )
     )
     reviews = TriggerReviewStore(tmp_path)
     pending = reviews.add_boot_observations(
         triggers,
-        {"review": {"rows": [{"trigger_id": "clock:review-metadata", "scheduled_for": 1200}], "summaries": []}},
+        {
+            "review": {
+                "rows": [
+                    {"trigger_id": "clock:review-metadata", "scheduled_for": 1200}
+                ],
+                "summaries": [],
+            }
+        },
         [],
         now=1500,
     )

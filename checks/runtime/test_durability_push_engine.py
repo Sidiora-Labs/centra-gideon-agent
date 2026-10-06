@@ -58,10 +58,15 @@ class FakeTransport(SyncTransportProvider):
         return [
             SyncObject(
                 key=r.key,
-                data=self.registry_bytes if r.key == REGISTRY_KEY else self.objects[r.key],
+                data=(
+                    self.registry_bytes
+                    if r.key == REGISTRY_KEY
+                    else self.objects[r.key]
+                ),
             )
             for r in refs
-            if r.key == REGISTRY_KEY and self.registry_bytes is not None
+            if r.key == REGISTRY_KEY
+            and self.registry_bytes is not None
             or r.key in self.objects
         ]
 
@@ -221,7 +226,9 @@ def test_unlanded_registry_write_retries_as_create(tmp_path, monkeypatch):
     assert report.registry_committed and report.cas_attempts == 2
     assert tr.cas_calls == [None, None]
     assert Registry.loads(tr.registry_bytes).seq_of("me") == report.seq == 1
-    assert len([key for key in tr.objects if key.startswith(shard_prefix("me", 1))]) == 2
+    assert (
+        len([key for key in tr.objects if key.startswith(shard_prefix("me", 1))]) == 2
+    )
 
     class LandedWithoutAcknowledgement(FakeTransport):
         def cas_registry(self, expected_sha, data):

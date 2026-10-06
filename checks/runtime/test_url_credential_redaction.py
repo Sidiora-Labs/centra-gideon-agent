@@ -234,8 +234,7 @@ def test_scp_credential_is_redacted_and_git_username_is_preserved(
     assert warnings == ["Redacted credential in scp-style address"]
     assert "svc-user" not in redacted and "pa$$word" not in redacted
     assert all(
-        "svc-user" not in warning and "pa$$word" not in warning
-        for warning in warnings
+        "svc-user" not in warning and "pa$$word" not in warning for warning in warnings
     )
     assert redact_for_display(credential_address) == expected_address
 

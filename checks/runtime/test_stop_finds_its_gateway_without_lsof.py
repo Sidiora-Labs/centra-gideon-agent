@@ -6,15 +6,17 @@ import sys
 from pathlib import Path
 
 import pytest
+from test_container_host import assert_install_commands
 
 from gideon.engine import gateway_base
 from gideon.interfaces.cli import server
 from gideon.operations import container_host
-from test_container_host import assert_install_commands
 
 
 def test_containerized_gateway_stop_reports_host_action_without_lsof_or_ps(
-    tmp_path, monkeypatch, capsys,
+    tmp_path,
+    monkeypatch,
+    capsys,
 ):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     assert_install_commands(monkeypatch)
@@ -22,7 +24,10 @@ def test_containerized_gateway_stop_reports_host_action_without_lsof_or_ps(
         ("/opt/venv/bin/python /opt/venv/bin/gideon gateway", True),
         ("/usr/bin/python3 -m gideon gateway --port 10000", True),
         ("/home/u/.local/bin/gideon gateway --no-open", True),
-        ("/Applications/Gideon.app/Contents/Resources/backend-dist/gideon-backend gateway --port auto --json-ready --no-open", True),
+        (
+            "/Applications/Gideon.app/Contents/Resources/backend-dist/gideon-backend gateway --port auto --json-ready --no-open",
+            True,
+        ),
         ("/opt/venv/bin/python /opt/venv/bin/gideon token", False),
         ("vim /tmp/gideon-notes.txt", False),
         ("sh -c sleep 60 gateway", False),
@@ -55,14 +60,21 @@ def test_containerized_gateway_stop_reports_host_action_without_lsof_or_ps(
                 ("compose", "docker compose -f infrastructure/compose/compose.yaml"),
             ):
                 monkeypatch.setenv(container_host.STARTED_BY_ENV, started_by)
-                for action, verb in ((server._stop, "stopped"), (server._restart, "restarted")):
+                for action, verb in (
+                    (server._stop, "stopped"),
+                    (server._restart, "restarted"),
+                ):
                     with pytest.raises(SystemExit) as failure:
                         action(10000)
                     assert failure.value.code == 1
                     error = capsys.readouterr().err
                     assert f"Nothing was {verb}." in error
                     assert base in error
-                    assert (container_host.stop_command() if verb == "stopped" else container_host.restart_command()) in error
+                    assert (
+                        container_host.stop_command()
+                        if verb == "stopped"
+                        else container_host.restart_command()
+                    ) in error
                     assert child.poll() is None
             monkeypatch.delenv("GIDEON_INSTALL_KIND")
             for action in (server._stop, server._restart):

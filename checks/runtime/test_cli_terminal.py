@@ -9,8 +9,7 @@ from aiohttp.test_utils import TestServer
 from gideon.cognition.history import ConversationLog
 from gideon.core.config import AppConfig
 from gideon.engine.session import ConversationDirectory
-from gideon.interfaces.cli.terminal import GatewayClient, TerminalState
-from gideon.interfaces.cli.terminal import TerminalApp
+from gideon.interfaces.cli.terminal import GatewayClient, TerminalApp, TerminalState
 from gideon.interfaces.dashboard.chat_handlers import (
     api_chat_session_approve,
     api_chat_session_create,
@@ -25,13 +24,46 @@ from gideon.interfaces.dashboard.ws import api_ws
 
 def test_terminal_keeps_live_turn_and_approval_in_its_session():
     state = TerminalState(session="terminal-one", running=True)
-    state.event({"type": "chat_chunk", "data": {"session": "terminal-other", "content": "wrong"}})
-    state.event({"type": "chat_chunk", "data": {"session": "terminal-one", "content": "hello"}})
-    state.event({"type": "chat_chunk", "data": {"session": "terminal-one", "content": " world"}})
-    state.event({"type": "tool_call", "data": {"session": "terminal-one", "tool": "read_file", "purpose": "inspect"}})
-    state.event({"type": "approval", "data": {"session": "terminal-one", "id": "permit-1", "tool": "write_file", "tool_input": "file.txt"}})
+    state.event(
+        {
+            "type": "chat_chunk",
+            "data": {"session": "terminal-other", "content": "wrong"},
+        }
+    )
+    state.event(
+        {"type": "chat_chunk", "data": {"session": "terminal-one", "content": "hello"}}
+    )
+    state.event(
+        {"type": "chat_chunk", "data": {"session": "terminal-one", "content": " world"}}
+    )
+    state.event(
+        {
+            "type": "tool_call",
+            "data": {
+                "session": "terminal-one",
+                "tool": "read_file",
+                "purpose": "inspect",
+            },
+        }
+    )
+    state.event(
+        {
+            "type": "approval",
+            "data": {
+                "session": "terminal-one",
+                "id": "permit-1",
+                "tool": "write_file",
+                "tool_input": "file.txt",
+            },
+        }
+    )
     assert state.pending and state.pending["id"] == "permit-1"
-    state.event({"type": "approval_resolved", "data": {"id": "permit-1", "decision": "rejected"}})
+    state.event(
+        {
+            "type": "approval_resolved",
+            "data": {"id": "permit-1", "decision": "rejected"},
+        }
+    )
     state.event({"type": "chat_done", "data": {"session": "terminal-one"}})
     assert state.pending is None
     assert state.running is False
@@ -49,7 +81,9 @@ def test_local_gateway_token_is_confined_to_the_requested_origin():
 
 
 @pytest.mark.asyncio
-async def test_terminal_authenticated_session_ws_and_approval_journey(tmp_path, monkeypatch):
+async def test_terminal_authenticated_session_ws_and_approval_journey(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "gideon-home"))
     sessions = ConversationDirectory(AppConfig())
     state = ConsoleState(
@@ -64,8 +98,12 @@ async def test_terminal_authenticated_session_ws_and_approval_journey(tmp_path, 
     server_app.router.add_get("/api/chat/sessions", api_chat_sessions)
     server_app.router.add_post("/api/chat/sessions", api_chat_session_create)
     server_app.router.add_get("/api/chat/sessions/{session}", api_chat_session_detail)
-    server_app.router.add_post("/api/chat/sessions/{session}/resume", api_chat_session_resume)
-    server_app.router.add_post("/api/chat/sessions/{session}/approve", api_chat_session_approve)
+    server_app.router.add_post(
+        "/api/chat/sessions/{session}/resume", api_chat_session_resume
+    )
+    server_app.router.add_post(
+        "/api/chat/sessions/{session}/approve", api_chat_session_approve
+    )
 
     async with TestServer(server_app) as server:
         token = generate_token("terminal-journey")
@@ -81,10 +119,17 @@ async def test_terminal_authenticated_session_ws_and_approval_journey(tmp_path, 
                 await terminal._open_session("terminal-journey")
                 request_id = "permit-journey"
                 future = asyncio.get_running_loop().create_future()
-                state._sessions[terminal.state.session]._approval_futures[request_id] = future
+                state._sessions[terminal.state.session]._approval_futures[
+                    request_id
+                ] = future
                 state.broadcast_ws(
                     "approval",
-                    {"session": terminal.state.session, "id": request_id, "tool": "write_file", "tool_input": "file.txt"},
+                    {
+                        "session": terminal.state.session,
+                        "id": request_id,
+                        "tool": "write_file",
+                        "tool_input": "file.txt",
+                    },
                 )
                 async with asyncio.timeout(3):
                     while terminal.state.pending is None:

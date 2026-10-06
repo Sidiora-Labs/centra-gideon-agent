@@ -5,9 +5,9 @@ import os
 import sys
 
 import pytest
+from test_mcp_abandoned_queue import SERVER, configured, until
 
 from gideon.integrations import mcp_client, mcp_discovery, mcp_stdio
-from test_mcp_abandoned_queue import configured, until, SERVER
 
 
 @pytest.mark.asyncio
@@ -41,7 +41,7 @@ async def test_failed_start_count_is_shared_and_retry_clears_exit_detail(tmp_pat
 async def test_silent_first_start_finishes_without_failure_and_cleanup_reaps(tmp_path):
     program = "import os,sys,time\nfrom pathlib import Path\nPath(sys.argv[1]).with_suffix('.pid').write_text(str(os.getpid()))\ntime.sleep(30)\n"
     spec, log = configured(tmp_path, program=program, name="installing")
-    conn = mcp_client.McpServerConn("installing", spec, connect_timeout=.4)
+    conn = mcp_client.McpServerConn("installing", spec, connect_timeout=0.4)
     try:
         assert not await conn.ensure_started()
         assert conn._failure.pending and not conn._failure.counts
@@ -50,14 +50,16 @@ async def test_silent_first_start_finishes_without_failure_and_cleanup_reaps(tmp
         assert mcp_stdio._finishing
         pid = int(log.with_suffix(".pid").read_text())
         os.kill(pid, 0)
-        other = mcp_client.McpServerConn("installing", spec, connect_timeout=.03)
+        other = mcp_client.McpServerConn("installing", spec, connect_timeout=0.03)
         assert not await other.ensure_started()
         assert "earlier start" in other.error
         await other.shutdown()
         await mcp_stdio.stop_finishing(lambda name: name == "installing")
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
-        assert not any(entry.server == "installing" for entry in mcp_stdio._finishing.values())
+        assert not any(
+            entry.server == "installing" for entry in mcp_stdio._finishing.values()
+        )
     finally:
         await conn.shutdown()
         await mcp_stdio.stop_finishing(lambda name: name == "installing")

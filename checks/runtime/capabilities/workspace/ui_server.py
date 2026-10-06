@@ -21,10 +21,15 @@ async def main():
         root = Path(directory)
         os.environ["GIDEON_HOME"] = directory
         repo = repository(root / "repo")
-        (root / "config.json").write_text(json.dumps({"dashboard": {"terminal": {"enabled": True}}}))
-        from gideon.interfaces.dashboard.handlers.capabilities_workspace import register
-        from gideon.interfaces.dashboard.handlers.terminal import _TerminalSession, api_terminal_list
+        (root / "config.json").write_text(
+            json.dumps({"dashboard": {"terminal": {"enabled": True}}})
+        )
         from gideon.engine.tasks.handlers import register_task_routes
+        from gideon.interfaces.dashboard.handlers.capabilities_workspace import register
+        from gideon.interfaces.dashboard.handlers.terminal import (
+            _TerminalSession,
+            api_terminal_list,
+        )
         from gideon.interfaces.dashboard.token_auth import (
             generate_token,
             reset_secret_cache,
@@ -35,16 +40,26 @@ async def main():
         app = web.Application(middlewares=[token_auth_middleware()])
         master_fd, slave_fd = pty.openpty()
         terminal = await asyncio.create_subprocess_exec(
-            "/bin/sleep", "300", stdin=slave_fd, stdout=slave_fd,
-            stderr=slave_fd, cwd=str(repo), start_new_session=True,
+            "/bin/sleep",
+            "300",
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=str(repo),
+            start_new_session=True,
         )
         os.close(slave_fd)
-        app["state"] = SimpleNamespace(_terminal_sessions={
-            "native-workspace-terminal": _TerminalSession(
-                session_id="native-workspace-terminal", master_fd=master_fd,
-                proc=terminal, cwd=str(repo), shell="/bin/sleep",
-            )
-        })
+        app["state"] = SimpleNamespace(
+            _terminal_sessions={
+                "native-workspace-terminal": _TerminalSession(
+                    session_id="native-workspace-terminal",
+                    master_fd=master_fd,
+                    proc=terminal,
+                    cwd=str(repo),
+                    shell="/bin/sleep",
+                )
+            }
+        )
         register(app)
         register_task_routes(app)
         app.router.add_get("/api/terminal/sessions", api_terminal_list)

@@ -27,20 +27,25 @@ def test_scanner_checks_formerly_skipped_shipped_directory(tmp_path: Path) -> No
     staged = tmp_path / "staged"
     nested = staged / ".venv" / "lib"
     nested.mkdir(parents=True)
-    (nested / "payload.py").write_text("import os; os.system('rm -rf /')\n", encoding="utf-8")
+    (nested / "payload.py").write_text(
+        "import os; os.system('rm -rf /')\n", encoding="utf-8"
+    )
     report = default_scanner.scan(staged)
     assert report.verdict is Verdict.DANGEROUS
     assert any(f.path == ".venv/lib/payload.py" for f in report.findings)
 
 
-def test_install_uses_staged_bundle_and_refuses_external_link(tmp_path: Path, monkeypatch) -> None:
+def test_install_uses_staged_bundle_and_refuses_external_link(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "home"))
     source = tmp_path / "source-app"
     source.mkdir()
     (source / "app.json").write_text(
         '{"name":"snapshot-app","version":"1.0.0","displayName":"Snapshot",'
-        '"description":"test"}', encoding="utf-8"
+        '"description":"test"}',
+        encoding="utf-8",
     )
     (source / "main.py").write_text("print('safe')\n", encoding="utf-8")
     installed = app_manager.install(source)

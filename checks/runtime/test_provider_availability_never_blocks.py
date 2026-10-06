@@ -13,12 +13,12 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
+from gideon.core.config import loader as config_loader
 from gideon.extensions.apps.manifest import AppManifest
 from gideon.extensions.apps.native_contract import namespaced_module_name
-from gideon.core.config import loader as config_loader
-from gideon.extensions.providers import routes as provider_routes
 from gideon.extensions.providers import availability as availability_module
 from gideon.extensions.providers import registry as registry_module
+from gideon.extensions.providers import routes as provider_routes
 from gideon.extensions.providers.registry import ProviderRegistry
 
 APP = "slow-probe-app"
@@ -65,7 +65,9 @@ def _plant_app(home: Path, *, sleep: float, ok: bool, reason: str) -> Path:
     root = home / "apps" / APP
     root.mkdir(parents=True, exist_ok=True)
     (root / "installed.json").write_text(
-        json.dumps({"name": APP, "version": "0.1.0", "enabled": True, "origin": "local"})
+        json.dumps(
+            {"name": APP, "version": "0.1.0", "enabled": True, "origin": "local"}
+        )
     )
     (root / "app.json").write_text(
         json.dumps(
@@ -74,7 +76,10 @@ def _plant_app(home: Path, *, sleep: float, ok: bool, reason: str) -> Path:
                 "version": "0.1.0",
                 "displayName": "Slow Probe",
                 "description": "An app whose availability check is slow.",
-                "provider": {"type": "channel", "implementation": "provider:create_provider"},
+                "provider": {
+                    "type": "channel",
+                    "implementation": "provider:create_provider",
+                },
             }
         )
     )
@@ -83,7 +88,9 @@ def _plant_app(home: Path, *, sleep: float, ok: bool, reason: str) -> Path:
     return root
 
 
-def _behave(root: Path, *, sleep: float, ok: bool, reason: str, needs: str = "") -> None:
+def _behave(
+    root: Path, *, sleep: float, ok: bool, reason: str, needs: str = ""
+) -> None:
     (root / "behaviour.json").write_text(
         json.dumps({"sleep": sleep, "ok": ok, "reason": reason, "needs": needs})
     )
@@ -144,7 +151,9 @@ async def test_listing_providers_runs_no_app_code_in_the_gateway(planted):
         started = time.monotonic()
         card = await _card(client)
         elapsed = time.monotonic() - started
-        assert elapsed < 1.0, f"/api/providers took {elapsed:.2f}s — it waited on the hook"
+        assert (
+            elapsed < 1.0
+        ), f"/api/providers took {elapsed:.2f}s — it waited on the hook"
         assert card["availability"]["state"] == "checking"
         assert (
             namespaced_module_name(APP, "provider") not in sys.modules
@@ -167,7 +176,9 @@ async def test_healthz_stays_fast_while_providers_loads_cold(planted):
         listing = asyncio.ensure_future(client.get("/api/providers"))
         health = [await timed_healthz() for _ in range(5)]
         await listing
-        assert max(health) < 1.0, f"/api/healthz took {max(health):.2f}s during a Providers load"
+        assert (
+            max(health) < 1.0
+        ), f"/api/healthz took {max(health):.2f}s during a Providers load"
         await _stop(board)
 
 
@@ -200,9 +211,13 @@ async def test_a_hook_that_never_returns_is_unknown_at_the_deadline_and_its_chil
     assert card["availability"]["state"] == "unknown"
     assert "did not finish within 15 s" in card["availability"]["reason"]
     pid_file = root / "ran-in.pid"
-    assert pid_file.is_file(), "the child never reached the hook, so its kill proves nothing"
+    assert (
+        pid_file.is_file()
+    ), "the child never reached the hook, so its kill proves nothing"
     with pytest.raises(ProcessLookupError):
-        os.kill(int(pid_file.read_text()), 0)  # the child that was stuck in the hook is gone
+        os.kill(
+            int(pid_file.read_text()), 0
+        )  # the child that was stuck in the hook is gone
 
 
 @pytest.mark.asyncio
@@ -248,7 +263,9 @@ async def test_check_again_on_an_unknown_provider_is_404(planted):
 
 
 @pytest.mark.asyncio
-async def test_a_stale_answer_keeps_being_served_while_it_is_measured_again(planted, monkeypatch):
+async def test_a_stale_answer_keeps_being_served_while_it_is_measured_again(
+    planted, monkeypatch
+):
     root, _unused = planted
     _behave(root, sleep=0, ok=False, reason="first answer")
     board = _board(ttl_secs=0.0)
@@ -272,5 +289,7 @@ def test_a_malformed_protocol_line_is_dropped_not_trusted():
     assert parse_answer(b"[]") is None
     assert parse_answer(json.dumps({"name": APP, "state": "sure"})) is None
     assert parse_answer(json.dumps({"name": APP, "state": "checking"})) is None
-    parsed = parse_answer(json.dumps({"name": APP, "implementation": "p:f", "state": "available"}))
+    parsed = parse_answer(
+        json.dumps({"name": APP, "implementation": "p:f", "state": "available"})
+    )
     assert parsed is not None and parsed[2].state == "available"

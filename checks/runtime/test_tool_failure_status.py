@@ -4,14 +4,20 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_runtime_and_resume_learning_use_structured_tool_status(tmp_path, monkeypatch):
+async def test_runtime_and_resume_learning_use_structured_tool_status(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / ".gideon"))
+    from gideon.cognition.resume_account import _facts_from_tool_history
     from gideon.engine.agents.native.builtin_tools import create_platform_tools_provider
     from gideon.engine.agents.native.runtime import NativeAgentRuntime
     from gideon.engine.agents.provider import AgentRuntimeDefinition
-    from gideon.cognition.resume_account import _facts_from_tool_history
     from gideon.integrations.llm.credentials import Credential
-    from gideon.integrations.llm.events import EVENT_TOOL_CALL, EVENT_TOOL_RESULT, AgentEvent
+    from gideon.integrations.llm.events import (
+        EVENT_TOOL_CALL,
+        EVENT_TOOL_RESULT,
+        AgentEvent,
+    )
     from gideon.integrations.llm.openai import OpenAIProvider
 
     source = tmp_path / "error-prefixed-success.txt"
@@ -43,8 +49,12 @@ async def test_runtime_and_resume_learning_use_structured_tool_status(tmp_path, 
             tool_input={"path": source.name},
         )
         runtime._messages.append(runtime._assistant_msg("", [success_call]))
-        success_events = [event async for event in runtime._execute_tool_batch([success_call])]
-        success = next(event for event in success_events if event.kind == EVENT_TOOL_RESULT)
+        success_events = [
+            event async for event in runtime._execute_tool_batch([success_call])
+        ]
+        success = next(
+            event for event in success_events if event.kind == EVENT_TOOL_RESULT
+        )
         assert success.tool_output.startswith("Error: this file was read successfully")
         assert success.tool_meta["ok"] is True
 
@@ -55,8 +65,12 @@ async def test_runtime_and_resume_learning_use_structured_tool_status(tmp_path, 
             tool_input={"tool_name": "not-in-the-catalog"},
         )
         runtime._messages.append(runtime._assistant_msg("", [failed_call]))
-        failed_events = [event async for event in runtime._execute_tool_batch([failed_call])]
-        failed = next(event for event in failed_events if event.kind == EVENT_TOOL_RESULT)
+        failed_events = [
+            event async for event in runtime._execute_tool_batch([failed_call])
+        ]
+        failed = next(
+            event for event in failed_events if event.kind == EVENT_TOOL_RESULT
+        )
         assert "No tool named" in failed.tool_output
         assert failed.tool_meta["ok"] is False
         assert runtime.drain_tool_outcomes() == [
@@ -77,7 +91,9 @@ async def test_runtime_and_resume_learning_use_structured_tool_status(tmp_path, 
                 runtime._prepare_call(cancelled_call)
             )
         ]
-        cancelled = next(event for event in cancelled_events if event.kind == EVENT_TOOL_RESULT)
+        cancelled = next(
+            event for event in cancelled_events if event.kind == EVENT_TOOL_RESULT
+        )
         assert cancelled.tool_meta["ok"] is False
         assert runtime._messages[-1]["_tool_status"] is False
         assert runtime.drain_tool_outcomes() == [("read_file", "failed")]
@@ -91,6 +107,8 @@ async def test_runtime_and_resume_learning_use_structured_tool_status(tmp_path, 
         provider_messages = runtime._messages_with_staged_images(runtime._messages)
         assert all("_tool_status" not in message for message in provider_messages)
         assert any(message.get("_tool_status") is True for message in runtime._messages)
-        assert any(message.get("_tool_status") is False for message in runtime._messages)
+        assert any(
+            message.get("_tool_status") is False for message in runtime._messages
+        )
     finally:
         await model.shutdown()

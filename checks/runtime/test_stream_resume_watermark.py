@@ -12,7 +12,9 @@ from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
 
 
 @pytest.mark.asyncio
-async def test_stream_detail_watermark_tracks_active_and_completed_answer(tmp_path, monkeypatch):
+async def test_stream_detail_watermark_tracks_active_and_completed_answer(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     state = ConsoleState(
@@ -41,7 +43,11 @@ async def test_stream_detail_watermark_tracks_active_and_completed_answer(tmp_pa
             assert response.status == 200
             assert active["running"] is True
             assert active["stream_cursor"] == {**first_cursor, "stream_seq": 2}
-            partial = next(message for message in active["messages"] if message["role"] == "streaming")
+            partial = next(
+                message
+                for message in active["messages"]
+                if message["role"] == "streaming"
+            )
             assert partial["content"] == "one, two, "
             assert partial["meta"] == second
 
@@ -50,7 +56,11 @@ async def test_stream_detail_watermark_tracks_active_and_completed_answer(tmp_pa
             response = await client.get(f"/api/chat/sessions/{session.key}")
             resumed = await response.json()
             assert resumed["stream_cursor"] == third
-            partial = next(message for message in resumed["messages"] if message["role"] == "streaming")
+            partial = next(
+                message
+                for message in resumed["messages"]
+                if message["role"] == "streaming"
+            )
             assert partial["content"] == "one, two, three"
             assert partial["meta"] == third
 
@@ -62,10 +72,18 @@ async def test_stream_detail_watermark_tracks_active_and_completed_answer(tmp_pa
             completed = await response.json()
             assert completed["running"] is False
             assert completed["stream_cursor"] == third
-            assert [message["content"] for message in completed["messages"] if message["role"] == "assistant"] == [
+            assert [
+                message["content"]
+                for message in completed["messages"]
+                if message["role"] == "assistant"
+            ] == [
                 "one, two, three",
             ]
-            terminal_partial = next(message for message in completed["messages"] if message["role"] == "streaming")
+            terminal_partial = next(
+                message
+                for message in completed["messages"]
+                if message["role"] == "streaming"
+            )
             assert terminal_partial["meta"] == third
     finally:
         if session.task is not None and not session.task.done():

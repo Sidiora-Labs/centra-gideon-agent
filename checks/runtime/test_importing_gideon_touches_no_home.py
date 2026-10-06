@@ -11,7 +11,7 @@ def test_imports_resolve_no_home_or_create_files(tmp_path):
     active = tmp_path / "gideon-home"
     home.mkdir()
     active.mkdir()
-    script = r'''
+    script = r"""
 import importlib, json, os, pkgutil, shutil, sys, traceback, types
 from pathlib import PurePath
 ROOTS = tuple(os.path.realpath(p) for p in sys.argv[1:3])
@@ -137,7 +137,7 @@ print(json.dumps({"walked": len(names), "done": done, "failed": failed,
                   "touches": [event for event in events if event["phase"] == "import"],
                   "inspection_events": [event for event in events if event["phase"] != "import"],
                   "frozen": frozen, "left": left}))
-'''
+"""
     env = {
         key: value
         for key, value in os.environ.items()
@@ -158,18 +158,24 @@ print(json.dumps({"walked": len(names), "done": done, "failed": failed,
         check=True,
     )
     report = json.loads(result.stdout.strip().splitlines()[-1])
-    assert report["walked"] >= 1000, f"module walk found only {report['walked']} modules: {report['failed']}"
+    assert (
+        report["walked"] >= 1000
+    ), f"module walk found only {report['walked']} modules: {report['failed']}"
     assert report["done"] >= 1000, (
         f"only {report['done']} modules imported from {report['walked']} discovered; "
         f"failures: {report['failed']}"
     )
-    assert not report["touches"], (
-        "module imports touched HOME/GIDEON_HOME: "
-        + json.dumps(report["touches"][:30], indent=2)
+    assert not report[
+        "touches"
+    ], "module imports touched HOME/GIDEON_HOME: " + json.dumps(
+        report["touches"][:30], indent=2
     )
-    assert not report["frozen"], f"modules captured home paths at import: {report['frozen'][:30]}"
-    assert report["left"] == ["gideon-home", "os-home"], (
-        f"module imports left home files behind: {report['left']}"
-    )
+    assert not report[
+        "frozen"
+    ], f"modules captured home paths at import: {report['frozen'][:30]}"
+    assert report["left"] == [
+        "gideon-home",
+        "os-home",
+    ], f"module imports left home files behind: {report['left']}"
     assert list(home.iterdir()) == []
     assert list(active.iterdir()) == []

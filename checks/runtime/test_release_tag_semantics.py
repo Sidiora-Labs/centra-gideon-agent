@@ -3,6 +3,7 @@ import time
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
+from test_update_offers_only_a_newer_release import assert_update_offer_vectors
 
 from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
@@ -10,7 +11,6 @@ from gideon.interfaces.cli import server as cli
 from gideon.interfaces.dashboard.handlers import updates
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.operations import self_update as su
-from test_update_offers_only_a_newer_release import assert_update_offer_vectors
 
 
 @pytest.mark.asyncio
@@ -37,12 +37,14 @@ async def test_installed_and_release_prereleases_are_ordered_semantically(
         assert su.select_target(catalog, "beta", "0.2.1") == "v0.2.1"
     released = [{"tag": "v0.3.0"}, *releases]
     assert su.select_target(released, "beta") == "v0.3.0"
-    assert su.select_target(
-        [{"tag": "nightly-build"}, {"tag": "v0.1.0"}], "beta"
-    ) == "v0.1.0"
-    assert su.select_target(
-        [{"tag": "v0.3.0rc1"}, {"tag": "v0.2.1"}], "stable"
-    ) == "v0.2.1"
+    assert (
+        su.select_target([{"tag": "nightly-build"}, {"tag": "v0.1.0"}], "beta")
+        == "v0.1.0"
+    )
+    assert (
+        su.select_target([{"tag": "v0.3.0rc1"}, {"tag": "v0.2.1"}], "stable")
+        == "v0.2.1"
+    )
     assert not su.moves_to("v0.1.2", "0.2.0", "0.1.3")
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))

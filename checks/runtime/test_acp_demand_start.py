@@ -9,7 +9,11 @@ import json
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
-from gideon.integrations.llm.registry import ProviderEntry, get_default_registry, reset_default_registry
+from gideon.integrations.llm.registry import (
+    ProviderEntry,
+    get_default_registry,
+    reset_default_registry,
+)
 
 
 @pytest.fixture
@@ -54,7 +58,7 @@ async def test_reads_and_gateway_start_never_launch_configured_cli(
     marker = tmp_path / "launched"
     executable = tmp_path / "acp-sentinel"
     executable.write_text(
-        "#!/bin/sh\nprintf launched >> \"$1\"\nexit 0\n",
+        '#!/bin/sh\nprintf launched >> "$1"\nexit 0\n',
         encoding="utf-8",
     )
     executable.chmod(0o755)
@@ -77,10 +81,14 @@ async def test_reads_and_gateway_start_never_launch_configured_cli(
         listed = await providers.api_agent_providers_list(
             make_mocked_request("GET", "/api/agent-providers")
         )
-        assert next(
-            row for row in _response(listed)["agent_providers"]
-            if row["name"] == "acp:demand-sentinel"
-        )["state"] == "untested"
+        assert (
+            next(
+                row
+                for row in _response(listed)["agent_providers"]
+                if row["name"] == "acp:demand-sentinel"
+            )["state"]
+            == "untested"
+        )
 
         discovery_request = make_mocked_request(
             "GET",

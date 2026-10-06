@@ -82,7 +82,9 @@ def test_stale_update_preserves_artifact_and_source(tmp_path, monkeypatch):
     assert provider.get(artifact.slug, version=1).content == "original"
 
 
-def test_stale_source_revision_refuses_before_artifact_or_file_mutation(tmp_path, monkeypatch):
+def test_stale_source_revision_refuses_before_artifact_or_file_mutation(
+    tmp_path, monkeypatch
+):
     home = tmp_path / "home"
     workspace = tmp_path / "workspace"
     home.mkdir()
@@ -146,7 +148,9 @@ def test_unapproved_source_is_refused_before_artifact_creation(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_native_write_file_requires_explicit_text_but_accepts_empty_text(tmp_path):
+async def test_native_write_file_requires_explicit_text_but_accepts_empty_text(
+    tmp_path,
+):
     provider = NativeBuiltinToolProvider(cwd=tmp_path, sandbox_mode="off")
     missing = await provider._t_write_file({"path": "missing.txt"})
     null = await provider._t_write_file({"path": "missing.txt", "content": None})
@@ -162,4 +166,7 @@ def test_mcp_content_adapter_preserves_absent_null_and_empty():
     assert _read_artifact_content({}) == (None, None)
     assert _read_artifact_content({"content": None}) == (None, None)
     assert _read_artifact_content({"content": ""}) == ("", None)
-    assert _read_artifact_content({"content": 3}) == (None, "content must be text or null")
+    assert _read_artifact_content({"content": 3}) == (
+        None,
+        "content must be text or null",
+    )

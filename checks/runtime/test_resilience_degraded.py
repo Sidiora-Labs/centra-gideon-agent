@@ -353,7 +353,9 @@ def test_a_raising_drain_does_not_announce_unreported_recovery(home, monkeypatch
 
 def _recovered_body(state, surface: str) -> str:
     return next(
-        body for _kind, title, body in state.notes if title in {f"{surface} recovered", f"{surface} is ready"}
+        body
+        for _kind, title, body in state.notes
+        if title in {f"{surface} recovered", f"{surface} is ready"}
     )
 
 

@@ -166,7 +166,9 @@ async def test_temperatures_are_varied_and_ladder_ordered(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_identical_answers_get_one_bounded_resample_and_report_exhaustion(monkeypatch, tmp_path):
+async def test_identical_answers_get_one_bounded_resample_and_report_exhaustion(
+    monkeypatch, tmp_path
+):
     sampler = _Sampler(
         delay=0,
         texts={temperature: "same answer" for temperature in _TEMPERATURE_LADDER[:3]},
@@ -176,7 +178,9 @@ async def test_identical_answers_get_one_bounded_resample_and_report_exhaustion(
 
     assert len(sampler.temperatures) == 5
     assert [candidate["text"] for candidate in result["candidates"]] == [
-        "same answer", "", "",
+        "same answer",
+        "",
+        "",
     ]
     assert "2 repeated after a bounded resample" in result["note"]
     record = json.loads((tmp_path / "sampling_outcomes.jsonl").read_text().strip())

@@ -9,7 +9,10 @@ import pytest
 from gideon.core.config.credentials import owner_id_for
 from gideon.integrations import channel_trust
 from gideon.integrations.channel_inbound import admit, reset_admissions
-from gideon.integrations.channel_transports import register_transport, unregister_transport
+from gideon.integrations.channel_transports import (
+    register_transport,
+    unregister_transport,
+)
 from gideon.integrations.channel_transports.base import ChannelMessage
 
 
@@ -36,7 +39,9 @@ def test_owner_pairing_requires_real_transport_and_consumes_code_once(
     reset_admissions()
     try:
         code = channel_trust.create_owner_pairing_code(provider)
-        pairing_file = isolated_owner_pairing / "entity_settings" / "channel_owner_pairing.json"
+        pairing_file = (
+            isolated_owner_pairing / "entity_settings" / "channel_owner_pairing.json"
+        )
         record = json.loads(pairing_file.read_text(encoding="utf-8"))[provider]
         assert code not in pairing_file.read_text(encoding="utf-8")
         assert set(record) >= {"code_hash", "epoch", "expires_at", "attempts"}
@@ -67,7 +72,8 @@ def test_owner_pairing_requires_real_transport_and_consumes_code_once(
 
         channel_trust.allow_sender(provider, sender, via="owner")
         assert sender not in {
-            row["sender_id"] for row in channel_trust.provider_trust(provider)["allowed_senders"]
+            row["sender_id"]
+            for row in channel_trust.provider_trust(provider)["allowed_senders"]
         }
 
         replay = admit(

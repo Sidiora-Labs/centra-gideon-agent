@@ -11,7 +11,7 @@ from gideon.interfaces.dashboard.server import start_dashboard
 
 
 def _headers(token):
-    from gideon.assurance.api_version import VERSION_HEADER, API_VERSION
+    from gideon.assurance.api_version import API_VERSION, VERSION_HEADER
 
     return {"Authorization": f"Bearer {token}", VERSION_HEADER: str(API_VERSION)}
 
@@ -65,6 +65,7 @@ async def test_app_notifications_and_websocket_delivery_are_creator_scoped(
         state.notify("chat_message", title, title, meta={"session": session})
 
     from aiohttp import ClientSession
+
     from gideon.interfaces.dashboard.token_auth import generate_token
 
     app_a_token = generate_token("owner", app="app-a")
@@ -130,9 +131,16 @@ async def test_app_notifications_and_websocket_delivery_are_creator_scoped(
             owner_initial = await owner_ws.receive_json()
             a_initial = await a_ws.receive_json()
             b_initial = await b_ws.receive_json()
-            assert owner_initial["type"] == a_initial["type"] == b_initial["type"] == "sessions"
+            assert (
+                owner_initial["type"]
+                == a_initial["type"]
+                == b_initial["type"]
+                == "sessions"
+            )
             assert {row["key"] for row in owner_initial["data"]} == {
-                "a-chat", "b-chat", "owner-chat"
+                "a-chat",
+                "b-chat",
+                "owner-chat",
             }
             assert {row["key"] for row in a_initial["data"]} == {"a-chat"}
             assert {row["key"] for row in b_initial["data"]} == {"b-chat"}
@@ -150,7 +158,9 @@ async def test_app_notifications_and_websocket_delivery_are_creator_scoped(
             a_event = await a_ws.receive_json()
             b_event = await b_ws.receive_json()
             assert {row["data"]["content"] for row in owner_events} == {
-                "owner event", "A event", "B event"
+                "owner event",
+                "A event",
+                "B event",
             }
             assert a_event["data"]["content"] == "A event"
             assert b_event["data"]["content"] == "B event"

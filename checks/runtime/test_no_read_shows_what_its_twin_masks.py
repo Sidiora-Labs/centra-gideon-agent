@@ -39,7 +39,9 @@ def test_artifact_list_and_detail_mask_nested_content_and_inverse_edits():
 
 
 def test_ambiguous_moved_masked_list_entry_fails_closed():
-    artifact = Artifact(slug="tags", name="Tags", tags=[SECRET, SECRET.replace("A", "D")])
+    artifact = Artifact(
+        slug="tags", name="Tags", tags=[SECRET, SECRET.replace("A", "D")]
+    )
     with pytest.raises(MaskConflict):
         _restore_artifact_fields({"tags": [MASK]}, artifact)
 
@@ -51,7 +53,10 @@ def test_nested_memory_and_mcp_projections_mask_values_and_preserve_references()
             "name": "tenant-service",
             "headers": {"Authorization": f"Bearer {SECRET}"},
             "header_credentials": {
-                "Authorization": {"credential": "MCP_owner__API_TOKEN", "prefix": "Bearer "}
+                "Authorization": {
+                    "credential": "MCP_owner__API_TOKEN",
+                    "prefix": "Bearer ",
+                }
             },
         }
     )
@@ -59,7 +64,10 @@ def test_nested_memory_and_mcp_projections_mask_values_and_preserve_references()
     assert MASK in json.dumps(memory)
     assert SECRET not in json.dumps(mcp)
     assert mcp["name"] == "tenant-service"
-    assert mcp["header_credentials"]["Authorization"]["credential"] == "MCP_owner__API_TOKEN"
+    assert (
+        mcp["header_credentials"]["Authorization"]["credential"]
+        == "MCP_owner__API_TOKEN"
+    )
 
 
 def test_recursive_projection_uses_the_shared_display_mask():
@@ -88,6 +96,7 @@ def test_schedule_final_failure_policy_stays_masked(tmp_path, monkeypatch):
     projected = _schedule_row_for(state, trigger)
     assert SECRET not in json.dumps(projected)
     assert projected["failure_policy"] == {
-        "nested": {"api_key": MASK}, "dedupe_hash": True
+        "nested": {"api_key": MASK},
+        "dedupe_hash": True,
     }
     assert trigger.failure_policy["nested"]["api_key"] == SECRET

@@ -13,7 +13,6 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-
 _ARTIFACT = Path(__file__).parents[2] / "apps" / "assistant" / "dist" / "web"
 _REPOSITORY = Path(__file__).parents[2]
 
@@ -35,7 +34,9 @@ def _assistant_client(core) -> TestClient:
 async def test_assistant_entry_serves_nested_reload_and_exported_chunk(monkeypatch):
     from gideon.interfaces.dashboard.handlers import core
 
-    assert (_ARTIFACT / "index.html").is_file(), "build the assistant web artifact first"
+    assert (
+        _ARTIFACT / "index.html"
+    ).is_file(), "build the assistant web artifact first"
     monkeypatch.setattr(core, "_ASSISTANT_DIST_DIR", _ARTIFACT)
 
     async with _assistant_client(core) as client:
@@ -54,7 +55,9 @@ async def test_assistant_entry_serves_nested_reload_and_exported_chunk(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_assistant_artifact_absence_is_explicit_and_keeps_console_fallback(monkeypatch, tmp_path):
+async def test_assistant_artifact_absence_is_explicit_and_keeps_console_fallback(
+    monkeypatch, tmp_path
+):
     from gideon.interfaces.dashboard.handlers import core
 
     monkeypatch.setattr(core, "_ASSISTANT_DIST_DIR", tmp_path / "not-installed")
@@ -72,7 +75,9 @@ async def test_missing_assistant_assets_do_not_fall_back_to_console(monkeypatch)
     from gideon.interfaces.dashboard.handlers import core
 
     monkeypatch.setattr(core, "_ASSISTANT_DIST_DIR", _ARTIFACT)
-    assert (_ARTIFACT / "index.html").is_file(), "build the assistant web artifact first"
+    assert (
+        _ARTIFACT / "index.html"
+    ).is_file(), "build the assistant web artifact first"
 
     async with _assistant_client(core) as client:
         response = await client.get(
@@ -120,7 +125,9 @@ async def test_assistant_static_bypass_does_not_cover_api_mutations_or_traversal
 
 
 def test_runtime_build_includes_the_complete_assistant_web_artifact(tmp_path):
-    assert (_ARTIFACT / "index.html").is_file(), "build the assistant web artifact first"
+    assert (
+        _ARTIFACT / "index.html"
+    ).is_file(), "build the assistant web artifact first"
     build_lib = tmp_path / "runtime-build-lib"
     isolated_home = tmp_path / "gideon-home"
     env = os.environ.copy()
@@ -160,10 +167,14 @@ def test_dockerfile_nginx_routes_the_exported_assistant_artifact():
     if not nginx or not openssl:
         pytest.skip("nginx and openssl are required for the Docker routing proof")
 
-    assert (_ARTIFACT / "index.html").is_file(), "build the assistant web artifact first"
+    assert (
+        _ARTIFACT / "index.html"
+    ).is_file(), "build the assistant web artifact first"
     dockerfile = (_REPOSITORY / "infrastructure/docker/Dockerfile.web").read_text()
     lines = dockerfile.splitlines()
-    start = next(i for i, line in enumerate(lines) if line.startswith("RUN printf '%s\\n'"))
+    start = next(
+        i for i, line in enumerate(lines) if line.startswith("RUN printf '%s\\n'")
+    )
     end = next(
         i
         for i in range(start, len(lines))
@@ -189,9 +200,7 @@ def test_dockerfile_nginx_routes_the_exported_assistant_artifact():
         routing_fragment = temp_root / "assistant-routing.conf"
         insertion = insertion.replace(
             "/tmp/assistant-routing.conf", str(routing_fragment)
-        ).replace(
-            "/etc/nginx/templates/default.conf.template", str(template)
-        )
+        ).replace("/etc/nginx/templates/default.conf.template", str(template))
         subprocess.run(["/bin/sh", "-eu", "-c", insertion], check=True, cwd=_REPOSITORY)
 
         cert = temp_root / "server.crt"
@@ -274,16 +283,27 @@ def test_dockerfile_nginx_routes_the_exported_assistant_artifact():
             except urllib.error.HTTPError as error:
                 return error.code, error.headers.get_content_type(), error.read()
             with response:
-                return response.status, response.headers.get_content_type(), response.read()
+                return (
+                    response.status,
+                    response.headers.get_content_type(),
+                    response.read(),
+                )
 
         entry = fetch("/assistant/chat")
         assert entry == (200, "text/html", (_ARTIFACT / "index.html").read_bytes())
 
-        for suffix, content_type in ((".js", "application/javascript"), (".css", "text/css")):
+        for suffix, content_type in (
+            (".js", "application/javascript"),
+            (".css", "text/css"),
+        ):
             asset = _artifact_file(suffix)
             route = "/assistant/" + asset.relative_to(_ARTIFACT).as_posix()
             status, actual_type, body = fetch(route)
-            assert (status, actual_type, body) == (200, content_type, asset.read_bytes())
+            assert (status, actual_type, body) == (
+                200,
+                content_type,
+                asset.read_bytes(),
+            )
 
         for missing in ("missing.js", "missing.webp"):
             status, actual_type, body = fetch(f"/assistant/_expo/static/{missing}")
@@ -294,7 +314,15 @@ def test_dockerfile_nginx_routes_the_exported_assistant_artifact():
     finally:
         if process_started:
             subprocess.run(
-                [nginx, "-p", f"{temp_root}/", "-c", str(temp_root / "nginx.conf"), "-s", "quit"],
+                [
+                    nginx,
+                    "-p",
+                    f"{temp_root}/",
+                    "-c",
+                    str(temp_root / "nginx.conf"),
+                    "-s",
+                    "quit",
+                ],
                 check=False,
                 capture_output=True,
                 text=True,

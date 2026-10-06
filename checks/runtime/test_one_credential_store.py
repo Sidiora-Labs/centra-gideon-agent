@@ -6,14 +6,18 @@ from pathlib import Path
 from gideon.integrations.llm.credentials import CredentialStore
 
 
-def test_legacy_descriptors_migrate_to_the_shared_credential_backend(tmp_path: Path, monkeypatch):
+def test_legacy_descriptors_migrate_to_the_shared_credential_backend(
+    tmp_path: Path, monkeypatch
+):
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
     monkeypatch.setenv("GIDEON_HOME", str(home))
     monkeypatch.setenv("GIDEON_CREDENTIAL_BACKEND", "dotenv")
     home.mkdir()
     legacy = home / "credentials.json"
-    legacy.write_text(json.dumps({"service": {"type": "api_key", "value": "legacy-secret"}}))
+    legacy.write_text(
+        json.dumps({"service": {"type": "api_key", "value": "legacy-secret"}})
+    )
     first = CredentialStore(home)
     assert first.resolve("service").secret == "legacy-secret"
     persisted = json.loads(legacy.read_text())
@@ -23,7 +27,9 @@ def test_legacy_descriptors_migrate_to_the_shared_credential_backend(tmp_path: P
     assert CredentialStore(home).resolve("service").secret == "legacy-secret"
 
 
-def test_new_descriptors_write_values_only_to_the_core_backend(tmp_path: Path, monkeypatch):
+def test_new_descriptors_write_values_only_to_the_core_backend(
+    tmp_path: Path, monkeypatch
+):
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
     monkeypatch.setenv("GIDEON_HOME", str(home))

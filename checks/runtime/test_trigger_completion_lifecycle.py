@@ -41,7 +41,9 @@ def one_shot(identity, now, *, title="Completed"):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("title,expected", [("Completed", "success"), ("", "failure")])
-async def test_taken_one_shot_survives_until_real_provider_settles(tmp_path, monkeypatch, title, expected):
+async def test_taken_one_shot_survives_until_real_provider_settles(
+    tmp_path, monkeypatch, title, expected
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     now = time.time()
     store = TriggerStore(base_dir=tmp_path)
@@ -58,12 +60,14 @@ async def test_taken_one_shot_survives_until_real_provider_settles(tmp_path, mon
     previous = get_action_services()
     set_action_services(ActionServices(runtime.dashboard_state, asyncio.create_task))
     try:
-        action = TriggerAction("notify", trigger.workflow["config"], NotifyActionProvider())
+        action = TriggerAction(
+            "notify", trigger.workflow["config"], NotifyActionProvider()
+        )
         route = route_provider_action("notify", session_key="trigger:completion")
         before = time.time()
-        await TriggerDispatch(runtime, taken, {"scheduled_for": now - 1}, "trigger.fired", LOGGER).execute(
-            action, action.config, ActionContext("trigger.fired"), route
-        )
+        await TriggerDispatch(
+            runtime, taken, {"scheduled_for": now - 1}, "trigger.fired", LOGGER
+        ).execute(action, action.config, ActionContext("trigger.fired"), route)
         after = time.time()
     finally:
         set_action_services(previous)
@@ -85,7 +89,9 @@ async def test_taken_one_shot_survives_until_real_provider_settles(tmp_path, mon
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["launched", "queued", "waiting", "interrupted"])
-async def test_noncompleted_results_keep_durable_one_shot(tmp_path, monkeypatch, status):
+async def test_noncompleted_results_keep_durable_one_shot(
+    tmp_path, monkeypatch, status
+):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     now = time.time()
     trigger = one_shot("clock:pending", now)
@@ -114,7 +120,9 @@ async def test_missing_provider_is_durably_refused(tmp_path, monkeypatch):
     trigger.workflow = {"provider": "provider-does-not-exist"}
     store = TriggerStore(base_dir=tmp_path)
     store.upsert(trigger)
-    await TriggerDispatch(RuntimeCoordinator(AppConfig()), trigger, {}, "trigger.fired", LOGGER).run()
+    await TriggerDispatch(
+        RuntimeCoordinator(AppConfig()), trigger, {}, "trigger.fired", LOGGER
+    ).run()
     rows, count = await ExecutionJournal(tmp_path).list_for_job(trigger.id)
     assert count == 1 and rows[0]["status"] == "skipped_gate"
     assert "unknown action provider" in rows[0]["error"]
@@ -139,44 +147,72 @@ def test_retirement_preserves_rearmed_live_row(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_native_workflow_completion_records_terminal_success(tmp_path, monkeypatch):
+async def test_native_workflow_completion_records_terminal_success(
+    tmp_path, monkeypatch
+):
     from gideon.automation.triggers import grants
     from gideon.automation.workflows import defs
     from gideon.automation.workflows import store as runs
     from gideon.automation.workflows.models import RunStatus
     from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider
     from gideon.automation.workflows.watchdog import WorkflowWatchdog
-    from gideon.integrations.action_providers.run_workflow_provider import RunWorkflowActionProvider
+    from gideon.integrations.action_providers.run_workflow_provider import (
+        RunWorkflowActionProvider,
+    )
     from gideon.security.approval_answer import YOU
 
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     now = time.time()
     trigger = one_shot("clock:workflow", now)
-    trigger.enabled, trigger.next_fire_at, trigger.last_fired_at = False, "", to_iso(now)
+    trigger.enabled, trigger.next_fire_at, trigger.last_fired_at = (
+        False,
+        "",
+        to_iso(now),
+    )
     trigger.workflow = {"provider": "run-workflow", "config": {"workflow": "empty"}}
     prior_provider = defs.get_provider("native")
     provider = NativeWorkflowDefProvider()
     defs.register_provider(provider)
-    await provider.save_def(name="empty", root={"kind": "sequence", "children": []}, provenance="user")
+    await provider.save_def(
+        name="empty", root={"kind": "sequence", "children": []}, provenance="user"
+    )
     question = grants.question(trigger)
-    assert grants.grant(trigger, confirmed_revision=question.revision, principal=YOU, shown=question.shown)
+    assert grants.grant(
+        trigger,
+        confirmed_revision=question.revision,
+        principal=YOU,
+        shown=question.shown,
+    )
     TriggerStore(base_dir=tmp_path).upsert(trigger)
     supervisor = WorkflowWatchdog()
     runtime = RuntimeCoordinator(AppConfig())
     state = ConsoleState(None, now)
     previous = get_action_services()
-    set_action_services(ActionServices(state, asyncio.create_task, workflows=supervisor))
+    set_action_services(
+        ActionServices(state, asyncio.create_task, workflows=supervisor)
+    )
     try:
         from trigger_origin_fixture import authenticated_origin
 
         origin = await authenticated_origin()
-        action = TriggerAction("run-workflow", trigger.workflow["config"], RunWorkflowActionProvider())
+        action = TriggerAction(
+            "run-workflow", trigger.workflow["config"], RunWorkflowActionProvider()
+        )
         await TriggerDispatch(runtime, trigger, {}, "trigger.fired", LOGGER).execute(
-            action, action.config, ActionContext("trigger.fired", context=trigger.id, trigger_id=trigger.id, accepted_origin=origin),
+            action,
+            action.config,
+            ActionContext(
+                "trigger.fired",
+                context=trigger.id,
+                trigger_id=trigger.id,
+                accepted_origin=origin,
+            ),
             route_provider_action("run-workflow", session_key="trigger:workflow"),
         )
         assert len(runtime._handler_tasks) == 1
-        assert not TriggerStore(base_dir=tmp_path).get(trigger.id).trigger.last_success_at
+        assert (
+            not TriggerStore(base_dir=tmp_path).get(trigger.id).trigger.last_success_at
+        )
         await asyncio.wait_for(asyncio.gather(*runtime._handler_tasks), timeout=5)
         run = runs.active_runs()
         assert not run
@@ -196,7 +232,10 @@ async def test_native_workflow_completion_records_terminal_success(tmp_path, mon
 @pytest.mark.asyncio
 async def test_native_agent_refusal_and_cancel_are_not_success():
     from gideon.engine.subagent import DelegationSupervisor, SubagentInfo
-    from gideon.integrations.action_providers.completion import agent_launch, agent_result
+    from gideon.integrations.action_providers.completion import (
+        agent_launch,
+        agent_result,
+    )
 
     manager = DelegationSupervisor(None, None)
     refused = manager._refused("task", "", "spawn refused: invalid grant")

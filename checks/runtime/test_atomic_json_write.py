@@ -20,6 +20,9 @@ def test_json_writer_preserves_file_mode_and_notifies_subscribers(tmp_path):
         atomic_write.unregister_post_write_hook(record)
 
     assert stat.S_IMODE(target.stat().st_mode) == 0o640
-    assert target.read_text(encoding="utf-8") == json.dumps({"after": [1, 2]}, indent=2) + "\n"
+    assert (
+        target.read_text(encoding="utf-8")
+        == json.dumps({"after": [1, 2]}, indent=2) + "\n"
+    )
     assert observed == [target]
     assert list(tmp_path.iterdir()) == [target]

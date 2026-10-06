@@ -127,6 +127,7 @@ def test_contribution_requires_exact_gideon_authorization_and_appends_once() -> 
     assert replay == first
     assert parent.cursor == Cursor(1, 1)
     assert parent.items == (first,)
-    assert first.child_snapshot_digest == registry.snapshot(
-        "child-1", _scope()
-    ).source_digest
+    assert (
+        first.child_snapshot_digest
+        == registry.snapshot("child-1", _scope()).source_digest
+    )

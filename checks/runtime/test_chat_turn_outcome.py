@@ -7,11 +7,11 @@ from aiohttp.test_utils import TestClient, TestServer
 from gideon.cognition.history import ConversationLog
 from gideon.core.config import AppConfig
 from gideon.engine.session import ConversationDirectory
-from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 from gideon.interfaces.dashboard.chat_handlers import (
     api_chat_session_detail,
     api_chat_session_stop,
 )
+from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 from gideon.interfaces.dashboard.chat_regenerate import (
     api_chat_session_edit_resend,
     api_chat_session_regenerate,
@@ -34,7 +34,12 @@ async def test_session_detail_restores_persisted_terminal_outcome(tmp_path, outc
     session = _ChatSession(f"outcome-{outcome}")
     state._sessions[session.key] = session
     session.append("user", "Run the requested task.", "msg msg-u")
-    session.append("assistant", "The result is ready.", "msg msg-a", meta={"last_turn_outcome": outcome})
+    session.append(
+        "assistant",
+        "The result is ready.",
+        "msg msg-a",
+        meta={"last_turn_outcome": outcome},
+    )
     save_session_to_history(state, session, force=True)
     state._sessions.clear()
 
@@ -60,11 +65,17 @@ async def test_stop_and_rewrite_refusals_preserve_server_transcript(tmp_path):
     app = web.Application()
     app["state"] = state
     app.router.add_post("/api/chat/sessions/{session}/stop", api_chat_session_stop)
-    app.router.add_post("/api/chat/sessions/{session}/regenerate", api_chat_session_regenerate)
-    app.router.add_post("/api/chat/sessions/{session}/edit-resend", api_chat_session_edit_resend)
+    app.router.add_post(
+        "/api/chat/sessions/{session}/regenerate", api_chat_session_regenerate
+    )
+    app.router.add_post(
+        "/api/chat/sessions/{session}/edit-resend", api_chat_session_edit_resend
+    )
     async with TestClient(TestServer(app)) as client:
         stop_response = await client.post(f"/api/chat/sessions/{session.key}/stop")
-        regenerate_response = await client.post(f"/api/chat/sessions/{session.key}/regenerate")
+        regenerate_response = await client.post(
+            f"/api/chat/sessions/{session.key}/regenerate"
+        )
         edit_response = await client.post(
             f"/api/chat/sessions/{session.key}/edit-resend",
             json={"content": "Edited prompt", "ts": before[0]["ts"], "index": 0},

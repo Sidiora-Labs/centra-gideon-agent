@@ -356,7 +356,10 @@ def test_recording_without_transcript_is_incomplete_and_keeps_ocr(store, tmp_pat
     save_active_models({})
     ensure_nodes_registered()
     graph = _graph(
-        [NodeSpec("transcription", backend="stt"), NodeSpec("ocr", backend="vision-llm")],
+        [
+            NodeSpec("transcription", backend="stt"),
+            NodeSpec("ocr", backend="vision-llm"),
+        ],
         [],
     )
 
@@ -1422,7 +1425,11 @@ def test_runner_records_skip_reason_on_partial(store, tmp_path, monkeypatch):
     monkeypatch.setattr(
         _ex,
         "unserved_reason_sync",
-        lambda uc: "No Image · Modality model is set up." if uc == "image_modality" else _orig_reason(uc),
+        lambda uc: (
+            "No Image · Modality model is set up."
+            if uc == "image_modality"
+            else _orig_reason(uc)
+        ),
     )
     img = tmp_path / "px.png"
     Image.new("RGB", (4, 4), "white").save(img)

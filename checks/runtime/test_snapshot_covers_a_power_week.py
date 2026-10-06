@@ -32,10 +32,10 @@ def _write_week(home: Path) -> dict[str, str]:
     rotated = log.rotate(archive=True)
     assert rotated["entries_before"] == 3, rotated
 
-    from gideon.security.guardrails import incident
-    from gideon.engine.routing import stats
     from gideon.automation.triggers import idle_poll
+    from gideon.engine.routing import stats
     from gideon.integrations.inbound import capture_store
+    from gideon.security.guardrails import incident
 
     incident.activate("drill: a human stopped unattended work")
     incident.reset_incident_mirror()
@@ -130,7 +130,9 @@ def test_transcript_summaries_are_rebuilt_instead_of_backed_up(tmp_path, monkeyp
     log.init()
     log.append("durable-session", "user", "Remember the project")
     log.append("durable-session", "assistant", "I recorded the project")
-    log.write_summary("durable-session", summary="A project was recorded", summarized=2, reduced=2)
+    log.write_summary(
+        "durable-session", summary="A project was recorded", summarized=2, reduced=2
+    )
     assert log.read_summary("durable-session") is not None
     transcript = (home / "sessions" / "durable-session.jsonl").read_bytes()
     summary = log.summary_path("durable-session")
@@ -139,13 +141,21 @@ def test_transcript_summaries_are_rebuilt_instead_of_backed_up(tmp_path, monkeyp
     assert snapshot_main([str(out)]) == 0
     (archive,) = out.glob("gideon-snapshot-*.tar.gz")
     with tarfile.open(archive) as tar:
-        members = {item.name.split("/", 1)[1]: item for item in tar.getmembers()
-                   if item.isfile() and "/" in item.name}
+        members = {
+            item.name.split("/", 1)[1]: item
+            for item in tar.getmembers()
+            if item.isfile() and "/" in item.name
+        }
         assert "sessions/durable-session.summary.json" not in members
-        assert tar.extractfile(members["sessions/durable-session.jsonl"]).read() == transcript
+        assert (
+            tar.extractfile(members["sessions/durable-session.jsonl"]).read()
+            == transcript
+        )
     export, _ = create_export_zip()
     with zipfile.ZipFile(io.BytesIO(export)) as zipped:
-        members = {name.split("/", 1)[1]: name for name in zipped.namelist() if "/" in name}
+        members = {
+            name.split("/", 1)[1]: name for name in zipped.namelist() if "/" in name
+        }
         assert "sessions/durable-session.summary.json" not in members
         assert zipped.read(members["sessions/durable-session.jsonl"]) == transcript
     assert summary.is_file()
@@ -177,9 +187,13 @@ def test_inbound_token_authority_is_not_portable_or_restored(tmp_path, monkeypat
     assert entry.secret and entry.derived
     assert entry not in inventory.backup_entries()
     assert entry not in inventory.export_entries()
-    history = state_history.HistoryRoot("state", "State", home, ("inbound_tokens.json",))
+    history = state_history.HistoryRoot(
+        "state", "State", home, ("inbound_tokens.json",)
+    )
     exclusions = state_history._exclude_lines(history)
-    assert exclusions.index("inbound_tokens.json") > exclusions.index("!/inbound_tokens.json")
+    assert exclusions.index("inbound_tokens.json") > exclusions.index(
+        "!/inbound_tokens.json"
+    )
     assert "*.lock" in exclusions
     out = tmp_path / "snapshots"
     assert snapshot_main([str(out)]) == 0
@@ -189,24 +203,31 @@ def test_inbound_token_authority_is_not_portable_or_restored(tmp_path, monkeypat
         members = tar.getmembers()
         prefix = members[0].name.split("/", 1)[0]
         for member in members:
-            assert not member.name.endswith(("/inbound_tokens.json", "/.inbound_tokens.json.lock"))
+            assert not member.name.endswith(
+                ("/inbound_tokens.json", "/.inbound_tokens.json.lock")
+            )
             older.addfile(member, tar.extractfile(member) if member.isfile() else None)
-        for name, body in (("inbound_tokens.json", old_bytes), (".inbound_tokens.json.lock", b"")):
+        for name, body in (
+            ("inbound_tokens.json", old_bytes),
+            (".inbound_tokens.json.lock", b""),
+        ):
             member = tarfile.TarInfo(prefix + "/" + name)
             member.size = len(body)
             member.mode = 0o600
             older.addfile(member, io.BytesIO(body))
     export, _ = create_export_zip()
     with zipfile.ZipFile(io.BytesIO(export)) as zipped:
-        assert not any(name.endswith(("/inbound_tokens.json", "/.inbound_tokens.json.lock"))
-                       for name in zipped.namelist())
+        assert not any(
+            name.endswith(("/inbound_tokens.json", "/.inbound_tokens.json.lock"))
+            for name in zipped.namelist()
+        )
     assert restore_main([str(legacy), "--force", "--components", "everything"]) == 0
     assert path.read_bytes() == current_bytes
     assert lock.is_file()
 
 
 def test_machine_local_owner_authority_never_restores(tmp_path, monkeypatch):
-    from gideon.automation.triggers.grants import action_revision, grant
+    from gideon.automation.triggers import parks
     from gideon.automation.triggers.dispatch import (
         Envelope,
         EventSpool,
@@ -214,15 +235,15 @@ def test_machine_local_owner_authority_never_restores(tmp_path, monkeypatch):
         spool_hold_path,
         spool_path,
     )
+    from gideon.automation.triggers.grants import action_revision, grant
     from gideon.automation.triggers.models import Trigger
-    from gideon.automation.triggers import parks
     from gideon.integrations.action_providers.base import ActionResult
     from gideon.integrations.mcp_discovery import McpServerInfo
     from gideon.operations.durability import state_history
     from gideon.security.agent_hook_grants import allow as allow_hook
     from gideon.security.agent_hook_grants import key as hook_key
     from gideon.security.agent_hook_grants import pinned as pin_hook
-    from gideon.security.approval_answer import OWNER, Principal, YOU
+    from gideon.security.approval_answer import OWNER, YOU, Principal
     from gideon.security.mcp_grants import give as grant_mcp_server
     from gideon.security.owner_grants import GrantBook, seal
     from gideon.workspace.portability import create_export_zip
@@ -316,13 +337,15 @@ def test_machine_local_owner_authority_never_restores(tmp_path, monkeypatch):
         spool_path().relative_to(home).as_posix(),
         hold_path.relative_to(home).as_posix(),
     )
-    authority_bytes = {
-        rel: (home / rel).read_bytes() for rel in relative_authority
-    }
+    authority_bytes = {rel: (home / rel).read_bytes() for rel in relative_authority}
     rows = {
         "owner_grants": ("grants", inventory.KIND_TREE, inventory.DOMAIN_SECURITY),
         "pinned_hook_cache": ("hooks", inventory.KIND_TREE, inventory.DOMAIN_SECURITY),
-        "trigger_parks": ("trigger_parks", inventory.KIND_TREE, inventory.DOMAIN_SECURITY),
+        "trigger_parks": (
+            "trigger_parks",
+            inventory.KIND_TREE,
+            inventory.DOMAIN_SECURITY,
+        ),
         "trigger_spool": (
             "trigger-spool.jsonl",
             inventory.KIND_JSONL_APPEND,
@@ -359,7 +382,9 @@ def test_machine_local_owner_authority_never_restores(tmp_path, monkeypatch):
     exclusions = state_history._exclude_lines(history)
     for path, kind, _ in rows.values():
         include = f"!/{path}/" if kind == inventory.KIND_TREE else f"!/{path}"
-        assert exclusions.index(include) < exclusions.index(path + ("/" if kind == inventory.KIND_TREE else ""))
+        assert exclusions.index(include) < exclusions.index(
+            path + ("/" if kind == inventory.KIND_TREE else "")
+        )
 
     snapshots = tmp_path / "snapshots"
     assert snapshot_main([str(snapshots)]) == 0

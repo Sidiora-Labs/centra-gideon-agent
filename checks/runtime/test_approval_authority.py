@@ -24,7 +24,13 @@ from gideon.security.approval_answer import (
 
 @pytest.mark.parametrize(
     "asker",
-    [agent("session-1"), app("calendar"), bridge("desktop"), run("run-1"), trigger("timer")],
+    [
+        agent("session-1"),
+        app("calendar"),
+        bridge("desktop"),
+        run("run-1"),
+        trigger("timer"),
+    ],
 )
 def test_an_approval_raiser_cannot_answer_its_own_request(asker):
     assert check(asker, what="approval:request-1", asked_by=asker.label)
@@ -34,9 +40,10 @@ def test_only_authenticated_owner_request_is_an_owner_principal():
     assert of_request({"user": "owner-1"}).kind == "owner"
     assert of_request({"app": "calendar", "user": "owner-1"}).kind == "app"
     assert of_request({}).kind == "unknown"
-    assert of_request(
-        {"claimed_identity": {"user": "owner-1", "role": "owner"}}
-    ).kind == "unknown"
+    assert (
+        of_request({"claimed_identity": {"user": "owner-1", "role": "owner"}}).kind
+        == "unknown"
+    )
     assert of_request({"authenticated": True}).kind == "unknown"
 
 
@@ -105,9 +112,7 @@ async def test_bridge_surface_token_cannot_redeem_but_signed_owner_session_can(
     monkeypatch.delenv("GIDEON_DEV_NO_AUTH", raising=False)
     monkeypatch.delenv("GIDEON_BYPASS_LOCAL_NETWORKS", raising=False)
     (home / "config.json").write_text(
-        json.dumps(
-            {"external_access": {"enabled": True, "bridge": {"enabled": True}}}
-        ),
+        json.dumps({"external_access": {"enabled": True, "bridge": {"enabled": True}}}),
         encoding="utf-8",
     )
 
@@ -157,7 +162,7 @@ async def test_verified_telegram_answer_is_audited_and_dismisses_dashboard_once(
     from gideon.engine.gateway import ApprovalExchange, ApprovalFlow, RuntimeCoordinator
     from gideon.engine.session import ConversationDirectory
     from gideon.integrations.channel_trust import allow_sender
-    from gideon.integrations.llm.events import AgentEvent, EVENT_PERMISSION_REQUEST
+    from gideon.integrations.llm.events import EVENT_PERMISSION_REQUEST, AgentEvent
     from gideon.integrations.telegram.delivery import PendingApproval
     from gideon.integrations.telegram.transport import TelegramTransport
     from gideon.interfaces.dashboard.state import ConsoleState

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from gideon.hypermid.foundation import Cursor, Scope
 from gideon.hypermid.identity import (
     ContextIdentity,
     IdentityError,
@@ -11,7 +12,6 @@ from gideon.hypermid.identity import (
     RelationKind,
     SourceIdentity,
 )
-from gideon.hypermid.foundation import Cursor, Scope
 
 
 def _digest(character: str) -> str:
@@ -39,7 +39,9 @@ def test_source_identity_replay_is_stable_across_restart_and_provider_changes() 
         session_id="session-1",
         source=SourceIdentity("gideon-event-7", _digest("a")),
     )
-    assert restored.register_source_item(replay_with_new_candidate).identity_id == "item-1"
+    assert (
+        restored.register_source_item(replay_with_new_candidate).identity_id == "item-1"
+    )
     assert restored.to_mapping() == store.to_mapping()
 
 

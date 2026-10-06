@@ -45,7 +45,7 @@ def create_run(tier="read", *, mode="normal", extra=None):
 def test_store_reload_malformed_and_live_tier(home):
     from gideon.automation.workflows import store
     from gideon.automation.workflows.models import WorkflowRun
-    from gideon.extensions.apps.app_work import of_run_id, from_record
+    from gideon.extensions.apps.app_work import from_record, of_run_id
 
     run = create_run()
     work = of_run_id(store.get(run.id).id)
@@ -59,7 +59,7 @@ def test_store_reload_malformed_and_live_tier(home):
 
 
 def test_real_fork_preserves_scope_privacy_and_other_extra(home):
-    from gideon.automation.workflows import store, checkpoints
+    from gideon.automation.workflows import checkpoints, store
     from gideon.extensions.apps.app_work import of_run_id
 
     parent = create_run(
@@ -83,19 +83,19 @@ def test_real_fork_preserves_scope_privacy_and_other_extra(home):
 async def test_real_native_stage_enforces_stored_scope(home):
     from gideon.automation.workflows import engine
     from gideon.automation.workflows.bindings import BindingContext
-    from gideon.automation.workflows.models import Node, NodeKind, InstanceState
-    from gideon.core.config.loader import AppConfig
-    from gideon.engine.session import ConversationDirectory
-    from gideon.engine.subagent import DelegationSupervisor
+    from gideon.automation.workflows.models import InstanceState, Node, NodeKind
     from gideon.cognition.context import PromptAssembler
+    from gideon.core.config.loader import AppConfig
+    from gideon.engine.agents.native.builtin_tools import (
+        PLATFORM_CATEGORIES,
+        NativeBuiltinToolProvider,
+    )
     from gideon.engine.agents.native.runtime import NativeAgentRuntime
     from gideon.engine.agents.provider import AgentRuntimeDefinition
-    from gideon.engine.agents.native.builtin_tools import (
-        NativeBuiltinToolProvider,
-        PLATFORM_CATEGORIES,
-    )
-    from gideon.integrations.llm.scripted import ScriptedProvider
+    from gideon.engine.session import ConversationDirectory
+    from gideon.engine.subagent import DelegationSupervisor
     from gideon.extensions.apps.app_work import release_session
+    from gideon.integrations.llm.scripted import ScriptedProvider
 
     instances = []
 
@@ -161,10 +161,10 @@ async def test_real_native_stage_enforces_stored_scope(home):
 
 @pytest.mark.asyncio
 async def test_nested_real_controller_preserves_scope_and_privacy(home):
-    from gideon.automation.workflows import defs, native_defs, engine, store
-    from gideon.automation.workflows.watchdog import WorkflowWatchdog
-    from gideon.automation.workflows.models import Node, NodeKind, InstanceState
+    from gideon.automation.workflows import defs, engine, native_defs, store
     from gideon.automation.workflows.bindings import BindingContext
+    from gideon.automation.workflows.models import InstanceState, Node, NodeKind
+    from gideon.automation.workflows.watchdog import WorkflowWatchdog
     from gideon.extensions.apps.app_work import of_run_id
 
     provider = native_defs.NativeWorkflowDefProvider()
@@ -203,11 +203,18 @@ async def test_nested_real_controller_preserves_scope_and_privacy(home):
 @pytest.mark.asyncio
 async def test_app_action_agent_escape_refused_before_provider(home):
     from gideon.automation.workflows import engine
-    from gideon.automation.workflows.models import Node, NodeKind, InstanceState
     from gideon.automation.workflows.bindings import BindingContext
+    from gideon.automation.workflows.models import InstanceState, Node, NodeKind
 
     run = create_run()
-    for name in ("invoke-agent", "run-prompt", "run-workflow", "bash", "create-task", "call-app-route"):
+    for name in (
+        "invoke-agent",
+        "run-prompt",
+        "run-workflow",
+        "bash",
+        "create-task",
+        "call-app-route",
+    ):
         result = await engine.dispatch_action(
             Node(NodeKind.ACTION, id=name, config={"provider": name}),
             BindingContext(),

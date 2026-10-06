@@ -299,7 +299,8 @@ def test_revision_checked_edit_reuses_identity_reloads_and_invalidates_approval(
         )
 
     reloaded = OutboundEmail(
-        PeopleStore(store.path.parent), artifacts=artifacts,
+        PeopleStore(store.path.parent),
+        artifacts=artifacts,
         transport=outbound.transport,
     )._get(original["id"])
     assert reloaded == edited
@@ -333,9 +334,14 @@ def test_edit_rejects_in_flight_or_sent_drafts(environment, smtp_server):
     with pytest.raises(PeopleError, match="Only an unsent draft"):
         outbound.edit(
             row["id"],
-            {**edit, "revision": outbound._change(
-                row["id"], sending["revision"], lambda current: current.update(state="accepted")
-            )["revision"]},
+            {
+                **edit,
+                "revision": outbound._change(
+                    row["id"],
+                    sending["revision"],
+                    lambda current: current.update(state="accepted"),
+                )["revision"],
+            },
         )
 
 
@@ -349,7 +355,7 @@ def test_legacy_draft_edit_preserves_original_request_fingerprint(
     original_fingerprint = original["fingerprint"]
 
     with closing(store.connect()) as db, db:
-        body, = db.execute(
+        (body,) = db.execute(
             "SELECT body FROM outbound_email_drafts WHERE id=?", (original["id"],)
         ).fetchone()
         legacy = json.loads(body)

@@ -57,7 +57,9 @@ def _diagnostics() -> ContextDiagnostics:
     )
 
 
-def test_diagnostics_keep_last_good_and_report_parked_failure_without_secret_content() -> None:
+def test_diagnostics_keep_last_good_and_report_parked_failure_without_secret_content() -> (
+    None
+):
     store = DiagnosticStore(retention=2)
     good = _diagnostics()
     store.record_good(good, observed_at_ms=10)

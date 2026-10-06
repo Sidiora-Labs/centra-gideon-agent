@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import importlib
+import json
 import os
 import stat
 from pathlib import Path
@@ -14,7 +14,9 @@ from aiohttp.test_utils import TestClient, TestServer
 
 
 @pytest.mark.asyncio
-async def test_custom_runner_waits_for_exact_definition_consent(tmp_path, monkeypatch, request):
+async def test_custom_runner_waits_for_exact_definition_consent(
+    tmp_path, monkeypatch, request
+):
     home = tmp_path / "gideon-home"
     home.mkdir()
     marker = tmp_path / "runner-started.log"
@@ -36,7 +38,9 @@ async def test_custom_runner_waits_for_exact_definition_consent(tmp_path, monkey
         "    print(json.dumps({'jsonrpc': '2.0', 'id': frame.get('id'), 'result': result}), flush=True)\n",
         encoding="utf-8",
     )
-    executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    executable.chmod(
+        executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+    )
 
     monkeypatch.setenv("GIDEON_HOME", str(home))
     monkeypatch.setenv("HOME", str(home))
@@ -45,22 +49,22 @@ async def test_custom_runner_waits_for_exact_definition_consent(tmp_path, monkey
     monkeypatch.setenv("GIDEON_AUTH_MODE", "local-token")
 
     from gideon.engine.agents import runners
+    from gideon.integrations.llm.acp_agent import ACP_AGENT_CAPABILITY, AcpAgentProvider
+    from gideon.integrations.llm.registry import ProviderEntry, get_default_registry
     from gideon.interfaces.dashboard.api_version_gate import api_version_middleware
     from gideon.interfaces.dashboard.handlers.providers import (
         api_agent_provider_agents,
         api_agent_providers_list,
         api_agent_runners_list,
-        runner_grant_tenant_middleware,
         register_runner_routes,
+        runner_grant_tenant_middleware,
     )
     from gideon.interfaces.dashboard.token_auth import (
         generate_token,
         token_auth_middleware,
     )
     from gideon.security import runner_grants
-    from gideon.security.approval_answer import OWNER, APP, Principal
-    from gideon.integrations.llm.acp_agent import ACP_AGENT_CAPABILITY, AcpAgentProvider
-    from gideon.integrations.llm.registry import ProviderEntry, get_default_registry
+    from gideon.security.approval_answer import APP, OWNER, Principal
 
     catalog_dir = home / runners.USER_CATALOG_DIR_NAME
     catalog_dir.mkdir()
@@ -89,7 +93,10 @@ async def test_custom_runner_waits_for_exact_definition_consent(tmp_path, monkey
         name="acp:local-helper",
         type=ACP_AGENT_CAPABILITY.type,
         model="",
-        options={"command": [str(executable), "--acp"], "runtime_id": "acp:local-helper"},
+        options={
+            "command": [str(executable), "--acp"],
+            "runtime_id": "acp:local-helper",
+        },
         declared_capabilities=ACP_AGENT_CAPABILITY.capabilities,
     )
     registry.register_entry(runtime_entry)
@@ -122,6 +129,7 @@ async def test_custom_runner_waits_for_exact_definition_consent(tmp_path, monkey
     }
 
     import asyncio
+
     from gideon.core.config import AppConfig
     from gideon.engine.session import ConversationDirectory
     from gideon.integrations.acp.connection_pool import (
@@ -182,35 +190,48 @@ async def test_custom_runner_waits_for_exact_definition_consent(tmp_path, monkey
 
     async with TestClient(TestServer(app)) as client:
         assert await pool.warm("acp:local-helper") is False
-        assert not marker.exists(), "startup prewarm started the custom CLI before consent"
+        assert (
+            not marker.exists()
+        ), "startup prewarm started the custom CLI before consent"
 
         ready = await client.get("/api/agent-providers", headers=headers)
         assert ready.status == 200
         readiness = await ready.json()
         custom_ready = next(
-            row for row in readiness["agent_providers"] if row["name"] == "acp:local-helper"
+            row
+            for row in readiness["agent_providers"]
+            if row["name"] == "acp:local-helper"
         )
         assert custom_ready["state"] == "needs_owner_approval"
         discovered = await client.get(
             "/api/agent-providers/acp:local-helper/agents", headers=headers
         )
         assert discovered.status == 409
-        assert not marker.exists(), "readiness/discovery started the custom CLI before consent"
+        assert (
+            not marker.exists()
+        ), "readiness/discovery started the custom CLI before consent"
 
         response = await client.get("/api/agent-runners?probe=1", headers=headers)
         assert response.status == 200
         before = next(
-            row for row in (await response.json())["runners"] if row["id"] == "local-helper"
+            row
+            for row in (await response.json())["runners"]
+            if row["id"] == "local-helper"
         )
         assert before["health"]["probe"] == "owner-consent"
         assert before["owner_grant"]["required"] is True
         assert before["owner_grant"]["allowed"] is False
-        assert not marker.exists(), "GET/readiness/check started the custom CLI before consent"
+        assert (
+            not marker.exists()
+        ), "GET/readiness/check started the custom CLI before consent"
 
         denied = await client.post(
             "/api/agent-runners/local-helper/grant",
             headers=app_headers,
-            json={"approved": True, "expected_revision": before["owner_grant"]["revision"]},
+            json={
+                "approved": True,
+                "expected_revision": before["owner_grant"]["revision"],
+            },
         )
         assert denied.status == 403
         assert not marker.exists()
@@ -226,25 +247,34 @@ async def test_custom_runner_waits_for_exact_definition_consent(tmp_path, monkey
         granted = await client.post(
             "/api/agent-runners/local-helper/grant",
             headers=headers,
-            json={"approved": True, "expected_revision": before["owner_grant"]["revision"]},
+            json={
+                "approved": True,
+                "expected_revision": before["owner_grant"]["revision"],
+            },
         )
         assert granted.status == 200
         assert (await granted.json())["ok"] is True
         current_definition = runners.catalog()["local-helper"]
         runner_grants = importlib.reload(runner_grants)
         assert runner_grants.allowed(current_definition, "self-hosted")
-        assert not runner_grants.allowed(current_definition), "an unbound process has no tenant authority"
+        assert not runner_grants.allowed(
+            current_definition
+        ), "an unbound process has no tenant authority"
 
         measured = await client.get("/api/agent-runners?probe=1", headers=headers)
         assert measured.status == 200
         after_grant = next(
-            row for row in (await measured.json())["runners"] if row["id"] == "local-helper"
+            row
+            for row in (await measured.json())["runners"]
+            if row["id"] == "local-helper"
         )
         assert after_grant["health"]["ok"] is True
         assert after_grant["health"]["version"] == "2.4.1"
         assert marker.read_text(encoding="utf-8").splitlines() == ["started"]
 
-        spawned = await client.post("/api/test/runner-session", headers=headers, json={})
+        spawned = await client.post(
+            "/api/test/runner-session", headers=headers, json={}
+        )
         assert spawned.status == 200
         spawn_result = await spawned.json()
         assert spawn_result["created"] is True
@@ -275,11 +305,15 @@ async def test_custom_runner_waits_for_exact_definition_consent(tmp_path, monkey
             response = await client.get("/api/agent-runners?probe=1", headers=headers)
             assert response.status == 200
             invalidated = next(
-                row for row in (await response.json())["runners"] if row["id"] == "local-helper"
+                row
+                for row in (await response.json())["runners"]
+                if row["id"] == "local-helper"
             )
             assert invalidated["owner_grant"]["allowed"] is False
             assert invalidated["health"]["probe"] == "owner-consent"
-            assert marker.read_text(encoding="utf-8").splitlines() == session_spawn_lines
+            assert (
+                marker.read_text(encoding="utf-8").splitlines() == session_spawn_lines
+            )
 
         executable.write_text(
             "#!/usr/bin/env python3\n"
@@ -288,7 +322,9 @@ async def test_custom_runner_waits_for_exact_definition_consent(tmp_path, monkey
             "print('custom-runner 2.4.2')\n",
             encoding="utf-8",
         )
-        executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        executable.chmod(
+            executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+        )
         current_definition = runners.catalog()["local-helper"]
         assert not runner_grants.allowed(current_definition, "self-hosted")
         assert marker.read_text(encoding="utf-8").splitlines() == session_spawn_lines

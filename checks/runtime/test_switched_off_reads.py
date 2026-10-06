@@ -8,7 +8,13 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.interfaces.dashboard.handlers import doctor, evals, feedback, learning, rooms
+from gideon.interfaces.dashboard.handlers import (
+    doctor,
+    evals,
+    feedback,
+    learning,
+    rooms,
+)
 
 
 def _app() -> web.Application:
@@ -17,7 +23,9 @@ def _app() -> web.Application:
     app.router.add_get("/api/doctor/fixes", doctor.api_doctor_fixes)
     app.router.add_get("/api/doctor/remediation", doctor.api_doctor_remediation)
     app.router.add_get("/api/doctor/{capability}", doctor.api_doctor_capability)
-    app.router.add_post("/api/doctor/remediation/run", doctor.api_doctor_remediation_run)
+    app.router.add_post(
+        "/api/doctor/remediation/run", doctor.api_doctor_remediation_run
+    )
     feedback.register_feedback_routes(app)
     learning.register_learning_routes(app)
     rooms.setup_room_routes(app)
@@ -27,17 +35,24 @@ def _app() -> web.Application:
 
 def _config(home, *, evals_enabled: bool = False) -> None:
     home.mkdir(parents=True, exist_ok=True)
-    (home / "config.json").write_text(json.dumps({
-        "resilience": {"doctor_enabled": False},
-        "feedback": {"enabled": False},
-        "learning": {"enabled": False},
-        "rooms": {"enabled": False},
-        "evals": {"enabled": evals_enabled},
-    }), encoding="utf-8")
+    (home / "config.json").write_text(
+        json.dumps(
+            {
+                "resilience": {"doctor_enabled": False},
+                "feedback": {"enabled": False},
+                "learning": {"enabled": False},
+                "rooms": {"enabled": False},
+                "evals": {"enabled": evals_enabled},
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 @pytest.mark.asyncio
-async def test_disabled_collection_reads_return_only_the_off_envelope(tmp_path, monkeypatch):
+async def test_disabled_collection_reads_return_only_the_off_envelope(
+    tmp_path, monkeypatch
+):
     _config(tmp_path)
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     reads = (
