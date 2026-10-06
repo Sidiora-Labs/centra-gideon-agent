@@ -64,7 +64,7 @@ jobs:
     - name: Set up Python ${{ matrix.python }}
       run: uv python install ${{ matrix.python }}
     - name: Install (locked)
-      run: uv sync --locked --extra dev --python ${{ matrix.python }}
+      run: uv sync --locked --extra dev --extra slack --python ${{ matrix.python }}
     - name: "Install tmux (EI-6 durable sessions \u2014 real-daemon test leg)"
       run: |
         if command -v tmux >/dev/null 2>&1; then tmux -V; exit 0; fi
@@ -142,7 +142,7 @@ jobs:
     - name: Set up Python
       run: uv python install 3.12
     - name: Install (locked)
-      run: uv sync --locked --extra dev
+      run: uv sync --locked --extra dev --extra slack
     - name: pytest (adversarial scanner corpus)
       run: |
         uv run pytest -n 0 --no-cov checks/runtime/security checks/runtime/test_supply_chain_scanner.py checks/runtime/test_supply_chain_gates.py \
@@ -169,7 +169,7 @@ jobs:
     - name: Set up Python
       run: uv python install 3.12
     - name: Install (locked)
-      run: uv sync --locked --extra dev
+      run: uv sync --locked --extra dev --extra slack
     - name: pytest with coverage XML
       run: uv run pytest --cov=gideon --cov-report=xml --junitxml=reports/full-coverage.junit.xml
     - name: "Coverage badge (self-owned shields JSON \u2014 no third-party service)"
@@ -304,7 +304,7 @@ jobs:
     - name: Set up Python
       run: uv python install 3.12
     - name: Install (locked)
-      run: uv sync --locked --extra dev
+      run: uv sync --locked --extra dev --extra slack
     - name: "prepare \u2014 build canonical fixture repositories"
       run: |
         set -eu

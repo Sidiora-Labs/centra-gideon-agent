@@ -37,7 +37,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install (locked)
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --extra dev --extra slack
 
 
 
