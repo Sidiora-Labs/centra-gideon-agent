@@ -124,6 +124,10 @@ class EmbeddingProvider(ABC):
         self, texts: list[str], model: str = ""
     ) -> list[list[float] | None]: ...
 
+    def untestable_reason(self) -> str:
+        """Explain why a small owner-requested Test cannot run, without inference."""
+        return ""
+
     def _embed_sync(self, text: str, *, model: str) -> list[float] | None:
         return run_embed_sync(partial(self.embed, text, model), timeout=30)
 

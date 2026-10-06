@@ -69,7 +69,7 @@ async def test_real_local_model_test_success_refusal_timeout_strict_candidate_an
             assert status == 200 and not refused['ok'] and '401' in refused['detail']
             count = len(requests)
             assert (await test('Missing:ok:8b'))[0] == 409
-            assert (await test('Local:ok:8b', 'embedding'))[0] == 409
+            assert (await test('Local:ok:8b', 'image_gen'))[0] == 409
             assert (await test('Local:ok:8b', 'not-a-use-case'))[0] == 400
             assert len(requests) == count
             slow = asyncio.create_task(test('Local:slow:8b'))

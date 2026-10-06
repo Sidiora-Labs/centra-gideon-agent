@@ -30,4 +30,17 @@ describe('per-use-case model Test', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Test Next model for chat' })).not.toBeDisabled())
     expect(screen.queryByText('OLD RESPONSE')).not.toBeInTheDocument()
   })
+  it('tests the selected embedding model and displays actual dimensions', async () => {
+    seam.test.mockResolvedValue({ ok: true, detail: 'Embedded a test word into 3 dimensions.', reason: '', duration_ms: 2 })
+    render(<ModelTest useCase="embedding" model={{ ...model, capabilities: ['embedding'] }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test Chosen model for embedding' }))
+    await waitFor(() => expect(seam.test).toHaveBeenCalledWith('embedding', 'Registered:chosen:8b'))
+    expect(await screen.findByRole('status')).toHaveTextContent('3 dimensions')
+  })
+  it('shows the embedding adapter setup refusal without a call', () => {
+    render(<ModelTest useCase="embedding" model={{ ...model, capabilities: ['embedding'], untestable: { embedding: 'This adapter needs setup.' } }} />)
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.getByText('No Test: This adapter needs setup.')).toBeInTheDocument()
+  })
+
 })

@@ -179,6 +179,15 @@ def get_active_embedding_fingerprint() -> tuple[str, str] | None:
     return provider, model
 
 
+def direct_provider(provider_name: str) -> EmbeddingProvider | None:
+    """Look up a named typed adapter without consulting active model bindings."""
+    if provider_name in _NATIVE_NAMES:
+        ensure_registered()
+        return native_provider()
+    _ensure_scanned()
+    return _registered(provider_name)
+
+
 @dataclass(frozen=True)
 class _Selection:
     provider_name: str
@@ -189,11 +198,7 @@ class _Selection:
         return self.provider_name in _NATIVE_NAMES
 
     def direct_provider(self) -> EmbeddingProvider | None:
-        if self.native:
-            ensure_registered()
-            return native_provider()
-        _ensure_scanned()
-        return _registered(self.provider_name)
+        return direct_provider(self.provider_name)
 
 
 @dataclass(frozen=True)
@@ -391,16 +396,13 @@ def get_active_embed_many_fn() -> Callable | None:
     return _HotEmbedding(many=True) if _resolve_embed_many_fn() is not None else None
 
 
-async def embed_active(text: str) -> list[float] | None:
-    """Invoke the current actual async adapter with cancellation owned by its caller."""
-    specification = _active_embedding_spec()
-    if specification is None:
-        return None
-    selection = _Selection(*specification)
+async def embed_for(provider_name: str, model_id: str, text: str) -> list[float] | None:
+    """Invoke exactly the named adapter/model with caller-owned cancellation."""
+    selection = _Selection(provider_name, model_id)
     provider = selection.direct_provider()
     if provider is not None:
         return await provider.embed(text, model=selection.model_id)
-    model_provider = _build_model_provider(*specification)
+    model_provider = _build_model_provider(provider_name, model_id)
     if model_provider is None:
         return None
     operation = getattr(model_provider, "embed", None)
@@ -408,3 +410,11 @@ async def embed_active(text: str) -> list[float] | None:
         await model_provider.shutdown()
         return None
     return await _ModelBinding(model_provider, operation, selection.model_id).request(text)
+
+
+async def embed_active(text: str) -> list[float] | None:
+    """Invoke the current actual async adapter with cancellation owned by its caller."""
+    specification = _active_embedding_spec()
+    if specification is None:
+        return None
+    return await embed_for(*specification, text)

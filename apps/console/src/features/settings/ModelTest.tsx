@@ -7,6 +7,7 @@ const CHAT_CASES = new Set(['chat', 'code_tools', 'reasoning', 'background', 'or
 export function modelTestRefusal(useCase: string, model: AvailableModel): string {
   if (model.downloaded === false) return 'Download this model before testing it.'
   if (model.untestable?.[useCase]) return model.untestable[useCase]
+  if (useCase === 'embedding') return model.capabilities.includes('embedding') ? '' : 'This model is not listed for embedding.'
   if (!CHAT_CASES.has(useCase)) return 'A small Test for this use case is not available yet.'
   if (!model.capabilities.includes('chat')) return 'This model is not listed for chat.'
   return ''

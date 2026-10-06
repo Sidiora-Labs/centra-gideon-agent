@@ -36,7 +36,15 @@ def untestable_reason(use_case: str, provider_name: str) -> str:
     if use_case not in VALID_USE_CASES:
         return "This is not a model use case Settings lists."
     capability = parent_capability(use_case)
-    if capability != "chat":
+    if capability == "embedding":
+        from gideon.integrations.embedding_providers.registry import direct_provider
+        try:
+            adapter = direct_provider(provider_name)
+            if adapter is not None:
+                return adapter.untestable_reason()
+        except Exception:
+            return "This embedding provider is not available."
+    if capability not in {"chat", "embedding"}:
         if capability == "video_gen":
             return "A Test would have to make a whole video clip, which is slow and costly."
         return f"A small {capability.replace('_', ' ')} Test is not available yet."
@@ -46,8 +54,9 @@ def untestable_reason(use_case: str, provider_name: str) -> str:
     try:
         entry = registry.get_entry(provider_name)
         declared = entry.declared_capabilities or registry.capability_of(entry.type).capabilities
-        if entry.type == "acp_agent" or Capability.CHAT not in declared:
-            return "This provider does not serve chat models."
+        required = Capability.EMBEDDING if capability == "embedding" else Capability.CHAT
+        if entry.type == "acp_agent" or required not in declared:
+            return f"This provider does not serve {capability} models."
         if entry.type not in registry._factories:
             return "This provider's model app is not available."
     except Exception:
@@ -135,6 +144,19 @@ async def _reply(use_case: str, provider_name: str, model: str) -> ModelTestResu
     return ModelTestResult(True, f'Replied “{_safe(text)[:80]}”.')
 
 
+async def _embedding(provider_name: str, model: str) -> ModelTestResult:
+    from numbers import Real
+    from gideon.integrations.embedding_providers.registry import embed_for
+    from gideon.security.guardrails.local_inference import turn
+    async with turn(provider_name, model):
+        vector = await embed_for(provider_name, model, "hello")
+    if not isinstance(vector, (list, tuple)) or not vector:
+        return ModelTestResult(False, "The provider returned no embedding vector.", "empty_embedding")
+    if any(isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value) for value in vector):
+        return ModelTestResult(False, "The provider returned an invalid embedding vector.", "invalid_embedding")
+    return ModelTestResult(True, f"Embedded a test word into {len(vector)} dimensions.")
+
+
 async def run_model_test(use_case: str, provider_name: str, model: str) -> ModelTestResult:
     refusal = untestable_reason(use_case, provider_name)
     if refusal:
@@ -156,7 +178,8 @@ async def run_model_test(use_case: str, provider_name: str, model: str) -> Model
     try:
         from gideon.security.guardrails.local_inference import Attended, attending, next_entry
         with attending(Attended("Testing the model")), next_entry(""):
-            task = asyncio.create_task(_reply(use_case, provider_name, model))
+            probe = _embedding(provider_name, model) if parent_capability(use_case) == "embedding" else _reply(use_case, provider_name, model)
+            task = asyncio.create_task(probe)
         done, _ = await asyncio.wait({task}, timeout=timeout)
         if not done:
             deferred = True

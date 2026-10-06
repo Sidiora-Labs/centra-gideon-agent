@@ -615,6 +615,7 @@ function UseCaseRow({ useCase, activeModels, revision, allModels, providers, cat
 }
       <p data-type="body-s" className="text-on-surface-low">{meta.description}</p>
       {(useCase === 'chat' || CHAT_SUBCATEGORIES.has(useCase)) && <p data-type="caption" className="text-on-surface-low">Each model’s Test makes one small real call and asks for a one-word reply. It uses this machine’s compute or the provider’s tokens.</p>}
+      {useCase === 'embedding' && <p data-type="caption" className="text-on-surface-low">Each model’s Test embeds one word and checks the returned vector. It uses this machine’s compute or the provider’s usage allowance.</p>}
       <StaleWriteNotice guard={stale} what={`The ${meta.label.toLowerCase()} model chain`} />
       <div data-type="caption" className="inline-flex w-fit items-center gap-1.5 rounded-md px-2 py-1"
         style={meta.chain ? accentChip : { background: 'var(--color-surface-high)', color: 'var(--color-on-surface-low)' }}>
