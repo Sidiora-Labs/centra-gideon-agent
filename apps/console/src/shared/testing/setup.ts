@@ -1,16 +1,22 @@
 // Vitest global setup — jest-dom matchers (toBeInTheDocument, toBeDisabled, …)
 import '@testing-library/jest-dom/vitest'
-import { Blob as NodeBlob } from 'node:buffer'
-import { URL as NodeUrl } from 'node:url'
 import { cleanup, configure } from '@testing-library/react'
 import { afterEach } from 'vitest'
 import { resetDataStore } from '../data/data/store'
 
 configure({ asyncUtilTimeout: 5_000 })
 
-globalThis.Blob = NodeBlob as typeof Blob
-globalThis.URL.createObjectURL = (object) => NodeUrl.createObjectURL(object as NodeBlob)
-globalThis.URL.revokeObjectURL = NodeUrl.revokeObjectURL
+// Keep Blob and FileReader in the same browser realm. Node's Blob is not
+// accepted by jsdom's FileReader, even though its interface looks identical.
+const objectUrls = new Map<string, Blob>()
+let nextObjectUrl = 0
+globalThis.URL.createObjectURL = (object) => {
+  if (!(object instanceof Blob)) throw new TypeError('Expected a Blob')
+  const url = `blob:vitest/${++nextObjectUrl}`
+  objectUrls.set(url, object)
+  return url
+}
+globalThis.URL.revokeObjectURL = (url) => { objectUrls.delete(url) }
 
 if (typeof globalThis.ResizeObserver === 'undefined') {
   globalThis.ResizeObserver = class {
@@ -37,4 +43,4 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   })
 }
 
-afterEach(() => { cleanup(); resetDataStore() })
+afterEach(() => { cleanup(); resetDataStore(); objectUrls.clear() })

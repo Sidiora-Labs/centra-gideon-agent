@@ -485,7 +485,10 @@ class TestOfflineArgumentPaths:
         ``uv tool install`` with no uv and leave the user with a half-configured PATH and an
         exit code saying everything was fine.
         """
-        proc = self._run(sandbox_env)
+        # An explicit package specification exercises bootstrap prerequisites independently
+        # of the checkout's Rust and console build prerequisites.
+        wheel_env = {**sandbox_env, "GIDEON_PACKAGE_SOURCE": "gideon-agent-harness==0.1.3"}
+        proc = self._run(wheel_env)
         assert proc.returncode != 0, (
             "the installer exited 0 on a machine with no uv and no downloader. "
             f"stdout={proc.stdout!r} stderr={proc.stderr!r}"

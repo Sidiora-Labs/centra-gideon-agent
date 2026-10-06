@@ -68,7 +68,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install (locked)
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --extra dev --extra slack
       # `checks/harness/` is repo-inner dev infra beside src/ (SELF-VERIFICATION). `make lint`
 
 
@@ -267,7 +267,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install (locked)
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --extra dev --extra slack
 
 
 
@@ -330,6 +330,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install native test runtime
+        run: |
+          uv sync --locked --extra dev --extra slack
+          echo "GIDEON_TEST_PYTHON=$GITHUB_WORKSPACE/.venv/bin/python" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -433,7 +441,7 @@ jobs:
       # The config's `webServer` starts `../.venv/bin/gideon`, so the gateway must import
 
       - name: Install (locked)
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --extra dev --extra slack
 
       - name: npm ci (root)
         run: npm ci
@@ -490,7 +498,7 @@ jobs:
           enable-cache: true
       # The harness starts `../.venv/bin/gideon`, so the gateway must be importable.
       - name: Install (locked)
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --extra dev --extra slack
 
       - name: npm ci (root)
         run: npm ci
@@ -628,7 +636,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install (locked)
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --extra dev --extra slack
 
 
 
@@ -669,7 +677,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install (locked)
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --extra dev --extra slack
 
 
 
@@ -719,7 +727,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install (locked)
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --extra dev --extra slack
       - name: harness validate (spec shape + reference resolution)
         run: |
           set -o pipefail
