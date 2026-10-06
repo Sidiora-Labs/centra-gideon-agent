@@ -17,6 +17,7 @@ from gideon.assurance.testing.channel_conformance import (
     CapturingState,
     ChannelContractError,
     assert_channel_contract,
+    assert_channel_approvals,
 )
 from gideon.automation.schedule import compute_next_run_ts, format_schedule
 from gideon.automation.triggers.models import Trigger
@@ -223,6 +224,7 @@ __all__ = [
     "allow_sender",
     "apply_trust_action",
     "assert_channel_contract",
+    "assert_channel_approvals",
     "atomic_write",
     "build_cancelled_turn_preamble",
     "compress_thread_history",

@@ -43,6 +43,11 @@ provider instance it drives the clauses the plan's §C4 names:
    ``_warn_on_incomplete_vendor_seams`` for why an advisory rather than a failure, and
    ``docs/guides/BUILD_A_CHANNEL_APP.md`` for the checklist.
 
+10. **approval answers** — with ``press=`` supplied, each actual offered answer is
+    driven through the production callback. Controller endings close the prompt,
+    late answers report their actual ending, off-list keys decide nothing, and
+    cancellation propagates. ``ask_approval=`` can use native authenticated offers.
+
 Failures name the violated obligation, not just the expression, because the reader is
 usually an app author who has never seen this file.
 
@@ -99,6 +104,7 @@ from gideon.integrations.channel_transports.base import (
 
 __all__ = [
     "assert_channel_contract",
+    "assert_channel_approvals",
     "CapturingState",
     "ChannelContractError",
     "MUST_TRANSPORT_METHODS",
@@ -263,6 +269,8 @@ def assert_channel_contract(
     inbound_via: str = "",
     no_inbox_source_reason: str = "",
     no_trigger_source_reason: str = "",
+    press: Any = None,
+    ask_approval: Any = None,
 ) -> None:
     """Assert ``provider`` honours the channel contract. Raises on the first violation.
 
@@ -298,6 +306,14 @@ def assert_channel_contract(
         parameter rather than one shared "seams I skip" string, because an app that has a
         real reason to skip one arm rarely has a reason to skip the other, and a single
         suppressor would silence a seam nobody had thought about.
+    :param press: async ``press(pending, answer_key) -> str`` driving the app's actual
+        approval callback. Its return describes what the owner is told, including a
+        late press after an ending. Supplying it enables clause 10.
+    :param ask_approval: optional async ``ask_approval(event) -> (pending, wait)`` that
+        asks through the live authenticated owner controller. Use this when standing
+        permission requires a native offer and a genuine originating conversation.
+        The kit never creates approval authority; ``pending.answers`` identifies the
+        actual offered vocabulary, and ``wait`` returns the delivery's boolean result.
     """
     _assert_identity(provider)
     _assert_capabilities(provider)
@@ -315,6 +331,9 @@ def assert_channel_contract(
             clock=clock,
             fake_backend=fake_backend,
         )
+    if press is not None:
+        _require(delivery is not None, "approvals", "press= requires the app's production delivery.")
+        _run(assert_channel_approvals(delivery, press=press, ask_approval=ask_approval))
     _warn_on_incomplete_vendor_seams(
         provider,
         no_inbox_source_reason=no_inbox_source_reason,
@@ -1067,3 +1086,141 @@ def _warn_missing_seam(
         UserWarning,
         stacklevel=4,
     )
+
+
+_APPROVAL_WAIT_SECS = 5.0
+_APPROVAL_ENDINGS = ("approved", "rejected", "expired", "cancelled")
+_APPROVAL_SEQUENCE = itertools.count(1)
+
+
+def _approval_event() -> Any:
+    from types import SimpleNamespace
+    from gideon.integrations.channel_delivery import APPROVAL_ANSWERS
+    from gideon.security.approval_brief import APPROVAL_BRIEF_META_KEY
+    brief = {"tool": "write_file", "input": '{"path":"notes.txt"}',
+             "purpose": "Save the meeting notes", "risk": "caution",
+             "summary": "Can: writes files · Risk: Caution",
+             "blastRadius": {"writes": True}, "blastRadiusLine": "writes files",
+             "answers": [answer.as_dict() for answer in APPROVAL_ANSWERS]}
+    return SimpleNamespace(request_id=f"approval-contract-{next(_APPROVAL_SEQUENCE)}",
+        title=brief["tool"], tool_input=brief["input"], tool_purpose=brief["purpose"],
+        risk_level="caution", tool_meta={APPROVAL_BRIEF_META_KEY: brief})
+
+
+async def _approval_asked(delivery: Any, ask: Any) -> tuple[Any, Any, tuple]:
+    from gideon.integrations.channel_delivery import offered_answers
+    from gideon.security.approval_brief import APPROVAL_BRIEF_META_KEY
+    event = _approval_event()
+    if ask is not None:
+        result = await asyncio.wait_for(ask(event), _APPROVAL_WAIT_SECS)
+        _require(isinstance(result, tuple) and len(result) == 2, "approvals",
+                 "ask_approval MUST return the actual pending record and delivery wait.")
+        pending, wait = result
+        wait = asyncio.ensure_future(wait)
+    else:
+        seen = []
+        def prompted(pending):
+            seen.append(pending)
+            return True
+        wait = asyncio.create_task(delivery.request_approval(event, source="approval contract", on_prompted=prompted))
+        deadline = asyncio.get_running_loop().time() + _APPROVAL_WAIT_SECS
+        while not seen and not wait.done() and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(.01)
+        if not seen:
+            wait.cancel()
+            await asyncio.gather(wait, return_exceptions=True)
+            _fail("approvals", "request_approval MUST hand the owner controller a pending record; wire an authenticated owner and originating conversation, or supply ask_approval.")
+        pending = seen[-1]
+    future = getattr(pending, "future", None)
+    if not isinstance(future, asyncio.Future) or future.done():
+        wait.cancel()
+        await asyncio.gather(wait, return_exceptions=True)
+        _fail("approvals", "the actual pending record MUST carry an unresolved asyncio.Future.")
+    values = getattr(pending, "answers", None)
+    if values is None and ask is None:
+        values = event.tool_meta[APPROVAL_BRIEF_META_KEY]["answers"]
+    wire = [value.as_dict() if hasattr(value, "as_dict") else value for value in values] if isinstance(values, (tuple,list)) else None
+    answers = offered_answers(wire)
+    if answers is None:
+        wait.cancel()
+        await asyncio.gather(wait, return_exceptions=True)
+        _fail("approvals", "the pending record MUST identify its exact frozen offered vocabulary.")
+    return pending, wait, answers
+
+
+async def _approval_ended(wait: Any, reason: str) -> Any:
+    try:
+        return await asyncio.wait_for(asyncio.shield(wait), _APPROVAL_WAIT_SECS)
+    except asyncio.TimeoutError:
+        wait.cancel()
+        await asyncio.gather(wait, return_exceptions=True)
+        _fail("approvals", f"the delivery wait MUST end when {reason}.")
+
+
+def _approval_outcome(pending: Any) -> Any:
+    future = pending.future
+    if not future.done():
+        return "unresolved"
+    if future.cancelled():
+        return "future cancelled"
+    return future.exception() or future.result()
+
+
+async def _approval_pressed(press: Any, pending: Any, key: str) -> Any:
+    try:
+        return await asyncio.wait_for(press(pending, key), _APPROVAL_WAIT_SECS)
+    except Exception as exc:
+        _fail("approvals", f"the actual callback press on {key!r} failed: {exc!r}.")
+
+
+async def assert_channel_approvals(delivery: Any, *, press: Any, ask_approval: Any = None) -> None:
+    """Assert clause 10 on a live event loop, using actual offers and callback authority.
+
+    ``press(pending, key)`` drives the production callback and returns the owner's
+    visible result. ``ask_approval(event)`` may return an authenticated native
+    ``(pending, delivery_wait)``. Standing grants are never fabricated by this kit.
+    A controller-owned future keeps its terminal outcome; ``chosen_answer`` records
+    the accepted key. A delivery that stores the key itself in its future also works.
+    """
+    _require(callable(press), "approvals", "press MUST drive the production callback.")
+    told_late = {}
+    actual_answers = None
+    for ending in _APPROVAL_ENDINGS:
+        pending, wait, answers = await _approval_asked(delivery, ask_approval)
+        actual_answers = answers
+        pending.future.set_result(ending)
+        result = await _approval_ended(wait, f"the controller ended the approval {ending!r}")
+        _require(result is (ending == "approved"), "approvals", f"ending {ending!r} MUST return True only for approved; got {result!r}.")
+        told = await _approval_pressed(press, pending, "approved")
+        _require(_approval_outcome(pending) == ending, "approvals", "a late answer MUST leave the actual ending unchanged.")
+        _require(isinstance(told, str) and told.strip(), "approvals", "a late answer MUST show the owner how this approval ended.")
+        told_late[ending] = told
+    _require(len(set(told_late.values())) == len(told_late), "approvals",
+             "late answers MUST distinguish approved, denied, expired and cancelled endings.")
+    for answer in actual_answers:
+        pending, wait, offered = await _approval_asked(delivery, ask_approval)
+        try:
+            _require(answer in offered, "approvals", "the authenticated offer changed during this assertion; restart under a stable owner policy.")
+            await _approval_pressed(press, pending, "unoffered")
+            _require(not pending.future.done() and not getattr(pending, "chosen_answer", ""), "approvals",
+                     "an answer outside the offered vocabulary MUST decide nothing.")
+            await _approval_pressed(press, pending, answer.key)
+            result = await _approval_ended(wait, f"the owner answered {answer.label!r}")
+            outcome = _approval_outcome(pending)
+            chosen = getattr(pending, "chosen_answer", "")
+            _require((chosen == answer.key and outcome == answer.ends) or (not chosen and outcome == answer.key),
+                     "approvals", f"the accepted key {answer.key!r} MUST be recorded without replacing an authoritative controller ending; got key={chosen!r}, ending={outcome!r}.")
+            _require(result is (answer.ends == "approved"), "approvals", "the delivery boolean MUST describe whether the accepted answer approves.")
+        finally:
+            if not wait.done():
+                wait.cancel()
+                await asyncio.gather(wait, return_exceptions=True)
+    pending, wait, _ = await _approval_asked(delivery, ask_approval)
+    wait.cancel()
+    try:
+        await asyncio.wait_for(wait, _APPROVAL_WAIT_SECS)
+    except asyncio.CancelledError:
+        return
+    except asyncio.TimeoutError:
+        _fail("approvals", "a cancelled wait MUST stop with its requesting work.")
+    _fail("approvals", "request_approval MUST propagate cancellation of its requesting work.")

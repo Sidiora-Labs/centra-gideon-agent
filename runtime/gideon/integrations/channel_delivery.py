@@ -221,9 +221,26 @@ class ChannelDelivery(Protocol):
                              "shell": bool, "readOnly": bool},   # optional
              "blastRadiusLine": str}                             # optional
 
-        Reading it is OPTIONAL and purely additive: the method's arguments are
+        The brief also carries ``answers``, an ordered list of exact dictionaries
+        with ``key``, ``label``, ``ends``, ``word`` and ``promise``. Render precisely
+        that offered vocabulary. Show any promise before accepting its answer;
+        ``Allow for this chat`` affects only the requesting conversation and appears
+        only when the authenticated native owner controller permits that scope.
+        An answer absent from the offer decides nothing. A channel principal remains
+        a channel principal; an owner label or pairing alone cannot mint a grant.
+
+        ``pending.future`` carries the authoritative terminal outcome: ``approved``,
+        ``rejected``, ``expired`` or ``cancelled``. Record an accepted answer key in
+        ``pending.chosen_answer`` (and the actual authenticated ``pending.answerer``).
+        A native ``pending.on_answer(key, principal)`` must admit an answer before the
+        channel promises success. Preserve a controller-owned future that already
+        ended during admission. Every ending closes the prompt; a late press reports
+        that ending and cannot change it. Cancelled requesting work must propagate
+        cancellation. The method returns True only for an approved terminal outcome.
+
+        Reading the blast-radius fields is OPTIONAL and additive: the method's arguments are
         unchanged, no existing field or ``tool_meta`` key is replaced, and a channel
-        that ignores the key prompts exactly as it did before. Two rules for a
+        that ignores those fields can still render the exact offered answers. Two rules for a
         renderer:
 
         * ``blastRadius``/``blastRadiusLine`` are ABSENT when nothing could be
