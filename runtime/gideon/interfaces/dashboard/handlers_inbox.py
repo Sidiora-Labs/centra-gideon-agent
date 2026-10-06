@@ -258,7 +258,9 @@ async def api_inbox_list(request: web.Request) -> web.Response:
     state: "ConsoleState" = request.app["state"]
     _, inbox = _get_inbox(state)
     owner = owner_username()
-    items = _rank_items(state, list(inbox.items.values()))
+    from gideon.integrations.inbox_reach import reader_of_request
+    reader = reader_of_request(request, state)
+    items = _rank_items(state, [item for item in inbox.items.values() if reader.reads(item)])
     if request.query.get("mine") in {"1", "true", "yes"}:
         items = [item for item in items if item.belongs_to(owner)]
     items = _filter_by_kind(items, request.query.get("kind"))
@@ -270,7 +272,9 @@ async def api_inbox_open_items(request: web.Request) -> web.Response:
     state: "ConsoleState" = request.app["state"]
     _, inbox = _get_inbox(state)
     owner = owner_username()
-    items = _rank_items(state, list(inbox.open_items(owner)))
+    from gideon.integrations.inbox_reach import reader_of_request
+    reader = reader_of_request(request, state)
+    items = _rank_items(state, [item for item in inbox.open_items(owner) if reader.reads(item)])
     items = _filter_by_kind(items, request.query.get("kind"))
     return web.json_response([_owner_item(i, owner) for i in items])
 
@@ -285,8 +289,12 @@ async def api_inbox_kinds(request: web.Request) -> web.Response:
     state: "ConsoleState" = request.app["state"]
     _, inbox = _get_inbox(state)
     owner = owner_username()
+    from gideon.integrations.inbox_reach import reader_of_request
+    reader = reader_of_request(request, state)
     counts: dict[str, dict[str, int]] = {}
     for item in inbox.items.values():
+        if not reader.reads(item):
+            continue
         kind = item.item_kind or ItemKind.MESSAGE.value
         entry = counts.setdefault(kind, {"total": 0, "open": 0})
         entry["total"] += 1
