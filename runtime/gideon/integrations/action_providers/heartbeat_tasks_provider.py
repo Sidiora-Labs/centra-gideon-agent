@@ -14,6 +14,8 @@ from gideon.integrations.action_providers.command_lifecycle import ActionClock
 
 
 class HeartbeatTasksActionProvider(ActionProvider):
+    hook_eligible = False
+
     @property
     def name(self) -> str:
         return "heartbeat-tasks"

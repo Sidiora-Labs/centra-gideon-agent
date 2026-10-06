@@ -5,7 +5,8 @@ app bundles. A few vendor-shaped *secret-detection / credential-key* literals ar
 deliberate keeps (secret patterns can't be renamed without breaking the control; the
 CRED_SLACK_* key names are what existing installs hold). This sweep pins that set:
 
-- It scans every core ``runtime/gideon/**/*.py`` for ACTIONABLE residue —
+- It scans core ``runtime/gideon/**/*.py`` for ACTIONABLE residue, excluding
+  validated native app bundles (whose core imports are checked by the SDK boundary) —
   vendor SDK imports (``import slack_sdk`` / ``from slack ...``) and vendor
   credential/secret literals (``SLACK_*`` env/cred keys, ``xox`` token patterns).
 - Every file with such a hit MUST be listed in
@@ -41,9 +42,26 @@ _RESIDUE_PATTERNS = [
 ]
 
 
-def _core_files() -> list[Path]:
+def _core_files(core: Path = _CORE) -> list[Path]:
     out: list[Path] = []
-    for p in sorted(_CORE.rglob("*.py")):
+    from gideon.extensions.apps.manifest import AppManifest
+
+    bundled = core / "extensions" / "apps" / "native"
+    app_roots: list[Path] = []
+    if bundled.is_dir():
+        for entry in bundled.iterdir():
+            manifest = entry / "app.json"
+            if not entry.is_dir() or not manifest.is_file():
+                continue
+            try:
+                definition = AppManifest.from_json_file(manifest)
+            except (ValueError, OSError, TypeError):
+                continue
+            if definition.native and not definition.validate():
+                app_roots.append(entry)
+    for p in sorted(core.rglob("*.py")):
+        if any(p.is_relative_to(app) for app in app_roots):
+            continue
         if "__pycache__" in p.parts:
             continue
         out.append(p)
@@ -121,3 +139,36 @@ def test_sweep_has_teeth(tmp_path):
     assert not _has_residue(
         clean.read_text(encoding="utf-8")
     ), "residue patterns wrongly flagged a docstring vendor mention (prose is not residue)"
+
+
+def test_manifest_bundles_are_separate_from_core(tmp_path):
+    import json
+
+    core = tmp_path / "gideon"
+    native = core / "extensions" / "apps" / "native"
+    app = native / "channel-app"
+    app.mkdir(parents=True)
+    (app / "app.json").write_text(
+        json.dumps(
+            {
+                "name": "channel-app",
+                "version": "1.0.0",
+                "displayName": "Channel app",
+                "description": "Channel transport",
+                "native": True,
+            }
+        )
+    )
+    app_code = app / "provider.py"
+    app_code.write_text("import slack_sdk\n")
+    unowned = native / "unowned"
+    unowned.mkdir()
+    misplaced = unowned / "provider.py"
+    misplaced.write_text("import slack_sdk\n")
+    core_code = core / "provider.py"
+    core_code.write_text("import slack_sdk\n")
+    files = _core_files(core)
+    assert app_code not in files
+    assert misplaced in files and core_code in files
+    (app / "app.json").write_text("{}")
+    assert app_code in _core_files(core)

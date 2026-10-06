@@ -233,7 +233,11 @@ RECORDS = {
     "config.agent.AgentConfig": Record(
         "AgentConfig",
         {
-            "approval_channel": Value(("agent", "approval_channel"), "", lambda value: str(value or "").strip()),
+            "approval_channel": Value(
+                ("agent", "approval_channel"),
+                "",
+                lambda value: str(value or "").strip(),
+            ),
             "approval_mode": Value(("agent", "approval_mode"), "auto"),
             "approval_timeout_minutes": Value(
                 ("agent", "approval_timeout_minutes"),
@@ -893,6 +897,16 @@ RECORDS = {
     "config.workflows.WorkflowsConfig": Record(
         "WorkflowsConfig",
         {
+            "max_concurrent_llm_nodes": Value(
+                ("workflows", "max_concurrent_llm_nodes"),
+                4,
+                lambda value: definitions._safe_int(value, 4),
+            ),
+            "max_concurrent_io_nodes": Value(
+                ("workflows", "max_concurrent_io_nodes"),
+                2,
+                lambda value: definitions._safe_int(value, 2),
+            ),
             "enabled": Value(("workflows", "enabled"), True, bool),
             "self_schedule_max_outstanding": Value(
                 ("workflows", "self_schedule_max_outstanding"),
@@ -1144,9 +1158,11 @@ RECORDS = {
             "outside_home": Value(
                 ("security", "outside_home"),
                 [],
-                lambda value: [str(place) for place in value if isinstance(place, str)]
-                if isinstance(value, list)
-                else [],
+                lambda value: (
+                    [str(place) for place in value if isinstance(place, str)]
+                    if isinstance(value, list)
+                    else []
+                ),
             ),
             "credential_keychain": Value(
                 ("security", "credential_keychain"), None, lambda value: value is True

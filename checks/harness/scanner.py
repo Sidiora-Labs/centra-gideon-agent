@@ -92,7 +92,9 @@ def _string_literals_in(node: ast.AST) -> list[str]:
 
 def check_hook_provider_parity(files: list[Path], root: Path) -> list[Finding]:
     """Every provider-name string returned by a ``name`` property under
-    ``action_providers/`` must be in ``ALLOWED_HOOK_PROVIDERS`` (validation.py).
+    ``action_providers/`` must be in ``ALLOWED_HOOK_PROVIDERS`` (validation.py),
+    unless its class explicitly declares ``hook_eligible = False``. Such action-only
+    providers must remain absent from the hook allowlist.
 
     Exact set parity → ERROR. Reads both ends from the repo (the allowlist and the
     provider files) so a change to either end is caught; only reports when a
@@ -117,7 +119,42 @@ def check_hook_provider_parity(files: list[Path], root: Path) -> list[Finding]:
 
     findings: list[Finding] = []
     for f in sorted(ap_root.glob("*_provider.py")) if ap_root.is_dir() else []:
-        name, lineno = _provider_name_of(_read(f))
+        source = _read(f)
+        name, lineno = _provider_name_of(source)
+        tree = _parse_or_none(f)
+        action_only = bool(
+            tree
+            and any(
+                isinstance(member, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name) and target.id == "hook_eligible"
+                    for target in member.targets
+                )
+                and isinstance(member.value, ast.Constant)
+                and member.value.value is False
+                for cls in tree.body
+                if isinstance(cls, ast.ClassDef)
+                and any(
+                    isinstance(node, ast.Return) and node.lineno == lineno
+                    for node in ast.walk(cls)
+                )
+                for member in cls.body
+            )
+        )
+        if name and action_only:
+            if name in allowlist:
+                findings.append(
+                    Finding(
+                        check="hook-provider-parity",
+                        level=ERROR,
+                        file=f,
+                        line=lineno,
+                        what=f"action-only provider {name!r} is in ALLOWED_HOOK_PROVIDERS",
+                        why="a provider explicitly excluded from hooks must remain unavailable to hook create/update",
+                        fix=f"remove {name!r} from ALLOWED_HOOK_PROVIDERS",
+                    )
+                )
+            continue
         if name and name not in allowlist:
             findings.append(
                 Finding(
@@ -420,7 +457,8 @@ def _load_body_kwarg_names(
 
     Covers the nested-constructor idiom ``legibility=LegibilityConfig(discover_tips=...)``
     — we collect every kwarg name at any depth of the mapping's body, which is exactly the
-    set of field names it assigns. ``None`` means the anchor is gone, which callers treat as
+    set of field names it assigns. Also recognizes direct attribute assignments to
+    the result of ``decode_configuration``. ``None`` means the anchor is gone, which callers treat as
     "cannot tell" rather than "nothing is mapped".
     """
     names: set[str] = set()
@@ -433,6 +471,26 @@ def _load_body_kwarg_names(
                     and item.name in _LOAD_MAPPING_METHODS
                 ):
                     found = True
+                    decoded_names = {
+                        target.id
+                        for statement in ast.walk(item)
+                        if isinstance(statement, ast.Assign)
+                        and isinstance(statement.value, ast.Call)
+                        and isinstance(statement.value.func, ast.Name)
+                        and statement.value.func.id == "decode_configuration"
+                        for target in statement.targets
+                        if isinstance(target, ast.Name)
+                    }
+                    for statement in ast.walk(item):
+                        if not isinstance(statement, ast.Assign):
+                            continue
+                        for target in statement.targets:
+                            if (
+                                isinstance(target, ast.Attribute)
+                                and isinstance(target.value, ast.Name)
+                                and target.value.id in decoded_names
+                            ):
+                                names.add(target.attr)
                     for call in ast.walk(item):
                         if isinstance(call, ast.Call):
                             if (
@@ -450,12 +508,15 @@ def _load_body_kwarg_names(
 
 
 def check_app_sdk_boundary(files: list[Path], root: Path) -> list[Finding]:
-    """Code under repo-root ``apps/`` may import core only via ``gideon.sdk.*``.
+    """Repo apps and bundled native apps may import core only via ``gideon.sdk.*``.
     A deep ``gideon.<non-sdk>`` import → ERROR (this mirrors the boundary test,
     promoted to diff time)."""
     findings: list[Finding] = []
     for f in files:
-        if f.suffix != ".py" or not _is_under(f, root, "apps"):
+        if f.suffix != ".py" or not (
+            _is_under(f, root, "apps")
+            or _is_under(f, root, "runtime", "gideon", "extensions", "apps", "native")
+        ):
             continue
         if f.name.startswith("test_"):
             continue

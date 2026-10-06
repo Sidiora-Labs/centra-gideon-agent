@@ -317,3 +317,74 @@ def test_parse_added_lines_reads_hunks() -> None:
         """)
     parsed = _parse_added_lines(patch)
     assert parsed == {"x.py": {2, 3}}
+
+
+def test_load_mapping_tracks_only_decoded_configuration_assignments():
+    import ast
+
+    tree = ast.parse("""
+class AppConfig:
+    def load_with_migration_state(cls, values):
+        configuration = decode_configuration(values, cls)
+        other = object()
+        other.forgotten = values.get("forgotten")
+        configuration.prices = values.get("prices")
+        return configuration, False
+""")
+    names = scanner._load_body_kwarg_names(tree)
+    assert names is not None and "prices" in names
+    assert "forgotten" not in names
+
+
+def test_bundled_app_sdk_boundary_remains_guarded(tmp_path):
+    app = tmp_path / "runtime/gideon/extensions/apps/native/channel/provider.py"
+    app.parent.mkdir(parents=True)
+    app.write_text("from gideon.engine.hooks import private_symbol\n")
+    assert scanner.check_app_sdk_boundary([app], tmp_path)
+    app.write_text("from gideon.sdk import channel\n")
+    assert scanner.check_app_sdk_boundary([app], tmp_path) == []
+
+
+def test_action_only_provider_cannot_become_hook_eligible(tmp_path):
+    validation = tmp_path / "runtime/gideon/assurance/validation.py"
+    validation.parent.mkdir(parents=True)
+    provider = (
+        tmp_path / "runtime/gideon/integrations/action_providers/system_provider.py"
+    )
+    provider.parent.mkdir(parents=True)
+    provider.write_text("""
+class SystemActionProvider:
+    hook_eligible = False
+    @property
+    def name(self):
+        return "system-action"
+""")
+    validation.write_text('ALLOWED_HOOK_PROVIDERS = frozenset({"bash"})\n')
+    assert scanner.check_hook_provider_parity([provider], tmp_path) == []
+    validation.write_text('ALLOWED_HOOK_PROVIDERS = frozenset({"system-action"})\n')
+    assert scanner.check_hook_provider_parity([provider], tmp_path)
+    provider.write_text(
+        provider.read_text().replace("    hook_eligible = False\n", "")
+        + "\nclass Unrelated:\n    hook_eligible = False\n"
+    )
+    validation.write_text('ALLOWED_HOOK_PROVIDERS = frozenset({"bash"})\n')
+    assert scanner.check_hook_provider_parity([provider], tmp_path)
+
+
+def test_workflow_concurrency_settings_survive_reload(tmp_path, monkeypatch):
+    import json
+
+    from gideon.core.config import loader
+
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {"workflows": {"max_concurrent_llm_nodes": 7, "max_concurrent_io_nodes": 3}}
+        )
+    )
+    monkeypatch.setattr(loader, "config_path", lambda: path)
+    configuration = loader.AppConfig.load()
+    assert configuration.workflows.max_concurrent_llm_nodes == 7
+    assert configuration.workflows.max_concurrent_io_nodes == 3
+    assert configuration.to_dict()["workflows"]["max_concurrent_llm_nodes"] == 7
+    assert configuration.to_dict()["workflows"]["max_concurrent_io_nodes"] == 3
