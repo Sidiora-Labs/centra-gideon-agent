@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import logging
+import os
 import re
 import secrets
 import time
@@ -99,6 +100,12 @@ _RUNTIME_DISPLAY = {
     "cli": "CLI terminal",
     "channel": "messaging channel",
 }
+
+
+def _home_directory_line() -> str:
+    """Describe the same account home that native file tools expand for ``~``."""
+    home = os.path.expanduser("~")
+    return f"[HOME DIRECTORY] {home}: ~ in a path is this folder, so ~/Notes is {os.path.join(home, 'Notes')}\n"
 
 
 def _path_home_gideon():
@@ -1259,6 +1266,7 @@ class PromptAssembler:
             assembled = prefix[: newline + 1] if newline > 0 else prefix
         return (
             assembled
+            + _home_directory_line()
             + f"[CURRENT DATE] {captured.strftime('%A, %Y-%m-%d %H:%M %Z')}\n\n"
         )
 
