@@ -55,7 +55,10 @@ async def test_actual_app_clock_dispatch_enters_live_native_tier(tmp_path, monke
         assert proof.memory_mode=='temporary' and proof.trigger_origin is not None
         assert runtime._app_work.current_tier()==tier
         if tier=='text': assert not runtime._tool_index
-        if tier=='read': assert all(runtime._tool_risk.get(name,'')=='read' for name in runtime._tool_index)
+        if tier=='read':
+            assert runtime._tool_index
+            assert all(not runtime._app_work.refusal(name,declared=runtime._tool_risk.get(name)) for name in runtime._tool_index)
+            assert runtime._app_work.refusal('write_file',arguments={'path':'forbidden.txt','content':'no'})
         observations.append(proof)
         async for event in original(self,*args,**kwargs): yield event
     monkeypatch.setattr(ScriptedProvider,'complete',observe)

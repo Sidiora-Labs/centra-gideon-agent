@@ -338,7 +338,8 @@ def memory_tool_endpoint(tool: str):
                     return await handler(request)
                 except Exception as error:
                     from gideon.hypermid.client import HypermidRemoteError
-                    if isinstance(error, HypermidRemoteError) and error.error.code == 'AUTHORIZATION_DENIED':
+                    from gideon.hypermid.memory_client import NativeMemoryAuthorityDenied
+                    if isinstance(error, NativeMemoryAuthorityDenied) or (isinstance(error, HypermidRemoteError) and error.error.code == 'AUTHORIZATION_DENIED'):
                         from aiohttp import web
                         return web.json_response({'error': 'Native memory authorization refused this operation in the current scope.'}, status=403)
                     raise

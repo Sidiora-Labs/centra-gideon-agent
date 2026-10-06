@@ -44,6 +44,10 @@ from .models import JsonValue
 from .portability import LegacyImportReceipt, MemoryExportBundle, MemoryImportBatch
 
 
+class NativeMemoryAuthorityDenied(PermissionError):
+    """A typed local request violates this authenticated native memory actor scope."""
+
+
 class MemoryClient:
     """Route memory calls through one authenticated Hypermid session."""
 
@@ -86,11 +90,11 @@ class MemoryClient:
         if request.operation is not expected:
             raise ValueError(f"mutation request must use {expected.value}")
         if request.actor_scope != self.scope:
-            raise ValueError("mutation actor scope does not match the authenticated scope")
+            raise NativeMemoryAuthorityDenied("mutation actor scope does not match the authenticated scope")
 
     def _access(self, request: AccessRequest) -> None:
         if request.actor_scope != self.scope:
-            raise ValueError("access actor scope does not match the authenticated scope")
+            raise NativeMemoryAuthorityDenied("access actor scope does not match the authenticated scope")
 
     def _job_spec(self, request: MutationRequest, spec: MaintenanceJobSpec) -> None:
         self._mutation(request, spec.required_operation)
