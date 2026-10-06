@@ -1600,6 +1600,11 @@ class NativeAgentRuntime(AgentProvider):
                         prep.tool_name, prep.args, meta_sink=metadata, human_approved=True, tool_call_id=prep.call.tool_call_id
                     )
         observation = self._observe_tool_result(prep, observation, metadata)
+        from gideon.security.tool_capture import native_result_origin
+        _outcome_origin = native_result_origin(self, prep, observation, metadata)
+        metadata.pop('native_outcome_origin', None)
+        if _outcome_origin is not None:
+            metadata['native_outcome_origin'] = _outcome_origin
         if self._breaker.repeat_circuit_tripped():
             self._cancel.request(reason=CANCEL_INTERNAL)
         yield prep.result_event(observation, metadata)

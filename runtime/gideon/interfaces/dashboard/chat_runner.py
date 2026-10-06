@@ -3157,6 +3157,14 @@ async def run_chat(
                             _meta = m.setdefault("meta", {})
                             _meta["done"] = True
                             _meta["output"] = _out
+                            from gideon.security.tool_capture import project_native_result
+                            _outcome_projection = project_native_result(
+                                _tmeta.get('native_outcome_origin'), call_id=event.tool_call_id,
+                                tool_name=event.title, result=event.tool_output or '', projected=_out,
+                            )
+                            _meta.pop('native_outcome_origin', None)
+                            if _outcome_projection is not None:
+                                _meta['native_outcome_origin'] = _outcome_projection
                             if _content_type:
                                 _meta["content_type"] = _content_type
                             if _raw_ref:
