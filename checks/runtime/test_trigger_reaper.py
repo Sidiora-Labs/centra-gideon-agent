@@ -63,8 +63,7 @@ def test_a_run_past_the_deadline_is_overdue(home):
 
 
 def test_a_run_inside_the_deadline_is_left_alone(home):
-    """Ported from `test_reaper_skips_jobs_within_deadline`: the deadline is a deadline, and a slow
-    run is not a hung one."""
+    """A run within its deadline remains active."""
     _claim(home, age=60.0)
     assert reaper.overdue(now=NOW, base_dir=home) == []
 
@@ -121,9 +120,7 @@ def test_reaping_releases_the_claim(home, store):
 
 
 def test_reaping_records_degraded_health_and_the_reason(home, store):
-    """Ported from `test_reaper_kills_expired_job`, which asserted `last_status == "error"`.
-
-    DEGRADED rather than FAILING: `migrate.py`'s `_HEALTH_FROM_STATUS` maps a legacy `timeout` to
+    """DEGRADED rather than FAILING: `migrate.py`'s `_HEALTH_FROM_STATUS` maps a legacy `timeout` to
     DEGRADED, and that is the honest reading — the trigger is not broken, its last run did not
     finish. Written to `health_status`/`last_error_summary`, the fields a `Trigger` actually has;
     `last_status`/`last_error` are the LEGACY names the field map translates FROM, so writing those
@@ -164,8 +161,7 @@ def test_reaping_emits_the_sel_audit_the_cron_reaper_emitted(home, store):
 
 
 def test_reaping_a_trigger_with_no_store_row_still_frees_it(home, store):
-    """Ported from `test_force_reap_without_sessions`: the release is the load-bearing half, so a
-    trigger whose row was deleted mid-run must still get its claim back."""
+    """A trigger deleted during its run still releases its claim."""
     _claim(home, "clock:ghost", age=OVER)
 
     with patch("gideon.security.sel.sel"):
@@ -273,9 +269,7 @@ def test_sweeping_twice_is_idempotent(home, store):
 
 @pytest.mark.asyncio
 async def test_the_loop_sweeps_on_its_interval(home, store):
-    """Ported from `test_start_reaper_creates_task` + `test_reaper_loop_invokes_force_reap...`,
-    which asserted a task object existed and that a hand-built dict got swept. This drives the real
-    loop against a real claim and asserts the CLAIM IS GONE — the outcome, not the plumbing.
+    """The background loop releases overdue claims on its scheduled sweep.
     """
     _trigger(store)
     _claim(home, age=OVER)
@@ -297,7 +291,7 @@ async def test_the_loop_sweeps_on_its_interval(home, store):
 
 @pytest.mark.asyncio
 async def test_the_loop_propagates_cancellation(home, store):
-    """Ported from `test_stop_cancels_reaper`. Shutdown has to be able to stop it."""
+    """The background reaper propagates cancellation during shutdown."""
     task = asyncio.create_task(
         reaper.run_forever(store=store, base_dir=home, interval_secs=0.01)
     )

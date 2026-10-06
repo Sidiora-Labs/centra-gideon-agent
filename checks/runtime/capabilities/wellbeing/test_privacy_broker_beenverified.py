@@ -121,7 +121,7 @@ def setup(tmp_path, smtp):
             "name": "BeenVerified",
             "website": "https://www.beenverified.com",
             "optout_url": "https://www.beenverified.com/svc/optout/search/optouts",
-            "source": "curated donor protocol",
+            "source": "curated broker protocol",
         }
     )
     case = store.create_case(

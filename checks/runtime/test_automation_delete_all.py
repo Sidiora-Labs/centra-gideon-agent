@@ -52,8 +52,7 @@ def _ids(store):
 
 
 def test_it_deletes_only_the_rows_the_caller_created(store):
-    """🔴 THE CONTROL, ported from `test_removes_only_own_session_jobs`. An agent must not be able
-    to mass-delete the automations the USER built."""
+    """An agent cannot mass-delete automations created by the owner."""
     _make(store, "clock:agent-one", created_by="agent")
     _make(store, "clock:agent-two", created_by="agent")
     _make(store, "clock:mine", created_by="user")
@@ -121,8 +120,7 @@ def test_the_mcp_schema_requires_confirm():
 
 
 def test_an_empty_scope_reports_that_it_deleted_nothing(store):
-    """Ported from `test_no_matching_jobs_returns_message`. "Removed 0" beside an untouched list is
-    how a caller learns its scope was wrong instead of assuming the work is done."""
+    """An empty caller scope reports zero removals and leaves other automations intact."""
     _make(store, "clock:mine", created_by="user")
 
     result = T.delete_all(store, created_by="agent", confirm=True)

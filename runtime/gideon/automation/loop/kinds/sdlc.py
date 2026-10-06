@@ -4,9 +4,8 @@ The task is classified to an SDLC entry stage; the plan is an ordered set of
 stages each gated by explicit exit criteria (the supervisor runs the project's
 ``verify_command``/``test_command`` and a conservative judge over recent
 findings — never the worker's self-report). Module named ``sdlc`` to avoid
-shadowing the stdlib ``code`` module. Slice 1 supplies config + phase keying; the
-full stage-gate + worktree behavior ports from the legacy ``code/`` engine in
-Slice 2.
+shadowing the stdlib ``code`` module. Stage gates and task worktrees share the
+loop's configured phase plan.
 """
 
 from __future__ import annotations
@@ -363,8 +362,7 @@ class CodeKind(LoopKindStrategy):
         empty project files dir, or start() would silently recreate a deleted dir
         empty and run against nothing. Greenfield provisions its own fresh dir, so
         it's fine. Returns a user-facing reason to block ``start``, or None to allow.
-        Ported from the legacy launch-time ``require_workspace=True`` re-validation +
-        the reaper's workspace-existence guard."""
+        Revalidates the bound workspace at launch."""
         import os
 
         if (
@@ -422,8 +420,7 @@ class CodeKind(LoopKindStrategy):
 
     def stage_directive(self, loop: Loop) -> str:
         """A one-block directive naming the CURRENT stage + objective + exit
-        criteria, prepended to the cycle nudge. Empty when there's no plan.
-        Ported faithfully from code.project.stage_directive."""
+        criteria, prepended to the cycle nudge. Empty when there's no plan."""
         plan = loop.plan or []
         idx = self.active_stage_index(loop)
         if idx < 0:
@@ -518,7 +515,7 @@ class CodeKind(LoopKindStrategy):
         return _CodeWalkthrough()
 
     def build_brief(self, loop: Loop, context_dir: str = "") -> str:
-        """Ported from code/manager.write_brief — the stage-plan/workspace/DoD brief.
+        """Build the stage-plan, workspace, and done-conditions brief.
         Pure: takes the resolved project ``context_dir`` instead of looking it up."""
         cfg = loop.kind_config or {}
         entry_stage = str(cfg.get("entry_stage", "ideation"))
@@ -767,8 +764,7 @@ class CodeKind(LoopKindStrategy):
         ``cause`` tailors the steer message to WHY it stalled: ``"gate"`` = the structural
         exit criteria never cleared (busywork the gate rejects); ``"metric"`` = the exit
         criteria are met but the quality metric keeps holding below the stage's pass bar
-        (refinement that can't clear the quality gate). Ported from the legacy code
-        watchdog's _note_stall/_escalate_stall."""
+        (refinement that can't clear the quality gate)."""
         if not stage:
             return False
         key = f"{loop.id}:{stage}"
@@ -1366,8 +1362,7 @@ class CodeKind(LoopKindStrategy):
         """Autopilot tick: queue every not-terminal task of the ACTIVE stage that
         isn't already queued, so the scheduler always has the full stage to drive.
         Respects the phase barrier (only the active stage's tasks are queued). Returns
-        the refreshed loop if it queued anything, else None. Never raises. Ported from
-        code/watchdog._autopilot_queue."""
+        the refreshed loop if it queued anything, else None. Never raises."""
         from gideon.automation.loop import store, tasks_link
 
         cid = loop.id
@@ -1465,8 +1460,7 @@ class CodeKind(LoopKindStrategy):
         """Run the active phase's ready tasks concurrently — one worker per task in its
         own worktree, capped at _POOL_CAP. Reap+merge finished workers (freeing slots),
         then fill free slots with ready tasks. Returns True iff the loop paused
-        (NEEDS_INPUT on a merge conflict that couldn't auto-resolve). Ported from
-        code/watchdog._schedule_parallel onto the Loop entity + ctx."""
+        (NEEDS_INPUT on a merge conflict that couldn't auto-resolve)."""
         from gideon.automation.loop import manager, store, tasks_link, worktree
         from gideon.automation.loop.manager import (
             spawn_task_worker,
@@ -1676,7 +1670,7 @@ class CodeKind(LoopKindStrategy):
         return True
 
     def cycle_nudge(self, loop: Loop, loop_dir: str) -> str:
-        """Ported from the legacy code manager: path-qualified per-cycle trigger.
+        """Build the path-qualified per-cycle trigger.
         brief/status/guidance live in loop_dir, which for a brownfield project is
         NOT the worker's cwd (the bound workspace) — so qualify each path."""
         lines = [
@@ -1707,8 +1701,8 @@ class CodeKind(LoopKindStrategy):
 
 class _CodeWalkthrough:
     """Code-kind planning walkthrough — a DYNAMIC step list (design pass first).
-    Wraps the legacy code plan-walkthrough's pure briefs/parsers; projects the
-    approved decomposition into the UNIFIED ``plan`` + ``summary``."""
+    Uses pure briefs/parsers and projects the approved decomposition into the
+    loop's ``plan`` and ``summary``."""
 
     step_mode = "dynamic"
 

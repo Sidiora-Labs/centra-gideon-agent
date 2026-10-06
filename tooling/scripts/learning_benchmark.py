@@ -1,41 +1,10 @@
 #!/usr/bin/env python3
-"""THE one command for the skill-impact benchmark (LEARNING-VISIBILITY T4.2).
+"""Run the paired skill-impact benchmark and persist its measured verdicts.
 
-    python tooling/scripts/learning_benchmark.py --preflight            # nothing is called
-    python tooling/scripts/learning_benchmark.py --dry-run              # the paired cell plan
-    python tooling/scripts/learning_benchmark.py --run                  # the paired runs
-    python tooling/scripts/learning_benchmark.py --run --bind-provider LocalOllama:gemma4:12b
-    python tooling/scripts/learning_benchmark.py --run --task sk_grill --trials 5
-    python tooling/scripts/learning_benchmark.py --reproduce <baseline_run_id> --run
-
-Protocol: `docs/reference/LEARNING_BENCHMARK_PROTOCOL.md` (PROTOCOL v1, owner-signed
-before any run). This script implements §3's arms, §4's metrics, §5's verdict rule and §8's
-publication rules; it does not restate any of them.
-
-Why a script and not a `gideon` subcommand: the verdict thresholds live in
-`checks/harness/fanout_measure.py`, and `harness` is a repo-root dev package that is deliberately NOT in
-the shipped wheel. A CLI subcommand would have to import it from `src/`, stranding an import at
-install time. So the benchmark is dev tooling that imports both trees, the verdict is computed
-HERE, and it is **written into the report** — the gateway and the dashboard only read it. That is
-also what makes an unmeasured task render as "not measured" rather than as `0.000`: no surface
-downstream is able to synthesise a verdict or a score it was not given.
-
-Why `--run` is explicit and there is no default: every trial is a real model call against a real
-provider. §3 pairs `k = 5` trials per arm over ten tasks — 100 cells — so the default must be the
-one that costs nothing. `--preflight` and `--dry-run` both call zero models.
-
-Isolation: nothing here touches `~/.gideon`'s skills. Each cell runs in a spawned child
-whose `GIDEON_HOME` is a per-cell temp dir seeded from the scenario's declared
-`fixture_home`, and the `skills_off` arm's suppression is an overlay applied only inside that
-child. The REPORT, however, is written under the invoking home's `evals/learning_bench/`, so run
-this against an isolated `GIDEON_HOME` unless you mean to keep the results.
-
-Why `--bind-provider` and not "use whatever this home has": a cell's environment is BUILT from a
-name allowlist, not inherited, so no provider or credential reaches it by accident. `--run` on its
-own therefore measures nothing — every cell resolves the offline scripted fixture — and the flag
-names the ONE `Provider:model` ref the cells may call. The ref it names lands in the report's
-`provider_binding`, so a published table can never be mistaken for the other kind of run.
-"""
+See docs/reference/LEARNING_BENCHMARK_PROTOCOL.md for arms, metrics, thresholds
+and reproduction requirements. Preflight and dry-run do not call a model.
+Live runs require an explicit provider binding; unbound cells use scripted fixtures.
+The runner imports the repository harness, which is not part of the runtime wheel."""
 
 from __future__ import annotations
 
@@ -75,13 +44,9 @@ def _run_id(moment: datetime) -> str:
 
 
 def _default_k() -> int:
-    """§3's `k`, read from `EvalsConfig.study_default_k` rather than hardcoded.
+    """Read trials per arm from EvalsConfig.study_default_k.
 
-    G5 named this specifically: that field sits in the config PATCH allowlist and was read by
-    nothing, so the protocol says read it rather than instruct an operator to flip a switch that
-    changes nothing. Falls back to the §5 floor on any config failure — never to 1, which would
-    silently produce `insufficient_trials` for every task.
-    """
+    Fall back to the minimum trial floor if configuration cannot be read."""
     try:
         from gideon.core.config.loader import AppConfig
 
@@ -165,13 +130,10 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
 
 
 def _cell_payload(cell) -> dict:
-    """The child's own result dict for one cell, read back off the retained artifact.
+    """Read a cell result from its retained result.json artifact.
 
-    `CellResult` carries only coords/outcome/score, so the two metrics G3 and G4 fold into the
-    child payload (`tool_calls`, `spend`) reach us through `<artifact_ref>/result.json`, which the
-    parent writes under the REAL home and never deletes. Returning `{}` on any read failure is
-    correct and is not the same as returning zeros: the caller counts an unobserved cell.
-    """
+    Return an empty mapping on read failure so missing observations remain distinguishable
+    from measured zero values."""
     ref = getattr(cell, "artifact_ref", "") or ""
     if not ref:
         return {}
@@ -184,20 +146,10 @@ def _cell_payload(cell) -> dict:
 
 
 def _verdict_for_task(task: bench.BenchTask, cells: list) -> verdict_lib.TaskVerdict:
-    """Assemble the two arms from one task's cells and verdict them.
+    """Assemble scored arms and compute the task verdict.
 
-    A `VERIFIER_ABSENT` cell contributes to `absent_cells` and to NOTHING else (§6: an absent
-    cell is reported as a count, never counted as a skills-off win). A scored cell whose spend
-    was not observed flips `spend_observed` off for the whole task, because a token ratio over
-    partially observed spend is not a token match.
-
-    A scored cell whose PROVIDER did not report its usage flips `tokens_recorded` off, which is a
-    different fact and was #2540's silent zero: `spend.get("tokens") or 0` fed the token
-    denominator a `0` for a cell that genuinely spent, while the cell still reported
-    `observed: true`. The cell now reports `tokens: None`
-    (`provenance.UNRECORDED`) and this is where the count is assembled; `verdict_task` refuses the
-    ratio rather than averaging over it.
-    """
+    Count absent verifier cells separately. Preserve observed and estimated spend facts.
+    Unrecorded provider token usage prevents a token-match claim."""
     trials: dict[str, list] = {verdict_lib.ARM_SKILLS_ON: [], verdict_lib.ARM_SKILLS_OFF: []}
     tool_calls: dict[str, int] = {verdict_lib.ARM_SKILLS_ON: 0, verdict_lib.ARM_SKILLS_OFF: 0}
     absent = 0
@@ -243,17 +195,10 @@ def _verdict_for_task(task: bench.BenchTask, cells: list) -> verdict_lib.TaskVer
 
 
 def run_spend_facts(verdicts: list) -> dict:
-    """The RUN-level spend facts the report publishes above its task table.
+    """Aggregate run-level token-recording facts from task verdicts.
 
-    #2540 asked for this as a property of the run and not only of a row: "if a provider cannot
-    report usage, that is a property of the run worth surfacing in the report". A reader deciding
-    whether to believe any token ratio in the table needs it before reading a single row.
-
-    A pure function rather than an expression inlined into the report literal, because inline it was
-    unreachable from a test — and a run-level claim nothing exercises is the inert-control shape
-    this project keeps finding. A run with NO verdicts records `True`: nothing failed to report,
-    because nothing reported at all, and `measured_tasks: 0` beside it is what says so.
-    """
+    A run with no verdicts has no failed token report; measured_tasks separately identifies
+    that no task was measured."""
     return {
         "tokens_recorded": all(tv.tokens_recorded for tv in verdicts) if verdicts else True,
         "unrecorded_spend_cells": sum(tv.unrecorded_spend_cells for tv in verdicts),

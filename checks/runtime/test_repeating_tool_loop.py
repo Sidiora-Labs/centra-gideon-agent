@@ -95,18 +95,18 @@ def test_read_cycle_is_refused_and_stopped():
         subprocess.run(["git", "init", "-q", str(workspace)], check=True)
 
         runtime, _ = _runtime(workspace)
-        donor_results = []
+        cycle_results = []
         delivered = []
         for index in _ORDER:
             if runtime._cancelled:
                 break
             command = _command(index)
             delivered.append(command)
-            donor_results.append(await _dispatch_bash(runtime, index, command))
+            cycle_results.append(await _dispatch_bash(runtime, index, command))
 
         refusals = [
             result
-            for result in donor_results
+            for result in cycle_results
             if (result.tool_meta or {}).get("loop_breaker_refusal") is True
         ]
         assert refusals, "the recorded read cycle was not refused"

@@ -372,8 +372,7 @@ class LoopWatchdog:
         """Publish the third-party done-ness verdict a kind persisted for ``cycle``
         (+ a ratchet_regression flag on a regression) so the cockpit's ROI rail /
         verdict panel / judge-degraded indicator update live. No-op for a kind that
-        writes no verdicts (verifiable/monitor/code) — the FE listens for these and
-        the legacy goal watchdog published them at the same point."""
+        writes no verdicts (verifiable/monitor/code)."""
         verdict = next(
             (
                 v
@@ -466,13 +465,12 @@ class LoopWatchdog:
         clean finish. A NON-genuine complete — a ceiling ran out with the goal
         possibly unmet — persists ``reason`` via error_message so the cockpit can tell
         "finished the work" from "stopped on budget" even after a reload, instead of an
-        identical green check. Ported from the legacy code watchdog's genuine flag.
+        identical green check.
 
         ``stop_reason`` is the `AG-14` closed classification. Callers that hit a specific
         ceiling name it; unnamed, it defaults from ``genuine`` — a genuine finish is
-        ``DONE`` and a non-genuine one is the historical meaning of non-genuine,
-        ``CYCLE_BUDGET`` — so every completion carries a reason without every legacy
-        call site changing."""
+        ``DONE`` and a non-genuine one defaults to ``CYCLE_BUDGET`` — so every
+        completion carries a reason."""
         if stop_reason is None:
             stop_reason = default_stop_reason(genuine=genuine)
         if stop_reason in (

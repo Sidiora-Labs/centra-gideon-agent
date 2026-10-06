@@ -1,14 +1,13 @@
 """The Loop ROW store — the SQLite ``loops`` table, serving every
 :class:`gideon.automation.loop.loop.LoopKind`.
 
-PP-16 seam 4b: this module used to be TWO stores in one file. The per-loop FILE
-dir (ledger events, findings, guidance, questions, nudges, plan session, stop
-sentinel) now lives in :mod:`gideon.automation.loop.files`; this module keeps the row
+The per-loop file directory (ledger events, findings, guidance, questions, nudges,
+plan session, stop sentinel) lives in :mod:`gideon.automation.loop.files`; this
+module keeps the row
 — schema, CRUD, transitions — plus the REDACTED VIEWS, which stay here because a
 view composes both stores and the row is the authoritative spine it hangs off.
 The kind_config runtime trails (marginal/quality scores) are row functions too:
-they read-modify-write the row's JSON blob, exactly the coupling the 2026-08-27
-measurement warned a naive by-directory split would misplace.
+they read-modify-write the row's JSON blob.
 
 Schema is deliberately LEAN so a new kind never needs a migration: the shared
 spine fields are real columns; list/dict fields are JSON-text columns; and
@@ -725,12 +724,11 @@ def list_redacted(project_id: str = "", kind: str = "") -> list[dict]:
     """The list view: redacted rows (newest first), optionally filtered by project /
     kind. Attaches findings to each row so the per-card finding count + latest-insight
     preview match the detail view (the FE cards read ``findings.length`` + the last
-    finding directly). Ported from both legacy engines. Unlike a per-row get_redacted it never
+    finding directly). Unlike a per-row get_redacted it never
     CREATES anything per loop (no ``files_dir``, hence no ``loop_dir`` mkdir) — but it does READ
     one file per row: ``get_findings`` projects over ``<id>/events.jsonl``, so this path costs
-    O(rows) ledger reads. Measured while retiring ``total_cycles`` (PP-16 seam 4a), and the reason
-    the derived count below reuses the findings already in hand rather than asking for a second
-    scan of the same file."""
+    O(rows) ledger reads. The derived count reuses the findings already in hand
+    instead of scanning the same file again."""
     loops = list_for_project(project_id) if project_id else list_all()
     out: list[dict] = []
     for loop in loops:

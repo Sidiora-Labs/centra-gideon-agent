@@ -1,29 +1,9 @@
-"""The skill-impact benchmark: the frozen task register, its reports, and V4 reproduction.
+"""Skill-impact task register, preflight, report persistence and reproduction checks.
 
-`docs/reference/LEARNING_BENCHMARK_PROTOCOL.md` is PROTOCOL v1 — owner-signed on
-2026-08-16, before any run, including the commitment to publish a modest or negative result.
-This module is the shipped half of executing it: the frozen ten-task register, the preflight
-that says whether a paired run is runnable *before* a model is called, report persistence, and
-the §8 reproduction predicate.
-
-**What is deliberately NOT here: the verdict.** The protocol's §5 thresholds live in
-`harness/fanout_measure.py`, and `harness` is a repo-root dev package that does not ship in the
-wheel — so importing it from `src/` would strand an import at install time. The verdict is
-computed by the runner (`scripts/learning_benchmark.py`, through `harness/learning_verdict.py`)
-and **written into the report**. Everything downstream — this module, the gateway route, the
-dashboard panel — only ever READS a verdict string.
-
-That is not a workaround, it is the property worth having. A surface that cannot recompute a
-verdict cannot invent one. A report with no verdict therefore renders as *"not measured"*, and
-the one failure mode this benchmark most needs to avoid — drawing `0.000` where nothing was
-measured, turning "we never asked" into "it scored nothing" — is unreachable by construction.
-
-Isolation: every paired trial runs as a matrix cell in a spawned child whose
-``GIDEON_HOME`` is a per-cell temp dir seeded from the scenario's declared
-``fixture_home``. Nothing here reads or writes the operator's skills. The protocol's §3 forbids
-`gideon eval` for benchmark runs for exactly that reason — it isolates the workspace but
-not the home — and this module never reaches it.
-"""
+The methodology is documented in docs/reference/LEARNING_BENCHMARK_PROTOCOL.md.
+Verdicts are computed by tooling/scripts/learning_benchmark.py and stored in reports;
+runtime consumers read the recorded verdict rather than recomputing it.
+Matrix trials use temporary homes seeded from scenario fixtures."""
 
 from __future__ import annotations
 
@@ -44,13 +24,9 @@ PROVENANCE_SCHEMA = 2
 
 
 def report_schema(report: dict | None) -> int | None:
-    """The schema a report was written under, as the report itself states it.
+    """Return the declared report schema, or None when it is unrecorded.
 
-    ``None`` when the report does not state one — :data:`~gideon.assurance.evals.provenance.UNRECORDED`
-    — which no report this repo has ever written should be, because ``report_schema`` shipped with
-    LV-7. A hand-edited or truncated artifact can be, and it must not read as v1 by default: that
-    is the same absent-versus-declared collapse one level up.
-    """
+    Absent metadata must not be interpreted as an explicit schema version."""
     if provenance.is_unrecorded(report, "report_schema"):
         return None
     try:
@@ -75,7 +51,7 @@ PROTOCOL_DOC = "docs/reference/LEARNING_BENCHMARK_PROTOCOL.md"
 
 @dataclass(frozen=True)
 class BenchTask:
-    """One row of the §2.2 frozen register.
+    """One row of the §2.2 versioned register.
 
     ``skill`` is the bundled skill under test — the name the child suppresses for the
     ``skills_off`` arm. ``observable`` restates in one line what the scenario's assertions
@@ -176,19 +152,9 @@ class TaskPreflight:
 
 
 def preflight(*, loader=None) -> list[TaskPreflight]:
-    """Check every register task WITHOUT calling a model.
+    """Check scenario, fixture, skill availability and suppression without calling a model.
 
-    Three checks, in the order that makes the later ones meaningful:
-
-    1. the scenario is installed (so the pin has something to hash);
-    2. the named skill exists in the loader's home (a register row naming a skill that no
-       longer ships would otherwise "run" as two identical arms);
-    3. suppression actually removes the skill body — reusing
-       :func:`gideon.assurance.evals.skills_bench.verify_suppression`, the same check ES-7's
-       skills bench refuses on. A suppression that does not suppress produces a 0.0 delta that
-       reads as "this skill does not earn its place", which is the precise fabricated result the
-       protocol exists to prevent.
-    """
+    Suppression uses skills_bench.verify_suppression. Failed checks are returned as blockers."""
     from gideon.assurance.evals import skills_bench
 
     if loader is None:  # pragma: no cover - the default wiring

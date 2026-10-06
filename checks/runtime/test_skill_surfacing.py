@@ -120,7 +120,7 @@ def test_clear_semantic_lead_excludes_short_ambiguous_reply():
     keys = (
         "artifacts", "best-of-n", "check-work", "delegation", "document-authoring",
         "editorial-document", "grill", "infographic-syntax", "knowledge-grounding",
-        "loop-worker", "memory-discipline", "pclaw-api", "pclaw-features",
+        "loop-worker", "memory-discipline", "gideon-api", "gideon-features",
         "research-campaign", "task-and-project", "visual-output", "web-verify",
         "imported/claude_code/feedsmith-release", "imported/claude_code/incident-writeup",
         "imported/claude_code/postgres-migration-review", "imported/claude_code/trip-research",

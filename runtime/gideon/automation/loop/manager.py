@@ -7,8 +7,7 @@ the per-cycle trigger) is delegated to the loop's :class:`LoopKindStrategy`
 + tool roots and owns the file write, so the strategy stays pure.
 
 Kept free of the dashboard + autonudge concretions (passed in as ``state`` /
-``svc``) so it's unit-testable and import-cycle-free — same discipline as the
-legacy loops/code managers it unifies.
+``svc``) so orchestration stays unit-testable and import-cycle-free.
 """
 
 from __future__ import annotations
@@ -533,8 +532,7 @@ def loop_spend(loop_id: str) -> dict:
 
 def _task_cycle_nudge(loop: Loop, task, worktree_dir: str, loop_dir: str) -> str:
     """The per-cycle trigger for a parallel task-worker: it works ONLY its task, in
-    its own worktree, marks the task done, and writes a task finding. Ported from
-    code/manager._task_cycle_nudge."""
+    its own worktree, marks the task done, and writes a task finding."""
     plan = "\n".join(
         f"   - {a.get('content', '')}"
         for a in (getattr(task, "action_plan", None) or [])
@@ -598,8 +596,7 @@ async def spawn_task_worker(
     state, svc, loop: Loop, task, worktree_dir: str
 ) -> str | None:
     """Start a dedicated worker session for ``task`` in its own ``worktree_dir``.
-    Returns the session key, or None. Idempotent (a live task session is returned as-is).
-    Ported from code/manager.spawn_task_worker onto the Loop entity."""
+    Returns the session key, or None. Idempotent (a live task session is returned as-is)."""
     cfg = AppConfig.load().loops
     skey = task_session_key(loop.id, task.id)
     existing = state._sessions.get(skey)

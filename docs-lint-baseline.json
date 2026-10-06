@@ -1,35 +1,19 @@
 {
   "generated_from": "tooling/scripts/generate_docs_lint_baseline.py",
   "per_file": {
-    "docs/architecture/WINDOWS_NATIVE_AUDIT.md": {
-      "findings": [
-        "stale_citation:cli_doctor.py",
-        "stale_citation:cli_server.py"
-      ],
-      "total": 2
-    },
     "docs/guides/COMPANION_APPS.md": {
       "findings": [
         "stale_citation:runtime/gideon/dashboard/token_auth.py"
       ],
       "total": 1
-    },
-    "docs/reference/LEARNING_BENCHMARK_PROTOCOL.md": {
-      "findings": [
-        "stale_citation:gideon/config/loader.py",
-        "stale_citation:gideon/eval/runner.py",
-        "stale_citation:gideon/skills/loader.py",
-        "stale_citation:gideon/skills/surfacing.py"
-      ],
-      "total": 4
     }
   },
   "totals": {
     "by_kind": {
       "dead_link": 0,
-      "stale_citation": 7,
+      "stale_citation": 1,
       "stale_header": 0
     },
-    "total": 7
+    "total": 1
   }
 }

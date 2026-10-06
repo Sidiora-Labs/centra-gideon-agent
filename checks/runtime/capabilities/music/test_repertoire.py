@@ -157,9 +157,9 @@ def test_stable_archive_import_is_idempotent_and_supports_guarded_rollback(tmp_p
         name="Archive score", kind="document", content="C G Am F", source="archive"
     )
     arguments = dict(
-        import_id="migration-25:song:donor-song-7",
+        import_id="migration-25:song:imported-song-7",
         source_fingerprint="sha256:archive-song-7",
-        item_id="donor-song-7",
+        item_id="imported-song-7",
         created_at="2024-01-02T03:04:05+00:00",
         updated_at="2025-02-03T04:05:06+00:00",
         data={
@@ -186,7 +186,7 @@ def test_stable_archive_import_is_idempotent_and_supports_guarded_rollback(tmp_p
         },
     )
     created = store.import_song(**arguments)
-    assert created["replayed"] is False and created["item"]["id"] == "donor-song-7"
+    assert created["replayed"] is False and created["item"]["id"] == "imported-song-7"
     assert created["item"]["created_at"] == arguments["created_at"]
     assert created["item"]["stage"] == "learned" and created["item"]["repetitions"] == 8
     assert store_at(tmp_path).import_song(**arguments)["replayed"] is True
@@ -202,9 +202,9 @@ def test_stable_archive_import_is_idempotent_and_supports_guarded_rollback(tmp_p
         is True
     )
     with pytest.raises(DomainError):
-        store.get("donor-song-7")
+        store.get("imported-song-7")
     assert store.import_song(**arguments)["replayed"] is False
-    edited = store.update("donor-song-7", {"revision": 1, "capo": 3})
+    edited = store.update("imported-song-7", {"revision": 1, "capo": 3})
     assert edited["revision"] == 2
     with pytest.raises(DomainError) as err:
         store.rollback_import(arguments["import_id"], arguments["source_fingerprint"])

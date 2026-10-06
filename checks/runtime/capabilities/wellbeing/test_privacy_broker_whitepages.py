@@ -121,7 +121,7 @@ def setup(tmp_path, smtp):
             "name": "Whitepages",
             "website": "https://www.whitepages.com",
             "optout_url": "https://www.whitepages.com/suppression_requests",
-            "source": "curated donor protocol",
+            "source": "curated broker protocol",
         }
     )
     case = store.create_case(

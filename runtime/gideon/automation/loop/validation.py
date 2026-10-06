@@ -5,7 +5,7 @@ unstartable config. The SHARED spine checks (task length, cycle budget, workspac
 path safety, agent existence) live here; each kind contributes its own checks via an
 optional ``validate_config(body) -> (errors, warnings)`` strategy method (goal type/
 granularity + verify-command screening; code entry-stage + brownfield workspace). The
-union folds the legacy loops + code validators onto the one entity. Free of the agent
+shared validator combines these checks for one loop entity. Free of the agent
 registry — the HTTP layer passes ``agent_exists`` — so it stays import-light + testable.
 """
 
@@ -25,8 +25,7 @@ def _as_int(value) -> int | None:
     """Coerce a JSON value to int, or None if it isn't a whole number. Tolerates a
     clean integer string (JSON clients sometimes send numbers as strings) but rejects
     a non-numeric one — so a malformed value surfaces as a clean validation error
-    rather than an unhandled int() ValueError → 500. Ported from the legacy code
-    validator, dropped at the unified-validator cutover (which used a raw int())."""
+    rather than an unhandled int() ValueError → 500."""
     if isinstance(value, bool):
         return None
     if isinstance(value, int):

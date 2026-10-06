@@ -2,9 +2,8 @@
 
 Done-ness is **type-driven** (the principle that no agent certifies its own work):
 verifiable runs a deterministic ``verify_command``; open-ended consults a separate
-judge subagent's ROI verdict; monitor never self-completes. Slice 1 supplies the
-classification/config shape + phase keying; the full classify/judge/ratchet
-behavior ports from the legacy ``loops/`` engine in Slice 2.
+judge subagent's ROI verdict; monitor never self-completes. Classification, phase
+keying, judging, and quality ratchets follow the configured goal type.
 """
 
 from __future__ import annotations
@@ -206,14 +205,13 @@ class GoalKind(LoopKindStrategy):
     def walkthrough(self):
         """The goal stepwise planning walkthrough — a FIXED ordered step list
         (intent → sub-goals → quorum → execution_plan), projecting into the unified
-        loop spec. Wraps the legacy goal plan-walkthrough's pure briefs/parsers."""
+        loop spec using pure planning briefs and artifact parsers."""
         return _GoalWalkthrough()
 
     def build_brief(self, loop: Loop, context_dir: str = "") -> str:
-        """Ported from loops/manager.write_brief — goal/sub-goals/scope/DoD/
-        deliverables/context. Pure: takes the resolved project ``context_dir``.
-        (Intake-clarification + orchestrator framing fold in when the manager wires
-        provisioning in 2c; the durable spec the worker reads each cycle is here.)"""
+        """Build the goal, sub-goals, scope, done-conditions, deliverables, and context
+        brief. Pure: takes the resolved project ``context_dir``.
+        The worker reads this durable spec each cycle."""
         cfg = loop.kind_config or {}
         goal_type = str(cfg.get("goal_type", "open_ended"))
         sub_goals = list(cfg.get("sub_goals", []) or [])
@@ -332,8 +330,7 @@ class GoalKind(LoopKindStrategy):
         return "\n".join(lines)
 
     def cycle_nudge(self, loop: Loop, loop_dir: str) -> str:
-        """Ported from the legacy loops manager: the per-cycle trigger shaped by
-        goal type. The finding write IS the cycle (a hard criterion — less-steerable
+        """Build the per-cycle trigger for the configured goal type. The finding write IS the cycle (a hard criterion — less-steerable
         ACP workers otherwise plan + write nothing); the deliverable write is
         conditional on the goal type having a document deliverable."""
         cfg = loop.kind_config or {}
@@ -414,9 +411,8 @@ def _deliverable_name(goal_type: str) -> str:
 
 
 class _GoalWalkthrough:
-    """Goal-kind planning walkthrough — a FIXED step list. Wraps the legacy goal
-    plan-walkthrough's pure briefs/parsers; projects approved artifacts into the
-    UNIFIED loop spec (sub-goals → ``plan`` rows + ``kind_config.sub_goals``)."""
+    """Goal-kind planning walkthrough with a fixed step list and pure briefs/parsers.
+    Projects approved artifacts into the loop spec (sub-goals → ``plan`` rows + ``kind_config.sub_goals``)."""
 
     step_mode = "fixed"
 

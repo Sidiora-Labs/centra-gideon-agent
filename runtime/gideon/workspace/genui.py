@@ -206,7 +206,7 @@ def library_manifest() -> dict:
 
 
 def uispec_catalog() -> tuple[dict[str, Any], ...]:
-    """Vetted snapshot derived from the donor trees; the frontend contract test checks drift."""
+    """Versioned UI template catalog; the frontend contract test checks drift."""
     path = Path(__file__).with_name("uispec_catalog.json")
     return tuple(json.loads(path.read_text(encoding="utf-8")))
 
