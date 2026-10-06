@@ -2,10 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { Artifact, ArtifactUpdate } from '../../shared/data/api'
 import { ArtifactViewer } from './ArtifactViewer'
+import { registerBuiltinContentTypes } from '../../shared/ui/content/registerBuiltins'
 
 const SLUG = 'tagged-brief'
 let artifact: Artifact
-const updateArtifact = vi.fn<(slug: string, body: ArtifactUpdate) => Promise<Artifact>>()
+const { updateArtifact } = vi.hoisted(() => ({
+  updateArtifact: vi.fn<(slug: string, body: ArtifactUpdate) => Promise<Artifact>>(),
+}))
 
 vi.mock('../../shared/data/useChatSocket', () => ({ useChatSocket: () => {} }))
 vi.mock('../../shared/ui/content/ContentSurface', () => ({
@@ -54,6 +57,7 @@ async function mountViewer(onChanged = vi.fn()) {
 }
 
 beforeEach(() => {
+  registerBuiltinContentTypes()
   artifact = fixture()
   updateArtifact.mockReset()
   updateArtifact.mockImplementation(async (_slug, body) => {

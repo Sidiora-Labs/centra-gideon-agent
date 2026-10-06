@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
-const prompts = vi.fn(async () => [{ name: 'weekly-review', description: 'Review the week' }])
+const { prompts } = vi.hoisted(() => ({
+  prompts: vi.fn(async () => [{ name: 'weekly-review', description: 'Review the week' }]),
+}))
 
 vi.mock('../../shared/data/api', () => ({ api: { prompts } }))
 
@@ -39,7 +41,7 @@ describe('ActionConfig prompt widgets', () => {
 
     await waitFor(() => expect(prompts).toHaveBeenCalledWith('user'))
     fireEvent.click(screen.getByRole('button', { name: 'Pick a saved prompt…' }))
-    fireEvent.click(await screen.findByRole('option', { name: 'weekly-review' }))
+    fireEvent.click(await screen.findByRole('option', { name: /^weekly-review\s*Review the week$/ }))
 
     expect(onConfig).toHaveBeenCalledWith({ prompt_id: 'weekly-review' })
   })

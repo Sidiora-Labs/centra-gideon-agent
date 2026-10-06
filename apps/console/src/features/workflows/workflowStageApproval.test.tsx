@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkflowContinuation, WorkflowRunDetailData } from '../../shared/data/api'
 import { WorkflowRunDetail } from './WorkflowRunDetail'
 
-const confirmWorkflowRun = vi.fn()
-const resumeWorkflowRun = vi.fn()
+const { confirmWorkflowRun, resumeWorkflowRun } = vi.hoisted(() => ({
+  confirmWorkflowRun: vi.fn(),
+  resumeWorkflowRun: vi.fn(),
+}))
 
 const run: WorkflowRunDetailData = {
   run_id: 'run-38', workflow: 'release', status: 'needs_input', spec_version: 1,
