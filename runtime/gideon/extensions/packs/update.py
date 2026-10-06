@@ -227,7 +227,14 @@ def _decide(plan: "ImportPlan", installed: Any, home: Path) -> list[ComponentUpd
             )
             continue
         target = home / lock.get("path", "")
-        current = component_digest(target)
+        from gideon.operations.durability.home_paths import LinkInTheWay
+        try:
+            current = component_digest(target)
+        except LinkInTheWay as link:
+            out.append(ComponentUpdate(ref=ref, action=ACTION_SKIP_UNVERIFIABLE,
+                                       reason=f"linked contents left unchanged: {link}",
+                                       pack_path=comp.path, home_path=lock.get("path", "")))
+            continue
         if current == "":
             out.append(
                 ComponentUpdate(
@@ -368,6 +375,10 @@ def apply_update(
         write_refs = {d.ref for d in decisions if d.writes}
 
         update_id = uuid.uuid4().hex[:16]
+        try:
+            pack_import.refuse_links(home, parsed, plan.name or pack_name, update_id, refs=write_refs)
+        except pack_import.PackImportRefused as error:
+            raise PackUpdateError(f"update destinations refused: {error}") from error
         journal = pack_import._Journal(home, update_id)
         registry = get_default_skills_registry()
         mp_name = f"pack-update:{pack_name}:{update_id}"

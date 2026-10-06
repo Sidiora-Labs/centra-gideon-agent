@@ -833,7 +833,7 @@ def _landing(home: Path, relative: str) -> Path:
         raise PackImportRefused("integrity", f"invalid pack destination: {relative}") from error
 
 
-def refuse_links(home: Path, parsed, stage: str, import_id: str) -> None:
+def refuse_links(home: Path, parsed, stage: str, import_id: str, *, refs=None) -> None:
     """Validate every publication destination before a pack starts its journal."""
     from gideon.extensions.packs.component_paths import component_path
     from gideon.extensions.packs.installed import LEDGER_FILE
@@ -842,6 +842,8 @@ def refuse_links(home: Path, parsed, stage: str, import_id: str) -> None:
                      f"packs/staged/{stage}/{pack_roster.ROSTER_FILE}"):
         _landing(home, relative)
     for component in parsed:
+        if refs is not None and f"{component.kind}:{component.id}" not in refs:
+            continue
         path = component_path(component.kind, component.target_id, home, stage)
         if path is None:
             raise PackImportRefused("integrity", "invalid component destination")
