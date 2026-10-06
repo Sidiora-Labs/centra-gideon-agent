@@ -13,7 +13,7 @@ from gideon.integrations.llm.openai import OpenAIProvider
 from gideon.integrations.llm.credentials import Credential
 from gideon.interfaces.dashboard import token_auth
 from gideon.interfaces.dashboard.handlers import external_access as ea
-from gideon.interfaces.dashboard.chat_handlers import _run_chat_scoped
+from gideon.interfaces.dashboard.chat_handlers import _run_chat_scoped, api_chat_sessions
 from gideon.interfaces.dashboard.chat_persistence import resolve_session, save_session_to_history
 from gideon.core.config.external_access import ExternalAccessConfig
 from gideon.core.config.external_access import ExternalAccessSurfaceConfig as Surface
@@ -159,6 +159,7 @@ class _World:
         app['allowed_origins'] = set()
         app["state"] = self.state
         dialect.register_routes(app, turn_runner=_run_chat_scoped, persist_turn=save_session_to_history, restore_session=resolve_session)
+        app.router.add_get('/api/chat/sessions', api_chat_sessions)
         app.router.add_get('/api/external-access', ea.api_external_access)
         app.router.add_post(CLIENTS, ea.api_external_access_client)
         app.router.add_post(CLIENTS + '/{client_id}/persistent-sessions', ea.api_external_access_client_persistent_sessions)
@@ -300,6 +301,92 @@ async def test_actual_sdk_client_conversation_rounds_restart_and_refusals(tmp_pa
         with pytest.raises(APIStatusError):
             await sdk.chat.completions.create(model='other-agent', messages=[{'role':'user','content':'No privilege widening'}])
         assert clients.load_clients()[made['client_id']].conversation_round == 2
+    finally:
+        if sdk is not None: await sdk.close()
+        await world.close()
+        caps.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_actual_sdk_unfinished_restart_toggle_and_private_client_consumers(tmp_path, monkeypatch):
+    monkeypatch.setenv('GIDEON_HOME', str(tmp_path / 'home'))
+    monkeypatch.setenv('GIDEON_WORKSPACE', str(tmp_path / 'workspace'))
+    for surface in _SURFACES:
+        monkeypatch.delenv(f'GIDEON_INBOUND_{surface}_TOKEN', raising=False)
+    caps.reset_for_tests()
+    world = _World(tmp_path, monkeypatch)
+    await world.start()
+    sdk = None
+    try:
+        status, made = await world.register(persistent_sessions=True, agent=AGENT)
+        assert status == 200, made
+        sdk = AsyncOpenAI(api_key=made['token'], base_url=str(world.http.make_url('/v1')), max_retries=0)
+        async def ask(text, user=TAG):
+            reply = await sdk.chat.completions.create(model=AGENT, messages=[{'role': 'user', 'content': text}], user=user)
+            await world.settled()
+            return reply
+        await ask(FIRST)
+        # Drain native sessions, create a new ConsoleState on the same durable native history.
+        old = world.state
+        await world.sessions.close_all()
+        world.sessions = ConversationDirectory(AppConfig.load(), provider_factory=create_provider_factory())
+        world.state = ConsoleState(sessions=world.sessions, start_time=0.0, conversation_log=world.log)
+        world.state.context_builder = old.context_builder
+        world.state._hook_store = None
+        world.http.app['state'] = world.state
+        await ask('[q5] After restart?')
+        assert FIRST_SECRET in world.handed('[q5]')
+        world.was_asked.clear()
+        world.hold.clear()
+        inflight = asyncio.create_task(ask('[q6] Captured old round?'))
+        await asyncio.wait_for(world.was_asked.wait(), 5)
+        status, changed = await world.choose(made['client_id'], {'persistent_sessions': False})
+        assert status == 200
+        world.hold.set()
+        await inflight
+        assert FIRST_SECRET in world.handed('[q6]')
+        await ask('[q6b] New round answered alone?')
+        assert FIRST_SECRET not in world.handed('[q6b]')
+        await world.choose(made['client_id'], {'persistent_sessions': True})
+        await ask('[q7] New kept round?')
+        assert FIRST_SECRET not in world.handed('[q7]')
+        status, refused = await world.choose(made['client_id'], {'persistent_sessions': 'true'})
+        assert status == 400
+        status, wrong = await world.register(surfaces=('mcp',), persistent_sessions=True)
+        assert status == 400
+        # Integration credentials never become owner settings permissions or private history readers.
+        response = await world.http.get('/api/chat/sessions', headers={'Authorization': 'Bearer ' + made['token']})
+        assert response.status in {401,403}
+        # Integration credentials never become owner settings permissions.
+        response = await world.http.post(CLIENTS + '/' + made['client_id'] + '/persistent-sessions', json={'persistent_sessions':False}, headers={'Authorization': 'Bearer ' + made['token']})
+        assert response.status in {401,403}
+        with pytest.raises(APIStatusError):
+            await sdk.chat.completions.create(model='other-agent', messages=[{'role':'user','content':'No privilege widening'}])
+        assert clients.load_clients()[made['client_id']].conversation_round == 2
+        await ask('[qOwner] Untrusted user field is not owner identity.', user='owner')
+        key = dialect.session_key_for(made['client_id'], 'owner', conversation_round=2)
+        resident = world.state._sessions[key]
+        assert resident._initiator == {'kind':'bridge', 'name':made['client_id'], 'tenant':''}
+        ingress = next(row['meta']['ingress'] for row in reversed(resident.messages) if row.get('role') == 'user')
+        assert ingress['principal'] == resident._initiator
+        owner_history = await world.http.get('/api/chat/sessions', headers={'Authorization':'Bearer ' + world.owner})
+        assert owner_history.status == 200
+        # A registered native handler at the same path cannot acquire OpenAI delegation.
+        guarded = web.Application(middlewares=[token_auth.token_auth_middleware(port=0)])
+        guarded['state'] = world.state
+        guarded['port'] = 0
+        guarded['allowed_origins'] = set()
+        guarded.router.add_post(dialect.ROUTE_CHAT, ea.api_external_access)
+        guarded.router.add_get(dialect.ROUTE_CHAT, dialect.handle_models)
+        guarded.router.add_get('/v1/private-data', ea.api_external_access)
+        probe = TestClient(TestServer(guarded))
+        await probe.start_server()
+        try:
+            for method, path in [('POST', dialect.ROUTE_CHAT), ('GET', dialect.ROUTE_CHAT), ('GET','/v1/private-data')]:
+                response = await probe.request(method, path, headers={'Authorization':'Bearer ' + made['token']})
+                assert response.status in {401,403}
+        finally:
+            await probe.close()
     finally:
         if sdk is not None: await sdk.close()
         await world.close()
