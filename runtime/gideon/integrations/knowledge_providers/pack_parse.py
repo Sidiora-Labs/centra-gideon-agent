@@ -442,6 +442,9 @@ def run_parse_script(
         wrap_argv,
     )
 
+    from gideon.core.python_children import require
+
+    require("run Python parse scripts")
     script = Path(script)
     _require_script(script)
     if len(body) > MAX_BODY_BYTES:

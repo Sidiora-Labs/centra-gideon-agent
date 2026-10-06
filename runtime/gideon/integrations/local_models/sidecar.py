@@ -790,6 +790,9 @@ class SidecarInstall:
         return True
 
     def _step_venv(self) -> tuple[str, str]:
+        from gideon.core.python_children import require
+
+        require("create a Python sidecar environment")
         python = venv_python(self.venv)
         if python.is_file():
             return "skipped", "venv already present"

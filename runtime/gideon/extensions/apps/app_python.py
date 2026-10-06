@@ -101,7 +101,9 @@ class PackageInstallError(Exception):
 
 def root() -> Path:
     """The active home's app prefix, refusing a link that redirects writes elsewhere."""
-    home = _manager.config_dir().resolve()
+    from gideon.core.config.loader import resolve_config_dir
+
+    home = resolve_config_dir().resolve()
     prefix = home / APP_PYTHON_DIRNAME
     if prefix.is_symlink() or (prefix.exists() and not prefix.is_dir()):
         raise PackageInstallError(

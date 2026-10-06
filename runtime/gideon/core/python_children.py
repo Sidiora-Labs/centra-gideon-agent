@@ -19,3 +19,22 @@ def refusal(cannot: str) -> str:
 def require(cannot: str) -> None:
     if not available():
         raise NeedsInterpreter(refusal(cannot))
+
+
+
+def app_refusal(manifest) -> str:
+    """Reject only app capabilities that need an unsupported interpreter child."""
+    if available():
+        return ""
+    needs = []
+    if manifest.sources:
+        needs.append("run this app's Python parse scripts")
+    if any(provider.execution == "sidecar" for provider in manifest.all_providers()):
+        needs.append("create this app's Python sidecar environment")
+    requirements = manifest.dependencies.pythonDependencies
+    if requirements:
+        from gideon.extensions.apps.app_python import unmet
+        missing = unmet(requirements)
+        if missing:
+            needs.append("install this app's Python packages (" + ", ".join(missing) + ")")
+    return refusal(" and ".join(needs)) if needs else ""

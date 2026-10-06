@@ -99,11 +99,12 @@ class CoreCompatibility:
     required: str = ""
     host: str = ""
     missing: tuple[str, ...] = ()
+    runtime_reason: str = ""
 
     @property
     def admits(self) -> bool:
         """Whether an app carrying this verdict may be installed / enabled / started."""
-        return self.state == CORE_COMPAT_OK
+        return self.state == CORE_COMPAT_OK and not self.runtime_reason
 
     @property
     def reason(self) -> str:
@@ -112,6 +113,8 @@ class CoreCompatibility:
         Names BOTH versions in every non-``ok`` state, and — where the user can act —
         says what to do next. Prefixed with the app name by the caller, which is the
         layer that knows it."""
+        if self.runtime_reason:
+            return self.runtime_reason
         if self.missing:
             return (
                 "requires unavailable core features "
@@ -127,15 +130,15 @@ class CoreCompatibility:
         if self.state == CORE_COMPAT_INVALID:
             return (
                 f"declares minGideonVersion {self.required!r}, which is not a "
-                f"MAJOR.MINOR.PATCH version, so its core-version floor cannot be "
-                f"checked against this core ({self.host}) and is being ignored. Fix the "
+                f"PEP 440 version, so its core-version floor cannot be "
+                f"checked against this core ({self.host}) and the app is refused. Fix the "
                 f"value in app.json to restore the gate."
             )
         if self.state == CORE_COMPAT_UNKNOWN_HOST:
             return (
                 f"requires Gideon {self.required} or newer; this core reports "
                 f"{self.host!r}, which is not a comparable version, so the floor cannot "
-                f"be checked and is being allowed."
+                f"be checked and the app is refused."
             )
         return ""
 
@@ -2070,6 +2073,11 @@ class AppManifest:
         card) and a write surface (install / update / enable / boot) can both ask.
         See :func:`check_core_version` for which way each unparseable case falls."""
         verdict = check_core_version(self.minGideonVersion, host)
+        from gideon.core.python_children import app_refusal
+
+        runtime_reason = app_refusal(self)
+        if runtime_reason:
+            return CoreCompatibility(CORE_COMPAT_INCOMPATIBLE, self.minGideonVersion, verdict.host, runtime_reason=runtime_reason)
         missing = tuple(
             sorted(
                 {
