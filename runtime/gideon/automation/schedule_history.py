@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from gideon.core.atomic_write import atomic_write
+from gideon.core.bounded_log import in_time_order
 
 logger = logging.getLogger(__name__)
 _SUMMARY_CAP = 200
@@ -135,7 +136,7 @@ def _retain_job(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     suppressed_budget = min(sum(map(_inert, records)), _MAX_SUPPRESSED_PER_JOB)
     budgets = {True: suppressed_budget, False: _MAX_RECORDS_PER_JOB - suppressed_budget}
     retained = []
-    for record in reversed(records):
+    for record in reversed(in_time_order(records, at="started_at")):
         category = _inert(record)
         if budgets[category] > 0:
             retained.append(record)
@@ -147,7 +148,7 @@ def _retain_job(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _retain_index(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     usage: Counter[str] = Counter()
     retained = []
-    for record in reversed(records):
+    for record in reversed(in_time_order(records, at="started_at")):
         owner = str(record.get("job_id") or "")
         if usage[owner] >= _MAX_INDEX_PER_JOB:
             continue
@@ -248,7 +249,8 @@ class ExecutionJournal:
     def _page(
         records: list[dict[str, Any]], offset: int, limit: int
     ) -> tuple[list[dict[str, Any]], int]:
-        return list(reversed(records))[offset : offset + limit], len(records)
+        ordered = in_time_order(records, at="started_at")
+        return list(reversed(ordered))[offset : offset + limit], len(records)
 
     def _job_page(
         self, job_id: str, offset: int, limit: int
