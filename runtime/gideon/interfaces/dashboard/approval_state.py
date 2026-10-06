@@ -76,10 +76,20 @@ class DashboardApprovalState:
         from gideon.security.session_credentials import credential_for, verify
 
         key = str(entry.get("session") or "")
-        if not key or self.channel_provider_for(key) != "telegram":
+        provider = self.channel_provider_for(key)
+        if not key or provider not in {"telegram", "slack"}:
             return None
         history_key = _history_key_for(key)
         thread, channel = self.sessions.get_channel_link(history_key)
+        if provider == "slack":
+            from gideon.integrations.channel_delivery import raw_delivery_for
+            delivery = raw_delivery_for("slack")
+            identity = delivery.approval_identity(str(channel)) if delivery is not None and hasattr(delivery, "approval_identity") else None
+            if identity is None or not thread or not channel:
+                return None
+            return {"provider": "slack", "thread": str(thread), "channel": str(channel),
+                    **identity, "principal": on_channel("slack", identity["owner"], identity["tenant"]),
+                    "work": verify(credential_for(history_key), history_key)}
         pieces = str(thread).split(":")
         if not pieces or pieces[0] != "telegram":
             return None
@@ -94,7 +104,7 @@ class DashboardApprovalState:
         if not owner or not is_allowed_sender("telegram", owner):
             return None
         return {"provider": "telegram", "thread": str(thread), "channel": str(channel),
-                "owner": owner, "tenant": f"telegram:{slot}", "transport": child,
+                "owner": owner, "tenant": f"telegram:{slot}", "transport": child, "private": str(channel) == owner,
                 "principal": on_channel("telegram", owner, f"telegram:{slot}"),
                 "work": verify(credential_for(history_key), history_key)}
 
@@ -115,7 +125,7 @@ class DashboardApprovalState:
                 work.initiator.kind == CHANNEL and work.initiator == context["principal"])
         if (not own or not eligible_work or getattr(session, "created_by_app", "")
             or getattr(session, "_app", "") in {"loop", "loops", "room"}
-            or context["channel"] != context["owner"]
+            or not context.get("private")
             or entry.get("owner_only") or entry.get("protected_delete")
             or entry.get("risk") not in {"safe", "caution"}
             or (work is not None and work.durable_run_id)
@@ -200,6 +210,18 @@ class DashboardApprovalState:
         current = self._pending_approvals.get(approval_id)
         if current is None or current.get("revision") != entry.get("revision"):
             return
+        delivery = delivery_for(context["provider"])
+        if delivery is None:
+            return
+        if context["provider"] == "slack":
+            await delivery.prepare_approval_channel(context["channel"])
+            refreshed = self._channel_context(entry)
+            if refreshed is None or any(refreshed.get(k) != context.get(k) for k in ("provider", "thread", "channel", "owner", "tenant", "transport", "work")):
+                return
+            context = refreshed
+            current = self._pending_approvals.get(approval_id)
+            if current is None or current.get("revision") != entry.get("revision"):
+                return
         answers = self.channel_answers(entry, context=context)
         offer = {"revision": entry["revision"], "context": context, "answers": answers}
         offers = self.__dict__.setdefault("_channel_offers", {})

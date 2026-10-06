@@ -726,13 +726,18 @@ def _persist_channel_config(
 
 
 class _PendingApproval:
-    __slots__ = ("provider", "request_id", "session_key", "future")
+    __slots__ = ("provider", "request_id", "session_key", "future", "answers", "delivery", "tenant", "owner", "channel", "thread", "answerer", "on_answer", "chosen_answer")
 
     def __init__(self, provider: ModelProvider, request_id: str | int, session_key: str = "") -> None:
         self.provider = provider
         self.request_id = request_id
         self.session_key = session_key
         self.future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
+        self.answers = ONE_CALL_ANSWERS
+        self.delivery = None
+        self.tenant = self.owner = self.channel = self.thread = self.chosen_answer = ""
+        self.answerer = self.on_answer = None
 
 
 _OUTCOME_APPROVED = "approved"
@@ -2823,6 +2828,14 @@ async def _request_approval(
 
     key = f"{channel}:{approval_ts}"
     pending = _PendingApproval(provider, event.request_id, session_key)
+    from gideon.integrations.channel_delivery import raw_delivery_for
+    pending.delivery = raw_delivery_for("slack")
+    identity = pending.delivery.approval_identity(channel) if pending.delivery else None
+    if identity is None:
+        await provider.reject_tool(event.request_id)
+        return "rejected"
+    pending.owner, pending.tenant = identity["owner"], identity["tenant"]
+    pending.channel, pending.thread = channel, thread_ts or ""
     _pending_approvals[key] = pending
 
     try:
@@ -2844,170 +2857,42 @@ async def _request_approval(
     return outcome
 
 
-async def handle_interaction(channel: str, msg_ts: str, action_id: str, user_id: str = "", thread_ts: str = "", slack_desk: SlackDeskClientOps | None = None) -> str | None:
-    """Handle a Block Kit button click for tool approval.
-
-    Supports four actions:
-    - approve_tool: approve this one tool call
-    - trust_tool: auto-approve all tools for this session (thread)
-    - reject_tool: reject this tool call
-
-    Security: rejects non-owner clicks. Trust requires DM channel
-    (verified via conversations.info by the gateway caller).
-    """
-
-    # Deny-by-default: reject unless positively confirmed as allowed
-    if not user_id or not is_allowed_user(user_id):
-        logger.warning(
-            "Rejecting interactive action from unauthorized user %s (action=%s)", user_id, action_id
-        )
-        sel().log_api_access(
-            caller=user_id or "unknown",
-            operation="slack.interactive.approval",
-            outcome="denied",
-            source="slack",
-            resources=action_id,
-            error="unauthorized user",
-        )
+async def handle_interaction(channel: str, msg_ts: str, action_id: str, user_id: str = "", thread_ts: str = "", slack_desk: SlackDeskClientOps | None = None, *, team_id: str = "", answer_value: str = "") -> str | None:
+    """Answer only the live offer in its authenticated workspace and destination."""
+    from slack_desk_runtime.enterprise import check_message_origin
+    from gideon.integrations.channel_delivery import raw_delivery_for
+    from gideon.security.approval_answer import on_channel
+    pending = _pending_approvals.get(f"{channel}:{msg_ts}")
+    if pending is None or pending.future.done() or not check_message_origin(team_id):
         return None
-
-    key = f"{channel}:{msg_ts}"
-    pending = _pending_approvals.get(key)
-    if not pending:
-        # Approval already resolved (approved/rejected/timed out).
-        # For trust clicks, still set trust using the thread as session key.
-        # Replicate session_key derivation from handle_message: thread_ts,
-        # then check for linked dashboard session override.
-        if action_id == _ACTION_TRUST and thread_ts:
-            if not is_allowed_user(user_id):
-                logger.warning("Rejecting late trust click from non-allowed user %s", user_id)
-                sel().log_api_access(
-                    caller=user_id,
-                    operation="slack.interactive.trust_late",
-                    outcome="denied",
-                    source="slack",
-                    error="unauthorized user",
-                )
-                return None
-            # Verify clicking user owns this thread (prevents privilege escalation)
-            if not slack_desk:
-                logger.warning("Rejecting late trust click: cannot verify thread ownership (no slack client)")
-                sel().log_api_access(
-                    caller=user_id,
-                    operation="slack.interactive.trust_late",
-                    outcome="denied",
-                    source="slack",
-                    error="no_slack_client",
-                )
-                return None
-            try:
-                msgs = await slack_desk.fetch_thread_replies(channel, thread_ts, limit=1)
-                thread_owner = msgs[0].get("user", "") if msgs else ""
-            except Exception:
-                logger.warning("Failed to verify thread ownership for %s", thread_ts, exc_info=True)
-                sel().log_api_access(
-                    caller=user_id,
-                    operation="slack.interactive.trust_late",
-                    outcome="denied",
-                    source="slack",
-                    error="thread_ownership_check_failed",
-                )
-                return None
-            if not thread_owner or thread_owner != user_id:
-                logger.warning("Rejecting late trust click: user %s is not thread owner", user_id)
-                sel().log_api_access(
-                    caller=user_id,
-                    operation="slack.interactive.trust_late",
-                    outcome="denied",
-                    source="slack",
-                    error="not_thread_owner",
-                )
-                return None
-            from gideon.sdk.channel import SessionMap
-            session_key = thread_ts
-            try:
-                linked = SessionMap().get_session_for_thread(thread_ts)
-                if linked:
-                    session_key = linked
-            except Exception:
-                logger.warning("SessionMap lookup failed for thread %s; refusing to grant trust", thread_ts, exc_info=True)
-                sel().log_api_access(
-                    caller=user_id,
-                    operation="slack.interactive.trust_late",
-                    outcome="denied",
-                    source="slack",
-                    error="session_map_lookup_failed",
-                )
-                return None
-            _trusted_sessions.add(session_key)
-            logger.info("Trust mode ON (late click) for session %s", session_key)
-            sel().log_api_access(
-                caller=user_id,
-                operation="slack.interactive.trust_late",
-                outcome="allowed",
-                source="slack",
-                resources=session_key,
-            )
-            return _ACTION_TRUST
-        else:
-            logger.warning("No pending approval for %s", key)
-            sel().log_api_access(
-                caller=user_id or "unknown",
-                operation="slack.interactive.approval",
-                outcome="denied",
-                source="slack",
-                resources=key,
-                error="no_pending_approval",
-            )
+    delivery = pending.delivery
+    identity = delivery.approval_identity(channel) if delivery is not None else None
+    if (identity is None or raw_delivery_for("slack") is not delivery or slack_desk is not delivery.client
+        or user_id != identity["owner"] or user_id != pending.owner
+        or identity["tenant"] != pending.tenant or pending.channel != channel
+        or pending.thread != thread_ts or answer_value != str(pending.request_id)):
         return None
-
-    if action_id in (_ACTION_APPROVE, _ACTION_TRUST):
-        # Set trust state BEFORE approving (so subsequent tools auto-approve)
-        if action_id == _ACTION_TRUST:
-            if not is_allowed_user(user_id):
-                logger.error("Rejecting trust escalation from non-allowed user %s", user_id)
-                sel().log_api_access(
-                    caller=user_id,
-                    operation="slack.interactive.trust_denied",
-                    outcome="denied",
-                    source="slack",
-                    resources=pending.session_key or "",
-                    error="non-allowed user",
-                )
-                if not pending.future.done():
-                    pending.future.set_result(_OUTCOME_REJECTED)
-                del _pending_approvals[key]
-                return _ACTION_REJECT
-            elif pending.session_key:
-                _trusted_sessions.add(pending.session_key)
-                logger.info("Trust mode ON for session %s", pending.session_key)
-            else:
-                logger.warning("No session_key on pending approval %s; approving without trust", key)
-        if pending.provider:
+    answer = {"approve_tool": "approved", "trust_tool": "trust", "reject_tool": "rejected"}.get(action_id)
+    chosen = next((item for item in pending.answers if item.key == answer), None)
+    if chosen is None:
+        return None
+    if answer == "trust" and not await delivery.prepare_approval_channel(channel):
+        return None
+    by = on_channel("slack", user_id, pending.tenant)
+    if callable(pending.on_answer):
+        if not pending.on_answer(answer, by):
+            return None
+    elif answer == "trust":
+        return None
+    elif pending.provider:
+        if chosen.ends == "approved":
             await pending.provider.approve_tool(pending.request_id)
-        if not pending.future.done():
-            pending.future.set_result(_OUTCOME_APPROVED)
-        sel().log_api_access(
-            caller=user_id,
-            operation="slack.interactive.approval",
-            outcome="allowed",
-            source="slack",
-            resources=action_id,
-        )
-    else:
-        if pending.provider:
+        else:
             await pending.provider.reject_tool(pending.request_id)
-        if not pending.future.done():
-            pending.future.set_result(_OUTCOME_REJECTED)
-        sel().log_api_access(
-            caller=user_id,
-            operation="slack.interactive.approval",
-            outcome="denied",
-            source="slack",
-            resources=action_id,
-        )
-
-    del _pending_approvals[key]
+    pending.answerer = by
+    pending.chosen_answer = answer
+    if not pending.future.done():
+        pending.future.set_result(chosen.ends)
     return action_id
 
 
@@ -3066,52 +2951,17 @@ def _approval_brief_line(event: LLMEvent) -> str:
     return line
 
 
-def _build_approval_blocks(event: LLMEvent, is_dm: bool = True, source: str = "") -> list[dict]:
-    """Build Block Kit blocks for tool approval prompt.
+def _build_approval_blocks(event: LLMEvent, is_dm: bool = True, source: str = "", *, answers: tuple | None = None) -> list[dict]:
+    """Render the exact offered answers and complete tool input.
 
-    Args:
-        event: The permission-request event from the LLM provider.
-        is_dm: True when posting to a DM (adds Trust button).
-        source: Optional label for background agents (e.g. "subagent",
-            "cron").  Prefixed to the header so users can tell main-agent
-            approvals apart from background ones.
-
-    Shows the full command text (from tool_input) in a code block so users
-    can see exactly what will run before approving.  Falls back to the
-    truncated title when tool_input is unavailable.
-
-    In DMs: Approve / Trust / Reject
-    In group channels: Approve / Reject only (Trust excluded
-    to limit blast radius — it escalates permissions for the session).
-    YOLO is owner-only via ``!yolo on`` command — no button.
+    Standing permission appears only when the native approval owner offers it.
+    A private channel alone does not authorize a standing grant.
     """
-    buttons: list[dict] = [
-        {
-            "type": "button",
-            "text": {"type": "plain_text", "text": "Approve"},
-            "style": "primary",
-            "action_id": _ACTION_APPROVE,
-            "value": event.request_id,
-        },
-    ]
-    if is_dm:
-        buttons.append(
-            {
-                "type": "button",
-                "text": {"type": "plain_text", "text": "Trust session"},
-                "action_id": _ACTION_TRUST,
-                "value": event.request_id,
-            },
-        )
-    buttons.append(
-        {
-            "type": "button",
-            "text": {"type": "plain_text", "text": "Reject"},
-            "style": "danger",
-            "action_id": _ACTION_REJECT,
-            "value": event.request_id,
-        },
-    )
+    from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
+    answers = answers or ONE_CALL_ANSWERS
+    action_ids = {"approved": _ACTION_APPROVE, "trust": _ACTION_TRUST, "rejected": _ACTION_REJECT}
+    buttons = [{"type": "button", "text": {"type": "plain_text", "text": answer.label},
+                "action_id": action_ids[answer.key], "value": str(event.request_id)} for answer in answers]
 
     blocks: list[dict] = []
 
@@ -3137,20 +2987,8 @@ def _build_approval_blocks(event: LLMEvent, is_dm: bool = True, source: str = ""
         # Security: scan for exfiltration URLs and credentials before posting
         sanitized, _ = redact_exfiltration_urls(event.tool_input)
         sanitized, _ = redact_credentials(sanitized)
-        # Truncate with marker if exceeds Slack limit
-        if len(sanitized) > _SLACK_SECTION_TEXT_LIMIT:
-            detail = (
-                sanitized[: _SLACK_SECTION_TEXT_LIMIT - len(_TRUNCATION_MARKER)]
-                + _TRUNCATION_MARKER
-            )
-        else:
-            detail = sanitized
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": f"```{detail}```"},
-            },
-        )
+        for detail in split_message(sanitized, limit=_SLACK_SECTION_TEXT_LIMIT - 6):
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"```{detail}```"}})
 
     # The blast radius goes ABOVE the buttons: it is the reason to press one, so a
     # reader must meet it before the decision, not after it.
@@ -3160,6 +2998,9 @@ def _build_approval_blocks(event: LLMEvent, is_dm: bool = True, source: str = ""
             {"type": "context", "elements": [{"type": "mrkdwn", "text": brief_line}]},
         )
 
+    for answer in answers:
+        if answer.promise:
+            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": answer.promise}]})
     blocks.append({"type": "actions", "elements": buttons})
     blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]})
     return blocks

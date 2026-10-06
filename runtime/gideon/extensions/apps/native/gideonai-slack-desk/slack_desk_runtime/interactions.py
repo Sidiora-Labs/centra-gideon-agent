@@ -2011,38 +2011,15 @@ async def _handle_session_new(
             pass
 
 
-async def _handle_tool_approval(
-    payload: dict, action_id: str, channel: str, msg_ts: str, user_id: str
-) -> None:
-    """Route approve / trust / reject to the handler."""
-    # Trust is restricted to DMs — fail-closed if orchestrator not ready
-    if action_id == "trust_tool":
-        if not _orch or not _orch.slack_desk:
-            logger.warning("trust_tool: orchestrator not ready — rejecting")
-            return
-        is_dm = await _orch.slack_desk.is_dm(channel)
-        if not is_dm:
-            logger.warning("Rejecting trust_tool in non-DM channel %s (user=%s)", channel, user_id)
-            return
-
-    thread_ts = payload.get("message", {}).get("thread_ts", "")
+async def _handle_tool_approval(payload: dict, action_id: str, channel: str, msg_ts: str, user_id: str) -> None:
+    """Forward the Socket Mode identity and exact button value to the live offer."""
+    thread_ts = str(payload.get("message", {}).get("thread_ts", ""))
+    team_id = str((payload.get("team") or {}).get("id") or "")
+    actions = payload.get("actions") or []
+    answer_value = str(actions[0].get("value") or "") if actions else ""
     slack_desk_ops = _orch.slack_desk if _orch else None
-    effective_action = await handle_interaction(channel, msg_ts, action_id, user_id=user_id, thread_ts=thread_ts, slack_desk=slack_desk_ops)
-
-    # Replace buttons with outcome label — only when an action was processed.
-    # When effective_action is None (unauthorized user or already resolved),
-    # preserve buttons so the authorized owner can still click.
-    if _orch and _orch.slack_desk and effective_action:
-        label = {
-            "approve_tool": "✅ Approved",
-            "trust_tool": "🤝 Trusted",
-            "reject_tool": "🚫 Rejected",
-        }.get(effective_action, "")
-        if label:
-            try:
-                await _orch.slack_desk.update_message(channel, msg_ts, text=label)
-            except Exception:
-                pass
+    await handle_interaction(channel, msg_ts, action_id, user_id=user_id,
+        thread_ts=thread_ts, slack_desk=slack_desk_ops, team_id=team_id, answer_value=answer_value)
 
 
 # ---------------------------------------------------------------------------

@@ -34,9 +34,36 @@ _CRON_MSG_LIMIT = SLACK_BLOCK_SECTION_LIMIT
 class SlackDeskDelivery:
     """Renders + delivers gateway results to Slack. Implements ChannelDelivery."""
 
-    def __init__(self, client: RealSlackDeskClient, owner_id: str) -> None:
+    def __init__(self, client: RealSlackDeskClient, owner_id: str, *, runtime: Any = None, transport: Any = None) -> None:
         self._client = client
         self._owner_id = owner_id
+        self._runtime = runtime
+        self._transport = transport
+        self._private_channels: dict[str, bool] = {}
+
+    def approval_identity(self, channel: str) -> dict | None:
+        from slack_desk_runtime import enterprise
+        from gideon.integrations.channel_delivery import raw_delivery_for
+        from gideon.integrations.channel_transports import get_transport
+        from gideon.integrations.channel_trust import is_allowed_sender
+        from gideon.core.config.credentials import owner_id_for
+        owner = owner_id_for("slack")
+        team = enterprise._validated_team_id
+        if (not owner or not team or not is_allowed_sender("slack", owner)
+            or raw_delivery_for("slack") is not self or self._transport is None
+            or get_transport("slack") is not self._transport or not self._transport.connected):
+            return None
+        return {"owner": owner, "tenant": f"slack:{team}", "transport": self._transport,
+                "private": self._private_channels.get(channel, False)}
+
+    async def prepare_approval_channel(self, channel: str) -> bool:
+        try:
+            response = await self._client._web.conversations_info(channel=channel)
+            actual = response.get("channel") or {}
+            self._private_channels[channel] = bool(response.get("ok") and actual.get("id") == channel and actual.get("is_im"))
+        except Exception:
+            self._private_channels[channel] = False
+        return self._private_channels[channel]
 
     # ── raw client passthrough (used by the approval flow + session routing) ──
     @property
@@ -256,24 +283,35 @@ class SlackDeskDelivery:
             _PendingApproval,
         )
 
-        if not self._owner_id:
+        from gideon.security.approval_brief import approval_brief_for
+        from gideon.integrations.channel_delivery import offered_answers, ONE_CALL_ANSWERS
+        identity = self.approval_identity("")
+        if identity is None:
             return None
         request_id = str(event.request_id)
         thread_ts: str | None = None
         channel: str | None = None
         if parent_session_key and sessions:
-            channel = sessions.get_channel(parent_session_key)
-            thread_ts = sessions.get_thread(parent_session_key)
+            history_key = parent_session_key
+            if sessions.get_channel_provider(history_key) != "slack":
+                history_key = f"dashboard:{parent_session_key}"
+            if sessions.get_channel_provider(history_key) == "slack":
+                channel = sessions.get_channel(history_key)
+                thread_ts = sessions.get_thread(history_key)
             if not thread_ts and channel and re.fullmatch(r"\d+\.\d+", parent_session_key):
                 thread_ts = parent_session_key
-        is_dm = not channel
+        is_dm = False
         if not channel:
-            channel = await self._client.open_dm(self._owner_id)
+            channel = await self._client.open_dm(identity["owner"])
             thread_ts = None
         if not channel:
             return None
 
-        blocks = _build_approval_blocks(event, is_dm=is_dm, source=source)
+        is_dm = await self.prepare_approval_channel(channel)
+        answers = offered_answers(approval_brief_for(event).get("answers")) or ONE_CALL_ANSWERS
+        if not is_dm:
+            answers = ONE_CALL_ANSWERS
+        blocks = _build_approval_blocks(event, is_dm=is_dm, source=source, answers=answers)
         title_safe, _ = redact_exfiltration_urls(event.title)
         title_safe, _ = redact_credentials(title_safe)
         fallback = f"🔐 [{source}] Approve: {title_safe}?"
@@ -288,22 +326,31 @@ class SlackDeskDelivery:
         pending = _PendingApproval(
             provider=None, request_id=request_id, session_key=parent_session_key,  # type: ignore[arg-type]
         )
+        pending.answers = answers
+        pending.delivery = self
+        pending.tenant = identity["tenant"]
+        pending.owner = identity["owner"]
+        pending.channel = channel
+        pending.thread = thread_ts or ""
         key = f"{channel}:{approval_ts}"
         _pending_approvals[key] = pending
-        if on_prompted:
-            on_prompted(pending)
+        owned = bool(on_prompted and on_prompted(pending))
 
         try:
-            outcome = await asyncio.wait_for(pending.future, timeout=7200)
+            outcome = await pending.future if owned else await asyncio.wait_for(pending.future, timeout=7200)
         except asyncio.TimeoutError:
-            outcome = "rejected"
+            outcome = "expired"
         finally:
             _pending_approvals.pop(key, None)
 
-        status = "✅ Approved" if outcome == "approved" else "🚫 Rejected"
+        status = {"approved": "✅ Approved", "rejected": "🚫 Denied", "expired": "Expired", "cancelled": "Cancelled"}.get(outcome, "Unavailable")
+        chosen = next((a for a in answers if a.key == pending.chosen_answer), None)
+        if chosen is not None and chosen.promise and outcome == "approved":
+            status += " — " + chosen.promise
         try:
             await self._client.update_message(
-                channel, approval_ts, text=f"🔐 *{title_safe}* — {status}"
+                channel, approval_ts, text=f"🔐 *{title_safe}* — {status}",
+                blocks=[{"type": "section", "text": {"type": "plain_text", "text": status[:3000]}}]
             )
         except Exception:
             pass

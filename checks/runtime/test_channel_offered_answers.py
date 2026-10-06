@@ -66,7 +66,6 @@ async def native(tmp_path,monkeypatch):
 
 def register_question(native,*,risk='caution'):
     session=native.session
-    replacement=None
     future=asyncio.get_running_loop().create_future();session._approval_futures['call']=future
     session.append('permission','Read a file',json.dumps({'request_id':'call','asked_by':'agent:ordinary'}))
     native.state._register_chat_approval({'id':'call','session':session.key,'tool':'read_file','tool_input':'{"path":"notes.txt"}','risk':risk,'blast_radius':{'readOnly':True}})
@@ -129,6 +128,7 @@ async def test_changed_identity_destination_or_offer_never_grants_trust(native,m
 @pytest.mark.asyncio
 @pytest.mark.parametrize('variation',['unchecked','destructive','app','foreign','group','room','background'])
 async def test_unavailable_scopes_offer_only_one_call(native,variation):
+    replacement=None
     session=native.session
     if variation=='app':session._created_by_app='example'
     elif variation=='foreign':

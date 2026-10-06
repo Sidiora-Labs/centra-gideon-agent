@@ -160,7 +160,7 @@ class SlackDeskTransport(ChannelTransportProvider):
         # Register outbound delivery on the gateway + the dashboard. Core delivers
         # through this ONE provider-agnostic ChannelDelivery handle (text, attachments,
         # streaming, identity lookups, approvals) — it never sees the Slack client.
-        delivery = SlackDeskDelivery(runtime.slack_desk, runtime._owner_id)
+        delivery = SlackDeskDelivery(runtime.slack_desk, runtime._owner_id, runtime=runtime, transport=self)
         if hasattr(services, "register_channel_delivery"):
             services.register_channel_delivery(delivery)
         if getattr(services, "dashboard_state", None) is not None:
