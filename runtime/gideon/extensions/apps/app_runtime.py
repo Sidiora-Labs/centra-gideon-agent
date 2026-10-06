@@ -8,11 +8,11 @@ needed.
 
 from __future__ import annotations
 
-import logging
-import hashlib
 import asyncio
+import hashlib
 import importlib
 import importlib.util
+import logging
 import sys
 import threading
 import time
@@ -89,7 +89,9 @@ def load(*manifests: AppManifest) -> None:
             try:
                 unload(manifest.name, manifest)
             except Exception:
-                logger.exception("app %s: cleanup after load failure failed", manifest.name)
+                logger.exception(
+                    "app %s: cleanup after load failure failed", manifest.name
+                )
         raise
 
 
@@ -109,10 +111,10 @@ def record(manifest: AppManifest) -> None:
 
 def _load_in_process(manifest: AppManifest) -> None:
     from gideon.extensions.apps.app_manager import (
+        _origin_of,
         _register_proposal_kinds,
         _seed_app_prompts,
         _seed_app_skills,
-        _origin_of,
     )
 
     if manifest.all_providers():
@@ -131,14 +133,18 @@ def _load_in_process(manifest: AppManifest) -> None:
                     _load_ext_module(provider, module_path)
                 except Exception as exc:
                     provider.error = str(exc)
-                    logger.exception("app %s provider module failed to load", manifest.name)
+                    logger.exception(
+                        "app %s provider module failed to load", manifest.name
+                    )
             registry.enable(manifest.name)
     _seed_app_prompts(manifest, manifest.name)
     _seed_app_skills(manifest, manifest.name, origin=_origin_of(manifest.name))
     _register_proposal_kinds(manifest, manifest.name)
 
 
-def unload(name: str, manifest: AppManifest | None, *, forget: bool = False) -> list[str]:
+def unload(
+    name: str, manifest: AppManifest | None, *, forget: bool = False
+) -> list[str]:
     """Stop app processes and registrations, evict its bundle modules, and report residue."""
     from gideon.extensions.apps.app_manager import (
         _deregister_mcp,
@@ -238,13 +244,19 @@ def _evict_modules(name: str) -> list[str]:
                 pass
         if not owned:
             continue
-        from gideon.extensions.providers.media_scanners import unregister_module_scanners
+        from gideon.extensions.providers.media_scanners import (
+            unregister_module_scanners,
+        )
+
         unregister_module_scanners(module_name)
         from gideon.integrations.llm.registry import unregister_app_module_types
+
         unregister_app_module_types(name, module_name, module)
         sys.modules.pop(module_name, None)
         if path.endswith((".so", ".pyd", ".dll", ".dylib")):
-            removed.append(f"a compiled extension from the previous version remains loaded ({Path(path).name})")
+            removed.append(
+                f"a compiled extension from the previous version remains loaded ({Path(path).name})"
+            )
     if root is not None:
         sys.path_importer_cache.pop(str(root), None)
     importlib.invalidate_caches()
@@ -265,7 +277,10 @@ def _processes_left(name: str) -> list[str]:
         alive = first & second
         if not alive:
             return []
-        return [f"a process from the previous version is still running (pid {pid})" for pid in sorted(alive)]
+        return [
+            f"a process from the previous version is still running (pid {pid})"
+            for pid in sorted(alive)
+        ]
     except Exception:
         logger.debug("app %s: residual process check failed", name, exc_info=True)
         return []
@@ -281,10 +296,17 @@ def _matching_processes(root: Path) -> set[int]:
             continue
         try:
             cwd = (entry / "cwd").resolve()
-            cmdline = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+            cmdline = (
+                (entry / "cmdline")
+                .read_bytes()
+                .replace(b"\0", b" ")
+                .decode(errors="replace")
+            )
         except (OSError, PermissionError):
             continue
-        if (cwd.is_relative_to(root) if cwd.exists() else False) or str(root) in cmdline:
+        if (cwd.is_relative_to(root) if cwd.exists() else False) or str(
+            root
+        ) in cmdline:
             result.add(int(entry.name))
     return result
 
@@ -310,7 +332,9 @@ def _discard_bundle_bytecode(name: str, module_path: str) -> None:
         cache = Path(importlib.util.cache_from_source(str(source)))
         cache.unlink(missing_ok=True)
     except (NotImplementedError, OSError, ValueError):
-        logger.debug("app %s: stale bytecode cache could not be removed", name, exc_info=True)
+        logger.debug(
+            "app %s: stale bytecode cache could not be removed", name, exc_info=True
+        )
 
 
 def _thread_task_residue(root: Path, name: str) -> list[str]:
@@ -322,9 +346,11 @@ def _thread_task_residue(root: Path, name: str) -> list[str]:
         if module.startswith(prefix):
             reasons.append(f"app code still owns a live thread ({thread.name})")
     try:
-        from asyncio.tasks import _all_tasks
+        import asyncio.tasks
 
-        for task in tuple(_all_tasks):
+        for task in tuple(getattr(asyncio.tasks, "_all_tasks", ())):
+            if not isinstance(task, asyncio.Task):
+                continue
             coroutine = task.get_coro()
             frame = getattr(coroutine, "cr_frame", None)
             globals_ = getattr(frame, "f_globals", {}) if frame else {}

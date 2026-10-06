@@ -20,8 +20,6 @@ firing is an injected callable so the package stays free of any
 
 from __future__ import annotations
 
-from gideon.core.turn_streams import closing_stream
-
 import asyncio
 import copy
 import hashlib
@@ -44,8 +42,14 @@ from gideon.core.cancellation import (
     CancelScope,
 )
 from gideon.core.token_estimate import CONSERVATIVE_CHARS_PER_TOKEN
+from gideon.core.turn_streams import closing_stream
 from gideon.engine.agents.native import dispatch_plan
 from gideon.engine.agents.native.approval import REJECT, REVISE, ApprovalGate
+from gideon.engine.agents.native.failover import (
+    FAILOVER_MODES,
+    ModelFailover,
+    NoModelAnswered,
+)
 from gideon.engine.agents.native.tools import (
     ARGUMENTS_UNREADABLE,
     format_tool_result,
@@ -59,9 +63,9 @@ from gideon.integrations.acp.types import (
 )
 from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
-    EVENT_SPENT,
     EVENT_MODEL_SUBSTITUTION,
     EVENT_PERMISSION_REQUEST,
+    EVENT_SPENT,
     EVENT_TEXT_CHUNK,
     EVENT_THINKING_CHUNK,
     EVENT_TOOL_CALL,
@@ -71,10 +75,10 @@ from gideon.integrations.llm.events import (
 )
 from gideon.integrations.llm.prompt_cache import (
     VOLATILE_KEY,
-    turn_note_message,
     PromptCache,
     effective_cache_mode,
     mark_cacheable_prefix,
+    turn_note_message,
 )
 from gideon.integrations.tool_providers.base import RiskLevel
 from gideon.security.guardrails.audit import AttemptRecord, now_ms, record_attempt
@@ -94,11 +98,6 @@ from gideon.security.guardrails.loop_breaker import (
     result_digest,
     structural_note,
     warn_note,
-)
-from gideon.engine.agents.native.failover import (
-    FAILOVER_MODES,
-    ModelFailover,
-    NoModelAnswered,
 )
 
 if TYPE_CHECKING:
@@ -177,8 +176,7 @@ def build_provider_tool_name_index(names: Iterable[str]) -> dict[str, str]:
     )
 
     return {
-        wire: canonical
-        for canonical, wire in provider_tool_name_map(names).items()
+        wire: canonical for canonical, wire in provider_tool_name_map(names).items()
     }
 
 
@@ -351,7 +349,14 @@ class _TurnTotals:
             response.usage.context_usage if response.usage is not None else None
         )
         for usage in response.usages:
-            if any((usage.input_tokens, usage.output_tokens, usage.cache_read_tokens, usage.cache_creation_tokens)) or usage.tool_meta.get("usage_reported"):
+            if any(
+                (
+                    usage.input_tokens,
+                    usage.output_tokens,
+                    usage.cache_read_tokens,
+                    usage.cache_creation_tokens,
+                )
+            ) or usage.tool_meta.get("usage_reported"):
                 self.measured_calls += 1
             self.input_tokens += usage.input_tokens or 0
             self.output_tokens += usage.output_tokens or 0
@@ -360,11 +365,20 @@ class _TurnTotals:
             metadata = usage.tool_meta if isinstance(usage.tool_meta, dict) else {}
             if metadata.get("spend_charged") is not True:
                 from gideon.operations.usage_ledger import EventAccounting
-                served = str(getattr(usage, "served_model_ref", "") or self.served_model_ref)
+
+                served = str(
+                    getattr(usage, "served_model_ref", "") or self.served_model_ref
+                )
                 provider, _, model = served.partition(":")
                 _, price = EventAccounting(usage, model, True).values(provider)
-                metadata = dict(metadata, spend_charged=True, charged_cost_usd=price.cost_usd,
-                    priced=price.priced, price_source=price.source, price_estimated=price.estimated)
+                metadata = dict(
+                    metadata,
+                    spend_charged=True,
+                    charged_cost_usd=price.cost_usd,
+                    priced=price.priced,
+                    price_source=price.source,
+                    price_estimated=price.estimated,
+                )
             self.charged_calls.append(dict(metadata))
             audit_id = str(metadata.get("audit_id") or "")
             if audit_id and audit_id not in self.audit_ids:
@@ -392,17 +406,30 @@ class _TurnTotals:
             cache_creation_tokens=self.cache_creation_tokens,
             cache_read_tokens=self.cache_read_tokens,
             tool_meta={
-                "spend_charged": bool(self.charged_calls) and all(row.get("spend_charged") is True for row in self.charged_calls),
-                "charged_cost_usd": sum(float(row["charged_cost_usd"]) for row in self.charged_calls if row.get("priced") is True and row.get("charged_cost_usd") is not None),
-                "priced": bool(self.charged_calls) and all(row.get("priced") is True for row in self.charged_calls),
+                "spend_charged": bool(self.charged_calls)
+                and all(row.get("spend_charged") is True for row in self.charged_calls),
+                "charged_cost_usd": sum(
+                    float(row["charged_cost_usd"])
+                    for row in self.charged_calls
+                    if row.get("priced") is True
+                    and row.get("charged_cost_usd") is not None
+                ),
+                "priced": bool(self.charged_calls)
+                and all(row.get("priced") is True for row in self.charged_calls),
                 "price_source": "call_aggregate",
-                "price_estimated": any(row.get("price_estimated", True) for row in self.charged_calls),
+                "price_estimated": any(
+                    row.get("price_estimated", True) for row in self.charged_calls
+                ),
                 "audit_ids": list(self.audit_ids),
                 "model_calls": self.model_calls,
                 "usage_status": (
-                    "no_model_calls" if not self.model_calls else
-                    "measured" if self.measured_calls == self.model_calls else
-                    "partial" if self.measured_calls else "absent"
+                    "no_model_calls"
+                    if not self.model_calls
+                    else (
+                        "measured"
+                        if self.measured_calls == self.model_calls
+                        else "partial" if self.measured_calls else "absent"
+                    )
                 ),
                 "measured_calls": self.measured_calls,
             },
@@ -492,7 +519,9 @@ class _ModelExchange:
             enabled=runtime._prompt_cache_enabled(),
         )
         messages = mark_cacheable_prefix(
-            runtime._messages, cache_mode, generation=runtime._cache_generation,
+            runtime._messages,
+            cache_mode,
+            generation=runtime._cache_generation,
             max_markers=3,
         )
         while True:
@@ -502,22 +531,33 @@ class _ModelExchange:
             started = now_ms()
             try:
                 from gideon.security.guardrails.local_inference import native_turn
+
                 async with native_turn(runtime):
                     self.attempts += 1
                     request_messages = runtime._messages_with_staged_images(messages)
-                    async with closing_stream(runtime._model.complete(
-                        request_messages,
-                        tools=tools,
-                        model=(runtime._definition.model or None) if runtime._active_fallback is None else None,
-                        reasoning_effort=runtime._reasoning_effort,
-                    )) as _owned_events:
+                    async with closing_stream(
+                        runtime._model.complete(
+                            request_messages,
+                            tools=tools,
+                            model=(
+                                (runtime._definition.model or None)
+                                if runtime._active_fallback is None
+                                else None
+                            ),
+                            reasoning_effort=runtime._reasoning_effort,
+                        )
+                    ) as _owned_events:
                         async for event in _owned_events:
                             if runtime._cancelled:
                                 break
-                            if (
-                                not runtime._substitution_announced
-                                and (event.kind in (EVENT_TEXT_CHUNK, EVENT_THINKING_CHUNK, EVENT_TOOL_CALL)
-                                     and (event.kind == EVENT_TOOL_CALL or bool(event.text)))
+                            if not runtime._substitution_announced and (
+                                event.kind
+                                in (
+                                    EVENT_TEXT_CHUNK,
+                                    EVENT_THINKING_CHUNK,
+                                    EVENT_TOOL_CALL,
+                                )
+                                and (event.kind == EVENT_TOOL_CALL or bool(event.text))
                             ):
                                 substitution = runtime._substitution_for_current_model()
                                 if substitution is not None:
@@ -535,8 +575,15 @@ class _ModelExchange:
                 raise
             except Exception as error:
                 if getattr(error, "unsent", False):
-                    if await runtime._advance_model_fallback(FailureMode.PROVIDER_ERROR, error):
-                        messages = mark_cacheable_prefix(runtime._messages, cache_mode, generation=runtime._cache_generation, max_markers=3)
+                    if await runtime._advance_model_fallback(
+                        FailureMode.PROVIDER_ERROR, error
+                    ):
+                        messages = mark_cacheable_prefix(
+                            runtime._messages,
+                            cache_mode,
+                            generation=runtime._cache_generation,
+                            max_markers=3,
+                        )
                         continue
                     raise
                 from gideon.integrations.tool_providers.portable_schema import (
@@ -582,8 +629,10 @@ class _ModelExchange:
                             enabled=runtime._prompt_cache_enabled(),
                         )
                         messages = mark_cacheable_prefix(
-                            runtime._messages, cache_mode,
-                            generation=runtime._cache_generation, max_markers=3,
+                            runtime._messages,
+                            cache_mode,
+                            generation=runtime._cache_generation,
+                            max_markers=3,
                         )
                         continue
                     if runtime._announce_failover and runtime._fallback_failures:
@@ -602,9 +651,15 @@ class _ModelExchange:
                 self.fragments.clear()
                 self.usage = None
             else:
-                if not runtime._cancelled and not self.calls and not "".join(self.fragments).strip():
+                if (
+                    not runtime._cancelled
+                    and not self.calls
+                    and not "".join(self.fragments).strip()
+                ):
                     if self.totals.recoveries >= _MAX_INFERENCE_RECOVERIES_PER_TURN:
-                        raise RuntimeError("Model returned no answer after bounded recovery")
+                        raise RuntimeError(
+                            "Model returned no answer after bounded recovery"
+                        )
                     self.totals.recoveries += 1
                     if self.thinking:
                         note = "Your previous response contained reasoning but no answer. Provide the answer now."
@@ -612,7 +667,10 @@ class _ModelExchange:
                         note = "The tool results are available. Provide a substantive answer to the user."
                     else:
                         note = "Your response was empty. Provide a substantive answer to the user."
-                    messages = [*messages, {"role": "user", "content": note, VOLATILE_KEY: True}]
+                    messages = [
+                        *messages,
+                        {"role": "user", "content": note, VOLATILE_KEY: True},
+                    ]
                     self.thinking.clear()
                     self.usage = None
                     continue
@@ -649,11 +707,15 @@ class NativeAgentRuntime(AgentProvider):
     ) -> None:
         self._app_work = app_work
         self._definition, self._model = definition, model_provider
-        from gideon.engine.agents.tool_list import AgentTools
         from gideon.engine.agents.skill_list import AgentSkills
+        from gideon.engine.agents.tool_list import AgentTools
 
-        self._tool_grants = definition.tool_grants or AgentTools.of(definition.name, definition.tools)
-        self._skill_grants = definition.skill_grants or AgentSkills.of(definition.name, definition.skills)
+        self._tool_grants = definition.tool_grants or AgentTools.of(
+            definition.name, definition.tools
+        )
+        self._skill_grants = definition.skill_grants or AgentSkills.of(
+            definition.name, definition.skills
+        )
         self._initial_tool_grants = self._tool_grants
         self._initial_skill_grants = self._skill_grants
         self._profile_managed = definition.tool_grants is not None
@@ -671,8 +733,10 @@ class NativeAgentRuntime(AgentProvider):
         self._turn_output_visible = False
         self._fallback_failures: list[tuple[str, str]] = []
         self._staged_images: list[dict[str, Any]] = []
-        self.model_substitution = None
-        self._configured_substitution = None
+        from gideon.integrations.llm.base import ModelSubstitution
+
+        self.model_substitution: ModelSubstitution | None = None
+        self._configured_substitution: ModelSubstitution | None = None
         self._agent_id = getattr(definition, "name", "") or ""
         self._project_id, self._reasoning_effort = (
             project_id or "",
@@ -685,9 +749,10 @@ class NativeAgentRuntime(AgentProvider):
 
         lineage = leaf_lineage(leaf_context or {})
         try:
-            has_leaf_run = bool(lineage.get("__wf_run_id", "").strip()) and int(
-                lineage.get("__wf_depth", "0") or "0"
-            ) > 0
+            has_leaf_run = (
+                bool(lineage.get("__wf_run_id", "").strip())
+                and int(lineage.get("__wf_depth", "0") or "0") > 0
+            )
         except ValueError:
             has_leaf_run = False
         self._leaf_lineage = lineage if has_leaf_run else {}
@@ -751,8 +816,12 @@ class NativeAgentRuntime(AgentProvider):
             if not tier:
                 raise RuntimeError("app may run no agent work now")
             if tier != "text" and not getattr(self._model, "supports_tools", False):
-                raise RuntimeError("app read/tools work requires a model that can use tools; task did not run")
-        if (self._app_work is not None and self._app_work.current_tier() == "text") or not getattr(self._model, "supports_tools", False):
+                raise RuntimeError(
+                    "app read/tools work requires a model that can use tools; task did not run"
+                )
+        if (
+            self._app_work is not None and self._app_work.current_tier() == "text"
+        ) or not getattr(self._model, "supports_tools", False):
             self._tool_defs = []
             self._tool_schema = []
             self._tool_index = {}
@@ -770,16 +839,31 @@ class NativeAgentRuntime(AgentProvider):
             self._tool_providers, self._unattended
         )
         self._catalog_inventory = inventory
-        self._tool_defs = [item for item in inventory.definitions if self._tool_grants.allows(item.name)]
+        self._tool_defs = [
+            item
+            for item in inventory.definitions
+            if self._tool_grants.allows(item.name)
+        ]
         if self._app_work is not None:
-            self._tool_defs = [item for item in self._tool_defs if not self._app_work.refusal(item.name, declared=item.risk_level)]
+            self._tool_defs = [
+                item
+                for item in self._tool_defs
+                if not self._app_work.refusal(item.name, declared=item.risk_level)
+            ]
         kept = {item.name for item in self._tool_defs}
-        self._tool_index = {name: provider for name, provider in inventory.providers.items() if name in kept}
+        self._tool_index = {
+            name: provider
+            for name, provider in inventory.providers.items()
+            if name in kept
+        }
         if self._tool_grants.listed:
-            self._tool_grants.say_narrowed(kept=sorted(kept), withheld=[item.name for item in inventory.definitions if item.name not in kept])
-        self._tool_wire_to_canonical = build_provider_tool_name_index(
-            self._tool_index
-        )
+            self._tool_grants.say_narrowed(
+                kept=sorted(kept),
+                withheld=[
+                    item.name for item in inventory.definitions if item.name not in kept
+                ],
+            )
+        self._tool_wire_to_canonical = build_provider_tool_name_index(self._tool_index)
         self._provider_of = inventory.owners
         self._groups = groups.partition(self._tool_defs, provider_of=self._provider_of)
         self._active_groups = (
@@ -791,9 +875,18 @@ class NativeAgentRuntime(AgentProvider):
         self._tool_sanitized_index, collisions = build_sanitized_index(self._tool_index)
         for alias, names in collisions.items():
             logger.warning("native tool alias %r is ambiguous: %s", alias, names)
-        self._tool_annotations = {definition.name: dict(getattr(definition, "annotations", {}) or {}) for definition in self._tool_defs}
+        self._tool_annotations = {
+            definition.name: dict(getattr(definition, "annotations", {}) or {})
+            for definition in self._tool_defs
+        }
         self._tool_risk = {
-            definition.name: RiskLevel(getattr(getattr(definition, "risk_level", RiskLevel.CAUTION), "value", getattr(definition, "risk_level", RiskLevel.CAUTION)))
+            definition.name: RiskLevel(
+                getattr(
+                    getattr(definition, "risk_level", RiskLevel.CAUTION),
+                    "value",
+                    getattr(definition, "risk_level", RiskLevel.CAUTION),
+                )
+            )
             for definition in self._tool_defs
         }
         self._tool_retriever = ToolRetriever(self._tool_defs)
@@ -811,9 +904,9 @@ class NativeAgentRuntime(AgentProvider):
 
     def _refresh_profile_grants(self) -> None:
         from gideon.core.config.loader import AppConfig
-        from gideon.engine.agents.tool_list import agent_tools
-        from gideon.engine.agents.skill_list import agent_skills
         from gideon.engine.agents.loop_skills import names
+        from gideon.engine.agents.skill_list import agent_skills
+        from gideon.engine.agents.tool_list import agent_tools
 
         cfg = AppConfig.load()
         key = self._definition.name
@@ -827,7 +920,10 @@ class NativeAgentRuntime(AgentProvider):
             self._skill_grants = agent_skills(key, cfg)
         elif self._profile_managed:
             from gideon.engine.agents.tool_list import AgentTools
-            self._tool_grants = AgentTools.cannot_read(key, "the agent profile was removed")
+
+            self._tool_grants = AgentTools.cannot_read(
+                key, "the agent profile was removed"
+            )
             self._skill_grants = self._initial_skill_grants
         else:
             self._tool_grants = self._initial_tool_grants
@@ -841,31 +937,76 @@ class NativeAgentRuntime(AgentProvider):
         from gideon.engine.agents.native.tool_retrieval import ToolRetriever
         from gideon.integrations.tool_providers import groups
 
-        self._tool_defs = [item for item in inventory.definitions if self._tool_grants.allows(item.name)]
+        self._tool_defs = [
+            item
+            for item in inventory.definitions
+            if self._tool_grants.allows(item.name)
+        ]
         if self._app_work is not None:
-            self._tool_defs = [item for item in self._tool_defs if not self._app_work.refusal(item.name, declared=item.risk_level)]
+            self._tool_defs = [
+                item
+                for item in self._tool_defs
+                if not self._app_work.refusal(item.name, declared=item.risk_level)
+            ]
         kept = {item.name for item in self._tool_defs}
-        self._tool_index = {name: provider for name, provider in inventory.providers.items() if name in kept}
+        self._tool_index = {
+            name: provider
+            for name, provider in inventory.providers.items()
+            if name in kept
+        }
         self._provider_of = inventory.owners
         self._tool_wire_to_canonical = build_provider_tool_name_index(self._tool_index)
         self._groups = groups.partition(self._tool_defs, provider_of=self._provider_of)
         self._assemble_schema()
         self._tool_sanitized_index, _ = build_sanitized_index(self._tool_index)
-        self._tool_annotations = {definition.name: dict(getattr(definition, "annotations", {}) or {}) for definition in self._tool_defs}
-        self._tool_risk = {definition.name: RiskLevel(getattr(getattr(definition, "risk_level", RiskLevel.CAUTION), "value", getattr(definition, "risk_level", RiskLevel.CAUTION))) for definition in self._tool_defs}
+        self._tool_annotations = {
+            definition.name: dict(getattr(definition, "annotations", {}) or {})
+            for definition in self._tool_defs
+        }
+        self._tool_risk = {
+            definition.name: RiskLevel(
+                getattr(
+                    getattr(definition, "risk_level", RiskLevel.CAUTION),
+                    "value",
+                    getattr(definition, "risk_level", RiskLevel.CAUTION),
+                )
+            )
+            for definition in self._tool_defs
+        }
         self._tool_retriever = ToolRetriever(self._tool_defs)
 
     async def _refresh_mcp_inventory(self) -> None:
-        from gideon.integrations.tool_providers.registry import ConfiguredMcpToolProvider
+        from gideon.integrations.tool_providers.registry import (
+            ConfiguredMcpToolProvider,
+        )
+
         inventory = getattr(self, "_catalog_inventory", None)
         if inventory is None:
             return
-        providers = {id(provider): provider for provider in [*self._tool_providers, *inventory.providers.values()] if isinstance(provider, ConfiguredMcpToolProvider)}
+        providers = {
+            id(provider): provider
+            for provider in [*self._tool_providers, *inventory.providers.values()]
+            if isinstance(provider, ConfiguredMcpToolProvider)
+        }
         if not providers:
             return
-        definitions = [item for item in inventory.definitions if not isinstance(inventory.providers.get(item.name), ConfiguredMcpToolProvider)]
-        ownership = {name: owner for name, owner in inventory.owners.items() if name in {item.name for item in definitions}}
-        lookup = {name: provider for name, provider in inventory.providers.items() if not isinstance(provider, ConfiguredMcpToolProvider)}
+        definitions = [
+            item
+            for item in inventory.definitions
+            if not isinstance(
+                inventory.providers.get(item.name), ConfiguredMcpToolProvider
+            )
+        ]
+        ownership = {
+            name: owner
+            for name, owner in inventory.owners.items()
+            if name in {item.name for item in definitions}
+        }
+        lookup = {
+            name: provider
+            for name, provider in inventory.providers.items()
+            if not isinstance(provider, ConfiguredMcpToolProvider)
+        }
         for provider in providers.values():
             for definition in await provider.list_tools():
                 if definition.name in lookup:
@@ -1027,16 +1168,26 @@ class NativeAgentRuntime(AgentProvider):
 
             return (await image_input(served_ref)).accepted
         except Exception:
-            logger.debug("Could not establish image compatibility for %s", served_ref, exc_info=True)
+            logger.debug(
+                "Could not establish image compatibility for %s",
+                served_ref,
+                exc_info=True,
+            )
             return False
 
     async def _advance_model_fallback(
         self, failure: FailureMode, error: BaseException
     ) -> bool:
-        if self._cancelled or failure not in FAILOVER_MODES or not self._announce_failover:
+        if (
+            self._cancelled
+            or failure not in FAILOVER_MODES
+            or not self._announce_failover
+        ):
             return False
         try:
-            from gideon.extensions.providers.provider_bridge import resolve_provider_for_use_case
+            from gideon.extensions.providers.provider_bridge import (
+                resolve_provider_for_use_case,
+            )
             from gideon.extensions.providers.use_cases import resolution_chain
 
             chain = resolution_chain("chat")
@@ -1045,29 +1196,45 @@ class NativeAgentRuntime(AgentProvider):
             if not self._fallback_failures or self._fallback_failures[-1][0] != current:
                 self._fallback_failures.append((current, _safe_model_failure(error)))
             position = next(
-                (index for index, ref in enumerate(chain)
-                 if ref == current or ref.split(":", 1)[-1] == current_id),
+                (
+                    index
+                    for index, ref in enumerate(chain)
+                    if ref == current or ref.split(":", 1)[-1] == current_id
+                ),
                 None,
             )
             if position is None or position + 1 >= len(chain):
                 return False
-            for ref in chain[position + 1:]:
+            for ref in chain[position + 1 :]:
                 from gideon.security.execution_lineage import admits
+
                 if not admits(ref):
                     continue
                 if not await self._image_compatible(ref):
-                    self._fallback_failures.append((ref, "it cannot receive the attached image"))
+                    self._fallback_failures.append(
+                        (ref, "it cannot receive the attached image")
+                    )
                     continue
                 try:
-                    candidate = resolve_provider_for_use_case("chat", model_override=ref, _force_model_axis=True)
+                    candidate = resolve_provider_for_use_case(
+                        "chat", model_override=ref, _force_model_axis=True
+                    )
                     await candidate.start()
-                    if self._tool_schema and not getattr(candidate, "supports_tools", False):
+                    if self._tool_schema and not getattr(
+                        candidate, "supports_tools", False
+                    ):
                         await self._close_replaced_model(candidate)
-                        self._fallback_failures.append((ref, "it does not support the configured tools"))
+                        self._fallback_failures.append(
+                            (ref, "it does not support the configured tools")
+                        )
                         continue
                 except Exception as candidate_error:
-                    self._fallback_failures.append((ref, _safe_model_failure(candidate_error)))
-                    logger.warning("Native fallback candidate %s unavailable", ref, exc_info=True)
+                    self._fallback_failures.append(
+                        (ref, _safe_model_failure(candidate_error))
+                    )
+                    logger.warning(
+                        "Native fallback candidate %s unavailable", ref, exc_info=True
+                    )
                     continue
                 previous = self._model
                 self._model = candidate
@@ -1075,7 +1242,9 @@ class NativeAgentRuntime(AgentProvider):
                 candidate.served_model_ref = ref
                 if previous is not self._preferred_model:
                     await self._close_replaced_model(previous)
-                logger.warning("Native inference switched to configured fallback %s", ref)
+                logger.warning(
+                    "Native inference switched to configured fallback %s", ref
+                )
                 return True
         except Exception:
             logger.warning("Native provider fallback failed", exc_info=True)
@@ -1090,9 +1259,16 @@ class NativeAgentRuntime(AgentProvider):
             return configured
         if not self._active_fallback or not self._fallback_failures:
             return None
-        who = str(getattr(configured, "who", "") or getattr(self._definition, "name", ""))
-        requested = str(getattr(configured, "requested", "") or self._preferred_model_ref)
-        fix = str(getattr(configured, "fix", "") or "Review the chat model order in Settings → Models.")
+        who = str(
+            getattr(configured, "who", "") or getattr(self._definition, "name", "")
+        )
+        requested = str(
+            getattr(configured, "requested", "") or self._preferred_model_ref
+        )
+        fix = str(
+            getattr(configured, "fix", "")
+            or "Review the chat model order in Settings → Models."
+        )
         return ModelFailover(
             requested=requested,
             who=who,
@@ -1109,15 +1285,22 @@ class NativeAgentRuntime(AgentProvider):
         if not self._staged_images:
             return adapted
         position = next(
-            (index for index in range(len(adapted) - 1, -1, -1)
-             if adapted[index].get("role") == "user"),
+            (
+                index
+                for index in range(len(adapted) - 1, -1, -1)
+                if adapted[index].get("role") == "user"
+            ),
             None,
         )
         if position is None:
             return adapted
         message = adapted[position]
         content = message.get("content")
-        parts = list(content) if isinstance(content, list) else [{"type": "text", "text": str(content or "")}]
+        parts = (
+            list(content)
+            if isinstance(content, list)
+            else [{"type": "text", "text": str(content or "")}]
+        )
         image_content = getattr(self._model, "_image_content", None)
         for neutral_image in self._staged_images:
             data_url = str(
@@ -1176,7 +1359,9 @@ class NativeAgentRuntime(AgentProvider):
             await self._close_replaced_model(prior)
         if self._configured_substitution is not None and not self._announce_failover:
             self._cancel.end_turn()
-            raise RuntimeError("This caller cannot surface the configured model substitution")
+            raise RuntimeError(
+                "This caller cannot surface the configured model substitution"
+            )
         self._fallback_failures = []
         self._substitution_announced = False
         self._turn_output_visible = False
@@ -1191,25 +1376,38 @@ class NativeAgentRuntime(AgentProvider):
         try:
             served_window = await self._model.served_context_window()
         except Exception:
-            logger.debug("Could not resolve the request-bound model window", exc_info=True)
+            logger.debug(
+                "Could not resolve the request-bound model window", exc_info=True
+            )
         self._refresh_profile_grants()
         await self._refresh_mcp_inventory()
         tools, annotation = await asyncio.to_thread(
             self._prepare_turn_tools, message, served_window
         )
         self._messages[:] = [
-            row for row in self._messages
+            row
+            for row in self._messages
             if not (row.get("role") == "system" and row.get(VOLATILE_KEY))
         ]
         self._turn_note = turn_note_message(annotation) if annotation else None
         totals = _TurnTotals()
         try:
-            if self._staged_images and not await self._image_compatible(self._preferred_model_ref):
-                incompatible = RuntimeError("The preferred model cannot receive the attached image.")
-                if not self._announce_failover or not await self._advance_model_fallback(
-                    FailureMode.PROVIDER_ERROR, incompatible
+            if self._staged_images and not await self._image_compatible(
+                self._preferred_model_ref
+            ):
+                incompatible = RuntimeError(
+                    "The preferred model cannot receive the attached image."
+                )
+                if (
+                    not self._announce_failover
+                    or not await self._advance_model_fallback(
+                        FailureMode.PROVIDER_ERROR, incompatible
+                    )
                 ):
-                    raise NoModelAnswered(self._fallback_failures or [(self._preferred_model_ref, str(incompatible))])
+                    raise NoModelAnswered(
+                        self._fallback_failures
+                        or [(self._preferred_model_ref, str(incompatible))]
+                    )
             for _ in range(self._max_turns):
                 if self._cancelled:
                     yield totals.finish(
@@ -1237,7 +1435,9 @@ class NativeAgentRuntime(AgentProvider):
                 if not tool_calls or self._cancelled:
                     if self._cancelled:
                         for call in tool_calls:
-                            self._record_tool_outcome(call.title, True, CANCELLED_BEFORE_RUN)
+                            self._record_tool_outcome(
+                                call.title, True, CANCELLED_BEFORE_RUN
+                            )
                     self._messages.extend(
                         self._tool_result_msg(call, CANCELLED_BEFORE_RUN, {"ok": False})
                         for call in tool_calls
@@ -1261,15 +1461,17 @@ class NativeAgentRuntime(AgentProvider):
                 if self._pending_revisions:
                     corrections = self._pending_revisions[:]
                     self._pending_revisions.clear()
-                    self._messages.append({
-                        "role": "user",
-                        "content": "\n".join(
-                            f"Revise the proposed {name} action: {instruction}. "
-                            "Propose the updated action and wait for normal approval before execution."
-                            for name, instruction in corrections
-                        ),
-                        VOLATILE_KEY: True,
-                    })
+                    self._messages.append(
+                        {
+                            "role": "user",
+                            "content": "\n".join(
+                                f"Revise the proposed {name} action: {instruction}. "
+                                "Propose the updated action and wait for normal approval before execution."
+                                for name, instruction in corrections
+                            ),
+                            VOLATILE_KEY: True,
+                        }
+                    )
                 if self._drain_steers_into_history():
                     yield AgentEvent(kind=EVENT_TEXT_CHUNK, text="")
             yield totals.finish("max_turns", self._last_context_pct)
@@ -1468,7 +1670,9 @@ class NativeAgentRuntime(AgentProvider):
         metadata = {"ok": False}
         self._record_tool_outcome(prep.tool_name, True, CANCELLED_BEFORE_RUN)
         yield prep.result_event(CANCELLED_BEFORE_RUN, metadata)
-        self._messages.append(self._tool_result_msg(prep.call, CANCELLED_BEFORE_RUN, metadata))
+        self._messages.append(
+            self._tool_result_msg(prep.call, CANCELLED_BEFORE_RUN, metadata)
+        )
 
     @staticmethod
     def _unrunnable_result(
@@ -1528,7 +1732,9 @@ class NativeAgentRuntime(AgentProvider):
                 self._cancel.request(reason=CANCEL_INTERNAL)
             self._record_tool_outcome(prep.tool_name, True, observation)
             yield prep.result_event(observation, metadata)
-            self._messages.append(self._tool_result_msg(prep.call, observation, metadata))
+            self._messages.append(
+                self._tool_result_msg(prep.call, observation, metadata)
+            )
             return
         if prefetched is None and self._breaker.count(prep.bkey) >= BLOCK_THRESHOLD:
             observation = blocked_message(
@@ -1537,7 +1743,9 @@ class NativeAgentRuntime(AgentProvider):
             metadata = {"ok": False}
             self._record_tool_outcome(prep.tool_name, True, observation)
             yield prep.result_event(observation, metadata)
-            self._messages.append(self._tool_result_msg(prep.call, observation, metadata))
+            self._messages.append(
+                self._tool_result_msg(prep.call, observation, metadata)
+            )
             return
         observation, metadata = (
             await self._prefetch(prep) if prefetched is None else prefetched
@@ -1586,7 +1794,9 @@ class NativeAgentRuntime(AgentProvider):
                     metadata["ok"] = False
                 elif decision == REVISE:
                     revision_instruction = self._revisions.pop(str(request), "")
-                    observation = "Error: the user requested a revision; this action was not run."
+                    observation = (
+                        "Error: the user requested a revision; this action was not run."
+                    )
                     metadata["ok"] = False
                 elif decision == REJECT:
                     observation = self._denial(
@@ -1597,14 +1807,19 @@ class NativeAgentRuntime(AgentProvider):
                     metadata["ok"] = False
                 else:
                     observation = await self._invoke(
-                        prep.tool_name, prep.args, meta_sink=metadata, human_approved=True, tool_call_id=prep.call.tool_call_id
+                        prep.tool_name,
+                        prep.args,
+                        meta_sink=metadata,
+                        human_approved=True,
+                        tool_call_id=prep.call.tool_call_id,
                     )
         observation = self._observe_tool_result(prep, observation, metadata)
         from gideon.security.tool_capture import native_result_origin
+
         _outcome_origin = native_result_origin(self, prep, observation, metadata)
-        metadata.pop('native_outcome_origin', None)
+        metadata.pop("native_outcome_origin", None)
         if _outcome_origin is not None:
-            metadata['native_outcome_origin'] = _outcome_origin
+            metadata["native_outcome_origin"] = _outcome_origin
         if self._breaker.repeat_circuit_tripped():
             self._cancel.request(reason=CANCEL_INTERNAL)
         yield prep.result_event(observation, metadata)
@@ -1655,7 +1870,9 @@ class NativeAgentRuntime(AgentProvider):
             return ""
         return self._breaker.read_refusal(prep.tool_name, prep.bkey)
 
-    def _record_tool_outcome(self, tool_name: str, failed: bool, observation: str) -> None:
+    def _record_tool_outcome(
+        self, tool_name: str, failed: bool, observation: str
+    ) -> None:
         from gideon.security.security import is_denial_observation
 
         if len(self._tool_outcomes) >= 200:
@@ -1672,16 +1889,32 @@ class NativeAgentRuntime(AgentProvider):
     ) -> str | None:
         from gideon.engine.task_modes import task_mode_denies
         from gideon.security import security
-        from gideon.security.guardrails.policy import profile_for_session, tool_grant_denial
+        from gideon.security.guardrails.policy import (
+            profile_for_session,
+            tool_grant_denial,
+        )
 
         reason = security.is_denied(name, self._extra_deny)
         decided_by = "deny_list"
         if not reason:
-            reason = task_mode_denies(self._task_mode, name, "", call.tool_input, declared=self._tool_risk.get(name, RiskLevel.CAUTION))
+            reason = task_mode_denies(
+                self._task_mode,
+                name,
+                "",
+                call.tool_input,
+                declared=self._tool_risk.get(name, RiskLevel.CAUTION),
+            )
             decided_by = "task_mode"
         if not reason:
             posture = profile_for_session(self._session_key)
-            reason = tool_grant_denial(name, posture.tool_grants, posture.tool_allowlist, declared=self._tool_risk.get(name, ""), tool_kind=call.tool_kind, tool_input=arguments)
+            reason = tool_grant_denial(
+                name,
+                posture.tool_grants,
+                posture.tool_allowlist,
+                declared=self._tool_risk.get(name, ""),
+                tool_kind=call.tool_kind,
+                tool_input=arguments,
+            )
             decided_by = "tool_grant"
         if reason:
             if meta is not None:
@@ -1700,31 +1933,48 @@ class NativeAgentRuntime(AgentProvider):
             if blocked:
                 reason = blocked[0].removeprefix("BLOCKED:").strip() or "policy hook"
                 if meta is not None:
-                    meta.update(ok=False, unasked_outcome="denied", decided_by="hook_deny")
+                    meta.update(
+                        ok=False, unasked_outcome="denied", decided_by="hook_deny"
+                    )
                 return self._denial(security.DENY_KIND_HOOK, reason, name)
         return None
 
-    def _tool_context(self, tool_name: str, args: dict, *, human_approved: bool = False, tool_call_id: str = ""):
+    def _tool_context(
+        self,
+        tool_name: str,
+        args: dict,
+        *,
+        human_approved: bool = False,
+        tool_call_id: str = "",
+    ):
         from contextlib import ExitStack
 
         from gideon.engine.agents.native import builtin_tools
-        from gideon.integrations import mcp_core
-        from gideon.integrations import mcp_shared
+        from gideon.integrations import mcp_core, mcp_shared
 
         lineage = mcp_shared.bind_leaf_lineage(self._leaf_lineage)
         session = mcp_core.set_current_session_key(self._session_key)
         agent = mcp_core.set_current_agent_id(self._agent_id)
         workspace = builtin_tools.bind_tool_context(
-            cwd=self._cwd, agent=self._agent_id, project_id=self._project_id,
-            approved_delete_command=str(args.get("command", "")) if human_approved and tool_name == "bash" else ""
+            cwd=self._cwd,
+            agent=self._agent_id,
+            project_id=self._project_id,
+            approved_delete_command=(
+                str(args.get("command", ""))
+                if human_approved and tool_name == "bash"
+                else ""
+            ),
         )
         scope = cancellation.bind_scope(self._cancel)
         from gideon.engine.agents import skill_list
+
         skill_scope = skill_list.hold(self._skill_grants)
         release = ExitStack()
         from gideon.security.owner_questions import bind_call, reset_call
+
         release.callback(reset_call, bind_call(tool_call_id))
         from gideon.extensions.apps import app_work as scopes
+
         release.callback(scopes.let_go, scopes.hold(self._app_work))
         release.callback(skill_list.let_go, skill_scope)
         release.callback(mcp_shared.reset_leaf_lineage, lineage)
@@ -1735,8 +1985,14 @@ class NativeAgentRuntime(AgentProvider):
         return release
 
     async def _preflight_bound(self, tool_name: str, args: dict):
-        from gideon.integrations.tool_providers.arguments import argument_refusal, refused_result
-        definition = next((entry for entry in self._tool_defs if entry.name == tool_name), None)
+        from gideon.integrations.tool_providers.arguments import (
+            argument_refusal,
+            refused_result,
+        )
+
+        definition = next(
+            (entry for entry in self._tool_defs if entry.name == tool_name), None
+        )
         if definition is not None:
             reason = argument_refusal(tool_name, args, definition.parameters)
             if reason:
@@ -1751,13 +2007,17 @@ class NativeAgentRuntime(AgentProvider):
                 return None
         return None
 
-    async def _preflight(self, tool_name: str, args: dict, *, meta: dict, tool_call_id: str = ""):
+    async def _preflight(
+        self, tool_name: str, args: dict, *, meta: dict, tool_call_id: str = ""
+    ):
         with self._tool_context(tool_name, args, tool_call_id=tool_call_id):
             result = await self._preflight_bound(tool_name, args)
         if result is None:
             return None
         meta.update(self._result_metadata(result))
-        meta.update(ok=False, effect_state="not_started", not_run=True, refused_by_tool=True)
+        meta.update(
+            ok=False, effect_state="not_started", not_run=True, refused_by_tool=True
+        )
         return format_tool_result(result)
 
     async def _guard_and_invoke(
@@ -1765,12 +2025,16 @@ class NativeAgentRuntime(AgentProvider):
     ):
         self._refresh_profile_grants()
         if self._app_work is not None:
-            refusal = self._app_work.refusal(tool_name, declared=self._tool_risk.get(tool_name, ""), arguments=args)
+            refusal = self._app_work.refusal(
+                tool_name, declared=self._tool_risk.get(tool_name, ""), arguments=args
+            )
             if refusal:
                 meta["ok"] = False
                 meta["refused_by"] = "app_agent_tier"
                 return self._denial("policy", refusal, tool_name)
-        if tool_name not in self._META_TOOLS and not self._tool_grants.allows(tool_name):
+        if tool_name not in self._META_TOOLS and not self._tool_grants.allows(
+            tool_name
+        ):
             return self._tool_grants.refuse(tool_name, meta)
         if (
             self._dry_run
@@ -1787,11 +2051,24 @@ class NativeAgentRuntime(AgentProvider):
         if refusal is not None:
             meta["ok"] = False
             return refusal
-        refusal = await self._preflight(tool_name, args, meta=meta, tool_call_id=call.tool_call_id)
+        refusal = await self._preflight(
+            tool_name, args, meta=meta, tool_call_id=call.tool_call_id
+        )
         if refusal is not None:
             return refusal
-        from gideon.security.protected_folders import call_protected_delete, provider_working_folder, refusal as protected_refusal
-        protected = call_protected_delete(self._tool_risk.get(tool_name, RiskLevel.CAUTION), tool_name, call.tool_kind, args, cwd=provider_working_folder(self))
+        from gideon.security.protected_folders import (
+            call_protected_delete,
+            provider_working_folder,
+        )
+        from gideon.security.protected_folders import refusal as protected_refusal
+
+        protected = call_protected_delete(
+            self._tool_risk.get(tool_name, RiskLevel.CAUTION),
+            tool_name,
+            call.tool_kind,
+            args,
+            cwd=provider_working_folder(self),
+        )
         if protected:
             if self._unattended:
                 meta["ok"] = False
@@ -1799,7 +2076,9 @@ class NativeAgentRuntime(AgentProvider):
             return _NEEDS_APPROVAL
         if self._requires_approval(tool_name, meta=meta):
             return _NEEDS_APPROVAL
-        return await self._invoke(tool_name, args, meta_sink=meta, tool_call_id=call.tool_call_id)
+        return await self._invoke(
+            tool_name, args, meta_sink=meta, tool_call_id=call.tool_call_id
+        )
 
     def _resolve_name(self, name: str) -> str:
         canonical = self._tool_wire_to_canonical.get(name)
@@ -1886,15 +2165,27 @@ class NativeAgentRuntime(AgentProvider):
                 metadata["agent_error"] = error.to_dict()
         return metadata
 
-    async def _invoke(self, tool_name: str, args: dict, *, meta_sink: dict, human_approved: bool = False, tool_call_id: str = "") -> str:
+    async def _invoke(
+        self,
+        tool_name: str,
+        args: dict,
+        *,
+        meta_sink: dict,
+        human_approved: bool = False,
+        tool_call_id: str = "",
+    ) -> str:
         self._refresh_profile_grants()
         if self._app_work is not None:
-            refusal = self._app_work.refusal(tool_name, declared=self._tool_risk.get(tool_name, ""), arguments=args)
+            refusal = self._app_work.refusal(
+                tool_name, declared=self._tool_risk.get(tool_name, ""), arguments=args
+            )
             if refusal:
                 meta_sink["ok"] = False
                 meta_sink["refused_by"] = "app_agent_tier"
                 return self._denial("policy", refusal, tool_name)
-        if tool_name not in self._META_TOOLS and not self._tool_grants.allows(tool_name):
+        if tool_name not in self._META_TOOLS and not self._tool_grants.allows(
+            tool_name
+        ):
             return self._tool_grants.refuse(tool_name, meta_sink)
         if tool_name == "tool_schema":
             result = self._describe_tool(args, meta_sink=meta_sink)
@@ -1915,20 +2206,40 @@ class NativeAgentRuntime(AgentProvider):
             return f"Error: unknown tool {tool_name!r}"
         if self._tool_retriever is not None:
             self._tool_retriever.mark_used(tool_name)
-        with self._tool_context(tool_name, args, human_approved=human_approved, tool_call_id=tool_call_id):
+        with self._tool_context(
+            tool_name, args, human_approved=human_approved, tool_call_id=tool_call_id
+        ):
             refusal = await self._preflight_bound(tool_name, args)
             if refusal is not None:
                 meta_sink.update(self._result_metadata(refusal))
-                meta_sink.update(ok=False, effect_state="not_started", not_run=True, refused_by_tool=True)
+                meta_sink.update(
+                    ok=False,
+                    effect_state="not_started",
+                    not_run=True,
+                    refused_by_tool=True,
+                )
                 return format_tool_result(refusal)
             try:
-                from gideon.integrations.tool_providers.registry import ConfiguredMcpToolProvider
+                from gideon.integrations.tool_providers.registry import (
+                    ConfiguredMcpToolProvider,
+                )
+
                 if isinstance(provider, ConfiguredMcpToolProvider):
-                    offered = next((entry for entry in self._tool_defs if entry.name == tool_name), None)
+                    offered = next(
+                        (entry for entry in self._tool_defs if entry.name == tool_name),
+                        None,
+                    )
                     if offered is None or not offered.mcp_definition_digest:
                         meta_sink.update(ok=False, effect_state="not_started")
                         return "Error: MCP tool was not run because its offered definition is unavailable."
-                    result = await provider.invoke(tool_name, args, expected_definition=offered.mcp_definition_digest, expected_configuration=offered.mcp_configuration_revision, expected_read_authority=not offered.requires_approval and not human_approved)
+                    result = await provider.invoke(
+                        tool_name,
+                        args,
+                        expected_definition=offered.mcp_definition_digest,
+                        expected_configuration=offered.mcp_configuration_revision,
+                        expected_read_authority=not offered.requires_approval
+                        and not human_approved,
+                    )
                 else:
                     result = await provider.invoke(tool_name, args)
             except Exception as exc:
@@ -1942,21 +2253,36 @@ class NativeAgentRuntime(AgentProvider):
     def _requires_approval(self, tool_name: str, *, meta: dict | None = None) -> bool:
         if tool_name in self._META_TOOLS:
             return False
-        if self._app_work is None and self._approval_policy in ("auto", "yolo", "acceptEdits"):
+        if self._app_work is None and self._approval_policy in (
+            "auto",
+            "yolo",
+            "acceptEdits",
+        ):
             from gideon.security.approval_grants import SESSION_POLICY, stands
 
-            if stands(SESSION_POLICY, caller=self._session_key or "agent", subject=f"tool={tool_name}"):
+            if stands(
+                SESSION_POLICY,
+                caller=self._session_key or "agent",
+                subject=f"tool={tool_name}",
+            ):
                 if meta is not None:
-                    meta.update(unasked_outcome="auto_approved", decided_by=SESSION_POLICY)
+                    meta.update(
+                        unasked_outcome="auto_approved", decided_by=SESSION_POLICY
+                    )
                 return False
         definition = next(
             (entry for entry in self._tool_defs if entry.name == tool_name), None
         )
         from gideon.engine.agents.native.tools import InProcessMcpToolProvider
+
         provider = self._tool_index.get(tool_name)
-        if (definition is not None and definition.work_asks
-                and type(provider) is InProcessMcpToolProvider
-                and provider._module in {"gideon.integrations.mcp_core", "gideon.integrations.mcp_subagents"}):
+        if (
+            definition is not None
+            and definition.work_asks
+            and type(provider) is InProcessMcpToolProvider
+            and provider._module
+            in {"gideon.integrations.mcp_core", "gideon.integrations.mcp_subagents"}
+        ):
             if meta is not None:
                 meta.update(unasked_outcome="invoked", decided_by="work_asks")
             return False
@@ -1974,11 +2300,16 @@ class NativeAgentRuntime(AgentProvider):
         if characters <= 0:
             return None
         from gideon.integrations.llm.registry import endpoint_on_this_machine
-        reference = str(getattr(self._model, "served_model_ref", "") or self.agent_model or "")
+
+        reference = str(
+            getattr(self._model, "served_model_ref", "") or self.agent_model or ""
+        )
         capacity = model_context_window(
             reference or None,
             override=getattr(self._model, "context_window", None),
-            local=endpoint_on_this_machine(reference.partition(":")[0], actual_provider=self._model),
+            local=endpoint_on_this_machine(
+                reference.partition(":")[0], actual_provider=self._model
+            ),
         )
         return (
             100.0 * (characters / CONSERVATIVE_CHARS_PER_TOKEN) / capacity
@@ -2123,9 +2454,7 @@ class NativeAgentRuntime(AgentProvider):
     def is_alive(self) -> bool:
         return True
 
-    def set_model_resolution_basis(
-        self, basis: str, context: dict[str, str]
-    ) -> None:
+    def set_model_resolution_basis(self, basis: str, context: dict[str, str]) -> None:
         """Attach non-secret binding identity for the session lease."""
         self._model_resolution_basis = str(basis)
         self._model_resolution_context = {
@@ -2172,7 +2501,9 @@ class NativeAgentRuntime(AgentProvider):
 
     def restore_turn_state(self, state: dict) -> None:
         if self._cancel.turn_active or self._messages:
-            raise RuntimeError("Native state can only be restored before its first turn")
+            raise RuntimeError(
+                "Native state can only be restored before its first turn"
+            )
         self._messages = copy.deepcopy(state["messages"])
         self._cache_generation = int(state.get("cache_generation", 0)) + 1
         self._last_context_pct = state.get("last_context_pct")

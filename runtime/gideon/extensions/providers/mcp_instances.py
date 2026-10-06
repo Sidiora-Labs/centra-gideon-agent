@@ -29,7 +29,11 @@ from pathlib import Path
 from typing import Any
 
 from gideon.extensions.providers.instances import ExtensionInstance
-from gideon.integrations.mcp_argument_secrets import credential_values, store_command_line, resolve_command_line
+from gideon.integrations.mcp_argument_secrets import (
+    credential_values,
+    resolve_command_line,
+    store_command_line,
+)
 
 MCP_TOOLS_EXTENSION = "mcp-tools"
 
@@ -54,7 +58,9 @@ def _display_args(values: list[str]) -> list[str]:
         match = _HEADER_CREDENTIAL.search(value)
         if match:
             delimiter = ": " if ":" in match.group(2) else "="
-            displayed[index] = value[:match.start(2)] + delimiter + "[REDACTED: credential]"
+            displayed[index] = (
+                value[: match.start(2)] + delimiter + "[REDACTED: credential]"
+            )
     return displayed
 
 
@@ -87,7 +93,9 @@ def _restore_args(incoming: str, stored: Any) -> list[str]:
         if index >= len(values) or values[index] != safe:
             raise ValueError("MCP credential mask moved or changed")
     for index, value in enumerate(values):
-        if _has_mask(value) and (index not in mask_indices or value != displayed[index]):
+        if _has_mask(value) and (
+            index not in mask_indices or value != displayed[index]
+        ):
             raise ValueError("MCP credential mask moved or changed")
     for index in mask_indices:
         values[index] = previous[index]
@@ -143,10 +151,13 @@ def _load() -> dict[str, Any]:
                 data["mcpServers"] = prepared
                 _save(data)
                 from gideon.security.mcp_grants import carry_over
+
                 for name, old in servers.items():
                     if isinstance(old, dict) and isinstance(prepared.get(name), dict):
-                        carry_over({**old, "name": name, "source": "mcp.json"},
-                                   {**prepared[name], "name": name, "source": "mcp.json"})
+                        carry_over(
+                            {**old, "name": name, "source": "mcp.json"},
+                            {**prepared[name], "name": name, "source": "mcp.json"},
+                        )
         except Exception:
             for name, spec in servers.items():
                 if isinstance(spec, dict):
@@ -181,12 +192,19 @@ def _validate_credential_maps(
     for name, value in headers.items():
         if not isinstance(name, str) or not _HEADER_NAME.fullmatch(name):
             raise ValueError("Invalid MCP HTTP header name")
-        if name.lower() in {"host", "content-length", "connection", "transfer-encoding"}:
+        if name.lower() in {
+            "host",
+            "content-length",
+            "connection",
+            "transfer-encoding",
+        }:
             raise ValueError("Transport headers cannot be configured as credentials")
         if not isinstance(value, str) or any(char in value for char in "\0\r\n"):
             raise ValueError("MCP HTTP header values must be CR/LF/NUL-free strings")
     for name, value in oauth.items():
-        if not isinstance(name, str) or not isinstance(value, (str, int, float, bool, type(None))):
+        if not isinstance(name, str) or not isinstance(
+            value, (str, int, float, bool, type(None))
+        ):
             raise ValueError("MCP OAuth settings must contain scalar values")
         if isinstance(value, str) and "\0" in value:
             raise ValueError("MCP OAuth settings must be NUL-free")
@@ -197,8 +215,8 @@ def store_server_credentials(
     name: str, spec: dict[str, Any], *, previous: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     """Persist MCP env and header credentials under the server's owner prefix."""
-    from gideon.core.config.secret_refs import store
     from gideon.cognition.onboarding_import.floors import credential_field
+    from gideon.core.config.secret_refs import store
 
     env, headers, oauth = _validate_credential_maps(spec)
     previous = previous or {}
@@ -212,7 +230,9 @@ def store_server_credentials(
                 env,
                 owner=owner,
                 declared=secret_env,
-                previous=previous.get("env") if isinstance(previous.get("env"), dict) else {},
+                previous=(
+                    previous.get("env") if isinstance(previous.get("env"), dict) else {}
+                ),
             )
         else:
             prepared.pop("env", None)
@@ -221,7 +241,11 @@ def store_server_credentials(
                 headers,
                 owner=owner,
                 declared=set(headers),
-                previous=previous.get("headers") if isinstance(previous.get("headers"), dict) else {},
+                previous=(
+                    previous.get("headers")
+                    if isinstance(previous.get("headers"), dict)
+                    else {}
+                ),
             )
         else:
             prepared.pop("headers", None)
@@ -231,7 +255,11 @@ def store_server_credentials(
                 oauth,
                 owner=owner,
                 declared=secret_oauth,
-                previous=previous.get("oauth") if isinstance(previous.get("oauth"), dict) else {},
+                previous=(
+                    previous.get("oauth")
+                    if isinstance(previous.get("oauth"), dict)
+                    else {}
+                ),
             )
         elif "oauth" in spec:
             prepared["oauth"] = {}
@@ -259,7 +287,9 @@ def resolve_server_credentials(name: str, spec: dict[str, Any]) -> dict[str, Any
             _secret_reference(value) and not credential_field(key)
             for key, value in values.items()
         ):
-            raise ValueError("MCP references are allowed only for credential-shaped env names")
+            raise ValueError(
+                "MCP references are allowed only for credential-shaped env names"
+            )
         resolved[field] = resolve(values, owner=owner)
     return resolve_command_line(name, resolved)
 
@@ -280,7 +310,11 @@ def _save(data: dict[str, Any]) -> None:
 
     for name in set(before) | set(after):
         if before.get(name) != after.get(name):
-            mcp_stdio.stop_finishing_soon(lambda server, changed=name: server == changed)
+
+            def matches_changed(server: str, changed: str = name) -> bool:
+                return server == changed
+
+            mcp_stdio.stop_finishing_soon(matches_changed)
             mcp_discovery.forget_probe(name)
             if mcp_client._registry is not None:
                 mcp_client._registry.invalidate_server(name)
@@ -292,7 +326,11 @@ def _spec_to_instance(name: str, spec: dict[str, Any]) -> ExtensionInstance:
     config: dict[str, Any] = {
         "transport": "sse" if url else "stdio",
         "command": _display_command(spec.get("command", "")),
-        "args": shlex.join(_display_args(args)) if isinstance(args, list) else str(args or ""),
+        "args": (
+            shlex.join(_display_args(args))
+            if isinstance(args, list)
+            else str(args or "")
+        ),
         "endpoint": _safe_display_url(url),
     }
     return ExtensionInstance(
@@ -323,7 +361,9 @@ def _config_to_spec(
         if field in config:
             spec[field] = config[field]
 
-    old_command = str(existing.get("command") or "") if isinstance(existing, dict) else ""
+    old_command = (
+        str(existing.get("command") or "") if isinstance(existing, dict) else ""
+    )
     old_args = existing.get("args", []) if isinstance(existing, dict) else []
     old_url = str(existing.get("url") or "") if isinstance(existing, dict) else ""
     transport = config.get("transport") or (
@@ -338,7 +378,9 @@ def _config_to_spec(
             raise ValueError("MCP credential mask moved or changed")
         spec["url"] = endpoint
     else:
-        spec["command"] = _restore_command((config.get("command") or "").strip(), old_command)
+        spec["command"] = _restore_command(
+            (config.get("command") or "").strip(), old_command
+        )
         raw_args = config.get("args") or ""
         if isinstance(raw_args, list):
             raw_args = shlex.join([str(value) for value in raw_args])
@@ -368,7 +410,9 @@ def get_instance(instance_id: str) -> ExtensionInstance | None:
     return _spec_to_instance(instance_id, spec) if isinstance(spec, dict) else None
 
 
-def instance_revision_document(instance: ExtensionInstance, schema: dict[str, Any]) -> dict[str, Any]:
+def instance_revision_document(
+    instance: ExtensionInstance, schema: dict[str, Any]
+) -> dict[str, Any]:
     """Return the masked card projection plus a private definition fingerprint."""
     from gideon.extensions.apps.secret_fields import mask_instance
     from gideon.security import mcp_grants
@@ -376,7 +420,9 @@ def instance_revision_document(instance: ExtensionInstance, schema: dict[str, An
     spec = _load().get("mcpServers", {}).get(instance.id)
     if not isinstance(spec, dict):
         raise ValueError("MCP server definition is unavailable")
-    definition = mcp_grants.revision({**spec, "name": instance.id, "source": "mcp.json"})
+    definition = mcp_grants.revision(
+        {**spec, "name": instance.id, "source": "mcp.json"}
+    )
     return {**mask_instance(instance, schema), "_definition_revision": definition}
 
 
@@ -448,5 +494,7 @@ def delete_instance(instance_id: str) -> bool:
     purge([mcp_owner(instance_id).prefix, _mcp_oauth_owner(instance_id).prefix])
     from gideon.integrations.mcp_oauth import purge_server
 
-    purge_server(instance_id, str(existing.get("url") or existing.get("endpoint") or ""))
+    purge_server(
+        instance_id, str(existing.get("url") or existing.get("endpoint") or "")
+    )
     return True

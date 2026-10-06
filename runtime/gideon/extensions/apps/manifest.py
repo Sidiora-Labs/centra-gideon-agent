@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 from gideon.core.versions import order_key, parse_version
-
 from gideon.extensions.apps.agent_tiers import AGENT_TIERS, declared_agent
 from gideon.extensions.apps.core_features import FEATURE_NAME_RE, core_has
 
@@ -775,6 +774,7 @@ class Dependencies:
     commands: list[str] = field(default_factory=list)
     pythonDependencies: list[str] = field(default_factory=list)  # noqa: N815
     sidecarDependencies: list[str] = field(default_factory=list)  # noqa: N815
+    _sidecar_array_valid: bool = field(default=True, kw_only=True, repr=False)
     npmPackages: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -817,8 +817,9 @@ class Dependencies:
             sidecarDependencies=(
                 [str(p) for p in data.get("sidecarDependencies", [])]
                 if isinstance(data.get("sidecarDependencies", []), list)
-                else data.get("sidecarDependencies")
+                else []
             ),  # noqa: N815
+            _sidecar_array_valid=isinstance(data.get("sidecarDependencies", []), list),
         )
 
     def _validate_npm_packages(self) -> list[str]:
@@ -1718,7 +1719,9 @@ class AppManifest:
         if not self.version:
             errors.append("missing required field: version")
         elif parse_version(self.version) is None:
-            errors.append(f"version must be a valid PEP 440 version (e.g. 1.0.0), got: {self.version!r}")
+            errors.append(
+                f"version must be a valid PEP 440 version (e.g. 1.0.0), got: {self.version!r}"
+            )
 
         if not self.displayName:
             errors.append("missing required field: displayName")
@@ -1759,32 +1762,41 @@ class AppManifest:
                     seen_requires.add(normalized)
 
         sidecar_dependencies = self.dependencies.sidecarDependencies
-        if not isinstance(sidecar_dependencies, list):
+        if not self.dependencies._sidecar_array_valid or not isinstance(
+            sidecar_dependencies, list
+        ):
             errors.append("dependencies.sidecarDependencies must be an array")
         else:
             if len(sidecar_dependencies) > 50:
                 errors.append(
                     "dependencies.sidecarDependencies may contain at most 50 entries"
                 )
+            from collections.abc import Callable
+
+            requirement_parser: Callable[[str], object] | None
+            invalid_requirement: type[Exception]
             try:
                 from packaging.requirements import InvalidRequirement, Requirement
+
+                requirement_parser = Requirement
+                invalid_requirement = InvalidRequirement
             except ImportError:
-                InvalidRequirement = ValueError
-                Requirement = None
+                invalid_requirement = ValueError
+                requirement_parser = None
             for index, spec in enumerate(sidecar_dependencies):
                 if not isinstance(spec, str) or not spec.strip() or len(spec) > 500:
                     errors.append(
                         f"sidecarDependencies[{index}] must be a requirement of at most 500 characters"
                     )
                     continue
-                if Requirement is None:
+                if requirement_parser is None:
                     errors.append(
                         "cannot validate sidecarDependencies without packaging"
                     )
                     break
                 try:
-                    Requirement(spec)
-                except InvalidRequirement:
+                    requirement_parser(spec)
+                except invalid_requirement:
                     errors.append(
                         f"sidecarDependencies[{index}] is not a valid PEP 508 requirement"
                     )
@@ -1876,7 +1888,9 @@ class AppManifest:
                 )
 
         if (self.crons or self.permissions.cron) and not self.permissions.agent_tier:
-            errors.append("scheduled agent jobs require permissions.agent to declare a tier")
+            errors.append(
+                "scheduled agent jobs require permissions.agent to declare a tier"
+            )
         for cron in self.crons:
             if self.permissions.agent_tier == "text" and cron.agent:
                 errors.append("a text-tier scheduled job cannot name an agent")
@@ -2077,7 +2091,12 @@ class AppManifest:
 
         runtime_reason = app_refusal(self)
         if runtime_reason:
-            return CoreCompatibility(CORE_COMPAT_INCOMPATIBLE, self.minGideonVersion, verdict.host, runtime_reason=runtime_reason)
+            return CoreCompatibility(
+                CORE_COMPAT_INCOMPATIBLE,
+                self.minGideonVersion,
+                verdict.host,
+                runtime_reason=runtime_reason,
+            )
         missing = tuple(
             sorted(
                 {

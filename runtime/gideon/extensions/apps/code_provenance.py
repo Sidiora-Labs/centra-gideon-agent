@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import sys
-import threading
 import contextvars
 import logging
+import sys
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Iterator
@@ -13,7 +13,9 @@ from typing import Callable, Iterator
 logger = logging.getLogger(__name__)
 _lock = threading.RLock()
 _takebacks: dict[str, list[tuple[object | None, Callable[[], None]]]] = {}
-_loading_scope: contextvars.ContextVar[tuple[str, object] | None] = contextvars.ContextVar("app_registration_scope", default=None)
+_loading_scope: contextvars.ContextVar[tuple[str, object] | None] = (
+    contextvars.ContextVar("app_registration_scope", default=None)
+)
 _roots: dict[Path, str] = {}
 _pending: dict[Path, tuple[str, int]] = {}
 _package = Path(__file__).resolve().parents[2]
@@ -28,7 +30,9 @@ def _snapshot() -> tuple[tuple[Path, str], ...]:
     with _lock:
         entries = dict(_roots)
         entries.update({root: app for root, (app, _count) in _pending.items()})
-        return tuple(sorted(entries.items(), key=lambda item: len(item[0].parts), reverse=True))
+        return tuple(
+            sorted(entries.items(), key=lambda item: len(item[0].parts), reverse=True)
+        )
 
 
 @contextmanager
@@ -36,7 +40,9 @@ def loading(app: str, directory: Path) -> Iterator[None]:
     root = directory.resolve(strict=True)
     if not app or not root.is_dir():
         raise ImportError("App code requires a named, existing directory")
-    if _inside(_package, root) or (_inside(root, _package) and not _inside(root, _native)):
+    if _inside(_package, root) or (
+        _inside(root, _package) and not _inside(root, _native)
+    ):
         raise ImportError("Core code cannot be registered as an app")
     with _lock:
         current = _roots.get(root)
@@ -76,7 +82,9 @@ def loaded_app(path: str) -> str | None:
 
 
 def owner() -> str | None:
-    frame = sys._getframe(1)
+    from types import FrameType
+
+    frame: FrameType | None = sys._getframe(1)
     try:
         while frame is not None:
             name = frame.f_globals.get("__name__")
@@ -116,8 +124,14 @@ def keep(take_back: Callable[[], None]) -> None:
 def _withdraw(app: str, *, scope: object | None = None) -> None:
     with _lock:
         registered = _takebacks.get(app, [])
-        selected = registered if scope is None else [row for row in registered if row[0] is scope]
-        remaining = [] if scope is None else [row for row in registered if row[0] is not scope]
+        selected = (
+            registered
+            if scope is None
+            else [row for row in registered if row[0] is scope]
+        )
+        remaining = (
+            [] if scope is None else [row for row in registered if row[0] is not scope]
+        )
         if remaining:
             _takebacks[app] = remaining
         else:
@@ -131,8 +145,12 @@ def _withdraw(app: str, *, scope: object | None = None) -> None:
             failures.append((_scope, take_back, exc))
     if failures:
         with _lock:
-            _takebacks.setdefault(app, []).extend((failed_scope, callback) for failed_scope, callback, _exc in failures)
-        raise RuntimeError(f"App {app!r} retained registrations after withdrawal") from failures[0][2]
+            _takebacks.setdefault(app, []).extend(
+                (failed_scope, callback) for failed_scope, callback, _exc in failures
+            )
+        raise RuntimeError(
+            f"App {app!r} retained registrations after withdrawal"
+        ) from failures[0][2]
 
 
 def release(app: str) -> None:

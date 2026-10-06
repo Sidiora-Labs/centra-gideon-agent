@@ -6,7 +6,7 @@ import contextvars
 from dataclasses import dataclass
 from typing import Any
 
-from gideon.extensions.apps.agent_tiers import AGENT_TIERS, AGENT_READ, AGENT_TOOLS
+from gideon.extensions.apps.agent_tiers import AGENT_READ, AGENT_TIERS, AGENT_TOOLS
 
 _BOUND: dict[str, AppWork] = {}
 _HELD: contextvars.ContextVar[AppWork | None] = contextvars.ContextVar(
@@ -55,7 +55,9 @@ class AppWork:
             proof = current_work()
             bound = from_bound(proof)
             if bound is None or bound.app != self.app or not bound.current_tier():
-                return "app workflow starts require the verified current app work origin"
+                return (
+                    "app workflow starts require the verified current app work origin"
+                )
             # The service resolves the native private receipt before accepting Temporary work.
             return ""
         if name in {
@@ -124,17 +126,23 @@ def for_job(trigger_id: str) -> AppWork | None:
 
     manifest = _manifest_of(app) if app else None
     checker = checker_for(app) if app else None
-    from gideon.automation.triggers.grants import _loaded_trigger, _action, is_granted
+    from gideon.automation.triggers.grants import _action, _loaded_trigger, is_granted
     from gideon.extensions.apps.app_crons import posture_refusal
+
     try:
         row = _loaded_trigger(trigger_id)
         trigger = row.trigger if row is not None and row.ok else None
         provider, action = _action(trigger) if trigger is not None else ("", {})
-        canonical = bool(trigger is not None and trigger.id == trigger_id
-                         and trigger.kind == "clock" and trigger.enabled
-                         and trigger.created_by == f"app:{app}"
-                         and provider == "invoke-agent" and is_granted(trigger)
-                         and not posture_refusal(trigger_id, trigger.workflow))
+        canonical = bool(
+            trigger is not None
+            and trigger.id == trigger_id
+            and trigger.kind == "clock"
+            and trigger.enabled
+            and trigger.created_by == f"app:{app}"
+            and provider == "invoke-agent"
+            and is_granted(trigger)
+            and not posture_refusal(trigger_id, trigger.workflow)
+        )
     except Exception:
         canonical = False
     if (
@@ -216,7 +224,7 @@ def from_request(request) -> AppWork | None:
     app = request.get("app", "")
     proof_scope = from_bound(work_of_request(request))
     scope = AppWork.for_app(app) if app else proof_scope
-    if app and proof_scope is not None:
+    if app and proof_scope is not None and scope is not None:
         scope = (
             proof_scope.child(scope.tier)
             if proof_scope.app == app

@@ -40,14 +40,22 @@ def desired_app_hooks() -> dict[str, dict]:
 
 def reconcile_app_hooks(store: object | None = None) -> None:
     """Apply enabled app hooks and prune removed ones without touching user hooks."""
-    target = store if isinstance(store, ScriptHookStore) else get_global_hook_store() or ScriptHookStore()
+    target = (
+        store
+        if isinstance(store, ScriptHookStore)
+        else get_global_hook_store() or ScriptHookStore()
+    )
     desired = desired_app_hooks()
     for existing in target.list_all():
         if existing.id.startswith(APP_HOOK_PREFIX) and existing.id not in desired:
             target.delete(existing.id)
     for hook_id, payload in desired.items():
-        existing = target.get(hook_id)
-        if existing is None:
+        saved_hook = target.get(hook_id)
+        if saved_hook is None:
             target.create(payload)
-        elif any(getattr(existing, key) != value for key, value in payload.items() if key != "id"):
+        elif any(
+            getattr(saved_hook, key) != value
+            for key, value in payload.items()
+            if key != "id"
+        ):
             target.update(hook_id, payload)

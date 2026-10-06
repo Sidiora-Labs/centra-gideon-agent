@@ -3,6 +3,7 @@
 The survey is the authority for the exact tree copied into quarantine.  A caller must
 scan and make every install decision against that copy, then install that same copy.
 """
+
 from __future__ import annotations
 
 import errno
@@ -54,9 +55,14 @@ class Survey:
                     dirs.append(entry)
                 elif entry.kind == "link":
                     try:
-                        with _parent_fd(self.root, entry.path[:-1]) as (parent_fd, name):
+                        with _parent_fd(self.root, entry.path[:-1]) as (
+                            parent_fd,
+                            name,
+                        ):
                             link_name = entry.path[-1]
-                            st = os.stat(link_name, dir_fd=parent_fd, follow_symlinks=False)
+                            st = os.stat(
+                                link_name, dir_fd=parent_fd, follow_symlinks=False
+                            )
                             target = os.readlink(link_name, dir_fd=parent_fd)
                     except OSError as exc:
                         raise _changed(entry) from exc
@@ -71,8 +77,8 @@ class Survey:
             if _tree_signature(current) != _tree_signature(self.entries):
                 raise UnsafeBundleError("app source changed while it was being staged")
             for entry in sorted(dirs, key=lambda e: len(e.path), reverse=True):
-                target = destination.joinpath(*entry.path)
-                os.chmod(target, stat.S_IMODE(entry.mode) & 0o777)
+                directory = destination.joinpath(*entry.path)
+                os.chmod(directory, stat.S_IMODE(entry.mode) & 0o777)
             return destination
         except BaseException:
             shutil.rmtree(destination, ignore_errors=True)
@@ -101,7 +107,9 @@ def survey(source: Path) -> Survey:
     return Survey(root, tuple(entries))
 
 
-def _walk(root: Path, root_st: os.stat_result | None = None) -> tuple[list[Entry], os.stat_result]:
+def _walk(
+    root: Path, root_st: os.stat_result | None = None
+) -> tuple[list[Entry], os.stat_result]:
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         root_fd = os.open(root, flags)
@@ -113,41 +121,81 @@ def _walk(root: Path, root_st: os.stat_result | None = None) -> tuple[list[Entry
         if not stat.S_ISDIR(root_st.st_mode):
             raise UnsafeBundleError("app source root changed type")
 
-        def visit(folder_fd: int, parent: tuple[str, ...], folder_stat: os.stat_result) -> None:
-            found.append(Entry(parent, "dir", folder_stat.st_mode, 0,
-                               folder_stat.st_mtime_ns, (folder_stat.st_dev, folder_stat.st_ino)))
+        def visit(
+            folder_fd: int, parent: tuple[str, ...], folder_stat: os.stat_result
+        ) -> None:
+            found.append(
+                Entry(
+                    parent,
+                    "dir",
+                    folder_stat.st_mode,
+                    0,
+                    folder_stat.st_mtime_ns,
+                    (folder_stat.st_dev, folder_stat.st_ino),
+                )
+            )
             try:
                 with os.scandir(folder_fd) as scan:
-                    children = [(item.name, item.stat(follow_symlinks=False)) for item in scan]
+                    children = [
+                        (item.name, item.stat(follow_symlinks=False)) for item in scan
+                    ]
             except OSError as exc:
-                raise UnsafeBundleError(f"cannot survey {_display(parent)}: {exc}") from exc
+                raise UnsafeBundleError(
+                    f"cannot survey {_display(parent)}: {exc}"
+                ) from exc
             for name, st in sorted(children, key=lambda row: row[0]):
                 rel = (*parent, name)
                 if stat.S_ISDIR(st.st_mode):
                     try:
                         child_fd = os.open(name, flags, dir_fd=folder_fd)
                     except OSError as exc:
-                        raise UnsafeBundleError(f"{_display(rel)} changed during survey") from exc
+                        raise UnsafeBundleError(
+                            f"{_display(rel)} changed during survey"
+                        ) from exc
                     try:
                         opened = os.fstat(child_fd)
                         if (opened.st_dev, opened.st_ino) != (st.st_dev, st.st_ino):
-                            raise UnsafeBundleError(f"{_display(rel)} changed during survey")
+                            raise UnsafeBundleError(
+                                f"{_display(rel)} changed during survey"
+                            )
                         visit(child_fd, rel, opened)
                     finally:
                         os.close(child_fd)
                 elif stat.S_ISREG(st.st_mode):
-                    found.append(Entry(rel, "file", st.st_mode, st.st_size, st.st_mtime_ns,
-                                       (st.st_dev, st.st_ino), hardlinks=st.st_nlink))
+                    found.append(
+                        Entry(
+                            rel,
+                            "file",
+                            st.st_mode,
+                            st.st_size,
+                            st.st_mtime_ns,
+                            (st.st_dev, st.st_ino),
+                            hardlinks=st.st_nlink,
+                        )
+                    )
                 elif stat.S_ISLNK(st.st_mode):
                     try:
                         target = os.readlink(name, dir_fd=folder_fd)
                         check = os.stat(name, dir_fd=folder_fd, follow_symlinks=False)
                     except OSError as exc:
-                        raise UnsafeBundleError(f"{_display(rel)} changed during survey") from exc
+                        raise UnsafeBundleError(
+                            f"{_display(rel)} changed during survey"
+                        ) from exc
                     if (check.st_dev, check.st_ino) != (st.st_dev, st.st_ino):
-                        raise UnsafeBundleError(f"{_display(rel)} changed during survey")
-                    found.append(Entry(rel, "link", st.st_mode, 0, st.st_mtime_ns,
-                                       (st.st_dev, st.st_ino), target))
+                        raise UnsafeBundleError(
+                            f"{_display(rel)} changed during survey"
+                        )
+                    found.append(
+                        Entry(
+                            rel,
+                            "link",
+                            st.st_mode,
+                            0,
+                            st.st_mtime_ns,
+                            (st.st_dev, st.st_ino),
+                            target,
+                        )
+                    )
                 else:
                     raise UnsafeBundleError(f"{_display(rel)} is a special file")
 
@@ -174,20 +222,22 @@ def _validate_link(entry: Entry, known: dict[tuple[str, ...], Entry]) -> None:
                 raise UnsafeBundleError(f"{_display(entry.path)} links outside the app")
             here.pop()
             continue
-        target = known.get((*here, part))
-        if target is None:
+        linked_entry = known.get((*here, part))
+        if linked_entry is None:
             raise UnsafeBundleError(f"{_display(entry.path)} links to a missing path")
-        if target.kind == "link":
+        if linked_entry.kind == "link":
             hops += 1
             if hops > 40:
                 raise UnsafeBundleError(f"{_display(entry.path)} contains a link loop")
-            nested = target.link
+            nested = linked_entry.link
             if os.path.isabs(nested):
                 raise UnsafeBundleError(f"{_display(entry.path)} links outside the app")
             parts = nested.split("/") + parts
             continue
-        if parts and target.kind != "dir":
-            raise UnsafeBundleError(f"{_display(entry.path)} links through a non-directory")
+        if parts and linked_entry.kind != "dir":
+            raise UnsafeBundleError(
+                f"{_display(entry.path)} links through a non-directory"
+            )
         here.append(part)
     final = known.get(tuple(here))
     if final is None or final.kind != "file":
@@ -219,15 +269,22 @@ def _copy_file(root: Path, destination: Path, entry: Entry) -> None:
         raise
     try:
         st = os.fstat(fd)
-        if (not stat.S_ISREG(st.st_mode) or st.st_mode != entry.mode
-                or (st.st_dev, st.st_ino) != entry.identity
-                or st.st_size != entry.size or st.st_mtime_ns != entry.mtime_ns):
+        if (
+            not stat.S_ISREG(st.st_mode)
+            or st.st_mode != entry.mode
+            or (st.st_dev, st.st_ino) != entry.identity
+            or st.st_size != entry.size
+            or st.st_mtime_ns != entry.mtime_ns
+        ):
             raise _changed(entry)
         with os.fdopen(fd, "rb", closefd=False) as fin, open(destination, "xb") as fout:
             shutil.copyfileobj(fin, fout, 1024 * 1024)
         after = os.fstat(fd)
         if (after.st_size, after.st_mtime_ns, after.st_mode) != (
-                entry.size, entry.mtime_ns, entry.mode):
+            entry.size,
+            entry.mtime_ns,
+            entry.mode,
+        ):
             raise _changed(entry)
         os.chmod(destination, stat.S_IMODE(entry.mode) & 0o777)
     finally:
@@ -235,11 +292,16 @@ def _copy_file(root: Path, destination: Path, entry: Entry) -> None:
 
 
 def _tree_signature(entries: list[Entry] | tuple[Entry, ...]) -> tuple:
-    return tuple((e.path, e.kind, e.mode, e.identity, e.size, e.mtime_ns, e.link, e.hardlinks) for e in entries)
+    return tuple(
+        (e.path, e.kind, e.mode, e.identity, e.size, e.mtime_ns, e.link, e.hardlinks)
+        for e in entries
+    )
 
 
 def _changed(entry: Entry) -> UnsafeBundleError:
-    return UnsafeBundleError(f"{_display(entry.path)} changed while it was being staged")
+    return UnsafeBundleError(
+        f"{_display(entry.path)} changed while it was being staged"
+    )
 
 
 def _display(parts: tuple[str, ...]) -> str:

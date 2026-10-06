@@ -15,8 +15,8 @@ a callable matching the factory signature::
     factory(session_key=None, agent=None, model_override=None, ...) -> ModelProvider
 """
 
-import json
 import hashlib
+import json
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -83,6 +83,7 @@ def _resolution_entry(entry: Any, registry: Any) -> tuple:
     if not isinstance(options, dict):
         options = {}
     safe_options = []
+    safe: tuple[str, str, int | None, str] | str | int | float | None
     for key in sorted(_RESOLUTION_OPTION_KEYS):
         if key not in options:
             continue
@@ -127,7 +128,10 @@ def model_resolution_basis(
     credentials and secret-bearing options; endpoint userinfo and query values are
     discarded before hashing.
     """
-    from gideon.extensions.providers.use_cases import active_model_refs, parent_capability
+    from gideon.extensions.providers.use_cases import (
+        active_model_refs,
+        parent_capability,
+    )
     from gideon.integrations.llm.registry import get_default_registry
 
     registry = get_default_registry()
@@ -153,6 +157,7 @@ def model_resolution_basis(
 
     kind = str(provider_kind or profile_provider or "")
     refs = list(active_model_refs(use_case))
+    candidates: list[tuple[str, tuple[Any, ...] | None]]
     if kind.startswith("acp"):
         runtime_name = kind.split(":", 1)[1] if ":" in kind else ""
         selected = by_name.get(runtime_name) if runtime_name else None
@@ -180,9 +185,13 @@ def model_resolution_basis(
         if not refs:
             target = _capability_enum(parent_capability(use_case))
             for entry in entries:
-                if entry.type == "acp_agent" or target not in _entry_capabilities(registry, entry):
+                if entry.type == "acp_agent" or target not in _entry_capabilities(
+                    registry, entry
+                ):
                     continue
-                parsed_refs.append((str(entry.name), _resolution_entry(entry, registry)))
+                parsed_refs.append(
+                    (str(entry.name), _resolution_entry(entry, registry))
+                )
         candidates = parsed_refs
         refs_for_basis = tuple(str(ref) for ref in refs)
 
@@ -197,7 +206,9 @@ def model_resolution_basis(
         "provider_kind": kind,
         "candidates": candidates,
     }
-    encoded = json.dumps(basis, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    encoded = json.dumps(
+        basis, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    )
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
@@ -563,9 +574,8 @@ def _build_native_runtime(
     )
     from gideon.engine.agents.native.runtime import NativeAgentRuntime
     from gideon.engine.agents.provider import AgentRuntimeDefinition
-    from gideon.integrations.mcp_shared import leaf_lineage
-
     from gideon.extensions.providers.use_cases import CHAT_SUBCATEGORIES
+    from gideon.integrations.mcp_shared import leaf_lineage
 
     inner_axis = model_axis if model_axis in CHAT_SUBCATEGORIES else "chat"
     profile = None
@@ -592,8 +602,8 @@ def _build_native_runtime(
         _model_axis_only=True,
         **kwargs,
     )
-    from gideon.engine.agents.tool_list import agent_tools
     from gideon.engine.agents.skill_list import agent_skills
+    from gideon.engine.agents.tool_list import agent_tools
 
     app_work = kwargs.pop("app_work", None)
     tool_grants = agent_tools(agent, cfg)
@@ -704,7 +714,11 @@ def _build_native_runtime(
     )
     from gideon.integrations.mcp_delegated import McpDelegatedToolProvider
 
-    tool_providers = [platform, *_list_tool_providers(), McpDelegatedToolProvider(session_key or "")]
+    tool_providers = [
+        platform,
+        *_list_tool_providers(),
+        McpDelegatedToolProvider(session_key or ""),
+    ]
 
     runtime = NativeAgentRuntime(  # type: ignore[assignment]  # CI-2
         definition=definition,
@@ -762,10 +776,16 @@ def resolve_provider_for_use_case(
         raise ProviderResolutionError(f"Unknown use case: {use_case!r}")
 
     from gideon.security import execution_lineage
-    if execution_lineage.origin() is not None and not execution_lineage.admitting_host_runtime():
+
+    if (
+        execution_lineage.origin() is not None
+        and not execution_lineage.admitting_host_runtime()
+    ):
         try:
             model_override, inherited_runtime = execution_lineage.requested_model(
-                str(model_override or ""), model_only=bool(kwargs.get("_force_model_axis")) or use_case not in {"chat", "code_tools"},
+                str(model_override or ""),
+                model_only=bool(kwargs.get("_force_model_axis"))
+                or use_case not in {"chat", "code_tools"},
             )
         except execution_lineage.PrivateModelRefused as error:
             raise ProviderResolutionError(str(error)) from error
@@ -773,6 +793,7 @@ def resolve_provider_for_use_case(
             kwargs["provider_kind"] = inherited_runtime
 
     from gideon.extensions.apps.app_work import of_session
+
     _app_work = kwargs.pop("app_work", None) or of_session(session_key or "")
     _force_model_axis = kwargs.pop("_force_model_axis", False)
     _provider_kind = kwargs.pop("provider_kind", "") or ""
@@ -789,7 +810,9 @@ def resolve_provider_for_use_case(
         else _agent_provider_kind(agent)
     )
     if _app_work is not None and _kind == "acp":
-        raise ProviderResolutionError("App agent work requires the native runtime; external agent tools cannot be held to its tier")
+        raise ProviderResolutionError(
+            "App agent work requires the native runtime; external agent tools cannot be held to its tier"
+        )
     # §2.3 (gap 3): re-inject ``unattended`` for the ACP branch. Only the acp_agent
     # factory sees these kwargs on that branch, and it is the one place that can
     # honour the flag — it hands it to AcpClient, which is what lets sanitize_mode
@@ -810,7 +833,9 @@ def resolve_provider_for_use_case(
             channel_id=kwargs.pop("channel_id", None),
             **kwargs,
         )
-        provider.set_spend_axis(use_case)
+        spend_setter = getattr(provider, "set_spend_axis", None)
+        if callable(spend_setter):
+            spend_setter(use_case)
         return provider
     if (
         not _force_model_axis
@@ -864,8 +889,13 @@ def resolve_provider_for_use_case(
         if direct is not None:
             return direct
 
-    if execution_lineage.origin() is not None and not execution_lineage.admitting_host_runtime():
-        raise ProviderResolutionError("The private origin's model is no longer available under current provider policy; no fallback was used.")
+    if (
+        execution_lineage.origin() is not None
+        and not execution_lineage.admitting_host_runtime()
+    ):
+        raise ProviderResolutionError(
+            "The private origin's model is no longer available under current provider policy; no fallback was used."
+        )
 
     _refs = list(active_model_refs(use_case))
     _query_class = str(kwargs.pop("routing_query_class", "") or "")
@@ -971,18 +1001,26 @@ def _entry_capabilities(registry: Any, entry: Any) -> frozenset:
         return frozenset()
 
 
-def _ref_problem(registry: Any, entries: dict[str, Any], ref: str) -> tuple[str, str] | None:
+def _ref_problem(
+    registry: Any, entries: dict[str, Any], ref: str
+) -> tuple[str, str] | None:
     from dataclasses import replace
+
     from gideon.extensions.providers.use_cases import split_ref
 
     parsed = split_ref(ref)
     if parsed is None or parsed[0] not in entries:
         return None
-    return registry.not_ready(replace(entries[parsed[0]], model=parsed[1]), implicit=False)
+    return registry.not_ready(
+        replace(entries[parsed[0]], model=parsed[1]), implicit=False
+    )
 
 
 def model_chosen(use_case: str) -> bool:
-    from gideon.extensions.providers.use_cases import active_model_refs, parent_capability
+    from gideon.extensions.providers.use_cases import (
+        active_model_refs,
+        parent_capability,
+    )
     from gideon.integrations.llm.registry import get_default_registry
 
     if active_model_refs(use_case):
@@ -990,14 +1028,18 @@ def model_chosen(use_case: str) -> bool:
     target = _capability_enum(parent_capability(use_case))
     registry = get_default_registry()
     return target is not None and any(
-        entry.type != "acp_agent" and bool(entry.own_model)
+        entry.type != "acp_agent"
+        and bool(entry.own_model)
         and target in _entry_capabilities(registry, entry)
         for entry in registry.list_entries()
     )
 
 
 def use_case_problem(use_case: str) -> tuple[str, str] | None:
-    from gideon.extensions.providers.use_cases import active_model_refs, parent_capability
+    from gideon.extensions.providers.use_cases import (
+        active_model_refs,
+        parent_capability,
+    )
     from gideon.integrations.llm.registry import get_default_registry, no_model_chosen
 
     registry = get_default_registry()
@@ -1009,7 +1051,9 @@ def use_case_problem(use_case: str) -> tuple[str, str] | None:
     target = _capability_enum(parent_capability(use_case))
     first_problem = None
     for entry in entries.values():
-        if entry.type == "acp_agent" or target not in _entry_capabilities(registry, entry):
+        if entry.type == "acp_agent" or target not in _entry_capabilities(
+            registry, entry
+        ):
             continue
         problem = registry.not_ready(entry, implicit=True)
         if problem is None and entry.own_model:
@@ -1021,7 +1065,9 @@ def use_case_problem(use_case: str) -> tuple[str, str] | None:
 def can_resolve_use_case(use_case: str) -> bool:
     """Probe the binding and optional provider readiness without constructing a client."""
     from gideon.extensions.providers.use_cases import (
-        VALID_USE_CASES, active_model_refs, parent_capability,
+        VALID_USE_CASES,
+        active_model_refs,
+        parent_capability,
     )
     from gideon.integrations.llm.registry import get_default_registry
 
@@ -1035,7 +1081,8 @@ def can_resolve_use_case(use_case: str) -> bool:
             return any(_ref_problem(registry, entries, ref) is None for ref in refs)
         target = _capability_enum(parent_capability(use_case))
         return target is not None and any(
-            entry.type != "acp_agent" and bool(entry.own_model)
+            entry.type != "acp_agent"
+            and bool(entry.own_model)
             and target in _entry_capabilities(registry, entry)
             and registry.not_ready(entry, implicit=True) is None
             for entry in entries.values()
@@ -1140,7 +1187,9 @@ def _resolve_from_config_registry(
             continue
         from dataclasses import replace
 
-        selected_entry = replace(entry, model=model_override) if model_override else entry
+        selected_entry = (
+            replace(entry, model=model_override) if model_override else entry
+        )
         problem = registry.not_ready(selected_entry, implicit=not bool(provider_hint))
         if problem is not None:
             if provider_hint:
@@ -1204,8 +1253,13 @@ def _resolve_from_config_registry(
         kwargs["max_tokens"] = derived
 
     from gideon.security import execution_lineage
-    if not execution_lineage.admitting_host_runtime() and not execution_lineage.admits(f"{candidate.name}:{served_model}"):
-        raise ProviderResolutionError("The resolved provider is outside the private origin's admitted model catalog.")
+
+    if not execution_lineage.admitting_host_runtime() and not execution_lineage.admits(
+        f"{candidate.name}:{served_model}"
+    ):
+        raise ProviderResolutionError(
+            "The resolved provider is outside the private origin's admitted model catalog."
+        )
     build_kwargs = dict(kwargs)
     build_kwargs["model"] = served_model
     if "credential_store" not in build_kwargs and candidate.credential:
@@ -1398,12 +1452,18 @@ def create_provider_factory(default_use_case: str = "chat") -> ProviderFactory:
             if callable(setter):
                 setter(basis, context)
             else:
-                provider._model_resolution_basis = basis
-                provider._model_resolution_context = context
+                setattr(provider, "_model_resolution_basis", basis)
+                setattr(provider, "_model_resolution_context", context)
         except Exception:
-            logger.debug("Provider does not expose model resolution identity", exc_info=True)
+            logger.debug(
+                "Provider does not expose model resolution identity", exc_info=True
+            )
         return provider
 
-    _factory.spend_axis = default_use_case if default_use_case in METERED_AXES else ""
+    setattr(
+        _factory,
+        "spend_axis",
+        default_use_case if default_use_case in METERED_AXES else "",
+    )
     _factory.resolution_basis = _resolution_basis  # type: ignore[attr-defined]
     return _factory
