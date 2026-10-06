@@ -38,7 +38,7 @@ export function NotificationBell({ navigate }: { navigate: (path: string) => voi
   }, [open])
 
   const unread = items?.filter((n) => !n.acked).length ?? 0
-  const recent = items ? [...items].reverse().slice(0, MAX_SHADE) : []
+  const recent = items ? items.slice(0, MAX_SHADE) : []
 
   async function ack(n: NotificationItem) {
     await api.ackNotification(n.ts).catch((e) => notify(`Couldn't mark this notification read: ${String((e as Error)?.message || e)}`, 'error'))

@@ -9,7 +9,7 @@ import { bucketOf, kindsPresent } from './notificationMeta'
 
 const describeFailure = (error: unknown) => error instanceof Error ? error.message : String(error)
 export function projectNotifications(items: NotificationItem[] | undefined, filter: string, now: number) {
-  const filtered = items ? [...items].reverse().filter(item => filter === 'all' || (filter === 'unread' ? !item.acked : (item.kind || 'info') === filter)) : null
+  const filtered = items ? items.filter(item => filter === 'all' || (filter === 'unread' ? !item.acked : (item.kind || 'info') === filter)) : null
   const groups: Record<string, NotificationItem[]> = {}
   const counts = new Map<string, number>()
   let unread = 0

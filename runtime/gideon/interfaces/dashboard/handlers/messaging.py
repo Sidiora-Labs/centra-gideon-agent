@@ -316,15 +316,17 @@ async def api_spawn_cancel_fanout(request: web.Request) -> web.Response:
 
 
 async def api_notifications(request: web.Request) -> web.Response:
+    from gideon.workspace.notification_order import newest_first
+
     state: ConsoleState = request.app["state"]
     app = str(request.get("app", "") or "")
     if app:
-        notifications = state.notifications_for_app(app)
+        notifications = newest_first(state.notifications_for_app(app))
         return web.json_response(
             {"notifications": notifications, "unread": state.unread_notifications_for_app(app)}
         )
     return web.json_response(
-        {"notifications": state._notification_log, "unread": state.unread_count()}
+        {"notifications": newest_first(state._notification_log), "unread": state.unread_count()}
     )
 
 
