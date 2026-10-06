@@ -236,6 +236,7 @@ impl MemoryStore {
                 sources,
                 expected,
                 now_ms,
+                None,
             )
         })
     }
@@ -252,7 +253,7 @@ impl MemoryStore {
        tx.require_record_revision(&draft.id,&request.revision)?;
        let mutation=match request.revision {
         RevisionPrecondition::MustNotExist if request.operation==Operation::Create=>create_in_transaction(tx,request,auth,draft,sources,now_ms)?,
-        RevisionPrecondition::Match(expected) if request.operation==Operation::Update=>update_in_transaction(tx,request,auth,draft,sources,expected,now_ms)?,
+        RevisionPrecondition::Match(expected) if request.operation==Operation::Update=>update_in_transaction(tx,request,auth,draft,sources,expected,now_ms,Some(capture))?,
         _=>return Err(conflict("capture requires exact mutation precondition")),
        };
        crate::provenance::attach_capture(tx.raw(),draft,sources,capture,&request.actor_scope,now_ms)?;
@@ -284,9 +285,22 @@ impl MemoryStore {
       for raw in ids {
        let id=Id::new(raw).map_err(|_|corrupt("record id is invalid"))?;
        let record=load_record(tx.raw(),&id)?;
-       let (total,exclusive):(u64,u64)=tx.raw().query_row("SELECT COUNT(*),COALESCE(SUM(CASE WHEN c.owner_scope_digest=?3 AND c.history_scope_digest=?4 AND c.history_session_id=?5 THEN 1 ELSE 0 END),0) FROM memory_provenance p LEFT JOIN memory_capture_origins c ON c.source_id=p.source_id WHERE p.record_id=?1 AND p.revision=?2",params![id.as_str(),record.current.number,target,history,session_id.as_str()],|r|Ok((r.get(0)?,r.get(1)?))).map_err(sql_error)?;
-       let parents:Vec<(String,String)>= {let mut st=tx.raw().prepare("SELECT parent_record_id,relation FROM memory_lineage WHERE child_record_id=?1 AND child_revision=?2").map_err(sql_error)?;let out=st.query_map(params![id.as_str(),record.current.number],|r|Ok((r.get(0)?,r.get(1)?))).map_err(sql_error)?.collect::<Result<Vec<_>,_>>().map_err(sql_error)?;out};
+       let spans:Vec<String>={let mut st=tx.raw().prepare("SELECT source_id FROM memory_provenance WHERE record_id=?1 AND revision=?2").map_err(sql_error)?;let rows=st.query_map(params![id.as_str(),record.current.number],|r|r.get(0)).map_err(sql_error)?.collect::<Result<Vec<_>,_>>().map_err(sql_error)?;rows};
+       let total=spans.len() as u64;
+       let mut exclusive=0;
+       let mut damaged=false;
+       for source in spans {
+        let source=Id::new(source).map_err(|_|corrupt("source id is invalid"))?;
+        match crate::provenance::validated_capture(tx.raw(),&source) {
+         Ok(Some(c)) if c.owner_scope_digest==record.owner_scope_digest && c.history_scope_digest.to_string()==history && c.capture.history_session_id==*session_id=>exclusive+=1,
+         Ok(_)=>{},
+         Err(e) if e.code=="CAPTURE_PROOF_DAMAGED"=>damaged=true,
+         Err(e)=>return Err(e),
+        }
+       }
+       let parents:Vec<(String,String,String)>= {let mut st=tx.raw().prepare("SELECT parent_record_id,relation,parent_revision_digest FROM memory_lineage WHERE child_record_id=?1 AND child_revision=?2").map_err(sql_error)?;let out=st.query_map(params![id.as_str(),record.current.number],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(sql_error)?.collect::<Result<Vec<_>,_>>().map_err(sql_error)?;out};
        // An independently supported revision is preserved even when one origin disappears.
+       if damaged {retained_unproven+=1;records.push((record,total,exclusive,parents,false));continue;}
        if record.verification!=VerificationState::Unverified {retained_independent+=1;records.push((record,total,exclusive,parents,false));continue;}
        if total>0 && total==exclusive && parents.is_empty() {proven.insert(id.clone());}
        records.push((record,total,exclusive,parents,true));
@@ -295,7 +309,7 @@ impl MemoryStore {
        let before=proven.len();
        for (r,total,exclusive,parents,eligible) in &records {
         if !eligible || proven.contains(&r.id) || (*total>0 && total!=exclusive) || parents.is_empty() {continue;}
-        if parents.iter().all(|(p,rel)|matches!(rel.as_str(),"derived_from"|"merged_from"|"split_from") && proven.iter().any(|id|id.as_str()==p)) {proven.insert(r.id.clone());}
+        if parents.iter().all(|(p,rel,digest)|matches!(rel.as_str(),"derived_from"|"merged_from"|"split_from") && proven.iter().any(|id|id.as_str()==p) && records.iter().any(|(parent,_,_,_,_)|parent.id.as_str()==p && parent.current.digest.to_string()==*digest)) {proven.insert(r.id.clone());}
        }
        if before==proven.len(){break;}
       }
@@ -827,6 +841,9 @@ impl MemoryStore {
             let previous = transaction
                 .require_record_revision(record_id, &request.revision)?
                 .expect("match precondition returns digest");
+            if operation==Operation::Restore {
+                crate::provenance::require_live_revision(transaction.raw(),record_id,previous)?;
+            }
             let current_status: String = transaction
                 .raw()
                 .query_row(
@@ -1115,9 +1132,13 @@ fn update_in_transaction(
     sources: &[SourceSnapshot],
     expected: Digest,
     now_ms: u64,
+    replacement_capture: Option<&crate::provenance::OwnerWordCapture>,
 ) -> MemoryResult<RecordMutation> {
     validate_draft(draft)?;
     let existing = load_record(transaction.raw(), &draft.id)?;
+    if let Some(capture)=replacement_capture {capture.validate()?;} else {
+        crate::provenance::require_live_revision(transaction.raw(),&draft.id,existing.current.digest)?;
+    }
     if existing.kind == RecordKind::Anchor {
         return Err(domain_error(
             "IMMUTABLE_ANCHOR",
@@ -1225,8 +1246,12 @@ fn attach_sources_and_edges(
     now_ms: u64,
 ) -> MemoryResult<()> {
     for span in &draft.provenance {
-        let retired:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM memory_capture_origins c JOIN memory_chat_retractions t ON t.owner_scope_digest=c.owner_scope_digest AND t.history_scope_digest=c.history_scope_digest AND t.history_session_id=c.history_session_id WHERE c.source_id=?1)",[span.source_id.as_str()],|r|r.get(0)).map_err(sql_error)?;
-        if retired {return Err(domain_error("CHAT_SOURCE_RETRACTED","chat source has been retired"));}
+        crate::provenance::require_live_source(transaction,&span.source_id)?;
+    }
+    for edge in &draft.lineage {
+        if matches!(edge.relation,crate::LineageRelation::DerivedFrom|crate::LineageRelation::MergedFrom|crate::LineageRelation::SplitFrom|crate::LineageRelation::ImportedFrom) {
+            crate::provenance::require_live_revision(transaction,&edge.parent_id,edge.parent_revision_digest)?;
+        }
     }
     for source in sources {
         let canonical_id = put_source(transaction, source, now_ms)?;

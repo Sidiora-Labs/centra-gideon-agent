@@ -303,10 +303,113 @@ pub(crate) fn attach_capture(transaction: &Transaction<'_>, draft: &crate::Recor
   || draft.provenance.len()!=1 || draft.provenance[0].source_id!=sources[0].source_id {
    return Err(error("CAPTURE_SOURCE_MISMATCH","capture must reference its exact native message snapshot"));
  }
- let encoded=serde_json::to_string(capture).map_err(|_|error("CAPTURE_ENCODING_FAILED","capture evidence could not be encoded"))?;
- let digest=Digest::sha256(encoded.as_bytes()).to_string();
- let existing:Option<String>=transaction.query_row("SELECT capture_digest FROM memory_capture_origins WHERE source_id=?1",[sources[0].source_id.as_str()],|r|r.get(0)).optional().map_err(sql_error)?;
- if let Some(old)=existing { if old!=digest {return Err(error("CAPTURE_SOURCE_CONFLICT","source attribution is immutable"));} return Ok(()); }
- transaction.execute("INSERT INTO memory_capture_origins VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![sources[0].source_id.as_str(),target_digest,history_digest,capture.history_session_id.as_str(),capture.source_event_id.as_str(),capture.source_digest.to_string(),serde_json::to_string(&capture.original_actor).map_err(|_|error("CAPTURE_ENCODING_FAILED","actor could not be encoded"))?,serde_json::to_string(&capture.effective_actor).map_err(|_|error("CAPTURE_ENCODING_FAILED","actor could not be encoded"))?,capture.ingress_event_id,capture.ingress_own_digest.to_string(),capture.capture_kind,digest,now_ms]).map_err(sql_error)?;
+ let existing:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM memory_capture_origins WHERE source_id=?1)",[sources[0].source_id.as_str()],|r|r.get(0)).map_err(sql_error)?;
+ if existing {
+  let prior=validated_capture(transaction,&sources[0].source_id)?.ok_or_else(damaged_capture)?;
+  if prior.owner_scope_digest.to_string()!=target_digest || prior.history_scope_digest.to_string()!=history_digest || prior.capture!=*capture {
+   return Err(error("CAPTURE_SOURCE_CONFLICT","source attribution is immutable"));
+  }
+  return Ok(());
+ }
+ let digest=bound_capture_digest(capture,&target_digest,&history_digest,now_ms)?;
+ transaction.execute("INSERT INTO memory_capture_origins VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![sources[0].source_id.as_str(),target_digest,history_digest,capture.history_session_id.as_str(),capture.source_event_id.as_str(),capture.source_digest.to_string(),serde_json::to_string(&capture.original_actor).map_err(|_|damaged_capture())?,serde_json::to_string(&capture.effective_actor).map_err(|_|damaged_capture())?,capture.ingress_event_id,capture.ingress_own_digest.to_string(),capture.capture_kind,digest,now_ms]).map_err(sql_error)?;
+ Ok(())
+}
+
+
+#[derive(Clone,Debug)]
+pub(crate) struct ValidatedCapture {
+ pub capture:OwnerWordCapture,
+ pub owner_scope_digest:Digest,
+ pub history_scope_digest:Digest,
+ pub capture_digest:Digest,
+ pub retired:bool,
+}
+
+fn damaged_capture()->Error {
+ error("CAPTURE_PROOF_DAMAGED","persisted capture evidence is unavailable or inconsistent")
+}
+
+fn bound_capture_digest(capture:&OwnerWordCapture,owner:&str,history:&str,at:u64)->MemoryResult<String> {
+ let mut encoded=b"hypermid.memory.capture-origin.v2\0".to_vec();
+ encoded.extend(serde_json::to_vec(&(owner,history,at,capture)).map_err(|_|damaged_capture())?);
+ Ok(Digest::sha256(&encoded).to_string())
+}
+
+struct StoredCapture {
+ owner:String,history:String,session:String,event:String,digest:String,
+ original:String,effective:String,ingress:String,own_digest:String,kind:String,proof:String,at:u64,
+}
+
+pub(crate) fn validated_capture(tx:&Transaction<'_>,source_id:&Id)->MemoryResult<Option<ValidatedCapture>> {
+ let raw=tx.query_row("SELECT owner_scope_digest,history_scope_digest,history_session_id,source_event_id,source_digest,original_actor_json,effective_actor_json,ingress_event_id,ingress_own_digest,capture_kind,capture_digest,captured_at_ms FROM memory_capture_origins WHERE source_id=?1",[source_id.as_str()],|r|Ok(StoredCapture{owner:r.get(0)?,history:r.get(1)?,session:r.get(2)?,event:r.get(3)?,digest:r.get(4)?,original:r.get(5)?,effective:r.get(6)?,ingress:r.get(7)?,own_digest:r.get(8)?,kind:r.get(9)?,proof:r.get(10)?,at:r.get(11)?})).optional().map_err(sql_error)?;
+ let Some(raw)=raw else{return Ok(None)};
+ let snapshot:Option<(String,String,String,Option<String>,String)>=tx.query_row("SELECT owner_scope_digest,source_kind,source_digest,captured_content,capture_method FROM memory_sources WHERE source_id=?1",[source_id.as_str()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional().map_err(sql_error)?;
+ let (source_owner,source_kind,source_digest,content,method)=snapshot.ok_or_else(damaged_capture)?;
+ let content=content.ok_or_else(damaged_capture)?;
+ if source_owner!=raw.owner || source_kind!="message" || source_digest!=raw.digest || method!="accepted_owner_words"
+  || Digest::sha256(content.as_bytes()).to_string()!=raw.digest {return Err(damaged_capture());}
+ let row:serde_json::Value=serde_json::from_str(&content).map_err(|_|damaged_capture())?;
+ let own_text=row["content"].as_str().ok_or_else(damaged_capture)?.to_owned();
+ let capture=OwnerWordCapture{history_session_id:Id::new(raw.session.clone()).map_err(|_|damaged_capture())?,
+  source_event_id:Id::new(raw.event.clone()).map_err(|_|damaged_capture())?,source_digest:raw.digest.parse().map_err(|_|damaged_capture())?,
+  original_actor:serde_json::from_str(&raw.original).map_err(|_|damaged_capture())?,effective_actor:serde_json::from_str(&raw.effective).map_err(|_|damaged_capture())?,
+  ingress_event_id:raw.ingress.clone(),ingress_own_digest:raw.own_digest.parse().map_err(|_|damaged_capture())?,own_text,capture_kind:raw.kind.clone()};
+ capture.validate().map_err(|_|damaged_capture())?;
+ let ingress=&row["meta"]["ingress"];
+ let thread=ingress["source_thread"].as_str().ok_or_else(damaged_capture)?;
+ let mut candidates=vec![thread.to_owned()];
+ let mut residual=thread;
+ while let Some(rest)=residual.strip_prefix("dashboard_"){residual=rest;}
+ if !residual.is_empty() && residual!=thread {candidates.push(format!("dashboard_{residual}"));}
+ let canonical=candidates.into_iter().find(|key|format!("session:{}",Digest::sha256(key.as_bytes()))==capture.history_session_id.as_str()).ok_or_else(damaged_capture)?;
+ let native_event=if let Some(event)=row["source_event_id"].as_str().filter(|v|!v.is_empty()){event.to_owned()} else {
+  let mut identity=canonical.into_bytes();identity.push(0);identity.extend(content.as_bytes());
+  format!("legacy:{}",Digest::sha256(identity))
+ };
+ if row["role"]!="user" || native_event!=capture.source_event_id.as_str()
+  || ingress["source_event_id"].as_str()!=Some(&capture.ingress_event_id)
+  || ingress["source_digest"].as_str()!=Some(raw.own_digest.as_str())
+  || ingress["principal"]!=serde_json::to_value(&capture.original_actor).map_err(|_|damaged_capture())?
+  || ingress["origin_proof"].as_str().is_none_or(|p|p.is_empty()) {return Err(damaged_capture());}
+ let owner:Digest=raw.owner.parse().map_err(|_|damaged_capture())?;
+ let history:Digest=raw.history.parse().map_err(|_|damaged_capture())?;
+ for digest in [&raw.owner,&raw.history] {
+  let scope:Option<String>=tx.query_row("SELECT scope_json FROM memory_scopes WHERE scope_digest=?1",[digest],|r|r.get(0)).optional().map_err(sql_error)?;
+  let scope:crate::Scope=serde_json::from_str(&scope.ok_or_else(damaged_capture)?).map_err(|_|damaged_capture())?;
+  if crate::scope_digest(&scope).to_string()!=*digest {return Err(damaged_capture());}
+ }
+ let bound=bound_capture_digest(&capture,&raw.owner,&raw.history,raw.at)?;
+ if raw.proof!=bound {
+  let legacy=Digest::sha256(serde_json::to_vec(&capture).map_err(|_|damaged_capture())?).to_string();
+  if raw.proof!=legacy {return Err(damaged_capture());}
+  let original_binding:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM memory_provenance p JOIN memory_revisions v ON v.record_id=p.record_id AND v.revision=p.revision JOIN memory_records r ON r.record_id=p.record_id WHERE p.source_id=?1 AND v.author_scope_digest=?2 AND v.authored_at_ms=?3 AND r.owner_scope_digest=?4)",params![source_id.as_str(),raw.history,raw.at,raw.owner],|r|r.get(0)).map_err(sql_error)?;
+  if !original_binding {return Err(damaged_capture());}
+ }
+ let retired:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM memory_chat_retractions WHERE owner_scope_digest=?1 AND history_scope_digest=?2 AND history_session_id=?3)",params![raw.owner,raw.history,raw.session],|r|r.get(0)).map_err(sql_error)?;
+ Ok(Some(ValidatedCapture{capture,owner_scope_digest:owner,history_scope_digest:history,capture_digest:raw.proof.parse().map_err(|_|damaged_capture())?,retired}))
+}
+
+pub(crate) fn require_live_source(tx:&Transaction<'_>,source_id:&Id)->MemoryResult<()> {
+ if validated_capture(tx,source_id)?.is_some_and(|capture|capture.retired) {
+  return Err(error("CHAT_SOURCE_RETRACTED","chat source has been retired"));
+ }
+ Ok(())
+}
+
+pub(crate) fn require_live_revision(tx:&Transaction<'_>,record_id:&Id,digest:Digest)->MemoryResult<()> {
+ let mut pending=vec![(record_id.clone(),digest)];
+ let mut seen=std::collections::BTreeSet::new();
+ while let Some((id,digest))=pending.pop(){
+  if !seen.insert((id.to_string(),digest.to_string())){continue;}
+  let revision:Option<u64>=tx.query_row("SELECT revision FROM memory_revisions WHERE record_id=?1 AND revision_digest=?2",params![id.as_str(),digest.to_string()],|r|r.get(0)).optional().map_err(sql_error)?;
+  let revision=revision.ok_or_else(damaged_capture)?;
+  let mut st=tx.prepare("SELECT source_id FROM memory_provenance WHERE record_id=?1 AND revision=?2").map_err(sql_error)?;
+  let sources=st.query_map(params![id.as_str(),revision],|r|r.get::<_,String>(0)).map_err(sql_error)?.collect::<Result<Vec<_>,_>>().map_err(sql_error)?;
+  for source in sources {require_live_source(tx,&Id::new(source).map_err(|_|damaged_capture())?)?;}
+  let mut st=tx.prepare("SELECT parent_record_id,parent_revision_digest FROM memory_lineage WHERE child_record_id=?1 AND child_revision=?2 AND relation IN ('derived_from','merged_from','split_from','imported_from')").map_err(sql_error)?;
+  let parents=st.query_map(params![id.as_str(),revision],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).map_err(sql_error)?.collect::<Result<Vec<_>,_>>().map_err(sql_error)?;
+  for (id,digest) in parents {pending.push((Id::new(id).map_err(|_|damaged_capture())?,digest.parse().map_err(|_|damaged_capture())?));}
+ }
  Ok(())
 }

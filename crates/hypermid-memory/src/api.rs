@@ -208,11 +208,16 @@ impl MemoryApi {
      self.store.immediate_access(context,request,|tx,_auth| {
       tx.authorize_access(context,request)?;
       tx.require_record_revision(&record.id,&crate::RevisionPrecondition::Match(record.current.digest))?;
-      let mut st=tx.raw().prepare("SELECT c.source_id,c.history_scope_digest,c.history_session_id,c.source_event_id,c.source_digest,c.original_actor_json,c.effective_actor_json,c.capture_kind,c.capture_digest FROM memory_capture_origins c JOIN memory_provenance p ON p.source_id=c.source_id WHERE p.record_id=?1 AND p.revision=?2 AND c.owner_scope_digest=?3 ORDER BY c.source_id").map_err(crate::provenance::sql_error)?;
-      let rows=st.query_map(rusqlite::params![record.id.as_str(),record.current.number,record.owner_scope_digest.to_string()],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,String>(6)?,r.get::<_,String>(7)?,r.get::<_,String>(8)?))).map_err(crate::provenance::sql_error)?.collect::<Result<Vec<_>,_>>().map_err(crate::provenance::sql_error)?;
-      let origins=rows.into_iter().map(|(source,history_scope,session,event,digest,original,effective,kind,proof)|{
-        Ok(serde_json::json!({"source_id":source,"history_scope_digest":history_scope,"history_session_id":session,"source_event_id":event,"source_digest":digest,"original_actor":serde_json::from_str::<serde_json::Value>(&original).map_err(|_|denied("capture origin is damaged"))?,"effective_actor":serde_json::from_str::<serde_json::Value>(&effective).map_err(|_|denied("capture origin is damaged"))?,"capture_kind":kind,"capture_digest":proof}))
-      }).collect::<MemoryResult<Vec<_>>>()?;
+      let mut st=tx.raw().prepare("SELECT DISTINCT source_id FROM memory_provenance WHERE record_id=?1 AND revision=?2 ORDER BY source_id").map_err(crate::provenance::sql_error)?;
+      let sources=st.query_map(rusqlite::params![record.id.as_str(),record.current.number],|r|r.get::<_,String>(0)).map_err(crate::provenance::sql_error)?.collect::<Result<Vec<_>,_>>().map_err(crate::provenance::sql_error)?;
+      let mut origins=Vec::new();
+      for source in sources {
+        let id=Id::new(source).map_err(|_|denied("capture source id is invalid"))?;
+        if let Some(c)=crate::provenance::validated_capture(tx.raw(),&id)? {
+          if c.owner_scope_digest!=record.owner_scope_digest {return Err(denied("capture source scope is inconsistent"));}
+          origins.push(serde_json::json!({"source_id":id,"history_scope_digest":c.history_scope_digest,"history_session_id":c.capture.history_session_id,"source_event_id":c.capture.source_event_id,"source_digest":c.capture.source_digest,"original_actor":c.capture.original_actor,"effective_actor":c.capture.effective_actor,"capture_kind":c.capture.capture_kind,"capture_digest":c.capture_digest,"retired":c.retired}));
+        }
+      }
       tx.authorize_access(context,request)?;
       Ok(serde_json::json!({"origins":origins,"cursor":view.cursor,"record_id":record.id,"revision_digest":record.current.digest,"owner_scope_digest":record.owner_scope_digest}))
      })
