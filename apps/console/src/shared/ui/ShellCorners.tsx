@@ -7,6 +7,7 @@ import { SystemWidget } from './SystemWidget'
 import { DegradedChip } from './DegradedChip'
 import { useIsMobile } from '../../app/shell/useIsMobile'
 import { accentChip } from '../theme/accent'
+import { WidgetBoundary } from '../../app/shell/ErrorBoundary'
 
 
 export function ShellCornerLeft({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
@@ -46,17 +47,17 @@ export function ShellCornerRight({ terminalOpen, onToggleTerminal, navigate }: {
         {!isMobile && (
           <>
             <span className="h-4 w-px bg-outline-variant/40" aria-hidden />
-            <WidthPill />
+            <WidgetBoundary what="the content width control" compact><WidthPill /></WidgetBoundary>
           </>
         )}
-        <NotificationBell navigate={navigate} />
-        <ThemeControl />
+        <WidgetBoundary what="notifications" compact><NotificationBell navigate={navigate} /></WidgetBoundary>
+        <WidgetBoundary what="the theme control" compact><ThemeControl /></WidgetBoundary>
         {
 }
-        <DegradedChip />
+        <WidgetBoundary what="the model status" compact><DegradedChip /></WidgetBoundary>
         { }
         <span className="h-4 w-px bg-outline-variant/40" aria-hidden />
-        <SystemWidget />
+        <WidgetBoundary what="the system status" compact><SystemWidget /></WidgetBoundary>
       </div>
     </div>
   )

@@ -98,7 +98,24 @@ def _load_ext_module(ext: "RegisteredProvider", module_path: str) -> Any:
         sys.path.insert(0, str(ext_dir))
         added = True
     try:
-        return importlib.import_module(module_path)
+        if ext_dir is None:
+            return importlib.import_module(module_path)
+        from gideon.extensions.apps.code_provenance import loading
+
+        root = ext_dir.resolve(strict=True)
+        candidate = ext_dir / module_path.replace(".", "/")
+        for location in (candidate.with_suffix(".py"), candidate, candidate / "__init__.py"):
+            if location.exists() and root not in location.resolve(strict=True).parents:
+                raise ImportError("App package resolves outside its code directory")
+        with loading(ext.name, ext_dir):
+            module = importlib.import_module(module_path)
+            origin = getattr(module, "__file__", None)
+            if origin is not None:
+                resolved = Path(origin).resolve(strict=True)
+                local = candidate.with_suffix(".py").exists() or candidate.is_dir()
+                if local and root not in resolved.parents:
+                    raise ImportError("App package resolves outside its code directory")
+            return module
     finally:
         if added and ext_dir and str(ext_dir) in sys.path:
             sys.path.remove(str(ext_dir))

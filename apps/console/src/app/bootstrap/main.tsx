@@ -6,6 +6,7 @@ import { App } from '../shell/App'
 import { installAppSdk } from '../shell/appSdk'
 import { registerServiceWorker } from '../shell/registerServiceWorker'
 import { ConsoleProviders } from './ConsoleProviders'
+import { ErrorBoundary } from '../shell/ErrorBoundary'
 
 const roots = new WeakMap<HTMLElement, Root>()
 
@@ -17,7 +18,7 @@ export function mountConsole(container: HTMLElement): () => void {
     roots.set(container, root)
     void registerServiceWorker()
   }
-  root.render(<ConsoleProviders><App /></ConsoleProviders>)
+  root.render(<ConsoleProviders><ErrorBoundary><App /></ErrorBoundary></ConsoleProviders>)
   return () => {
     if (roots.get(container) !== root) return
     root.unmount()

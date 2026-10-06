@@ -56,7 +56,7 @@ class ReferenceEchoTransport(ChannelTransportProvider):
         flags: dict = dict(
             inbound=True, threads=True, rich_text=True, max_text_len=4000
         )
-        return ChannelCapabilities(**flags)
+        return ChannelCapabilities(groups=True, **flags)
 
     async def connect(self) -> bool:
         self._runtime.online = True

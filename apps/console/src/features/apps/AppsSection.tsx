@@ -4,7 +4,7 @@ import { accentChip } from '../../shared/theme/accent'
 import { motion } from 'framer-motion'
 import {
   Blocks, Plus, Download, Power, Trash2, Settings2, FolderOpen,
-  ShieldAlert, ShieldCheck, Server, LayoutGrid, RefreshCw, Plug, ChevronDown,
+  ShieldAlert, ShieldCheck, LayoutGrid, RefreshCw, Plug, ChevronDown,
   MoreVertical, Database, Sparkles, Archive, HardDrive, MapPin, AlertTriangle,
 } from 'lucide-react'
 import { launchChat, notify } from '../../app/shell/appSdk'
@@ -41,6 +41,7 @@ import { catalogApps } from '../../shared/data/appCatalog'
 import { provenance } from '../../shared/data/provenance'
 import { RegistryProvenanceLine } from './RegistryProvenanceLine'
 import { AppIcon } from './appIcon'
+import { AppProcesses } from './appProcesses'
 import { QualityBadges } from './qualityBadges'
 import { StoreSideRail, type RailOption } from './StoreSideRail'
 import { artGradient } from './appArt'
@@ -1265,14 +1266,7 @@ export function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSu
           </div>
         )}
 
-        {app.hasBackend && (
-          <div className="rounded-md border border-outline-variant bg-surface-high p-m" data-type="body-s">
-            <div className="flex items-center gap-2 text-on-surface"><Server size={14} /> Backend</div>
-            <div className="mt-1 text-on-surface-low">
-              {app.backendRunning ? `running on port ${app.backendPort}` : 'not running'}
-            </div>
-          </div>
-        )}
+        <AppProcesses app={app} />
 
         {app.hasUI && app.enabled && (
           <label className="flex items-center justify-between gap-3 rounded-md border border-outline-variant bg-surface-high p-m">

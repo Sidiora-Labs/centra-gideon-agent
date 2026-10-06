@@ -86,6 +86,8 @@ AUDIO_UPLOAD_CAP_BYTES = 8 * 1024 * 1024
 _SILENT_ROLES = frozenset({"user", "done"})
 
 TURN_RUNNER_KEY = "inbound_openai_turn_runner"
+PERSIST_TURN_KEY = "inbound_openai_persist_turn"
+RESTORE_SESSION_KEY = "inbound_openai_restore_session"
 
 
 def openai_error(
@@ -336,7 +338,7 @@ class _quiet:
         return True
 
 
-def session_key_for(client_id: str, tag: str) -> str:
+def session_key_for(client_id: str, tag: str, *, conversation_round: int = 0) -> str:
     """``inbound:<client_id>:<sha8(tag)>`` — §2.1's key, hashed for a reason.
 
     ``tag`` is caller-supplied (`user`, or the `X-Gideon-Session` header), so it
@@ -347,6 +349,8 @@ def session_key_for(client_id: str, tag: str) -> str:
     """
     tag = (tag or DEFAULT_SESSION_TAG).strip() or DEFAULT_SESSION_TAG
     digest = hashlib.sha256(tag.encode("utf-8")).hexdigest()[:8]
+    if conversation_round > 0:
+        digest = f"{digest}.{conversation_round}"
     return f"{SESSION_PREFIX}{client_id}:{digest}"
 
 
@@ -547,7 +551,7 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
         )
 
     tag, persistent = session_tag_from(body, request, client)
-    key = session_key_for(client_id, tag)
+    key = session_key_for(client_id, tag, conversation_round=getattr(client, "conversation_round", 0))
     stream = body.get("stream") is True
 
     state = request.app.get("state")
@@ -556,7 +560,10 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
             "Gateway state unavailable.", code="service_unavailable", status=503
         )
 
-    session = state.get_or_create_session(key, agent=agent)
+    restore_session = request.app.get(RESTORE_SESSION_KEY)
+    session = restore_session(state, key) if persistent and restore_session is not None else None
+    if session is None:
+        session = state.get_or_create_session(key, agent=agent)
     if getattr(session, "agent", "") != agent:
         session.agent = agent
     if not persistent:
@@ -577,7 +584,21 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
             status=503,
         )
 
-    session.append("user", prompt, "msg msg-u")
+    from gideon.engine.turn_source import arrived_on
+
+    from gideon.security.approval_answer import bridge, ingress_record, principal_record
+    principal = bridge(client_id)
+    accepted = ingress_record(principal, key, prompt)
+    stamped = getattr(session, "_initiator", None)
+    if stamped is not None and stamped != principal_record(principal):
+        _finish(session, key)
+        return openai_error("This conversation belongs to another principal.", code="scope_violation", status=403)
+    if stamped is None:
+        session._initiator = accepted["principal"]
+    session.append("user", prompt, "msg msg-u", source=arrived_on(key, client_id), meta={"ingress": accepted})
+    persist_turn = request.app.get(PERSIST_TURN_KEY)
+    if persist_turn is not None:
+        persist_turn(state, session, force=True)
     task = asyncio.create_task(runner(state, session, prompt))
     session.task = task
     with _quiet():
@@ -1165,7 +1186,7 @@ async def _read_json(request: web.Request) -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-def register_routes(app: web.Application, *, turn_runner: Any) -> None:
+def register_routes(app: web.Application, *, turn_runner: Any, persist_turn: Any = None, restore_session: Any = None) -> None:
     """Mount `/v1/*`. ``turn_runner`` is INJECTED, never imported.
 
     Registered UNCONDITIONALLY and refusing per request, like the capture proxy and
@@ -1190,6 +1211,10 @@ def register_routes(app: web.Application, *, turn_runner: Any) -> None:
     optional injection point is one that silently stops being used.
     """
     app[TURN_RUNNER_KEY] = turn_runner
+    if persist_turn is not None:
+        app[PERSIST_TURN_KEY] = persist_turn
+    if restore_session is not None:
+        app[RESTORE_SESSION_KEY] = restore_session
     app.router.add_post(ROUTE_CHAT, handle_chat_completions)
     app.router.add_get(ROUTE_MODELS, handle_models)
     app.router.add_post(ROUTE_SPEECH, handle_speech)

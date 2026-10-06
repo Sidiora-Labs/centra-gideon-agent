@@ -89,16 +89,26 @@ class NudgeTurn:
             )
         return started
 
+    def still_armed(self) -> bool:
+        from gideon.security.guardrails.incident import incident_active
+        key = str(getattr(self.session, "key", "") or "")
+        if incident_active() or not key or self.state._sessions.get(key) is not self.session:
+            return False
+        service = self.driver.runtime.autonudge_svc
+        row = service.get_by_session(key) if service is not None else None
+        return bool(row is not None and row.active)
+
     def rearm(self) -> None:
         self.session._suppress_autonudge_rearm = False
         try:
             from gideon.automation.triggers.nudge import get_instance
 
+            from gideon.security.guardrails.incident import incident_active
             service = get_instance()
             if service is not None:
                 service.notify_turn_complete(
                     self.session.key,
-                    errored=getattr(self.session, "_last_turn_errored", False),
+                    errored=getattr(self.session, "_last_turn_errored", False) and not incident_active(),
                 )
         except Exception:
             self.driver.logger.debug(
@@ -106,6 +116,8 @@ class NudgeTurn:
             )
 
     async def run(self) -> None:
+        if not self.still_armed():
+            return
         if not self.loop_worker:
             await self.run_once(self.message)
             return
@@ -114,6 +126,8 @@ class NudgeTurn:
         try:
             await self.run_once(self.message)
             for attempt in range(self.driver.limits.retries):
+                if not self.still_armed():
+                    break
                 if self.finding_count() > before or getattr(
                     self.session, "_last_turn_errored", False
                 ):
@@ -130,7 +144,10 @@ class NudgeTurn:
                     if await self.fresh_context()
                     else reminder
                 )
+                if not self.still_armed():
+                    break
                 self.session.append("nudge", retry, "msg msg-nudge")
+                self.session.task = asyncio.current_task()
                 await self.run_once(retry)
         finally:
             self.rearm()
@@ -183,6 +200,9 @@ class NudgeDispatch:
         return report
 
     async def fire(self, loop: Any) -> bool:
+        from gideon.security.guardrails.incident import incident_active
+        if incident_active():
+            return False
         runtime, state = self.runtime, self.runtime.dashboard_state
         if state is None:
             self.logger.warning(

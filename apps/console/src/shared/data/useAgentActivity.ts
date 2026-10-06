@@ -48,7 +48,7 @@ const SALIENCE: Record<AgentActivityState, number> = {
 
 const LOOP_STATE: Record<string, AgentActivityState> = {
   intake: 'working', planning: 'working', review: 'working', running: 'working',
-  needs_input: 'needs_input', blocked: 'needs_input', stagnant: 'needs_input',
+  held: 'needs_input', needs_input: 'needs_input', blocked: 'needs_input', stagnant: 'needs_input',
   failed: 'error', ended_early: 'error',
   ready: 'idle', paused: 'idle', stopped: 'idle', complete: 'idle',
 }
@@ -65,7 +65,7 @@ export function approvalSessions(approvals: PendingApproval[]): Set<string> {
 export function foldLoops(loops: Loop[], blocked: Set<string>): AgentActivityEntity[] {
   return loops.map((l) => {
     const awaiting = !!l.session_key && blocked.has(l.session_key)
-    const status = effectiveLoopStatus(l.status, l.stop_reason)
+    const status = effectiveLoopStatus(l.status, l.stop_reason, l.held)
     const state: AgentActivityState = awaiting
       ? 'waiting_approval'
       : l.error_message

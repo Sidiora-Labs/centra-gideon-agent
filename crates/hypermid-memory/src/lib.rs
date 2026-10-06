@@ -1,4 +1,6 @@
 pub mod api;
+pub mod app_scopes;
+pub use app_scopes::AppScopeReceipt;
 pub mod auth;
 pub mod budget;
 pub mod bus;
@@ -19,6 +21,8 @@ pub mod maintenance;
 pub mod migrations;
 pub mod model;
 pub mod protocol;
+pub mod private_scopes;
+pub use private_scopes::PrivateScopeReceipt;
 pub mod provenance;
 pub mod rank;
 pub mod records;

@@ -29,6 +29,8 @@ from gideon.extensions.providers.use_cases import (
     USE_CASES,
     VALID_USE_CASES,
     load_active_models,
+    parent_capability,
+    split_ref,
     save_active_models,
 )
 
@@ -36,6 +38,113 @@ logger = logging.getLogger(__name__)
 
 _CATALOG_BUILD_CONCURRENCY = 4
 _CATALOG_BUILD_TIMEOUT_SECS = 30.0
+
+
+_BIND_CHECK_TIMEOUT_SECS = 8.0
+_JOB_WORDS = {
+    "chat": "chat",
+    "image_modality": "reading images",
+    "audio_modality": "understanding audio",
+    "video_modality": "understanding video",
+    "embedding": "embedding",
+    "stt": "speech-to-text",
+    "tts": "text-to-speech",
+    "diarization": "telling speakers apart",
+    "image_gen": "making images",
+    "audio_gen": "making audio",
+    "video_gen": "making video",
+}
+
+async def _listed_jobs(refs: list[str]) -> dict[tuple[str, str], list[str]]:
+    """What each ``provider:model`` ref's own provider lists the model for, where it says so.
+
+    A ref is in the answer, keyed ``(provider, model)``, only when its provider is a configured
+    instance whose catalog lists the model. One whose provider could not be asked (no catalog,
+    its last connection check failed, the listing failed or outran
+    :data:`_BIND_CHECK_TIMEOUT_SECS`), or that does not list the model, says nothing and is left
+    out: a server slow to list what it serves, or a model pulled a moment ago, is no reason to
+    refuse it. Each provider is listed once, all of them at the same time.
+    """
+    from gideon.integrations.llm.registry import canonical_provider_type
+    from gideon.extensions.providers.connection import (
+        FAILED,
+        get_connection_board,
+        settings_fingerprint,
+    )
+
+    wanted: dict[str, set[str]] = {}
+    for ref in refs:
+        parsed = split_ref(str(ref))
+        if parsed:
+            wanted.setdefault(parsed[0], set()).add(parsed[1])
+    if not wanted:
+        return {}
+    board = get_connection_board()
+    catalogs: dict[str, Any] = {}
+    for p in _get_providers_from_config():
+        name = str(p.get("name", ""))
+        if name not in wanted or name in catalogs:
+            continue
+        fingerprint = settings_fingerprint(
+            canonical_provider_type(p.get("type", "")), p.get("options")
+        )
+        last = board.peek(name, fingerprint)
+        if last is not None and last.state == FAILED:
+            continue  # its listing would fail too, and re-send a key its vendor refused
+        catalog = _catalog_for_config_provider(p)
+        if catalog is not None:
+            catalogs[name] = catalog
+
+    from gideon.integrations.local_models.registry import get_provider, catalog_for
+    for name in wanted:
+        if name not in catalogs:
+            local = get_provider(name)
+            if local is not None:
+                class LocalCatalog:
+                    async def list_models(self, provider=local):
+                        rows = await catalog_for(provider)
+                        from gideon.integrations.llm.catalog import ModelInfo
+                        return [ModelInfo(id=row.name, name=row.name, capabilities=row.capabilities) for row in rows]
+                catalogs[name] = LocalCatalog()
+
+    async def _rows(catalog: Any) -> list[Any]:
+        from gideon.integrations.llm.catalog import capture_discovery_failures
+        with capture_discovery_failures() as failures:
+            rows = list(await asyncio.wait_for(catalog.list_models(), _BIND_CHECK_TIMEOUT_SECS))
+        if failures and not rows:
+            raise failures[-1]
+        return rows
+
+    names = list(catalogs)
+    listings = await asyncio.gather(*(_rows(catalogs[n]) for n in names), return_exceptions=True)
+    out: dict[tuple[str, str], list[str]] = {}
+    for name, rows in zip(names, listings):
+        if isinstance(rows, BaseException):
+            from gideon.extensions.providers.connection import recheck
+            recheck(name)
+            logger.debug("models of %s could not be listed to check a binding", name, exc_info=rows)
+            continue
+        for row in rows:
+            if row.id in wanted[name]:
+                jobs = out.setdefault((name, row.id), [])
+                jobs.extend(c for c in row.capabilities or [] if c not in jobs)
+    return out
+
+def _cannot_serve(use_case: str, provider: str, model: str, jobs: list[str]) -> str:
+    """Why the model its provider lists for ``jobs`` cannot be bound to ``use_case``, or ``""``."""
+    need = parent_capability(use_case)
+    if need in jobs:
+        return ""
+    wanted = _JOB_WORDS.get(need, need)
+    named = [_JOB_WORDS[j] for j in jobs if j in _JOB_WORDS]
+    choose = "Choose one of the models Settings → Models offers for it."
+    if not named:
+        return (
+            f"{provider} lists “{model}” for nothing Gideon can use it for, so it can't be "
+            f"used for {wanted}. {choose}"
+        )
+    listed = named[0] if len(named) == 1 else f"{', '.join(named[:-1])} and {named[-1]}"
+    return f"{provider} lists “{model}” for {listed}, not for {wanted}. {choose}"
 
 
 def _sel_log(
@@ -358,7 +467,7 @@ def _step_down_name(
         return None
     from gideon.integrations.local_models import fit as _fit
 
-    siblings = [r for r in rows if _fit.family_key(str(r.get("name", ""))) == family]
+    siblings = [r for r in rows if r.get("runs_here") is not False and _fit.family_key(str(r.get("name", ""))) == family]
     target = _fit.largest_that_fits(
         [float(r.get("size_mb") or 0) for r in siblings], budget_bytes
     )
@@ -371,7 +480,13 @@ def _step_down_name(
 
 
 async def _bounded_catalog_build(build) -> Any:
-    return await asyncio.wait_for(build(), timeout=_CATALOG_BUILD_TIMEOUT_SECS)
+    from gideon.integrations.llm.catalog import capture_discovery_failures
+    with capture_discovery_failures() as failures:
+        rows = await asyncio.wait_for(build(), timeout=_CATALOG_BUILD_TIMEOUT_SECS)
+    rejected = next((error for error in failures if error.rejected_credential), None)
+    if rejected or (failures and not rows):
+        raise rejected or failures[-1]
+    return rows
 
 
 async def api_models_available(request: web.Request) -> web.Response:
@@ -415,6 +530,8 @@ async def api_models_available(request: web.Request) -> web.Response:
         )
         for (pname, ptype, _), models_or_exc in zip(tasks, results):
             if isinstance(models_or_exc, BaseException):
+                from gideon.extensions.providers.connection import recheck
+                recheck(pname)
                 result.append(
                     {
                         "name": pname,
@@ -459,11 +576,18 @@ async def api_models_available(request: web.Request) -> web.Response:
             rows = [lm.to_dict() for lm in models_or_exc]
         sizes_by_family: dict[str, list[float]] = {}
         for d in rows:
+            if d.get("runs_here") is False:
+                continue
             sizes_by_family.setdefault(
                 _fit.family_key(str(d.get("name", ""))), []
             ).append(float(d.get("size_mb") or 0))
         models = []
         for d in rows:
+            if d.get("runs_here") is False:
+                d["provider"] = pkey
+                d["provider_type"] = pkey
+                models.append(d)
+                continue
             family = _fit.family_key(str(d.get("name", "")))
             quoted = _fit.median_variant_size_mb(sizes_by_family.get(family, []))
             own_size_mb = float(d.get("size_mb") or 0)
@@ -508,6 +632,9 @@ async def api_models_available(request: web.Request) -> web.Response:
             by_provider_v.setdefault(m["provider"], []).append(m)
         for pname, models in by_provider_v.items():
             result.append({"name": pname, "type": "video_gen", "models": models})
+
+    from gideon.extensions.providers.model_test import mark_untestable
+    mark_untestable(result)
 
     return web.json_response(
         {
@@ -747,6 +874,18 @@ async def api_models_active_set(request: web.Request) -> web.Response:
     except Exception:
         logger.debug("active-model provider validation skipped", exc_info=True)
 
+    existing = set(load_active_models().get(use_case, []))
+    added = [str(ref) for ref in models if ref not in existing]
+    listed = await _listed_jobs(added)
+    for ref in added:
+        provider, model = split_ref(ref) or ("", ref)
+        jobs = listed.get((provider, model))
+        refusal = _cannot_serve(use_case, provider, model, jobs) if jobs is not None else ""
+        if refusal:
+            from gideon.http_errors import json_error
+            _sel_log("models.active_set", "error", f"{use_case}:{ref}", request, error=refusal)
+            return json_error("model_cannot_serve_use_case", message=refusal, status=400)
+
     from gideon.core.config.transactions import _ConfigLock
     from gideon.extensions.providers.use_cases import active_models_path
 
@@ -826,6 +965,8 @@ async def api_models_chat(request: web.Request) -> web.Response:
     """
     active = load_active_models()
     chat_active = active.get("chat", [])
+    jobs_of = await _listed_jobs(chat_active)
+    chat_active = [ref for ref in chat_active if "chat" in jobs_of.get(split_ref(ref) or ("", ref), ["chat"])]
 
     if chat_active:
         result = []
@@ -883,6 +1024,9 @@ async def api_models_chat(request: web.Request) -> web.Response:
         )
         for (pname, pinned, _), models_or_exc in zip(tasks, results):
             if isinstance(models_or_exc, BaseException) or not models_or_exc:
+                if isinstance(models_or_exc, BaseException):
+                    from gideon.extensions.providers.connection import recheck
+                    recheck(pname)
                 if pinned:
                     _add(pname, pinned)
                 continue
@@ -933,12 +1077,70 @@ async def api_onboarding_model_check(request: web.Request) -> web.Response:
                 logger.debug("Onboarding model check teardown failed", exc_info=True)
 
 
+async def api_model_test(request: web.Request) -> web.Response:
+    from gideon.security.approval_answer import OWNER, of_request
+    if of_request(request).kind != OWNER:
+        raise web.HTTPForbidden(text="Only the owner can ask for a model Test.")
+    from gideon.extensions.providers.model_test import ModelUntestable, ModelTestRunning, run_model_test
+    try:
+        body = await read_json_body(request)
+    except Exception:
+        return web.json_response({"error": {"code": "invalid_request", "message": "Send a JSON object naming use_case and provider:model."}}, status=400)
+    if not isinstance(body, dict) or not isinstance(body.get("use_case"), str) or body["use_case"] not in VALID_USE_CASES:
+        return web.json_response({"error": {"code": "invalid_request", "message": "Name a supported model use case."}}, status=400)
+    ref = body.get("model")
+    parsed = split_ref(ref) if isinstance(ref, str) else None
+    if parsed is None or not parsed[0].strip() or not parsed[1].strip():
+        return web.json_response({"error": {"code": "invalid_request", "message": "Name the model as provider:model."}}, status=400)
+    try:
+        result = await run_model_test(body["use_case"], *parsed)
+    except ModelUntestable as error:
+        return web.json_response({"error": {"code": "model_untestable", "message": str(error)}}, status=409)
+    except ModelTestRunning:
+        return web.json_response({"error": {"code": "model_test_running", "message": "A Test of this provider is already running. Try again when it finishes."}}, status=409)
+    return web.json_response({"use_case": body["use_case"], "model": ref, **result.to_dict()})
+
+
+async def api_local_inference_waits(request: web.Request) -> web.Response:
+    from gideon.security.approval_answer import OWNER, of_request
+    if of_request(request).kind != OWNER:
+        raise web.HTTPForbidden(text="Only the owner can inspect local inference waits.")
+    from gideon.security.guardrails.local_inference import waits
+    return web.json_response({"waits": waits()})
+
+
+async def api_local_inference_move_on(request: web.Request) -> web.Response:
+    from gideon.security.approval_answer import OWNER, of_request
+    if of_request(request).kind != OWNER:
+        raise web.HTTPForbidden(text="Only the owner can move on from a queued request.")
+    from gideon.security.guardrails.local_inference import move_on
+    if not move_on(request.match_info["wait_id"]):
+        raise web.HTTPConflict(text="This request is no longer waiting, or has no next model.")
+    return web.json_response({"moved": True})
+
+
 def register_model_registry_routes(app: web.Application) -> None:
     """Register model registry routes.
 
     Local-model download/delete/search is served generically by the local-model
     routes (``/api/models/downloads`` + ``/api/models/local/{provider}/…``); no
     per-kind catalog/delete routes live here anymore."""
+    from gideon.interfaces.dashboard.handlers.local_model import register_local_model_routes
+    register_local_model_routes(app)
+    from gideon.security.guardrails.local_inference import subscribe, unsubscribe
+    def changed():
+        state = app.get("state")
+        if state is not None:
+            state.broadcast_ws("local_inference_waits", {}, owner_only=True)
+    async def start_wait_events(_app):
+        subscribe(changed)
+    async def stop_wait_events(_app):
+        unsubscribe(changed)
+    app.on_startup.append(start_wait_events)
+    app.on_cleanup.append(stop_wait_events)
+    app.router.add_post("/api/models/test", api_model_test)
+    app.router.add_get("/api/models/local/waits", api_local_inference_waits)
+    app.router.add_post("/api/models/local/waits/{wait_id}/move-on", api_local_inference_move_on)
     app.router.add_get("/api/onboarding/model-check", api_onboarding_model_check)
     app.router.add_get("/api/models/available", api_models_available)
     app.router.add_get("/api/models/local/availability", api_local_models_availability)

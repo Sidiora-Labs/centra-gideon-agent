@@ -2,6 +2,8 @@
 
 const os = require("node:os");
 const path = require("node:path");
+const { exitDetail } = require("../gateway/lost");
+const { movedUrl } = require("../gateway/local-session");
 const { LocalGateway } = require("./local-gateway");
 const { EndpointSession, waitRemote } = require("./endpoint-session");
 const { isHostedWindowsMode } = require("../connection/hosted-config");
@@ -28,10 +30,12 @@ class DesktopApplication {
     this.hostedMode = isHostedWindowsMode({ platform: process.platform, isPackaged: electron.app.isPackaged });
     this.state = { window: null, quitting: false, shutdown: null, complete: false, presenceTimer: null };
     const home = process.env.GIDEON_HOME || path.join(os.homedir(), ".gideon");
-    this.gateway = new LocalGateway({ app: electron.app, home, status: (message) => this.send("status", message) });
+    this.gateway = new LocalGateway({ app: electron.app, home, session: electron.session, onReady: (ready) => this.gatewayReady(ready), onLost: (loss) => this.gatewayLost(loss), status: (message) => this.send("status", message) });
     this.workspace = new WindowWorkspace(electron, {
       main: () => this.state.window, target: () => this.endpoints.target(), local: () => this.gateway.url,
       hostedMode: () => this.hostedMode,
+      browserSession: (address) => address === this.gateway.url ? this.gateway.browserSession : electron.session.defaultSession,
+      localBrowserSession: () => this.gateway.browserSession,
       waitLocal: (window) => this.gateway.waitReady(window), waitRemote,
       failedLoad: (window) => this.endpoints.scheduleReachability(window), openConnect: () => this.endpoints.openDialog(),
     });
@@ -143,6 +147,45 @@ class DesktopApplication {
     await this.endpoints.chooseStartup();
   }
 
+  async gatewayLost(loss) {
+    if (this.state.quitting || this.state.recovering) return;
+    this.state.recovering = true;
+    try {
+      const options = { type: "error", title: "Gideon", message: "The local gateway stopped.",
+        detail: exitDetail(loss) + (loss.retirement.stopped ? "" : "\nSome child processes could not be confirmed stopped. Quit and inspect the gateway before restarting."),
+        buttons: loss.retirement.stopped ? ["Start Again", "Quit"] : ["Quit"], defaultId: 0, cancelId: loss.retirement.stopped ? 1 : 0 };
+      const window = this.state.window;
+      const result = window && !window.isDestroyed()
+        ? await this.electron.dialog.showMessageBox(window, options)
+        : await this.electron.dialog.showMessageBox(options);
+      if (this.state.quitting) return;
+      if (result.response !== 0 || !loss.retirement.stopped) { this.requestQuit(); return; }
+      try {
+        await this.gateway.start();
+        if (!this.state.quitting) await this.endpoints.chooseStartup();
+      } catch (error) {
+        console.error("Gateway recovery failed:", error.message);
+        await this.electron.dialog.showMessageBox({ type: "error", title: "Gideon", message: "The local gateway could not start again.",
+          detail: "Quit Gideon and reopen it.", buttons: ["Quit"] });
+        this.requestQuit();
+      }
+    } finally { this.state.recovering = false; }
+  }
+
+  async gatewayReady({ previousOrigin, origin }) {
+    if (this.state.quitting) return;
+    if (this.endpoints.state.activeUrl === previousOrigin) this.endpoints.state.activeUrl = origin;
+    if (this.endpoints.state.store) require("../connection/controller").rememberLocalGateway(this.endpoints.state.store, origin);
+    await this.gateway.register(this.capabilities.snapshot());
+    if (this.state.quitting) return;
+    await this.gateway.hypermid.refresh();
+    for (const window of this.electron.BaseWindow.getAllWindows()) {
+      if (window.isDestroyed() || !this.workspace.getState(window)) continue;
+      const address = movedUrl(window.webContents.getURL(), previousOrigin, origin);
+      if (address) await window.webContents.loadURL(address);
+    }
+  }
+
   requestQuit() { this.state.quitting = true; this.electron.app.quit(); }
 
   beforeQuit(event) {
@@ -155,8 +198,12 @@ class DesktopApplication {
     if (this.state.presenceTimer !== null) clearInterval(this.state.presenceTimer);
     this.state.presenceTimer = null;
     this.endpoints.cancelReachability();
-    if (!this.hostedMode) this.gateway.unregister();
-    this.state.shutdown = (this.hostedMode ? Promise.resolve() : this.gateway.stop())
+    for (const window of this.electron.BaseWindow.getAllWindows()) if (!window.isDestroyed()) window.hide();
+    this.state.shutdown = (this.hostedMode ? Promise.resolve() : (async () => {
+      await this.gateway.unregister();
+      await this.gateway.signOut();
+      await this.gateway.stop();
+    })())
       .catch((error) => console.warn(`gateway shutdown failed: ${error.message}`))
       .finally(() => { this.tray.destroy(); this.state.complete = true; this.electron.app.quit(); });
   }

@@ -38,24 +38,6 @@ services:
       gideon-gateway:
         condition: service_healthy
 
-  gideon-slack:
-    image: ${GIDEON_GATEWAY_IMAGE:-gideon-gateway:local}
-    restart: unless-stopped
-    command: [ "gideon", "slack" ]
-    profiles:
-      - with-slack
-    volumes:
-      - gideon_home:/data:z
-    env_file:
-      - ../../.env
-    environment:
-      GIDEON_CONTAINER_STARTED_BY: compose
-      GIDEON_GATEWAY_IMAGE: ${GIDEON_GATEWAY_IMAGE:-gideon-gateway:local}
-      GIDEON_WEB_IMAGE: ${GIDEON_WEB_IMAGE:-gideon-web:local}
-      GIDEON_HOME: /data
-      GIDEON_WORKSPACE: /data/workspace
-    depends_on:
-      - gideon-gateway
 
 volumes:
   gideon_home:

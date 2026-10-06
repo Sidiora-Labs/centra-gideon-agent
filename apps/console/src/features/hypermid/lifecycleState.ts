@@ -25,6 +25,8 @@ export interface LifecyclePlan extends HypermidOperationPlanWire {
   binary_digest?: string | null
   operator_identity?: { username: string; uid?: number | null } | null
   params?: {
+    current_enrollment?: { digest: string; operations: string[]; resources: string[]; expires_ms: number } | null
+    permission_additions?: { operations: string[]; resources: string[] } | null
     local_enrollment?: {
       operations: string[]
       resources: string[]
@@ -42,6 +44,9 @@ export interface LifecycleInstallEvidence {
   resources: string[]
   expiresMs: number | null
   packagedBinaryVerified: boolean | null
+  currentEnrollmentDigest: string
+  addedOperations: string[]
+  addedResources: string[]
 }
 
 export function lifecycleInstallEvidence(plan: LifecyclePlan): LifecycleInstallEvidence {
@@ -55,6 +60,9 @@ export function lifecycleInstallEvidence(plan: LifecyclePlan): LifecycleInstallE
     resources: enrollment ? [...enrollment.resources] : [],
     expiresMs: enrollment?.expires_ms ?? null,
     packagedBinaryVerified: plan.checks?.packaged_binary_verified ?? null,
+    currentEnrollmentDigest: plan.params?.current_enrollment?.digest || '',
+    addedOperations: plan.params?.permission_additions?.operations || [],
+    addedResources: plan.params?.permission_additions?.resources || [],
   }
 }
 

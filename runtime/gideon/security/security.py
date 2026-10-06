@@ -596,6 +596,7 @@ _CREDENTIAL_PATTERNS = re.compile(
     r"|sk-proj-[A-Za-z0-9_-]{20,}"
     r"|sk-[A-Za-z0-9]{32,}"
     r"|gh[pousr]_[A-Za-z0-9]{20,}"
+    r"|gwsp_[A-Za-z0-9_-]{43}"
     r"|AIza[0-9A-Za-z_-]{35}"
     r"|sk-[A-Za-z0-9][A-Za-z0-9_-]{20,}"
     r"|(?i:api[_-]?key|secret[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret"
@@ -709,7 +710,8 @@ def redact_credentials(text: str) -> tuple[str, list[str]]:
     warnings.extend(address_warnings)
 
     def _tag_credential(m: "re.Match[str]") -> str:
-        warnings.append(f"Redacted credential pattern: {m.group()[:20]}...")
+        warnings.append("Redacted scoped gateway credential" if m.group().startswith("gwsp_")
+                        else f"Redacted credential pattern: {m.group()[:20]}...")
         return "[REDACTED: credential]"
 
     result = _CREDENTIAL_PATTERNS.sub(_tag_credential, result)
@@ -944,22 +946,6 @@ SUSPICIOUS_BASH_PATTERNS: list[str] = [
     "nc * < ",
 ]
 
-_RM_RF_RE = re.compile(
-    r"""\brm\s+                       # rm
-        (?:-[a-z]*[rf][a-z]*\s+|--(?:recursive|force)\s+)+   # ≥1 flag incl r or f
-        ['"]?                         # optional opening quote on the target
-        (?:                           # — a catastrophic target, whole-token —
-            /\*?                      #   /  or  /*   (root, or everything under it)
-          | ~/?                       #   ~  or  ~/   (home)
-          | \.{1,2}/?                 #   .  ..  ./  ../  (cwd / parent)
-          | \*                        #   a bare glob in cwd
-          | \$\{?(?:HOME|PWD)\}?/?    #   $HOME / ${HOME} / $PWD (optional trailing /)
-        )
-        (?=['"]?(?:$|\s|;|&|\|))      # target ENDS here — a real path (./build,
-                                      # ~/.cache/x, /tmp/y) has more segments → no match
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
 
 
 BASELINE_DENYLIST_FILE = "baseline_denylist.json"
@@ -1168,13 +1154,19 @@ def verify_baseline_denylist() -> dict:
     }
 
 
-def denied_command_reason(command: str) -> str | None:
+def denied_command_reason(command: str, *, cwd: str | None = None, protected_checked: bool = False) -> str | None:
     """Return the denied pattern a command matches, or None.
 
     Matches ``command`` against :func:`denied_command_patterns` (built-in +
     user) case-insensitively. The native bash tool calls this before execution.
     """
-    for pat in denied_command_patterns():
+    patterns = denied_command_patterns()
+    if not protected_checked:
+        from gideon.security.protected_folders import protected_delete, sentence
+        found = protected_delete(command, cwd=cwd or "")
+        if found:
+            return f"protected_delete: {sentence(found)}"
+    for pat in patterns:
         try:
             if re.search(pat, command, re.IGNORECASE):
                 return pat
@@ -1482,8 +1474,10 @@ def audit_bash_command(command: str) -> str | None:
                 return f"Suspicious command detected: matches '{pattern}'"
         elif pat in lower:
             return f"Suspicious command detected: matches '{pattern}'"
-    if _RM_RF_RE.search(command):
-        return "Suspicious command detected: recursive force-delete of a critical path"
+    from gideon.security.protected_folders import protected_delete, sentence
+    found = protected_delete(command, cwd="")
+    if found:
+        return "Suspicious command detected: " + sentence(found)
     return None
 
 

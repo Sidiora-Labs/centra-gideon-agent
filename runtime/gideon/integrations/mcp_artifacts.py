@@ -418,7 +418,7 @@ def _list_tools() -> list[dict[str, Any]]:
                     "csv": {"type": "string", "description": "Single-sheet CSV text"},
                     "format": {
                         "type": "string",
-                        "description": "Output format: 'xlsx' (default) or 'csv'. CSV accepts exactly one sheet.",
+                        "description": "Output format: 'xlsx' (default) or 'csv'. CSV accepts exactly one sheet; formula-leading cells are saved as literal text, while numbers remain numbers.",
                     },
                     "slug": {
                         "type": "string",
@@ -856,6 +856,8 @@ def _image_generate(
 
     from gideon.integrations.image_gen.provider import ImageGenError
     from gideon.integrations.image_gen.registry import active_image_gen
+    from gideon.security.guardrails.media_call import MediaCall, metered_media_call
+    from gideon.security.guardrails.failure import BudgetExceededError
 
     resolved = active_image_gen()
     if resolved is None:
@@ -872,6 +874,7 @@ def _image_generate(
         return "Error: provide a non-empty prompt."
     size = str(args.get("size", "")).strip()
     edit_slug = str(args.get("edit_artifact", "")).strip()
+    call = MediaCall(provider.name, model_id, "image", 1, size=size)
 
     try:
         if edit_slug:
@@ -894,15 +897,20 @@ def _image_generate(
                 src_path = tf.name
             try:
                 results = _run_async(
-                    provider.edit(
+                    metered_media_call(call, lambda: provider.edit(
                         prompt, source_image=src_path, model=model_id, size=size
-                    )
+                    ), session_key=sk or "", billed=lambda rows: len(rows))
                 )
             finally:
                 with __import__("contextlib").suppress(OSError):
                     Path(src_path).unlink()
         else:
-            results = _run_async(provider.generate(prompt, model=model_id, size=size))
+            results = _run_async(metered_media_call(
+                call, lambda: provider.generate(prompt, model=model_id, size=size),
+                session_key=sk or "", billed=lambda rows: len(rows)))
+    except BudgetExceededError as e:
+        _audit("denied", edit_slug, e.sentence())
+        return f"Error: {e.sentence()}"
     except ImageGenError as e:
         _audit("error", edit_slug, str(e))
         return f"Error: {e}"
@@ -990,6 +998,8 @@ def _video_generate(
     """
     from gideon.integrations.video_gen.provider import VideoGenError
     from gideon.integrations.video_gen.registry import active_video_gen
+    from gideon.security.guardrails.media_call import MediaCall, metered_media_call
+    from gideon.security.guardrails.failure import BudgetExceededError
 
     resolved = active_video_gen()
     if resolved is None:
@@ -1009,13 +1019,18 @@ def _video_generate(
 
     try:
         results = _run_async(
-            provider.generate(
-                prompt,
-                model=model_id,
-                duration_seconds=duration_seconds,
-                aspect_ratio=aspect_ratio,
+            metered_media_call(
+                MediaCall(provider.name, model_id, "second", duration_seconds),
+                lambda: provider.generate(
+                    prompt, model=model_id, duration_seconds=duration_seconds,
+                    aspect_ratio=aspect_ratio), session_key=sk or "",
+                billed=lambda rows: (sum(row.duration_s for row in rows)
+                    if rows and all(row.duration_s and row.duration_s > 0 for row in rows) else None),
             )
         )
+    except BudgetExceededError as e:
+        _audit("denied", "", e.sentence())
+        return f"Error: {e.sentence()}"
     except VideoGenError as e:
         _audit("error", "", str(e))
         return f"Error: {e}"
@@ -1070,6 +1085,8 @@ def regenerate_image_at_slug(
     """
     from gideon.integrations.image_gen.provider import ImageGenError
     from gideon.integrations.image_gen.registry import active_image_gen
+    from gideon.security.guardrails.media_call import MediaCall, metered_media_call
+    from gideon.security.guardrails.failure import BudgetExceededError
 
     prompt = (prompt or "").strip()
     if not prompt:
@@ -1080,8 +1097,13 @@ def regenerate_image_at_slug(
     provider, model_id = resolved
     try:
         results = _run_async(
-            provider.generate(prompt, model=model_id, size=(size or "").strip())
+            metered_media_call(
+                MediaCall(provider.name, model_id, "image", 1, size=(size or "").strip()),
+                lambda: provider.generate(prompt, model=model_id, size=(size or "").strip()),
+                session_key=session_id or "", billed=lambda rows: len(rows))
         )
+    except BudgetExceededError as e:
+        return False, e.sentence()
     except ImageGenError as e:
         return False, str(e)
     if not results:
@@ -1148,6 +1170,8 @@ def _visualize(args: dict[str, Any], _audit: Any) -> str:
 
 
 def _validate_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    from gideon.assurance.validation import normalize_tool_booleans
+
     """Validate tool arguments against the shared MCP schema (enforces e.g. the
     artifact_save ``kind`` enum). Tools without a schema pass through."""
     from gideon.assurance.validation import (
@@ -1164,8 +1188,13 @@ def _validate_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
                 tool_name=schema.tool_name,
                 fields=[*schema.fields, FieldSpec("collection", str, max_len=200)],
             )
-        return validate_tool_args(args, schema)
+        return validate_tool_args(normalize_tool_booleans(args, schema), schema)
     return args
+
+
+def _preflight_tool(name: str, args: dict[str, Any]) -> str:
+    from gideon.integrations.mcp_shared import preflight_tool
+    return preflight_tool(name, args, _validate_args)
 
 
 def _call_tool(name: str, raw_args: dict[str, Any]) -> str:
@@ -1310,9 +1339,12 @@ def _document_create(
             model = SheetModel.from_rows({"Sheet1": [list(r) for r in rows]})
         elif csv_text.strip():
             import csv
-            import io
-
-            parsed: list[list[str]] = list(csv.reader(io.StringIO(csv_text)))
+            from gideon.cognition.knowledge.readers import delimited_rows
+            try:
+                parsed = delimited_rows(csv_text)
+            except csv.Error as exc:
+                _audit("denied", error=f"unreadable csv: {exc}")
+                return f"Error: could not read the csv text: {exc}."
             model = SheetModel.from_rows({"Sheet1": parsed})
         else:
             _audit("denied", error="no sheet input")
@@ -1428,7 +1460,7 @@ def _document_create(
     location = (
         f"Download at /api/artifacts/{art.slug}/raw"
         if binary
-        else f"Open at /api/artifacts/{art.slug}"
+        else f"Open in Artifacts at /#/artifacts/{art.slug}, where Download saves a .csv file"
     )
     return (
         f"{verb} {fmt}: {art.slug} (v{art.version}, {len(data) / 1024:.0f}KB). "

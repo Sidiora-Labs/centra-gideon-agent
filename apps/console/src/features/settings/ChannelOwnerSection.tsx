@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { KeyRound, UserRoundCheck } from 'lucide-react'
 import { api } from '../../shared/data/api'
 import type { ChannelRuntime } from '../../shared/data/api'
@@ -6,6 +6,7 @@ import { notify } from '../../app/shell/appSdk'
 import { useQuery } from '../../shared/data/data'
 import { Button } from '../../shared/ui/Button'
 import { EmptyState, FormSkeleton, LoadError } from '../../shared/ui/ListScaffold'
+import { channelPerson } from './channelPerson'
 import { PanelHeader, Section } from './settingsUI'
 
 const CHANNELS_KEY = 'settings:channel-owner-channels'
@@ -35,10 +36,27 @@ function OwnerRow({ channel }: { channel: ChannelRuntime }) {
   const { data, error, refresh } = useQuery(queryKey, () => api.channelOwner(channel.name), { persist: false })
   const [busy, setBusy] = useState(false)
   const [code, setCode] = useState('')
+  const [said, setSaid] = useState('')
+  useEffect(() => {
+    if (!code) return
+    if (data?.pairing.ended === 'paired') {
+      setCode('')
+      setSaid('Paired.')
+      return
+    }
+    if (data?.pairing.ended === 'cancelled' || data?.pairing.ended === 'expired' || data?.pairing.ended === 'too_many_attempts') {
+      setCode('')
+      return
+    }
+    const timer = window.setInterval(refresh, 2000)
+    return () => window.clearInterval(timer)
+  }, [code, data?.pairing.ended, refresh])
+  const owner = channelPerson(labelFor(channel), data?.owner_id || '', data?.owner_name || '')
 
   const issue = async () => {
     setBusy(true)
     setCode('')
+    setSaid('')
     try {
       const result = await api.createChannelOwnerPairing(channel.name)
       setCode(result.code)
@@ -70,8 +88,9 @@ function OwnerRow({ channel }: { channel: ChannelRuntime }) {
       title={labelFor(channel)}
       icon={UserRoundCheck}
       iconTone="muted"
-      hint={data?.owner_configured ? 'An owner identity is configured for this channel.' : 'No owner identity is configured for this channel yet.'}
+      hint={data?.owner_source === 'shared' ? `Shared owner id ${data.owner_id}; this may belong to another channel. Create an owner code to pair your account here.` : data?.owner_configured ? `Owner: ${owner.name}${owner.detail ? ` · ${owner.detail}` : ''}.` : 'No owner identity is configured for this channel yet.'}
     >
+      <div role="status" aria-live="polite" data-type="body-s" className="text-on-surface">{said}</div>
       {!data && error ? <LoadError what={`${labelFor(channel)} owner state`} error={error} onRetry={refresh} /> : null}
       {data?.pairing.active ? (
         <div className="space-y-3">
@@ -89,7 +108,7 @@ function OwnerRow({ channel }: { channel: ChannelRuntime }) {
         </Button>
       )}
       {code ? (
-        <div role="status" aria-live="polite" className="mt-3 rounded-md border border-outline-low p-3">
+        <div className="mt-3 rounded-md border border-outline-low p-3">
           <p data-type="body-s" className="text-on-surface">Send this code from your direct message with {labelFor(channel)}:</p>
           <code className="mt-2 block select-all text-lg font-semibold tracking-widest text-on-surface">{code}</code>
           <p data-type="caption" className="mt-2 text-on-surface-low">It is shown once and expires in ten minutes.</p>

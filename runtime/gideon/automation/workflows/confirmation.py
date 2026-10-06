@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from gideon.security.safety_flags import yes_or_no
+
 import hashlib
 from dataclasses import dataclass
 from enum import Enum
@@ -276,7 +278,8 @@ def on_expiry(
 
 
 def requires_hitl(node_config: dict[str, Any]) -> bool:
-    return (node_config or {}).get("require_hitl") is True
+    declared = (node_config or {}).get("require_hitl")
+    return declared is not None and yes_or_no(declared) is not False
 
 
 def may_mute(kind: ConfirmationType) -> tuple[bool, str]:

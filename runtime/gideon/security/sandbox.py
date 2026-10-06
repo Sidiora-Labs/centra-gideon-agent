@@ -123,6 +123,7 @@ CHILD_ENV_BASE_NAMES: frozenset[str] = frozenset(
         "HF_XET_CACHE",
         "HF_ASSETS_CACHE",
         "HF_HUB_DISABLE_IMPLICIT_TOKEN",
+        "HF_HUB_DISABLE_XET",
         "HF_HUB_DISABLE_TELEMETRY",
         "DO_NOT_TRACK",
         "TREE_SITTER_LANGUAGE_PACK_CACHE_DIR",
@@ -316,6 +317,13 @@ def build_child_env(
         if name.upper() not in _INSTALLER_RELOCATION_SETTINGS:
             env[name] = str(value)
 
+    env["HF_HUB_DISABLE_XET"] = "1"
+
+    if installer_name in {"pip", "npm", "uv"}:
+        from gideon.operations._installer import installer_cache_env
+
+        env.update(installer_cache_env())
+
     for name in tuple(env):
         if name not in _URL_CHILD_SETTINGS:
             continue
@@ -374,6 +382,26 @@ def _probe_unshare() -> bool:
                 os._exit(1)
             if _libc.unshare(_clone_newns) != 0:
                 os._exit(1)
+            os._exit(0)
+        _, status = os.waitpid(pid, 0)
+        return os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
+    except Exception:
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_unshare_net() -> bool:
+    if sys.platform != "linux":
+        return False
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        libc.unshare.argtypes = [ctypes.c_int]
+        libc.unshare.restype = ctypes.c_int
+        pid = os.fork()
+        if pid == 0:
+            for flag in (0x10000000, 0x00020000, 0x40000000):
+                if libc.unshare(flag) != 0:
+                    os._exit(1)
             os._exit(0)
         _, status = os.waitpid(pid, 0)
         return os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
@@ -480,7 +508,7 @@ def _ssh_supports_accept_new() -> bool:
     return (major, minor) >= (7, 5)
 
 
-def _build_launcher_script(sandbox_level: str = "strict") -> str:
+def _build_launcher_script(sandbox_level: str = "strict", *, network: bool = True) -> str:
     """Build a Python launcher script for the Linux namespace sandbox.
 
     The launcher is executed as a subprocess.  It:
@@ -549,6 +577,8 @@ import tempfile
 
 _CLONE_NEWUSER = 0x10000000
 _CLONE_NEWNS   = 0x00020000
+_CLONE_NEWNET  = 0x40000000
+NO_NETWORK = {not network}
 _MS_BIND       = 4096
 _MS_REC        = 16384
 _MS_PRIVATE    = 1 << 18
@@ -733,6 +763,9 @@ def main():
         if _libc.unshare(_CLONE_NEWNS) != 0:
             sys.exit(f"sandbox: unshare(NEWNS) failed: errno {{ctypes.get_errno()}}")
 
+        if NO_NETWORK and _libc.unshare(_CLONE_NEWNET) != 0:
+            sys.exit(f"sandbox: unshare(NEWNET) failed: errno {{ctypes.get_errno()}}")
+
         # Private mount propagation
         _mount_checked(None, b"/", None, _MS_REC | _MS_PRIVATE)
         _owner_fence()
@@ -839,7 +872,9 @@ def _resolve_real_agent_bin(name: str) -> str:
     return resolved if resolved else name
 
 
-def namespace_argv(argv: list[str], sandbox_level: str = "strict") -> list[str]:
+def namespace_argv(
+    argv: list[str], sandbox_level: str = "strict", *, network: bool = True
+) -> list[str]:
     """Wrap *argv* via the Python namespace launcher.
 
     The launcher forks, the parent writes identity UID/GID maps, and the
@@ -850,7 +885,13 @@ def namespace_argv(argv: list[str], sandbox_level: str = "strict") -> list[str]:
     if real_argv:
         real_argv[0] = _resolve_real_agent_bin(real_argv[0])
 
-    script = _build_launcher_script(sandbox_level)
+    if getattr(sys, "frozen", False):
+        from gideon.core.config.loader import config_dir
+        return [sys.executable, "-m", "gideon.security.namespace_child", sandbox_level,
+                str(Path.home()), str(config_dir()), *([] if network else ["--no-network"]),
+                "--", *real_argv]
+
+    script = _build_launcher_script(sandbox_level, network=network)
     fd, path = _sandbox_temp_file(suffix=".py", prefix="gideon_sandbox_")
     os.write(fd, script.encode())
     os.close(fd)
@@ -866,7 +907,7 @@ _SEATBELT_PROFILE = """\
 """
 
 
-def _build_seatbelt_profile(sandbox_level: str = "strict") -> str:
+def _build_seatbelt_profile(sandbox_level: str = "strict", *, network: bool = True) -> str:
     """Build a Seatbelt .sb profile denying reads of sensitive dirs."""
     home = str(Path.home())
     from gideon.security.owner_only import prepare_owner_only_paths
@@ -926,12 +967,16 @@ def _build_seatbelt_profile(sandbox_level: str = "strict") -> str:
         )
         rules.append(f'(deny file-write* (subpath "{ssh_escaped}"))')
 
+    if not network:
+        rules.append("(deny network*)")
     return _SEATBELT_PROFILE.format(deny_rules="\n".join(rules))
 
 
 def sandbox_exec_argv(
     argv: list[str],
     sandbox_level: str = "strict",
+    *,
+    network: bool = True,
 ) -> tuple[list[str], str | None]:
     """Wrap *argv* with ``sandbox-exec -f <profile>``.
 
@@ -942,7 +987,7 @@ def sandbox_exec_argv(
     profile file after the child exits.
     """
     env, sandbox_exec = _seatbelt_binaries()
-    profile = _build_seatbelt_profile(sandbox_level)
+    profile = _build_seatbelt_profile(sandbox_level, network=network)
     fd, path = _sandbox_temp_file(suffix=".sb", prefix="gideon_sandbox_")
     os.write(fd, profile.encode())
     os.close(fd)
@@ -991,10 +1036,112 @@ def reset_backend() -> None:
     global _backend, _backend_config_mode
     _backend = None
     _backend_config_mode = None
+    _probe_unshare.cache_clear()
+    _probe_unshare_net.cache_clear()
+
+
+class SandboxEnforcementUnavailable(PermissionError):
+    pass
+
+
+def _cannot_take_the_network(mode: str) -> str:
+    if mode == "off":
+        return "the command sandbox is set to off"
+    backend = detect_backend(config_mode=mode)
+    if backend == "sandbox-exec" or (backend == "namespace" and _probe_unshare_net()):
+        return ""
+    return "this host cannot apply an OS sandbox that removes the command's network access"
+
+
+def _network_audit(argv: list[str], reason: str, *, launched: bool) -> None:
+    try:
+        from gideon.security.net.policy import run_of_this_call
+        from gideon.security.sel import sel
+
+        program = os.path.basename(argv[0]) if argv else ""
+        sel().log_api_access(
+            caller=run_of_this_call(), operation="egress_launch" if launched else "command_refused",
+            outcome="denied", source="net", resources=f"network ({program})", error=reason,
+        )
+    except Exception:
+        logger.debug("command egress audit failed", exc_info=True)
+
+
+def _require_no_network(argv: list[str], mode: str, reason: str) -> None:
+    if cannot := _cannot_take_the_network(mode):
+        from gideon.security.net.guard import where_egress_is_narrowed
+
+        sentence = (f"This command was not run: {reason}, so it may run only with no network access, "
+                    f"and {cannot}. {where_egress_is_narrowed()}")
+        _network_audit(argv, sentence, launched=False)
+        raise SandboxEnforcementUnavailable(sentence)
+
+
+def wrap_refusal(mode: str = "auto") -> str:
+    from gideon.security.net.policy import no_network_for_commands
+
+    held = no_network_for_commands()
+    if held:
+        try:
+            _require_no_network([], mode, held)
+        except SandboxEnforcementUnavailable as exc:
+            return str(exc)
+    if detect_backend(config_mode="auto" if mode == "off" else mode) == "none":
+        return "owner-state OS isolation is unavailable"
+    return ""
 
 
 def wrap_argv(
     argv: list[str], mode: str = "auto", *, cwd: str | os.PathLike[str] | None = None
+) -> tuple[list[str], str | None]:
+    from gideon.security.net.policy import no_network_for_commands
+
+    held = no_network_for_commands()
+    if held:
+        _require_no_network(argv, mode, held)
+    result = _wrapped(argv, mode, cwd=cwd, network=not held)
+    if held:
+        _network_audit(argv, held, launched=True)
+    return result
+
+
+def wrap_program_argv(
+    argv: list[str], mode: str = "auto", *, cwd: str | os.PathLike[str] | None = None,
+    network: bool = True,
+) -> tuple[list[str], str | None]:
+    if not network:
+        _require_no_network(argv, mode, "this program's declared egress is off")
+    result = _wrapped(argv, mode, cwd=cwd, network=network)
+    if not network:
+        _network_audit(argv, "this program's declared egress is off", launched=True)
+    return result
+
+
+def egress_bound_argv(argv: list[str], *, run: str) -> tuple[list[str], str | None]:
+    from gideon.security.net.policy import egress_held_to, no_network_for_commands
+
+    with egress_held_to(run):
+        return wrap_argv(argv, "standard") if no_network_for_commands() else (list(argv), None)
+
+
+def no_network_note(run: str | None = None) -> str:
+    from gideon.security.net.policy import no_network_for_commands
+
+    held = no_network_for_commands(run)
+    return f"It ran with no network access: {held}." if held else ""
+
+
+def remove_wrap(cleanup: str | None) -> None:
+    if cleanup:
+        try:
+            os.unlink(cleanup)
+        except OSError:
+            pass
+
+
+def _wrapped(
+    argv: list[str], mode: str = "auto", *, cwd: str | os.PathLike[str] | None = None,
+    network: bool = True,
 ) -> tuple[list[str], str | None]:
     """Wrap a command argv with OS-level sandbox if available.
 
@@ -1041,12 +1188,12 @@ def wrap_argv(
         backend = detect_backend(config_mode=mode)
 
     if backend == "namespace":
-        wrapped = namespace_argv(argv, sandbox_level)
-        return wrapped, wrapped[1]
+        wrapped = namespace_argv(argv, sandbox_level, network=network)
+        return wrapped, None if getattr(sys, "frozen", False) else wrapped[1]
     if backend == "sandbox-exec":
-        return sandbox_exec_argv(argv, sandbox_level)
+        return sandbox_exec_argv(argv, sandbox_level, network=network)
 
-    raise PermissionError("owner-state OS isolation is unavailable")
+    raise SandboxEnforcementUnavailable("owner-state OS isolation is unavailable")
 
 
 _SHIM_MODULE = "gideon.engine._spawn_exec_shim"

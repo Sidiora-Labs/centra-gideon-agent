@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from gideon.core.turn_streams import closing_stream
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from gideon.engine.agents.tool_list import AgentTools
+    from gideon.engine.agents.skill_list import AgentSkills
     from gideon.integrations.llm.events import AgentEvent
 
 
@@ -24,6 +27,8 @@ class AgentRuntimeDefinition:
     workspace_dir: str = ""
     approval_mode: str = ""
     triggers: list[str] = field(default_factory=list)
+    tool_grants: AgentTools | None = field(default=None, kw_only=True)
+    skill_grants: AgentSkills | None = field(default=None, kw_only=True)
 
 
 @dataclass
@@ -92,13 +97,13 @@ class AgentProvider(ABC):
         return False
 
     async def stream_command(self, command: str) -> AsyncIterator[AgentEvent]:
-        turn = aiter(self.stream(command))
-        while True:
-            try:
-                event = await anext(turn)
-            except StopAsyncIteration:
-                return
-            yield event
+        async with closing_stream(aiter(self.stream(command))) as turn:
+            while True:
+                try:
+                    event = await anext(turn)
+                except StopAsyncIteration:
+                    return
+                yield event
 
     @abstractmethod
     async def approve_tool(self, request_id: str | int) -> None: ...

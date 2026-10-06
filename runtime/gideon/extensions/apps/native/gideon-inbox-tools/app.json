@@ -2,7 +2,7 @@
   "name": "gideon-inbox-tools",
   "version": "1.0.0",
   "displayName": "Inbox Tools",
-  "description": "Surface a message to the user's Inbox triage queue \u2014 notifications, questions, and FYIs the agent raises when no one is watching the chat.",
+  "description": "Read waiting Inbox items or surface a message to the user's Inbox triage queue \u2014 notifications, questions, and FYIs the agent raises when no one is watching the chat.",
   "icon": "Inbox",
   "author": "Gideon",
   "tags": [

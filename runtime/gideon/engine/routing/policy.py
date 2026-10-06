@@ -197,11 +197,8 @@ def _local_provider_keys() -> set[str]:
 
 
 def is_local_ref(ref: str, *, local_keys: set[str] | None = None) -> bool:
-    provider = _norm(provider_of(ref))
-    if not provider:
-        return False
-    keys = _local_provider_keys() if local_keys is None else local_keys
-    return provider in keys
+    from gideon.integrations.llm.registry import served_on_this_machine
+    return served_on_this_machine(provider_of(ref), model_of(ref))
 
 
 def _structured_providers() -> set[str]:

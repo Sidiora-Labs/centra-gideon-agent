@@ -4,10 +4,14 @@ Eliminates duplicate code across gateway, handler, dashboard, subagent,
 and history modules.
 """
 
+from gideon.core.turn_streams import closing_stream
 import asyncio
 import inspect
+import contextvars
+from contextlib import contextmanager
 import json
 import logging
+import math
 from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -153,45 +157,52 @@ async def stream_and_collect(
         The complete response text.
     """
     from gideon.integrations.acp.errors import AcpError
+    from gideon.integrations.llm.protocol_turn import until_terminal
 
     for attempt in range(_PROMPT_BUSY_RETRIES + 1):
         result_text = ""
         try:
-            async for event in provider.stream(message):
-                if event.kind == EVENT_TEXT_CHUNK:
-                    result_text += event.text
-                    if on_chunk:
-                        on_chunk(event.text)
-                elif event.kind == EVENT_PERMISSION_REQUEST:
-                    approved = await _resolve_permission(
-                        provider, event, approval_policy, hooks, on_tool_approval
-                    )
-                    if not approved:
-                        continue
-                elif event.kind == EVENT_TOOL_CALL:
-                    _sel().log_tool_invocation(
-                        session_key="",
-                        source="llm_helpers",
-                        tool_name=event.title,
-                        tool_kind=event.tool_kind,
-                        outcome="auto_approved",
-                    )
-                    await fire_tool_hooks(
-                        get_global_hook_store(),
-                        event.title,
-                        event.tool_input,
-                    )
-                elif event.kind == EVENT_COMPLETE:
-                    if on_complete is not None:
-                        try:
-                            on_complete(event)
-                        except (
-                            Exception
-                        ):  # noqa: BLE001 — telemetry must never break a turn
-                            logger.debug(
-                                "stream_and_collect on_complete failed", exc_info=True
-                            )
-                    break
+            async with closing_stream(until_terminal(
+                provider.stream(message),
+                ends=lambda event: event.kind == EVENT_COMPLETE,
+                adapter=type(provider).__name__,
+                missing="a completion event",
+            )) as _turn_events:
+                async for event in _turn_events:
+                    if event.kind == EVENT_TEXT_CHUNK:
+                        result_text += event.text
+                        if on_chunk:
+                            on_chunk(event.text)
+                    elif event.kind == EVENT_PERMISSION_REQUEST:
+                        approved = await _resolve_permission(
+                            provider, event, approval_policy, hooks, on_tool_approval
+                        )
+                        if not approved:
+                            continue
+                    elif event.kind == EVENT_TOOL_CALL:
+                        _sel().log_tool_invocation(
+                            session_key="",
+                            source="llm_helpers",
+                            tool_name=event.title,
+                            tool_kind=event.tool_kind,
+                            outcome="auto_approved",
+                        )
+                        await fire_tool_hooks(
+                            get_global_hook_store(),
+                            event.title,
+                            event.tool_input,
+                        )
+                    elif event.kind == EVENT_COMPLETE:
+                        if on_complete is not None:
+                            try:
+                                on_complete(event)
+                            except (
+                                Exception
+                            ):  # noqa: BLE001 — telemetry must never break a turn
+                                logger.debug(
+                                    "stream_and_collect on_complete failed", exc_info=True
+                                )
+                        break
             return result_text
         except AcpError as exc:
             if "already in progress" not in str(exc) or attempt >= _PROMPT_BUSY_RETRIES:
@@ -264,6 +275,17 @@ async def _resolve_permission(
             **extra,
         )
 
+    from gideon.security.protected_folders import call_protected_delete, provider_working_folder, refusal
+    protected = call_protected_delete(getattr(event, "risk_level", ""), event.title, event.tool_kind, event.tool_input, cwd=provider_working_folder(provider))
+    if protected:
+        approved = bool(policy != ToolApprovalPolicy.REJECT_ALL and on_tool_approval and await on_tool_approval(event))
+        if approved:
+            await provider.approve_tool(event.request_id)
+            _log("approved", metadata={"reason": "protected_delete_once"})
+        else:
+            await provider.reject_tool(event.request_id)
+            _log("denied", error=refusal(protected, where="a background model call"))
+        return approved
     if policy == ToolApprovalPolicy.REJECT_ALL:
         await provider.reject_tool(event.request_id)
         _log("rejected", metadata={"reason": "reject_all_policy"})
@@ -348,6 +370,15 @@ def save_conversation_turn(
             source_user=source_user,
         )
 
+    from gideon.integrations.inbox_providers.native_source import get_dashboard_state
+
+    state = get_dashboard_state()
+    if state is not None:
+        try:
+            state.take_channel_turn(log, key)
+        except Exception:
+            logging.getLogger(__name__).warning("Could not refresh the resident channel conversation", exc_info=True)
+
 
 def _enforces_json_schema_natively(model_ref: str) -> bool:
     """Does the provider behind ``model_ref`` enforce a supplied JSON Schema NATIVELY?
@@ -413,7 +444,53 @@ def _enforces_json_schema_natively(model_ref: str) -> bool:
         return False
 
 
-async def one_shot_completion(
+_EXPECTED_SHAPE = contextvars.ContextVar("gideon_completion_expected_shape", default=None)
+
+
+@contextmanager
+def expecting(check):
+    """Apply a consumer contract to completion functions handed to this block."""
+    token = _EXPECTED_SHAPE.set(check)
+    try:
+        yield
+    finally:
+        _EXPECTED_SHAPE.reset(token)
+
+
+async def one_shot_completion(prompt: str, *, use_case: str = "background",
+                              output_type: type | None = None, model: str = "",
+                              temperature: float | None = None,
+                              _call_metadata: dict[str, Any] | None = None,
+                              validate: Callable[[str], str] | None = None,
+                              attempt_timeout: float | None = None,
+                              max_output_tokens: int | None = None,
+                              attended: Any = None) -> str:
+    """Run a finite model-only completion under its consumer contract."""
+    if max_output_tokens is not None and (isinstance(max_output_tokens, bool) or not isinstance(max_output_tokens, int) or max_output_tokens <= 0):
+        raise ValueError("max_output_tokens must be a positive integer")
+    if attempt_timeout is not None and (not math.isfinite(float(attempt_timeout)) or float(attempt_timeout) <= 0):
+        raise ValueError("attempt_timeout must be finite and positive")
+    from gideon.security.execution_lineage import requested_model
+    model, _ = requested_model(model, model_only=True)
+    check = validate if validate is not None else _EXPECTED_SHAPE.get()
+    token = _EXPECTED_SHAPE.set(None)
+    try:
+        call = _one_shot_completion(prompt, use_case=use_case, output_type=output_type,
+                                   model=model, temperature=temperature,
+                                   _call_metadata=_call_metadata, validate=check,
+                                   attempt_timeout=attempt_timeout,
+                                   max_output_tokens=max_output_tokens)
+        from gideon.security.guardrails.local_inference import attending
+        with attending(attended):
+            if use_case in {"background", "ingestion"}:
+                async with asyncio.timeout(300):
+                    return await call
+            return await call
+    finally:
+        _EXPECTED_SHAPE.reset(token)
+
+
+async def _one_shot_completion(
     prompt: str,
     *,
     use_case: str = "background",
@@ -421,6 +498,9 @@ async def one_shot_completion(
     model: str = "",
     temperature: float | None = None,
     _call_metadata: dict[str, Any] | None = None,
+    validate: Callable[[str], str] | None = None,
+    attempt_timeout: float | None = None,
+    max_output_tokens: int | None = None,
 ) -> str:
     """Send a single prompt to the system's configured LLM and return the response.
 
@@ -560,27 +640,45 @@ async def one_shot_completion(
             logger.debug(
                 "one_shot_completion: budget derivation failed for %r", model_ref
             )
+        if resolved_uc == "background":
+            kw.setdefault("max_tokens", 4096)
+        if max_output_tokens is not None:
+            if isinstance(max_output_tokens, bool) or int(max_output_tokens) <= 0:
+                raise ValueError("max_output_tokens must be positive")
+            kw["max_tokens"] = min(int(kw.get("max_tokens", max_output_tokens)), int(max_output_tokens))
         return kw
 
-    async def _run(provider) -> str:
+    def miss(text):
+        if not text.strip():
+            return "a nonempty completion"
+        if output_type is not None and _parse_llm(text, output_type) is None:
+            return getattr(output_type, "__name__", str(output_type))
+        if validate is not None:
+            try:
+                return str(validate(text) or "")
+            except Exception as error:
+                return "readable consumer output (" + type(error).__name__ + ")"
+        return ""
+
+    async def _run(provider, *, retry_shape=True) -> str:
         try:
             await provider.start()
-            text = await stream_and_collect(provider, prompt)
-            if output_type is None:
+            text = await stream_and_collect(provider, prompt, approval_policy=ToolApprovalPolicy.REJECT_ALL)
+            problem = miss(text)
+            if not problem:
                 return text
-            if _parse_llm(text, output_type) is not None:
-                return text
+            if not retry_shape:
+                raise OutputContractError(problem, text)
             from gideon.security.guardrails.failure import FailureMode, correction_note
 
             retry_prompt = (
-                f"{prompt}\n\n{correction_note(FailureMode.SCHEMA_VIOLATION)}"
+                f"{prompt}\n\n{correction_note(FailureMode.SCHEMA_VIOLATION)} Expected: {problem}."
             )
-            retry_text = await stream_and_collect(provider, retry_prompt)
-            if _parse_llm(retry_text, output_type) is not None:
+            retry_text = await stream_and_collect(provider, retry_prompt, approval_policy=ToolApprovalPolicy.REJECT_ALL)
+            problem = miss(retry_text)
+            if not problem:
                 return retry_text
-            raise OutputContractError(
-                getattr(output_type, "__name__", str(output_type)), retry_text
-            )
+            raise OutputContractError(problem, retry_text)
         finally:
             if _call_metadata is not None:
                 sent_temperature = getattr(provider, "sampling_temperature", None)
@@ -606,12 +704,21 @@ async def one_shot_completion(
                     ),
                 )
             try:
-                await provider.shutdown()
+                await asyncio.wait_for(provider.shutdown(), timeout=1.0)
             except Exception:
                 pass
 
+    async def attempt(provider, *, retry_shape=True):
+        call = _run(provider, retry_shape=retry_shape)
+        if attempt_timeout is None:
+            return await call
+        if float(attempt_timeout) <= 0:
+            call.close()
+            raise ValueError("attempt_timeout must be positive")
+        return await asyncio.wait_for(call, float(attempt_timeout))
+
     if model:
-        return await _run(
+        return await attempt(
             resolve_provider_for_use_case(
                 resolved_uc, model_override=model, **(await _entry_kw(model))
             )
@@ -634,9 +741,9 @@ async def one_shot_completion(
                 last_exc = exc
                 continue
             try:
-                return await _run(entry_provider)
-            except OutputContractError:
-                raise
+                from gideon.security.guardrails.local_inference import next_entry
+                with next_entry(_chain[i + 1] if i + 1 < len(_chain) else ""):
+                    return await attempt(entry_provider, retry_shape=False)
             except Exception as exc:  # noqa: BLE001 — a failed call advances
                 last_exc = exc
                 if i + 1 < len(_chain):
@@ -647,6 +754,8 @@ async def one_shot_completion(
                         ref,
                         type(exc).__name__,
                     )
+        if isinstance(last_exc, OutputContractError):
+            raise last_exc
         raise RuntimeError(
             f"every model in the {resolved_uc!r} fallback chain failed "
             f"({len(_chain)} entr{'y' if len(_chain) == 1 else 'ies'}); "
@@ -657,7 +766,7 @@ async def one_shot_completion(
     provider = resolve_provider_for_use_case(
         resolved_uc, **(await _entry_kw(_plain_ref))
     )
-    return await _run(provider)
+    return await attempt(provider)
 
 
 def humanize_provider_error(exc: object) -> str:
@@ -672,6 +781,11 @@ def humanize_provider_error(exc: object) -> str:
     real error, just clean up the ones we know. Pure string heuristics (provider SDKs
     don't share a typed error taxonomy), matched on the lowercased message.
     """
+    from gideon.security.guardrails.failure import answer_cut_off
+
+    cut_off = answer_cut_off(exc)
+    if cut_off is not None:
+        return cut_off.sentence()
     raw = str(exc or "").strip()
     low = raw.lower()
     _MAP = [

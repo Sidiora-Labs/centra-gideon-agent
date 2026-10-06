@@ -36,9 +36,11 @@ describe("buildGatewayEnv", () => {
     assert.strictEqual(env.HOME, "/Users/someone");
   });
 
-  it("sets the loopback auth bypass and the project dir it was given", () => {
+  it("requires local token authentication and the supplied project directory", () => {
     const env = built();
-    assert.strictEqual(env.GIDEON_DEV_NO_AUTH, "1");
+    assert.strictEqual(env.GIDEON_AUTH_MODE, "local_token");
+    assert.strictEqual(env.GIDEON_BIND_HOST, "127.0.0.1");
+    assert.ok(!("GIDEON_DEV_NO_AUTH" in env));
     assert.strictEqual(env.GIDEON_PROJECT_DIR, "/app/resources");
   });
 
@@ -52,4 +54,14 @@ describe("buildGatewayEnv", () => {
     const src = require("node:fs").readFileSync(require.resolve("../src/gateway/environment.js"), "utf8");
     assert.ok(!/require\("electron"\)/.test(src), "gatewayEnv.js must stay a pure module");
   });
+});
+
+
+it("strips inherited desktop bypasses and public bind overrides", () => {
+  const env = buildGatewayEnv({ env: { GIDEON_AUTH_MODE: "none", GIDEON_DEV_NO_AUTH: "1",
+    GIDEON_BYPASS_LOCAL_NETWORKS: "1", GIDEON_BIND_HOST: "0.0.0.0" } });
+  assert.equal(env.GIDEON_AUTH_MODE, "local_token");
+  assert.equal(env.GIDEON_BIND_HOST, "127.0.0.1");
+  assert.equal(env.GIDEON_DEV_NO_AUTH, undefined);
+  assert.equal(env.GIDEON_BYPASS_LOCAL_NETWORKS, undefined);
 });

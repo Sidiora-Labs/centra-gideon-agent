@@ -75,6 +75,28 @@ def core_tool_declaration(
     return risk, tells_owner
 
 
+def core_tool_work_asks(title: str, tool_kind: str, tool_input: object) -> bool:
+    """Only the exact validated host-owned declaration confers this decision."""
+    from gideon.assurance.validation import ValidationError
+    from gideon.integrations import mcp_core
+    from gideon.integrations.tool_providers.base import WORK_ASKS_META_KEY
+    name, args, exact = _core_call(title, tool_kind, tool_input)
+    if not exact or not name:
+        return False
+    import importlib
+    owners = [mcp_core] + [importlib.import_module(path) for path in mcp_core._AGGREGATED_CATEGORY_MODULES]
+    matches = [(owner, item) for owner in owners for item in owner._list_tools() if item.get("name") == name]
+    if len(matches) != 1:
+        return False
+    owner, tool = matches[0]
+    try:
+        owner._validate_args(name, args)
+    except (ValidationError, AttributeError):
+        return False
+    meta = tool.get("_meta")
+    return isinstance(meta, dict) and meta.get(WORK_ASKS_META_KEY) is True
+
+
 def _session_environment(
     session_key: str | None,
     leaf_context: Mapping[str, Any] | None = None,
@@ -95,6 +117,10 @@ def _session_environment(
         logger.warning("Cannot declare GIDEON_PORT for %s: %s", CORE_SERVER_NAME, exc)
     if session_key:
         values["GIDEON_SESSION_KEY"] = str(session_key)
+        from gideon.security.session_credentials import credential_for
+        proof = credential_for(str(session_key))
+        if proof:
+            values["GIDEON_SESSION_PROOF"] = proof
     return [{"name": name, "value": value} for name, value in values.items()]
 
 

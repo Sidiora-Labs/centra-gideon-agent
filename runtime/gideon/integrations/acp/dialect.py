@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from gideon.integrations.acp.types import (
@@ -45,6 +46,28 @@ def _preference(option: dict, *, always: bool) -> int:
     return 0 if first in label else 1 if second in label else 2
 
 
+
+def _option_words(option: dict) -> list[str]:
+    text = f"{option.get('id', '')} {option.get('label', '')} {option.get('name', '')}"
+    return re.findall(r"[a-z]+", re.sub(r"([a-z])([A-Z])", r"\1 \2", text).lower())
+
+
+def is_refusal_option(option: dict) -> bool:
+    kind = str(option.get("kind") or "").lower()
+    if kind:
+        return kind.startswith(("reject", "deny", "declin", "refus"))
+    words = _option_words(option)
+    return (any(word.startswith(("reject", "deny", "denied", "declin", "refus")) for word in words)
+            and not any(word.startswith(("allow", "approv", "accept", "yes", "grant")) for word in words))
+
+
+def refusal_rank(option: dict) -> tuple[bool, bool, bool]:
+    words = _option_words(option)
+    continues = any(word.startswith(("continu", "proceed", "skip")) for word in words)
+    ends = not continues and any(word.startswith(("cancel", "abort", "interrupt", "stop", "halt", "terminat")) for word in words)
+    remembered = "always" in str(option.get("kind") or option.get("id") or "").lower()
+    return ends, remembered, not continues
+
 def _choose_option(offered: list[dict], *, approve: bool, always: bool = False):
     choices = []
     for index, option in enumerate(offered):
@@ -53,13 +76,9 @@ def _choose_option(offered: list[dict], *, approve: bool, always: bool = False):
         if approve:
             eligible = kind.startswith("allow") or identity.startswith("allow")
         else:
-            eligible = (
-                kind.startswith("reject")
-                or identity.startswith("reject")
-                or "deny" in (kind + " " + identity)
-            )
+            eligible = is_refusal_option(option)
         if eligible:
-            choices.append((_preference(option, always=always), index, option))
+            choices.append((_preference(option, always=always) if approve else refusal_rank(option), index, option))
     if choices:
         selected = min(choices, key=lambda row: row[:2])[2].get("id", "")
         return selected if approve else str(selected or "")
@@ -77,6 +96,7 @@ def _choose_option(offered: list[dict], *, approve: bool, always: bool = False):
 
 class ACPDialect:
     name: str = "default"
+    asks_through_elicitation: bool = False
     supports_concurrent_sessions: bool = False
     supports_mid_turn_prompt: bool = False
     _protocol: object = "2025-08-22"
@@ -88,6 +108,9 @@ class ACPDialect:
 
     def client_info(self, *, client_name: str, client_version: str) -> dict:
         return dict(name=client_name, version=client_version)
+
+    def client_capabilities(self, *, attended: bool) -> dict:
+        return {"elicitation": {"form": {}}} if attended and self.asks_through_elicitation else {}
 
     def mid_turn_prompt_request(
         self, *, session_id: str, text: str
@@ -185,6 +208,11 @@ class ACPDialect:
     def select_reject_option_id(self, offered: list[dict[str, str]]) -> str:
         return _choose_option(offered, approve=False)
 
+    def deny_ends_turn(self, offered: list[dict]) -> bool:
+        selected = self.select_reject_option_id(offered)
+        option = next((row for row in offered if row.get("id") == selected), None)
+        return bool(refusal_rank(option)[0]) if option else True
+
     def approve_outcome(self, option_id: str) -> dict:
         return dict(outcome=dict(outcome=OUTCOME_SELECTED, optionId=option_id))
 
@@ -267,6 +295,7 @@ class ZedAdapterDialect(ACPDialect):
 
 
 class ClaudeCodeDialect(ZedAdapterDialect):
+    asks_through_elicitation = True
     name = "claude"
 
     def child_process_names(self) -> tuple[str, ...]:

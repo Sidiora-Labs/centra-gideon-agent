@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import atexit
+import hashlib
+import stat
 import json
 import logging
 import os
@@ -14,6 +17,61 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 PORT_ENV = "GIDEON_PORT"
 RUNTIME_FILE = "gateway.runtime.json"
+CLAIM_FILE = "gateway.lock"
+_claim = None
+
+
+def home_fingerprint() -> str:
+    from gideon.core.config.loader import config_dir
+    return hashlib.sha256(os.fsencode(config_dir().resolve())).hexdigest()
+
+
+class HomeAlreadyClaimed(RuntimeError):
+    pass
+
+
+class HomeClaim:
+    def __init__(self, fd, home):
+        self.fd, self.home = fd, home
+
+    def close(self):
+        global _claim
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+        if _claim is self:
+            _claim = None
+
+
+def claim_home() -> HomeClaim:
+    """Hold one kernel lock per home through startup and shutdown."""
+    global _claim
+    import fcntl
+    from gideon.core.config.loader import config_dir
+    home = config_dir().resolve()
+    if _claim is not None:
+        if _claim.home != home:
+            raise HomeAlreadyClaimed("gateway already claimed another home")
+        return _claim
+    fd = os.open(home / CLAIM_FILE, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise HomeAlreadyClaimed("gateway lock must be a regular file with one link")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            owner = os.pread(fd, 256, 0).decode("utf-8", "replace").strip()
+            raise HomeAlreadyClaimed(f"gateway {owner or '(starting)'} already owns this home: {home}") from error
+        os.fchmod(fd, 0o600)
+        os.ftruncate(fd, 0)
+        os.write(fd, f"pid {os.getpid()}".encode())
+    except BaseException:
+        os.close(fd)
+        raise
+    _claim = HomeClaim(fd, home)
+    atexit.register(_claim.close)
+    return _claim
 
 
 class GatewayBaseUnresolved(RuntimeError):
@@ -106,7 +164,7 @@ class BoundGateway:
             return None
 
     def live_port(self) -> int | None:
-        if self.port > 0 and _pid_is_alive(self.pid):
+        if 0 < self.port <= 65535 and _pid_is_alive(self.pid):
             if self.identity:
                 facts = process_facts(self.pid)
                 if facts is None or facts.identity != self.identity or facts.state == "Z":
@@ -116,7 +174,7 @@ class BoundGateway:
 
 
 def publish(port: int, *, pid: int | None = None) -> None:
-    if not isinstance(port, int) or isinstance(port, bool) or port <= 0:
+    if not isinstance(port, int) or isinstance(port, bool) or not 0 < port <= 65535:
         raise ValueError(
             f"gateway_base.publish() needs the bound port, got {port!r}. A gateway that cannot name its own socket cannot address its children."
         )
@@ -136,7 +194,11 @@ def publish(port: int, *, pid: int | None = None) -> None:
 
 def unpublish() -> None:
     try:
-        _runtime_path().unlink()
+        path = _runtime_path()
+        binding = BoundGateway.read(path)
+        facts = process_facts(os.getpid())
+        if binding and binding.pid == os.getpid() and facts and binding.identity == facts.identity:
+            path.unlink()
     except Exception:
         logger.debug("could not remove %s", RUNTIME_FILE, exc_info=True)
 
@@ -198,4 +260,4 @@ def resolve_port() -> int:
 
 def resolve_api_base() -> str:
     port = resolve_port()
-    return f"http://localhost:{port}"
+    return f"http://127.0.0.1:{port}"

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from gideon.core.turn_streams import closing_stream
+
 import json
+import copy
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
@@ -14,11 +17,12 @@ from gideon.integrations.llm.base import (
     LLMEvent,
 )
 from gideon.integrations.llm.credentials import Credential
-from gideon.integrations.llm.prompt_cache import CACHE_HINT_KEY, PromptCache
+from gideon.integrations.llm.prompt_cache import CACHE_HINT_KEY, VOLATILE_KEY, PromptCache
 from gideon.integrations.llm.protocol_turn import (
     ConversationProtocol,
     ToolFragment,
     TurnUsage,
+    until_terminal,
     wire_value,
 )
 from gideon.integrations.llm.catalog import SAMPLING_PARAMETERS, refused_sampling
@@ -35,7 +39,7 @@ _THINKING_BUDGETS: dict[str, int] = {
     "high": 24_576,
     "max": 63_999,
 }
-_VOLATILE_MESSAGE_KEY = "_volatile"
+_VOLATILE_MESSAGE_KEY = VOLATILE_KEY
 _CACHE_CONTROL_EPHEMERAL: dict[str, str] = {"type": "ephemeral"}
 
 
@@ -143,14 +147,14 @@ class _MessageEnvelope:
         self.system_parts: list[str] = []
         self.system_hinted = False
         self.messages: list[dict] = []
-        self.tail: list[dict] = []
+        self.notes: list[str] = []
 
     def _system(self, message: dict) -> None:
         content = message.get("content")
         if not content:
             return
         if message.get(_VOLATILE_MESSAGE_KEY):
-            self.tail.append({"role": "user", "content": str(content)})
+            self.notes.append(str(content))
         else:
             self.system_parts.append(str(content))
             self.system_hinted |= CACHE_HINT_KEY in message
@@ -198,10 +202,21 @@ class _MessageEnvelope:
 
     def result(self) -> tuple[str | list[dict], list[dict]]:
         system = "\n\n".join(self.system_parts)
-        return (_hinted_content(system) if self.system_hinted else system), [
-            *self.messages,
-            *self.tail,
-        ]
+        messages = copy.deepcopy(self.messages)
+        if self.notes:
+            notes = [{"type": "text", "text": note} for note in self.notes]
+            for message in reversed(messages):
+                if message.get("role") != "user":
+                    continue
+                own = message.get("content")
+                blocks = own if isinstance(own, list) else (
+                    [{"type": "text", "text": str(own)}] if own else []
+                )
+                message["content"] = [*blocks, *notes]
+                break
+            else:
+                messages.append({"role": "user", "content": notes})
+        return (_hinted_content(system) if self.system_hinted else system), messages
 
 
 def _translate_messages(messages: list[dict]) -> tuple[str | list[dict], list[dict]]:
@@ -283,8 +298,7 @@ class _MessagesDecoder:
         return [LLMEvent(kind=kind, text=text)]
 
     def _block_stop(self, event: Any) -> list[LLMEvent]:
-        assembly = self._blocks.get(wire_value(event, "index", 0) or 0)
-        return assembly.emit() if assembly else []
+        return []
 
     def _message_delta(self, event: Any) -> list[LLMEvent]:
         reason = wire_value(wire_value(event, "delta"), "stop_reason") or wire_value(
@@ -443,7 +457,16 @@ class AnthropicProvider(ConversationProtocol):
     ) -> AsyncIterator[LLMEvent]:
         decoder = _MessagesDecoder()
         async with self._client.messages.stream(**request) as response:
-            async for frame in response:
+            async for frame in until_terminal(
+                response,
+                ends=lambda frame: bool(
+                    wire_value(wire_value(frame, "delta"), "stop_reason")
+                    or wire_value(frame, "stop_reason")
+                ),
+                adapter="Anthropic",
+                missing="a stop_reason",
+                model=model,
+            ):
                 for event in decoder.feed(frame):
                     yield event
         for event in decoder.finish():
@@ -468,8 +491,9 @@ class AnthropicProvider(ConversationProtocol):
     async def stream(self, message: str) -> AsyncIterator[LLMEvent]:
         messages = self._begin_message(message, _MAX_HISTORY)
         request = self._request(messages, model=self._model, translate=False)
-        async for event in self._run_turn(request, self._model, remember=True):
-            yield event
+        async with closing_stream(self._run_turn(request, self._model, remember=True)) as _owned_events:
+            async for event in _owned_events:
+                yield event
 
     async def complete(
         self,
@@ -487,5 +511,6 @@ class AnthropicProvider(ConversationProtocol):
             reasoning_effort=reasoning_effort,
             translate=True,
         )
-        async for event in self._run_turn(request, selected, remember=False):
-            yield event
+        async with closing_stream(self._run_turn(request, selected, remember=False)) as _owned_events:
+            async for event in _owned_events:
+                yield event

@@ -158,23 +158,27 @@ class NetFetchActionProvider(ActionProvider):
         decision = getattr(blocked, "decision", None)
         origin = str(getattr(decision, "host", "") or "")
         reason = str(getattr(decision, "reason", "") or "egress blocked")
-        setting = (
-            "Settings → Security → Allowed Egress Hosts (security.egress.allow_hosts)"
+        from gideon.security.net.guard import (
+            EGRESS_OFF_NOTHING_SENT, allow_host_step, where_egress_is_off,
         )
         destination = origin or "the host"
-        action = f"add {destination} to {setting}"
+        action = allow_host_step(destination)
         configured = len(getattr(policy, "allow_hosts", ()) or ())
         recovery = (
             f"{action}, or point the action at a listed host"
             if configured
             else f"no hosts are permitted for automated fetches yet — {action}"
         )
+        hints = tuple(getattr(decision, "recovery_hints", ()) or ())
+        why = "automated fetches are limited to an operator allow-list, which is exclusive: a host that is not on it is refused before the request is made"
+        if getattr(decision, "category", "") == "egress_off":
+            why, recovery, hints = EGRESS_OFF_NOTHING_SENT, where_egress_is_off(), ()
         envelope = AgentError(
             code="ERR_NET_FETCH_EGRESS_BLOCKED",
             what=f"net-fetch did not reach {origin or 'the requested host'}: {reason}",
-            why="automated fetches are limited to an operator allow-list, which is exclusive: a host that is not on it is refused before the request is made",
+            why=why,
             fix=recovery,
-            suggestions=tuple(getattr(decision, "recovery_hints", ()) or ()),
+            suggestions=hints,
         )
         return ActionClock(started).result(
             False,

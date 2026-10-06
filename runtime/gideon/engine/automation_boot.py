@@ -106,47 +106,51 @@ class AutomationBoot:
         observed_at = time.time()
         base_dir = getattr(store, "base_dir", self.home())
         journal = ExecutionJournal(base_dir)
-        for trigger_id in claims.running_ids(now=observed_at, base_dir=base_dir):
+        identities = set(claims.ClaimJournal(base_dir).identities())
+        identities.update(
+            row.trigger.id for row in store.load()
+            if int(getattr(row.trigger, "run_owner_pid", 0) or 0) > 0
+        )
+        for trigger_id in sorted(identities):
             try:
                 stored = store.get(trigger_id)
                 if stored is None:
                     continue
                 trigger = stored.trigger
-                owner_pid = int(getattr(trigger, "run_owner_pid", 0) or 0)
-                if not _owner_provably_dead(owner_pid):
-                    continue
-                claim = claims.read_claim(
-                    trigger_id, now=observed_at, base_dir=base_dir
-                )
-                if claim is None or not claims.release_claim(
-                    trigger_id, base_dir=base_dir
-                ):
-                    continue
-                reason = (
-                    f"interrupted at boot: owner PID {owner_pid} is no longer running"
-                )
-                run_id = f"interrupted-{owner_pid}-{int(observed_at * 1000)}"
-                trigger.last_run_id = run_id
-                trigger.run_owner_pid = 0
-                trigger.health_status = TriggerHealth.DEGRADED.value
-                trigger.last_failure_at = to_iso(observed_at)
-                trigger.last_error_summary = reason
-                store.upsert(trigger)
-                await journal.append(
-                    ExecutionRecord(
-                        run_id=run_id,
-                        job_id=trigger_id,
-                        trigger="interrupted",
-                        started_at=claim.claimed_at,
-                        finished_at=observed_at,
-                        duration_ms=int(
-                            max(0.0, observed_at - claim.claimed_at) * 1000
-                        ),
-                        status="interrupted",
-                        error=reason,
-                    )
-                )
-                interrupted.append(trigger_id)
+                from gideon.automation.triggers.scheduling import Claim
+                from gideon.automation.triggers.service import to_epoch
+                from uuid import uuid4
+
+                holders = claims.read_claims(trigger_id, base_dir=base_dir)
+                legacy_pid = int(getattr(trigger, "run_owner_pid", 0) or 0)
+                if not holders and legacy_pid:
+                    holders = [Claim(trigger_id, "", to_epoch(trigger.last_fired_at) or observed_at,
+                                     owner_pid=legacy_pid)]
+                for claim in holders:
+                    owner_pid = claim.owner_pid
+                    if not owner_pid:
+                        continue
+                    dead = claims.owner_state(owner_pid, claim.owner_identity) is False if claim.owner_identity else _owner_provably_dead(owner_pid)
+                    if not dead:
+                        continue
+                    if claim.holder and not claims.release_claim(trigger_id, base_dir=base_dir, holder=claim.holder):
+                        continue
+                    reason = f"interrupted at boot: owner process {owner_pid} is no longer running with its recorded identity"
+                    run_id = f"interrupted-{owner_pid}-{uuid4().hex}"
+                    trigger.last_run_id = run_id
+                    remaining = claims.read_claims(trigger_id, base_dir=base_dir)
+                    trigger.run_owner_pid = next((active.owner_pid for active in remaining if active.owner_pid), 0)
+                    trigger.health_status = TriggerHealth.DEGRADED.value
+                    trigger.last_failure_at = to_iso(observed_at)
+                    trigger.last_error_summary = reason
+                    store.upsert(trigger)
+                    await journal.append(ExecutionRecord(
+                        run_id=run_id, job_id=trigger_id, trigger="interrupted",
+                        started_at=claim.claimed_at, finished_at=observed_at,
+                        duration_ms=int(max(0.0, observed_at - claim.claimed_at) * 1000),
+                        status="interrupted", error=reason))
+                    if trigger_id not in interrupted:
+                        interrupted.append(trigger_id)
             except Exception:
                 self.logger.warning(
                     "trigger %s: interrupted-run recovery failed",

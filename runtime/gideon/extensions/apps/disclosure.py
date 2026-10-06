@@ -28,6 +28,9 @@ def describe(manifest: AppManifest) -> dict[str, Any]:
             else []
         ),
         "requires": _requires(manifest),
+        "launches": _launches(manifest),
+        "npmPackages": list(manifest.dependencies.npmPackages),
+        "writes": [entry.to_dict() for entry in manifest.writes],
         "providerExecution": (
             manifest.provider.execution if manifest.provider is not None else ""
         ),
@@ -56,9 +59,9 @@ def changed(previous: dict[str, Any] | None, current: dict[str, Any]) -> bool:
     """Whether an update changes the app's install-time grants or runtime behavior."""
     if previous is None:
         return True
-    return json.dumps(previous, sort_keys=True, separators=(",", ":"), default=str) != json.dumps(
-        current, sort_keys=True, separators=(",", ":"), default=str
-    )
+    return json.dumps(
+        previous, sort_keys=True, separators=(",", ":"), default=str
+    ) != json.dumps(current, sort_keys=True, separators=(",", ":"), default=str)
 
 
 def bundle_digest(staged: Path) -> str:
@@ -102,14 +105,19 @@ def _crons(manifest: AppManifest) -> list[dict[str, Any]]:
                 "cadence": cadence,
                 "agent": cron.agent,
                 "message": cron.message,
-                "scheduled": bool(manifest.permissions.cron and has_schedule and cron.name),
+                "agentTier": manifest.permissions.agent_tier,
+                "scheduled": bool(
+                    manifest.permissions.cron and manifest.permissions.agent_tier and has_schedule and cron.name
+                ),
             }
         )
     return jobs
 
 
 def _python_dependencies(manifest: AppManifest) -> list[dict[str, Any]]:
-    requirements = [str(requirement) for requirement in manifest.dependencies.pythonDependencies]
+    requirements = [
+        str(requirement) for requirement in manifest.dependencies.pythonDependencies
+    ]
     if not requirements:
         return []
     try:
@@ -120,7 +128,9 @@ def _python_dependencies(manifest: AppManifest) -> list[dict[str, Any]]:
 
         core = _core_requirement_pins()
     except Exception:
-        logger.debug("app disclosure could not read core package ownership", exc_info=True)
+        logger.debug(
+            "app disclosure could not read core package ownership", exc_info=True
+        )
         return [{"spec": spec, "coreOwned": False} for spec in requirements]
 
     result: list[dict[str, Any]] = []
@@ -212,7 +222,9 @@ def _safe_endpoint(value: str) -> str:
             host = f"[{host}]"
         if parts.port is not None:
             host = f"{host}:{parts.port}"
-        query_keys = sorted({key for key, _value in parse_qsl(parts.query, keep_blank_values=True)})
+        query_keys = sorted(
+            {key for key, _value in parse_qsl(parts.query, keep_blank_values=True)}
+        )
         suffix = f" · query keys: {', '.join(query_keys)}" if query_keys else ""
         return f"Remote server · {parts.scheme}://{host}{parts.path}{suffix}"
     except ValueError:
@@ -230,21 +242,76 @@ def _skills(manifest: AppManifest) -> list[str]:
 
 def _runs_as_you(projection: dict[str, Any]) -> str:
     actions: list[str] = []
-    if any(not dependency["coreOwned"] for dependency in projection["pythonDependencies"]):
+    if any(
+        not dependency["coreOwned"] for dependency in projection["pythonDependencies"]
+    ):
         actions.append("loads declared Python packages into the gateway")
     if projection["hasBackend"]:
         actions.append("starts an app backend")
-    if any(provider["execution"] == "in-process" for provider in projection["providers"]):
+    if any(
+        provider["execution"] == "in-process" for provider in projection["providers"]
+    ):
         actions.append("loads provider code into the gateway")
     if projection["mcpServers"]:
         actions.append("starts or connects to MCP servers")
     if projection["sources"]:
         actions.append("runs connector scripts")
-    if any(
-        projection[key]
-        for key in ("onInstall", "onUpdate", "onEnable", "onDisable", "onUninstall")
-    ) or projection["hooks"]:
+    if (
+        any(
+            projection[key]
+            for key in ("onInstall", "onUpdate", "onEnable", "onDisable", "onUninstall")
+        )
+        or projection["hooks"]
+    ):
         actions.append("runs app lifecycle commands")
+    if projection.get("launches"):
+        programs = [entry["program"] for entry in projection["launches"]]
+        named = [name for name in programs if name != "*"]
+        if named:
+            actions.append("starts " + ", ".join(named))
+        if len(named) != len(programs):
+            actions.append("starts programs you name")
+    if projection.get("npmPackages"):
+        actions.append("installs the declared npm packages")
+    if projection.get("writes"):
+        actions.append("writes to the declared external locations")
     if not actions:
         return ""
     return "This app " + ", and ".join(actions) + "."
+
+
+def _launches(m: AppManifest) -> list[dict[str, Any]]:
+    try:
+        props: dict[str, Any] = {}
+        for p in m.all_providers():
+            props.update((p.settingsSchema or {}).get("properties") or {})
+        out: list[dict[str, Any]] = []
+        for launch in m.launches:
+            cond = launch.inheritsWhile
+            condition: dict[str, Any] | None = None
+            if cond is not None:
+                spec = props.get(cond.setting)
+                spec = spec if isinstance(spec, dict) else {}
+                meta = spec.get("x-meta")
+                label = str(meta.get("label") or "") if isinstance(meta, dict) else ""
+                default = spec.get("default")
+                condition = {
+                    "setting": cond.setting,
+                    "label": label or cond.setting,
+                    "value": cond.value,
+                    "default": default if isinstance(default, bool) else None,
+                }
+            out.append(
+                {
+                    "program": launch.program,
+                    "why": launch.why,
+                    "inherits": list(launch.inherits),
+                    "inheritsWhile": condition,
+                    "npmPackage": launch.npmPackage,
+                    "hosts": list(launch.hosts),
+                }
+            )
+        return out
+    except Exception:
+        logger.debug("disclosure: launches unreadable for %s", m.name, exc_info=True)
+        return []

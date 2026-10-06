@@ -35,6 +35,7 @@ import { useComposerData } from '../../shared/data/useComposerData'
 import type { ComposerValue } from '../../shared/ui/composer/types'
 import type { RouteProps } from '../../app/shell/useQueryState'
 import { InlineError } from '../../shared/ui/InlineError'
+import { WidgetBoundary } from '../../app/shell/ErrorBoundary'
 import { LauncherBubble } from '../../shared/vendor/assistant-ui/elements/launcher-bubble'
 
 export function DashboardPage(route: RouteProps) {
@@ -55,7 +56,7 @@ export function DashboardPage(route: RouteProps) {
 }
           <EntranceGroup className="mx-auto flex w-full flex-col gap-2xl px-l py-xl" style={{ maxWidth: 'var(--content-width)' }}>
             <GideonHomeIntro navigate={route.navigate} />
-            <EntranceRegion><Launcher {...route} /></EntranceRegion>
+            <EntranceRegion><WidgetBoundary what="the launcher"><Launcher {...route} /></WidgetBoundary></EntranceRegion>
 
             {
 }
@@ -64,7 +65,7 @@ export function DashboardPage(route: RouteProps) {
 
             {
 }
-            <SurfaceOverlay surface="dashboard" />
+            <WidgetBoundary what="the dashboard overlay"><SurfaceOverlay surface="dashboard" /></WidgetBoundary>
 
             {
 }
@@ -80,9 +81,9 @@ export function DashboardPage(route: RouteProps) {
             <OverviewDisclosure>
               <Section label="Activity" icon={Activity}><HeroPulse {...route} /></Section>
               <Section label="System status" icon={HardDrive}><SystemRailIsland {...route} /></Section>
-              <CompositionEditor model={composition} />
-              <PinnedTiles viewId={composition.selected?.id || 'overview'} />
-            {custom ? <CoreWidgets tiles={composition.selected!.tiles} route={route} /> : <>
+              <WidgetBoundary what="the layout editor"><CompositionEditor model={composition} /></WidgetBoundary>
+              <WidgetBoundary what="your pinned tiles"><PinnedTiles viewId={composition.selected?.id || 'overview'} /></WidgetBoundary>
+            {custom ? <WidgetBoundary what="your saved layout"><CoreWidgets tiles={composition.selected!.tiles} route={route} /></WidgetBoundary> : <>
             <EntranceRegion className="grid grid-cols-1 gap-2xl lg:grid-cols-2">
               <Section label="Needs you" icon={ListTodo} tour="approvals">
                 <ActionCenter {...route} />
@@ -323,7 +324,7 @@ function Section({ label, icon: Icon, children, tour }: {
         <h2 data-type="label-l" className="text-on-surface-var">{label}</h2>
         <span className="h-px flex-1 bg-outline-variant/40" />
       </div>
-      {children}
+      <WidgetBoundary what={`the ${label} section`}>{children}</WidgetBoundary>
     </section>
   )
 }

@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import uuid
+from dataclasses import dataclass
+from collections.abc import Callable
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal
@@ -105,7 +109,77 @@ def parse_dotenv(text: str) -> dict[str, str]:
     return values
 
 
+KEYCHAIN_NAMESPACE_FILE = "keychain_namespace"
+_keychain_disabled = False
+
+
+def keychain_off() -> Callable[[], None]:
+    global _keychain_disabled
+    previous = _keychain_disabled
+    _keychain_disabled = True
+
+    def restore() -> None:
+        global _keychain_disabled
+        _keychain_disabled = previous
+
+    return restore
+
+
+@dataclass(frozen=True)
+class KeychainNamespace:
+    service: str
+    scope: Literal["default", "own", "unnamed", "unreadable"]
+
+
+def keychain_namespace(home: Path | None = None, *, mint: bool = False) -> KeychainNamespace:
+    try:
+        base = Path(home) if home is not None else _loader.resolve_config_dir()
+        if base.resolve() == _loader.default_config_dir().resolve():
+            return KeychainNamespace(_KEYCHAIN_SERVICE, "default")
+        path = base / KEYCHAIN_NAMESPACE_FILE
+        if mint and not path.exists():
+            from gideon.core.atomic_write import atomic_write
+
+            base.mkdir(parents=True, exist_ok=True)
+            fresh = uuid.uuid4().hex
+            staged = base / f".{KEYCHAIN_NAMESPACE_FILE}.{fresh}.tmp"
+            try:
+                atomic_write(staged, fresh + "\n", mode=0o600, fsync=True)
+                try:
+                    os.link(staged, path)
+                except FileExistsError:
+                    pass
+            finally:
+                staged.unlink(missing_ok=True)
+        try:
+            identifier = path.read_text(encoding="ascii").strip()
+        except FileNotFoundError:
+            return KeychainNamespace("", "unnamed")
+        if re.fullmatch(r"[0-9a-f]{32}", identifier):
+            return KeychainNamespace(f"{_KEYCHAIN_SERVICE}-{identifier}", "own")
+    except (OSError, UnicodeError):
+        logger.debug("keychain namespace unreadable", exc_info=True)
+    return KeychainNamespace("", "unreadable")
+
+
+def keychain_service(home: Path | None = None, *, mint: bool = False) -> str:
+    return keychain_namespace(home, mint=mint).service
+
+
+def keychain_namespace_summary(namespace: KeychainNamespace) -> str:
+    if namespace.scope == "default":
+        return f"{namespace.service} — the default home's"
+    if namespace.scope == "own":
+        return f"{namespace.service} — this home's own"
+    if namespace.scope == "unnamed":
+        return "none yet — named when this home first stores a secret in the keychain"
+    return (f"unreadable — restore the id in {KEYCHAIN_NAMESPACE_FILE}, or remove the file "
+            "to start a new empty namespace; no keychain is used here")
+
+
 def _usable_keyring() -> object | None:
+    if _keychain_disabled:
+        return None
     try:
         import keyring
     except Exception:
@@ -147,12 +221,14 @@ def requested_credential_backend() -> CredentialBackend:
 
 def credential_backend() -> CredentialBackend:
     requested = requested_credential_backend()
-    return requested if requested == "keychain" and keychain_available() else "dotenv"
+    return requested if requested == "keychain" and keychain_available() and keychain_namespace().scope != "unreadable" else "dotenv"
 
 
 def credential_backend_warning() -> str:
     if requested_credential_backend() != "keychain" or credential_backend() != "dotenv":
         return ""
+    if keychain_available():
+        return "keychain requested but " + keychain_namespace_summary(keychain_namespace())
     return "keychain requested but no usable OS keyring backend is available — credentials stay in .env at mode 0600 (never plaintext elsewhere)"
 
 
@@ -162,12 +238,16 @@ def is_config_secret_reference_key(key: str) -> bool:
 
 
 class KeyringStore:
-    def __init__(self, backend):
+    def __init__(self, backend, home: Path | None = None):
         self.backend = backend
+        self.home = home
 
     def index(self) -> list[str]:
+        service = keychain_service(self.home)
+        if not service:
+            return []
         try:
-            raw = self.backend.get_password(_KEYCHAIN_SERVICE, _KEYCHAIN_INDEX_KEY)
+            raw = self.backend.get_password(service, _KEYCHAIN_INDEX_KEY)
         except Exception:
             logger.debug("keychain index unreadable", exc_info=True)
             return []
@@ -186,19 +266,25 @@ class KeyringStore:
         return [name for name in names if name and name != _KEYCHAIN_INDEX_KEY]
 
     def get(self, key: str) -> str:
+        service = keychain_service(self.home)
+        if not service:
+            return ""
         try:
-            return self.backend.get_password(_KEYCHAIN_SERVICE, key) or ""
+            return self.backend.get_password(service, key) or ""
         except Exception:
             logger.debug("keychain read failed for %s", key, exc_info=True)
             return ""
 
     def put(self, key: str, value: str) -> bool:
+        service = keychain_service(self.home, mint=True)
+        if not service:
+            return False
         try:
-            self.backend.set_password(_KEYCHAIN_SERVICE, key, value)
-            names = _keychain_index()
+            self.backend.set_password(service, key, value)
+            names = self.index()
             if key not in names:
                 self.backend.set_password(
-                    _KEYCHAIN_SERVICE,
+                    service,
                     _KEYCHAIN_INDEX_KEY,
                     json.dumps(sorted([*names, key])),
                 )
@@ -210,19 +296,22 @@ class KeyringStore:
         return True
 
     def remove(self, key: str) -> bool:
+        service = keychain_service(self.home)
+        if not service:
+            return keychain_namespace(self.home).scope == "unnamed"
         failures = []
         try:
-            self.backend.delete_password(_KEYCHAIN_SERVICE, key)
+            self.backend.delete_password(service, key)
         except Exception:
-            if _keychain_get(key):
+            if self.get(key):
                 logger.warning("keychain delete failed for %s", key)
                 failures.append("entry")
         try:
-            names = _keychain_index()
+            names = self.index()
             if key in names:
                 retained = sorted(name for name in names if name != key)
                 self.backend.set_password(
-                    _KEYCHAIN_SERVICE, _KEYCHAIN_INDEX_KEY, json.dumps(retained)
+                    service, _KEYCHAIN_INDEX_KEY, json.dumps(retained)
                 )
         except Exception:
             logger.warning("keychain index update failed after deleting %s", key)
@@ -235,23 +324,23 @@ def _keychain_index() -> list[str]:
     return KeyringStore(backend).index() if backend is not None else []
 
 
-def _keychain_get(key: str) -> str:
+def _keychain_get(key: str, home: Path | None = None) -> str:
     backend = _usable_keyring()
-    return KeyringStore(backend).get(key) if backend is not None else ""
+    return KeyringStore(backend, home).get(key) if backend is not None else ""
 
 
 def _keychain_credentials() -> dict[str, str]:
     return {key: value for key in _keychain_index() if (value := _keychain_get(key))}
 
 
-def _keychain_save(key: str, value: str) -> bool:
+def _keychain_save(key: str, value: str, home: Path | None = None) -> bool:
     backend = _usable_keyring()
-    return KeyringStore(backend).put(key, value) if backend is not None else False
+    return KeyringStore(backend, home).put(key, value) if backend is not None else False
 
 
-def _keychain_delete(key: str) -> bool:
+def _keychain_delete(key: str, home: Path | None = None) -> bool:
     backend = _usable_keyring()
-    return KeyringStore(backend).remove(key) if backend is not None else False
+    return KeyringStore(backend, home).remove(key) if backend is not None else False
 
 
 def _dotenv_remove_credentials(keys: Iterable[str]) -> list[str]:
@@ -270,18 +359,19 @@ def _dotenv_names() -> list[str]:
     return DotenvDocument(_loader.env_path()).names()
 
 
-def save_credential(key: str, value: str) -> None:
-    stored = credential_backend() == "keychain" and _keychain_save(key, value)
+def save_credential(key: str, value: str, home: Path | None = None) -> None:
+    stored = credential_backend() == "keychain" and _keychain_save(key, value, home)
     if not stored:
-        _dotenv_save_credential(key, value)
+        DotenvDocument(Path(home) / ".env" if home is not None else _loader.env_path()).upsert(key, value)
     if not is_config_secret_reference_key(key):
         from gideon.integrations.channel_transports import request_reconcile
 
         request_reconcile()
 
 
-def get_credential(key: str) -> str:
-    return _keychain_get(key) or _dotenv_credentials().get(key, "")
+def get_credential(key: str, home: Path | None = None) -> str:
+    document = DotenvDocument(Path(home) / ".env" if home is not None else _loader.env_path())
+    return _keychain_get(key, home) or document.values().get(key, "")
 
 
 def owner_id_credential(provider: str) -> str:
@@ -344,10 +434,12 @@ def credential_names() -> list[str]:
     return sorted(set(_keychain_index()).union(_dotenv_names()))
 
 
-def delete_credential(key: str) -> bool:
-    existed = key in credential_names() or key in os.environ
+def delete_credential(key: str, home: Path | None = None) -> bool:
+    document = DotenvDocument(Path(home) / ".env" if home is not None else _loader.env_path())
+    existed = bool(_keychain_get(key, home)) or key in document.names() or key in os.environ
     if _usable_keyring() is not None:
-        _keychain_delete(key)
-    _dotenv_remove_credentials((key,))
-    os.environ.pop(key, None)
+        _keychain_delete(key, home)
+    document.remove((key,))
+    if home is None or Path(home).resolve() == _loader.resolve_config_dir().resolve():
+        os.environ.pop(key, None)
     return existed

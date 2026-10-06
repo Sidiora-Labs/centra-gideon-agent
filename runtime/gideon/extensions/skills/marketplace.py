@@ -16,7 +16,11 @@ Additional marketplaces (skills.sh, custom registries) register via
 """
 
 import builtins
+import hashlib
+import json
+from collections.abc import Mapping
 import logging
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +32,7 @@ from gideon.core.record_ids import record_path
 logger = logging.getLogger(__name__)
 
 _SKILL_FILENAME = "SKILL.md"
+LOCK_FILENAME = ".gideon-lock.json"
 
 
 class _SkillDiscoveryPaths:
@@ -219,112 +224,201 @@ def _stage_files(files: "list[dict[str, Any]]", staged_skill: Path) -> None:
         out.write_bytes(_entry_bytes(entry))
 
 
-def _write_lock(
-    target_dir: Path, detail: "SkillDetail", source: str, tier: "Any", report: "Any"
+def file_digests(skill_dir: Path) -> dict[str, str]:
+    """Each file in *skill_dir* and the sha256 of its bytes, by its path in the folder.
+
+    The install record itself is left out: it describes the files, it is not one of them. A file
+    that cannot be read is left out too, so a comparison with a record reads it as missing.
+    """
+    skill_dir = Path(skill_dir)
+    out: dict[str, str] = {}
+    for f in sorted(skill_dir.rglob("*")):
+        if not f.is_file():
+            continue
+        rel = f.relative_to(skill_dir).as_posix()
+        if rel == LOCK_FILENAME:
+            continue
+        try:
+            out[rel] = hashlib.sha256(f.read_bytes()).hexdigest()
+        except OSError:
+            continue
+    return out
+
+
+def files_digest(sha256: Mapping[str, str]) -> str:
+    """One digest for a set of files: sha256 over their sorted ``<path>\\0<sha256>`` lines.
+
+    Two folders hold the same files exactly when their digests are equal, whatever their files'
+    times say. The algorithm is a stable contract: :data:`shipped.EARLIER_VERSIONS` holds digests
+    of versions that shipped before install records were kept.
+    """
+    lines = "".join(f"{rel}\0{sha256[rel]}\n" for rel in sorted(sha256))
+    return hashlib.sha256(lines.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class InstallRecord:
+    """What a skill folder's install record says was installed: its source, and each file."""
+
+    source: str
+    sha256: dict[str, str]
+
+    @property
+    def digest(self) -> str:
+        return files_digest(self.sha256)
+
+
+class DamagedInstallRecord(ValueError):
+    """A skill's install record is there and cannot be read as one, so nothing can say what was
+    installed in its folder."""
+
+
+def install_record(skill_dir: Path) -> InstallRecord | None:
+    """The install record in *skill_dir*, or ``None`` when it has none (nothing installed it).
+
+    Raises :class:`DamagedInstallRecord` when ``.gideon-lock.json`` is there but is not a record:
+    unreadable, not JSON, not an object, or without a ``sha256`` map of file paths to digests.
+    """
+    path = Path(skill_dir) / LOCK_FILENAME
+    if not path.exists() and not path.is_symlink():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise DamagedInstallRecord(f"{path.name} cannot be read: {exc}") from exc
+    if not isinstance(data, dict):
+        raise DamagedInstallRecord(f"{path.name} is not an object")
+    digests = data.get("sha256")
+    if not isinstance(digests, dict) or not all(
+        isinstance(rel, str) and isinstance(digest, str) for rel, digest in digests.items()
+    ):
+        raise DamagedInstallRecord(f"{path.name} holds no digest of the files installed")
+    source = data.get("source")
+    return InstallRecord(source=source if isinstance(source, str) else "", sha256=dict(digests))
+
+
+def write_install_record(
+    skill_dir: Path,
+    *,
+    skill_id: str,
+    source: str,
+    trust_tier: str,
+    verdict: str,
+    sha256: Mapping[str, str],
 ) -> None:
-    """Record install provenance + an integrity baseline in ``<skill>/.gideon-lock.json``:
-    id, source, tier, verdict, per-file sha256, timestamp. A later integrity lint (S6)
-    compares on-disk sha256 vs this to detect a skill mutated after install."""
-    import hashlib
-    import json
+    """Record in *skill_dir* that *sha256* (each file and its digest) was installed there from
+    *source*, scanned at *trust_tier* with *verdict*. Atomic; a failure to write it is logged and
+    leaves the skill without a record, which reads as unverified."""
     import time
 
-    skill_dir = Path(target_dir) / (detail.name or detail.id)
-    if not skill_dir.is_dir():
-        return
-    hashes: dict[str, str] = {}
-    for entry in detail.files:
-        rel = entry.get("path", "")
-        if rel and ".." not in rel and not rel.startswith("/"):
-            hashes[rel] = hashlib.sha256(_entry_bytes(entry)).hexdigest()
-    lock = {
-        "id": detail.id,
+    from gideon.core.atomic_write import atomic_json_write
+
+    record = {
+        "id": skill_id,
         "source": source,
-        "trust_tier": getattr(tier, "value", str(tier)),
-        "verdict": getattr(report.verdict, "value", str(report.verdict)),
-        "sha256": hashes,
+        "trust_tier": trust_tier,
+        "verdict": verdict,
+        "sha256": dict(sha256),
         "installed_at": time.time(),
     }
     try:
-        (skill_dir / ".gideon-lock.json").write_text(
-            json.dumps(lock, indent=2), encoding="utf-8"
-        )
+        atomic_json_write(Path(skill_dir) / LOCK_FILENAME, record)
     except OSError:
-        logger.debug("could not write skill lock file for %s", skill_dir, exc_info=True)
+        logger.warning("could not write the install record of %s", skill_dir, exc_info=True)
+
+
+def payload_digests(files: "list[dict[str, Any]]") -> dict[str, str]:
+    """Each file of an install payload and the sha256 of the bytes it writes
+    (:func:`_entry_bytes`), the install record left out."""
+    return {
+        str(entry.get("path", "")): hashlib.sha256(_entry_bytes(entry)).hexdigest()
+        for entry in files
+        if entry.get("path") and entry.get("path") != LOCK_FILENAME
+    }
+
+
+def _write_lock(
+    target_dir: Path, detail: "SkillDetail", source: str, tier: "Any", report: "Any"
+) -> None:
+    """Record what an install wrote (:func:`write_install_record`): the payload's files, which
+    are exactly the folder's files (:func:`install_skill_files`), from *source* at *tier*."""
+    skill_dir = Path(target_dir) / (detail.name or detail.id)
+    if not skill_dir.is_dir():
+        return
+    write_install_record(
+        skill_dir,
+        skill_id=detail.id,
+        source=source,
+        trust_tier=getattr(tier, "value", str(tier)),
+        verdict=getattr(report.verdict, "value", str(report.verdict)),
+        sha256=payload_digests(detail.files),
+    )
+
+
+#: The four answers to "are this skill's files what was installed?". ``intact``: exactly what its
+#: record holds. ``edited``: changed since (a file changed, added or removed), whoever changed
+#: it: the owner's save in the skill editor, a change she made to the files, Gideon's own
+#: writers. ``tampered``: its record is there and cannot be read (:class:`DamagedInstallRecord`),
+#: so nothing can say what was installed; an edit never touches the record. ``unverified``: no
+#: record, so nothing installed it, or it was installed before records were kept.
+INTACT = "intact"
+EDITED = "edited"
+TAMPERED = "tampered"
+UNVERIFIED = "unverified"
 
 
 @dataclass
 class IntegrityReport:
-    """S6 post-install integrity check for one skill vs its ``.gideon-lock.json``.
-
-    ``ok`` is True when every locked file's on-disk sha256 matches the baseline recorded
-    at install. ``mutated`` / ``missing`` / ``added`` name the drift so a tamper (a skill
-    edited on disk after a clean install) is visible. ``unlocked`` = no lock file (a
-    pre-gate or hand-placed skill — not a failure, just unverifiable)."""
+    """One skill's files compared with its install record. ``state`` is one of the four answers
+    above; ``mutated`` / ``missing`` / ``added`` name what changed, for an ``edited`` skill."""
 
     skill: str
-    ok: bool = True
-    unlocked: bool = False
-    mutated: list[str] = field(default_factory=list)
-    missing: list[str] = field(default_factory=list)
-    added: list[str] = field(default_factory=list)
+    state: str = UNVERIFIED
+    mutated: list[str] = field(default_factory=list)  # a recorded file whose bytes changed
+    missing: list[str] = field(default_factory=list)  # a recorded file now gone
+    added: list[str] = field(default_factory=list)  # a file the record does not hold
+    #: The digest of the folder's files as they are (:func:`files_digest`), when it was read.
+    digest: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.state == INTACT
+
+    @property
+    def unlocked(self) -> bool:
+        return self.state == UNVERIFIED
 
     def summary(self) -> str:
-        if self.unlocked:
-            return f"{self.skill}: no lock (unverifiable)"
-        if self.ok:
+        if self.state == UNVERIFIED:
+            return f"{self.skill}: no install record (unverifiable)"
+        if self.state == TAMPERED:
+            return f"{self.skill}: its install record is damaged, so what was installed is unknown"
+        if self.state == INTACT:
             return f"{self.skill}: intact"
         parts = []
         if self.mutated:
-            parts.append(f"{len(self.mutated)} mutated")
+            parts.append(f"{len(self.mutated)} changed")
         if self.missing:
             parts.append(f"{len(self.missing)} missing")
         if self.added:
             parts.append(f"{len(self.added)} added")
-        return f"{self.skill}: TAMPERED ({', '.join(parts)})"
+        return f"{self.skill}: edited ({', '.join(parts)})"
 
 
 def verify_skill_integrity(skill_dir: Path) -> IntegrityReport:
-    """S6: compare a skill's on-disk file hashes against its ``.gideon-lock.json`` baseline
-    to detect post-install mutation (a skill edited/replaced after a clean install — the
-    tamper case a static install-time scan can't catch on its own). Content-only:
-    ``.gideon-lock.json`` itself is excluded. Emits a SEL audit on detected tamper."""
-    import hashlib
-    import json
+    """Compare a skill's files with its install record (:func:`install_record`).
 
+    Its owner's edit reads ``edited``, with what changed, and never as tampering: Gideon
+    cannot tell who changed a file in the home, and a change to a skill there is the owner's to
+    make. A damaged record is the one finding that is not an edit; it reads ``tampered`` and is
+    written to the security log.
+    """
     skill_dir = Path(skill_dir)
     name = skill_dir.name
-    lock_path = skill_dir / ".gideon-lock.json"
-    if not lock_path.is_file():
-        return IntegrityReport(skill=name, unlocked=True)
     try:
-        locked = (json.loads(lock_path.read_text(encoding="utf-8")) or {}).get(
-            "sha256", {}
-        )
-    except (OSError, json.JSONDecodeError):
-        return IntegrityReport(skill=name, unlocked=True)
-
-    rep = IntegrityReport(skill=name)
-    on_disk: dict[str, str] = {}
-    for f in sorted(skill_dir.rglob("*")):
-        if not f.is_file() or f.name == ".gideon-lock.json":
-            continue
-        rel = f.relative_to(skill_dir).as_posix()
-        try:
-            on_disk[rel] = hashlib.sha256(f.read_bytes()).hexdigest()
-        except OSError:
-            continue
-    for rel, want in locked.items():
-        got = on_disk.get(rel)
-        if got is None:
-            rep.missing.append(rel)
-        elif got != want:
-            rep.mutated.append(rel)
-    for rel in on_disk:
-        if rel not in locked:
-            rep.added.append(rel)
-    rep.ok = not (rep.mutated or rep.missing or rep.added)
-    if not rep.ok:
+        record = install_record(skill_dir)
+    except DamagedInstallRecord as exc:
+        rep = IntegrityReport(skill=name, state=TAMPERED)
         try:
             from gideon.security.sel import sel
 
@@ -334,10 +428,23 @@ def verify_skill_integrity(skill_dir: Path) -> IntegrityReport:
                 outcome="tampered",
                 source="skills",
                 resources=name,
-                error=rep.summary(),
+                error=str(exc),
             )
         except Exception:
             logger.debug("integrity SEL audit failed", exc_info=True)
+        return rep
+    on_disk = file_digests(skill_dir)
+    if record is None:
+        return IntegrityReport(skill=name, state=UNVERIFIED, digest=files_digest(on_disk))
+    rep = IntegrityReport(skill=name, digest=files_digest(on_disk))
+    for rel, want in record.sha256.items():
+        got = on_disk.get(rel)
+        if got is None:
+            rep.missing.append(rel)
+        elif got != want:
+            rep.mutated.append(rel)
+    rep.added = [rel for rel in on_disk if rel not in record.sha256]
+    rep.state = EDITED if (rep.mutated or rep.missing or rep.added) else INTACT
     return rep
 
 
@@ -365,25 +472,39 @@ class SkillsRegistry:
 
     def __init__(self) -> None:
         self._marketplaces: dict[str, SkillsMarketplace] = {}
+        self._lock = threading.RLock()
 
     def register(self, name: str, marketplace: SkillsMarketplace) -> None:
-        self._marketplaces[name] = marketplace
+        from gideon.extensions.apps.code_provenance import keep
+
+        with self._lock:
+            self._marketplaces[name] = marketplace
+            keep(lambda: self._forget(name, marketplace))
+
+    def _forget(self, name: str, marketplace: SkillsMarketplace) -> None:
+        """A retired owner's callback cannot remove a replacement registration."""
+        with self._lock:
+            if self._marketplaces.get(name) is marketplace:
+                del self._marketplaces[name]
 
     def unregister(self, name: str) -> None:
         """Remove a registered marketplace. Idempotent — a name that was never registered
         is a no-op. Used by transient, single-operation sources (a pack import registers a
         ``PackMarketplace`` for one commit, then unregisters it — it is not a public
         marketplace and must not outlive the import)."""
-        self._marketplaces.pop(name, None)
+        with self._lock:
+            self._marketplaces.pop(name, None)
 
     def get(self, name: str) -> SkillsMarketplace:
-        mp = self._marketplaces.get(name)
+        with self._lock:
+            mp = self._marketplaces.get(name)
         if mp is None:
             raise KeyError(f"No skills marketplace registered as {name!r}")
         return mp
 
     def list(self) -> "list[str]":
-        return sorted(self._marketplaces)
+        with self._lock:
+            return sorted(self._marketplaces)
 
     # `builtins.list`, not `list`: this class defines a method named `list` (just above), which
     # shadows the builtin inside its own annotation scope — so `"list[dict[str, str]]"` resolved
@@ -392,10 +513,9 @@ class SkillsRegistry:
     # the first caller that did got `"list?[dict[str, str]]" has no attribute "__iter__"`.
     # Qualifying the name states the type correctly instead of suppressing the complaint.
     def info(self) -> "builtins.list[dict[str, str]]":
-        return [
-            {"name": n, "type": mp.marketplace_type, "trust_tier": mp.trust_tier}
-            for n, mp in sorted(self._marketplaces.items())
-        ]
+        with self._lock:
+            rows = sorted(self._marketplaces.items())
+        return [{"name": n, "type": mp.marketplace_type, "trust_tier": mp.trust_tier} for n, mp in rows]
 
     def install_guarded(
         self,
@@ -541,8 +661,11 @@ def install_scanned(
                                      if finding.severity is Verdict.WARNING}))
             _audit_install(source, skill_id, tier, report, outcome="accepted", rules=rules)
 
-        written = install_skill_files(detail.files, detail.name or skill_id, target_dir)
-        _write_lock(target_dir, detail, source, tier, report)
+        from gideon.extensions.skills.loader import hold_library
+
+        with hold_library():
+            written = install_skill_files(detail.files, detail.name or skill_id, target_dir)
+            _write_lock(target_dir, detail, source, tier, report)
         _audit_install(source, skill_id, tier, report, outcome="installed")
         return InstallResult(path=written, report=report, tier=tier)
     finally:
@@ -677,16 +800,31 @@ def install_skill_files(
                 f"skill install refused: scanner flagged {rel_path!r} as dangerous ({cats})"
             )
 
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    written_skill_md: Path | None = None
-    for file_entry in files:
-        rel_path = file_entry.get("path", "")
-        out_path = skill_dir / rel_path
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        if rel_path.endswith("SKILL.md") or rel_path == "SKILL.md":
-            written_skill_md = out_path
-        out_path.write_bytes(_entry_bytes(file_entry))
+    import os
+    import shutil
+    import tempfile
+    import uuid
 
-    if written_skill_md is None:
+    if not any(entry.get("path") == "SKILL.md" for entry in files):
         raise ValueError(f"No SKILL.md found in files for skill {skill_name!r}")
-    return written_skill_md
+    target_base.mkdir(parents=True, exist_ok=True)
+    if skill_dir.is_symlink():
+        raise ValueError("Skill folder must not be a symbolic link")
+    stage = Path(tempfile.mkdtemp(prefix=".skill-install-", dir=target_base))
+    backup = target_base / f".skill-backup-{uuid.uuid4().hex}"
+    try:
+        _stage_files(files, stage)
+        if skill_dir.exists():
+            os.replace(skill_dir, backup)
+        try:
+            os.replace(stage, skill_dir)
+        except BaseException:
+            if backup.exists():
+                os.replace(backup, skill_dir)
+            raise
+        if backup.exists():
+            shutil.rmtree(backup)
+    finally:
+        if stage.exists():
+            shutil.rmtree(stage)
+    return skill_dir / "SKILL.md"

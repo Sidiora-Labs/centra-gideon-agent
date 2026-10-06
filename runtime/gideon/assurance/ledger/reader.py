@@ -15,6 +15,7 @@ from gideon.assurance.ledger.kinds import (
     STEP_CACHED,
     STEP_COMPLETED,
     STEP_FAILED,
+    STEP_CANCELLED,
 )
 from gideon.assurance.ledger.writer import EVENTS_FILE, JOURNAL_FILE, LedgerStore
 
@@ -100,6 +101,7 @@ def run_totals(store: LedgerStore, run_id: str) -> dict[str, Any]:
     steps = 0
     failures = 0
     cached = 0
+    cancelled = 0
     priced = True
     for rec in store.read_jsonl(run_id, EVENTS_FILE):
         kind = rec.get("kind")
@@ -115,8 +117,14 @@ def run_totals(store: LedgerStore, run_id: str) -> dict[str, Any]:
             cost += float(rec.get("cost_usd", 0.0) or 0.0)
             if rec.get("cost_usd") is None:
                 priced = False
-        elif kind == STEP_FAILED:
-            failures += 1
+        elif kind in (STEP_FAILED, STEP_CANCELLED):
+            if kind == STEP_FAILED:
+                failures += 1
+            else:
+                cancelled += 1
+                cost += float(rec.get("cost_usd", 0.0) or 0.0)
+                if rec.get("cost_usd") is None:
+                    priced = False
             # Failed/retried attempts spend tokens too. Older rows have no token key and
             # therefore do not change the aggregate; a present null remains unknown.
             if "tokens" in rec and tokens is not None:
@@ -135,4 +143,5 @@ def run_totals(store: LedgerStore, run_id: str) -> dict[str, Any]:
         "steps_completed": steps,
         "steps_failed": failures,
         "steps_cached": cached,
+        "steps_cancelled": cancelled,
     }

@@ -243,6 +243,16 @@ def _save_credentials(names: list[str], values: dict[str, str]) -> list[str]:
     reason nobody can name, so refuse before writing the server.
     """
     from gideon.integrations.llm.credentials import CredentialStore
+    from gideon.security.secrets_vault import (
+        PROJECT_KEY_PREFIX, is_reserved_key, is_sign_in_key, valid_key_name,
+    )
+    unusable = [name for name in names if not valid_key_name(name)
+                or is_reserved_key(name) or name.startswith(PROJECT_KEY_PREFIX)
+                or is_sign_in_key(name)]
+    if unusable:
+        raise ConnectorResolutionError(
+            f"the pack names credential(s) Gideon cannot store for it: {', '.join(sorted(unusable))}"
+        )
 
     home = config_dir()
     missing = [n for n in names if not values.get(n)]
@@ -253,16 +263,8 @@ def _save_credentials(names: list[str], values: dict[str, str]) -> list[str]:
     if not names:
         return []
     store = CredentialStore(home)
-    descriptors: dict[str, dict[str, object]] = {
-        c.name: {"type": c.kind} for c in store.list()
-    }
     for name in names:
-        descriptors[name] = {"type": "static_token", "value_env": name}
-    store.save(descriptors)
-    from gideon.core.config.credentials import save_credential
-
-    for name in names:
-        save_credential(name, values[name])
+        store.put(name, {"type": "static_token", "value": values[name]})
     return list(names)
 
 

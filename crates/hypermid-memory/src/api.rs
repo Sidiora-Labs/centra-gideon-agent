@@ -353,6 +353,22 @@ impl MemoryApi {
             })
     }
 
+    pub fn list_records_after(
+        &mut self, context: &AuthContext, request: &AccessRequest,
+        category: Option<&str>, status: Option<crate::RecordStatus>,
+        after_id: Option<&Id>, limit: usize,
+    ) -> MemoryResult<RecordList> {
+        if request.operation != GrantOperation::Read
+            || request.category.as_deref().is_some_and(|allowed| category != Some(allowed)) {
+            return Err(denied("record listing requires read authority"));
+        }
+        self.store.immediate_access(context, request, |transaction, _| {
+            let (cursor, records) = crate::records::list_records_after(transaction.raw(),
+                &request.target_scope, category, status, after_id, limit)?;
+            Ok(RecordList { records, cursor })
+        })
+    }
+
     pub fn search(
         &mut self,
         context: &AuthContext,
@@ -375,9 +391,55 @@ impl MemoryApi {
             .immediate_authorized(context, request, |transaction, authorization| {
                 transaction.reauthorize(context, request, authorization)?;
                 transaction.ensure_scope(&request.target_scope, now_i64)?;
+                if context.request.resource_id.as_str() == "memory-embedding" {
+                    let prior = embedding::active_embedding(transaction.raw(), &request.target_scope)?
+                        .ok_or_else(|| denied("embedding rebind requires an enabled scoped registration"))?;
+                    if prior.mode == embedding::EmbeddingMode::Off {
+                        return Err(denied("embedding rebind requires an enabled scoped registration"));
+                    }
+                }
                 embedding::register_embedding(transaction.raw(), registration, now_ms)?;
                 transaction.advance_cursor(&request.target_scope, now_i64)
             })
+    }
+
+    pub fn publish_embedding(
+        &mut self,
+        context: &AuthContext,
+        request: &MutationRequest,
+        guard: &embedding::PublicationGuard,
+        response: embedding::ProviderEmbedding,
+        now_ms: u64,
+    ) -> MemoryResult<Cursor> {
+        self.require_ready()?;
+        if request.operation != crate::Operation::Embed
+            || request.record_id.as_ref() != Some(&guard.record_id)
+            || request.revision != crate::model::RevisionPrecondition::Match(guard.revision_digest)
+        {
+            return Err(denied("embedding publication requires its exact record revision"));
+        }
+        let now_i64 = timestamp(now_ms)?;
+        self.store.immediate_authorized(context, request, |transaction, authorization| {
+            transaction.reauthorize(context, request, authorization)?;
+            let category: String = transaction.raw().query_row(
+                "SELECT category FROM memory_records WHERE record_id=?1",
+                [guard.record_id.as_str()], |row| row.get(0),
+            ).map_err(|_| denied("embedding record is unavailable"))?;
+            if request.category.as_deref() != Some(category.as_str()) {
+                return Err(denied("embedding publication requires the record category"));
+            }
+            let registration = embedding::active_embedding(transaction.raw(), &request.target_scope)?
+                .ok_or_else(|| denied("embedding publication requires an active scoped registration"))?;
+            if registration.registration_id != guard.registration_id
+                || registration.fingerprint != guard.registration_fingerprint
+            {
+                return Err(denied("embedding registration changed during inference"));
+            }
+            let candidate = embedding::validate_provider_embedding(&registration, guard.content_digest, response)
+                .map_err(|_| denied("embedding output is incompatible with the scoped registration"))?;
+            embedding::publish_embedding(transaction.raw(), guard, candidate, now_ms)?;
+            transaction.advance_cursor(&request.target_scope, now_i64)
+        })
     }
 
     pub fn retire_embedding(

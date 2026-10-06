@@ -1,5 +1,5 @@
 
-import type { ChatFileChange, SpawnMemoryReceipt } from '../../shared/data/api'
+import type { ChatFileChange, SpawnMemoryReceipt, OwnerQuestionPayload } from '../../shared/data/api'
 
 export interface TextSegment { kind: 'text'; text: string }
 
@@ -52,11 +52,28 @@ export interface ApprovalSegment {
   tool: string
   input?: string
   purpose?: string
-  risk?: 'safe' | 'caution' | 'destructive'
+  risk?: 'safe' | 'caution' | 'destructive' | 'unchecked'
+  denyConsequence?: import("./denyConsequence").DenyConsequence
+  blastRadius?: import('./approvalMeta').BlastRadius
+  protectedDelete?: string
   toolKind?: string
   canRevise?: boolean
 
   resolved?: string
+}
+
+export interface QuestionSegment extends OwnerQuestionPayload { kind: 'question' }
+
+export function decodeOwnerQuestion(raw: unknown): QuestionSegment | null {
+  if (!raw || typeof raw !== 'object') return null
+  const q = raw as OwnerQuestionPayload
+  if (typeof q.id !== 'string' || !q.id || typeof q.session !== 'string'
+    || !Array.isArray(q.questions) || !q.questions.length
+    || !q.questions.every((item) => item && typeof item.question === 'string' && typeof item.header === 'string'
+      && typeof item.multiSelect === 'boolean' && Array.isArray(item.options) && item.options.length
+      && item.options.every((option) => typeof option.label === 'string' && typeof option.description === 'string'))
+    || !['pending', 'answered', 'skipped', 'expired', 'cancelled', 'unanswerable'].includes(q.outcome)) return null
+  return { ...q, kind: 'question', answerable: q.answerable === true }
 }
 
 export interface ActivitySegment {
@@ -68,7 +85,7 @@ export interface ErrorSegment { kind: 'error'; text: string }
 
 export interface ThinkingSegment { kind: 'thinking'; text: string }
 
-export type Segment = TextSegment | ToolSegment | ApprovalSegment | ActivitySegment | ErrorSegment | ThinkingSegment
+export type Segment = TextSegment | ToolSegment | ApprovalSegment | QuestionSegment | ActivitySegment | ErrorSegment | ThinkingSegment
 
 export const appendThinking = (segs: Segment[], chunk: string): Segment[] => {
   if (!chunk) return segs
@@ -219,7 +236,7 @@ export function deriveActivity(turns: ChatTurn[]): ChatActivity {
   return { files: [...files.values()], links: [...links.values()] }
 }
 
-export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { kind?: string; id?: string; state?: string; outcome?: string | null; tool_call_id?: string; turn_id?: string; turn_origin?: string; approval_id?: string; tool_kind?: string; can_revise?: boolean; input?: string; tool_input?: string; purpose?: string; risk?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; image_delivery?: ImageDeliveryMap; image_delivery_reason?: ImageDeliveryReasonMap; turn_telemetry?: { line?: string }; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[]; file_changes?: ChatFileChange[] } }
+export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { owner_question?: OwnerQuestionPayload; finish_reason?: string; cut_off?: { adapter: string; missing: string; model?: string }; kind?: string; id?: string; state?: string; outcome?: string | null; tool_call_id?: string; turn_id?: string; turn_origin?: string; approval_id?: string; tool_kind?: string; can_revise?: boolean; input?: string; tool_input?: string; purpose?: string; risk?: string; deny_consequence?: import("./denyConsequence").DenyConsequence; blast_radius?: import('./approvalMeta').BlastRadius; protected_delete?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; image_delivery?: ImageDeliveryMap; image_delivery_reason?: ImageDeliveryReasonMap; turn_telemetry?: { line?: string }; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[]; file_changes?: ChatFileChange[] } }
 
 export function stopOutcomeForMessage(message: HistMsg): StopOutcome | null {
   const meta = message.meta
@@ -274,6 +291,14 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
   }
 
   for (const m of messages) {
+    const question = decodeOwnerQuestion(m.meta?.owner_question)
+    if (question) {
+      const at = lastAssistant(m.meta?.turn_id)
+      const existing = at.segments.findIndex((seg) => seg.kind === 'question' && seg.id === question.id)
+      if (existing >= 0) at.segments[existing] = question
+      else at.segments.push(question)
+      if (m.role === 'tool' || m.role === 'tool_call') continue
+    }
     if (m.role === 'user') {
       visible += 1
       const text = m.content.trim()
@@ -348,9 +373,9 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       }
     } else if (m.role === 'permission') {
       const resolved = m.meta?.resolved || undefined
-      lastAssistant(m.meta?.turn_id).segments.push({ kind: 'approval', id: m.meta?.approval_id || m.meta?.tool_call_id || `perm-${turns.length}`, tool: toolName(m.meta, m.content), toolKind: m.meta?.tool_kind, canRevise: m.meta?.can_revise === true, input: m.meta?.input || m.meta?.tool_input, purpose: m.meta?.purpose, risk: m.meta?.risk as ApprovalSegment['risk'], resolved })
+      lastAssistant(m.meta?.turn_id).segments.push({ kind: 'approval', id: m.meta?.approval_id || m.meta?.tool_call_id || `perm-${turns.length}`, tool: toolName(m.meta, m.content), toolKind: m.meta?.tool_kind, canRevise: m.meta?.can_revise === true, input: m.meta?.input || m.meta?.tool_input, purpose: m.meta?.purpose, risk: m.meta?.risk as ApprovalSegment['risk'], blastRadius: m.meta?.blast_radius, denyConsequence: m.meta?.deny_consequence, protectedDelete: m.meta?.protected_delete, resolved })
     } else if (m.role === 'error') {
-      lastAssistant().segments.push({ kind: 'error', text: m.content })
+      lastAssistant(m.meta?.turn_id).segments.push({ kind: 'error', text: m.content })
     } else if (m.role === 'system') {
       const outcome = stopOutcomeForMessage(m)
       const previous = turns[turns.length - 1]

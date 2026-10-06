@@ -142,14 +142,16 @@ class WakeupFactory:
         trigger_id = str(
             getattr(trigger, "id", "") or getattr(fire, "trigger_id", "") or ""
         )
+        claim_holder = str(getattr(getattr(fire, "claim", None), "holder", "") or "")
         target = resume_target_of(trigger)
         if target:
-            return self.resume(trigger_id, "", dict(trigger_id=trigger_id, **target))
+            return self.resume(trigger_id, "", dict(trigger_id=trigger_id, claim_holder=claim_holder, **target))
         fields = {
             "trigger_id": trigger_id,
             "kind": str(getattr(trigger, "kind", "") or ""),
             "scheduled_for": float(getattr(fire, "scheduled_for", 0) or 0),
             "reason": str(getattr(fire, "reason", "") or ""),
+            "claim_holder": claim_holder,
         }
         binding = str(getattr(trigger, "session", "") or "")
         return Wakeup(

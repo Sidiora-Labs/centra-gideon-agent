@@ -130,6 +130,7 @@ class BashActionProvider(ActionProvider):
             PROFILE_TOOL,
             build_child_env,
             create_subprocess_limited,
+            no_network_note,
             wrap_argv,
         )
 
@@ -137,7 +138,10 @@ class BashActionProvider(ActionProvider):
         variables = _payload_env(ctx)
         variables.update(GIDEON_HOOK_EVENT=ctx.event, GIDEON_HOOK_CONTEXT=ctx.context)
         environment = build_child_env(site="bash-action", extra=variables)
-        argv, disposable = wrap_argv(["/bin/sh", "-c", command])
+        try:
+            argv, disposable = wrap_argv(["/bin/sh", "-c", command])
+        except PermissionError as error:
+            return clock.result(False, error=str(error))
         owned = CommandProcess(disposable)
         try:
             owned.process = await create_subprocess_limited(
@@ -153,6 +157,8 @@ class BashActionProvider(ActionProvider):
             output = await owned.capture(json.dumps(ctx.payload).encode(), deadline)
             status = owned.process.returncode or 0
             decoded = [stream.decode(errors="replace").strip() for stream in output]
+            if status not in (0, 2) and (note := no_network_note()):
+                decoded[1] = f"{decoded[1]}\n{note}".strip()
             return clock.result(
                 status == 0,
                 exit_code=status,

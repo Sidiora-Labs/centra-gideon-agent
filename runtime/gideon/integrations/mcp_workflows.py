@@ -24,6 +24,7 @@ can actually fix and retry.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 from typing import Any
@@ -33,6 +34,7 @@ from gideon.automation.workflows import intent as intent_mod
 from gideon.automation.workflows import rigor as rigor_mod
 from gideon.automation.workflows import service, template_pipeline
 from gideon.automation.workflows.context_block import needs_staging, staged_spec_echo
+from gideon.security.safety_flags import yes_or_no
 
 logger = logging.getLogger(__name__)
 
@@ -532,6 +534,14 @@ def _run(coro: Any) -> Any:
         return pool.submit(asyncio.run, coro).result()
 
 
+def _on_engine(work: Any) -> Any:
+    supervisor = _supervisor()
+    if supervisor is None or supervisor.event_loop is None:
+        answer = work(None)
+        return _run(answer) if inspect.isawaitable(answer) else answer
+    return supervisor.run_threadsafe(lambda: work(supervisor))
+
+
 def _fmt(body: dict[str, Any], *, summary: str = "") -> str:
     """Render a service result for the model.
 
@@ -567,8 +577,20 @@ def _call_tool(name: str, args: dict[str, Any]) -> str:
 
 
 def _dispatch(name: str, args: dict[str, Any]) -> str:
-    args = args or {}
+    args = dict(args or {})
+    definition = next((item for item in _list_tools() if item["name"] == name), {})
+    for field, spec in definition.get("inputSchema", {}).get("properties", {}).items():
+        if spec.get("type") == "boolean" and field in args:
+            parsed = yes_or_no(args[field])
+            if parsed is None:
+                return _fmt({"ok": False, "code": "field_not_a_boolean", "message": f"{field} must be a boolean"})
+            args[field] = parsed
     run_id = str(args.get("run_id", "") or "")
+    if run_id:
+        from gideon.automation.workflows import chat_runs, store
+        run = store.get(run_id)
+        if run is not None and not chat_runs.reads(run, **chat_runs.current_reader()):
+            return _fmt({"ok": False, "code": "WF_RUN_NOT_FOUND", "message": f"no run {run_id!r}"})
 
     if name == "workflow_manifest":
         return _fmt(
@@ -615,20 +637,19 @@ def _dispatch(name: str, args: dict[str, Any]) -> str:
 
     if name == "workflow_start":
         return _fmt(
-            _run(
-                service.start_run(
+            _on_engine(lambda supervisor: service.start_run(
                     name=str(args.get("name", "") or ""),
+                    session_key=_current_session_id(),
                     inputs=(
                         args.get("inputs")
                         if isinstance(args.get("inputs"), dict)
                         else None
                     ),
                     mode=str(args.get("mode", "background") or "background"),
-                    supervisor=_supervisor(),
+                    supervisor=supervisor,
                     project_id=str(args.get("project_id", "") or ""),
                     idempotency_key=str(args.get("idempotency_key", "") or ""),
-                )
-            ),
+                )),
             summary="Workflow run started.",
         )
 
@@ -649,15 +670,15 @@ def _dispatch(name: str, args: dict[str, Any]) -> str:
             return _fmt(service.preview_edit(run_id, ops))
         expect = args.get("expect_version")
         return _fmt(
-            service.edit_run(
+            _on_engine(lambda supervisor: service.edit_run(
                 run_id,
                 ops,
-                supervisor=_supervisor(),
+                supervisor=supervisor,
                 expect_version=(
                     int(expect) if isinstance(expect, (int, float)) else None
                 ),
                 confirm_cascade=bool(args.get("confirm_cascade")),
-            )
+            ))
         )
 
     if name == "workflow_skip":
@@ -665,72 +686,72 @@ def _dispatch(name: str, args: dict[str, Any]) -> str:
         if not isinstance(node_ids, list) or not node_ids:
             return "Error [WF_NO_NODE_IDS]: 'node_ids' must be a non-empty array."
         return _fmt(
-            service.skip_nodes(
-                run_id, [str(n) for n in node_ids], supervisor=_supervisor()
-            )
+            _on_engine(lambda supervisor: service.skip_nodes(
+                run_id, [str(n) for n in node_ids], supervisor=supervisor
+            ))
         )
 
     if name == "workflow_rewind":
         return _fmt(
-            service.rewind_run(
+            _on_engine(lambda supervisor: service.rewind_run(
                 run_id,
                 str(args.get("node_id", "") or ""),
-                supervisor=_supervisor(),
+                supervisor=supervisor,
                 redo_effects=bool(args.get("redo_effects")),
                 force=bool(args.get("force")),
                 confirm_cascade=bool(args.get("confirm_cascade")),
-            )
+            ))
         )
 
     if name == "workflow_run_from":
         return _fmt(
-            service.run_from(
+            _on_engine(lambda supervisor: service.run_from(
                 run_id,
                 str(args.get("node_id", "") or ""),
-                supervisor=_supervisor(),
+                supervisor=supervisor,
                 confirm_cascade=bool(args.get("confirm_cascade")),
-            )
+            ))
         )
 
     if name == "workflow_fork":
         return _fmt(
-            service.fork_run(
+            _on_engine(lambda supervisor: service.fork_run_checked(
                 run_id,
                 checkpoint_id=str(args.get("checkpoint_id", "") or ""),
                 note=str(args.get("note", "") or ""),
-                supervisor=_supervisor(),
-            ),
+                supervisor=supervisor,
+            )),
             summary="Forked a new run; the original is unchanged.",
         )
 
     if name == "workflow_pause":
-        return _fmt(service.pause_run(run_id, supervisor=_supervisor()))
+        return _fmt(_on_engine(lambda supervisor: service.pause_run(run_id, supervisor=supervisor)))
 
     if name == "workflow_resume":
         return _fmt(
-            service.resume_run(
+            _on_engine(lambda supervisor: service.resume_run(
                 run_id,
-                supervisor=_supervisor(),
+                supervisor=supervisor,
                 token=str(args.get("resume_token", "") or ""),
                 answer=args.get("answer"),
                 always_allow=bool(args.get("always_allow")),
-            )
+            ))
         )
 
     if name == "workflow_start_draft":
         return _fmt(
-            _run(service.start_draft(run_id, supervisor=_supervisor())),
+            _on_engine(lambda supervisor: service.start_draft(run_id, supervisor=supervisor, session_key=_current_session_id())),
             summary="Workflow draft started.",
         )
 
     if name == "workflow_cancel":
-        return _fmt(service.cancel_run(run_id, supervisor=_supervisor()))
+        return _fmt(_on_engine(lambda supervisor: service.cancel_run(run_id, supervisor=supervisor)))
 
     if name == "workflow_audit":
         return _fmt(
-            service.audit(
-                dry_run=bool(args.get("dry_run", True)), supervisor=_supervisor()
-            )
+            _on_engine(lambda supervisor: service.audit(
+                dry_run=bool(args.get("dry_run", True)), supervisor=supervisor
+            ))
         )
 
     if name == "workflow_delete_def":
@@ -1205,7 +1226,7 @@ def _review_surface(goal: str, definition: dict, routing: dict | None) -> dict:
                 intent = intent_mod.Intent(
                     rigor=intent_mod.Rigor(raw_intent["rigor"]),
                     stakes=intent_mod.Level(raw_intent.get("stakes", "low")),
-                    irreversible=bool(raw_intent.get("irreversible")),
+                    irreversible=yes_or_no(raw_intent.get("irreversible")) is True,
                     shape=str(raw_intent.get("shape", "") or ""),
                     signals=raw_intent.get("signals") or {},
                 )

@@ -1,6 +1,9 @@
 "use strict";
 
 const fs = require("node:fs");
+const { rememberGroup, retireLostGroup } = require("../gateway/lost");
+const { randomUUID } = require("node:crypto");
+const { LocalSession, parseReadyLine } = require("../gateway/local-session");
 const os = require("node:os");
 const path = require("node:path");
 const http = require("node:http");
@@ -28,8 +31,13 @@ function readyOrigin(line) {
 class LocalGateway {
   #shellToken = null;
 
-  constructor({ app, home, status, log = console }) {
-    Object.assign(this, { app, home, status, log, child: null, url: null });
+  constructor({ app, home, status, session, onReady = async () => {}, onLost = async () => {}, log = console }) {
+    Object.assign(this, { app, home, status, session, onReady, onLost, log, child: null, url: null });
+    this.partition = `gideon-local-${randomUUID()}`;
+    this.browserSession = null;
+    this.signIn = null;
+    this.readyQueue = Promise.resolve();
+    this.stopping = false;
     this.loginPath = createLoginPathResolver({ env: process.env, execFileSync, warn: log.warn });
     this.hypermid = new HypermidDesktop({ home, resourcesPath: process.resourcesPath,
       projectDir: path.resolve(__dirname, "../../../.."), platform: process.platform,
@@ -37,6 +45,11 @@ class LocalGateway {
   }
 
   start() {
+    this.stopping = false;
+    if (!this.browserSession) {
+      this.browserSession = this.session.fromPartition(this.partition);
+      this.signIn = new LocalSession(this.browserSession.cookies);
+    }
     try { fs.mkdirSync(this.home, { recursive: true, mode: 0o700 }); }
     catch (error) { this.log.warn("Failed to create gideon dir:", error.message); }
     const executable = findGideonBin(fs, os, path, process.resourcesPath, path.resolve(__dirname, "../.."));
@@ -44,7 +57,7 @@ class LocalGateway {
     this.status("Starting gateway…");
     this.log.log(`Starting gateway: ${executable} ${arguments_.join(" ")}`);
     return new Promise((resolve, reject) => {
-      let output = "", finished = false;
+      let output = "", stderr = "", group = null, readySeen = false, finished = false;
       const complete = (error, origin) => {
         if (finished) return;
         finished = true;
@@ -62,25 +75,56 @@ class LocalGateway {
         this.child = spawn(executable, arguments_, { stdio: ["ignore", "pipe", "pipe"], detached: true, env: environment });
       } catch (error) { complete(error); return; }
       const child = this.child;
+      child.once("spawn", () => { group = rememberGroup(child); });
       child.stdout.on("data", (chunk) => {
         const lines = (output + chunk.toString()).split("\n");
         output = lines.pop();
         for (const line of lines) {
-          const origin = readyOrigin(line);
-          if (origin) complete(null, origin);
+          const ready = parseReadyLine(line);
+          if (!ready) continue;
+          this.readyQueue = this.readyQueue.then(async () => {
+            if (this.stopping || this.child !== child) return;
+            const previousOrigin = this.url;
+            const previousSession = await this.signIn.adopt(ready);
+            this.url = ready.url;
+            readySeen = true;
+            this.#shellToken = null;
+            if (previousSession && previousSession.token !== ready.token) {
+              await this.request("POST", "/api/auth/logout", {}, { Authorization: `Bearer ${previousSession.token}` });
+            }
+            if (previousOrigin) await this.onReady({ previousOrigin, origin: ready.url });
+            complete(null, ready.url);
+          }).catch((error) => { this.log.error("Gateway sign-in failed:", error.message); complete(error); });
         }
       });
-      child.stderr.on("data", (chunk) => this.log.error("gateway:", chunk.toString().trim()));
+      child.stderr.on("data", (chunk) => {
+        const message = chunk.toString();
+        stderr = (stderr + message).slice(-4000);
+        this.log.error("gateway:", message.trim());
+      });
       child.on("error", (error) => { this.log.error("Failed to start gateway:", error.message); complete(error); });
-      child.on("exit", (code) => {
-        if (this.child === child) this.child = null;
+      child.on("exit", (code, signal) => {
+        const current = this.child === child;
+        if (current) this.child = null;
         this.log.log(`Gateway exited with code ${code}`);
         complete(new Error(`Gateway exited with code ${code}`));
+        if (!current || this.stopping || !readySeen) return;
+        this.hypermid.stopped();
+        this.readyQueue = this.readyQueue.then(async () => {
+          const retirement = await retireLostGroup(group);
+          return retirement;
+        });
+        this.readyQueue.then(async (retirement) => {
+          if (!this.stopping) await this.onLost({ code, signal, stderr, retirement });
+        }).catch((error) => this.log.error("Gateway exit handling failed:", error.message));
       });
     });
   }
 
   async stop() {
+    this.stopping = true;
+    await this.readyQueue;
+    await this.signIn?.release();
     const child = this.child;
     this.child = null;
     const outcome = await shutdownGateway({ child, graceMs: 8000, killGroup: true,
@@ -97,7 +141,9 @@ class LocalGateway {
       assertLoopbackTarget(this.url, `${method} ${route}`);
       target = new URL(route, this.url);
       assertLoopbackTarget(target.href, `${method} ${route}`);
+      if (target.origin !== new URL(this.url).origin) throw new Error("Desktop request left its owned gateway origin");
     } catch (error) { this.log.warn(`desktop: ${error.message}`); return Promise.resolve(null); }
+    headers = { ...this.signIn?.authorization(), ...headers };
     const payload = body === undefined ? null : Buffer.from(JSON.stringify(body));
     return new Promise((resolve) => {
       const options = { method, timeout: statusOnly ? 2000 : method === "POST" ? 5000 : 3000,
@@ -148,13 +194,20 @@ class LocalGateway {
     return token ? this.request("POST", "/api/desktop/unregister", {}, { "X-Shell-Token": token }) : Promise.resolve(null);
   }
 
+  async signOut() {
+    if (this.signIn) {
+      await this.request("POST", "/api/auth/logout", {});
+      await this.signIn.release();
+    }
+  }
+
   async waitReady(window) {
     const deadline = Date.now() + START_TIMEOUT;
     while (true) {
       if (window?.isDestroyed()) throw new Error("Window closed");
       if (Date.now() > deadline) throw new Error("Backend timeout");
-      const status = await this.request("GET", "/api/status", undefined, {}, true);
-      if (status !== null && status < 500) {
+      const status = await this.request("GET", "/api/healthz", undefined, {}, true);
+      if (status === 200) {
         await this.hypermid.refresh();
         return;
       }

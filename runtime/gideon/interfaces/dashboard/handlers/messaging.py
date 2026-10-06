@@ -82,9 +82,15 @@ async def api_spawn(request: web.Request) -> web.Response:
     agent = cleaned.get("agent") or ""
     max_turns = cleaned.get("max_turns") or 0
     cwd = cleaned.get("cwd") or ""
+    from gideon.extensions.apps.app_work import AppWork, of_session
+    app_name = request.get("app", "")
+    work = AppWork.for_app(app_name) if app_name else of_session(parent_session)
+    if work is not None and not work.current_tier():
+        return json_error("agent_tier_exceeded", message="app may run no agent work now", status=403)
     info = state.subagents.spawn(
         task,
         parent_session_key=parent_session,
+        app_work=work,
         agent=agent,
         max_turns=max_turns,
         cwd=cwd,

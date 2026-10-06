@@ -18,6 +18,7 @@ by TTL.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -180,6 +181,17 @@ class UploadStore:
         """Concatenate parts (or return the append-mode final) into one file, verify
         the size, and return its path. Does NOT delete the session dir — the caller
         finalizes (scan + hand-off) then calls :meth:`cleanup`."""
+        task = asyncio.create_task(asyncio.to_thread(self._assemble, sid))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            try:
+                await task
+            finally:
+                self.cleanup(sid)
+            raise
+
+    def _assemble(self, sid: str) -> tuple[Path, UploadSession]:
         sess = self.get(sid)
         if not self.is_complete(sess):
             missing = sorted(set(range(sess.total_parts)) - set(sess.received))

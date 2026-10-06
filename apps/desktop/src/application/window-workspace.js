@@ -106,7 +106,7 @@ class WindowWorkspace {
     });
   }
 
-  mount(window, { attachBridge = true } = {}) {
+  mount(window, { attachBridge = true, session = this.actions.browserSession?.(this.actions.target()) } = {}) {
     let current = this.getState(window);
     if (!current) {
       current = { name: null, bridge: false, content: null, drag: null };
@@ -117,6 +117,7 @@ class WindowWorkspace {
     }
     const { WebContentsView } = this.electron;
     const content = new WebContentsView({ webPreferences: {
+      ...(session ? { session } : {}),
       ...(attachBridge ? { preload: path.join(__dirname, "../bridge/dashboard-preload.js") } : {}),
       contextIsolation: true, nodeIntegration: false, sandbox: true,
     } });
@@ -211,7 +212,10 @@ class WindowWorkspace {
     });
     page.session.webRequest.onBeforeSendHeaders((details, callback) => {
       delete details.requestHeaders.Referer;
-      callback({ requestHeaders: details.requestHeaders });
+      const headers = page.session === this.actions.localBrowserSession?.()
+        ? require("../gateway/local-session").localRequestHeaders(details.url, this.actions.local(), details.requestHeaders)
+        : details.requestHeaders;
+      callback({ requestHeaders: headers });
     });
   }
 

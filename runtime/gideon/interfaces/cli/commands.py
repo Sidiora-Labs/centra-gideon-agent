@@ -6,6 +6,7 @@ import sys
 import time as _time
 import urllib.error
 import urllib.request
+from gideon.engine.home_gateway import open_loopback
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -39,12 +40,17 @@ class CliRefusal(SystemExit):
 
 def _spawn(args: argparse.Namespace) -> None:
     """Dispatch spawn subcommands: run, list."""
-    base = f"http://localhost:{args.port}"
+    from gideon.engine.home_gateway import require_home_gateway, HomeGatewayMismatch, NoGatewayRunning
+    try:
+        args.port = require_home_gateway(args.port)
+    except (HomeGatewayMismatch, NoGatewayRunning) as error:
+        raise CliRefusal(str(error)) from error
+    base = f"http://127.0.0.1:{args.port}"
     action = getattr(args, "spawn_action", None)
 
     if action == "list":
         try:
-            with urllib.request.urlopen(f"{base}/api/spawn", timeout=5) as resp:
+            with open_loopback(f"{base}/api/spawn", timeout=5) as resp:
                 data = json.loads(resp.read())
         except (urllib.error.URLError, OSError):
             print(
@@ -75,7 +81,7 @@ def _spawn_run(args: argparse.Namespace, base: str) -> None:
         f"{base}/api/spawn", data=data, headers={"Content-Type": "application/json"}
     )
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with open_loopback(req, timeout=5) as resp:
             result = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         try:
@@ -101,7 +107,7 @@ def _spawn_run(args: argparse.Namespace, base: str) -> None:
     while True:
         _time.sleep(2)
         try:
-            with urllib.request.urlopen(poll_url, timeout=5) as resp:
+            with open_loopback(poll_url, timeout=5) as resp:
                 status = json.loads(resp.read())
         except Exception:
             print("Error: lost connection to gateway", file=sys.stderr)
@@ -433,7 +439,9 @@ def _cron(args: argparse.Namespace) -> None:
 
         if "message" in patch or approval is not None:
             action_wf: dict = dict(existing.trigger.workflow or {})
-            inline: dict = dict(action_wf.get("inline") or {})
+            from gideon.automation.triggers.action_edit import action_in
+
+            inline: dict = dict(action_in(action_wf))
             action_cfg: dict = dict(inline.get("config") or {})
             if "message" in patch:
                 action_cfg["task_template"] = patch.pop("message")

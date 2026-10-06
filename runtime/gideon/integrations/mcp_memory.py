@@ -295,13 +295,20 @@ def _triage_rules_list() -> str:
 
 
 def _validate_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    from gideon.assurance.validation import normalize_tool_booleans
+
     """Validate tool arguments against the shared MCP schema; unschem'd tools pass through."""
     from gideon.assurance.validation import MCP_CORE_SCHEMAS, validate_tool_args
 
     schema = MCP_CORE_SCHEMAS.get(name)
     if schema:
-        return validate_tool_args(args, schema)
+        return validate_tool_args(normalize_tool_booleans(args, schema), schema)
     return args
+
+
+def _preflight_tool(name: str, args: dict[str, Any]) -> str:
+    from gideon.integrations.mcp_shared import preflight_tool
+    return preflight_tool(name, args, _validate_args)
 
 
 def _call_tool(name: str, raw_args: dict[str, Any]) -> str:

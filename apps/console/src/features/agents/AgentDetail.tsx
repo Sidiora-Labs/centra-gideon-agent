@@ -5,7 +5,7 @@ import { TextArea, FieldError } from '../../shared/ui/forms'
 import { FormFooter } from '../../shared/ui/FormFooter'
 import { Combobox } from '../../shared/ui/Combobox'
 import { Markdown } from '../../shared/ui/Markdown'
-import { confirmDelete } from '../../shared/ui/dialog'
+import { confirm, confirmDelete } from '../../shared/ui/dialog'
 import { Skeleton } from '../../shared/ui/ListScaffold'
 import { useQuery } from '../../shared/data/data'
 import { api, type SavedAgent, type DiscoveredAgent, type McpActiveServer, type AgentHook } from '../../shared/data/api'
@@ -30,7 +30,16 @@ export function NativeAgentDetail({ agent, isDefault, onSaved, onDeleted, onSetD
   const closeEditor = () => { setDraft(toDraft(agent)); operation.setError(''); onEditingChange(false) }
   const save = () => {
     if (!draft.name.trim()) { operation.setError('Name is required'); return }
-    void operation.write(() => api.updateAgent(agent.name, draftToPayload(draft)), () => { onSaved(); onEditingChange(false) })
+    const payload = draftToPayload(draft)
+    void operation.write(async () => {
+      const offered = await api.previewAgentGrants(agent.name, payload)
+      if (offered.confirmation_required) {
+        const accepted = await confirm({ title: `Widen ${agent.name} grants?`, body: <div className="grid gap-s">{offered.changes.map(change => <p key={change.field}>{change.field === 'tools' ? 'Tools' : 'Skills'}: {change.before.length ? change.before.join(', ') : 'All available'} → {change.every ? 'All available' : change.after.join(', ')}</p>)}</div>, confirmLabel: 'Confirm and save' })
+        if (!accepted) return false
+      }
+      await api.updateAgent(agent.name, { ...payload, grant_receipt: offered.grant_receipt })
+      return true
+    }, saved => { if (saved) { onSaved(); onEditingChange(false) } })
   }
   const remove = () => {
     if (isDefault) { operation.setError('Can’t delete the default agent — set another default first.'); return }

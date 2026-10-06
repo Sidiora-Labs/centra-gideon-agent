@@ -100,7 +100,10 @@ class EndpointSession {
     this.state.activeUrl = address;
     const epoch = this.state.epoch;
     const attachBridge = !this.hostedConfig && policy.shouldAttachBridge(address);
-    if (this.workspace.hasBridge(window) !== attachBridge) this.workspace.mount(window, { attachBridge });
+    const browserSession = address === this.gateway.url ? this.gateway.browserSession : this.electron.session.defaultSession;
+    if (this.workspace.hasBridge(window) !== attachBridge || window.webContents?.session !== browserSession) {
+      this.workspace.mount(window, { attachBridge, session: browserSession });
+    }
     const page = window.webContents;
     page.loadFile(path.join(__dirname, "../../views/loading.html"));
     try {
@@ -195,7 +198,9 @@ class EndpointSession {
         await this.gateway.waitReady(window);
         if (!alive(window)) return;
         this.state.activeUrl = this.gateway.url;
-        page.loadURL(this.gateway.url);
+        const localPage = page.session === this.gateway.browserSession ? page
+          : this.workspace.mount(window, { attachBridge: true, session: this.gateway.browserSession });
+        localPage.loadURL(this.gateway.url);
         return;
       } catch {
         if (!alive(window)) return;

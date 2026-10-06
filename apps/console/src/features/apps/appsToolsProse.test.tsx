@@ -53,7 +53,7 @@ describe('Apps and Tools prose', () => {
   })
   it('renders tool-row prose without nesting links in buttons', () => {
     const { container } = render(<GroupBlock g={{ key: 'native', label: 'Native', kind: 'native', tools: [tool] }}
-      onOpen={done} onToggleServer={done} onRemoveServer={done} onToggleTool={done} onToggleProvider={done} onReconnect={done} reconnecting={null} />)
+      onOpen={done} onAllowServer={done} onEditServer={done} allowing={null} onToggleServer={done} onRemoveServer={done} onToggleTool={done} onToggleProvider={done} onReconnect={done} reconnecting={null} />)
     expectProse(container)
     expect(container.querySelector('button a')).toBeNull()
     expect(screen.getByRole('button', { name: 'inspect' })).toBeInTheDocument()

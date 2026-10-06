@@ -78,7 +78,7 @@ fn finish_authorization(
 ) -> MemoryResult<Authorization> {
     let actor = scope_digest(actor_scope);
     let target = scope_digest(target_scope);
-    if same_project(actor_scope, target_scope) {
+    if actor_scope == target_scope {
         return Ok(Authorization {
             basis: AuthorizationBasis::Owner,
             capability,
@@ -161,6 +161,9 @@ fn validate_binding(context: &AuthContext, request: &MutationRequest) -> MemoryR
             context.request.resource_id == *record_id
                 || (same_project(&request.actor_scope, &request.target_scope)
                     && context.request.resource_id.as_str() == "memory-records")
+                || (request.operation == Operation::Embed
+                    && same_project(&request.actor_scope, &request.target_scope)
+                    && context.request.resource_id.as_str() == "memory-embedding")
         }
         None => {
             (matches!(request.operation, Operation::Import | Operation::Export)

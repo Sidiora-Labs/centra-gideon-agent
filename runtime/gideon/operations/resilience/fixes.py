@@ -208,42 +208,95 @@ def _orphan_prune_apply() -> str:
     return f"Removed {removed} stale lock(s); reconciled {len(recovered)} rollback leftover(s)."
 
 
+def _bindings_that_cannot_run() -> dict[str, list[str]]:
+    import asyncio
+    import json
+    from gideon.extensions.providers.use_cases import active_models_path, load_active_models
+    from gideon.operations.resilience.doctor import phantom_bindings
+    path = active_models_path()
+    raw = json.loads(path.read_text()) if path.exists() else {}
+    kept = load_active_models()
+    phantom = set(asyncio.run(phantom_bindings()))
+    out = {}
+    for use_case, refs in (raw if isinstance(raw, dict) else {}).items():
+        chain = [refs] if isinstance(refs, str) else refs if isinstance(refs, list) else []
+        gone = [str(ref) for ref in chain if ref not in kept.get(use_case, []) or ref in phantom]
+        if gone:
+            out[use_case] = gone
+    return out
+
+
 def _active_models_prune_preview() -> str:
-    try:
-        import json
-
-        from gideon.core.config.loader import config_dir
-        from gideon.extensions.providers.use_cases import load_active_models
-
-        raw_path = config_dir() / "active_models.json"
-        raw = (
-            json.loads(raw_path.read_text(encoding="utf-8"))
-            if raw_path.exists()
-            else {}
-        )
-        raw_refs = sum(len(v) for v in raw.values() if isinstance(v, list))
-        pruned = load_active_models()
-        pruned_refs = sum(len(v) for v in pruned.values())
-        stale = raw_refs - pruned_refs
-        if stale <= 0:
-            return "No active-model bindings reference removed providers."
-        return f"Would drop {stale} model binding(s) that reference removed providers."
-    except Exception:
-        return "Could not evaluate active-model bindings."
+    from gideon.extensions.providers.use_cases import CHAT_SUBCATEGORIES, load_active_models
+    gone = _bindings_that_cannot_run()
+    if not gone:
+        return "No bindings name a model that is gone."
+    active = load_active_models()
+    parts = []
+    for use_case, refs in gone.items():
+        after = ""
+        if not [ref for ref in active.get(use_case, []) if ref not in refs]:
+            after = " — then uses Chat models" if use_case in CHAT_SUBCATEGORIES else " — then needs a model selected"
+        parts.append(f"{use_case}: {', '.join(refs)}{after}")
+    return "Would unbind " + "; ".join(parts) + "."
 
 
 def _active_models_prune_apply() -> str:
-    from gideon.extensions.providers.use_cases import (
-        load_active_models,
-        save_active_models,
+    from gideon.extensions.providers.use_cases import load_active_models, save_active_models
+    gone = _bindings_that_cannot_run()
+    if not gone:
+        return "No bindings named a model that is gone; nothing changed."
+    active = load_active_models()
+    for use_case, refs in gone.items():
+        active[use_case] = [ref for ref in active.get(use_case, []) if ref not in refs]
+    save_active_models(active)
+    return "Unbound " + "; ".join(f"{use_case}: {', '.join(refs)}" for use_case, refs in gone.items()) + "."
+
+
+def _restore_core_server_preview() -> str:
+    from gideon.operations.resilience.core_server import agent_config_path, read_core_server, core_server_detail
+
+    reading = read_core_server(agent_config_path())
+    return f"Repair only Gideon's server command and arguments if needed. Keep tools, allowedTools and all other entries. Current: {core_server_detail(reading)}"
+
+
+def _restore_core_server_apply() -> str:
+    import copy
+    import json
+    from gideon.core.atomic_write import atomic_write
+    from gideon.core.config.transactions import _ConfigLock
+    from gideon.operations.resilience.core_server import (
+        agent_config_path, read_core_server, core_server_detail,
+        core_server_command, core_server_name, core_server_args,
     )
 
-    pruned = load_active_models()
-    save_active_models(pruned)
-    return "Persisted the pruned active-model bindings (removed-provider refs dropped)."
+    path = agent_config_path()
+    if not path.is_file():
+        raise RuntimeError("Agent config is missing; nothing was written")
+    expected = path.read_bytes()
+    with _ConfigLock(path, 5):
+        if path.read_bytes() != expected:
+            raise RuntimeError("Agent config changed during repair; nothing was written")
+        reading = read_core_server(path)
+        if reading.set_up:
+            return f"Nothing changed: {core_server_detail(reading)}"
+        if not reading.needs_setting_up:
+            raise RuntimeError(f"{core_server_detail(reading)}; nothing was written")
+        command = core_server_command()
+        if not command:
+            raise RuntimeError("Gideon command is unavailable; nothing was written")
+        document = copy.deepcopy(reading.document)
+        document.setdefault("mcpServers", {})[core_server_name()] = {
+            **(reading.entry or {}), "command": command, "args": core_server_args(),
+        }
+        if path.read_bytes() != expected:
+            raise RuntimeError("Agent config changed during repair; nothing was written")
+        atomic_write(path, json.dumps(document, indent=2) + "\n", fsync=True)
+    return "Repaired Gideon's server entry; tools and allowedTools unchanged."
 
 
 def _register_builtin_fixes() -> None:
+    register_fix(Fix("tools.restore-core-server", "Restore Gideon server entry", "Changes only server command and arguments; preserves tool permissions.", _restore_core_server_preview, _restore_core_server_apply))
     register_fix(
         Fix(
             id="serving-fs.symlink-repair",
@@ -267,9 +320,8 @@ def _register_builtin_fixes() -> None:
     register_fix(
         Fix(
             id="model-providers.prune-bindings",
-            title="Drop model bindings for removed providers",
-            impact="Persists the removed-provider pruning that load_active_models already "
-            "does on read, so stale bindings stop being silently ignored.",
+            title="Prune bindings to models that are gone",
+            impact="Unbinds removed providers and models a responding local provider no longer lists. Failed catalogs preserve bindings.",
             dry_preview=_active_models_prune_preview,
             apply=_active_models_prune_apply,
         )

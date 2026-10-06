@@ -251,6 +251,9 @@ def _get_parser(language: str):
         configure(
             PackConfig(cache_dir=settings["TREE_SITTER_LANGUAGE_PACK_CACHE_DIR"])
         )
+        from gideon.assurance.codegraph.grammars import ensure
+
+        ensure(language)
         parser = get_parser(language)  # type: ignore[arg-type]
     except Exception as exc:
         _record_load_failure(language, exc)

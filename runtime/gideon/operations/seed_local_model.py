@@ -1,6 +1,8 @@
 """Local model discovery and staged provider binding for a seeded home."""
 
 import json
+import asyncio
+import concurrent.futures as cf
 import logging
 import os
 import sys
@@ -20,6 +22,10 @@ PROVIDER_TYPE = "ollama"
 PROVIDER_ENTRY_NAME = "Local Ollama"
 PROBE_TIMEOUT_SECS = 2.0
 REQUEST_TIMEOUT_SECS = 300
+ADDED = "added"
+SKIPPED_NAME_TAKEN = "skipped_name_taken"
+SKIPPED_CONFIG_UNREADABLE = "skipped_config_unreadable"
+DESCRIBE_BUDGET_SECS = 5.0
 BOUND = "bound"
 ALREADY_BOUND = "already_bound"
 SKIPPED_NO_SERVER = "skipped_no_server"
@@ -39,13 +45,18 @@ class BindResult:
 
     @property
     def ok(self) -> bool:
-        return self.status in {BOUND, ALREADY_BOUND}
+        return self.status in {BOUND, ADDED, ALREADY_BOUND}
 
 
-def _probe_models(endpoint: str) -> list[dict] | None:
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _probe_models(endpoint: str, *, timeout: float = PROBE_TIMEOUT_SECS) -> list[dict] | None:
     address = f"{endpoint.rstrip('/')}/api/tags"
     try:
-        with urllib.request.urlopen(address, timeout=PROBE_TIMEOUT_SECS) as response:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect()).open(address, timeout=timeout) as response:
             data = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, OSError, ValueError) as error:
         logger.debug("local model probe failed for %s: %s", address, error)
@@ -84,6 +95,65 @@ class LocalCatalog:
         return identifier in {
             str(row.get("model") or row.get("name") or "") for row in self.models
         }
+
+
+def endpoint_models(endpoint: str, *, timeout: float = PROBE_TIMEOUT_SECS, describe_budget: float = DESCRIBE_BUDGET_SECS):
+    """One registered provider catalog and pick shared by seed, discovery and setup."""
+    from gideon.integrations.llm.registry import get_default_registry, ProviderEntry
+    from gideon.integrations.llm.catalog import ModelInfo, infer_capabilities
+    registry = get_default_registry()
+    if registry.catalog_of(PROVIDER_TYPE) is not None:
+        async def described():
+            catalog = registry.build_catalog(ProviderEntry(name="local-discovery", type=PROVIDER_TYPE, model="", options={"endpoint": endpoint, "timeout_secs": timeout}))
+            if catalog is None:
+                return None
+            return await asyncio.wait_for(catalog.list_models(), describe_budget)
+        pool = cf.ThreadPoolExecutor(max_workers=1)
+        try:
+            rows = pool.submit(asyncio.run, described()).result(timeout=describe_budget + .2)
+            if rows is not None:
+                return rows
+        except Exception:
+            logger.debug("provider catalog description failed for %s", endpoint, exc_info=True)
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+    rows = _probe_models(endpoint, timeout=timeout)
+    if rows is None:
+        return None
+    return [ModelInfo(id=str(row.get("model") or row.get("name") or ""), name=str(row.get("model") or row.get("name") or ""),
+        capabilities=infer_capabilities(str(row.get("model") or row.get("name") or ""), (row.get("details") or {}).get("families")),
+        extra={"modified_at": row.get("modified_at", "")}) for row in rows if isinstance(row, dict)]
+
+
+def pick_model(models, want: str) -> str:
+    able = [model for model in models if want in (model.capabilities or [])]
+    able.sort(key=lambda model: str((model.extra or {}).get("modified_at") or ""), reverse=True)
+    if want == "chat":
+        able.sort(key=lambda model: "tools" not in (model.capabilities or []))
+    return able[0].id if able else ""
+
+
+def _configured_entries():
+    from gideon.core.config.loader import config_path
+    path = config_path()
+    data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    if not isinstance(data, dict) or not isinstance(data.get("providers", []), list):
+        raise ValueError("The provider configuration is unreadable; nothing was changed.")
+    return data.get("providers", [])
+
+
+def _entry_endpoint(entry):
+    options = entry.get("options") or {}
+    return str(options.get("endpoint") or options.get("base_url") or DEFAULT_ENDPOINT).rstrip("/")
+
+
+def instance_at(endpoint: str) -> str:
+    from gideon.operations.local_model_detect import endpoint_identity
+    requested = endpoint_identity(endpoint)
+    try:
+        return next((str(entry["name"]) for entry in _configured_entries() if isinstance(entry, dict) and entry.get("type") == PROVIDER_TYPE and endpoint_identity(_entry_endpoint(entry)) == requested), "")
+    except (OSError, ValueError, TypeError, KeyError):
+        return ""
 
 
 def _pick(models: list[dict], want: str) -> str:
@@ -157,6 +227,11 @@ class ProviderDocument:
         from gideon.core.config.transactions import mutate_config
 
         def append_entry(data):
+            entries = data.setdefault("providers", [])
+            if not isinstance(entries, list):
+                raise ValueError("The provider configuration is unreadable; nothing was changed.")
+            if any(isinstance(entry, dict) and entry.get("name") == PROVIDER_ENTRY_NAME for entry in entries):
+                raise ValueError("Local Ollama was configured by another request; refresh before adding it.")
             options = {
                 "endpoint": endpoint,
                 "default_model": model,
@@ -213,17 +288,23 @@ class LocalBinding:
     model: str
     embedding: str
     apps_dir: str | None
+    bind_chat: bool = True
 
     def run(self):
         endpoint = self.endpoint
-        if _config_has_entry(PROVIDER_ENTRY_NAME):
-            return BindResult(
-                ALREADY_BOUND,
-                f"a provider entry named {PROVIDER_ENTRY_NAME!r} already exists in config.json — leaving it alone",
-                endpoint=endpoint,
-                provider_name=PROVIDER_ENTRY_NAME,
-            )
-        models = _probe_models(endpoint)
+        try:
+            entries = _configured_entries()
+        except (OSError, ValueError, TypeError) as error:
+            return BindResult(SKIPPED_CONFIG_UNREADABLE, str(error), endpoint=endpoint)
+        from gideon.operations.local_model_detect import endpoint_identity
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("type") == PROVIDER_TYPE and endpoint_identity(_entry_endpoint(entry)) == endpoint_identity(endpoint):
+                return BindResult(ALREADY_BOUND, f"Already added as {entry.get('name')}; existing bindings were left alone.", endpoint=endpoint, model=str(entry.get("model") or ""), provider_name=str(entry.get("name") or ""))
+            if entry.get("name") == PROVIDER_ENTRY_NAME:
+                return BindResult(SKIPPED_NAME_TAKEN, f"Local Ollama already uses {_entry_endpoint(entry)}; nothing was changed. Add this endpoint under another name in Settings → Providers.", endpoint=endpoint)
+        models = endpoint_models(endpoint)
         if models is None:
             return BindResult(
                 SKIPPED_NO_SERVER,
@@ -232,7 +313,7 @@ class LocalBinding:
                 f"Ollama and re-run, or set ${ENDPOINT_ENV} to a reachable endpoint.",
                 endpoint=endpoint,
             )
-        chat = self.model or _pick(models, "chat")
+        chat = self.model or pick_model(models, "chat")
         if not chat:
             return BindResult(
                 SKIPPED_NO_MODEL,
@@ -241,8 +322,8 @@ class LocalBinding:
                 f"re-run, or name one with ${MODEL_ENV}.",
                 endpoint=endpoint,
             )
-        embedding = self.embedding or _pick(models, "embedding")
-        missing = not LocalCatalog(models).contains(chat)
+        embedding = self.embedding or pick_model(models, "embedding")
+        missing = chat not in {model.id for model in models}
         source = None
         if not _installed_provider_app():
             source = _resolve_app_source(self.apps_dir)
@@ -277,19 +358,23 @@ class LocalBinding:
                     model=chat,
                 )
             written.append(f"apps/{PROVIDER_APP}/")
-        _write_provider_entry(
-            endpoint=self.endpoint, model=chat, embedding_model=embedding
-        )
+        try:
+            _write_provider_entry(endpoint=self.endpoint, model=chat, embedding_model=embedding)
+        except ValueError as error:
+            return BindResult(SKIPPED_NAME_TAKEN, str(error), endpoint=self.endpoint, wrote=written)
         written.append("config.json")
-        _write_active_models(model=chat, embedding_model=embedding)
-        written.append("active_models.json")
-        detail = f"bound {PROVIDER_ENTRY_NAME!r} -> {chat} at {self.endpoint}"
+        if self.bind_chat:
+            _write_active_models(model=chat, embedding_model=embedding)
+            written.append("active_models.json")
+        detail = f"{'bound' if self.bind_chat else 'added'} {PROVIDER_ENTRY_NAME!r} -> {chat} at {self.endpoint}"
+        if not self.bind_chat:
+            detail += "; no use case was rebound"
         if embedding:
             detail += f" (embedding: {embedding})"
         if missing:
             detail += f" — note: {chat!r} is not pulled yet on this endpoint"
         return BindResult(
-            BOUND, detail, self.endpoint, chat, embedding, PROVIDER_ENTRY_NAME, written
+            BOUND if self.bind_chat else ADDED, detail, self.endpoint, chat, embedding, PROVIDER_ENTRY_NAME, written
         )
 
 
@@ -306,6 +391,10 @@ def bind_local_model(
         (embedding_model or os.environ.get(EMBEDDING_MODEL_ENV, "")).strip(),
         apps_dir,
     ).run()
+
+
+def add_local_model(*, endpoint: str, apps_dir: str | None = None) -> BindResult:
+    return LocalBinding(endpoint.strip(), "", "", apps_dir, bind_chat=False).run()
 
 
 def seed_local_model_cmd(args) -> int:

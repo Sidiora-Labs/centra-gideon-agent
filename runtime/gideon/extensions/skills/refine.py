@@ -118,11 +118,19 @@ def proposed_body(
     this is not a prediction of the accept path's output but a second evaluation of it.
     """
     from gideon.extensions.skills import overlays
-    from gideon.extensions.skills.loader import ProcedureLibrary
+    from gideon.extensions.skills.loader import ProcedureLibrary, overlay_identity
 
-    current = ProcedureLibrary(install_builtins=False).load_skill(skill)
+    library = ProcedureLibrary(install_builtins=False)
+    current = library.load_skill(skill)
     if current is None:
         return ""
+    path = library.skill_file(skill)
+    if path is None:
+        return ""
+    root = path.parent
+    for _ in skill.split("/"):
+        root = root.parent
+    identity = overlay_identity(root, skill)
     block = overlays.render_block(
         {
             "description": description,
@@ -130,7 +138,7 @@ def proposed_body(
             "created_at": at,
             "trigger": trigger,
         },
-        overlays.next_version(skill),
+        overlays.next_version(identity),
     )
     if not block.strip():
         return current

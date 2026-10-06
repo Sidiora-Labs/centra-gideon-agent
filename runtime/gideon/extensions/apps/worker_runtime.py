@@ -77,6 +77,8 @@ from gideon.core.periodic_sweep import PeriodicSweep
 
 logger = logging.getLogger(__name__)
 
+from gideon.operations.child_output import ChildOutput, relay
+
 _WATCHDOG_INTERVAL = 30
 
 _MAX_RESTARTS = 5
@@ -109,6 +111,7 @@ class SupervisedWorker:
     restart: bool = True
     pid: int = 0
     proc: subprocess.Popen | None = field(default=None, repr=False)
+    output: ChildOutput | None = field(default=None, repr=False)
     state: WorkerState = WorkerState.RUNNING
     restarts: int = 0
     started_at: float = 0.0
@@ -208,12 +211,12 @@ def _incident_pause_reason() -> str:
 
 
 def _budget_pause_reason() -> str:
-    """The wallet half: the DAY-scope spend ceiling, measured by the existing meter.
+    """The wallet half: the DAY-scope token ceiling, measured by the existing meter.
 
     This is ``guardrails/budgets.py``'s accounting, not a parallel one — the same
     ``SpendMeter`` ``ModelCallGuard`` charges on every model call, and the same
     ``budget_from_config()`` ceiling. ``BudgetVerdict.EXCEEDED`` is the breach ("the run
-    must pause", per ``check_day``); ``WARN`` is surfaced elsewhere and does not stop
+    must pause", per ``check_day_before_work``); ``WARN`` is surfaced elsewhere and does not stop
     anything here.
 
     Scope honesty: the meter has DAY and RUN scopes and no per-app scope, so a breach is a
@@ -234,9 +237,9 @@ def _budget_pause_reason() -> str:
         budget = budget_from_config()
         if budget.is_unlimited:
             return ""
-        verdict, reason = get_meter().check_day(budget)
+        verdict, reason = get_meter().check_day_before_work(budget)
         if verdict is BudgetVerdict.EXCEEDED:
-            return reason or "the day spend budget is exceeded"
+            return reason or "the day token budget is exceeded"
     except Exception:  # noqa: BLE001
         logger.debug("worker sweep: budget probe failed", exc_info=True)
     return ""
@@ -323,6 +326,21 @@ class WorkerSupervisor:
     def list_workers(self, app: str | None = None) -> list[SupervisedWorker]:
         with self._lock:
             return [r for r in self._workers.values() if app is None or r.app == app]
+
+    def statuses(self, app: str) -> list[dict]:
+        rows = []
+        for rec in self.list_workers(app):
+            running = rec.state is WorkerState.RUNNING and rec.is_alive()
+            code = rec.proc.poll() if rec.proc is not None else None
+            if code is not None and rec.output is not None:
+                rec.output.ended(code)
+            rows.append({
+                "name": rec.worker, "running": running,
+                "state": rec.state.value if running or rec.state is not WorkerState.RUNNING else "exited",
+                "reason": rec.reason,
+                "exit": rec.output.report() if not running and rec.output is not None else None,
+            })
+        return rows
 
     def list_running(self) -> list[SupervisedWorker]:
         with self._lock:
@@ -438,14 +456,16 @@ class WorkerSupervisor:
                 launch_cmd,
                 cwd=str(app_dir(rec.app)),
                 env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
         except OSError as exc:
             logger.warning(
                 "app %s worker %s failed to launch: %s", rec.app, rec.worker, exc
             )
             return False
+        rec.output = ChildOutput(app=rec.app, process=f"worker {rec.worker}", pid=proc.pid, env=env)
+        relay(proc, rec.output)
         rec.proc = proc
         rec.pid = proc.pid
         rec.state = WorkerState.RUNNING
@@ -535,6 +555,8 @@ class WorkerSupervisor:
         proc = rec.proc
         if proc is None or proc.poll() is not None:
             return False
+        if rec.output is not None:
+            rec.output.stopping()
         try:
             proc.terminate()
             try:

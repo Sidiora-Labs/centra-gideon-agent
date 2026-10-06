@@ -44,6 +44,18 @@ def _task_scope_texts(task) -> list[str]:
 
 
 _POOL_CAP = 4
+
+
+def _pool_cap(loop: Loop) -> int:
+    """Preserve parallel worktrees; serialize workers sent to one local endpoint."""
+    if loop.provider:
+        return _POOL_CAP
+    from gideon.extensions.providers.use_cases import active_model_refs
+    from gideon.integrations.llm.registry import endpoint_on_this_machine
+    ref = loop.model if ":" in (loop.model or "") else next(iter(active_model_refs("loops")), "")
+    return 1 if ref and endpoint_on_this_machine(ref.partition(":")[0]) else _POOL_CAP
+
+
 _CONFLICT_REDO_CAP = 2
 _STALL_FINDINGS = 5
 
@@ -1525,7 +1537,7 @@ class CodeKind(LoopKindStrategy):
                 if await self._reap_merge_done(loop, tid, task, ws, ctx):
                     return True
         loop = store.get(loop.id) or loop
-        slots = _POOL_CAP - len(self._live_task_workers(loop, ctx.svc))
+        slots = _pool_cap(loop) - len(self._live_task_workers(loop, ctx.svc))
         if slots <= 0:
             return False
         ready = await tasks_link.ready_queued_tasks(loop, phase_key)

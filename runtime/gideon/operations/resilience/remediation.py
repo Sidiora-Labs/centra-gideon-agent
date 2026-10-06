@@ -597,7 +597,11 @@ def _job_reindex_embeddings() -> str:
 def _job_rebuild_memory_fts() -> str:
     from gideon.cognition.memory import MemoryJournal
 
-    return f"FTS index rebuilt: {MemoryJournal().rebuild_index()} file(s)"
+    journal = MemoryJournal()
+    indexed = journal.rebuild_index()
+    if reason := journal.search_degraded():
+        raise RuntimeError(f"Keyword search remains unavailable: {reason}. The memory database was preserved.")
+    return f"FTS index rebuilt: {indexed} file(s)"
 
 
 def _job_prune_history() -> str:

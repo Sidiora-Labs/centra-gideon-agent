@@ -5,7 +5,7 @@ services:
       - ../../runtime/gideon:/opt/venv/lib/python3.13/site-packages/gideon:ro
     environment:
       GIDEON_LOG_LEVEL: DEBUG
-    command: [ "gideon", "gateway", "--no-browser" ]
+    command: [ "gideon", "gateway", "--no-open" ]
 
   gideon-web:
 

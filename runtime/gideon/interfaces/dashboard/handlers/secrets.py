@@ -126,6 +126,9 @@ async def api_secrets_list(request: web.Request) -> web.Response:
     if project_id and not valid_project_id(project_id):
         return json_error("secret_project_invalid", status=400)
     rows = await _vault_rows(project_id)
+    from gideon.core.config.credentials import keychain_available, keychain_namespace, keychain_namespace_summary
+
+    namespace = keychain_namespace() if keychain_available() else None
     return web.json_response(
         {
             "secrets": [r.to_dict() for r in rows],
@@ -136,6 +139,8 @@ async def api_secrets_list(request: web.Request) -> web.Response:
                 "host": sum(1 for r in rows if r.scope == SCOPE_HOST),
             },
             "empty_hint": _empty_state_hint(rows),
+            "keychain": ({"service": namespace.service, "scope": namespace.scope,
+                          "summary": keychain_namespace_summary(namespace)} if namespace else None),
         }
     )
 
@@ -169,6 +174,13 @@ async def api_secrets_put(request: web.Request) -> web.Response:
         return json_error("secret_project_invalid", status=400)
     if not value:
         return json_error("secret_value_required", status=400)
+
+    from gideon.security.secrets_vault import is_sign_in_key
+    if not project_id and is_sign_in_key(name):
+        from gideon.interfaces.dashboard.owner_presence import ACTION_SIGN_IN_SECRET, require_owner_presence
+        refused = require_owner_presence(request, ACTION_SIGN_IN_SECRET)
+        if refused is not None:
+            return refused
 
     from gideon.core.config.credentials import save_credential
 

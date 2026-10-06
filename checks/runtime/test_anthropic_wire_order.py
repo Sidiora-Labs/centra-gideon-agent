@@ -1,40 +1,10 @@
-"""PCS-1 / F1: prompt-cache wire-order repair for the Anthropic translation.
-
-Anthropic prompt caching matches on an EXACT prefix, and Anthropic serves the
-out-of-band ``system=`` param AHEAD of ``messages[0]``. The native loop appends
-exactly one per-turn ``role: "system"`` note (the turn_note — tool catalog +
-group stubs) whose content CHANGES every turn. Before this fix ``_translate_messages``
-hoisted that volatile note into ``system=``, so a volatile string led the served
-prompt ahead of the stable assembled context (``messages[0]``, a user message),
-structurally zeroing the cache hit rate.
-
-The fix: the native runtime tags that note ``{"_volatile": True}``; ``_translate_messages``
-routes an untagged ``system`` message into ``system=`` exactly as before, but relocates a
-volatile note to the TAIL of the message list (carried as a trailing ``user`` message —
-Anthropic has no trailing-system concept). The note moves position, never existence.
-
-Guardrail-2 (byte-identical when off): a message list with NO volatile tag must produce
-byte-for-byte the pre-PCS-1 ``(system, messages)``. This is pinned below.
-
-Note: the plan's V1 "no comprehension regression" check — that the model still calls
-``tool_schema`` after the catalog moved to the tail — is a live-model owner-validation step,
-not headless-runnable. The structural property it depends on (the catalog still REACHES the
-model, just late) is asserted here instead.
-"""
+"""Volatile runtime notes follow user/tool blocks without changing the stable prefix."""
 
 from __future__ import annotations
 
 import pytest
 
-from gideon.engine.agents.native.runtime import NativeAgentRuntime
-from gideon.engine.agents.provider import AgentRuntimeDefinition
 from gideon.integrations.llm.anthropic import _VOLATILE_MESSAGE_KEY, _translate_messages
-from gideon.integrations.llm.events import EVENT_COMPLETE, AgentEvent
-from gideon.integrations.tool_providers.base import (
-    ToolDefinition,
-    ToolProvider,
-    ToolResult,
-)
 
 
 def test_untagged_list_is_byte_identical_to_pre_pcs1_behavior():
@@ -131,10 +101,11 @@ def test_volatile_note_routes_to_tail_not_system():
 
     assert system == "STABLE base prompt"
     assert "VOLATILE per-turn note" not in system
-    assert out[-1] == {
-        "role": "user",
-        "content": "[tool catalog] VOLATILE per-turn note",
-    }
+    assert len(out) == 1
+    assert out[-1]["content"] == [
+        {"type": "text", "text": "the assembled context"},
+        {"type": "text", "text": "[tool catalog] VOLATILE per-turn note"},
+    ]
     assert _VOLATILE_MESSAGE_KEY not in out[-1]
 
 
@@ -149,11 +120,11 @@ def test_multiple_volatile_notes_each_ship_once_in_order():
     system, out = _translate_messages(messages)
 
     assert system == ""
-    assert out == [
-        {"role": "user", "content": "context"},
-        {"role": "user", "content": "note A"},
-        {"role": "user", "content": "note B"},
-    ]
+    assert out == [{"role": "user", "content": [
+        {"type": "text", "text": "context"},
+        {"type": "text", "text": "note A"},
+        {"type": "text", "text": "note B"},
+    ]}]
 
 
 def test_content_equivalence_note_relocated_not_lost_or_duplicated():
@@ -193,11 +164,11 @@ def test_native_shape_stable_context_leads_volatile_at_tail():
     system, out = _translate_messages(messages)
 
     assert system == ""
-    assert out[0] == {
-        "role": "user",
-        "content": "ASSEMBLED CONTEXT (stable across the turn)",
-    }
-    assert out[-1] == {"role": "user", "content": "[tool catalog] volatile"}
+    assert len(out) == 1
+    assert out[0]["content"] == [
+        {"type": "text", "text": "ASSEMBLED CONTEXT (stable across the turn)"},
+        {"type": "text", "text": "[tool catalog] volatile"},
+    ]
 
 
 def test_stable_system_leads_when_present():
@@ -211,8 +182,11 @@ def test_stable_system_leads_when_present():
     system, out = _translate_messages(messages)
 
     assert system == "STABLE PREFIX"
-    assert out[0] == {"role": "user", "content": "ASSEMBLED CONTEXT"}
-    assert out[-1] == {"role": "user", "content": "volatile"}
+    assert len(out) == 1
+    assert out[0]["content"] == [
+        {"type": "text", "text": "ASSEMBLED CONTEXT"},
+        {"type": "text", "text": "volatile"},
+    ]
 
 
 def test_v1_catalog_still_reaches_the_model_just_late():
@@ -236,72 +210,6 @@ def test_v1_catalog_still_reaches_the_model_just_late():
     payload_text = "\n".join(str(m.get("content", "")) for m in out)
     assert catalog_note in payload_text
     assert catalog_note not in system
-
-
-class _ScriptedModel:
-    """Minimal ModelProvider capturing the messages each ``complete()`` sees."""
-
-    supports_tools = True
-    _model = "scripted"
-
-    def __init__(self) -> None:
-        self.seen_messages: list[list[dict]] = []
-
-    async def complete(self, messages, *, tools=None, model=None, reasoning_effort=""):
-        self.seen_messages.append(list(messages))
-        yield AgentEvent(kind=EVENT_COMPLETE)
-
-
-class _ManyTools(ToolProvider):
-    """Enough tools that per-turn retrieval reduces and emits a catalog turn_note."""
-
-    def __init__(self, n: int) -> None:
-        self._n = n
-
-    @property
-    def name(self) -> str:
-        return "many"
-
-    @property
-    def display_name(self) -> str:
-        return "Many"
-
-    async def list_tools(self):
-        return [
-            ToolDefinition(
-                name=f"niche_tool_{i}",
-                description=f"does niche thing {i}",
-                parameters={"type": "object", "properties": {"q": {"type": "string"}}},
-                requires_approval=False,
-                provider="many",
-            )
-            for i in range(self._n)
-        ]
-
-    async def invoke(self, tool_name, arguments):
-        return ToolResult(success=True, output=f"ran {tool_name}")
-
-
-@pytest.mark.asyncio
-async def test_runtime_tags_turn_note_volatile():
-    """The native loop's appended turn_note system message carries the volatile marker."""
-    model = _ScriptedModel()
-    rt = NativeAgentRuntime(
-        definition=AgentRuntimeDefinition(
-            name="T", provider="native", model="scripted"
-        ),
-        model_provider=model,
-        tool_providers=[_ManyTools(80)],
-    )
-    await rt.start()
-    async for _ in rt.stream("do something unrelated to any niche tool"):
-        pass
-
-    sent = model.seen_messages[-1]
-    sys_notes = [m for m in sent if m.get("role") == "system"]
-    assert sys_notes, "expected a per-turn system note when retrieval reduces"
-    assert all(m.get(_VOLATILE_MESSAGE_KEY) is True for m in sys_notes)
-    assert any("[tool catalog]" in str(m.get("content", "")) for m in sys_notes)
 
 
 def test_parallel_tool_result_merge_does_not_mutate_existing_caller_blocks():

@@ -17,6 +17,7 @@ from __future__ import annotations
 STEP_STARTED = "step_started"
 STEP_COMPLETED = "step_completed"
 STEP_FAILED = "step_failed"
+STEP_CANCELLED = "step_cancelled"
 STEP_SKIPPED = "step_skipped"
 STEP_CACHED = "step_cached"
 STEP_ATTEMPT = "step_attempt"
@@ -70,6 +71,9 @@ SKIPPED_TRIAGE = "skipped_triage"
 PROPOSAL_REFUSED = "proposal_refused"
 
 AUTO_EXECUTED = "auto_executed"
+AUTO_FAILED = "auto_failed"
+PROPOSAL_CARRIED = "proposal_carried"
+PROPOSAL_DROPPED = "proposal_dropped"
 SKIPPED_BUDGET = "skipped_budget"
 
 REVIEW_FINDING = "review_finding"
@@ -81,10 +85,14 @@ LEDGER_KINDS = frozenset(
         SKIPPED_TRIAGE,
         PROPOSAL_REFUSED,
         AUTO_EXECUTED,
+        AUTO_FAILED,
+        PROPOSAL_CARRIED,
+        PROPOSAL_DROPPED,
         SKIPPED_BUDGET,
         TRIAGE_REPLY,
         STEP_COMPLETED,
         STEP_FAILED,
+        STEP_CANCELLED,
         STEP_SKIPPED,
         STEP_CACHED,
         STEP_ATTEMPT,

@@ -382,7 +382,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
     return <div className="flex h-full items-center justify-center text-on-surface-low">Loading…</div>
   }
   const active = ACTIVE_LOOP_STATUSES.has(c.status)
-  const running = c.status === 'running'
+  const running = c.status === 'running' && !c.held
   const findings = [...(c.findings ?? [])].sort((a, b) => b.cycle - a.cycle)
   const verdictByCycle = new Map<number, LoopVerdict>()
   for (const v of c.verdicts ?? []) {
@@ -462,7 +462,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
       ) : (
         <span className="size-1.5 rounded-pill" style={{ background: c.status === 'failed' ? 'var(--color-danger)' : c.status === 'complete' ? 'var(--color-primary)' : 'var(--color-on-surface-low)' }} />
       )}
-      {running ? (statusText || 'Working') : loopStatusLabel(effectiveLoopStatus(c.status, c.stop_reason))}
+      {running ? (statusText || 'Working') : loopStatusLabel(effectiveLoopStatus(c.status, c.stop_reason, c.held))}
       {
 }
       {running && (
@@ -754,7 +754,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
                             {running && <motion.span aria-hidden className="absolute inset-[-6px] rounded-pill" style={{ background: thinkingGlow() }} animate={{ opacity: [0.3, 0.7, 0.3] }} transition={{ duration: 3, repeat: Infinity }} />}
                             <span className={running ? '' : 'text-on-surface-low'}><Spark size={13} /></span>
                           </span>
-                          <span data-type="label-s" className="flex-1 truncate text-on-surface" style={fvs(500)}>Cycle {shownCycle(c.total_cycles, c.status)} · {running ? (statusText || 'working') : loopStatusLabel(effectiveLoopStatus(c.status, c.stop_reason)).toLowerCase()}</span>
+                          <span data-type="label-s" className="flex-1 truncate text-on-surface" style={fvs(500)}>Cycle {shownCycle(c.total_cycles, c.status)} · {running ? (statusText || 'working') : loopStatusLabel(effectiveLoopStatus(c.status, c.stop_reason, c.held)).toLowerCase()}</span>
                           {running && <span data-type="caption" className="shrink-0 text-on-surface-low tabular-nums">{fmt(curCycleElapsed)}</span>}
                         </div>
                         {running && activity.length > 0 && <LiveSubsteps activity={activity} />}

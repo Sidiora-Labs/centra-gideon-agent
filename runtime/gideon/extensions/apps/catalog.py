@@ -31,6 +31,7 @@ from urllib.parse import urlsplit
 
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
+from gideon.extensions.apps.disclosure import _launches
 from gideon.extensions.apps.manifest import AppManifest, version_tuple
 
 logger = logging.getLogger(__name__)
@@ -144,6 +145,9 @@ class CatalogEntry:
     installable: bool = True
     refused: str = ""
     listedBy: str = ""  # noqa: N815
+    launches: list[dict[str, Any]] = field(default_factory=list)
+    npmPackages: list[str] = field(default_factory=list)
+    writes: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -478,20 +482,26 @@ def _scan_registries(*, now: float) -> list[CatalogEntry]:
             entry = _pointer_to_entry(url, p, is_git=True, policy=policy)
             out.append(entry)
             if entry.installable and entry.version:
-                offers.setdefault(url, []).append((entry.pointer, entry.version, entry.listedBy))
+                offers.setdefault(url, []).append(
+                    (entry.pointer, entry.version, entry.listedBy)
+                )
     for root in list_local_sources():
         policy = listing_policy(root)
         for p in _fetch_registry_index(root, is_git=False, now=now) or []:
             entry = _pointer_to_entry(root, p, is_git=False, policy=policy)
             out.append(entry)
             if entry.installable and entry.version:
-                offers.setdefault(root, []).append((entry.pointer, entry.version, entry.listedBy))
+                offers.setdefault(root, []).append(
+                    (entry.pointer, entry.version, entry.listedBy)
+                )
     _registry_offer_cache.clear()
     _registry_offer_cache.update(offers)
     return out
 
 
-def _scan_git_source(url: str, *, now: float, errors: list[str] | None = None) -> list[CatalogEntry]:
+def _scan_git_source(
+    url: str, *, now: float, errors: list[str] | None = None
+) -> list[CatalogEntry]:
     """Shallow-clone a git source, scan immediate subdirs for ``app.json``,
     and return installable CatalogEntry objects (with ``pointer=url#subdir``).
 
@@ -546,7 +556,9 @@ def _scan_git_source(url: str, *, now: float, errors: list[str] | None = None) -
 
         if (root / "app.json").is_file():
             try:
-                _git_root_versions[url] = AppManifest.from_json_file(root / "app.json").version
+                _git_root_versions[url] = AppManifest.from_json_file(
+                    root / "app.json"
+                ).version
             except Exception:
                 logger.debug("git scan: bad root manifest in %s", url, exc_info=True)
             _git_scan_cache[url] = (now, [])
@@ -588,12 +600,27 @@ def _scan_git_source(url: str, *, now: float, errors: list[str] | None = None) -
                     ),
                     sidecarDependencies=list(m.dependencies.sidecarDependencies),
                     requires=[item.to_dict() for item in m.requires],
+                    launches=_launches(m),
+                    npmPackages=list(m.dependencies.npmPackages),
+                    writes=[item.to_dict() for item in m.writes],
                     tags=list(m.tags),
                     quality=(m.quality.to_dict() if m.quality else {}),
                     pointer=f"{url}#{entry.name}",
                     permissions=_perms,
                     crons=_crons,
-                    hooks=[{"name": h["name"], "event": h["event"], "provider": h["provider"]} for h in m.extra.get("hooks", []) if isinstance(h, dict) and all(isinstance(h.get(k), str) for k in ("name", "event", "provider"))],
+                    hooks=[
+                        {
+                            "name": h["name"],
+                            "event": h["event"],
+                            "provider": h["provider"],
+                        }
+                        for h in m.extra.get("hooks", [])
+                        if isinstance(h, dict)
+                        and all(
+                            isinstance(h.get(k), str)
+                            for k in ("name", "event", "provider")
+                        )
+                    ],
                     hasUI=bool(m.ui.pages),
                     uiComponents=m.ui.components,
                     coreCompatibility=m.core_compatibility().to_dict(),
@@ -616,7 +643,9 @@ def _scan_git_source(url: str, *, now: float, errors: list[str] | None = None) -
     return entries
 
 
-def _scan_git_sources(*, now: float, errors: list[str] | None = None) -> list[CatalogEntry]:
+def _scan_git_sources(
+    *, now: float, errors: list[str] | None = None
+) -> list[CatalogEntry]:
     """Scan all configured git sources that lack a registry index, returning
     discovered multi-app subdirectory entries. Sources WITH a registry index
     are skipped (already handled by ``_scan_registries``).
@@ -813,14 +842,20 @@ def listing_repo_refusal(repo: str) -> str:
     if parts.username is not None or parts.password is not None:
         return f"Not installable: the listed download address contains credentials. {_LISTING_RULE}"
     if not parts.hostname:
-        return f"Not installable: the listed download address has no host. {_LISTING_RULE}"
+        return (
+            f"Not installable: the listed download address has no host. {_LISTING_RULE}"
+        )
     if port is not None:
         return f"Not installable: the listed download address specifies a port. {_LISTING_RULE}"
     return ""
 
 
 def _place(host: str, address: str, category: str) -> str:
-    place = "the cloud metadata service" if category == "metadata" else _PLACES.get(category, "a non-public address")
+    place = (
+        "the cloud metadata service"
+        if category == "metadata"
+        else _PLACES.get(category, "a non-public address")
+    )
     shown_host = _shown(host)
     if _is_ip_literal(shown_host) or not address:
         return f"{place} ({shown_host})"
@@ -880,7 +915,9 @@ def listing_policy(registry: str) -> Any:
     from gideon.security.net.policy import listing_egress_policy
 
     configured = {_git_source_key(source) for source in list_git_sources()}
-    trusted_host = _git_remote_host(registry) if _git_source_key(registry) in configured else ""
+    trusted_host = (
+        _git_remote_host(registry) if _git_source_key(registry) in configured else ""
+    )
     return listing_egress_policy(trusted_host)
 
 
@@ -1186,11 +1223,26 @@ def _scan_local_sources() -> list[CatalogEntry]:
                     ),
                     sidecarDependencies=list(m.dependencies.sidecarDependencies),
                     requires=[item.to_dict() for item in m.requires],
+                    launches=_launches(m),
+                    npmPackages=list(m.dependencies.npmPackages),
+                    writes=[item.to_dict() for item in m.writes],
                     tags=list(m.tags),
                     quality=(m.quality.to_dict() if m.quality else {}),
                     permissions=_perms,
                     crons=_crons,
-                    hooks=[{"name": h["name"], "event": h["event"], "provider": h["provider"]} for h in m.extra.get("hooks", []) if isinstance(h, dict) and all(isinstance(h.get(k), str) for k in ("name", "event", "provider"))],
+                    hooks=[
+                        {
+                            "name": h["name"],
+                            "event": h["event"],
+                            "provider": h["provider"],
+                        }
+                        for h in m.extra.get("hooks", [])
+                        if isinstance(h, dict)
+                        and all(
+                            isinstance(h.get(k), str)
+                            for k in ("name", "event", "provider")
+                        )
+                    ],
                     hasUI=bool(m.ui.pages),
                     uiComponents=m.ui.components,
                     coreCompatibility=m.core_compatibility().to_dict(),
@@ -1289,11 +1341,21 @@ def available_bundled() -> list[CatalogEntry]:
                 ),
                 sidecarDependencies=list(m.dependencies.sidecarDependencies),
                 requires=[item.to_dict() for item in m.requires],
+                launches=_launches(m),
+                npmPackages=list(m.dependencies.npmPackages),
+                writes=[item.to_dict() for item in m.writes],
                 tags=list(m.tags),
                 quality=(m.quality.to_dict() if m.quality else {}),
                 permissions=_perms,
                 crons=_crons,
-                hooks=[{"name": h["name"], "event": h["event"], "provider": h["provider"]} for h in m.extra.get("hooks", []) if isinstance(h, dict) and all(isinstance(h.get(k), str) for k in ("name", "event", "provider"))],
+                hooks=[
+                    {"name": h["name"], "event": h["event"], "provider": h["provider"]}
+                    for h in m.extra.get("hooks", [])
+                    if isinstance(h, dict)
+                    and all(
+                        isinstance(h.get(k), str) for k in ("name", "event", "provider")
+                    )
+                ],
                 hasUI=bool(m.ui.pages),
                 uiComponents=m.ui.components,
                 coreCompatibility=m.core_compatibility().to_dict(),
@@ -1429,7 +1491,9 @@ def updates_available() -> list[dict[str, Any]]:
                 candidates.append(cached)
         if not candidates:
             continue
-        latest_version, latest_source = max(candidates, key=lambda item: version_tuple(item[0]))
+        latest_version, latest_source = max(
+            candidates, key=lambda item: version_tuple(item[0])
+        )
         if version_tuple(latest_version) <= version_tuple(installed_version):
             continue
         out.append(
@@ -1581,3 +1645,18 @@ def _build_available_catalog() -> dict[str, Any]:
         "networkSources": network_source_hosts(),
         "sourceErrors": source_errors,
     }
+
+
+def is_packaged_native(name: str) -> bool:
+    from gideon.extensions.apps.native_contract import NATIVE_DIR
+
+    if not name or "/" in name or "\\" in name or name in {".", ".."}:
+        return False
+    path = NATIVE_DIR / name / "app.json"
+    if not path.is_file():
+        return False
+    try:
+        manifest = AppManifest.from_json_file(path)
+    except (OSError, ValueError, TypeError):
+        return False
+    return manifest.name == name and manifest.native is True

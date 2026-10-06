@@ -1,7 +1,7 @@
 {
   "version": 3,
   "description": "Baseline bash denied-command regexes, always enforced. Categories, in order: credential exfiltration (S3/env/wire), cloud metadata SSRF, pipe-to-shell, destructive filesystem, destructive cloud, disk/partition writes, reverse shells, credential env export, destructive SQL, unreviewed pushes, credential-file reads, and self-tampering with the running gateway. User config may only ADD to this set.",
-  "sha256": "1cfa1b46d011a0432765456d6bf4c8e104b5f7519c6796dbf9a0a22248423aac",
+  "sha256": "2ae58f08f3fde85d5406caab396e56976b91bcab3c92c6c093e6cb70e5409045",
   "patterns": [
     "aws s3 cp .* s3://.*",
     "aws s3 mv .* s3://.*",
@@ -68,8 +68,6 @@
     "chown.*/lib64/.*",
     "dd if=.*",
     "mkfs.*",
-    "rm -rf /.*",
-    "rm -rf ~.*",
     "git reset --hard.*",
     "curl .* \\| bash",
     "curl .* \\| sh",

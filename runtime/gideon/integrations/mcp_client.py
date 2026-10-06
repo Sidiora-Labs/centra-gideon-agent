@@ -21,6 +21,7 @@ module load.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -28,6 +29,8 @@ from urllib.parse import urlsplit
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
+
+from gideon.integrations.mcp_status import StartFailure
 
 from gideon.assurance import trace_recorder as _trace
 
@@ -63,10 +66,9 @@ def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoi
     import httpx
 
     from gideon.security.net.guard import evaluate
-    from gideon.security.net.policy import STRICT, egress_policy_for
+    from gideon.security.net.policy import MCP_SERVER, STRICT, egress_policy_for
     from gideon.security.net.client import EgressBlocked, _audit
 
-    policy = egress_policy_for(STRICT)
     base = urlsplit(endpoint)
     default_headers = httpx.Headers(headers or {})
     oauth_metadata_urls: set[str] = set()
@@ -142,7 +144,8 @@ def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoi
                 # Cross-origin GETs in an OAuth flow are discovery documents; credentials
                 # configured for the MCP resource never travel with those requests.
                 raise ValueError("MCP remote transport refused a cross-origin redirect or endpoint")
-            decision = evaluate(str(request.url), policy)
+            policy = egress_policy_for(STRICT if is_oauth else MCP_SERVER)
+            decision = await asyncio.to_thread(evaluate, str(request.url), policy)
             audit_origin = f"{parsed.scheme}://{parsed.netloc}"
             if not decision.allow:
                 _audit(audit_origin, policy, outcome="denied", reason=decision.reason)
@@ -211,6 +214,7 @@ class McpToolSpec:
     name: str
     description: str
     input_schema: dict[str, Any] = field(default_factory=dict)
+    annotations: dict[str, Any] = field(default_factory=dict)
 
 
 _INT_LITERAL_RE = re.compile(r"^-?\d+$")
@@ -228,8 +232,8 @@ def _schema_numeric_kind(prop_schema: object) -> str | None:
     if any(k in prop_schema for k in ("anyOf", "oneOf", "allOf", "$ref")):
         return None
     t = prop_schema.get("type")
-    types = {t} if isinstance(t, str) else set(t) if isinstance(t, list) else set()
-    if "string" in types:
+    types = {t} if isinstance(t, str) else set(t) if isinstance(t, list) and all(isinstance(item, str) for item in t) else set()
+    if types - {"integer", "number", "null"}:
         return None
     if "integer" in types:
         return "integer"
@@ -241,7 +245,7 @@ def _schema_numeric_kind(prop_schema: object) -> str | None:
 def _coerce_args_to_schema(
     arguments: dict[str, Any], input_schema: dict[str, Any] | None
 ) -> dict[str, Any]:
-    """Coerce numeric-looking STRING args back to numbers per the tool's
+    """Coerce unambiguous numeric/JSON STRING args per the tool's
     inputSchema. Only top-level properties are handled (nested object/array
     numerics are a known, accepted limitation). Non-string values, string-typed
     fields, and strings that don't strictly match a numeric literal are left
@@ -256,12 +260,47 @@ def _coerce_args_to_schema(
     for key, val in arguments.items():
         if not isinstance(val, str):
             continue
-        kind = _schema_numeric_kind(props.get(key))
+        prop = props.get(key)
+        kind = _schema_numeric_kind(prop)
+        if isinstance(prop, dict) and not any(k in prop for k in ("anyOf", "oneOf", "allOf", "$ref")):
+            declared = prop.get("type")
+            types = {declared} if isinstance(declared, str) else set(declared) if isinstance(declared, list) and all(isinstance(t, str) for t in declared) else set()
+            choices = types - {"null"}
+            if len(choices) == 1 and choices <= {"boolean", "array", "object"}:
+                try:
+                    decoded = json.loads(val)
+                except (ValueError, TypeError):
+                    pass
+                else:
+                    expected = {"boolean": bool, "array": list, "object": dict}[next(iter(choices))]
+                    if type(decoded) is expected:
+                        out[key] = decoded
         if kind == "integer" and _INT_LITERAL_RE.match(val):
             out[key] = int(val)
         elif kind == "number" and _NUM_LITERAL_RE.match(val):
             out[key] = float(val)
     return out
+
+
+@dataclass
+class _Request:
+    kind: str
+    payload: dict[str, Any]
+    answer: asyncio.Future
+    sent: bool = False
+
+    @property
+    def tool(self) -> str:
+        return str(self.payload.get("tool") or self.kind)
+
+
+def _not_sent(request: _Request, reason: str) -> str:
+    return f"MCP request '{request.tool}' was not sent: {reason}. Nothing reached the server."
+
+
+def _uncertain(request: _Request, server: str, reason: str) -> str:
+    return (f"MCP tool '{request.tool}' may have gone through: Gideon sent it to '{server}' and {reason}. "
+            "Check whether it did what was intended before calling it again, or it may happen twice.")
 
 
 class McpServerConn:
@@ -279,12 +318,13 @@ class McpServerConn:
         spec: dict[str, Any],
         scope: str = "",
         elicitation_handler: ElicitationHandler | None = None,
+        connect_timeout: float | None = None,
     ) -> None:
         self.name = name
         self.spec = spec
         self.scope = scope
         self._task: asyncio.Task | None = None
-        self._requests: asyncio.Queue[tuple[str, dict, asyncio.Future]] | None = None
+        self._requests: asyncio.Queue[_Request] | None = None
         self._ready: asyncio.Event = asyncio.Event()
         self._tools: list[McpToolSpec] = []
         self._error: str = ""
@@ -293,6 +333,10 @@ class McpServerConn:
         self._consecutive_failures: int = 0
         self._breaker_until: float = 0.0
         self._elicitation_handler = elicitation_handler
+        self._connect_timeout = connect_timeout if connect_timeout is not None else _CONNECT_TIMEOUT_SECS
+        self._failure: StartFailure | None = None
+        self._stdio = None
+        self._credential_redactions: tuple[str, ...] = ()
 
     @property
     def error(self) -> str:
@@ -309,91 +353,141 @@ class McpServerConn:
     def touch(self) -> None:
         self._last_used = time.monotonic()
 
-    async def ensure_started(self) -> bool:
-        """Start the actor + wait for the handshake. Returns connected-ok.
+    def _definition_seal(self) -> str:
+        from gideon.integrations.mcp_discovery import definition_seal
 
-        Gated by a circuit-breaker: a server that keeps failing to connect stops
-        being respawned for a cooldown, so a broken server can't churn the CPU in
-        a spawn→fail→spawn loop."""
+        return definition_seal(self.name, self.spec)
+
+    async def ensure_started(self) -> bool:
+        from gideon.integrations.mcp_discovery import start_refused
+
         self.touch()
         if self._task is None or self._task.done():
-            now = time.monotonic()
-            if now < self._breaker_until:
-                self._error = (
-                    self._error or "circuit breaker open (repeated connect failures)"
-                )
+            refused = start_refused(self.name, self._definition_seal())
+            if refused:
+                self._error = refused
                 return False
-            self._requests = asyncio.Queue()
-            self._ready = asyncio.Event()
-            self._error = ""
-            self._closing = False
-            self._task = asyncio.create_task(self._run(), name=f"mcp-conn-{self.name}")
+            refused = await self._egress_refusal()
+            if refused:
+                if not self.started:
+                    self._error = refused
+                return False
+            if not self.started:
+                self._requests = asyncio.Queue()
+                self._ready = asyncio.Event()
+                self._error = ""
+                self._failure = None
+                self._closing = False
+                from gideon.security.net.policy import egress_held_to
+
+                with egress_held_to(""):
+                    self._task = asyncio.create_task(self._run(), name=f"mcp-conn-{self.name}")
+        # The actor owns its startup deadline. Cancelling a waiter cannot cut off another
+        # caller's startup, and a failed attempt is counted once by the actor.
+        await self._ready.wait()
+        return not bool(self._error)
+
+    async def _egress_refusal(self) -> str:
+        url = str(self.spec.get("url") or self.spec.get("endpoint") or "")
+        if not url:
+            return ""
+        from gideon.security.net.client import _audit
+        from gideon.security.net.guard import evaluate, refusal_for
+        from gideon.security.net.policy import MCP_SERVER, egress_policy_for
+
+        parsed = urlsplit(url)
+        authority = parsed.hostname or ""
+        if ":" in authority:
+            authority = f"[{authority}]"
+        if parsed.port:
+            authority = f"{authority}:{parsed.port}"
+        from gideon.integrations.mcp_secret_refs import safe_display_url
+
+        shown = safe_display_url(url)
+        policy = egress_policy_for(MCP_SERVER)
         try:
-            await asyncio.wait_for(self._ready.wait(), timeout=_CONNECT_TIMEOUT_SECS)
+            decision = await asyncio.wait_for(
+                asyncio.to_thread(evaluate, url, policy), timeout=self._connect_timeout
+            )
         except asyncio.TimeoutError:
-            self._error = self._error or "handshake timed out"
-            self._note_failure()
-            return False
-        if self._error:
-            self._note_failure()
-            return False
-        self._consecutive_failures = 0
-        return True
+            reason = "The MCP endpoint lookup did not finish; nothing was sent."
+            _audit(shown, policy, outcome="denied", reason=reason)
+            return reason
+        if decision.allow or decision.category == "unresolvable":
+            return ""
+        _audit(shown, policy, outcome="denied", reason=decision.reason)
+        return refusal_for(shown, decision, then="then try it again")
 
     def _note_failure(self) -> None:
+        # Compatibility for diagnostics; startup accounting belongs to _run.
         self._consecutive_failures += 1
         if self._consecutive_failures >= _BREAKER_THRESHOLD:
-            self._breaker_until = time.monotonic() + _BREAKER_COOLDOWN_SECS
-            logger.warning(
-                "MCP server '%s' tripped the spawn breaker after %d failures; "
-                "cooling down %.0fs",
-                self.name,
-                self._consecutive_failures,
-                _BREAKER_COOLDOWN_SECS,
-            )
+            self._breaker_until = float("inf")
 
     async def list_tools(self) -> list[McpToolSpec]:
+        if await self._egress_refusal():
+            return []
         if not await self.ensure_started():
             return []
         self.touch()
+        await self.protocol_call("tools/list")
         return list(self._tools)
 
-    async def call_tool(self, tool: str, arguments: dict[str, Any]) -> tuple[bool, str]:
-        """Invoke ``tool``; returns ``(ok, text_output_or_error)``."""
+    async def call_tool(self, tool: str, arguments: dict[str, Any], *, expected_definition: str = "", expected_configuration: str = "", expected_read_authority: bool = False) -> tuple[bool, str]:
+        if refused := await self._egress_refusal():
+            return False, refused
         if not await self.ensure_started():
             return False, f"MCP server '{self.name}' not connected: {self._error}"
         self.touch()
         spec = next((t for t in self._tools if t.name == tool), None)
         if spec is not None:
             arguments = _coerce_args_to_schema(arguments, spec.input_schema)
-        assert self._requests is not None
-        fut: asyncio.Future = asyncio.get_event_loop().create_future()
-        await self._requests.put(("call", {"tool": tool, "arguments": arguments}, fut))
+            from gideon.integrations.tool_providers.arguments import argument_refusal
+            if reason := argument_refusal(tool, arguments, spec.input_schema, types=True):
+                return False, reason
+        request = _Request("call", {"tool": tool, "arguments": arguments, "expected_definition": expected_definition, "expected_configuration": expected_configuration, "expected_read_authority": expected_read_authority}, asyncio.get_running_loop().create_future())
+        if self._requests is None or not self.started or self._closing:
+            return False, _not_sent(request, "the connection ended first")
+        self._requests.put_nowait(request)
         try:
-            ok, output = await asyncio.wait_for(fut, timeout=_CALL_TIMEOUT_SECS)
-        except asyncio.TimeoutError:
-            ok, output = (
-                False,
-                f"MCP tool '{tool}' timed out after {_CALL_TIMEOUT_SECS:.0f}s",
-            )
+            await asyncio.wait({request.answer}, timeout=_CALL_TIMEOUT_SECS)
+        finally:
+            if not request.answer.done():
+                request.answer.cancel()
+        if request.answer.cancelled():
+            answer = ((True, _uncertain(request, self.name, f"had no answer after {_CALL_TIMEOUT_SECS:g} seconds"))
+                      if request.sent else (False, _not_sent(request, "its caller stopped waiting before dispatch")))
+        else:
+            answer = request.answer.result()
         if _trace.is_recording():
-            _trace.record(
-                "mcp",
-                self.name,
-                "call_tool",
-                {"tool": tool, "arguments": arguments, "ok": ok, "output": output},
-            )
-        return ok, output
+            _trace.record("mcp", self.name, "call_tool", {"tool": tool, "arguments": arguments, "ok": answer[0], "output": answer[1]})
+        return answer
 
     async def protocol_call(self, kind: str, **payload: Any) -> dict[str, Any]:
-        """Run a resource or prompt request on the actor's owning event loop."""
+        if refused := await self._egress_refusal():
+            raise RuntimeError(refused)
         if not await self.ensure_started():
             raise RuntimeError(f"MCP server '{self.name}' not connected: {self._error}")
         self.touch()
-        assert self._requests is not None
-        fut: asyncio.Future = asyncio.get_running_loop().create_future()
-        await self._requests.put((kind, payload, fut))
-        return await asyncio.wait_for(fut, timeout=_CALL_TIMEOUT_SECS)
+        request = _Request(kind, payload, asyncio.get_running_loop().create_future())
+        if self._requests is None or not self.started or self._closing:
+            raise RuntimeError(_not_sent(request, "the connection ended first"))
+        self._requests.put_nowait(request)
+        try:
+            return await asyncio.wait_for(request.answer, _CALL_TIMEOUT_SECS)
+        finally:
+            if not request.answer.done():
+                request.answer.cancel()
+
+    def _settle(self, request: _Request, value: Any = None, error: BaseException | None = None) -> None:
+        if request.answer.done():
+            if request.sent:
+                logger.warning("MCP server '%s' answered '%s' after its caller stopped waiting", self.name, request.tool)
+            return
+        if error is not None:
+            request.answer.set_exception(error)
+        else:
+            request.answer.set_result(value)
 
     async def shutdown(self) -> None:
         self._closing = True
@@ -406,75 +500,117 @@ class McpServerConn:
 
     async def _run(self) -> None:
         """Hold the transport+session open, serve queued requests until cancelled."""
+        from gideon.integrations.mcp_discovery import note_start
+
+        requests = self._requests
+        assert requests is not None
+        seal = self._definition_seal()
+        deadline = asyncio.timeout(self._connect_timeout)
+        self._stdio = None
         try:
             from contextlib import AsyncExitStack
 
             from mcp import ClientSession
             from mcp.client.session import ElicitationFnT
-            from mcp.shared.context import RequestContext
             from mcp.types import ElicitRequestParams, ElicitResult, ErrorData
 
             async with AsyncExitStack() as stack:
-                read, write = await self._open_transport(stack)
-                elicitation_callback: ElicitationFnT | None = None
-                if (
-                    self.spec.get("allowElicitation") is True
-                    and self._elicitation_handler
-                ):
+                try:
+                    async with deadline:
+                        read, write = await self._open_transport(stack)
+                        elicitation_callback: ElicitationFnT | None = None
+                        if (
+                            self.spec.get("allowElicitation") is True
+                            and self._elicitation_handler
+                        ):
 
-                    async def _elicit(
-                        context: RequestContext[ClientSession, Any],
-                        params: ElicitRequestParams,
-                    ) -> ElicitResult | ErrorData:
-                        handler = self._elicitation_handler
-                        if handler is None:
-                            return ElicitResult(action="cancel")
+                            async def _elicit(
+                                context: Any,
+                                params: ElicitRequestParams,
+                            ) -> ElicitResult | ErrorData:
+                                handler = self._elicitation_handler
+                                if handler is None:
+                                    return ElicitResult(action="cancel")
 
-                        try:
-                            return await asyncio.wait_for(
-                                handler(self.name, params),
-                                timeout=approval_window_secs(),
+                                try:
+                                    return await asyncio.wait_for(
+                                        handler(self.name, params),
+                                        timeout=approval_window_secs(),
+                                    )
+                                except asyncio.TimeoutError:
+                                    return ElicitResult(action="cancel")
+
+                            elicitation_callback = _elicit
+                        session = await stack.enter_async_context(
+                            ClientSession(
+                                read, write, elicitation_callback=elicitation_callback
                             )
-                        except asyncio.TimeoutError:
-                            return ElicitResult(action="cancel")
-
-                    elicitation_callback = _elicit
-                session = await stack.enter_async_context(
-                    ClientSession(
-                        read, write, elicitation_callback=elicitation_callback
-                    )
-                )
-                await session.initialize()
-                await self._refresh_tools(session)
+                        )
+                        await session.initialize()
+                        await self._refresh_tools(session)
+                except TimeoutError:
+                    if deadline.expired() and self._stdio is not None:
+                        self._stdio.stop_waiting()
+                    raise
+                note_start(self.name, seal, tools=self._tools)
                 self._ready.set()
-                await self._serve(session)
+                await self._serve(session, requests)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
-            from gideon.security.security import redact_credentials, redact_exfiltration_urls
-
-            safe_error, _ = redact_exfiltration_urls(str(exc))
-            safe_error, _ = redact_credentials(safe_error)
-            self._error = safe_error[:300] or exc.__class__.__name__
-            logger.warning(
-                "MCP server '%s' connection failed: %s", self.name, self._error
-            )
+            self._failure = self._start_failure(exc, timed_out=deadline.expired())
+            self._error = self._failure.headline
+            if not self._ready.is_set():
+                note_start(self.name, seal, failure=self._failure)
             self._ready.set()
+        finally:
+            self._ready.set()
+            while not requests.empty():
+                request = requests.get_nowait()
+                message = _not_sent(request, "the connection ended first")
+                self._settle(request, (False, message) if request.kind == "call" else None,
+                             None if request.kind == "call" else RuntimeError(message))
+
+    def _start_failure(self, exc: BaseException, *, timed_out: bool) -> StartFailure:
+        from gideon.integrations import mcp_status, mcp_stdio
+        from gideon.integrations.mcp_discovery import _probe_error_copy
+
+        run = self._stdio
+        if run is not None:
+            if run.waiting or run.left_to_finish:
+                return mcp_status.still_starting(self.name, self._connect_timeout, run.stderr,
+                                                allowance=mcp_stdio.FINISH_SECS, earlier=run.waiting)
+            if run.exited:
+                return mcp_status.exited(self.name, run.returncode, run.stderr)
+            if timed_out:
+                return mcp_status.did_not_answer(self.name, self._connect_timeout, run.stderr)
+            if run.stopped:
+                return mcp_status.closed(self.name, run.stderr)
+        if isinstance(exc, mcp_stdio.CommandNotFound):
+            return StartFailure(mcp_status.safe_text(str(exc)), counts=False)
+        url = str(self.spec.get("url") or self.spec.get("endpoint") or "")
+        from gideon.integrations.mcp_argument_secrets import scrub_text
+
+        diagnostic = scrub_text(str(exc) or type(exc).__name__, self._credential_redactions)
+        message = _probe_error_copy(diagnostic, url) if url else diagnostic
+        return StartFailure(mcp_status.safe_text(message)[:500], mcp_status.safe_text(run.stderr) if run else "",
+                            counts=not isinstance(exc, PermissionError))
 
     async def _open_transport(self, stack: Any):
         """Enter the right transport context for this server's spec."""
         from gideon.security.mcp_grants import allowed
 
-        current = _gideon_mcp_specs().get(self.name)
-        if (
-            current is None
-            or _spec_hash(current) != _spec_hash(self.spec)
-            or not allowed({"name": self.name, **current})
-        ):
+        from gideon.integrations.mcp_discovery import list_servers, _definition_revision
+
+        current = next((server for server in list_servers() if server.name == self.name), None)
+        if current is None or _definition_revision(current) != self._definition_seal() or not allowed(current):
             raise PermissionError("MCP server is not allowed in its current definition")
         from gideon.extensions.providers.mcp_instances import resolve_server_credentials
 
         spec = resolve_server_credentials(self.name, self.spec)
+        from gideon.integrations.mcp_argument_secrets import known_values
+
+        self._credential_redactions = known_values(spec)
         url = spec.get("url") or spec.get("endpoint")
         if url:
             headers = spec.get("headers") or {}
@@ -520,53 +656,72 @@ class McpServerConn:
             )
             return read, write
 
-        import os
+        from gideon.integrations.mcp_stdio import StdioRun, stdio_streams
 
-        from mcp.client.stdio import StdioServerParameters, stdio_client
-
-        from gideon.core.env import augmented_path
-
-        command = spec.get("command", "")
-        if not command:
-            raise ValueError("server spec has neither 'url' nor 'command'")
-        env = dict(os.environ)
-        env["PATH"] = augmented_path(env.get("PATH", ""))
-        env.update(spec.get("env") or {})
-        cwd = spec.get("cwd") or None
-        from gideon.security.sandbox import PROFILE_TOOL, spawn_shim_argv
-
-        wrapped = spawn_shim_argv(
-            [command, *(spec.get("args") or [])], PROFILE_TOOL
-        )
-        params = StdioServerParameters(
-            command=wrapped[0],
-            args=list(wrapped[1:]),
-            env=env,
-            cwd=cwd,
-        )
-        read, write = await stack.enter_async_context(stdio_client(params))
-        return read, write
+        self._stdio = StdioRun()
+        return await stack.enter_async_context(stdio_streams(
+            self.name, spec, run=self._stdio, seal=self._definition_seal(),
+        ))
 
     async def _refresh_tools(self, session: Any) -> None:
-        result = await session.list_tools()
         tools: list[McpToolSpec] = []
-        for t in getattr(result, "tools", None) or []:
-            tools.append(
-                McpToolSpec(
-                    name=getattr(t, "name", ""),
-                    description=getattr(t, "description", "") or "",
-                    input_schema=getattr(t, "inputSchema", None)
-                    or {"type": "object", "properties": {}},
-                )
-            )
+        cursor = None
+        seen_cursors: set[str] = set()
+        while True:
+            result = await session.list_tools(cursor=cursor)
+            for tool in getattr(result, "tools", None) or []:
+                labels = getattr(tool, "annotations", None)
+                annotations = labels.model_dump(exclude_none=True) if hasattr(labels, "model_dump") else dict(labels or {})
+                tools.append(McpToolSpec(name=getattr(tool, "name", ""), description=getattr(tool, "description", "") or "", input_schema=getattr(tool, "inputSchema", None) or {"type": "object", "properties": {}}, annotations=annotations))
+            if len(tools) > 1000:
+                raise ValueError("MCP tool inventory exceeds the review limit")
+            cursor = getattr(result, "nextCursor", None)
+            if not cursor:
+                break
+            if cursor in seen_cursors:
+                raise ValueError("MCP tool inventory cursor repeated")
+            seen_cursors.add(cursor)
+        names = [tool.name for tool in tools]
+        if len(set(names)) != len(names):
+            raise ValueError("MCP tool inventory contains duplicate names")
         self._tools = tools
+        from gideon.integrations.mcp_discovery import note_start
+        note_start(self.name, self._definition_seal(), tools=tools)
 
-    async def _serve(self, session: Any) -> None:
-        assert self._requests is not None
+    async def _serve(self, session: Any, requests: asyncio.Queue[_Request] | None = None) -> None:
+        import anyio
+        from mcp.shared.exceptions import McpError
+
+        requests = requests if requests is not None else self._requests
+        assert requests is not None
         while not self._closing:
-            kind, payload, fut = await self._requests.get()
+            request = await requests.get()
+            if request.answer.done():
+                continue
+            kind, payload = request.kind, request.payload
+            request.sent = kind != "call"
             try:
-                if kind == "call":
+                if kind == "tools/list":
+                    await self._refresh_tools(session)
+                    value = {"tools": [{"name": t.name, "description": t.description, "inputSchema": t.input_schema, "annotations": t.annotations} for t in self._tools]}
+                elif kind == "call":
+                    expected = payload.get("expected_definition", "")
+                    configuration = payload.get("expected_configuration", "")
+                    if expected:
+                        from gideon.security import mcp_read_only_trust
+                        await self._refresh_tools(session)
+                        current = next((t for t in self._tools if t.name == payload["tool"]), None)
+                        if current is None or mcp_read_only_trust.digest(current) != expected or not configuration or mcp_read_only_trust.configuration_revision(self.name) != configuration or (payload.get("expected_read_authority") and not mcp_read_only_trust.believes(self.name, current)):
+                            self._settle(request, (False, "MCP tool was not run: its reviewed definition changed. Refresh the tools and approve the current definition."))
+                            continue
+                    current = next((t for t in self._tools if t.name == payload["tool"]), None)
+                    if current is not None:
+                        from gideon.integrations.tool_providers.arguments import argument_refusal
+                        payload["arguments"] = _coerce_args_to_schema(payload["arguments"], current.input_schema)
+                        if reason := argument_refusal(payload["tool"], payload["arguments"], current.input_schema, types=True):
+                            self._settle(request, (False, reason))
+                            continue
+                    request.sent = True
                     result = await session.call_tool(payload["tool"], payload["arguments"])
                     value: Any = (not getattr(result, "isError", False), _coerce_output(result))
                 elif kind == "resources/list":
@@ -585,14 +740,33 @@ class McpServerConn:
                     value = result.model_dump(mode="json")
                 else:
                     raise ValueError(f"unknown request: {kind}")
-                if not fut.done():
-                    fut.set_result(value)
-            except Exception as exc:  # noqa: BLE001
-                if not fut.done():
-                    if kind == "call":
-                        fut.set_result((False, str(exc)[:500]))
-                    else:
-                        fut.set_exception(exc)
+            except asyncio.CancelledError:
+                message = _uncertain(request, self.name, "the connection ended before its answer arrived")
+                self._settle(request, (True, message) if kind == "call" else None,
+                             None if kind == "call" else RuntimeError(message))
+                raise
+            except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+                request.sent = False
+                message = _not_sent(request, "the session connection already ended")
+                self._settle(request, (False, message) if kind == "call" else None,
+                             None if kind == "call" else RuntimeError(message))
+                return
+            except McpError as exc:
+                ended = "connection closed" in str(exc).lower() or "connection lost" in str(exc).lower()
+                message = (_uncertain(request, self.name, "the connection ended before its answer arrived")
+                           if ended else str(exc)[:500])
+                self._settle(request, (ended, message) if kind == "call" else None,
+                             None if kind == "call" else RuntimeError(message))
+                if ended:
+                    return
+            except Exception as exc:
+                from gideon.integrations.mcp_status import safe_text
+
+                message = _uncertain(request, self.name, f"could not read its answer: {safe_text(str(exc))[:300]}")
+                self._settle(request, (True, message) if kind == "call" else None,
+                             None if kind == "call" else RuntimeError(message))
+            else:
+                self._settle(request, value)
 
 
 def _coerce_output(result: Any) -> str:
@@ -770,6 +944,9 @@ class McpClientRegistry:
             gone = name not in self._specs
             stale_hash = key[2] != _spec_hash(self._specs[name]) if not gone else False
             if gone or stale_hash:
+                from gideon.integrations.mcp_stdio import stop_finishing_soon
+
+                stop_finishing_soon(lambda server, removed=name: server == removed)
                 conn = self._conns.pop(key)
                 asyncio.ensure_future(conn.shutdown())
 
@@ -783,9 +960,13 @@ class McpClientRegistry:
             self._stats["evicted"] += 1
             asyncio.ensure_future(conn.shutdown())
 
-    def invalidate_server(self, name: str) -> int:
-        """Drop every live scope for one server after its OAuth authority changes."""
-        keys = [key for key in self._conns if key[0] == name]
+    def invalidate_server(self, name: str, *, serving_only: bool = False) -> int:
+        """Drop every live scope for one server after its authority changes."""
+        from gideon.integrations.mcp_stdio import stop_finishing_soon
+
+        if not serving_only:
+            stop_finishing_soon(lambda server: server == name)
+        keys = [key for key, conn in self._conns.items() if key[0] == name and (not serving_only or conn._ready.is_set())]
         for key in keys:
             conn = self._conns.pop(key)
             asyncio.ensure_future(conn.shutdown())
@@ -848,6 +1029,9 @@ class McpClientRegistry:
         }
 
     async def shutdown_all(self) -> None:
+        from gideon.integrations.mcp_stdio import stop_finishing
+
+        await stop_finishing(lambda _name: True)
         if self._sweeper and not self._sweeper.done():
             self._sweeper.cancel()
             self._sweeper = None
@@ -855,6 +1039,7 @@ class McpClientRegistry:
             *(c.shutdown() for c in self._conns.values()), return_exceptions=True
         )
         self._conns.clear()
+        await stop_finishing(lambda _name: True)
 
 
 _registry: McpClientRegistry | None = None

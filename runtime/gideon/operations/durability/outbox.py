@@ -144,6 +144,14 @@ class Outbox:
         self._write(entry)
         return entry
 
+    def forget_below(self, target: str, seq: int) -> int:
+        removed = 0
+        for entry in self.all_entries():
+            if entry.target == target and entry.seq < seq:
+                self._path(entry.id).unlink(missing_ok=True)
+                removed += 1
+        return removed
+
     def get(self, eid: str) -> OutboxEntry | None:
         try:
             data = self._path(eid).read_text(encoding="utf-8")

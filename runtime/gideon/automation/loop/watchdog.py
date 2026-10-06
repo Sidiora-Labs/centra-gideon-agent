@@ -226,6 +226,7 @@ class LoopWatchdog:
         self._task: asyncio.Task | None = None
         self._last_count: dict[str, int] = {}
         self._last_activity: dict[str, float] = {}
+        self._held: set[str] = set()
         self._running_since: dict[str, float] = {}
         self._consec_errors: dict[str, int] = {}
         self._ladder_done: set[str] = set()
@@ -251,6 +252,9 @@ class LoopWatchdog:
         the loop. A success / new finding resets the streak."""
         if ok:
             self._consec_errors[loop_id] = 0
+            return
+        from gideon.security.guardrails.incident import incident_active
+        if incident_active():
             return
         n = self._consec_errors.get(loop_id, 0) + 1
         self._consec_errors[loop_id] = n
@@ -1003,6 +1007,10 @@ class LoopWatchdog:
                 self._consec_errors.pop(cid, None)
                 self._running_since.pop(cid, None)
 
+        self._held &= live_ids
+        from gideon.security.guardrails.incident import incident_active
+        incident = incident_active()
+
         for loop in running:
             cid = loop.id
             session = self._state._sessions.get(manager.session_key(cid))
@@ -1023,6 +1031,13 @@ class LoopWatchdog:
                 store.update_status(cid, LoopStatus.NEEDS_INPUT)
                 self._publish(cid, "needs_input")
                 continue
+
+            if incident:
+                await self._hold_for_incident(cid)
+                continue
+            if cid in self._held:
+                self._held.discard(cid)
+                logger.info("loop %s carries on: incident mode is off", cid)
 
             loop_files.record_cycle_findings(cid)
             findings = loop_files.get_findings(cid)
@@ -1204,6 +1219,15 @@ class LoopWatchdog:
                     await manager.teardown_worker(self._svc, cid)
                     self._clear_liveness(cid)
                     self._publish(cid, "failed")
+
+    async def _hold_for_incident(self, cid: str) -> None:
+        """Stop in-flight workers while retaining the running state and due next cycle."""
+        self._last_activity[cid] = time.time()
+        self._running_since.pop(cid, None)
+        if cid not in self._held:
+            self._held.add(cid)
+            logger.info("loop %s held: incident mode is on", cid)
+        await manager.halt_worker_turns(self._state, cid)
 
     def _stagnation_disabled(self, loop) -> bool:
         """Whether the stall signal is off for this loop — read off the DECLARED policy

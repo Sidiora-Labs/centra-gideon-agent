@@ -30,10 +30,8 @@ class _ScriptAction:
         from gideon.automation.schedule_script import run_script_sandboxed
 
         clock = ActionClock()
-        executor = asyncio.get_running_loop()
         try:
-            receipt = await executor.run_in_executor(
-                None,
+            receipt = await asyncio.to_thread(
                 run_script_sandboxed,
                 self.reference,
                 f"action:{self.event}",

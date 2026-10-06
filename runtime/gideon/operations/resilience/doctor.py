@@ -338,6 +338,28 @@ async def _probe_memory(ctx: DoctorContext) -> ProbeResult:
     consistency check without touching the live faiss handle (which would auto-wire
     an embed_fn — a side effect a probe must not cause).
     """
+    from gideon.cognition import memory_service
+    from gideon.hypermid.memory import HypermidMemoryProvider, _trace
+    from gideon.hypermid.contracts import GrantOperation
+
+    authority = memory_service._authoritative_service
+    provider = authority.provider if authority is not None else None
+    if isinstance(provider, HypermidMemoryProvider):
+        access = provider._access(GrantOperation.READ, "memory-records")
+
+        async def inspect(client):
+            return await client.health(trace=_trace()), await client.diagnostics(access)
+
+        def native_read():
+            return provider._loop.call(inspect, timeout=8.0)
+
+        try:
+            health, diagnostics = await asyncio.to_thread(native_read)
+        except Exception:
+            return ProbeResult(ok=False, detail="Native memory diagnostics unavailable; health is unknown.", evidence={"authority": "hypermid"})
+        ready = health.state == "ready" and health.durable and health.lexical_available and diagnostics.recovery_state == "ready"
+        return ProbeResult(ok=ready, detail="Native memory ready" if ready else "Native memory storage or keyword search degraded", evidence={"authority": "hypermid", "records": diagnostics.record_count, "embeddings": diagnostics.embedding_count, "memory_fts_count": diagnostics.memory_fts_count, "recovery_state": diagnostics.recovery_state})
+
     home = ctx.home
     db_path = home / "memory.db"
     ids_path = home / "memory.ids.json"
@@ -394,6 +416,73 @@ async def _probe_memory(ctx: DoctorContext) -> ProbeResult:
     return ProbeResult(ok=True, detail="memory.db healthy", evidence=ev)
 
 
+async def _probe_memory_keyword_index(ctx: DoctorContext) -> ProbeResult:
+    """Read existing journal projections without creating or repairing any state."""
+    from gideon.cognition import memory_service
+    from gideon.cognition.memory import degraded_keyword_indexes
+    from gideon.core.sqlite_compat import FTS5_REMEDY, probe
+    from gideon.hypermid.memory import HypermidMemoryProvider
+
+    authority = memory_service._authoritative_service
+    if authority is not None and isinstance(authority.provider, HypermidMemoryProvider):
+        return ProbeResult(
+            ok=True,
+            detail="Native keyword readiness is checked by memory.store",
+            evidence={"authority": "hypermid", "delegated_probe": "memory.store"},
+        )
+
+    def read_existing() -> dict[str, Any]:
+        home = ctx.home.resolve()
+        failures = degraded_keyword_indexes()
+        paths = {home / "memory_index.db", *home.rglob("memory_index.db")}
+        for recorded in failures:
+            path = Path(recorded)
+            if path.is_relative_to(home):
+                paths.add(path)
+        rows = []
+        for path in sorted(paths):
+            directory = home / "workspace" / "memory" if path.parent == home else path.parent / "memory"
+            files = [directory / name for name in ("preferences.md", "projects.md")]
+            files.extend((directory / "history").glob("*.md"))
+            expected = {str(file): file.read_text(encoding="utf-8") for file in files if file.is_file()}
+            row: dict[str, Any] = {"path": str(path), "file_count": len(expected), "repair_available": path == home / "memory_index.db"}
+            if not path.exists():
+                row.update(ok=not expected, detail="Keyword index missing" if expected else "No journal files or keyword index yet")
+                rows.append(row)
+                continue
+            if not probe().fts5:
+                row.update(ok=False, detail=FTS5_REMEDY, repair_available=False)
+                rows.append(row)
+                continue
+            try:
+                with path.open("rb") as source:
+                    if source.read(16) != b"SQLite format 3\x00":
+                        raise sqlite3.DatabaseError("Unreadable SQLite header; original database and sidecars preserved")
+                connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=2.0)
+                try:
+                    indexed = {str(key): str(content) for key, content in connection.execute("SELECT path, content FROM memory_fts")}
+                finally:
+                    connection.close()
+                missing = object()
+                desync = sum(expected.get(key, missing) != indexed.get(key, missing) for key in expected.keys() | indexed.keys())
+                reason = failures.get(str(path.resolve()), "")
+                row.update(ok=not desync and not reason, desync_count=desync, detail=reason or (f"Keyword projection differs from {desync} memory file(s)" if desync else "Keyword index covers current journal files"))
+            except (sqlite3.Error, OSError) as error:
+                row.update(ok=False, detail="Keyword index could not be read; original database preserved", error_type=type(error).__name__)
+            rows.append(row)
+        return {"authority": "journal", "indexes": rows}
+
+    evidence = await asyncio.to_thread(read_existing)
+    failed = [row for row in evidence["indexes"] if not row["ok"]]
+    repairable = any(row.get("repair_available", True) for row in failed)
+    return ProbeResult(
+        ok=not failed,
+        detail=f"{len(failed)} keyword index(es) degraded" if failed else "Existing journal keyword indexes checked",
+        evidence=evidence,
+        fix_id="memory.rebuild-fts" if repairable else None,
+    )
+
+
 async def _probe_channels(ctx: DoctorContext) -> ProbeResult:
     """channels — each registered transport's connected/health signal.
 
@@ -434,81 +523,59 @@ async def _probe_channels(ctx: DoctorContext) -> ProbeResult:
     )
 
 
-async def _probe_local_models(ctx: DoctorContext) -> ProbeResult:
-    """local-models — per-provider availability + phantom-binding detection.
-
-    Per registered local provider: ``is_available()`` reports whether that
-    runtime's deps are importable. Phantom binding = a bound ``provider:model``
-    ref whose provider IS a registered local provider (so this pack owns it) but
-    whose model id is absent from that provider's own catalog. Refs to non-local
-    providers (cloud/config) are NOT this pack's concern and are never flagged —
-    that would false-alarm every ``bedrock:``/``openai:`` binding. A provider that
-    is unavailable is skipped for the catalog check (its unavailability is the
-    reported signal; an empty fail-soft catalog must not masquerade as phantoms).
-
-    Scope note: the on-disk HF ``models--`` layout probe belongs to
-    LOCAL-MODEL-MANAGER-V2 (``local_models/layouts.py``, unbuilt) — this pack uses
-    provider-computed availability and binding-integrity, not a raw cache scan.
-    """
+async def local_binding_state() -> dict[str, Any]:
+    """Only a successful provider list can establish a missing model."""
     from gideon.extensions.providers.use_cases import load_active_models, split_ref
-    from gideon.integrations.local_models.registry import (
-        catalog_for,
-        get_provider,
-        registered,
-    )
-
+    from gideon.integrations.local_models.registry import registered, to_local_model
     reg = dict(registered())
-    avail: dict[str, bool] = {}
-    for key, prov in reg.items():
-        try:
-            avail[key] = bool(await prov.is_available())
-        except Exception:
-            avail[key] = False
-
-    bound_by_local: dict[str, set[str]] = {}
+    bound: dict[str, set[str]] = {}
     for refs in load_active_models().values():
         for ref in refs:
             parsed = split_ref(ref)
-            if not parsed:
-                continue
-            provider_name, model_id = parsed
-            if provider_name in reg:
-                bound_by_local.setdefault(provider_name, set()).add(model_id)
-
-    phantom: list[str] = []
-    for key, model_ids in bound_by_local.items():
-        if not avail.get(key):
-            continue
-        bound_prov = get_provider(key)
-        if bound_prov is None:
+            if parsed and parsed[0] in reg:
+                bound.setdefault(parsed[0], set()).add(parsed[1])
+    available, phantom, failed = {}, [], {}
+    for key, provider in reg.items():
+        try:
+            available[key] = bool(await asyncio.wait_for(provider.is_available(), 30))
+        except Exception:
+            available[key] = False
+        if not available[key] or key not in bound:
             continue
         try:
-            catalog = await catalog_for(bound_prov)
-        except Exception:
-            catalog = []
-        catalog_ids = {m.name for m in catalog}
-        for model_id in model_ids:
-            if model_id not in catalog_ids:
-                phantom.append(f"{key}:{model_id}")
+            raw = await asyncio.wait_for(provider.list_models(), 30)
+            known = {to_local_model(row, provider=provider).name for row in raw}
+        except Exception as error:
+            failed[key] = str(error)[:200]
+            continue
+        phantom.extend(f"{key}:{model}" for model in bound[key] if model not in known)
+    unavailable = [key for key, value in available.items() if not value]
+    return dict(available=available, unavailable=unavailable,
+                bound_unavailable=[key for key in unavailable if key in bound],
+                phantom_bindings=sorted(phantom), catalog_failures=failed)
 
-    unavailable = [k for k, v in avail.items() if not v]
-    ok = not phantom
-    detail_parts = []
+
+async def phantom_bindings() -> list[str]:
+    return (await local_binding_state())["phantom_bindings"]
+
+
+async def _probe_local_models(ctx: DoctorContext) -> ProbeResult:
+    evidence = await local_binding_state()
+    bad = evidence["bound_unavailable"]
+    phantom = evidence["phantom_bindings"]
+    failed = evidence["catalog_failures"]
+    details = []
+    if bad:
+        details.append("bound providers unavailable: " + ", ".join(bad))
     if phantom:
-        detail_parts.append(f"{len(phantom)} phantom binding(s)")
-    if unavailable:
-        detail_parts.append(f"{len(unavailable)} provider(s) unavailable")
-    if not detail_parts:
-        detail_parts.append(f"{len(reg)} local provider(s) ok")
-    return ProbeResult(
-        ok=ok,
-        detail="; ".join(detail_parts),
-        evidence={
-            "available": avail,
-            "unavailable": unavailable,
-            "phantom_bindings": sorted(phantom),
-        },
-    )
+        details.append("models no longer listed: " + ", ".join(phantom))
+    if failed:
+        details.append("catalog unavailable: " + ", ".join(failed))
+    if evidence["unavailable"] and not bad:
+        details.append("unbound providers unavailable: " + ", ".join(evidence["unavailable"]))
+    return ProbeResult(ok=not (bad or phantom or failed),
+                       detail="; ".join(details) or f"{len(evidence['available'])} local providers ok",
+                       evidence=evidence)
 
 
 async def _probe_apps(ctx: DoctorContext) -> ProbeResult:
@@ -537,7 +604,8 @@ async def _probe_apps(ctx: DoctorContext) -> ProbeResult:
                 continue
             name = app.get("name", "")
             rb = sup.get(name)
-            backends[name] = {"alive": rb is not None}
+            exit = sup.last_exit(name) if rb is None else None
+            backends[name] = {"alive": rb is not None, "exit": exit}
         rollbacks: list[str] = []
         ad = apps_dir()
         if ad.exists():
@@ -555,6 +623,11 @@ async def _probe_apps(ctx: DoctorContext) -> ProbeResult:
     problems = []
     if dead:
         problems.append(f"{len(dead)} backend(s) not running")
+        for name in dead:
+            exit = ev["backends"][name].get("exit")
+            if exit is not None:
+                cause = exit.get("cause") or exit.get("ended", "exited")
+                problems.append(f"{name}: {cause}")
     if ev["rollback_leftovers"]:
         problems.append(f"{len(ev['rollback_leftovers'])} interrupted update(s)")
     return ProbeResult(
@@ -703,11 +776,21 @@ async def _probe_model_providers(ctx: DoctorContext) -> ProbeResult:
 
     health = await asyncio.to_thread(provider_health)
     providers = health.get("providers", [])
-    open_breakers = [p["name"] for p in providers if p.get("breaker_state") == "open"]
+    open_breakers = [p["name"] for p in providers if p.get("breaker_state") in {"open", "half_open"}]
+    from gideon.extensions.providers.connection import get_connection_board, entry_fingerprint
+    from gideon.integrations.llm.registry import get_default_registry
+    details = []
+    for name in open_breakers:
+        try:
+            entry = get_default_registry().get_entry(name)
+            answer = get_connection_board().peek(name, entry_fingerprint(entry))
+        except Exception:
+            answer = None
+        details.append(name + (": " + answer.detail if answer and answer.detail else ": calls are failing"))
     return ProbeResult(
         ok=not open_breakers,
         detail=(
-            f"{len(open_breakers)} provider(s) with an open breaker"
+            "; ".join(details)
             if open_breakers
             else f"{len(providers)} provider(s), no open breakers"
         ),
@@ -903,10 +986,46 @@ async def _probe_state_inventory(ctx: DoctorContext) -> ProbeResult:
         ok=False,
         detail=(
             f"{ev['unclaimed_count']} unclaimed path(s) and {ev['undeclared_db_count']} "
-            "undeclared database(s) — these are in NO snapshot"
+            "undeclared database(s) — review inventory declarations and backup coverage"
         ),
         evidence=ev,
     )
+
+
+async def _probe_backups(_ctx: DoctorContext) -> ProbeResult:
+    from gideon.operations.durability import service
+    try:
+        status = await asyncio.to_thread(service.backup_status)
+    except Exception as exc:
+        return ProbeResult(ok=False, detail=f"backup status unreadable: {exc}")
+    failures = [status[job]["problem"] for job in ("snapshot", "export") if status[job].get("problem")]
+    if failures:
+        return ProbeResult(ok=False, detail=" ".join(p["message"] for p in failures) + " " + service.restorable(status["snapshot"]),
+                           remedy=failures[0]["remedy"], evidence={"failing": len(failures)})
+    if not status["enabled"]:
+        return ProbeResult(ok=True, detail="automatic backups are off; manual runs remain available")
+    return ProbeResult(ok=True, detail="no snapshot has run yet" if not status["snapshot"]["last_run"] else "the latest backup runs succeeded")
+
+
+async def _probe_sync(_ctx: DoctorContext) -> ProbeResult:
+    from gideon.operations.durability import service
+    try:
+        sync = (await asyncio.to_thread(service.status))["sync"]
+    except Exception as exc:
+        return ProbeResult(ok=False, detail=f"sync status unreadable: {exc}")
+    if not sync["enabled"]:
+        return ProbeResult(ok=True, detail="sync is off")
+    if not sync["transport"]:
+        return ProbeResult(ok=True, detail="sync is enabled but no transport is selected")
+    if sync["encrypted"] and not sync["passphrase_stored"]:
+        message, remedy = service.job_problem("sync", "passphrase")
+        return ProbeResult(ok=False, detail=message, remedy=remedy)
+    problem = sync.get("problem")
+    if problem and problem["code"] == "passphrase" and sync["passphrase_stored"]:
+        return ProbeResult(ok=True, detail="a passphrase is now saved; the next sync will use it")
+    if problem:
+        return ProbeResult(ok=False, detail=problem["message"], remedy=problem["remedy"], evidence={"failures":problem["failures"]})
+    return ProbeResult(ok=True, detail="no sync has run yet" if not sync["last_run"] else "the latest sync succeeded")
 
 
 async def _probe_remote_reachability(ctx: DoctorContext) -> ProbeResult:
@@ -922,7 +1041,7 @@ async def _probe_remote_reachability(ctx: DoctorContext) -> ProbeResult:
       NEVER mints or prints a live token — a read-only health check must not
       generate a secret, and evidence strings are redacted anyway.
     * **exposed without auth** → not ok. The bind host is non-loopback AND auth is
-      off (``AuthMode.NONE`` / ``GIDEON_DEV_NO_AUTH``). That is the one
+      off (``AuthMode.NONE``). That is the one
       genuine misconfiguration: anything that reaches the interface walks in.
       (``effective_bind`` forces NONE to loopback, so this only arises when
       ``GIDEON_BIND_HOST`` overrode the bind.)
@@ -1165,6 +1284,8 @@ def credential_store_state() -> dict[str, Any]:
         credential_backend,
         credential_backend_warning,
         keychain_available,
+        keychain_namespace,
+        keychain_namespace_summary,
         requested_credential_backend,
     )
     from gideon.core.config.loader import env_path
@@ -1198,6 +1319,7 @@ def credential_store_state() -> dict[str, Any]:
         "requested": requested_credential_backend(),
         "keychain_available": keychain_available(),
         "warning": warning,
+        "keychain_namespace": keychain_namespace_summary(keychain_namespace()) if keychain_available() else "",
         "env_exists": exists,
         "env_readable": readable,
         "env_mode": mode,
@@ -1227,7 +1349,7 @@ async def _probe_credential_backend(_ctx: DoctorContext) -> ProbeResult:
     if facts["backend"] == "keychain":
         return ProbeResult(
             ok=True,
-            detail="credentials stored in the OS keychain (keyring)",
+            detail="credentials stored in the OS keychain (keyring): " + facts["keychain_namespace"],
             evidence=evidence,
         )
 
@@ -1249,6 +1371,8 @@ async def _probe_credential_backend(_ctx: DoctorContext) -> ProbeResult:
         detail = f"credential file .env is unreadable (mode {mode})"
     else:
         detail = f"credentials stored in .env at mode {mode}"
+    if facts["keychain_namespace"]:
+        detail += "; keychain namespace: " + facts["keychain_namespace"]
     return ProbeResult(ok=bool(facts["env_readable"]), detail=detail, evidence=evidence)
 
 
@@ -1547,6 +1671,11 @@ async def _probe_personal_domains(ctx: DoctorContext) -> ProbeResult:
 
 
 def _register_builtin_probes() -> None:
+    from gideon.operations.resilience.core_server import probe_core_server
+
+    register_probe(Probe("tools.core_server", "tools", Tier.CAPABILITY, probe_core_server, "Gideon server in agent config"))
+    register_probe(Probe("durability.backups", "durability", Tier.CAPABILITY, _probe_backups, "Backup outcomes"))
+    register_probe(Probe("durability.sync", "durability", Tier.CAPABILITY, _probe_sync, "Sync outcomes"))
     register_probe(
         Probe(
             "personal.sources",
@@ -1598,7 +1727,16 @@ def _register_builtin_probes() -> None:
             "memory",
             Tier.CAPABILITY,
             _probe_memory,
-            "Memory store + faiss consistency",
+            "Active memory storage and search readiness",
+        )
+    )
+    register_probe(
+        Probe(
+            "memory.keyword-search",
+            "memory",
+            Tier.CAPABILITY,
+            _probe_memory_keyword_index,
+            "Journal keyword index coverage",
         )
     )
     register_probe(

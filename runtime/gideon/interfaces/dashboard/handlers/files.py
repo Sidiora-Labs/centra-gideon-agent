@@ -794,7 +794,6 @@ async def api_upload_file(request: web.Request) -> web.Response:
             fname = part.filename or "upload"
             safe_name = re.sub(r"[^\w.\-]", "_", Path(fname).name)
             part_mime = part.headers.get("Content-Type") if part.headers else None
-            _limit = _upload_check(safe_name, part_mime).limit
             dest = _upload_dir() / f"{uuid.uuid4().hex}_{safe_name}"
             if not dest.resolve().is_relative_to(_upload_dir().resolve()):
                 _cleanup()
@@ -806,37 +805,26 @@ async def api_upload_file(request: web.Request) -> web.Response:
                     resources=f"file:{fname} reason:path_traversal",
                 )
                 return web.json_response({"error": "Invalid filename"}, status=400)
-            size = 0
-            over = False
-            fd = os.open(str(dest), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            from gideon.workspace.uploads.content_intake import approve_stream, IntakeRefused
+
+            async def chunks():
+                while True:
+                    chunk = await part.read_chunk(65536)
+                    if not chunk:
+                        return
+                    yield chunk
+
             try:
-                with os.fdopen(fd, "wb") as fh:
-                    while True:
-                        chunk = await part.read_chunk(65536)
-                        if not chunk:
-                            break
-                        size += len(chunk)
-                        if size > _limit:
-                            over = True
-                            break
-                        fh.write(chunk)
-            except Exception:
-                dest.unlink(missing_ok=True)
-                raise
-            if over:
-                dest.unlink(missing_ok=True)
+                approved = await approve_stream(chunks(), safe_name, part_mime, surface="attachment")
+            except IntakeRefused as exc:
                 _cleanup()
-                _sel().log_api_access(
-                    caller=caller,
-                    operation="upload.file",
-                    outcome="rejected",
-                    source="dashboard",
-                    resources=f"file:{fname} reason:too_large:{size}",
-                )
-                reason = _upload_check(safe_name, part_mime, size=size).reason
-                return web.json_response({"error": reason}, status=413)
+                return exc.response()
+            try:
+                await approved.persist(dest)
+            finally:
+                approved.close()
             paths.append(str(dest))
-    except Exception:
+    except BaseException:
         _cleanup()
         _sel().log_api_access(
             caller=caller,
@@ -904,7 +892,13 @@ async def api_attachment_extract(request: web.Request) -> web.Response:
         get_extractor,
     )
 
-    text = await get_extractor().get(path, _mt.guess_type(path)[0])
+    from gideon.workspace.uploads.content_intake import IntakeRefused
+    try:
+        text = await get_extractor().get(path, _mt.guess_type(path)[0], strict=True)
+    except IntakeRefused as refused:
+        _sel().log_api_access(caller=caller, operation="attachment_extract", outcome="denied",
+                              resources=f"name={display_name(path)} reason={refused.code}")
+        return refused.response()
     _sel().log_api_access(
         caller=caller,
         operation="attachment_extract",
@@ -1414,105 +1408,107 @@ async def api_file_write(request: web.Request) -> web.Response:
         )
         return web.json_response({"error": "invalid or forbidden path"}, status=400)
     content = body.get("content", "")
-    async with _file_write_lock:
-        if not os.path.isfile(path):
-            _sel().log_tool_invocation(
-                session_key="dashboard", tool_name="file_write", outcome="not_found", resources=path,
-            )
-            return web.json_response({"error": "not found"}, status=404)
-        try:
-            try:
-                with open(path, "r", encoding="utf-8") as source:
-                    before_content = source.read()
-            except (OSError, UnicodeError):
-                before_content = None
-            from gideon.stale_write import stale_write_refusal
+    from gideon.engine.heartbeat_store import queue_lock
 
-            if before_content is None:
-                refusal = stale_write_refusal(request, "", what="this file")
-            else:
-                refusal = stale_write_refusal(
-                    request,
-                    redact_for_display(before_content),
-                    what="this file",
-                )
-            if refusal is not None:
+    async with _file_write_lock:
+        with queue_lock(path):
+            if not os.path.isfile(path):
                 _sel().log_tool_invocation(
-                    session_key="dashboard", tool_name="file_write", outcome="conflict", resources=path,
+                    session_key="dashboard", tool_name="file_write", outcome="not_found", resources=path,
                 )
-                return refusal
-            if expected_validator is not None:
-                digest = hashlib.sha256()
-                with open(path, "rb") as source:
-                    for chunk in iter(lambda: source.read(65_536), b""):
-                        digest.update(chunk)
-                current_validator = digest.hexdigest()
-                if current_validator != expected_validator:
+                return web.json_response({"error": "not found"}, status=404)
+            try:
+                try:
+                    with open(path, "r", encoding="utf-8") as source:
+                        before_content = source.read()
+                except (OSError, UnicodeError):
+                    before_content = None
+                from gideon.stale_write import stale_write_refusal
+
+                if before_content is None:
+                    refusal = stale_write_refusal(request, "", what="this file")
+                else:
+                    refusal = stale_write_refusal(
+                        request,
+                        redact_for_display(before_content),
+                        what="this file",
+                    )
+                if refusal is not None:
                     _sel().log_tool_invocation(
                         session_key="dashboard", tool_name="file_write", outcome="conflict", resources=path,
                     )
-                    return web.json_response({"error": "file changed since read"}, status=409)
-
-            if "[REDACTED:" in content:
-                try:
-                    with open(path, "r", encoding="utf-8") as source:
-                        stored_content = source.read()
-                    content = keep_masked_spans(content, stored_content)
-                except MaskConflict:
-                    return web.json_response({"error": MASK_CONFLICT}, status=409)
-                except (OSError, UnicodeError):
-                    return web.json_response({"error": MASK_CONFLICT}, status=409)
-
-            tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
-            try:
-                try:
-                    shutil.copymode(path, tmp_path)
-                except OSError:
-                    pass
-                with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-                    f.write(content)
-                os.replace(tmp_path, path)
-            except Exception:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
-            if before_content is not None:
-                try:
-                    from gideon.engine.heartbeat import (
-                        heartbeat_path,
-                        record_owner_file_added_tasks,
-                    )
-                    from gideon.security.approval_answer import of_request
-
-                    if os.path.realpath(path) == os.path.realpath(str(heartbeat_path())):
-                        record_owner_file_added_tasks(
-                            before_content,
-                            content,
-                            principal=of_request(request),
+                    return refusal
+                if expected_validator is not None:
+                    digest = hashlib.sha256()
+                    with open(path, "rb") as source:
+                        for chunk in iter(lambda: source.read(65_536), b""):
+                            digest.update(chunk)
+                    current_validator = digest.hexdigest()
+                    if current_validator != expected_validator:
+                        _sel().log_tool_invocation(
+                            session_key="dashboard", tool_name="file_write", outcome="conflict", resources=path,
                         )
+                        return web.json_response({"error": "file changed since read"}, status=409)
+
+                if "[REDACTED:" in content:
+                    try:
+                        with open(path, "r", encoding="utf-8") as source:
+                            stored_content = source.read()
+                        content = keep_masked_spans(content, stored_content)
+                    except MaskConflict:
+                        return web.json_response({"error": MASK_CONFLICT}, status=409)
+                    except (OSError, UnicodeError):
+                        return web.json_response({"error": MASK_CONFLICT}, status=409)
+
+                tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
+                try:
+                    try:
+                        shutil.copymode(path, tmp_path)
+                    except OSError:
+                        pass
+                    with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    os.replace(tmp_path, path)
                 except Exception:
-                    logging.getLogger(__name__).warning(
-                        "owner file task grants unavailable; file write remains committed"
-                    )
-            _sel().log_tool_invocation(
-                session_key="dashboard", tool_name="file_write", outcome="success", resources=path,
-            )
-            from gideon.stale_write import revision_of
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    raise
+                if before_content is not None:
+                    try:
+                        from gideon.engine.heartbeat import (
+                            heartbeat_path,
+                            record_owner_file_added_tasks,
+                        )
+                        from gideon.security.approval_answer import of_request
 
-            return web.json_response({
-                "ok": True,
-                "validator": hashlib.sha256(content.encode("utf-8")).hexdigest(),
-                "revision": revision_of(redact_for_display(content)),
-            })
-        except Exception:
-            logging.getLogger(__name__).exception("file_write failed for %s", path)
-            _sel().log_tool_invocation(
-                session_key="dashboard", tool_name="file_write", outcome="failure", resources=path,
-            )
-            return web.json_response({"error": "failed to write file"}, status=500)
+                        if os.path.realpath(path) == os.path.realpath(str(heartbeat_path())):
+                            record_owner_file_added_tasks(
+                                before_content,
+                                content,
+                                principal=of_request(request),
+                            )
+                    except Exception:
+                        logging.getLogger(__name__).warning(
+                            "owner file task grants unavailable; file write remains committed"
+                        )
+                _sel().log_tool_invocation(
+                    session_key="dashboard", tool_name="file_write", outcome="success", resources=path,
+                )
+                from gideon.stale_write import revision_of
 
+                return web.json_response({
+                    "ok": True,
+                    "validator": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                    "revision": revision_of(redact_for_display(content)),
+                })
+            except Exception:
+                logging.getLogger(__name__).exception("file_write failed for %s", path)
+                _sel().log_tool_invocation(
+                    session_key="dashboard", tool_name="file_write", outcome="failure", resources=path,
+                )
+                return web.json_response({"error": "failed to write file"}, status=500)
 
 _EXPLORER_MAX_ENTRIES = 2_000
 
@@ -2488,66 +2484,58 @@ async def api_file_upload(request: web.Request) -> web.Response:
             {"error": f"failed to parse multipart body: {exc}"}, status=400
         )
 
+    from gideon.workspace.uploads.content_intake import IntakeRefused, approve_stream
+
     saved: list[str] = []
+    def rollback():
+        for path in saved:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
     try:
         async for part in _iter_multipart(reader):
             filename = os.path.basename(part.filename or "")
             refusal = _reject_name(filename)
             if refusal:
-                return json_error(
-                    "invalid_name",
-                    message=f"invalid filename in upload: {refusal}",
-                    status=400,
-                )
+                rollback()
+                return json_error("invalid_name", message=f"invalid filename in upload: {refusal}", status=400)
             dest = _validate_dashboard_path(os.path.join(target_dir, filename))
             if not dest:
-                return web.json_response(
-                    {"error": f"forbidden filename: {filename}"}, status=400
-                )
+                rollback()
+                return web.json_response({"error": f"forbidden filename: {filename}"}, status=400)
             if os.path.exists(dest):
-                return web.json_response(
-                    {"error": f"already exists: {filename}"}, status=409
-                )
+                rollback()
+                return web.json_response({"error": f"already exists: {filename}"}, status=409)
             part_mime = part.headers.get("Content-Type") if part.headers else None
-            _limit = _upload_check(filename, part_mime).limit
-            size = 0
-            fd, tmp = tempfile.mkstemp(dir=target_dir)
+            async def chunks():
+                while True:
+                    chunk = await part.read_chunk()
+                    if not chunk:
+                        return
+                    yield chunk
+            snapshot = await approve_stream(chunks(), filename, part_mime, surface='file_upload')
             try:
-                with os.fdopen(fd, "wb") as f:
-                    while True:
-                        chunk = await part.read_chunk()
-                        if not chunk:
-                            break
-                        size += len(chunk)
-                        if size > _limit:
-                            raise ValueError(
-                                _upload_check(filename, part_mime, size=size).reason
-                            )
-                        f.write(chunk)
-                os.replace(tmp, dest)
-            except Exception:
-                with contextlib.suppress(OSError):
-                    os.unlink(tmp)
-                raise
-            saved.append(dest)
+                if _validate_dashboard_path(dest) != dest:
+                    raise PermissionError('Upload destination is no longer permitted.')
+                await snapshot.persist(dest)
+                saved.append(dest)
+            finally:
+                snapshot.close()
+    except IntakeRefused as exc:
+        rollback()
+        return exc.response()
+    except FileExistsError:
+        rollback()
+        return web.json_response({"error": "file already exists"}, status=409)
     except ValueError as exc:
-        for p in saved:
-            with contextlib.suppress(OSError):
-                os.unlink(p)
-        return web.json_response(
-            {"error": str(exc)}, status=413 if "too large" in str(exc) else 400
-        )
-    except Exception:
+        rollback()
+        return web.json_response({"error": str(exc)}, status=400)
+    except BaseException as exc:
+        rollback()
+        if not isinstance(exc, Exception):
+            raise
         logging.getLogger(__name__).exception("file_upload failed into %s", target_dir)
-        for p in saved:
-            with contextlib.suppress(OSError):
-                os.unlink(p)
-        _sel().log_tool_invocation(
-            session_key="dashboard",
-            tool_name="file_upload",
-            outcome="failure",
-            resources=target_dir,
-        )
+        _sel().log_tool_invocation(session_key="dashboard", tool_name="file_upload",
+                                   outcome="failure", resources=target_dir)
         return web.json_response({"error": "failed to upload"}, status=500)
 
     if not saved:

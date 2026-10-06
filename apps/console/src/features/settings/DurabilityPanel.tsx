@@ -12,12 +12,13 @@ import {
   type DurabilityHistoryEntry,
   type DurabilityHistoryPreview,
   type DurabilityStatus,
+  type DurabilityJob,
   type SettingsProvider,
 } from '../../shared/data/api'
 import { notify } from '../../app/shell/appSdk'
 import { useQuery } from '../../shared/data/data'
 import { PanelHeader, Section, RowGroup, Row, Toggle, ToggleRow, SavedToast } from './settingsUI'
-import { Checkbox, NumberField, Select } from '../../shared/ui/forms'
+import { Checkbox, NumberField, Select, TextInput } from '../../shared/ui/forms'
 import { Button } from '../../shared/ui/Button'
 import { fvs } from '../../shared/theme/fontWeight'
 import { confirm } from '../../shared/ui/dialog'
@@ -59,7 +60,7 @@ export function DurabilityPanel() {
       <RetentionSection cfg={cfg} setCfg={setCfg} snaps={data.snaps} />
       <ArchiveSection snaps={data.snaps} onChanged={refresh} />
       <TimeTravelSection cfg={cfg} setCfg={setCfg} />
-      <SyncSection cfg={cfg} setCfg={setCfg} status={data.status} transports={data.transports} />
+      <SyncSection cfg={cfg} setCfg={setCfg} status={data.status} transports={data.transports} onChanged={refresh} />
       <ConflictsSection key={surface} read={data.conflicts} surface={surface} onSurface={setSurface} onChanged={refresh} />
     </div>
   )
@@ -451,8 +452,8 @@ function ScheduleSection({ cfg, setCfg, status, onChanged }: {
                 : 'Automatic backups are off — manual runs still appear here.'}
             </div>
             <div className="flex flex-col gap-1.5">
-              <JobLine label="Incremental export" when={status.export.last_run} due={status.export.due} />
-              <JobLine label="Nightly snapshot" when={status.snapshot.last_run} due={status.snapshot.due} />
+              <JobOutcome label="Incremental export" job={status.export} />
+              <JobOutcome label="Nightly snapshot" job={status.snapshot} />
               <JobLine label="Restore drill" when={status.drill.last_run} due={status.drill.due} />
             </div>
           </div>
@@ -554,7 +555,11 @@ function ArchiveSection({ snaps, onChanged }: {
     setBusy(a.id)
     try {
       const r = await api.durabilityArchiveRestore(a.id, { mode: 'merge', confirm: true })
-      notify(r.ok === false ? `Restore refused: ${r.error?.message ?? 'unknown reason'}` : `Merged ${a.name}`, r.ok === false ? 'error' : 'success')
+      if (r.partial) {
+        notify(`Restore finished with unchanged parts: ${(r.left_unchanged ?? []).join(', ') || 'some files could not be restored'}`, 'warning')
+      } else {
+        notify(r.ok === false ? `Restore refused: ${r.error?.message ?? 'unknown reason'}` : `Merged ${a.name}`, r.ok === false ? 'error' : 'success')
+      }
       onChanged()
     } catch (e) {
       notify(`Restore failed: ${String((e as Error)?.message || e)}`, 'error')
@@ -582,6 +587,8 @@ function ArchiveSection({ snaps, onChanged }: {
                   <span data-type="caption" className="shrink-0 text-on-surface-low">{formatSize(a.size)}</span>
                   {a.validate && <ValidateBadge ok={a.validate.ok} detail={a.validate.detail} />}
                 </div>
+                {a.held && <p data-type="caption" className="mt-1 text-on-surface-var">Kept until a newer snapshot passes a restore drill.</p>}
+                {a.prune_reason && <p data-type="caption" className="mt-1 text-on-surface-low">Would remove: {a.prune_reason}.</p>}
                 <DomainCounts counts={a.domains} />
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Button variant="secondary" size="sm" ariaLabel={`Preview restore: ${a.name}`}
@@ -623,14 +630,27 @@ const ENCRYPT_OPTIONS = [
   { value: 'off', label: 'Never encrypt' },
 ]
 
-function SyncSection({ cfg, setCfg, status, transports }: {
+function SyncSection({ cfg, setCfg, status, transports, onChanged }: {
   cfg: Record<string, unknown>
   setCfg: (c: Record<string, unknown>) => void
   status: DurabilityStatus | null
   transports: Settled<SettingsProvider[]>
+  onChanged: () => void
 }) {
   const [saved, flash] = useSavedFlash()
   const patch = usePatch(cfg, setCfg, flash)
+  const [passphrase, setPassphrase] = useState('')
+  const [savingPassphrase, setSavingPassphrase] = useState(false)
+  const savePassphrase = async () => {
+    setSavingPassphrase(true)
+    try {
+      await api.putHypermidCredential(status?.sync.passphrase_credential || 'GIDEON_SYNC_PASSPHRASE', passphrase)
+      setPassphrase('')
+      onChanged()
+      notify('Sync passphrase saved on this machine.', 'success')
+    } catch (error) { notify(String((error as Error)?.message || error), 'error') }
+    finally { setSavingPassphrase(false) }
+  }
   const syncOn = cfg.sync_enabled === true
   const chosen = String(cfg.sync_transport ?? '')
   const enabledTransports = transports.ok ? transports.value.filter((t) => t.enabled) : []
@@ -643,7 +663,7 @@ function SyncSection({ cfg, setCfg, status, transports }: {
           hint="Push this machine's changes and pull the other machines' on the schedule below. Off means nothing leaves this machine.">
           <div className="flex items-center gap-2">
             <SavedToast show={saved} />
-            <Toggle on={syncOn} onChange={(v) => patch('sync_enabled', v)} label="Sync this instance" />
+            <Toggle on={syncOn} onChange={(v) => patch('sync_enabled', v, onChanged)} label="Sync this instance" />
           </div>
         </Row>
 
@@ -667,7 +687,7 @@ function SyncSection({ cfg, setCfg, status, transports }: {
             <Select
               value={chosen}
               ariaLabel="Sync transport"
-              onChange={(v) => patch('sync_transport', v)}
+              onChange={(v) => patch('sync_transport', v, onChanged)}
               options={[
                 { value: '', label: 'None — sync is idle' },
                 ...enabledTransports.map((t) => ({ value: t.name, label: t.displayName || t.name })),
@@ -686,15 +706,24 @@ function SyncSection({ cfg, setCfg, status, transports }: {
           <Select
             value={String(cfg.sync_encrypt ?? 'auto')}
             ariaLabel="Encrypt shards"
-            onChange={(v) => patch('sync_encrypt', v)}
+            onChange={(v) => patch('sync_encrypt', v, onChanged)}
             options={ENCRYPT_OPTIONS}
           />
         </Row>
 
+        {status?.sync.encrypted && <Row label="Sync passphrase" hint={status.sync.passphrase_stored ? 'Saved on this machine. Use the same passphrase on every machine.' : 'Save a passphrase before encrypted sync can run. Use the same one on every machine.'}>
+          <div className="flex flex-wrap items-center gap-2">
+            <TextInput type="password" value={passphrase} onChange={setPassphrase} ariaLabel="Sync passphrase" />
+            <Button variant="secondary" size="sm" onClick={savePassphrase} disabled={!passphrase || savingPassphrase}>Save passphrase</Button>
+          </div>
+        </Row>}
+        {status?.sync.removal_failed && <p data-type="caption" className="py-2 text-on-surface-var">Older sync copies could not be removed: {status.sync.removal_failed}. The next sync retries cleanup.</p>}
+        {status?.sync.removes_old_copies === true && <p data-type="caption" className="py-2 text-on-surface-low">This transport keeps the newest copy and briefly retains the previous one while readers finish.</p>}
+        {status?.sync.removes_old_copies === false && <p data-type="caption" className="py-2 text-on-surface-low">This transport retains historical copies.</p>}
         {status?.sync && (
           <div className="border-t border-outline-variant py-3">
             <div className="flex flex-col gap-1.5">
-              <JobLine label="Last sync" when={status.sync.last_run} due={status.sync.due} />
+              <JobOutcome label="Last sync" job={status.sync} />
               <div data-type="body-s" className="flex items-baseline justify-between gap-3">
                 <span className="text-on-surface-var">Shards leaving this machine</span>
                 <span data-type="caption" className="shrink-0 text-on-surface-low">
@@ -811,8 +840,11 @@ function ConflictsSection({ read, surface, onSurface, onChanged }: {
                   </span>
                 </div>
                 <p data-type="caption" className="mt-1 text-on-surface-low">
-                  Both machines changed this after they last agreed. This machine's version is
-                  in place; nothing has been overwritten.
+                  {c.deleted === 'here'
+                    ? 'Deleted on this machine, changed on the other. Choose whether to keep the deletion or restore the other version.'
+                    : c.deleted === 'there'
+                      ? 'Changed on this machine, deleted on the other. Choose whether to keep this version or apply the deletion.'
+                      : "Both machines changed this after they last agreed. This machine's version is in place; nothing has been overwritten."}
                 </p>
 
                 {c.proposal
@@ -824,7 +856,7 @@ function ConflictsSection({ read, surface, onSurface, onChanged }: {
                   )
                   : (
                     <p data-type="caption" className="mt-2 text-on-surface-low">
-                      {c.proposal_error
+                      {c.deleted ? 'A deletion requires your decision. No merge will be drafted.' : c.proposal_error
                         ? `No merge was drafted — ${c.proposal_error}. Choose a version yourself.`
                         : 'No merge has been drafted yet. Choose a version yourself, or wait for the next background pass.'}
                     </p>
@@ -835,14 +867,14 @@ function ConflictsSection({ read, surface, onSurface, onChanged }: {
 }
                   <Button variant="secondary" size="sm" loading={busy === c.id} loadingLabel="Writing…" disabled={busy !== ''}
                     ariaLabel={`${CHOICE_LABELS.keep_local}: ${c.entity_id}`}
-                    onClick={() => resolve(c, 'keep_local')}>{CHOICE_LABELS.keep_local}
+                    onClick={() => resolve(c, 'keep_local')}>{c.deleted === 'here' ? 'Keep deletion' : CHOICE_LABELS.keep_local}
                   </Button>
                   <Button variant="secondary" size="sm" disabled={busy !== ''} disabledReason={BUSY_REASON}
                     ariaLabel={`${CHOICE_LABELS.take_remote}: ${c.entity_id}`}
                     onClick={() => resolve(c, 'take_remote')}>
-                    {CHOICE_LABELS.take_remote}
+                    {c.deleted === 'there' ? 'Apply deletion' : c.deleted === 'here' ? 'Restore other version' : CHOICE_LABELS.take_remote}
                   </Button>
-                  <Button variant="secondary" size="sm" disabled={busy !== '' || !c.proposal}
+                  <Button variant="secondary" size="sm" disabled={busy !== '' || !c.proposal || !!c.deleted}
                     disabledReason={!c.proposal ? 'No merge has been drafted for this conflict' : undefined}
                     ariaLabel={`${CHOICE_LABELS.accept_proposal}: ${c.entity_id}`}
                     onClick={() => resolve(c, 'accept_proposal')}>
@@ -955,7 +987,7 @@ function usePatch(
   return (key: string, value: unknown, _cb?: () => void, label?: string) => {
     const prev = cfg[key]
     setCfg({ ...cfg, [key]: value })
-    api.patchConfig(`durability.${key}`, value).then(flash).catch((e) => {
+    api.patchConfig(`durability.${key}`, value).then(() => { flash(); _cb?.() }).catch((e) => {
       setCfg({ ...cfg, [key]: prev })
       notify(`Couldn't save ${label ?? key}: ${String((e as Error)?.message || e)}`, 'error')
     })
@@ -996,6 +1028,16 @@ function RunButton({ label, icon: Icon, busy, disabled, onClick }: {
       {label}
     </Button>
   )
+}
+
+export function JobOutcome({ label, job }: { label: string; job: DurabilityJob }) {
+  return <div>
+    <JobLine label={label} when={job.last_run} due={job.due} />
+    {job.problem && <p data-type="caption" className="mt-1 text-on-surface-var" role="status">{job.problem.message} {job.problem.remedy} {job.problem.failures > 1 ? `The last ${job.problem.failures} runs failed.` : ''}</p>}
+    {job.problem && !!job.last_success && <p data-type="caption" className="text-on-surface-low">Last successful run: {new Date(job.last_success * 1000).toLocaleString()}.</p>}
+    {job.problem && job.newest && <p data-type="caption" className="text-on-surface-low">Newest snapshot available to restore: {job.newest.name}.</p>}
+    {job.detail && <p data-type="caption" className="mt-1 text-on-surface-low">{job.problem ? 'Last successful run: ' : ''}{job.detail}</p>}
+  </div>
 }
 
 function JobLine({ label, when, due }: { label: string; when: number; due: boolean }) {

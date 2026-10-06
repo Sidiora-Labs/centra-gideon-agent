@@ -35,6 +35,23 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _APP_JOB_PREFIX = "app:"
+_JOB_POSTURE = ("approval_mode", "capability")
+
+
+def app_of(trigger_id: str) -> str:
+    pieces = trigger_id.split(":")
+    return pieces[1] if len(pieces) == 3 and pieces[0] == "app" and all(pieces[1:]) else ""
+
+
+def posture_refusal(trigger_id: str, workflow: object) -> str:
+    if not app_of(trigger_id) or not isinstance(workflow, dict):
+        return ""
+    action = workflow.get("inline", workflow)
+    config = action.get("config") if isinstance(action, dict) else None
+    if isinstance(config, dict) and any(str(config.get(key) or "").strip() for key in _JOB_POSTURE):
+        return "An app's scheduled agent runs at its current declared tier; its job cannot set approval_mode or capability."
+    return ""
+
 
 
 def _desired_app_crons() -> dict[str, dict]:
@@ -56,7 +73,7 @@ def _desired_app_crons() -> dict[str, dict]:
         if meta is None or not meta.enabled:
             continue
         checker = checker_for(meta.name)
-        if checker is None or not checker.can_use_cron():
+        if checker is None or not checker.can_use_cron() or not checker.agent_tier():
             continue
         manifest = _manifest_of(meta.name)
         if manifest is None:
@@ -68,6 +85,7 @@ def _desired_app_crons() -> dict[str, dict]:
                 continue
             job_name = f"{_APP_JOB_PREFIX}{meta.name}:{cron.name}"
             desired[job_name] = {
+                "name": f"{manifest.displayName or manifest.name}: {cron.name}",
                 "workflow": {
                     "inline": {
                         "provider": "invoke-agent",
@@ -75,7 +93,6 @@ def _desired_app_crons() -> dict[str, dict]:
                             "task_template": cron.message,
                             "agent": cron.agent or "",
                             "model": "",
-                            "approval_mode": "auto",
                         },
                     }
                 },
@@ -134,6 +151,19 @@ def reconcile_app_crons(store: Any) -> None:
     for trigger_id, params in desired.items():
         cur = existing.get(trigger_id)
         if cur is not None:
+            changed = False
+            if cur.name == cur.id:
+                cur.name = params["name"]
+                changed = True
+            action = cur.workflow.get("inline", cur.workflow) if isinstance(cur.workflow, dict) else {}
+            config = action.get("config") if isinstance(action, dict) else None
+            if isinstance(config, dict):
+                for key in _JOB_POSTURE:
+                    if key in config:
+                        del config[key]
+                        changed = True
+            if changed:
+                store.upsert(cur)
             if str(getattr(cur, "delivery", "") or "") != "none":
                 try:
                     cur.delivery = "none"
@@ -149,7 +179,7 @@ def reconcile_app_crons(store: Any) -> None:
         try:
             trigger = Trigger(
                 id=trigger_id,
-                name=trigger_id,
+                name=params["name"],
                 kind="clock",
                 enabled=True,
                 created_by=params["created_by"],

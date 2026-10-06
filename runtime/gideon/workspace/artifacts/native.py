@@ -27,6 +27,7 @@ from pathlib import Path
 from gideon.core.atomic_write import atomic_write, atomic_write_bytes
 from gideon.core.config import loader as config_loader
 from gideon.security.security import is_sensitive_path
+from gideon.workspace.artifacts.deploy import ArtifactDeployStore
 from gideon.workspace.artifacts import changes
 from gideon.workspace.artifacts.models import (
     ALLOWED_EVENT_TYPES,
@@ -91,6 +92,18 @@ def _refuse_if_readonly(art: Artifact) -> None:
         raise PermissionError(
             f"artifact {art.slug!r} is read-only — it is a frozen record, not a document"
         )
+
+
+def _kept_text(kind: str, content: str) -> str:
+    """Apply the CSV export rule at every native text mutation boundary."""
+    if kind != "csv":
+        return content
+    import csv
+    from gideon.workspace.documents.writers.csv_writer import render_csv_text
+    try:
+        return render_csv_text(content)
+    except csv.Error as exc:
+        raise ValueError(f"could not read the csv text: {exc}") from exc
 
 
 class NativeArtifactProvider(ArtifactProvider):
@@ -549,6 +562,7 @@ class NativeArtifactProvider(ArtifactProvider):
                 )
                 else self._unique_slug(base)
             )
+            ArtifactDeployStore(self._root).teardown(final_slug)
             ts = _now()
             event = ArtifactEvent(
                 ts=ts,
@@ -668,6 +682,7 @@ class NativeArtifactProvider(ArtifactProvider):
                 content = self._version_content(slug, from_version)
                 if content is None:
                     return None
+                content = _kept_text(art.kind, content)
                 if art.source_path:
                     self._try_write_source_path(art.source_path, content, source_revision)
                 art.version += 1
@@ -721,6 +736,7 @@ class NativeArtifactProvider(ArtifactProvider):
             artifact_content = source_content if content is None else content
         else:
             artifact_content = content if content is not None else ""
+        artifact_content = _kept_text(normalize_kind(kind), artifact_content)
         with self._lock:
             if source_path and content is not None:
                 _current_content, latest_revision = source_files.read(source_path)
@@ -739,6 +755,7 @@ class NativeArtifactProvider(ArtifactProvider):
                 )
                 else self._unique_slug(base)
             )
+            ArtifactDeployStore(self._root).teardown(final_slug)
             ts = _now()
             event = ArtifactEvent(
                 ts=ts,
@@ -818,6 +835,7 @@ class NativeArtifactProvider(ArtifactProvider):
 
             content_changed = False
             if content is not None:
+                content = _kept_text(art.kind, content)
                 d = self._artifact_dir(slug)
                 content_changed = content != (self._current_content(slug) or "")
                 if art.source_path:
@@ -839,7 +857,7 @@ class NativeArtifactProvider(ArtifactProvider):
                 latest_snap = self._version_content(slug, nums[-1]) if nums else None
                 if latest_snap is None or snap_content != latest_snap:
                     art.version += 1
-                    self._snapshot_version(slug, art.version, snap_content)
+                    self._snapshot_version(slug, art.version, _kept_text(art.kind, snap_content))
                     cut_version = True
 
             if cut_version or content_changed:
@@ -900,6 +918,11 @@ class NativeArtifactProvider(ArtifactProvider):
                 return False
             import shutil
 
+            try:
+                ArtifactDeployStore(self._root).teardown(slug)
+            except OSError:
+                logger.warning("artifact delete refused: deployment revocation failed: %s", slug)
+                return False
             try:
                 shutil.rmtree(d)
             except OSError:
@@ -967,6 +990,7 @@ class NativeArtifactProvider(ArtifactProvider):
                 directory = self._artifact_dir(slug)
                 import shutil
 
+                ArtifactDeployStore(self._root).teardown(slug)
                 shutil.rmtree(directory)
             except (OSError, ValueError):
                 logger.warning(

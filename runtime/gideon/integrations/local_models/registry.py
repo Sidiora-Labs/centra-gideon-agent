@@ -40,6 +40,17 @@ _DEFAULT_SELF_TEST_TIMEOUT_SECONDS = 30.0
 _MAX_SELF_TEST_TIMEOUT_SECONDS = 300.0
 
 
+def _folded_use_case(capabilities: list[str] | None) -> list[str]:
+    """What a provider's models serve when they name nothing: its declared capabilities when they
+    come to one use case (a chat sub-category is chat), else none — a provider declaring several
+    cannot say which of them such a model serves."""
+    from gideon.extensions.providers.use_cases import VALID_USE_CASES, parent_capability
+
+    declared = list(capabilities or [])
+    uses = {parent_capability(c) for c in declared if c in VALID_USE_CASES}
+    return declared if len(uses) == 1 else []
+
+
 def to_local_model(
     m: Any, *, capabilities: list[str] | None = None, provider: Any = None
 ) -> LocalModel:
@@ -53,15 +64,16 @@ def to_local_model(
     own. Domain-only fields (dimension, language, …) stay on the domain object for
     inference; management never needs them.
     """
+    declared = _folded_use_case(capabilities)
     if isinstance(m, LocalModel):
-        model = replace(m, capabilities=list(m.capabilities or capabilities or []))
+        model = replace(m, capabilities=list(m.capabilities or declared))
     else:
         model = LocalModel(
             name=getattr(m, "name", ""),
             size_mb=float(getattr(m, "size_mb", 0) or 0),
             description=getattr(m, "description", ""),
             downloaded=bool(getattr(m, "downloaded", False)),
-            capabilities=list(getattr(m, "capabilities", None) or capabilities or []),
+            capabilities=list(getattr(m, "capabilities", None) or declared),
             gated=bool(getattr(m, "gated", False)),
             source=getattr(m, "source", ""),
             instance_id=getattr(m, "instance_id", ""),

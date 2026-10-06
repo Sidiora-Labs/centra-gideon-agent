@@ -136,7 +136,8 @@ function Installed({ onBrowse, onProposals, query, setQuery }: { onBrowse: () =>
                         {s.provenance && <span className="shrink-0 rounded-md bg-surface-high px-2 h-6 inline-flex items-center text-on-surface-var text-[0.75rem]">{s.provenance}</span>}
                         {s.always && <span className="shrink-0 inline-flex items-center gap-1 text-warn text-[0.75rem]" title="Always loaded"><Zap size={11} /> always</span>}
                         {s.integrity === 'intact' && <ShieldCheck size={12} className="shrink-0 text-ok" aria-label="Integrity verified" role="img" />}
-                        {s.integrity === 'tampered' && <span className="shrink-0 inline-flex items-center gap-1 text-danger text-[0.75rem]" title="Integrity check failed — files changed since install"><ShieldAlert size={11} /> tampered</span>}
+                        {s.integrity === 'edited' && <span className="shrink-0 text-warn text-[0.75rem]">edited</span>}
+                        {s.integrity === 'tampered' && <span className="shrink-0 inline-flex items-center gap-1 text-danger text-[0.75rem]" title="Install record damaged — installed files cannot be verified"><ShieldAlert size={11} /> tampered</span>}
                       </div>
 
                       <p className="mt-0.5 truncate text-on-surface-low text-[0.8125rem]" title={s.description}>{s.description}</p>

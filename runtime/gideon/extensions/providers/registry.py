@@ -1281,10 +1281,9 @@ def get_provider_registry() -> ProviderRegistry:
         _registry.register_type_handler(
             "skills",
             EntitySeamHandler(
-                source_of_truth="MISMATCH (owner: S1/E11 skills): factory returns a "
-                "ProcedureLibrary (built ad-hoc by ~8 call sites), but SkillsRegistry "
-                "holds SkillsMarketplace; native/installed marketplaces self-register "
-                "in skills.native on import. Reconcile the contract before wiring.",
+                source_of_truth="SkillsRegistry holds SkillsMarketplace catalogs. Native and "
+                "installed catalogs self-register on import; app code registrations "
+                "are withdrawn with the app's code provenance on unload.",
             ),
         )
     return _registry

@@ -37,16 +37,19 @@ _FALSE_WORDS = frozenset({"false", "no", "off", "0", "n", ""})
 _TRUE_WORDS = frozenset({"true", "yes", "on", "1", "y"})
 
 
-def strict_bool(value: object, *, field: str, default: bool = False) -> bool:
+def strict_bool(
+    value: object, *, field: str, default: bool = False, absent: bool | None = None
+) -> bool:
     """Coerce *value* to a bool without letting a string enable a safety control by accident.
 
     *field* is used only in the warning, so an operator can find the line they wrote.
-    *default* is returned for ``None`` and for anything unrecognised — pass the SAFE value.
+    *default* is returned for anything unrecognised — pass the SAFE value.
+    ``None`` takes *absent* when specified, otherwise *default*.
     """
     if isinstance(value, bool):
         return value
     if value is None:
-        return default
+        return default if absent is None else absent
     if isinstance(value, str):
         word = value.strip().lower()
         if word in _FALSE_WORDS:
@@ -70,3 +73,15 @@ def strict_bool(value: object, *, field: str, default: bool = False) -> bool:
         default,
     )
     return default
+
+
+def yes_or_no(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word and word in _TRUE_WORDS:
+            return True
+        if word and word in _FALSE_WORDS:
+            return False
+    return None

@@ -254,4 +254,10 @@ async def route_synthesis(
     adapter = params["provider"]
     guard_synthesis_capability(adapter, params)
     arguments = _synthesis_arguments(params)
-    return await adapter.synthesize(text, output_path=output_path, **arguments)
+    from gideon.security.guardrails.media_call import MediaCall, metered_media_call
+
+    return await metered_media_call(
+        MediaCall(adapter.name, arguments["voice"], "character", len(text)),
+        lambda: adapter.synthesize(text, output_path=output_path, **arguments),
+        billed=lambda path: len(text) if path else None,
+    )

@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 from aiohttp import web
 
+from gideon.integrations.mcp_argument_secrets import credential_values
 from gideon.core.http_request import read_json_body, string_field
 from gideon.extensions.providers.failure_copy import relayed_failure_copy
 from gideon.interfaces.dashboard.state import ConsoleState
@@ -247,13 +248,7 @@ def _purge_mcp_credentials(name: str, spec: dict[str, Any] | None = None) -> Non
 
 
 def _mcp_auth_values(spec: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(spec, dict):
-        return {}
-    return {
-        **(spec.get("env") if isinstance(spec.get("env"), dict) else {}),
-        **(spec.get("headers") if isinstance(spec.get("headers"), dict) else {}),
-        **(spec.get("oauth") if isinstance(spec.get("oauth"), dict) else {}),
-    }
+    return credential_values(spec)
 
 
 def _store_mcp_spec(name: str, spec: dict[str, Any], previous: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -574,6 +569,8 @@ async def api_mcp_servers(request: web.Request) -> web.Response:
         global_mcps = data.get("mcpServers", {})
     except (FileNotFoundError, json.JSONDecodeError):
         pass
+    from gideon.interfaces.dashboard.handlers.mcp_trust import read_only_trust_of
+
     result: list[dict] = []
     for s in servers:
         d = s.to_dict()
@@ -596,6 +593,8 @@ async def api_mcp_servers(request: web.Request) -> web.Response:
             err, _ = redact_credentials(err)
             err, _ = redact_exfiltration_urls(err)
             d["error"] = err
+        # Bind opaque review stamps to canonical inventory before display masking.
+        d["readOnlyTrust"] = read_only_trust_of(s, tools=d["tools"] if d["status"] == "ok" else None)
         result.append(_redact_mcp_projection(d))
     await _attach_agent_callable_projection(result, servers)
     return web.json_response(_redact_mcp_projection(result))
@@ -668,6 +667,10 @@ async def api_mcp_probe(request: web.Request) -> web.Response:
     global _mcp_probe_ts
     from gideon.integrations.mcp_discovery import probe_all  # noqa: F811
 
+    from gideon.integrations.mcp_discovery import forget_probe, list_servers
+
+    for server in list_servers():
+        forget_probe(server.name)
     servers = await probe_all()
     global_mcps: dict[str, Any] = {}
     try:
@@ -702,6 +705,9 @@ async def api_mcp_probe_one(request: web.Request) -> web.Response:
         return web.json_response({"error": "server name is required"}, status=400)
     from gideon.integrations.mcp_discovery import probe_one  # noqa: F811
 
+    from gideon.integrations.mcp_discovery import forget_probe
+
+    forget_probe(name)
     info = await probe_one(name)
     if info is None:
         return web.json_response(
@@ -1247,18 +1253,10 @@ async def api_mcp_server_detail(request: web.Request) -> web.Response:
             servers[name] = entry
             _atomic_write(_canonical_mcp_json(), data)
         except (OSError, ValueError) as exc:
-            retained = {
-                **(previous.get("env") if isinstance(previous.get("env"), dict) else {}),
-                **(previous.get("headers") if isinstance(previous.get("headers"), dict) else {}),
-                **(previous.get("oauth") if isinstance(previous.get("oauth"), dict) else {}),
-            }
+            retained = credential_values(previous)
             purge_unused(SecretOwner("MCP", name), retained)
             return web.json_response({"error": str(exc)}, status=400 if isinstance(exc, ValueError) else 500)
-        retained = {
-            **(entry.get("env") if isinstance(entry.get("env"), dict) else {}),
-            **(entry.get("headers") if isinstance(entry.get("headers"), dict) else {}),
-            **(entry.get("oauth") if isinstance(entry.get("oauth"), dict) else {}),
-        }
+        retained = credential_values(entry)
         purge_unused(SecretOwner("MCP", name), retained)
 
         if previous:
@@ -1719,18 +1717,10 @@ def _set_gideon_entry(name: str, *, enabled: bool, spec: dict | None = None) -> 
             servers[name] = prepared
             _atomic_write(_canonical_mcp_json(), data)
         except Exception:
-            retained = {
-                **(previous.get("env") if isinstance(previous.get("env"), dict) else {}),
-                **(previous.get("headers") if isinstance(previous.get("headers"), dict) else {}),
-                **(previous.get("oauth") if isinstance(previous.get("oauth"), dict) else {}),
-            }
+            retained = credential_values(previous)
             purge_unused(SecretOwner("MCP", name), retained)
             raise
-        retained = {
-            **(prepared.get("env") if isinstance(prepared.get("env"), dict) else {}),
-            **(prepared.get("headers") if isinstance(prepared.get("headers"), dict) else {}),
-            **(prepared.get("oauth") if isinstance(prepared.get("oauth"), dict) else {}),
-        }
+        retained = credential_values(prepared)
         purge_unused(SecretOwner("MCP", name), retained)
     else:
         _atomic_write(_canonical_mcp_json(), data)
@@ -1816,6 +1806,9 @@ def _set_scope_entry(
         if not isinstance(safe_spec, dict):
             return "missing_spec"
         safe_spec.pop("headers", None)
+        from gideon.integrations.mcp_argument_secrets import resolve_command_line
+
+        safe_spec = resolve_command_line(name, safe_spec)
         servers[name] = {k: v for k, v in safe_spec.items() if k != "disabled"}
         _atomic_write(path, data)
         return "added"

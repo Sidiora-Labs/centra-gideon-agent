@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from gideon.core.turn_streams import closing_stream
 from gideon.core.config import AppConfig
 from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
@@ -51,7 +52,20 @@ class AcpStdioServer:
     async def _permission(self, session_id: str, provider: Any, event: Any) -> None:
         request_id = self._next_request_id
         self._next_request_id -= 1
-        offered = {"allow_once": "Allow once", "reject_once": "Reject"}
+        declared = getattr(event, "options", None)
+        offered = []
+        if isinstance(declared, list):
+            for row in declared:
+                if not isinstance(row, dict):
+                    continue
+                identity = row.get("optionId") or row.get("id")
+                kind = row.get("kind")
+                if isinstance(identity, str) and identity and kind in {"allow_once", "allow_always", "reject_once", "reject_always"}:
+                    if not any(option["optionId"] == identity for option in offered):
+                        offered.append({"optionId": identity, "kind": kind, "name": str(row.get("name") or row.get("label") or identity)})
+        if not declared:
+            offered = [{"optionId": "allow_once", "kind": "allow_once", "name": "Allow once"},
+                       {"optionId": "reject_once", "kind": "reject_once", "name": "Reject"}]
         fut = asyncio.get_running_loop().create_future()
         self.pending[request_id] = fut
         try:
@@ -60,12 +74,13 @@ class AcpStdioServer:
                 "params": {
                     "sessionId": session_id,
                     "toolCall": {"toolCallId": str(event.tool_call_id or event.request_id), "title": str(event.title or "Tool request")},
-                    "options": [{"optionId": key, "name": label, "kind": "allow_once" if key == "allow_once" else "reject_once"} for key, label in offered.items()],
+                    "options": offered,
                 },
             })
             response = await asyncio.wait_for(fut, timeout=120)
             outcome = response.get("result", {}).get("outcome", {}) if isinstance(response, dict) else {}
-            if outcome.get("outcome") == "selected" and outcome.get("optionId") == "allow_once":
+            selected = next((row for row in offered if row["optionId"] == outcome.get("optionId")), None)
+            if outcome.get("outcome") == "selected" and selected and selected["kind"].startswith("allow_"):
                 await provider.approve_tool(event.request_id)
             else:
                 await provider.reject_tool(event.request_id)
@@ -95,26 +110,35 @@ class AcpStdioServer:
             await self.reply(request_id, error=(-32602, "text prompt required"))
             return
         try:
-            async for event in provider.stream(text):
-                if event.kind in (EVENT_TEXT_CHUNK, EVENT_THINKING_CHUNK) and event.text:
-                    kind = "agent_message_chunk" if event.kind == EVENT_TEXT_CHUNK else "agent_thought_chunk"
-                    await self.update(session_id, {"sessionUpdate": kind, "content": {"type": "text", "text": event.text}})
-                elif event.kind in (EVENT_TOOL_CALL, EVENT_TOOL_CALL_UPDATE):
-                    await self.update(session_id, {
-                        "sessionUpdate": "tool_call" if event.kind == EVENT_TOOL_CALL else "tool_call_update",
-                        "toolCallId": str(event.tool_call_id or event.request_id),
-                        "title": str(event.title or "Tool"),
-                        "kind": str(event.tool_kind or "other"),
-                        "status": "in_progress" if event.kind == EVENT_TOOL_CALL else "completed",
-                        "rawInput": event.tool_input_obj or event.tool_input,
-                    })
-                elif event.kind == EVENT_TOOL_RESULT:
-                    await self.update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": str(event.tool_call_id or event.request_id), "status": "completed", "content": [{"type": "text", "text": str(event.tool_output)}]})
-                elif event.kind == EVENT_PERMISSION_REQUEST:
-                    await self._permission(session_id, provider, event)
-                elif event.kind == EVENT_COMPLETE:
-                    await self.reply(request_id, {"stopReason": event.stop_reason or "end_turn"})
-                    return
+            async with closing_stream(provider.stream(text)) as events:
+                async for event in events:
+                    if event.kind in (EVENT_TEXT_CHUNK, EVENT_THINKING_CHUNK) and event.text:
+                        kind = "agent_message_chunk" if event.kind == EVENT_TEXT_CHUNK else "agent_thought_chunk"
+                        await self.update(session_id, {"sessionUpdate": kind, "content": {"type": "text", "text": event.text}})
+                    elif event.kind in (EVENT_TOOL_CALL, EVENT_TOOL_CALL_UPDATE):
+                        await self.update(session_id, {
+                            "sessionUpdate": "tool_call" if event.kind == EVENT_TOOL_CALL else "tool_call_update",
+                            "toolCallId": str(event.tool_call_id or event.request_id),
+                            "title": str(event.title or "Tool"),
+                            "kind": str(event.tool_kind or "other"),
+                            "status": "in_progress" if event.kind == EVENT_TOOL_CALL else "completed",
+                            "rawInput": event.tool_input_obj or event.tool_input,
+                        })
+                    elif event.kind == EVENT_TOOL_RESULT:
+                        await self.update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": str(event.tool_call_id or event.request_id), "status": "completed", "content": [{"type": "text", "text": str(event.tool_output)}]})
+                    elif event.kind == EVENT_PERMISSION_REQUEST:
+                        await self._permission(session_id, provider, event)
+                    elif event.kind == EVENT_COMPLETE:
+                        payload = {"stopReason": event.stop_reason or "end_turn"}
+                        metadata = event.tool_meta if isinstance(event.tool_meta, dict) else {}
+                        fields = {name: getattr(event, name, 0) for name in
+                            ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "cost_usd")}
+                        if any(fields.values()) or metadata.get("usage_reported"):
+                            fields["usage_reported"] = bool(metadata.get("usage_reported") or any(fields.values()))
+                            fields["cost_reported"] = bool(metadata.get("cost_reported") or event.cost_usd > 0)
+                            payload["_meta"] = {"gideon_usage": fields}
+                        await self.reply(request_id, payload)
+                        return
             await self.reply(request_id, {"stopReason": "end_turn"})
         except asyncio.CancelledError:
             await provider.cancel(wait_ack_timeout=2)

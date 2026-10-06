@@ -7,7 +7,10 @@ for gateway↔mcp self-calls) instead of re-implementing checks. The guard
 enforces the byte/timeout/redirect caps.
 """
 
+import contextvars
 import logging
+import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -103,6 +106,9 @@ METADATA_SERVICE_HOSTS: tuple[str, ...] = (
     "metadata.goog",
     "100.100.100.200",
 )
+MCP_SERVER = EgressPolicy(
+    name="mcp_server", allow_private=True, deny_hosts=METADATA_SERVICE_HOSTS,
+)
 SYNC = EgressPolicy(
     name="sync",
     allow_only=True,
@@ -149,6 +155,7 @@ _PROFILES: dict[str, EgressPolicy] = {
         BROWSE,
         FETCH_ACTION,
         LISTING,
+        MCP_SERVER,
     )
 }
 
@@ -184,8 +191,8 @@ def egress_policy_for_profile(base: EgressPolicy, tier: str) -> "EgressPolicy | 
 
     * ``off`` → ``None``.
     * a tier with an exclusive host set (``listed``/``registry``) → the base becomes
-      exclusive too, with the tier's hosts unioned onto the base's own (a surface that
-      already allow-listed a host keeps it; the tier adds its preset).
+      exclusive too, with the tier's hosts unioned onto an additive base. An already
+      exclusive base keeps its own hosts; adding a preset would widen that surface.
     * ``all`` → the base is already at least this narrow, so it is returned unchanged.
     * caps (``max_bytes``/``timeout_s``) take the tighter of the two, so a tier can never
       raise a surface's ceiling — REGISTRY's 100 MB does not widen a 5 MB fetch.
@@ -197,7 +204,8 @@ def egress_policy_for_profile(base: EgressPolicy, tier: str) -> "EgressPolicy | 
         return base
     return base.with_overrides(
         allow_only=True,
-        allow_hosts=tuple(dict.fromkeys([*base.allow_hosts, *tier_policy.allow_hosts])),
+        allow_hosts=(base.allow_hosts if base.allow_only else
+                     tuple(dict.fromkeys([*base.allow_hosts, *tier_policy.allow_hosts]))),
         max_bytes=min(base.max_bytes, tier_policy.max_bytes),
         timeout_s=min(base.timeout_s, tier_policy.timeout_s),
     )
@@ -206,6 +214,64 @@ def egress_policy_for_profile(base: EgressPolicy, tier: str) -> "EgressPolicy | 
 def get_policy(name: str) -> EgressPolicy:
     """Look up a named profile (defaults to STRICT for an unknown name)."""
     return _PROFILES.get(name, STRICT)
+
+
+_HELD_TO: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar(
+    "gideon_egress_held_to", default=None
+)
+
+
+def _session_of_this_call() -> str:
+    module = sys.modules.get("gideon.integrations.mcp_core")
+    return module.get_current_session_key() if module is not None else ""
+
+
+@contextmanager
+def egress_held_to(session_key: str):
+    token = _HELD_TO.set((session_key or "", _session_of_this_call()))
+    try:
+        yield
+    finally:
+        _HELD_TO.reset(token)
+
+
+def run_of_this_call() -> str:
+    session = _session_of_this_call()
+    held = _HELD_TO.get()
+    return held[0] if held is not None and held[1] == session else session
+
+
+def egress_policy_for_run(
+    base: EgressPolicy, session_key: str | None = None
+) -> EgressPolicy | None:
+    if base.loopback_only:
+        return base
+    key = run_of_this_call() if session_key is None else session_key
+    if session_key is None and not key:
+        return base
+    from gideon.security.guardrails.policy import profile_for_session
+
+    return egress_policy_for_profile(base, profile_for_session(key).egress_tier)
+
+
+def no_network_for_commands(session_key: str | None = None) -> str:
+    key = run_of_this_call() if session_key is None else session_key
+    if session_key is None and not key:
+        return ""
+    try:
+        from gideon.security.guardrails.policy import profile_for_session
+
+        tier = profile_for_session(key).egress_tier
+    except Exception:
+        logger.warning("command egress tier unreadable; network access is unavailable")
+        return "this run's egress tier could not be read"
+    if tier == "all":
+        return ""
+    if tier == "off":
+        from gideon.security.net.guard import EGRESS_OFF_REASON
+
+        return EGRESS_OFF_REASON
+    return f"this run's egress tier is {tier!r}; an arbitrary command cannot be confined to a host allow-list"
 
 
 _LAST_DENY_HOSTS: tuple[str, ...] = ()

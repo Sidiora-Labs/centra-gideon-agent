@@ -10,6 +10,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from gideon.engine.home_gateway import open_loopback
 from pathlib import Path
 
 from gideon import __version__
@@ -55,41 +56,9 @@ def config_path() -> Path:
 
 
 def resolve_client_port(cli_port: int | None) -> int:
-    """Return the dashboard port a *client* CLI command (token/status/logout/stop)
-    should talk to.
-
-    Resolution order:
-
-    1. Explicit ``--port`` CLI flag if the user passed one (``cli_port`` is not ``None``).
-    2. ``GIDEON_PORT`` env var if set to a valid integer.
-    3. Port parsed from ``dashboard.url`` in the config file (``~/.gideon/config.json``)
-       if present and parseable.
-    4. ``_DEFAULT_PORT`` (10000) as the final fallback.
-
-    This matches the server-side ``parse_dashboard_url()`` logic so that
-    ``gideon token`` / ``status`` / ``logout`` / ``stop`` all hit the same
-    port the gateway is actually bound to when the user has configured a
-    non-default ``dashboard.url`` (for example a dev instance on 6777 or an
-    alternative prod port like 7778).
-    """
-    if cli_port is not None:
-        return cli_port
-    env_port = os.environ.get("GIDEON_PORT")
-    if env_port:
-        try:
-            return int(env_port)
-        except ValueError:
-            pass
-    try:
-        cfg = AppConfig.load()
-        url = cfg.dashboard.url or ""
-        if url:
-            _, port = parse_dashboard_url(url)
-            if port:
-                return port
-    except Exception:
-        pass
-    return _DEFAULT_PORT
+    """Resolve only an explicitly declared or live home address."""
+    from gideon.engine.gateway_base import resolve_port
+    return cli_port if cli_port is not None else resolve_port()
 
 
 def _token(args: argparse.Namespace) -> None:
@@ -100,6 +69,8 @@ def _token(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     port = resolve_client_port(args.port)
+    from gideon.engine.home_gateway import require_home_gateway
+    require_home_gateway(port)
     secret_path = config_dir() / ".local_secret"
     try:
         secret = secret_path.read_text().strip()
@@ -107,10 +78,10 @@ def _token(args: argparse.Namespace) -> None:
         print("❌ Gateway not running — start it with: gideon gateway")
         sys.exit(1)
 
-    url = f"http://localhost:{port}/api/token/local?ttl={args.ttl}"
+    url = f"http://127.0.0.1:{port}/api/token/local?ttl={args.ttl}"
     req = urllib.request.Request(url, headers={"X-Local-Secret": secret})
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with open_loopback(req, timeout=5) as resp:
             data = json.loads(resp.read())
             token = data.get("token", "")
     except Exception as exc:
@@ -120,7 +91,7 @@ def _token(args: argparse.Namespace) -> None:
     if not token:
         print("❌ Gateway returned empty token")
         sys.exit(1)
-    print(f"http://localhost:{port}?token={token}")
+    print(f"http://127.0.0.1:{port}?token={token}")
     origin = dashboard_origin(AppConfig.load().dashboard.url)
     if origin and "localhost" not in origin:
         print(f"{origin}/?token={token}")
@@ -128,6 +99,8 @@ def _token(args: argparse.Namespace) -> None:
 
 def _logout(port: int) -> None:
     """Revoke all dashboard sessions by calling the gateway's /api/logout endpoint."""
+    from gideon.engine.home_gateway import require_home_gateway
+    require_home_gateway(port)
     secret_path = config_dir() / ".local_secret"
     try:
         secret = secret_path.read_text().strip()
@@ -135,7 +108,7 @@ def _logout(port: int) -> None:
         print("❌ Gateway not running — start it with: gideon gateway")
         sys.exit(1)
 
-    url = f"http://localhost:{port}/api/logout"
+    url = f"http://127.0.0.1:{port}/api/logout"
     req = urllib.request.Request(
         url,
         method="POST",
@@ -143,7 +116,7 @@ def _logout(port: int) -> None:
         data=b"{}",
     )
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with open_loopback(req, timeout=5) as resp:
             data = json.loads(resp.read())
             if data.get("ok"):
                 print("✅ All dashboard sessions revoked.")
@@ -267,7 +240,7 @@ def _spawn_detached_gateway(port: int) -> None:
     redirected to a log file so the detached process has no controlling TTY.
     """
     log_path = config_dir() / "gateway-restart.log"
-    args = [sys.executable, "-m", "gideon", "gateway", "--port", str(port)]
+    args = [*self_update.cli_argv(), "gateway", "--port", str(port)]
     try:
         log_fh = open(log_path, "ab")
     except OSError:
@@ -325,7 +298,7 @@ def _refresh_agent_config(cwd: str) -> None:
     """
     print("  🔒 Refreshing agent config…")
     r = subprocess.run(
-        [sys.executable, "-m", "gideon", "setup", "--agent-only"],
+        [*self_update.cli_argv(), "setup", "--agent-only"],
         cwd=cwd or None,
         capture_output=True,
         text=True,
@@ -409,16 +382,31 @@ def _update_git(proj: str) -> None:
                 print("  Aborted.")
             sys.exit(0 if interactive else 1)
 
-    print(f"  🔄 git reset --hard origin/{branch}…", file=sys.stderr)
-    reset = self_update.git_reset_hard(git_dir, branch)
-    if reset.returncode != 0:
-        from gideon.interfaces.cli.commands import CliRefusal
+    _require_update_installer()
 
-        raise CliRefusal(f"git reset failed: {(reset.stderr or '').strip()}")
+    head = self_update.git_commit_for(git_dir, "HEAD")
+    original_branch = self_update.GitCheckout(git_dir).branch()
+    metadata = self_update.installed_metadata()
+    self_update.begin_update("git", __version__, "", rollback_ref=head)
+    try:
+        print(f"  🔄 git reset --hard origin/{branch}…", file=sys.stderr)
+        reset = self_update.git_reset_hard(git_dir, branch)
+        if reset.returncode != 0:
+            from gideon.interfaces.cli.commands import CliRefusal
 
-    pkg_root = self_update.package_root(git_dir)
-    build_frontend_sync(Path(pkg_root))
-    _install(["-e", ".", "--quiet"], cwd=pkg_root, label="install -e .")
+            raise CliRefusal(f"git reset failed: {(reset.stderr or '').strip()}")
+
+        pkg_root = self_update.package_root(git_dir)
+        build_frontend_sync(Path(pkg_root))
+        _install(["-e", ".", "--quiet"], cwd=pkg_root, label="install checkout", checkout=True)
+        self_update.complete_update()
+    except (KeyboardInterrupt, Exception, SystemExit) as exc:
+        detail = ("Update stopped." if isinstance(exc, KeyboardInterrupt) else "Update failed.")
+        detail += self_update.installation_delta(metadata)
+        detail += self_update.restore_checkout(git_dir, head, original_branch)
+        self_update.transition_update("cancelled" if isinstance(exc, KeyboardInterrupt) else "failed", error=detail)
+        print(detail, file=sys.stderr)
+        raise
 
     print("\n✅ Gideon updated!")
     print(f"\n{DATA_WARNING}\n")
@@ -441,7 +429,17 @@ def _update_pip() -> None:
     spec = self_update.upgrade_spec(latest)
     if latest:
         print(f"  ⬆️  v{__version__} → v{latest}")
-    _install(["-U", spec, "--quiet"], cwd="", label=f"install -U {spec}")
+    _require_update_installer()
+    metadata = self_update.installed_metadata()
+    self_update.begin_update("pip", __version__, latest)
+    try:
+        _install(["-U", spec, "--quiet"], cwd="", label=f"install -U {spec}")
+        self_update.complete_update()
+    except (KeyboardInterrupt, Exception, SystemExit) as exc:
+        detail = ("Update stopped." if isinstance(exc, KeyboardInterrupt) else "Update failed.") + self_update.installation_delta(metadata)
+        self_update.transition_update("cancelled" if isinstance(exc, KeyboardInterrupt) else "failed", error=detail)
+        print(detail, file=sys.stderr)
+        raise
 
     print("\n✅ Gideon updated!")
     print(f"\n{DATA_WARNING}\n")
@@ -515,23 +513,34 @@ def _latest_release_version() -> str:
     return str(status.get("latest") or "")
 
 
-def _install(args: list[str], *, cwd: str, label: str) -> None:
+def _require_update_installer() -> None:
+    from gideon.operations._installer import NoInstallerError, require_own_installer
+    from gideon.interfaces.cli.commands import CliRefusal
+
+    try:
+        require_own_installer()
+    except NoInstallerError as exc:
+        raise CliRefusal(str(exc)) from None
+
+
+def _install(args: list[str], *, cwd: str, label: str, checkout: bool = False) -> None:
     """Run the resolved installer with *args*, or exit 1 with a readable reason."""
     from gideon.operations._installer import (
         NoInstallerError,
         install_argv,
+        checkout_install_argv,
         installer_name,
     )
 
     try:
-        argv = install_argv(args)
+        argv = checkout_install_argv(cwd) if checkout else install_argv(args)
     except NoInstallerError as exc:
         from gideon.interfaces.cli.commands import CliRefusal
 
         raise CliRefusal(str(exc)) from None
 
     print(f"  🔨 {installer_name()} {label}", file=sys.stderr)
-    result = subprocess.run(argv, cwd=cwd or None, capture_output=True, text=True)
+    result = self_update.run_install_command(argv, cwd=cwd or None)
     if result.returncode != 0:
         summary = self_update.installer_error_summary(result.stderr or "", limit=500)
         from gideon.interfaces.cli.commands import CliRefusal
@@ -586,9 +595,11 @@ def _update() -> None:
 def _status(args: argparse.Namespace) -> None:
     """Query the running gateway for stats, or print offline message."""
     port = resolve_client_port(getattr(args, "port", None))
+    from gideon.engine.home_gateway import require_home_gateway
+    require_home_gateway(port)
     url = f"http://127.0.0.1:{port}/api/status"
     try:
-        with urllib.request.urlopen(url, timeout=3) as resp:
+        with open_loopback(url, timeout=3) as resp:
             data = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
@@ -633,7 +644,11 @@ def _boot_config() -> AppConfig:
 
     from gideon.core.config.migrations import load_and_persist_migrations
 
-    return load_and_persist_migrations()
+    load_and_persist_migrations()
+    from gideon.engine.routing.rates import adopt_prices_set_before
+
+    adopt_prices_set_before()
+    return AppConfig.load()
 
 
 async def _gateway(
@@ -647,6 +662,8 @@ async def _gateway(
     safe_surfaces: bool = False,
 ) -> None:
     """Load config and start the gateway (dashboard + channel transports)."""
+    from gideon.engine.gateway_base import claim_home
+    claim_home()
     if safe_surfaces:
         from gideon.workspace.surface_layers import set_safe_surfaces
 

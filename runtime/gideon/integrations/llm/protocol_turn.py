@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 from gideon.integrations.llm.events import ContextUsage
 
@@ -17,6 +18,33 @@ from gideon.integrations.llm.base import (
 )
 
 logger = logging.getLogger(__name__)
+_Frame = TypeVar("_Frame")
+
+
+async def until_terminal(
+    events: AsyncIterator[_Frame],
+    *,
+    ends: Callable[[_Frame], bool],
+    adapter: str,
+    missing: str,
+    model: str = "",
+) -> AsyncIterator[_Frame]:
+    """Retain trailing usage frames, but reject EOF without a protocol terminal."""
+    ended = False
+    try:
+        async for event in events:
+            ended = ended or ends(event)
+            yield event
+    finally:
+        close = getattr(events, "aclose", None)
+        if close is not None:
+            await close()
+    if not ended:
+        from gideon.security.guardrails.failure import AnswerCutOff
+
+        error = AnswerCutOff(adapter=adapter, missing=missing, model=model)
+        logger.warning("%s", error)
+        raise error
 
 
 def wire_value(value: Any, key: str, default: Any = None) -> Any:

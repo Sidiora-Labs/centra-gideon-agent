@@ -15,6 +15,8 @@ also gated by the runtime's approval gate (``requires_approval`` per tool).
 
 from __future__ import annotations
 
+from gideon.engine.agents.native.inbox_tool_defs import inbox_tool_definitions, inbox_list_text, INBOX_LIST_DEFAULT, INBOX_LIST_MAX
+
 import asyncio
 import contextvars
 import logging
@@ -26,6 +28,7 @@ from typing import Any, cast
 from gideon.core import cancellation
 from gideon.engine.agents.native import application_tools as app_tools
 from gideon.engine.agents.native import read_gate
+from gideon.engine.agents.native.smart_case import LineQuery, glob_case_sensitive
 from gideon.engine.agents.native.decision_tool_defs import decision_tool_definitions
 from gideon.engine.agents.native.knowledge_tool_defs import knowledge_tool_definitions
 from gideon.engine.agents.native.project_run_tool_defs import (
@@ -58,6 +61,8 @@ _READ_GATED_WRITE_TOOLS: dict[str, tuple[str, str | None, str]] = {
     "edit_file": ("edit", "old_str", "new_str"),
 }
 
+_CURRENT_APPROVED_DELETE: contextvars.ContextVar[str] = contextvars.ContextVar("gideon_approved_delete_command", default="")
+
 _CURRENT_CWD: contextvars.ContextVar[str] = contextvars.ContextVar(
     "gideon_native_cwd", default=""
 )
@@ -78,6 +83,7 @@ def bind_tool_context(
     agent: str = "",
     extra_roots: list | None = None,
     project_id: str = "",
+    approved_delete_command: str = "",
 ):
     from gideon.integrations.tool_providers import projection
 
@@ -86,6 +92,7 @@ def bind_tool_context(
         _CURRENT_AGENT.set(agent or ""),
         _CURRENT_EXTRA_ROOTS.set(tuple(map(str, extra_roots or ()))),
         _CURRENT_PROJECT_ID.set(project_id or ""),
+        _CURRENT_APPROVED_DELETE.set(approved_delete_command),
     ]
     bound.append(projection.bind_project_dir(cwd))
     return bound
@@ -99,6 +106,7 @@ def reset_tool_context(tokens) -> None:
         _CURRENT_AGENT,
         _CURRENT_EXTRA_ROOTS,
         _CURRENT_PROJECT_ID,
+        _CURRENT_APPROVED_DELETE,
     )
     for index, variable in enumerate(variables):
         if not tokens or index >= len(tokens):
@@ -116,6 +124,7 @@ def current_project_id() -> str:
 
 
 _CATEGORY_OF: dict[str, str] = {
+    "ask_user": "core",
     "read_file": "filesystem",
     "write_file": "filesystem",
     "edit_file": "filesystem",
@@ -150,6 +159,7 @@ _CATEGORY_OF: dict[str, str] = {
     "project_run_status": "projects",
     "project_run_list": "projects",
     "post_to_inbox": "inbox",
+    "inbox_list": "inbox",
 }
 
 PLATFORM_CATEGORIES: frozenset[str] = frozenset({"filesystem", "shell", "core"})
@@ -243,7 +253,7 @@ def _ok_capped(
 def _denied_bash_reason(command: str) -> str | None:
     from gideon.security.security import denied_command_reason
 
-    return denied_command_reason(command)
+    return denied_command_reason(command, protected_checked=True)
 
 
 def _safe_command_output(text: str, values: list[str]) -> str:
@@ -484,6 +494,7 @@ class NativeBuiltinToolProvider(ToolProvider):
 
     def _all_tool_defs(self, s: dict) -> list[ToolDefinition]:
         return [
+            ToolDefinition(name="ask_user", provider=self.name, requires_approval=False, interactive=True, risk_level=RiskLevel.CAUTION, description="Ask the authenticated owner in this attended chat and wait for the actual answer. Unattended work cannot ask.", parameters={**s, "properties": {"questions": {"type": "array", "items": {"type": "object"}}}, "required": ["questions"]}),
             ToolDefinition(
                 name="read_file",
                 provider=self.name,
@@ -544,10 +555,10 @@ class NativeBuiltinToolProvider(ToolProvider):
                 provider=self.name,
                 requires_approval=False,
                 risk_level=RiskLevel.SAFE,
-                description="Find files matching a glob pattern under the workspace. Args: pattern (str, e.g. '**/*.py').",  # noqa: E501
+                description="Find files matching a glob pattern under the workspace. Case is smart: capitals keep case; ignore_case=true or false overrides it. Args: pattern (str, e.g. '**/*.py').",  # noqa: E501
                 parameters={
                     **s,
-                    "properties": {"pattern": {"type": "string"}},
+                    "properties": {"pattern": {"type": "string"}, "ignore_case": {"type": "boolean"}},
                     "required": ["pattern"],
                 },
             ),
@@ -556,13 +567,14 @@ class NativeBuiltinToolProvider(ToolProvider):
                 provider=self.name,
                 requires_approval=False,
                 risk_level=RiskLevel.SAFE,
-                description="Search file contents (substring by default, or a Python regex with regex=true). Skips .git/node_modules/venv/build dirs. Args: query (str), optional glob (str), optional regex (bool), optional max_results (int).",  # noqa: E501
+                description="Search file contents (substring by default, or a Python regex with regex=true). Skips .git/node_modules/venv/build dirs. Query and glob each use smart case: capitals keep case; ignore_case=true or false overrides both. Args: query (str), optional glob (str), optional regex (bool), optional max_results (int).",  # noqa: E501
                 parameters={
                     **s,
                     "properties": {
                         "query": {"type": "string"},
                         "glob": {"type": "string"},
                         "regex": {"type": "boolean"},
+                        "ignore_case": {"type": "boolean"},
                         "max_results": {"type": "integer"},
                     },
                     "required": ["query"],
@@ -615,31 +627,7 @@ class NativeBuiltinToolProvider(ToolProvider):
                     "required": ["command"],
                 },
             ),
-            ToolDefinition(
-                name="post_to_inbox",
-                provider=self.name,
-                requires_approval=False,
-                risk_level=RiskLevel.CAUTION,
-                description=(
-                    "Surface a message to the user in their Inbox triage queue — use when "
-                    "you finish something worth reporting, need a decision, or have a heads-up, "
-                    "and no one is watching the chat live. Args: message (str), kind "
-                    "('notification'|'question'|'fyi', default 'notification'; 'question' asks "
-                    "for a reply), optional context (str — why/what you used)."
-                ),
-                parameters={
-                    **s,
-                    "properties": {
-                        "message": {"type": "string"},
-                        "kind": {
-                            "type": "string",
-                            "enum": ["notification", "question", "fyi"],
-                        },
-                        "context": {"type": "string"},
-                    },
-                    "required": ["message"],
-                },
-            ),
+            *inbox_tool_definitions(self.name, s),
             *knowledge_tool_definitions(self.name, s, self._structural_verbs()),
             *decision_tool_definitions(self.name, s),
             *task_tool_definitions(self.name, s),
@@ -741,8 +729,51 @@ class NativeBuiltinToolProvider(ToolProvider):
         except Exception:
             logger.debug("read gate: post-write observation skipped", exc_info=True)
 
-    async def invoke(self, tool_name: str, arguments: dict[str, Any]) -> ToolResult:
+    async def preflight(self, tool_name: str, arguments: dict[str, Any]) -> ToolResult | None:
+        from gideon.integrations.tool_providers.arguments import argument_refusal, refused_result
+        definition = next((tool for tool in await self.list_tools() if tool.name == tool_name), None)
+        reason = argument_refusal(tool_name, arguments, definition.parameters if definition else {})
+        if reason:
+            return refused_result(reason)
         try:
+            from gideon.security.safety_flags import yes_or_no
+            arguments = dict(arguments)
+            for name, spec in ((definition.parameters or {}).get("properties") or {}).items() if definition else ():
+                if spec.get("type") == "boolean" and name in arguments:
+                    parsed = yes_or_no(arguments[name])
+                    if parsed is None:
+                        raise ValueError(f"{name} must be a boolean")
+                    arguments[name] = parsed
+            if tool_name in {"read_file", "write_file", "edit_file", "list_dir"}:
+                path = str(arguments.get("path") or ".") if tool_name == "list_dir" else str(arguments["path"])
+                if reason := self._owner_only_path_reason(path):
+                    return refused_result(reason)
+                self._resolve(path)
+            result = self._read_gate_refusal(tool_name, arguments)
+            check = getattr(self, f"_p_{tool_name}", None)
+            if result is None and check is not None:
+                result = check(arguments)
+            if result is not None:
+                result.metadata.update(effect_state="not_started", not_run=True, refused_by_tool=True)
+            return result
+        except (ValueError, KeyError) as exc:
+            return refused_result(str(exc))
+
+    async def invoke(self, tool_name: str, arguments: dict[str, Any]) -> ToolResult:
+        refusal = await self.preflight(tool_name, arguments)
+        if refusal is not None:
+            return refusal
+        try:
+            from gideon.security.safety_flags import yes_or_no
+
+            arguments = dict(arguments)
+            definition = next((tool for tool in await self.list_tools() if tool.name == tool_name), None)
+            for name, spec in ((definition.parameters or {}).get("properties") or {}).items() if definition else ():
+                if spec.get("type") == "boolean" and name in arguments:
+                    parsed = yes_or_no(arguments[name])
+                    if parsed is None:
+                        raise ValueError(f"{name} must be a boolean")
+                    arguments[name] = parsed
             implementation = getattr(self, f"_t_{tool_name}", None)
             if implementation is None:
                 return ToolResult(
@@ -776,6 +807,13 @@ class NativeBuiltinToolProvider(ToolProvider):
                 ]
             return ToolResult(success=False, error=message, recovery_hints=hints)
         return completed
+
+    async def _t_ask_user(self, arguments):
+        from gideon.security.owner_questions import registry
+        questions = registry()
+        if questions is None:
+            return ToolResult(success=False, error="No attended owner question surface is available.")
+        return ToolResult(success=True, output=await questions.ask(self._session_key, arguments))
 
     async def _t_conversation_archive_search(self, a: dict) -> ToolResult:
         import json
@@ -913,16 +951,33 @@ class NativeBuiltinToolProvider(ToolProvider):
         except Exception:
             logger.debug("checkpoint pre-edit skipped for %s", path, exc_info=True)
 
+    def _p_write_file(self, a: dict) -> ToolResult | None:
+        if "content" not in a or a["content"] is None:
+            return ToolResult(False, error="content is required; pass explicit text (an empty string clears the file)")
+        if not isinstance(a["content"], str):
+            return ToolResult(False, error="content must be text")
+        path = self._resolve(str(a["path"]))
+        if path.is_dir():
+            return ToolResult(False, error=f"path is a directory, not a file: {a['path']}")
+        if path.parent.exists() and not path.parent.is_dir():
+            return ToolResult(False, error=f"a parent path segment is a file, not a directory: {a['path']}")
+        return None
+
+    def _p_edit_file(self, a: dict) -> ToolResult | None:
+        before, after = str(a["old_str"]), str(a["new_str"])
+        if before and before != after:
+            return None
+        change = TextChange.prepare("", before, after, bool(a.get("replace_all")))
+        if change.error:
+            hint = "old_str must be the exact existing text to replace. To create a file or append, use write_file." if not before else "The file already contains new_str — no edit needed. Set old_str to the current text if you meant a different change."
+            return ToolResult(False, error=change.error, recovery_hints=[hint])
+        return None
+
     async def _t_write_file(self, a: dict) -> ToolResult:
         if reason := self._owner_only_path_reason(str(a["path"])):
             return ToolResult(success=False, error=reason)
-        if "content" not in a or a["content"] is None:
-            return ToolResult(
-                success=False,
-                error="content is required; pass explicit text (an empty string clears the file)",
-            )
-        if not isinstance(a["content"], str):
-            return ToolResult(success=False, error="content must be text")
+        if result := self._p_write_file(a):
+            return result
         path = self._resolve(str(a["path"]))
         content = a["content"]
         self._checkpoint_pre_edit(path)
@@ -950,12 +1005,16 @@ class NativeBuiltinToolProvider(ToolProvider):
                 success=True, output=f"Wrote {len(content)} chars to {a['path']}"
             )
 
-        return await asyncio.get_event_loop().run_in_executor(None, persist)
+        from gideon.engine.heartbeat_store import queue_locked
+
+        return await asyncio.get_event_loop().run_in_executor(None, queue_locked(path, persist))
 
     async def _t_edit_file(self, a: dict) -> ToolResult:
         if reason := self._owner_only_path_reason(str(a["path"])):
             return ToolResult(success=False, error=reason)
         path = self._resolve(str(a["path"]))
+        if result := self._p_edit_file(a):
+            return result
         before, after = str(a["old_str"]), str(a["new_str"])
         all_matches = bool(a.get("replace_all"))
         self._checkpoint_pre_edit(path)
@@ -990,7 +1049,9 @@ class NativeBuiltinToolProvider(ToolProvider):
                 output=f"Edited {a['path']} ({count} replacement{'s' if count != 1 else ''})",
             )
 
-        return await asyncio.get_event_loop().run_in_executor(None, persist)
+        from gideon.engine.heartbeat_store import queue_locked
+
+        return await asyncio.get_event_loop().run_in_executor(None, queue_locked(path, persist))
 
     async def _t_list_dir(self, a: dict) -> ToolResult:
         requested = str(a.get("path") or ".")
@@ -1018,17 +1079,24 @@ class NativeBuiltinToolProvider(ToolProvider):
             ],
         )
 
+    def _p_glob(self, a: dict) -> ToolResult | None:
+        return _safe_pattern(str(a["pattern"]), "pattern")
+
+    def _p_grep(self, a: dict) -> ToolResult | None:
+        return _safe_pattern(str(a.get("glob") or "**/*"), "glob")
+
     async def _t_glob(self, a: dict) -> ToolResult:
         pattern = str(a["pattern"])
         if refusal := _safe_pattern(pattern, "pattern"):
             return refusal
         root = self._cwd.resolve()
         tree = WorkspaceTree(root, self._SKIP_DIRS)
+        names = glob_case_sensitive(pattern, a.get("ignore_case"))
 
         def scan() -> str:
             paths = sorted(
                 str(path.relative_to(root))
-                for path in tree.matching_files(pattern)
+                for path in tree.matching_files(pattern, case_sensitive=names)
                 if self._admit_path(path) is not None
             )
             rows = paths[:500]
@@ -1049,7 +1117,8 @@ class NativeBuiltinToolProvider(ToolProvider):
             return refusal
         limit = int(a.get("max_results") or 200)
         try:
-            expression = re.compile(query) if bool(a.get("regex")) else None
+            match = LineQuery(query, regex=bool(a.get("regex")), ignore_case=a.get("ignore_case"))
+            names = glob_case_sensitive(pattern, a.get("ignore_case"))
         except re.error as exc:
             return ToolResult(
                 success=False,
@@ -1060,7 +1129,7 @@ class NativeBuiltinToolProvider(ToolProvider):
             )
         def scan() -> str:
             rows = []
-            for path in tree.matching_files(pattern):
+            for path in tree.matching_files(pattern, case_sensitive=names):
                 canonical = self._admit_path(path)
                 if canonical is None:
                     continue
@@ -1069,9 +1138,15 @@ class NativeBuiltinToolProvider(ToolProvider):
                 if self._SKIP_DIRS.intersection(relative.parts):
                     continue
                 try:
-                    lines = safe_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+                    raw = safe_path.read_bytes()
+                    if b"\0" in raw[:8192]:
+                        continue
+                    text = raw.decode("utf-8", errors="ignore")
+                    if not match.in_file(text):
+                        continue
+                    lines = text.splitlines()
                     for number, line in enumerate(lines, 1):
-                        matched = expression.search(line) if expression else query in line
+                        matched = match.in_line(line)
                         if not matched:
                             continue
                         rows.append(f"{relative}:{number}: {line.strip()[:200]}")
@@ -1118,16 +1193,7 @@ class NativeBuiltinToolProvider(ToolProvider):
         output = await asyncio.get_event_loop().run_in_executor(None, outline)
         return _ok_capped(output, session_key=self._session_key)
 
-    async def _t_bash(self, a: dict, *, timeout: float | None = None) -> ToolResult:
-        from gideon.security import security
-        from gideon.security.sandbox import wrap_argv
-
-        if timeout is None:
-            try:
-                requested = float(a.get("timeout") or _BASH_TIMEOUT)
-            except (TypeError, ValueError):
-                requested = _BASH_TIMEOUT
-            timeout = max(1.0, min(requested, _BASH_TIMEOUT_MAX))
+    def _bash_command(self, a: dict) -> tuple[str, list[str]] | ToolResult:
         command = str(a["command"])
         from gideon.automation.triggers.secrets import UnresolvedSecret, resolve as resolve_references
 
@@ -1143,14 +1209,18 @@ class NativeBuiltinToolProvider(ToolProvider):
             command = resolve_references(command, resolver=resolve_owned)
         except UnresolvedSecret as missing:
             return ToolResult(success=False, error=_unfilled_secret_error(missing.key))
+        return command, handed
+
+    def _bash_refusal(self, command: str, handed: list[str]) -> ToolResult | None:
+        from gideon.security import security
         handed.extend(_environment_credentials())
         from gideon.security.owner_only import owner_only_command_reason
 
         if reason := owner_only_command_reason(command, cwd=self._cwd):
-            return ToolResult(success=False, error=reason)
+            return ToolResult(success=False, error=_safe_command_output(reason, handed))
         checks = (
             (
-                security.is_sensitive_bash_command,
+                partial(security.is_sensitive_bash_command, cwd=self._cwd),
                 "This command touches a sensitive credential path. Use a non-credential path or a different approach.",
                 False,
             ),
@@ -1165,10 +1235,9 @@ class NativeBuiltinToolProvider(ToolProvider):
             if reason:
                 return ToolResult(
                     success=False,
-                    error=(
-                        f"Blocked: command matches denied pattern {reason!r}"
-                        if is_pattern
-                        else reason
+                    error=_safe_command_output(
+                        f"Blocked: command matches denied pattern {reason!r}" if is_pattern else reason,
+                        handed,
                     ),
                     recovery_hints=[recovery],
                 )
@@ -1177,11 +1246,40 @@ class NativeBuiltinToolProvider(ToolProvider):
         offer = handoff.detect(command)
         if offer is not None:
             return ToolResult(
-                success=False, error=offer.reason, recovery_hints=[handoff.HANDOFF_HINT]
+                success=False, error=_safe_command_output(offer.reason, handed), recovery_hints=[handoff.HANDOFF_HINT]
             )
-        wrapped, cleanup = wrap_argv(
-            ["bash", "-lc", command], mode=self._sandbox_mode, cwd=self._cwd
-        )
+        return None
+
+    def _p_bash(self, a: dict) -> ToolResult | None:
+        resolved = self._bash_command(a)
+        return resolved if isinstance(resolved, ToolResult) else self._bash_refusal(*resolved)
+
+    async def _t_bash(self, a: dict, *, timeout: float | None = None) -> ToolResult:
+        from gideon.security import security
+        from gideon.security.sandbox import wrap_argv
+
+        if timeout is None:
+            try:
+                requested = float(a.get("timeout") or _BASH_TIMEOUT)
+            except (TypeError, ValueError):
+                requested = _BASH_TIMEOUT
+            timeout = max(1.0, min(requested, _BASH_TIMEOUT_MAX))
+        resolved = self._bash_command(a)
+        if isinstance(resolved, ToolResult):
+            return resolved
+        command, handed = resolved
+        from gideon.security.protected_folders import protected_delete, refusal
+        protected = protected_delete(command, cwd=str(self._cwd))
+        if protected and _CURRENT_APPROVED_DELETE.get() != command:
+            return ToolResult(success=False, error=refusal(protected, where="this invocation"))
+        if result := self._bash_refusal(command, handed):
+            return result
+        try:
+            wrapped, cleanup = wrap_argv(
+                ["bash", "-lc", command], mode=self._sandbox_mode, cwd=self._cwd
+            )
+        except PermissionError as exc:
+            return ToolResult(success=False, error=str(exc))
         try:
             from gideon.security.sandbox import PROFILE_TOOL, create_subprocess_limited
 
@@ -1234,12 +1332,29 @@ class NativeBuiltinToolProvider(ToolProvider):
                 f"The command exited non-zero ({captured.returncode}). Read the error output above, fix the cause, and retry — or try a different approach."
             ],
         )
+        from gideon.security.sandbox import no_network_note
+
+        if note := no_network_note():
+            result.recovery_hints.insert(0, note)
         result.truncated, result.original_length = (
             projection.truncated,
             projection.original_length,
         )
         result.metadata = metadata
         return result
+
+    async def _t_inbox_list(self, a: dict) -> ToolResult:
+        try:
+            limit = max(1, min(int(a.get("limit", INBOX_LIST_DEFAULT)), INBOX_LIST_MAX))
+        except (ValueError, TypeError):
+            limit = INBOX_LIST_DEFAULT
+        from gideon.integrations.inbox_providers.native_source import get_dashboard_state, open_inbox_items
+        from gideon.integrations.inbox_reach import reader_of_work
+        reader = reader_of_work(get_dashboard_state())
+        items = await open_inbox_items(reader, kind=str(a.get("kind", "") or "").strip())
+        if items is None:
+            return ToolResult(success=False, error="the Inbox cannot be read from this run")
+        return _ok_capped(inbox_list_text(items, limit, everyone=reader.everyone), session_key=self._session_key)
 
     async def _t_post_to_inbox(self, a: dict) -> ToolResult:
         content = str(a.get("message", "")).strip()

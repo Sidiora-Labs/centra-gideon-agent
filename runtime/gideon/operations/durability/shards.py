@@ -30,6 +30,7 @@ allowlist in ``snapshot._merge_memory`` names two tables (``knowledge_facts``,
 from __future__ import annotations
 
 import hashlib
+import base64
 import json
 import logging
 import os
@@ -46,6 +47,8 @@ from typing import Any
 
 from gideon.core.atomic_write import atomic_write, atomic_write_bytes
 from gideon.operations.durability import inventory as inv
+
+from gideon.operations.durability.home_paths import export_path, guard_path, LinkInTheWay
 
 logger = logging.getLogger(__name__)
 
@@ -130,58 +133,153 @@ class ExportResult:
     skipped: dict[str, str] = field(default_factory=dict)
     blobs: int = 0
     databases: list[DbCopy] = field(default_factory=list)
+    agreements: ShardFile | None = None
 
     @property
     def rows(self) -> int:
         return sum(s.rows for s in self.shards)
 
 
-def _json_rows_from_entity_dir(root: Path, *, entry_path: str = "") -> list[dict]:
-    """One row per entity JSON file, id = filename stem, sorted by id."""
-    rows: list[dict] = []
-    for path in sorted(root.rglob("*.json")):
-        rel = path.relative_to(root).as_posix()
-        if entry_path:
-            from gideon.workspace.portability import _is_derived_within
+class FileRows(list):
+    """Rows with local raw-file fingerprints used only to avoid replacing a newer edit."""
+    def __init__(self, rows=(), *, file_shas=None):
+        super().__init__(rows)
+        self.file_shas = dict(file_shas or {})
 
-            if _is_derived_within(entry_path, rel):
+
+def row_file(row: dict) -> str:
+    """Original file path; older JSON rows retain their stem convention."""
+    rid = str(row.get("id", ""))
+    return rid if "text" in row or "base64" in row else f"{rid}.json"
+
+
+def row_bytes(row: dict) -> bytes:
+    forms = [name for name in ("data", "text", "base64") if name in row]
+    if len(forms) > 1:
+        raise ValueError("a file row must have one content representation")
+    if "text" in row:
+        if not isinstance(row["text"], str):
+            raise ValueError("file text must be a string")
+        return row["text"].encode("utf-8")
+    if "base64" in row:
+        if not isinstance(row["base64"], str):
+            raise ValueError("base64 file content must be a string")
+        return base64.b64decode(row["base64"], validate=True)
+    return (canonical_json(row.get("data", {})) + "\n").encode("utf-8")
+
+
+def store_file(entry, relative):
+    """Only this store's files may be carried or landed as rows."""
+    from pathlib import PurePosixPath
+    path = PurePosixPath(relative)
+    if not relative or "\\" in relative or "\0" in relative or path.is_absolute() or path.as_posix() != relative or any(part in (".", "..") for part in path.parts):
+        return False
+    if relative.endswith((".db", ".sqlite", ".sqlite3", "-journal", "-wal", "-shm")) or path.name in (".gideon-record-files.lock", "_tombstones.jsonl"):
+        return False
+    if entry is None:
+        return not path.name.endswith(".tmp")
+    full = f"{entry.path}/{relative}"
+    from gideon.workspace.portability import _is_derived_within
+    if inv.is_ignored(full) or _is_derived_within(entry.path, relative):
+        return False
+    owner = inv.claim_for(full)
+    return owner is None or not owner.path.startswith(entry.path + "/")
+
+
+def _json_rows_from_entity_dir(root: Path, *, entry_path: str = "", left_out=None, path_id="") -> list[dict]:
+    """Read JSON entities by stem and original UTF-8/binary files by their full relative name."""
+    rows = {}
+    file_shas = {}
+    entry = next((item for item in inv.all_entries() if item.path == entry_path), None)
+    def refused(relative, why):
+        if left_out is not None:
+            left_out[f"{path_id}/{relative}".strip("/")] = why
+    def listing_error(exc):
+        refused(".", f"folder could not be listed: {exc}")
+    for directory, dirs, files in os.walk(root, followlinks=False, onerror=listing_error):
+        here = Path(directory)
+        allowed = []
+        for name in sorted(dirs):
+            relative = (here / name).relative_to(root).as_posix()
+            if not store_file(entry, relative):
                 continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            logger.debug(
-                "shards: unreadable entity file %s — skipped", path, exc_info=True
-            )
-            continue
-        rows.append({"id": rel[:-5] if rel.endswith(".json") else rel, "data": data})
-    rows.sort(key=lambda r: r["id"])
-    return rows
+            try:
+                export_path(root, relative)
+            except LinkInTheWay as exc:
+                refused(relative, str(exc))
+            else:
+                allowed.append(name)
+        dirs[:] = allowed
+        for name in sorted(files):
+            path = here / name
+            relative = path.relative_to(root).as_posix()
+            if not store_file(entry, relative):
+                continue
+            try:
+                export_path(root, relative)
+                if path.stat().st_size > PART_SPLIT_BYTES * 3 // 4:
+                    refused(relative, "file too large for one shard row")
+                    continue
+                raw = path.read_bytes()
+                if raw.startswith(b"SQLite format 3\x00"):
+                    continue
+                if relative.endswith(".json"):
+                    row = {"id":relative[:-5], "data":json.loads(raw.decode("utf-8"))}
+                else:
+                    try:
+                        row = {"id":relative,"text":raw.decode("utf-8")}
+                    except UnicodeDecodeError:
+                        row = {"id":relative,"base64":base64.b64encode(raw).decode("ascii")}
+                if row["id"] in rows:
+                    refused(relative, f"row id already names {row_file(rows[row['id']])}")
+                    continue
+                rows[row["id"]] = row
+                file_shas[relative] = _sha256(raw)
+            except (OSError, ValueError, UnicodeDecodeError, LinkInTheWay) as exc:
+                refused(relative, f"file unreadable: {exc}")
+    return FileRows([rows[rid] for rid in sorted(rows)], file_shas=file_shas)
 
 
-def _json_rows_from_file(path: Path) -> list[dict]:
+def _json_rows_from_file(path: Path, *, left_out=None, path_id="", entry=None) -> list[dict]:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        guard_path(path, read=True)
+        raw = path.read_bytes()
+        try:
+            row = {"id":path.name,"data":json.loads(raw.decode("utf-8"))}
+        except (ValueError, UnicodeDecodeError):
+            if entry is None or entry.merge != inv.MERGE_REPLACE_ONLY:
+                raise
+            try:
+                row = {"id":path.name,"text":raw.decode("utf-8")}
+            except UnicodeDecodeError:
+                row = {"id":path.name,"base64":base64.b64encode(raw).decode("ascii")}
+        return FileRows([row], file_shas={path.name:_sha256(raw)})
+    except (OSError, ValueError, UnicodeDecodeError, LinkInTheWay):
+        if left_out is not None:
+            left_out[path_id] = "file unreadable"
         return []
-    return [{"id": path.name, "data": data}]
 
 
-def _json_record_rows_from_file(path: Path, records_field: str) -> list[dict]:
+def _json_record_rows_from_file(path: Path, records_field: str, *, left_out=None, path_id="") -> list[dict]:
     """Extract one stable-id row per record from a JSON collection store."""
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        guard_path(path, read=True)
+        raw = path.read_bytes()
+        value = json.loads(raw.decode("utf-8"))
+    except (OSError, json.JSONDecodeError, LinkInTheWay):
+        if left_out is not None:
+            left_out[path_id] = "JSON file unreadable"
         return []
     records = value if records_field == "$root" else (
         value.get(records_field) if isinstance(value, dict) else None
     )
     if not isinstance(records, list):
         return []
-    return [
+    return FileRows([
         {"id": str(record["id"]), "data": record}
         for record in records
         if isinstance(record, dict) and record.get("id") is not None
-    ]
+    ], file_shas={path.name:_sha256(raw)})
 
 
 def _year_of(row: dict) -> str:
@@ -205,12 +303,15 @@ def _year_of(row: dict) -> str:
     return _UNKNOWN_YEAR
 
 
-def _jsonl_rows_by_year(path: Path) -> dict[str, list[dict]]:
+def _jsonl_rows_by_year(path: Path, *, left_out=None, path_id="") -> dict[str, list[dict]]:
     """Parse an append-only JSONL file into ``{year: rows}``, order preserved."""
     buckets: dict[str, list[dict]] = {}
     try:
+        guard_path(path, read=True)
         text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    except (OSError, LinkInTheWay):
+        if left_out is not None:
+            left_out[f"{path_id}/{path.name}"] = "JSONL file unreadable"
         return buckets
     for line in text.splitlines():
         line = line.strip()
@@ -219,6 +320,8 @@ def _jsonl_rows_by_year(path: Path) -> dict[str, list[dict]]:
         try:
             row = json.loads(line)
         except json.JSONDecodeError:
+            if left_out is not None:
+                left_out[f"{path_id}/{path.name}"] = "JSONL contains unreadable rows"
             continue
         if not isinstance(row, dict):
             continue
@@ -418,12 +521,35 @@ def _stage_db_copy(out_dir: Path, entry_id: str, src_copy: Path) -> DbCopy | Non
     return DbCopy(path=rel, entry_id=entry_id, bytes=len(data), sha256=_sha256(data))
 
 
+def is_an_export(directory: Path) -> bool:
+    try:
+        guard_path(directory / _MANIFEST, read=True)
+        manifest = json.loads((directory / _MANIFEST).read_text())
+    except (OSError, ValueError, LinkInTheWay):
+        return False
+    return isinstance(manifest, dict) and "schema_version" in manifest and "shards" in manifest
+
+
+def _drop_shards_of(out_dir: Path, entry_id: str) -> None:
+    """Remove only a recognized export's selected store before rebuilding its current copy."""
+    if not is_an_export(out_dir):
+        return
+    folder = guard_path(out_dir / entry_id)
+    if folder.is_dir():
+        # Never delete user-linked children, even inside an otherwise recognized export.
+        for child in folder.rglob("*"):
+            guard_path(child)
+        shutil.rmtree(folder)
+
+
 def export_shards(
     home: Path,
     out_dir: Path,
     *,
     entries: list[str] | None = None,
     include_databases: bool = False,
+    agreements: dict | None = None,
+    deletions: dict | None = None,
 ) -> ExportResult:
     """Export state to deterministic shards under ``out_dir``.
 
@@ -441,13 +567,28 @@ def export_shards(
     out_dir.mkdir(parents=True, exist_ok=True)
     wanted = set(entries) if entries else None
 
+    if entries is not None:
+        for entry in inv.export_entries():
+            if entry.id in set(entries):
+                _drop_shards_of(out_dir, entry.id)
+
     with tempfile.TemporaryDirectory() as tmp:
         workdir = Path(tmp)
         for entry in inv.export_entries():
             if wanted is not None and entry.id not in wanted:
                 continue
+            if not any(char in entry.path for char in "*?["):
+                try:
+                    export_path(home, entry.path)
+                except LinkInTheWay as exc:
+                    result.skipped[entry.path] = str(exc)
+                    continue
             for rel in inv.paths_for(home, entry):
-                src = home / rel
+                try:
+                    src = export_path(home, rel)
+                except LinkInTheWay as exc:
+                    result.skipped[rel] = str(exc)
+                    continue
                 path_id = (
                     entry.id
                     if rel == entry.path
@@ -474,24 +615,20 @@ def export_shards(
                         if staged is not None:
                             result.databases.append(staged)
                 elif entry.kind == inv.KIND_JSON_ENTITY_DIR:
-                    rows = _json_rows_from_entity_dir(src, entry_path=entry.path) if src.is_dir() else []
+                    rows = _json_rows_from_entity_dir(src, entry_path=entry.path, left_out=result.skipped, path_id=path_id) if src.is_dir() else []
                     rows = [inv.shared_value(entry, row) for row in rows]
-                    if entry.tombstones and src.is_dir():
-                        from gideon.operations.durability.tombstones import merge_into_rows
-
-                        rows = merge_into_rows(src, rows)
                     result.shards.extend(
                         _write_shard(out_dir, f"{path_id}/entities.jsonl", rows)
                     )
                 elif entry.kind == inv.KIND_JSON_FILE:
                     if entry.records_field:
                         rows = (
-                            _json_record_rows_from_file(src, entry.records_field)
+                            _json_record_rows_from_file(src, entry.records_field, left_out=result.skipped, path_id=path_id)
                             if src.is_file()
                             else []
                         )
                     else:
-                        rows = _json_rows_from_file(src) if src.is_file() else []
+                        rows = _json_rows_from_file(src, left_out=result.skipped, path_id=path_id, entry=entry) if src.is_file() else []
                     rows = [inv.shared_value(entry, row) for row in rows]
                     result.shards.extend(
                         _write_shard(out_dir, f"{path_id}/value.jsonl", rows)
@@ -500,7 +637,7 @@ def export_shards(
                     files = [src] if src.is_file() else sorted(src.rglob("*.jsonl"))
                     buckets: dict[str, list[dict]] = {}
                     for path in files:
-                        for year, rows in _jsonl_rows_by_year(path).items():
+                        for year, rows in _jsonl_rows_by_year(path, left_out=result.skipped, path_id=path_id).items():
                             buckets.setdefault(year, []).extend(
                                 inv.shared_value(entry, row) for row in rows
                             )
@@ -518,11 +655,32 @@ def export_shards(
                     else:
                         result.blobs += _export_blob(out_dir / path_id, src)
 
+    if deletions:
+        for entry_id, marks in deletions.items():
+            entry = inv.by_id(entry_id)
+            if entry is None or entry.machine_local:
+                continue
+            matching = [record for record in result.shards if record.path.startswith(entry_id + "/")]
+            if not matching and entry.kind in (inv.KIND_JSON_ENTITY_DIR, inv.KIND_JSON_FILE):
+                relative = f"{entry_id}/" + ("entities.jsonl" if entry.kind == inv.KIND_JSON_ENTITY_DIR else "value.jsonl")
+                result.shards.extend(_write_shard(out_dir, relative, [{"id":rid,"deleted_at":mark.at or "unknown","held":list(mark.held)} for rid,mark in marks.items()]))
+            if matching:
+                record = matching[0]
+                path = out_dir / record.path
+                rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+                live = {str(row.get("id", "")) for row in rows}
+                rows.extend({"id":rid,"deleted_at":mark.at or "unknown","held":list(mark.held)} for rid,mark in marks.items() if rid not in live)
+                fresh = _write_shard(out_dir, record.path, rows)
+                result.shards = [row for row in result.shards if row.path != record.path] + fresh
     result.shards.sort(key=lambda s: s.path)
     if entries is not None:
         result.shards = _merged_shard_records(
             out_dir, result.shards, touched=set(entries)
         )
+    if agreements is not None:
+        body = (canonical_json(agreements) + "\n").encode("utf-8")
+        atomic_write_bytes(out_dir / "agreements.json", body)
+        result.agreements = ShardFile(path="agreements.json", bytes=len(body), rows=0, sha256=_sha256(body))
     _write_manifest(home, out_dir, result)
     return result
 
@@ -540,7 +698,7 @@ def _merged_shard_records(
     try:
         previous = json.loads((out_dir / _MANIFEST).read_text(encoding="utf-8"))
         records = previous.get("shards") or []
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, LinkInTheWay):
         records = []
     for record in records:
         rel = str(record.get("path", ""))
@@ -581,6 +739,9 @@ def _write_manifest(home: Path, out_dir: Path, result: ExportResult) -> None:
             for d in result.databases
         ],
     }
+    if result.agreements is not None:
+        agreement = result.agreements
+        manifest["agreements"] = {"path": agreement.path, "bytes": agreement.bytes, "sha256": agreement.sha256}
     atomic_write(
         out_dir / _MANIFEST, json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     )
@@ -597,6 +758,35 @@ class ValidationResult:
     @property
     def ok(self) -> bool:
         return not self.problems
+
+
+def declared_paths(manifest):
+    """A typed manifest's canonical paths; reject malformed or escaping names before any read."""
+    from pathlib import PurePosixPath
+    if not isinstance(manifest, dict):
+        raise ValueError("manifest must be an object")
+    records = []
+    for name in ("shards", "databases"):
+        values = manifest.get(name, [] if name == "databases" else None)
+        if not isinstance(values, list):
+            raise ValueError(f"manifest {name} must be a list")
+        records.extend(values)
+    if manifest.get("agreements") is not None:
+        records.append(manifest["agreements"])
+    paths = []
+    for record in records:
+        if not isinstance(record, dict):
+            raise ValueError("manifest declaration must be an object")
+        rel = record.get("path")
+        if not isinstance(rel, str) or not rel or "\\" in rel or "\0" in rel:
+            raise ValueError("manifest declaration has an invalid path")
+        path = PurePosixPath(rel)
+        if path.is_absolute() or path.as_posix() != rel or any(part in (".", "..") for part in path.parts):
+            raise ValueError(f"manifest path is outside its export: {rel}")
+        if rel in paths:
+            raise ValueError(f"duplicate manifest path: {rel}")
+        paths.append(rel)
+    return paths
 
 
 def validate(shard_dir: Path) -> ValidationResult:
@@ -616,6 +806,12 @@ def validate(shard_dir: Path) -> ValidationResult:
         return result
     except json.JSONDecodeError as exc:
         result.problems.append(f"{_MANIFEST} is not valid JSON: {exc}")
+        return result
+
+    try:
+        declared_paths(manifest)
+    except ValueError as exc:
+        result.problems.append(str(exc))
         return result
 
     if manifest.get("schema_version") != SHARD_SCHEMA_VERSION:
@@ -684,6 +880,18 @@ def validate(shard_dir: Path) -> ValidationResult:
             )
         if _sha256(data) != record.get("sha256"):
             result.problems.append(f"{rel}: db sha256 mismatch (content changed)")
+    agreement = manifest.get("agreements")
+    if agreement is not None:
+        if not isinstance(agreement, dict) or agreement.get("path") != "agreements.json":
+            result.problems.append("invalid agreements declaration")
+        else:
+            path = shard_dir / "agreements.json"
+            if not path.is_file():
+                result.problems.append("declared agreements missing on disk")
+            else:
+                data = path.read_bytes()
+                if len(data) != agreement.get("bytes") or _sha256(data) != agreement.get("sha256"):
+                    result.problems.append("agreements bytes or digest mismatch")
     return result
 
 
@@ -711,6 +919,7 @@ class ImportResult:
     problems: list[str] = field(default_factory=list)
     machine_id: str = ""
     databases: dict[str, str] = field(default_factory=dict)
+    agreements: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
 
     @property
     def entries(self) -> int:
@@ -765,6 +974,11 @@ def import_shards(shard_dir: Path, *, entries: list[str] | None = None) -> Impor
 
     manifest = json.loads((shard_dir / _MANIFEST).read_text(encoding="utf-8"))
     result = ImportResult(machine_id=str(manifest.get("machine_id", "")))
+    if manifest.get("agreements"):
+        value = json.loads((shard_dir / "agreements.json").read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("agreements are not an object")
+        result.agreements = value
     wanted = set(entries) if entries else None
 
     for record in manifest.get("shards", []):
@@ -816,17 +1030,18 @@ def dirty_entries(home: Path, state_path: Path) -> list[str]:
     costs data.
     """
     try:
+        guard_path(state_path, read=True)
         previous = json.loads(state_path.read_text(encoding="utf-8"))
         if not isinstance(previous, dict):
             previous = {}
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, LinkInTheWay):
         previous = {}
 
     current: dict[str, str] = {}
     dirty: list[str] = []
     for entry in inv.export_entries():
         paths = inv.paths_for(home, entry)
-        if not paths:
+        if not paths and entry.id not in previous:
             continue
         fingerprints = [
             (rel, _fingerprint(home / rel)) for rel in paths
@@ -837,13 +1052,30 @@ def dirty_entries(home: Path, state_path: Path) -> list[str]:
         current[entry.id] = fingerprint
         if previous.get(entry.id) != fingerprint:
             dirty.append(entry.id)
+    return Changes(dirty, current)
+
+
+class Changes(list):
+    """Changed entries and fingerprints awaiting a successful export."""
+    def __init__(self, entries, fingerprints):
+        super().__init__(entries)
+        self.fingerprints = fingerprints
+
+
+def mark_exported(state_path: Path, changes: Changes, *, skipped=()) -> None:
+    failed = {str(path).split("/", 1)[0] for path in skipped}
+    guard_path(state_path)
     try:
-        atomic_write(state_path, json.dumps(current, indent=2, sort_keys=True) + "\n")
+        fingerprints = json.loads(state_path.read_text(encoding="utf-8"))
+        if not isinstance(fingerprints, dict):
+            fingerprints = {}
+    except (OSError, ValueError):
+        fingerprints = {}
+    fingerprints.update({key: value for key, value in changes.fingerprints.items() if key not in failed})
+    try:
+        atomic_write(state_path, json.dumps(fingerprints, indent=2, sort_keys=True) + "\n")
     except OSError:
-        logger.debug(
-            "shards: could not persist the dirty-state fingerprint", exc_info=True
-        )
-    return dirty
+        logger.debug("shards: could not persist exported fingerprints", exc_info=True)
 
 
 def _fold_wal(db_path: Path) -> None:
@@ -903,6 +1135,7 @@ def _fingerprint(path: Path) -> str:
     no-op, which is the safe direction — an actively-written store is genuinely dirty, and
     the main-file mtime will have moved on its last commit regardless.
     """
+    guard_path(path, read=True)
     if path.is_file():
         if path.suffix == ".db":
             _fold_wal(path)
@@ -912,8 +1145,9 @@ def _fingerprint(path: Path) -> str:
     total = 0
     count = 0
     for child in path.rglob("*"):
+        guard_path(child, read=True)
         try:
-            if child.is_file() and not child.is_symlink():
+            if child.is_file():
                 stat = child.stat()
                 newest = max(newest, stat.st_mtime_ns)
                 total += stat.st_size
@@ -928,11 +1162,29 @@ def default_shard_dir(home: Path) -> Path:
 
 
 def clear_shards(out_dir: Path) -> None:
-    """Remove a previous export so a full re-export cannot leave stale shards
-    behind (which would then show up as undeclared files in validation)."""
-    if out_dir.is_dir():
-        shutil.rmtree(out_dir, ignore_errors=True)
-    os.makedirs(out_dir, exist_ok=True)
+    """Clear only known export files, preserving unrelated files in the destination."""
+    guard_path(out_dir)
+    if out_dir.exists() and not out_dir.is_dir():
+        raise ValueError("export destination is not a directory")
+    if not out_dir.exists():
+        out_dir.mkdir(parents=True, mode=0o700)
+        return
+    if not is_an_export(out_dir):
+        if any(out_dir.iterdir()):
+            raise ValueError("export destination holds files and no recognized export; choose an empty directory")
+        return
+    ours = {entry.id for entry in inv.INVENTORY} | {"db"}
+    selected = [child for child in out_dir.iterdir() if child.name == _MANIFEST or child.name in ours]
+    for child in selected:
+        guard_path(child)
+        if child.is_dir():
+            for nested in child.rglob("*"):
+                guard_path(nested)
+    for child in selected:
+        if child.is_dir():
+            shutil.rmtree(child)
+        elif child.name == _MANIFEST:
+            child.unlink()
 
 
 def backup_cmd(args) -> int:
@@ -957,8 +1209,11 @@ def backup_cmd(args) -> int:
                 print("⏭  Another shard export is already running — skipping.")
                 return 0
             entries = None
+            changes = None
+            state_path = home / ".shard-state.json"
             if incremental:
-                entries = dirty_entries(home, home / ".shard-state.json")
+                changes = dirty_entries(home, state_path)
+                entries = changes
                 if not entries:
                     print("✅ Nothing changed since the last export.")
                     return 0
@@ -967,8 +1222,14 @@ def backup_cmd(args) -> int:
                     f"{'y' if len(entries) == 1 else 'ies'}"
                 )
             else:
-                clear_shards(out_dir)
+                try:
+                    clear_shards(out_dir)
+                except (ValueError, OSError, LinkInTheWay) as error:
+                    print(f"❌ Export destination refused: {error}")
+                    return 1
             result = export_shards(home, out_dir, entries=entries)
+            if changes is not None:
+                mark_exported(state_path, changes, skipped=result.skipped)
         print(
             f"✅ Exported {result.entries} entr"
             f"{'y' if result.entries == 1 else 'ies'} → "
@@ -978,7 +1239,7 @@ def backup_cmd(args) -> int:
         print(f"📁 {out_dir}")
         for entry_id, reason in sorted(result.skipped.items()):
             print(f"⚠️  skipped {entry_id}: {reason}")
-        return 0
+        return 1 if result.skipped else 0
 
     if command == "validate":
         shard_dir = (

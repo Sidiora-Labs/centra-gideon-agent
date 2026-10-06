@@ -126,6 +126,14 @@ async def bind_surface(runtime: RuntimeCoordinator, *, api_only: bool) -> None:
     runtime._dashboard_port = addresses[0][1] if port == 0 and addresses else port
     runtime._publish_runtime_base()
     if surface is not None:
+        from gideon.security.guardrails.incident import watch
+
+        watcher = getattr(surface, "_incident_watch_task", None)
+        if watcher is None or watcher.done():
+            watcher = asyncio.create_task(watch(lambda _: surface.push_refresh("incident", "loops")))
+            surface._incident_watch_task = watcher
+            surface._background_tasks.add(watcher)
+            watcher.add_done_callback(surface._background_tasks.discard)
         surface.no_crons = runtime._no_crons
         if not api_only:
             surface._inbox_svc = runtime.inbox_svc
@@ -173,6 +181,11 @@ async def retire(runtime: RuntimeCoordinator) -> None:
         log.warning("Hypermid shutdown could not finish", exc_info=True)
 
     await cancel_tasks(runtime._handler_tasks)
+    if surface is not None:
+        try:
+            await asyncio.wait_for(cancel_tasks(surface._background_tasks), timeout=5.0)
+        except asyncio.TimeoutError:
+            log.warning("Dashboard background work did not settle within shutdown deadline")
     for watcher in (runtime.loop_watchdog, runtime.workflow_watchdog):
         if watcher is not None:
             await watcher.stop()
@@ -331,7 +344,9 @@ class RuntimeProcess:
             payload = {
                 "port": runtime._dashboard_port,
                 "token": generate_token(
-                    "local-startup", ttl_seconds=DEFAULT_BROWSER_SESSION_TTL_SECS
+                    "local-startup", ttl_seconds=DEFAULT_BROWSER_SESSION_TTL_SECS,
+                    issuer="ready",
+                    kind="desktop" if os.environ.get("GIDEON_INSTALL_KIND") == "desktop" else "cli",
                 ),
                 "pid": os.getpid(),
                 "home": str(config_dir()),

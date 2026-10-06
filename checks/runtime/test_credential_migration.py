@@ -69,6 +69,7 @@ def _stub_keyring(
     back something else. That is the failure mode a plain "did set_password raise?" check
     cannot see, and the one that would delete the user's only other copy.
     """
+    monkeypatch.setattr(cred, "_keychain_disabled", False)
     values: dict[str, str] = {}
 
     class _Backend:
@@ -145,7 +146,7 @@ def _mode(p: Path) -> int:
 
 
 def _kc(store: dict[str, str], key: str) -> str | None:
-    return store.get(f"gideon\x00{key}")
+    return store.get(f"{cred.keychain_service()}\x00{key}")
 
 
 def test_the_migration_moves_env_secrets_into_the_keychain_and_removes_the_keys(
@@ -206,7 +207,7 @@ def test_verify_is_vacuously_true_with_no_snapshot_and_says_so(home: Path) -> No
 def test_verify_fails_when_the_keychain_lost_a_key_it_was_handed(keychain_on) -> None:
     """The falsification rail for verify: it must be able to say NO."""
     mig.migrate_credentials_to_keychain(confirm=True)
-    keychain_on.pop("gideon\x00SH2_ALPHA")
+    keychain_on.pop(f"{cred.keychain_service()}\x00SH2_ALPHA")
     ok, evidence = mig.verify_credential_migration()
     assert not ok and evidence["missing"] == ["SH2_ALPHA"]
 
@@ -515,3 +516,59 @@ def test_the_gate_has_a_write_path_and_the_patch_allowlist_declares_it() -> None
     assert coerce_edit_value(key, False, spec) is False
     with pytest.raises(ConfigValueError):
         coerce_edit_value(key, "keychain", spec)
+
+
+def test_keychain_homes_isolate_indexes_values_and_deletes(home, tmp_path, monkeypatch):
+    values = _stub_keyring(monkeypatch)
+    monkeypatch.setenv(CREDENTIAL_BACKEND_ENV, "keychain")
+    cred.save_credential("SH2_ALPHA", "first")
+    first_service = cred.keychain_service()
+    other = tmp_path / "other"
+    monkeypatch.setenv("GIDEON_HOME", str(other))
+    monkeypatch.setattr(loader, "config_dir", lambda: other)
+    assert cred.credential_names() == []
+    assert cred.get_credential("SH2_ALPHA") == ""
+    assert cred.keychain_service() == ""
+    cred.save_credential("SH2_ALPHA", "second")
+    assert cred.keychain_service() != first_service
+    assert cred.get_credential("SH2_ALPHA", home) == "first"
+    assert cred.get_credential("SH2_ALPHA", other) == "second"
+    assert cred.delete_credential("SH2_ALPHA", other)
+    assert cred.get_credential("SH2_ALPHA", other) == ""
+    assert cred.get_credential("SH2_ALPHA", home) == "first"
+    assert values[f"{first_service}\x00SH2_ALPHA"] == "first"
+
+
+def test_corrupt_namespace_falls_back_without_modifying_keychain(home, monkeypatch):
+    values = _stub_keyring(monkeypatch)
+    monkeypatch.setenv(CREDENTIAL_BACKEND_ENV, "keychain")
+    namespace = home / cred.KEYCHAIN_NAMESPACE_FILE
+    namespace.write_text("broken")
+    cred.save_credential("SH2_ALPHA", "local")
+    assert cred.credential_backend() == "dotenv"
+    assert values == {}
+    assert "unreadable" in cred.credential_backend_warning()
+    assert get_credential("SH2_ALPHA") == "local"
+    assert namespace.read_text() == "broken"
+
+
+def test_descriptor_store_reads_its_home_when_active_home_differs(home, tmp_path, monkeypatch):
+    _stub_keyring(monkeypatch)
+    monkeypatch.setenv(CREDENTIAL_BACKEND_ENV, "keychain")
+    cred.save_credential("SH2_ALPHA", "first", home)
+    (home / "credentials.json").write_text(json.dumps({"SH2_ALPHA": {"type": "api_key", "value_ref": "SH2_ALPHA"}}))
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.setenv("GIDEON_HOME", str(other))
+    monkeypatch.setattr(loader, "config_dir", lambda: other)
+    cred.save_credential("SH2_ALPHA", "second", other)
+    from gideon.integrations.llm.credentials import CredentialStore
+
+    store = CredentialStore(home)
+    assert store.resolve("SH2_ALPHA").secret == "first"
+    store.put("SH2_ALPHA", {"type": "api_key", "value": "updated"})
+    assert cred.get_credential("SH2_ALPHA", home) == "updated"
+    assert cred.get_credential("SH2_ALPHA", other) == "second"
+    store.remove("SH2_ALPHA")
+    assert cred.get_credential("SH2_ALPHA", home) == ""
+    assert cred.get_credential("SH2_ALPHA", other) == "second"

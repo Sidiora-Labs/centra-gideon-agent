@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from gideon.core.turn_streams import closing_stream
+
 import json
 import os
 from collections.abc import AsyncIterator, Iterator
@@ -333,8 +335,9 @@ class ScriptedProvider(ModelProvider):
             yield event
 
     async def stream(self, message: str) -> AsyncIterator[LLMEvent]:
-        async for event in self._emit(message):
-            yield event
+        async with closing_stream(self._emit(message)) as _owned_events:
+            async for event in _owned_events:
+                yield event
 
     async def complete(
         self,
@@ -350,8 +353,9 @@ class ScriptedProvider(ModelProvider):
             model=model or "",
             reasoning_effort=reasoning_effort,
         )
-        async for event in self._emit(_last_user_text(messages)):
-            yield event
+        async with closing_stream(self._emit(_last_user_text(messages))) as _owned_events:
+            async for event in _owned_events:
+                yield event
 
     async def approve_tool(self, request_id: str | int) -> None:
         self._resolve(request_id, "approved")

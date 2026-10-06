@@ -59,3 +59,5 @@ class ProviderCapability:
     notes: str = ""
     structured_output: StructuredOutput = StructuredOutput.NONE
     prompt_cache: PromptCache = PromptCache.NONE
+    hosts_model: bool = False
+    default_endpoint: str = ""

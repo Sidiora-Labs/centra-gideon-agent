@@ -129,6 +129,7 @@ class _PromptLaunch:
         return cls(
             dict(
                 task=task,
+                parent_run=("workflow:" + str(ctx.payload["run_id"])) if ctx.event == "workflow_node" and ctx.payload.get("run_id") else "",
                 parent_session_key=parent,
                 agent=agent,
                 max_turns=turns,
@@ -140,21 +141,6 @@ class _PromptLaunch:
                 dry_run=bool(config.get("dry_run", False)),
             )
         )
-
-    async def dispatch(self, services: Any) -> None:
-        try:
-            services.subagents.spawn(**self.arguments)
-        except Exception:
-            logger.warning("run-prompt: spawn failed", exc_info=True)
-
-    def schedule(self, services: Any) -> None:
-        pending = self.dispatch(services)
-        try:
-            services.spawn_background(pending)
-        except BaseException:
-            pending.close()
-            raise
-
 
 class RunPromptActionProvider(ActionProvider):
     @property
@@ -189,10 +175,14 @@ class RunPromptActionProvider(ActionProvider):
         refused = validate_spawn_cwd(cwd)
         if refused:
             return ActionResult(False, error=f"run-prompt: {refused}")
-        _PromptLaunch.prepare(action_config, ctx, framed, cwd).schedule(services)
-        return ActionResult(
-            True, stdout=f"launched {document.label}", outcome="launched"
-        )
+        from gideon.integrations.action_providers.completion import agent_launch
+
+        invocation = _PromptLaunch.prepare(action_config, ctx, framed, cwd)
+        try:
+            info = services.subagents.spawn(**invocation.arguments)
+        except Exception as error:
+            return ActionResult(False, error=f"run-prompt: spawn failed: {error}")
+        return agent_launch(services.subagents, info, f"launched {document.label}")
 
 
 def create_provider(config: dict[str, Any] | None = None) -> RunPromptActionProvider:

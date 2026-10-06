@@ -1,3 +1,5 @@
+import { decodeDenyConsequence } from './chat/denyConsequence'
+import { decodeBlastRadius } from './chat/approvalMeta'
 import { ChatSearchCoverage } from './chat/ChatSearchCoverage'
 import type { SessionSearchAnswer } from '../shared/data/api'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -5,13 +7,7 @@ import { ResultAnnouncement } from '../shared/ui/ListControls'
 import { reportActionFailure, reportingWrite } from '../app/shell/reportingWrite'
 import { unavailableWhen, BUSY_REASON } from '../shared/ui/unavailable'
 
-interface VoiceLoopConfig {
-  confirmation_phrases: string[]
-  exit_phrases: string[]
-  duplex_mute_enabled: boolean
-}
-const DEFAULT_CONFIRMATION_PHRASES = ['do it', 'go ahead', 'send it', 'execute']
-const DEFAULT_EXIT_PHRASES = ['cancel', 'never mind', 'forget it']
+import { useVoiceConfig } from './chat/voiceConfig'
 import { fvs, withWeight } from '../shared/theme/fontWeight'
 import { playCue } from '../shared/theme/soundCues'
 import { acceptedActionSnapshot, claimTurnEndAnnouncement, readTurnOutcome } from './chat/turnOutcome'
@@ -65,6 +61,7 @@ import { onToolResultFull } from './chat/toolResultBridge'
 import { SdlcProgressCard, sdlcRefFromTool } from './chat/SdlcProgressCard'
 import { WorkflowProgressCard, workflowRefFromTool } from './chat/WorkflowProgressCard'
 import { ApprovalCard } from './chat/ApprovalCard'
+import { OwnerQuestionCard } from './chat/OwnerQuestionCard'
 import { ChatFilePanel } from './chat/ChatFilePanel'
 import { sameSessionTarget, type CommentTarget } from '../shared/ui/content/commentTarget'
 import { SessionWorkspace } from './chat/SessionWorkspace'
@@ -74,7 +71,7 @@ import { parseOptions, parseSwitchToAgent } from './chat/parseAssistant'
 import { type PasteBlock, shouldCollapsePaste, makePasteId, markerFor, expandPasteMarkers, pruneBlocks } from './chat/pasteBlocks'
 import { Modal } from '../shared/ui/Modal'
 import { confirm, promptInput } from '../shared/ui/dialog'
-import { type ChatTurn, type Segment, type ToolSegment, type ApprovalSegment, type ActivitySegment, type ThinkingSegment, appendThinking, type SubagentCard, type HistMsg, type MemoryCitation, type SkillUsed, userTurn, assistantTurn, hydrateTurns, turnText, deriveActivity, skillsUsedLabel, skillsUsedTitle, stampActivityOrigin } from './chat/chatTypes'
+import { type ChatTurn, type Segment, type ToolSegment, type ApprovalSegment, type QuestionSegment, decodeOwnerQuestion, type ActivitySegment, type ThinkingSegment, appendThinking, type SubagentCard, type HistMsg, type MemoryCitation, type SkillUsed, userTurn, assistantTurn, hydrateTurns, turnText, deriveActivity, skillsUsedLabel, skillsUsedTitle, stampActivityOrigin } from './chat/chatTypes'
 import { ThinkingBlock } from './chat/ThinkingBlock'
 import { branchIndexOf, branchParentKey } from './chat/branchLineage'
 import { buildOptimizerContext } from './chat/optimizerContext'
@@ -132,7 +129,7 @@ function streamCursorOf(value: unknown): StreamCursor | null {
 function transcriptReplayFrame(message: WsMessage): boolean {
   switch (message.type) {
     case 'chat_chunk': case 'chat_done': case 'chat_user_message':
-    case 'tool_call': case 'tool_result': case 'approval': case 'approval_resolved':
+    case 'tool_call': case 'tool_result': case 'approval': case 'approval_resolved': case 'question_card': case 'question_resolved':
     case 'activity_event': case 'chat_thinking': case 'queue_push': case 'queue_pop': case 'queue_cancel':
       return true
     case 'chat_message':
@@ -446,7 +443,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     () => (seededDetail ? hydrateTurns(seededDetail.messages || [], false) : []),
   )
   const { data: threadSessions } = useQuery<ChatSessionSummary[]>('chat:sessions', () => api.chatSessions(), { persist: false })
-  const { data: ttsSettings } = useQuery('settings:tts-auto-speak', () => api.useCaseSettings('tts'), { persist: false })
+  const { voiceCfg, speakReplies } = useVoiceConfig()
   const { data: handoffChannels, error: handoffChannelsError, refresh: refreshHandoffChannels } = useQuery(
     'settings:channels-owners:handoff',
     async () => {
@@ -950,12 +947,29 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         if (d.turn_id) patchAssistantForTurn(String(d.turn_id), (segs) => applyLiveToolResult(segs, d))
         else patchLastAssistant((segs) => applyLiveToolResult(segs, d))
         break
+      case 'question_card': {
+        coalescer.flushNow()
+        const question = decodeOwnerQuestion(d)
+        if (question) patchLastAssistant((segs) => {
+          const existing = segs.findIndex((sg) => sg.kind === 'question' && sg.id === question.id)
+          if (existing >= 0) return segs.map((sg, index) => index === existing ? question : sg)
+          return [...segs, question]
+        })
+        breakText.current = true
+        break
+      }
+      case 'question_resolved': {
+        const question = decodeOwnerQuestion(d)
+        if (question) setTurns((prev) => prev.map((turn) => ({ ...turn, segments: turn.segments.map((sg) =>
+          sg.kind === 'question' && sg.id === question.id ? question : sg) })))
+        break
+      }
       case 'approval':
         coalescer.flushNow()
         const patchApproval = (segs: Segment[]) => {
           const id = String(d.id ?? '')
           if (segs.some((sg) => sg.kind === 'approval' && sg.id === id)) return segs
-          segs.push({ kind: 'approval', id, tool: String(d.tool ?? 'tool'), toolKind: String(d.tool_kind ?? ''), canRevise: d.can_revise === true, input: String(d.tool_input ?? ''), purpose: String(d.tool_purpose ?? ''), risk: (d.risk ? String(d.risk) : undefined) as ApprovalSegment['risk'] })
+          segs.push({ kind: 'approval', id, tool: String(d.tool ?? 'tool'), toolKind: String(d.tool_kind ?? ''), canRevise: d.can_revise === true, input: String(d.tool_input ?? ''), purpose: String(d.tool_purpose ?? ''), risk: (d.risk ? String(d.risk) : undefined) as ApprovalSegment['risk'], blastRadius: decodeBlastRadius(d.blast_radius), denyConsequence: decodeDenyConsequence(d.deny_consequence), protectedDelete: String(d.protected_delete ?? '') })
           return segs
         }
         if (d.turn_id) patchAssistantForTurn(String(d.turn_id), patchApproval)
@@ -1755,14 +1769,9 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   const audioPlayHeadRef = useRef(0)
   const audioSourcesRef = useRef<AudioBufferSourceNode[]>([])
 
-  const { data: voiceCfgRaw } = useQuery('chat:voice-config', () => api.gideonConfig().then((c) => c.voice as VoiceLoopConfig), { persist: true })
-  const voiceCfg: VoiceLoopConfig = {
-    confirmation_phrases: voiceCfgRaw?.confirmation_phrases?.length ? voiceCfgRaw.confirmation_phrases : DEFAULT_CONFIRMATION_PHRASES,
-    exit_phrases: voiceCfgRaw?.exit_phrases?.length ? voiceCfgRaw.exit_phrases : DEFAULT_EXIT_PHRASES,
-    duplex_mute_enabled: voiceCfgRaw?.duplex_mute_enabled ?? true,
-  }
   const [speakingTurn, setSpeakingTurn] = useState<number | null>(null)
   const speakGenRef = useRef(0)
+  const speechModeRef = useRef<'manual' | 'automatic' | null>(null)
 
   function getAudioCtx(): AudioContext | null {
     if (!audioCtxRef.current) {
@@ -1774,6 +1783,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   }
 
   function stopSpeak() {
+    speechModeRef.current = null
     speakGenRef.current++
     activeSpeechRequestIdRef.current = null
     for (const src of audioSourcesRef.current) { try { src.stop() } catch {   } }
@@ -1782,13 +1792,14 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     setSpeakingTurn(null)
   }
 
-  function speak(text: string, turnIndex: number) {
+  function speak(text: string, turnIndex: number, mode: 'manual' | 'automatic' = 'manual') {
     if (speakingTurn === turnIndex) { stopSpeak(); return }
     stopSpeak()
     const s = sessionRef.current
     const ctx = getAudioCtx()
     if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {})
     speakGenRef.current++
+    speechModeRef.current = mode
     const requestId = crypto.randomUUID()
     activeSpeechRequestIdRef.current = requestId
     setSpeakingTurn(turnIndex)
@@ -1820,7 +1831,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       if (ownerTs) forgetSpeechOwner(storage, sid, ownerTs)
       return
     }
-    if (lastTurnOutcome !== 'complete' || !ttsSettings?.enabled || !ttsSettings?.auto_speak || !ownerTs) return
+    if (lastTurnOutcome !== 'complete' || !speakReplies || !ownerTs) return
     let assistantIndex = -1
     for (let index = turns.length - 1; index > userIndex; index--) {
       if (turns[index].role === 'assistant') { assistantIndex = index; break }
@@ -1834,8 +1845,11 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     }
     const reply = turnText(assistant).trim()
     if (!reply || !claimCompletedReplySpeech(storage, sid, ownerTs, assistant.ts, lastTurnOutcome)) return
-    if (speakingTurn !== assistantIndex) void speak(reply, assistantIndex)
-  }, [sessionId, lastTurnOutcome, turns, ttsSettings, speakingTurn])
+    if (speakingTurn !== assistantIndex) void speak(reply, assistantIndex, 'automatic')
+  }, [sessionId, lastTurnOutcome, turns, speakReplies, speakingTurn])
+  useEffect(() => {
+    if (!speakReplies && speechModeRef.current === 'automatic') stopSpeak()
+  }, [speakReplies])
   async function enqueueAudio(b64: string) {
     const ctx = getAudioCtx()
     if (!ctx) return
@@ -2413,7 +2427,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
                 {turn.skillNotice && <div className="mb-1 flex items-center gap-1.5 text-on-surface-low text-[0.75rem]" data-chat-selected-skills={turn.turnId || turn.ts}>
                   <Sparkles size={11} className="shrink-0 opacity-70" /><span>{turn.skillNotice}</span>
                 </div>}
-                <AssistantSegments segments={turn.segments} isLast={isLast} messageTs={turn.ts} streaming={isLast && streaming} onApprove={approve} onSwitchToAgent={switchToAgentAndRun} onOpenFile={setOpenFile} onSetupModel={() => navigate(MODELS_PATH)} chatSessionKey={sessionRef.current ?? undefined} citations={turn.citations} skillsUsed={turn.skillsUsed}/>
+                <AssistantSegments hiddenWorkflowRefs={new Set(turns.slice(0, index).flatMap((earlier) => earlier.segments.flatMap((segment) => { if (segment.kind !== 'tool') return []; const ref = workflowRefFromTool(segment.tool, segment.output); return ref ? [ref.batchName || ref.runId] : [] })))} segments={turn.segments} isLast={isLast} messageTs={turn.ts} streaming={isLast && streaming} onApprove={approve} onSwitchToAgent={switchToAgentAndRun} onOpenFile={setOpenFile} onSetupModel={() => navigate(MODELS_PATH)} chatSessionKey={sessionRef.current ?? undefined} citations={turn.citations} skillsUsed={turn.skillsUsed}/>
                 {speakingTurn === index && <ReadAloud words={turnText(turn).split(/\s+/).filter(Boolean)} playing showText={false} onToggle={() => speak(turnText(turn), index)}/>}
               </MessageAssistant>
             </>;
@@ -3139,7 +3153,7 @@ export function applyLiveToolResult(segments: Segment[], result: Record<string, 
       : segment)
 }
 
-export function AssistantSegments({ segments, isLast, messageTs, streaming, onApprove, onSwitchToAgent, onOpenFile, onSetupModel, chatSessionKey, citations, skillsUsed }: {
+export function AssistantSegments({ segments, isLast, messageTs, streaming, onApprove, onSwitchToAgent, onOpenFile, onSetupModel, chatSessionKey, citations, skillsUsed, hiddenWorkflowRefs }: {
   segments: Segment[]; isLast: boolean
   messageTs?: string
   streaming?: boolean
@@ -3150,6 +3164,7 @@ export function AssistantSegments({ segments, isLast, messageTs, streaming, onAp
   chatSessionKey?: string
   citations?: MemoryCitation[]
   skillsUsed?: SkillUsed[]
+  hiddenWorkflowRefs?: ReadonlySet<string>
 }) {
   const fullText = segments.filter((s) => s.kind === 'text').map((s) => (s as { text: string }).text).join('\n')
   const { switchTo } = parseSwitchToAgent(fullText)
@@ -3167,18 +3182,23 @@ export function AssistantSegments({ segments, isLast, messageTs, streaming, onAp
   }
   const hasLedger = Boolean(ledger.fed || ledger.learned || ledger.stats)
 
+  const workflowCards = new Set(hiddenWorkflowRefs)
   const renderItem = (seg: Segment, i: number): React.ReactNode => {
     if (seg.kind === 'tool') {
       const t = seg as ToolSegment
       const sdlc = t.done ? sdlcRefFromTool(t.tool, t.output) : null
       if (sdlc) return <SdlcProgressCard key={seg.id || i} refObj={sdlc} />
       const wf = t.done ? workflowRefFromTool(t.tool, t.output) : null
-      if (wf) return <WorkflowProgressCard key={seg.id || i} refObj={wf} />
+      if (wf && !workflowCards.has(wf.batchName || wf.runId)) {
+        workflowCards.add(wf.batchName || wf.runId)
+        return <WorkflowProgressCard key={seg.id || i} refObj={wf} />
+      }
       return <ToolCard key={seg.id || i} seg={t} connected />
     }
     if (seg.kind === 'activity') return <ActivityLine key={i} seg={seg as ActivitySegment} />
     if (seg.kind === 'thinking') return <ThinkingBlock key={i} text={(seg as ThinkingSegment).text} defaultOpen={streaming} connected streaming={!!streaming && i === segments.length - 1} />
     if (seg.kind === 'error') return <ThreadErrorSegment key={i} text={(seg as { text: string }).text} onSetupModel={onSetupModel}/>
+    if (seg.kind === 'question') return <OwnerQuestionCard key={seg.id || i} seg={seg as QuestionSegment} session={chatSessionKey} />
     if (seg.kind === 'approval') {
       const ap = seg as ApprovalSegment
       return <ApprovalCard key={ap.id || i} seg={ap} onAct={onApprove} />
@@ -3190,7 +3210,7 @@ export function AssistantSegments({ segments, isLast, messageTs, streaming, onAp
     return null
   }
   const isProcess = (s: Segment) =>
-    s.kind === 'tool' || s.kind === 'error' || s.kind === 'approval' ||
+    s.kind === 'tool' || s.kind === 'error' || s.kind === 'approval' || s.kind === 'question' ||
     (s.kind === 'activity' && !['context', 'learned', 'stats'].includes((s as ActivitySegment).activityKind || ''))
 
   const processIdxs = segments.flatMap((s, i) => (isProcess(s) ? [i] : []))

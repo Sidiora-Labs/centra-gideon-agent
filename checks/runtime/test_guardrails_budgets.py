@@ -318,7 +318,13 @@ async def test_local_provider_forced_to_warn(tmp_path, monkeypatch):
     monkeypatch.setattr("gideon.core.config.loader.config_dir", lambda: tmp_path)
     from gideon.security.guardrails.model_call import wrap_model_call_guard
 
+    from gideon.integrations.llm.registry import get_default_registry, ProviderEntry
+    from gideon.integrations.llm.capabilities import ProviderCapability
+    registry = get_default_registry()
+    registry.register_type(ProviderCapability('test-host', frozenset(), True, True, False, False, 0, hosts_model=True), lambda **kw: None)
+    registry.register_entry(ProviderEntry('test-local', 'test-host', model='llama3', options={'base_url': 'http://localhost:11434'}))
     local = FakeProvider()
+    local.served_model_ref = 'test-local:llama3'
     local._base_url = "http://localhost:11434"
     guard = wrap_model_call_guard(
         local,
@@ -494,7 +500,7 @@ def test_the_guard_charges_the_ambient_scope():
     from gideon.security.guardrails import model_call
 
     source = inspect.getsource(model_call)
-    assert "run_key=current_run_key() or None" in source, (
+    assert "run_key = current_run_key() or None" in source and "run_key=run_key" in source, (
         "the guard must pass the ambient run scope to charge(); without it run_totals is "
         "permanently empty and every run-scoped cap reads zero"
     )
@@ -597,7 +603,8 @@ def test_a_run_over_its_ceiling_is_REFUSED():
     assert exc.scope == "run", "the run scope, not the day scope"
     assert exc.dimension == "dollars"
     assert exc.limit == 0.02
-    assert exc.spent > 0.02
+    assert exc.spent < 0.02 and exc.spent + exc.needed > 0.02
+    assert exc.why == "no_room"
     assert (
         allowed >= 1
     ), "the ceiling is checked BEFORE a call, so the first one must get through"

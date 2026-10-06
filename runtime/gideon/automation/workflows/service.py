@@ -508,6 +508,8 @@ async def author_def(
             return _service_failure("WF_DEF_REVISION_UNSUPPORTED", "revision checks are supported only for native workflow definitions")
         saved = await writable[0].save_def(
             **spec,
+            _version_source="user" if provenance == "user" else "refiner",
+            _owner_saved=provenance == "user",
             **({"expected_revision": expected_revision} if expected_revision is not None else {}),
             **({"create_only": True} if create_only else {}),
         )
@@ -641,6 +643,11 @@ async def start_run(
     supervisor: Any = None,
     origin_kind: OriginKind = OriginKind.CHAT,
     session_key: str = "",
+    work_principal: Any = None,
+    work_initiator: Any = None,
+    accepted_origin: Any = None,
+    app_work: Any = None,
+    work_memory_mode: str | None = None,
     project_id: str = "",
     idempotency_key: str = "",
     blocking_timeout: float = 0.0,
@@ -648,6 +655,10 @@ async def start_run(
     policy_overrides: dict[str, Any] | None = None,
     loop_kind: str = "",
     loop_name: str = "",
+    run_once_definition: dict[str, Any] | None = None,
+    batch_admission: Any = None,
+    private_origin: Any = None,
+    origin_chat_key: str = "",
 ) -> dict[str, Any]:
     """Instantiate a def and start driving it.
 
@@ -658,22 +669,60 @@ async def start_run(
     nothing, and caught at node 7 has already paid for six nodes of model calls.
     """
     from gideon.automation.workflows.effects import START_DEDUPE
+    from gideon.extensions.apps import app_work as app_scopes
+    app_work = app_work or app_scopes.active_for(session_key)
+    from gideon.security.session_credentials import current_work
+    proof = private_origin if private_origin is not None else current_work()
+    if proof is not None and proof.session_key != session_key:
+        return _service_failure("WF_PRIVATE_SCOPE_UNAVAILABLE", "origin work does not match the launching session")
+    if proof is not None:
+        work_memory_mode = proof.memory_mode
+        origin_chat_key = proof.origin_session_key
+    private_receipt = None
+    if work_memory_mode in {"temporary", "incognito"}:
+        from gideon.automation.workflows import private_work
+        try:
+            if proof is None and batch_admission is not None:
+                from gideon.automation.workflows.batch_start import private_receipt_for
+                private_receipt = await private_receipt_for(supervisor, batch_admission, accepted_origin)
+            else:
+                private_receipt = await private_work.ensure(supervisor, proof)
+        except Exception as error:
+            return _service_failure("WF_PRIVATE_SCOPE_UNAVAILABLE", str(error))
+    refusal = app_scopes.run_refusal(app_work)
+    if refusal:
+        return _service_failure("APP_AGENT_TIER", refusal)
 
     if idempotency_key:
+        idempotency_key = f"chat:{origin_chat_key or session_key}:{idempotency_key}"
+        idempotency_key = f"app:{app_work.app}:{idempotency_key}" if app_work is not None else idempotency_key
         existing = START_DEDUPE.lookup(idempotency_key)
         if existing:
             return _ok(run_id=existing, deduped=True, status=_status_of(existing))
 
-    found = await get_def(name)
-    if not found.get("ok"):
-        return found
-    definition = await _raw_def(name)
-    if definition is None:
-        return _service_failure(
-            "WF_DEF_NOT_FOUND", f"no workflow definition named {name!r}"
-        )
+    if run_once_definition is not None:
+        from gideon.automation.workflows.definition_check import run_once_def
+        checked = await run_once_def(run_once_definition)
+        if not checked.get("ok"):
+            return checked
+        definition = checked["definition"]
+        name = str(definition["name"])
+    else:
+        found = await get_def(name)
+        if not found.get("ok"):
+            return found
+        definition = await _raw_def(name)
+        if definition is None:
+            return _service_failure("WF_DEF_NOT_FOUND", f"no workflow definition named {name!r}")
 
     spec = definition if isinstance(definition, dict) else definition.to_dict()
+    from gideon.automation.workflows import automation_versions as consent
+    try:
+        bounds = consent.run_bounds(work_principal.name) if getattr(work_principal, "kind", "") == "run" else consent.session_bounds(session_key)
+        if bounds is not None:
+            spec, bounds = consent.selection(name, bounds)
+    except consent.VersionConsentError as error:
+        return _service_failure("WF_RUN_NOT_ALLOWED", str(error))
     missing = _missing_required_inputs(spec, inputs or {})
     if missing:
         return _service_failure(
@@ -721,16 +770,33 @@ async def start_run(
 
     from gideon.automation.workflows import ownership
 
-    inherited = ownership.inherit_mode(
-        session_key, origin_metadata=_origin_metadata(session_key)
-    )
-    run_extra: dict[str, Any] = {}
-    if inherited is not ownership.MemoryMode.NORMAL:
-        run_extra = ownership.stamp_run_mode({}, inherited)
+    mode_metadata = _origin_metadata(session_key)
+    if work_memory_mode in {"persistent", "normal", "incognito", "temporary"}:
+        mode_metadata = {**mode_metadata, "memory_mode": work_memory_mode}
+    inherited = ownership.inherit_mode(session_key, origin_metadata=mode_metadata)
+    run_extra: dict[str, Any] = {consent.BOUNDS_KEY: bounds} if bounds is not None else {}
+    from gideon.security.approval_answer import principal_record
+    if work_principal is not None:
+        run_extra["work_principal"] = principal_record(work_principal)
+    if work_initiator is not None:
+        run_extra["work_initiator"] = principal_record(work_initiator)
+    run_extra = ownership.stamp_run_mode(run_extra, inherited)
+    if origin_chat_key:
+        run_extra["chat_owner"] = origin_chat_key
+    if private_receipt is not None:
+        from gideon.automation.workflows import private_work
+        run_extra[private_work.ORIGIN_KEY] = str(private_receipt.origin_session_key)
+        run_extra[private_work.SCOPE_KEY] = str(private_receipt.scope_id)
+    if work_memory_mode is not None:
+        inherited = ownership.parse_mode(work_memory_mode)
+        run_extra = ownership.stamp_run_mode(run_extra, inherited)
+    run_extra = app_scopes.stamp(run_extra, app_work)
     if loop_kind:
         run_extra["loop_kind"] = str(loop_kind)
         run_extra["loop_name"] = str(loop_name or "")
 
+    parent_run_id = str(work_principal.name) if getattr(work_principal, "kind", "") == "run" else ""
+    parent = store.get(parent_run_id) if parent_run_id else None
     run = store.create(
         WorkflowRun(
             id="",
@@ -741,10 +807,22 @@ async def start_run(
             mode=mode if mode in ("blocking", "background") else "background",
             project_id=project_id,
             origin=RunOrigin(kind=origin_kind, session_key=session_key),
+            parent_run_id=parent_run_id or None,
+            root_run_id=(parent.root_run_id or parent.id) if parent else "",
             policy_overrides=policy_overrides,
             extra=run_extra,
         )
     )
+    from gideon.security.durable_work import bind_run_origin
+    if accepted_origin is not None:
+        if not bind_run_origin(run, accepted_origin):
+            return _service_failure("WF_WORK_ORIGIN_DENIED", "authenticated work origin does not match this run's app or privacy scope", run_id=run.id)
+        store.save(run)
+    if batch_admission is not None:
+        from gideon.automation.workflows.batch_start import bind_run
+        if not bind_run(run, spec, batch_admission):
+            return _service_failure("WF_BATCH_CONSENT_STALE", "The batch no longer matches its displayed Allow.", run_id=run.id)
+        store.save(run)
     store.write_spec(run.id, spec)
     if idempotency_key:
         START_DEDUPE.remember(idempotency_key, run.id)
@@ -822,11 +900,36 @@ async def start_kind_run(
     )
 
 
-async def start_draft(run_id: str, *, supervisor: Any = None) -> dict[str, Any]:
+async def start_draft(run_id: str, *, supervisor: Any = None, session_key: str = "", work_principal: Any = None, app_work: Any = None, work_memory_mode: str | None = None, accepted_origin: Any = None) -> dict[str, Any]:
     """Launch an existing prelaunch run after its draft controls have been reviewed."""
+    from gideon.automation.workflows import automation_versions as consent
+    try:
+        bounds = consent.run_bounds(work_principal.name) if getattr(work_principal, "kind", "") == "run" else consent.session_bounds(session_key)
+        if bounds is not None:
+            return _service_failure("WF_RUN_NOT_ALLOWED", "automated descendants cannot launch mutable draft runs")
+    except consent.VersionConsentError as error:
+        return _service_failure("WF_RUN_NOT_ALLOWED", str(error))
     run = store.get(run_id)
     if run is None:
         return _run_not_found(run_id)
+    from gideon.extensions.apps import app_work as app_scopes
+    recorded = app_scopes.from_record(run.extra)
+    if app_work is not None:
+        if recorded is None or recorded.app != app_work.app:
+            return _service_failure("APP_RUN_SCOPE", "an app may launch only its own scoped draft")
+        if work_memory_mode in {"temporary", "incognito"}:
+            from gideon.automation.workflows import private_work
+            try:
+                await private_work.validate_run(supervisor, run)
+            except Exception as error:
+                return _service_failure("WF_PRIVATE_SCOPE_UNAVAILABLE", str(error))
+        recorded = recorded.child(app_work.tier)
+    refusal = app_scopes.run_refusal(recorded)
+    if refusal:
+        return _service_failure("APP_AGENT_TIER", refusal)
+    if recorded is not None:
+        run.extra = app_scopes.stamp(run.extra, recorded)
+        store.save(run)
     if RUN_PHASES[run.status] is not LifecyclePhase.PRELAUNCH:
         return _service_failure(
             "WF_RUN_NOT_PRELAUNCH", f"run is already {run.status.value}"
@@ -841,6 +944,11 @@ async def start_draft(run_id: str, *, supervisor: Any = None) -> dict[str, Any]:
             "WF_RUN_NO_SPEC", "the run spec is missing or unreadable"
         )
     try:
+        from gideon.security.durable_work import bind_run_origin, reviewed_origin_for_run
+        if accepted_origin is not None:
+            if not bind_run_origin(run, reviewed_origin_for_run(run, accepted_origin)):
+                return _service_failure("WF_WORK_ORIGIN_DENIED", "reviewed work origin does not match this run's app or privacy scope")
+            store.save(run)
         await supervisor.launch(run, spec)
     except Exception as exc:
         return _service_failure(
@@ -1366,6 +1474,13 @@ async def delete_run(
         shutil.rmtree(target, ignore_errors=True)
     attention.resolve_run_items(getattr(supervisor, "_state", None), run_id)
     deleted = store.delete(run_id)
+    from gideon.automation.workflows.effects import START_DEDUPE
+    START_DEDUPE.forget_run(run_id)
+    state = getattr(supervisor, "_state", None)
+    factory = getattr(state, "workflow_sse", None)
+    registry = factory() if callable(factory) else factory
+    if registry is not None:
+        registry.discard(f"workflow:{run_id}")
     return _ok(run_id=run_id, deleted=deleted, teardown=torn.to_dict())
 
 
@@ -2243,6 +2358,7 @@ def resume_run(
     channel: str = "",
     always_allow: bool = False,
     scheduled_event_wake: ScheduledEventWake | None = None,
+    accepted_origin: Any = None,
 ) -> dict[str, Any]:
     """Answer a gate, or clear a pause.
 
@@ -2263,6 +2379,16 @@ def resume_run(
         return _service_failure(
             "WF_RUN_ALREADY_TERMINAL", f"run is already {run.status.value}"
         )
+
+    if accepted_origin is not None:
+        from gideon.security.durable_work import _origin_values, bind_run_origin, reviewed_origin_for_run
+        from gideon.security.approval_answer import OWNER, principal_from_record
+        source = _origin_values(accepted_origin)
+        if source is None or principal_from_record(source.get("work_actor")).kind != OWNER:
+            return _service_failure("WF_OWNER_REVIEW_REQUIRED", "only an authenticated owner review can establish resumed work provenance")
+        if not bind_run_origin(run, reviewed_origin_for_run(run, accepted_origin)):
+            return _service_failure("WF_WORK_ORIGIN_DENIED", "reviewed source does not match the run's app or privacy scope")
+        store.save(run)
 
     if scheduled_event_wake is not None:
         if (
@@ -2376,6 +2502,41 @@ def skip_nodes(
         actor="chat",
         confirm=True,
     )
+
+
+async def fork_run_checked(run_id: str, *, checkpoint_id: str = "", note: str = "", supervisor: Any = None, caller: Any = None, private_origin: Any = ...) -> dict[str, Any]:
+    """Admit a fork with a live caller and original restrictions, including terminal parents."""
+    from gideon.security.session_credentials import current_work
+    from gideon.security.approval_answer import OWNER, UNKNOWN, principal_record
+    from gideon.security.durable_work import recorded_run_origin, verified_run_origin, _seal_origin
+    from gideon.automation.workflows import private_work, ownership
+    run = store.get(run_id)
+    if run is None:
+        return _service_failure("WF_RUN_NOT_FOUND", f"no run {run_id!r}")
+    proof = current_work() if private_origin is ... else private_origin
+    if proof is not None:
+        from gideon.security.session_credentials import credential_for, verify
+        if verify(credential_for(proof.session_key), proof.session_key) is not proof:
+            return _service_failure("WF_FORK_SOURCE_REQUIRED", "the current fork source credential is no longer valid")
+    actor = (proof.work_actor or proof.initiator) if proof is not None else caller
+    if actor is None or actor.kind == UNKNOWN:
+        return _service_failure("WF_FORK_SOURCE_REQUIRED", "an authenticated current caller must request the fork")
+    values = recorded_run_origin(run) if run.is_terminal else verified_run_origin(run)
+    private = ownership.run_mode(run) is not ownership.MemoryMode.NORMAL
+    if private:
+        if values is None or (actor.kind != OWNER and (proof is None or proof.origin_session_key != values.get("origin_session_key") or principal_record(proof.initiator) != values.get("initiator") or proof.created_by_app != values.get("created_by_app", ""))):
+            return _service_failure("WF_FORK_SOURCE_REQUIRED", "the private fork requires its authenticated owner or original source")
+        from gideon.extensions.apps.app_work import from_record
+        app = from_record(run.extra)
+        if app is not None and not app.current_tier():
+            return _service_failure("WF_FORK_SCOPE_REVOKED", "the original app scope is no longer admitted")
+        try:
+            await private_work.validate_run(supervisor, run)
+        except RuntimeError as error:
+            return _service_failure("WF_PRIVATE_SCOPE_UNAVAILABLE", str(error))
+    origin = _seal_origin({**values, "run_id": ""}) if values is not None else None
+    with private_work.admitted_fork(run.id, origin):
+        return fork_run(run_id, checkpoint_id=checkpoint_id, note=note, supervisor=supervisor)
 
 
 def fork_run(

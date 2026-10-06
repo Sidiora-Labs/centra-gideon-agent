@@ -7,8 +7,9 @@ import { investigate } from '../../shared/data/investigate'
 import { Button } from '../../shared/ui/Button'
 import { Markdown } from '../../shared/ui/Markdown'
 import { ChipInput, FieldError } from '../../shared/ui/forms'
-import type { KnowledgeAnnotation, KnowledgeItem, IntentOutcome, IntentOutcomeField, KnowledgeStaleness } from '../../shared/data/api'
+import type { KnowledgeAnnotation, KnowledgeItem, IntentOutcome, IntentOutcomeField, KnowledgeStaleness, PhaseOutcome } from '../../shared/data/api'
 import { ReadingView } from './ReadingView'
+import { PhaseOutcomes, outcomeSentence, stepLabel } from './PhaseOutcomes'
 import { resolveType, insightRows, fmtBytes, relTime, GIST_LANGUAGES } from './knowledgeMeta'
 import { getKnowledge, updateKnowledge, deleteKnowledge } from './knowledgeStore'
 import { GistEditor } from './GistEditor'
@@ -133,7 +134,7 @@ export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShow
   })
 
   const [itemIntents, setItemIntents] = useState<IntentOutcome[]>([])
-  const [nodePhases, setNodePhases] = useState<Record<string, string>>({})
+  const [nodePhases, setNodePhases] = useState<Record<string, NodePhase | PhaseOutcome>>({})
   const [procStatus, setProcStatus] = useState<string>(item.processing_status ?? '')
   const [ingestGraph, setIngestGraph] = useState<import('../../shared/data/api').KnowledgeIngestGraph | null>(null)
   const [fullscreen, setFullscreen] = useState<{ title: string; node: React.ReactNode } | null>(null)
@@ -153,11 +154,17 @@ export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShow
     if (procStatus !== 'queued' && procStatus !== 'processing') return
     const es = new EventSource(api.knowledgeIngestStreamUrl(item.id))
     const onNode = (e: MessageEvent) => {
-      try { const d = JSON.parse(e.data); if (d.node) setNodePhases((p) => ({ ...p, [d.node]: d.phase })) } catch {   }
+      try { const d = JSON.parse(e.data); if (d.node) setNodePhases((p) => ({ ...p, [d.node]: d.outcome || d.phase })) } catch {   }
     }
     const onComplete = (e: MessageEvent) => {
-      try { const d = JSON.parse(e.data); setProcStatus(d.status || 'done') } catch { setProcStatus('done') }
-      getKnowledge(item.id).then((d) => d && setFull(d)).catch(() => {})
+      try {
+        const d = JSON.parse(e.data)
+        if (d.status) setProcStatus(d.status)
+        else if (e.type === 'ingest_failed') setProcStatus('failed')
+      } catch { /* A malformed event does not establish an outcome. */ }
+      setNodePhases({})
+      getKnowledge(item.id).then((d) => { if (d) { setFull(d); setProcStatus(d.processing_status ?? '') } }).catch(() => {})
+      api.knowledgeItemGraph(item.id).then((g) => setIngestGraph(g)).catch(() => {})
       api.knowledgeItemIntents(item.id).then((r) => setItemIntents(r.outcomes || [])).catch(() => {})
       onChanged()
       es.close()
@@ -515,31 +522,23 @@ function FileRow({ item, tm }: { item: KnowledgeItem; tm: ReturnType<typeof reso
   )
 }
 
-type NodePhase = 'pending' | 'running' | 'done' | 'skipped' | 'failed'
+type NodePhase = 'pending' | 'running' | PhaseOutcome['status']
 
-function resolveNodePhases(
+export function resolveNodePhases(
   graph: import('../../shared/data/api').KnowledgeIngestGraph,
-  live: Record<string, string>,
+  live: Record<string, NodePhase | PhaseOutcome>,
   status: string,
-  error?: string,
 ): Record<string, NodePhase> {
-  const persisted = graph.node_phases || {}
-  const skipOnly = (error || '').startsWith('Skipped (optional steps unavailable):')
-  const skipped = new Set(skipOnly ? error!.split(':').slice(1).join(':').split(',').map((s) => s.trim()) : [])
-  const hasRealFailure = !skipOnly && !!error && (status === 'failed' || status === 'unreachable' || status === 'partial')
-  const failed = new Set(hasRealFailure ? error!.split(';').map((s) => s.split(':')[0].trim()).filter(Boolean) : [])
+  const active = status === 'queued' || status === 'processing'
   const out: Record<string, NodePhase> = {}
-  for (const n of graph.nodes) {
-    const nt = n.node_type
-    const lv = live[nt]
-    if (lv === 'running' || lv === 'done' || lv === 'skipped' || lv === 'failed') { out[nt] = lv as NodePhase; continue }
-    const p = persisted[nt]
-    if (p === 'done' || p === 'skipped' || p === 'failed') { out[nt] = p as NodePhase; continue }
-    if (failed.has(nt)) { out[nt] = 'failed'; continue }
-    if (skipped.has(nt)) { out[nt] = 'skipped'; continue }
-    if (Object.keys(persisted).length) out[nt] = 'pending'
-    else if (status === 'done' || status === 'partial') out[nt] = 'done'
-    else out[nt] = 'pending'
+  for (const node of graph.nodes) {
+    const current = live[node.node_type]
+    const phase = typeof current === 'string' ? current : current?.status
+    if (phase && ['running', 'done', 'skipped', 'failed', 'not_applicable'].includes(phase)) {
+      out[node.node_type] = phase
+      continue
+    }
+    out[node.node_type] = active ? 'pending' : graph.node_phases?.[node.node_type]?.status ?? 'pending'
   }
   return out
 }
@@ -562,7 +561,7 @@ function dagLevels(graph: import('../../shared/data/api').KnowledgeIngestGraph):
   return level
 }
 
-function ProcessingStrip({ status, nodePhases, error, graph, onRetry, retrying }: { status: string; nodePhases: Record<string, string>; error?: string; graph?: import('../../shared/data/api').KnowledgeIngestGraph | null; onRetry?: () => void; retrying?: boolean }) {
+function ProcessingStrip({ status, nodePhases, error, graph, onRetry, retrying }: { status: string; nodePhases: Record<string, NodePhase | PhaseOutcome>; error?: string; graph?: import('../../shared/data/api').KnowledgeIngestGraph | null; onRetry?: () => void; retrying?: boolean }) {
   const active = status === 'queued' || status === 'processing'
   const unreachable = status === 'unreachable'
   if (!active && status !== 'partial' && status !== 'failed' && !unreachable && !graph) return null
@@ -602,7 +601,8 @@ function ProcessingStrip({ status, nodePhases, error, graph, onRetry, retrying }
 
   return (
     <div data-type="body-s" className="flex flex-wrap items-center gap-x-2 gap-y-1 py-1">
-      <MiniDag graph={graph!} phases={resolveNodePhases(graph!, nodePhases, status, error)} status={status} />
+      <MiniDag graph={graph!} phases={resolveNodePhases(graph!, nodePhases, status)} status={status} />
+      {!active && <PhaseOutcomes graph={graph!} phases={graph!.node_phases ?? {}} onRunAgain={onRetry} running={retrying} />}
       {retryBtn}
       {error && <span data-type="caption" className="basis-full" style={{ color: status === 'failed' ? 'var(--color-danger)' : 'var(--color-on-surface-low)' }}>{error}</span>}
     </div>
@@ -633,9 +633,9 @@ function MiniDag({ graph, phases }: { graph: import('../../shared/data/api').Kno
     const ph = phases[nt] ?? 'pending'
     const c = _dagDotColor(ph)
     const loop = loopByTarget.get(nt)
-    const stateWord = ph === 'running' ? 'processing' : ph
+    const stateWord = ph === 'running' ? 'processing' : ph === 'not_applicable' ? 'not needed' : ph
     return (
-      <span className="inline-flex items-center gap-1" title={`${nt.replace(/_/g, ' ')}: ${ph}${loop ? ` (⟲ resamples up to ${loop.max}×)` : ''}`}>
+      <span className="inline-flex items-center gap-1" title={`${graph.node_phases?.[nt]?.status === ph ? outcomeSentence(stepLabel(graph, nt), graph.node_phases[nt]) : `${nodeLabel(nt)}: ${stateWord}`}${loop ? ` (⟲ resamples up to ${loop.max}×)` : ''}`}>
         <span className="grid size-3.5 shrink-0 place-items-center rounded-full"
           style={{ border: `1.5px ${ph === 'pending' ? 'dashed' : 'solid'} ${c}`,
                     background: ph === 'done' ? 'color-mix(in srgb, var(--color-success) 22%, transparent)' : 'transparent' }}>

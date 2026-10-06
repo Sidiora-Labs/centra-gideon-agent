@@ -32,6 +32,9 @@ export interface ScheduleDraft {
   timezone: string
   approval_mode: string
   skip_dates: string[]
+  capability: string
+  may_change: string[]
+  max_turns: string
 }
 
 export function emptyDraft(): ScheduleDraft {
@@ -39,11 +42,13 @@ export function emptyDraft(): ScheduleDraft {
     name: '', message: '', kind: 'every', intervalValue: 1, intervalUnit: 'h', cron: '0 9 * * *', at: '',
     mode: 'agent', agent: '', model: '', script: '', command: '',
     channel: '', silent: false, strict_schedule: false, timezone: '', approval_mode: '', skip_dates: [],
+    capability: '', may_change: [], max_turns: '',
   }
 }
 
 export function toDraft(j: ScheduleJob): ScheduleDraft {
   const iv = secsToInterval(j.every_secs)
+  const config = j.action?.config ?? {}
   return {
     id: j.id, name: j.name ?? '', message: j.message ?? '',
     kind: deriveKind(j), intervalValue: iv.value, intervalUnit: iv.unit,
@@ -52,6 +57,9 @@ export function toDraft(j: ScheduleJob): ScheduleDraft {
     script: j.script ?? '', command: j.command ?? '',
     channel: j.channel ?? '', silent: !!j.silent, strict_schedule: !!j.strict_schedule,
     timezone: j.timezone ?? '', approval_mode: j.approval_mode ?? '', skip_dates: j.skip_dates ?? [],
+    capability: typeof config.capability === 'string' ? config.capability : '',
+    may_change: Array.isArray(config.may_change) ? config.may_change.filter((value): value is string => typeof value === 'string') : [],
+    max_turns: config.max_turns == null ? '' : String(config.max_turns),
   }
 }
 
@@ -66,7 +74,11 @@ export function draftToPayload(d: ScheduleDraft): Record<string, unknown> {
   }
   Object.assign(body, scheduleWhenMet(d))
   if (d.mode !== 'other') body.message = d.message.trim()
-  if (d.mode === 'agent') { body.agent = d.agent; body.model = d.model; body.approval_mode = d.approval_mode || '' }
+  if (d.mode === 'agent') {
+    body.agent = d.agent; body.model = d.model; body.approval_mode = d.approval_mode || ''
+    body.capability = d.capability; body.may_change = d.may_change
+    body.max_turns = d.max_turns.trim() ? Number(d.max_turns) : null
+  }
   else if (d.mode === 'script') body.script = d.script.trim()
   else if (d.mode === 'command') body.command = d.command.trim()
   return body
@@ -131,6 +143,20 @@ export function ScheduleForm({ draft, onChange, compact, triggerOnly }: { draft:
               <Field label="Prompt" hint="What the agent should do each run.">
                 <TextArea value={draft.message} onChange={(v) => set('message', v)} placeholder="Summarize my unread messages and surface anything urgent." rows={compact ? 3 : 4} />
               </Field>
+              <Field label="Allowed changes" hint="Files this automation may change. Leave empty for no explicit file grant.">
+                <ChipInput values={draft.may_change} onChange={(v) => set('may_change', v)} placeholder="src/**, Enter" />
+              </Field>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-l">
+                <Field label="Capability" hint="The agent's permitted work for this automation.">
+                  <NativeSelect value={draft.capability} onChange={(v) => set('capability', v)} label="Automation capability" options={[
+                    { value: '', label: 'Default' }, { value: 'research', label: 'Research and read files' }, { value: 'mutating', label: 'Change allowed files' },
+                    ...(draft.capability && !['research', 'mutating'].includes(draft.capability) ? [{ value: draft.capability, label: draft.capability }] : []),
+                  ]} />
+                </Field>
+                <Field label="Turn limit" hint="Maximum agent turns per run. Leave empty for the default.">
+                  <TextInput value={draft.max_turns} onChange={(v) => set('max_turns', v)} placeholder="Default" />
+                </Field>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-l">
                 <Field label="Agent" hint="Which agent runs it. Defaults to the system default.">
                   <Combobox options={agentOptions} value={draft.agent} onChange={(v) => set('agent', v)} placeholder="Default agent" emptyText="No agents found" />

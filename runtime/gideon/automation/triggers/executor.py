@@ -28,17 +28,17 @@ STATUS_TO_OUTCOME: dict[str, str] = {
 }
 
 
-def _release_claim(trigger_id: str, *, base_dir: Any = None) -> bool:
-    if base_dir is not None:
+def _release_claim(trigger_id: str, *, base_dir: Any = None, holder: str = "") -> bool:
+    if base_dir is not None and holder:
         from gideon.automation.triggers.claims import release_claim
 
-        return release_claim(trigger_id, base_dir=base_dir)
+        return release_claim(trigger_id, base_dir=base_dir, holder=holder)
     return False
 
 
-def release_claim_for(trigger_id: str, *, base_dir: Any = None) -> bool:
+def release_claim_for(trigger_id: str, *, base_dir: Any = None, holder: str = "") -> bool:
     try:
-        return _release_claim(trigger_id, base_dir=base_dir)
+        return _release_claim(trigger_id, base_dir=base_dir, holder=holder)
     except Exception:
         logger.debug("claim release failed for %s", trigger_id, exc_info=True)
         return False
@@ -165,7 +165,9 @@ class RunAttempt:
         finally:
             if identity and self.release is not None:
                 try:
-                    self.release(identity, base_dir=self.base_dir)
+                    holder = str(self.payload.get("claim_holder") or "")
+                    if holder:
+                        self.release(identity, base_dir=self.base_dir, holder=holder)
                 except Exception:
                     logger.debug(
                         "could not release claim for %s", identity, exc_info=True
@@ -237,7 +239,7 @@ class InboxDrain:
             else:
                 self.result.skipped += 1
         try:
-            self.result.truncated = self.take() is not None
+            self.result.truncated = self.sessions.has_queued(self.result.session_key)
         except Exception:
             self.result.truncated = False
         return self.result

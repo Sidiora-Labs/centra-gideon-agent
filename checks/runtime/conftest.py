@@ -55,7 +55,8 @@ def _isolate_real_home_writers(tmp_path_factory, monkeypatch):
     ``sel._default_dir()``. Patching thirteen subsystems one at a time would have been
     thirteen fixtures guarding one seam, and the fourteenth subsystem would leak again.
 
-    So this redirects those two seams, and ONLY when the caller expressed no preference:
+    This redirects the home resolvers (including read-only resolution) and SEL,
+    only when the caller expressed no preference:
 
     * ``$GIDEON_HOME`` set (to anything, **including the real home**) → pass through
       untouched. Several rails deliberately point it at the real home and assert a refusal
@@ -102,6 +103,7 @@ def _isolate_real_home_writers(tmp_path_factory, monkeypatch):
         return bool(os.environ.get("GIDEON_HOME")) or Path.home() != real_home.parent
 
     original_config_dir = config_loader.config_dir
+    original_resolve_config_dir = config_loader.resolve_config_dir
     original_sel_dir = sel_mod._default_dir
 
     def guarded_config_dir() -> Path:
@@ -114,13 +116,21 @@ def _isolate_real_home_writers(tmp_path_factory, monkeypatch):
             return original_sel_dir()
         return tmp_home()
 
+    def guarded_resolve_config_dir() -> Path:
+        if caller_chose_a_home():
+            return original_resolve_config_dir()
+        return tmp_home()
+
     monkeypatch.setattr(config_loader, "config_dir", guarded_config_dir)
+    monkeypatch.setattr(config_loader, "resolve_config_dir", guarded_resolve_config_dir)
     monkeypatch.setattr(sel_mod, "_default_dir", guarded_sel_dir)
     for module in list(sys.modules.values()):
         if module is None or not getattr(module, "__name__", "").startswith("gideon"):
             continue
         if getattr(module, "config_dir", None) is original_config_dir:
             monkeypatch.setattr(module, "config_dir", guarded_config_dir)
+        if getattr(module, "resolve_config_dir", None) is original_resolve_config_dir:
+            monkeypatch.setattr(module, "resolve_config_dir", guarded_resolve_config_dir)
 
 
 @pytest.fixture(autouse=True)
@@ -732,3 +742,20 @@ def pytest_sessionfinish(session, exitstatus):
         print(report)
     if changes:
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+_keychain_restore = None
+
+
+def pytest_configure(config):
+    global _keychain_restore
+    from gideon.sdk.testing import keychain_off
+
+    _keychain_restore = keychain_off()
+
+
+def pytest_unconfigure(config):
+    global _keychain_restore
+    if _keychain_restore is not None:
+        _keychain_restore()
+        _keychain_restore = None

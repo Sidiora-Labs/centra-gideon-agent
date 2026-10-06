@@ -107,6 +107,23 @@ async def api_feedback_record(request: web.Request) -> web.Response:
             "app_judgment" if target_kind not in fb.TARGET_KINDS else target_kind
         )
 
+    from gideon.integrations.inbox import FEEDBACK_TARGETS, InboxStore, judgment_producers, owner_username
+    if not source_app and target_kind in FEEDBACK_TARGETS:
+        state = request.app.get("state")
+        service = getattr(state, "_inbox_svc", None)
+        if service is not None:
+            inbox = service.inbox
+        else:
+            inbox = InboxStore()
+            inbox.load()
+        found = inbox.items.get(target_id)
+        if found is None or not found.belongs_to(owner_username()):
+            return web.json_response({"error": {"code": "not_found", "message": "No Inbox item has that id."}}, status=404)
+        producer = judgment_producers(found.to_dict()).get(FEEDBACK_TARGETS[target_kind])
+        if producer is None:
+            return web.json_response({"error": {"code": "feedback_no_judgment", "message": "No prompt made this Inbox judgment."}}, status=409)
+        producer_kind, producer_id = producer["producer_kind"], producer["producer_id"]
+
     snapshot = body.get("snapshot")
     rec = fb.record_feedback(
         target_kind=target_kind,

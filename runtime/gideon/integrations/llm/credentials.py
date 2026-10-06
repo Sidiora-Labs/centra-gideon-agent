@@ -58,15 +58,15 @@ class CredentialStore:
                 if not value:
                     value = environment.get(name)
                 if isinstance(value, str) and value:
-                    _core_credentials.save_credential(name, value)
-                    if _core_credentials.get_credential(name) != value:
+                    _core_credentials.save_credential(name, value, self._home)
+                    if _core_credentials.get_credential(name, self._home) != value:
                         unresolved = True
                         continue
                     row.pop("value", None)
                     row.pop("value_env", None)
                     row["value_ref"] = name
                     changed = True
-                elif row.get("value_ref") == name and _core_credentials.get_credential(name):
+                elif row.get("value_ref") == name and _core_credentials.get_credential(name, self._home):
                     continue
                 else:
                     unresolved = True
@@ -97,7 +97,7 @@ class CredentialStore:
             credential_kind = cast(CredentialKind, kind)
             reference = descriptor.get("value_env")
             candidates: tuple[tuple[CredentialSource, object], ...] = (
-                ("file", _core_credentials.get_credential(name)),
+                ("file", _core_credentials.get_credential(name, self._home)),
                 ("env", os.environ.get(reference) if isinstance(reference, str) and reference else None),
                 ("file", descriptor.get("value")),
                 ("file", self._env.get(reference) if isinstance(reference, str) else None),
@@ -115,8 +115,8 @@ class CredentialStore:
                 if str(row.get("type", "none")) in _SECRET_BEARING_KINDS:
                     value = row.pop("value", None)
                     if isinstance(value, str) and value:
-                        _core_credentials.save_credential(name, value)
-                    if not _core_credentials.get_credential(name):
+                        _core_credentials.save_credential(name, value, self._home)
+                    if not _core_credentials.get_credential(name, self._home):
                         raise OSError("credential backend did not verify the stored value")
                     row.pop("value_env", None)
                     row.pop("value", None)
@@ -147,7 +147,7 @@ class CredentialStore:
                     snapshot = self._load_descriptors()
                     if descriptor is None:
                         snapshot.pop(name, None)
-                        _core_credentials.delete_credential(name)
+                        _core_credentials.delete_credential(name, self._home)
                     else:
                         snapshot[name] = descriptor
                     self.save(snapshot)

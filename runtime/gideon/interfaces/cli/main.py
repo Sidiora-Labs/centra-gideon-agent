@@ -163,34 +163,8 @@ _PROVIDER_BOOTSTRAP_COMMANDS = frozenset(
 )
 
 
-def main() -> None:
-    """Entry point — parse args and dispatch to the appropriate subcommand."""
-    from dotenv import load_dotenv as _load_dotenv
-
-    _cwd_env = Path.cwd() / ".env"
-    if _cwd_env.is_file():
-        _load_dotenv(_cwd_env, override=False)
-    _home_env = config_dir() / ".env"
-    if _home_env.is_file() and _home_env != _cwd_env:
-        _load_dotenv(_home_env, override=False)
-
-    _raw_port = os.environ.get("GIDEON_PORT")
-    if _raw_port is not None:
-        try:
-            int(_raw_port)
-        except ValueError:
-            print(
-                f"❌ GIDEON_PORT={_raw_port!r} is not a valid integer.\n"
-                f"   Unset it or provide a numeric port (e.g. GIDEON_PORT=6777).",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-    if not os.environ.get("GIDEON_PROJECT_DIR"):
-        detected = _detect_project_dir()
-        if detected:
-            os.environ["GIDEON_PROJECT_DIR"] = detected
-
+def build_parser() -> argparse.ArgumentParser:
+    """Construct command syntax without initializing a home or dispatching commands."""
     parser = argparse.ArgumentParser(
         prog="gideon",
         description="Gideon — personal AI agent",
@@ -210,17 +184,21 @@ def main() -> None:
 
     chat_parser = sub.add_parser(
         "chat",
-        help="Chat with the agent",
+        help="Chat with your assistant through the running gateway",
         epilog="""
 Examples:
-  gideon chat                      # Interactive mode
-  gideon chat -m 'check my PRs'    # Single message
-  gideon chat --model claude-opus  # Use specific model
+  gideon chat                      # Chat until exit or Ctrl+D
+  gideon chat -m 'check my PRs'    # Print one reply and exit
+  gideon chat --model MODEL        # Use another configured model
+
+This chat stays in the dashboard. Calls asking for approval wait for your answer
+in Gideon or your paired chat channel. Ctrl+C stops the current turn.
 """,
         formatter_class=_fmt,
     )
-    chat_parser.add_argument("-m", "--message", help="Single message (non-interactive)")
-    chat_parser.add_argument("--model", help="Model to use (default: from config)")
+    chat_parser.add_argument("-m", "--message", help="One message: print its reply and exit")
+    chat_parser.add_argument("--model", help="Model for this chat (default: Settings → Models)")
+    chat_parser.add_argument("--port", type=int, default=None, help="Local gateway port")
 
     tui_parser = sub.add_parser(
         "tui", help="Interactive gateway-backed terminal chat with tools and approvals"
@@ -573,7 +551,7 @@ Examples:
     )
     spawn_sub.add_parser("list", help="List subagents")
     spawn_parser.add_argument(
-        "--port", type=int, default=DASHBOARD_PORT, help="Dashboard port"
+        "--port", type=int, default=None, help="Home gateway port override"
     )
 
     footprint_parser = sub.add_parser("footprint", help="Measure declared database storage")
@@ -1372,7 +1350,48 @@ Examples:
         "(.gideon-lock.json) — detects a skill mutated/tampered after install",
     )
 
+    return parser
+
+
+def main() -> None:
+    """Entry point — parse args and dispatch to the appropriate subcommand."""
+    from gideon.core.library_environment import configure_library_environment
+    from gideon.security.net import libraries
+
+    configure_library_environment()
+    libraries.install()
+
+    from dotenv import load_dotenv as _load_dotenv
+
+    _cwd_env = Path.cwd() / ".env"
+    if _cwd_env.is_file():
+        _load_dotenv(_cwd_env, override=False)
+    _home_env = config_dir() / ".env"
+    if _home_env.is_file() and _home_env != _cwd_env:
+        _load_dotenv(_home_env, override=False)
+
+    _raw_port = os.environ.get("GIDEON_PORT")
+    if _raw_port is not None:
+        try:
+            int(_raw_port)
+        except ValueError:
+            print(
+                f"❌ GIDEON_PORT={_raw_port!r} is not a valid integer.\n"
+                f"   Unset it or provide a numeric port (e.g. GIDEON_PORT=6777).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    if not os.environ.get("GIDEON_PROJECT_DIR"):
+        detected = _detect_project_dir()
+        if detected:
+            os.environ["GIDEON_PROJECT_DIR"] = detected
+
+    parser = build_parser()
     args = parser.parse_args()
+    if args.command == "gateway":
+        from gideon.engine.gateway_base import claim_home
+        claim_home()
 
     if args.command == "gateway" and getattr(args, "seed", None) is not None:
         _rc = seed_cmd(args)
@@ -1402,14 +1421,11 @@ Examples:
             level = getattr(logging, _persisted, logging.WARNING)
         except Exception:
             pass
-    logging.getLogger("gideon").setLevel(level)
-    from gideon.extensions.apps.catalog import (
-        installed_logger_roots as _installed_logger_roots,
-    )
+    from gideon.core import log_sinks
 
-    _APP_LOGGER_ROOTS = _installed_logger_roots()
-    for _lname in _APP_LOGGER_ROOTS:
-        logging.getLogger(_lname).setLevel(level)
+    log_sinks.set_level(level)
+    for _handler in logging.getLogger().handlers:
+        log_sinks.attach(_handler)
     for _noisy in ("slack_sdk", "aiohttp", "urllib3", "asyncio"):
         logging.getLogger(_noisy).setLevel(logging.WARNING)
 
@@ -1421,9 +1437,7 @@ Examples:
             "%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S"
         )
     )
-    logging.getLogger("gideon").addHandler(_fh)
-    for _lname in _APP_LOGGER_ROOTS:
-        logging.getLogger(_lname).addHandler(_fh)
+    log_sinks.attach(_fh)
 
     if args.command in _PROVIDER_BOOTSTRAP_COMMANDS:
         from gideon.extensions.providers.loader import bootstrap_cli_providers
@@ -1431,18 +1445,7 @@ Examples:
         bootstrap_cli_providers()
 
     if args.command == "chat":
-        from gideon.extensions.providers.provider_bridge import (
-            ProviderResolutionError as _BridgeResolveErr,
-        )
-        from gideon.integrations.llm.registry import (
-            ProviderResolutionError as _LLMResolveErr,
-        )
-
-        try:
-            asyncio.run(_chat(args.message, args.model))
-        except (_BridgeResolveErr, _LLMResolveErr) as exc:
-            print(str(exc), file=sys.stderr)
-            raise SystemExit(1) from None
+        _chat(args)
     elif args.command == "tui":
         from gideon.interfaces.cli.terminal import run_terminal
 

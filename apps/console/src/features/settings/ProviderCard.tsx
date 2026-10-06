@@ -1,3 +1,4 @@
+import { channelPerson } from './channelPerson'
 import { useState } from 'react'
 import { ChevronDown, KeyRound, AlertTriangle, CheckCircle2, Clock, TerminalSquare, RefreshCw, Beaker, Plug, PlugZap, Loader2 } from 'lucide-react'
 import { api, type SettingsProvider, type AgentRuntime, type ChannelRuntime } from '../../shared/data/api'
@@ -133,6 +134,7 @@ function ChannelRuntimeRow({ channel, onChanged }: { channel: ChannelRuntime; on
         <span className="size-2 rounded-full" style={{ background: tone }} />
         {channel.connected ? 'Connected' : channel.health.state === 'error' ? 'Error' : 'Not connected'}
       </span>
+      {channel.owner_id ? <span data-type="caption" className="text-on-surface-low">Owner: {channelPerson(channel.display_name || channel.name, channel.owner_id, channel.owner_name).name}{channel.owner_name ? ` · ${channel.display_name || channel.name} id ${channel.owner_id}` : ''}</span> : null}
       {(detail ?? channel.health.detail) && <span data-type="caption" className="text-on-surface-low truncate max-w-[60%]">{detail ?? channel.health.detail}</span>}
       <div className="ml-auto flex items-center gap-1.5">
         { }

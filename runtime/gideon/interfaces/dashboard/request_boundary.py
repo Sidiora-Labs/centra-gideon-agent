@@ -55,6 +55,7 @@ from typing import Any, Awaitable, Callable
 from aiohttp import web
 
 from gideon.http_errors import json_error
+from gideon.core.http_request import RequestValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,10 @@ def request_boundary_middleware() -> Any:
             return await handler(request)
         except web.HTTPException:
             raise
+        except RequestValidationError as exc:
+            if not request.path.startswith("/api/"):
+                raise
+            return json_error(exc.code, message=exc.message, status=400)
         except (ValueError, TypeError, AttributeError) as exc:
             if not request.path.startswith("/api/"):
                 raise

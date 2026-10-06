@@ -164,6 +164,11 @@ _WRITE_INDICATORS = (
 )
 
 
+def _event_reads_only(event: LLMEvent) -> bool:
+    from gideon.engine.task_modes import resolve_effective_risk
+    return resolve_effective_risk(getattr(event, "risk_level", ""), event.title, event.tool_kind, event.tool_input) == "safe"
+
+
 def _is_read_only_tool(event_title: str) -> bool:
     if not event_title:
         return False
@@ -235,7 +240,7 @@ class ApprovalFlow:
     def cli_approval(self, event: LLMEvent) -> bool:
         mode = self.coordinator._approval_mode
         if mode != "yolo" and not (
-            mode == "reads" and _is_read_only_tool(event.title or "")
+            mode == "reads" and _event_reads_only(event)
         ):
             return False
         try:
@@ -319,6 +324,11 @@ class ApprovalFlow:
         from gideon.security import approval_grants
 
         coordinator = self.coordinator
+        from gideon.security.protected_folders import call_protected_delete, provider_working_folder
+        state = coordinator.dashboard_state
+        provider = state.sessions.get_provider(hint) or state.sessions.get_provider(f"dashboard:{hint}") if state else None
+        if call_protected_delete(getattr(event, "risk_level", ""), event.title, event.tool_kind, event.tool_input, cwd=provider_working_folder(provider)):
+            return False
         try:
             hooks = approval_grants.hooks_now()
         except Exception:
@@ -356,7 +366,7 @@ class ApprovalFlow:
             session_key = self.resolver(str(event.request_id)) if self.resolver else parent_session_key or hint
             posture = profile_for_session(session_key or "unattended:approval")
             denial = tool_grant_denial(
-                event.title or "", posture.tool_grants, posture.tool_allowlist
+                event.title or "", posture.tool_grants, posture.tool_allowlist, declared=getattr(event, "risk_level", ""), tool_kind=event.tool_kind, tool_input=event.tool_input
             )
         except Exception:
             logger.warning("approval tool grant could not be established", exc_info=True)
@@ -418,6 +428,8 @@ class ApprovalExchange:
             event.title,
             tool_input=event.tool_input,
             tool_purpose=event.tool_purpose,
+            risk_level=getattr(event, "risk_level", ""), tool_kind=event.tool_kind,
+            tool_annotations=getattr(event, "tool_annotations", {}),
             session=session_key,
             asked_by=asker.label,
         )
@@ -455,10 +467,33 @@ class ApprovalExchange:
             return None
         from gideon.security.approval_answer import CHANNEL, Principal
 
-        approved = bool(decision)
+        from gideon.integrations.channel_delivery import offered_answers, ONE_CALL_ANSWERS
+        from gideon.security.approval_brief import approval_brief_for
+        answers = offered_answers((approval_brief_for(self.event) or {}).get("answers")) or ONE_CALL_ANSWERS
+        pending_future = getattr(self.channel_pending, "future", None)
+        chosen = None
+        if pending_future is not None and pending_future.done() and not pending_future.cancelled():
+            chosen = next((answer for answer in answers if answer.key == pending_future.result()), None)
+        if chosen is None:
+            return None
+        approved = chosen.ends == "approved"
         by = getattr(self.channel_pending, "answerer", None)
         verified_answer = isinstance(by, Principal) and by.kind == CHANNEL
         state = self.flow.coordinator.dashboard_state
+        if verified_answer and getattr(self, "_channel_provider", "") == "telegram":
+            from gideon.integrations.channel_transports import get_transport
+            transport = get_transport("telegram")
+            pending_transport = getattr(self.channel_pending, "transport", None)
+            slot = str(getattr(pending_transport, "slot", ""))
+            registered = (getattr(transport, "bots", {}) or {}).get(slot)
+            if registered is None and getattr(transport, "slot", None) == slot:
+                registered = transport
+            from gideon.security.approval_answer import on_channel
+            from gideon.integrations.channel_trust import is_allowed_sender
+            owner = str((getattr(registered, "config", {}) or {}).get("owner_id", ""))
+            verified_answer = bool(registered is pending_transport and getattr(registered, "connected", False)
+                and owner and is_allowed_sender("telegram", owner)
+                and by == on_channel("telegram", owner, f"telegram:{slot}"))
         if not verified_answer:
             if (
                 self.dashboard_future is not None
@@ -514,7 +549,7 @@ class ApprovalExchange:
             selected = channel_delivery.approval_delivery(origin)
             if selected is None:
                 return None
-            _, delivery = selected
+            self._channel_provider, delivery = selected
             approved = await delivery.request_approval(
                 self.event,
                 source=flow.source,
@@ -757,11 +792,20 @@ class RuntimeCoordinator:
         TriggerPublication(self, logger).outcome(trigger, ok, error)
 
     async def _record_fire_outcome(
-        self, trigger: Any, *, result: Any = None, exc: BaseException | None = None
-    ) -> None:
+        self,
+        trigger: Any,
+        *,
+        result: Any = None,
+        exc: BaseException | None = None,
+        started: float | None = None,
+        finished: float | None = None,
+        late: str = "",
+    ) -> str | None:
         from gideon.engine.trigger_outcomes import FireLedger
 
-        await FireLedger(self, ExecutionJournal, logger).record(trigger, result, exc)
+        return await FireLedger(self, ExecutionJournal, logger).record(
+            trigger, result, exc, started=started, finished=finished, late=late
+        )
 
     async def _record_blocked_fire(self, trigger: Any, groups: str) -> None:
         message = "payload blocked by the injection screen ({}); never retried".format(
@@ -1032,12 +1076,17 @@ async def run_gateway(
     json_ready: bool = False,
     approval_mode: str | None = None,
 ) -> None:
-    await RuntimeCoordinator(
-        cfg,
-        no_dashboard=no_dashboard,
-        no_crons=no_crons,
-        no_open=no_open,
-        port_override=port_override,
-        json_ready=json_ready,
-        approval_mode=approval_mode,
-    ).run()
+    from gideon.engine.gateway_base import claim_home
+    claim = claim_home()
+    try:
+        await RuntimeCoordinator(
+            cfg,
+            no_dashboard=no_dashboard,
+            no_crons=no_crons,
+            no_open=no_open,
+            port_override=port_override,
+            json_ready=json_ready,
+            approval_mode=approval_mode,
+        ).run()
+    finally:
+        claim.close()

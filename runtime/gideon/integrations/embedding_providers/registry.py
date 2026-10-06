@@ -18,20 +18,31 @@ from gideon.integrations.embedding_providers.base import (
 logger = logging.getLogger(__name__)
 _providers: dict[str, EmbeddingProvider] = {}
 _catalog_guard = threading.RLock()
+_scanned: dict[str, EmbeddingProvider] = {}
+_scan_guard = threading.RLock()
+_scanned_generation = -1
+_revision = 0
+_refresh_requested = False
 _NATIVE_NAMES = ("sentence_transformers", "sentence-transformers", "native")
 _NO_SELECTION = object()
 
 
 def register_provider(provider: EmbeddingProvider) -> None:
     name = provider.name
+    global _revision
     with _catalog_guard:
         _providers.update({name: provider})
+        _scanned.pop(name, None)
+        _revision += 1
 
 
 def unregister_provider(name: str) -> None:
+    global _revision
     with _catalog_guard:
         if name in _providers:
             del _providers[name]
+            _scanned.pop(name, None)
+            _revision += 1
 
 
 def _registered(name: str) -> EmbeddingProvider | None:
@@ -40,16 +51,61 @@ def _registered(name: str) -> EmbeddingProvider | None:
 
 
 def _ensure_scanned() -> None:
-    try:
-        from gideon.extensions.providers.media_scanners import scan
+    global _scanned_generation, _revision, _refresh_requested
+    from gideon.extensions.providers import media_scanners
+    with _scan_guard:
+        try:
+            generation = media_scanners.generation()
+            fresh = media_scanners.scan("embedding", strict=True)
+            # A concurrent registration needs another scan; do not publish a mixed snapshot.
+            if generation != media_scanners.generation():
+                return
+        except Exception:
+            logger.debug("embedding scanner pass failed; keeping last good adapters", exc_info=True)
+            return
+        incoming = {provider.name: provider for provider in fresh if getattr(provider, "name", "")}
+        with _catalog_guard:
+            for name, provider in incoming.items():
+                held = _providers.get(name)
+                owned = held is not None and _scanned.get(name) is held
+                if held is None or (owned and (_refresh_requested or type(held) is not type(provider))):
+                    _providers[name] = _scanned[name] = provider
+                    _revision += 1
+            for name in set(_scanned).difference(incoming):
+                if _providers.get(name) is _scanned[name]:
+                    del _providers[name]
+                    _revision += 1
+                del _scanned[name]
+            _scanned_generation = generation
+            _refresh_requested = False
 
-        for provider in scan("embedding"):
-            name = getattr(provider, "name", "")
-            if name:
-                with _catalog_guard:
-                    _providers.setdefault(name, provider)
+
+def refresh_providers() -> None:
+    """Request an atomic rebuild of scanner-owned adapters from current settings."""
+    global _refresh_requested
+    with _scan_guard:
+        _refresh_requested = True
+    _ensure_scanned()
+
+
+def active_binding_key() -> tuple:
+    """Opaque process-local identity for consumer cache invalidation."""
+    _ensure_scanned()
+    specification = _active_embedding_spec()
+    if specification is None:
+        return (None,)
+    name, model = specification
+    with _catalog_guard:
+        provider = _providers.get("native" if name in _NATIVE_NAMES else name)
+    if provider is not None:
+        return (specification, id(provider))
+    try:
+        from gideon.integrations.llm.registry import get_default_registry
+        registry = get_default_registry()
+        entry = registry.get_entry(name)
+        return (specification, id(entry), id(registry.capability_of(entry.type)))
     except Exception:
-        logger.debug("embedding scanner pass failed", exc_info=True)
+        return (specification, None)
 
 
 def get_provider(name: str) -> EmbeddingProvider | None:
@@ -166,11 +222,27 @@ class _DirectBinding:
 class _ModelBinding:
     provider: Any
     embed: Callable
+    model_id: str = ""
+
+    async def request_many(self, texts: list[str]) -> list[list[float] | None]:
+        try:
+            await self.provider.start()
+            if isinstance(self.provider, EmbeddingProvider):
+                vectors = await self.provider.embed_batch(texts, model=self.model_id)
+            else:
+                vectors = await self.embed(texts)
+            rows = list(vectors or [])
+            return [list(row) if row is not None else None for row in rows]
+        finally:
+            await self.provider.shutdown()
 
     async def request(self, text: str) -> list[float] | None:
-        await self.provider.start()
-        vectors = await self.embed([text])
-        return list(vectors[0]) if vectors else None
+        rows = await self.request_many([text])
+        return rows[0] if rows else None
+
+    def many(self, texts: list[str]) -> list[list[float] | None]:
+        rows = run_embed_sync(partial(self.request_many, texts), timeout=max(60.0, len(texts)*5.0))
+        return (rows + [None]*len(texts))[:len(texts)]
 
     def one(self, text: str) -> list[float] | None:
         try:
@@ -237,10 +309,10 @@ def _llm_embed_fn(
     if operation is None:
         logger.warning("Provider %r does not support embeddings", provider_name)
         return None
-    return _ModelBinding(provider, operation).one
+    return _ModelBinding(provider, operation, model_id).one
 
 
-def get_active_embed_fn() -> Callable[[str], list[float] | None] | None:
+def _resolve_embed_fn() -> Callable[[str], list[float] | None] | None:
     specification = _active_embedding_spec()
     if specification is None:
         return None
@@ -253,7 +325,7 @@ def get_active_embed_fn() -> Callable[[str], list[float] | None] | None:
     return _llm_embed_fn(selection.provider_name, selection.model_id)
 
 
-def get_active_embed_many_fn() -> (
+def _resolve_embed_many_fn() -> (
     Callable[[list[str]], list[list[float] | None]] | None
 ):
     specification = _active_embedding_spec()
@@ -262,7 +334,11 @@ def get_active_embed_many_fn() -> (
     selection = _Selection(*specification)
     provider = selection.direct_provider()
     if provider is None:
-        return None
+        model_provider = _build_model_provider(*specification)
+        if model_provider is None:
+            return None
+        operation = getattr(model_provider, "embed", None)
+        return _ModelBinding(model_provider, operation, selection.model_id).many if callable(operation) else None
     operation = getattr(provider, "embed_batch", None)
     if not callable(operation):
         return None
@@ -291,3 +367,44 @@ def get_active_embedding_dim() -> int | None:
     embed = get_active_embed_fn()
     vector = embed("dimension probe") if embed else None
     return len(vector) if vector else None
+
+
+class _HotEmbedding:
+    def __init__(self, *, many: bool = False):
+        self._many = many
+
+    def binding_key(self) -> tuple:
+        return active_binding_key()
+
+    def __call__(self, value):
+        operation = _resolve_embed_many_fn() if self._many else _resolve_embed_fn()
+        if operation is None:
+            return [None] * len(value) if self._many else None
+        return operation(value)
+
+
+def get_active_embed_fn() -> Callable[[str], list[float] | None] | None:
+    return _HotEmbedding() if _resolve_embed_fn() is not None else None
+
+
+def get_active_embed_many_fn() -> Callable | None:
+    return _HotEmbedding(many=True) if _resolve_embed_many_fn() is not None else None
+
+
+async def embed_active(text: str) -> list[float] | None:
+    """Invoke the current actual async adapter with cancellation owned by its caller."""
+    specification = _active_embedding_spec()
+    if specification is None:
+        return None
+    selection = _Selection(*specification)
+    provider = selection.direct_provider()
+    if provider is not None:
+        return await provider.embed(text, model=selection.model_id)
+    model_provider = _build_model_provider(*specification)
+    if model_provider is None:
+        return None
+    operation = getattr(model_provider, "embed", None)
+    if not callable(operation):
+        await model_provider.shutdown()
+        return None
+    return await _ModelBinding(model_provider, operation, selection.model_id).request(text)

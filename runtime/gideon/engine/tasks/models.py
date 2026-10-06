@@ -1,6 +1,7 @@
 """Task wire records and shared write-admission/read-salvage normalization."""
 
 import enum
+import json
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any
@@ -112,7 +113,18 @@ def normalize_action_plan_item(item: Any, index: int) -> dict:
     }
 
 
+def decode_list_text(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    try:
+        decoded = json.loads(value)
+    except (ValueError, RecursionError):
+        return value
+    return decoded if isinstance(decoded, list) else value
+
+
 def _as_item_list(value: Any) -> list:
+    value = decode_list_text(value)
     if isinstance(value, list):
         return value
     if isinstance(value, (str, dict)):
@@ -353,6 +365,7 @@ def _as_bool(value: Any, *, strict: bool) -> bool:
 
 
 def _as_text_list(value: Any, *, strict: bool) -> list[str]:
+    value = decode_list_text(value)
     if value is None:
         return []
     if isinstance(value, (str, int, float, bool)):
@@ -404,6 +417,7 @@ def _as_open_dict_list(value: Any, *, strict: bool) -> list[dict]:
 
 
 def _as_dependencies(value: Any, *, strict: bool) -> list["TaskDependency"]:
+    value = decode_list_text(value)
     if value is None:
         return []
     try:

@@ -21,9 +21,14 @@ import for each capability it serves.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
+
+_lock = threading.RLock()
+_generation = 0
+
 
 _scanners: dict[str, list[Callable[[list[dict[str, Any]]], list[Any]]]] = {}
 
@@ -37,32 +42,65 @@ def register_scanner(
     function object is a no-op, so an app module re-imported in tests doesn't
     stack duplicate scanners.
     """
-    lst = _scanners.setdefault(capability, [])
-    if scanner not in lst:
+    global _generation
+    with _lock:
+        lst = _scanners.setdefault(capability, [])
+        if scanner in lst:
+            return
+        # Reloaded modules contribute their current implementation under the same name.
+        identity = (getattr(scanner, "__module__", None), getattr(scanner, "__qualname__", None))
+        if all(identity):
+            lst[:] = [fn for fn in lst if (getattr(fn, "__module__", None), getattr(fn, "__qualname__", None)) != identity]
         lst.append(scanner)
+        _generation += 1
 
 
-def scan(capability: str) -> list[Any]:
+def unregister_scanner(capability: str, scanner: Callable) -> None:
+    global _generation
+    with _lock:
+        lst = _scanners.get(capability, [])
+        if scanner in lst:
+            lst.remove(scanner)
+            _generation += 1
+
+
+def unregister_module_scanners(module_name: str) -> None:
+    with _lock:
+        owned = [(capability, scanner) for capability, scanners in _scanners.items()
+                 for scanner in scanners if getattr(scanner, "__module__", None) == module_name]
+        for capability, scanner in owned:
+            unregister_scanner(capability, scanner)
+
+
+def generation() -> int:
+    with _lock:
+        return _generation
+
+
+def scan(capability: str, *, strict: bool = False) -> list[Any]:
     """Run every registered scanner for ``capability`` against the current
     config.json provider entries; return the flattened adapter list.
 
     Import-guarded + best-effort: one scanner raising never blocks the others
     or the registry's own built-in discovery.
     """
-    scanners = _scanners.get(capability)
+    with _lock:
+        scanners = list(_scanners.get(capability, []))
     if not scanners:
         return []
-    entries = _config_provider_entries()
+    entries = _config_provider_entries(strict=strict)
     out: list[Any] = []
     for fn in scanners:
         try:
             out.extend(fn(entries) or [])
         except Exception:  # noqa: BLE001 — a bad scanner can't break discovery
+            if strict:
+                raise
             logger.debug("media scanner for %r failed", capability, exc_info=True)
     return out
 
 
-def _config_provider_entries() -> list[dict[str, Any]]:
+def _config_provider_entries(*, strict: bool = False) -> list[dict[str, Any]]:
     """The ``providers[]`` array from config.json (``[{name, type, options}]``)."""
     import json
 
@@ -74,6 +112,8 @@ def _config_provider_entries() -> list[dict[str, Any]]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
+        if strict:
+            raise
         return []
     providers = data.get("providers") if isinstance(data, dict) else None
     return (

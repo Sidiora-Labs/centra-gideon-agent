@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
+from gideon.core.sqlite_compat import connect, sqlite3
 import threading
 import time
 from contextlib import contextmanager
@@ -85,7 +85,7 @@ class StagingStore:
         if self._conn is not None:
             return self._conn
         self._base.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
+        self._conn = connect(str(self._path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._bootstrap(self._conn)

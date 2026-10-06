@@ -30,8 +30,6 @@ _VALID_TARGETS = ("attachment", "knowledge", "workspace", "voice_profile")
 
 _VOICE_SLOTS = ("ref_audio", "consent")
 
-_SCAN_WINDOW = 256 * 1024
-_SCANNABLE_CATEGORIES = {"document", "archive", "other"}
 
 
 def _store(request: web.Request) -> UploadStore:
@@ -202,67 +200,34 @@ async def api_uploads_complete(request: web.Request) -> web.Response:
         logger.exception("assemble failed for %s", sid)
         return web.json_response({"error": "failed to assemble upload"}, status=500)
 
-    scan_err = _bounded_scan(final_path, sess.category)
-    if scan_err:
-        store.cleanup(sid)
-        return web.json_response({"error": scan_err}, status=422)
+    from gideon.workspace.uploads.content_intake import IntakeRefused, approve_path
 
+    snapshot = None
     try:
-        result = await _finalize_target(request, sess, final_path)
+        snapshot = await approve_path(final_path, sess.mime or None,
+                                      filename=sess.filename, surface='resumable_upload')
+        result = await _finalize_target(request, sess, snapshot)
+        return web.json_response(result)
+    except IntakeRefused as exc:
+        return exc.response()
     except UploadError as exc:
-        store.cleanup(sid)
         return web.json_response({"error": exc.message}, status=exc.status)
+    except FileExistsError:
+        return web.json_response({"error": f"already exists: {sess.filename}"}, status=409)
     except Exception:
         logger.exception("finalize failed for %s target=%s", sid, sess.target)
-        store.cleanup(sid)
         return web.json_response({"error": "failed to finalize upload"}, status=500)
-
-    store.cleanup(sid)
-    return web.json_response(result)
-
-
-def _bounded_scan(path: Path, category: str) -> str | None:
-    """Scan a head+tail window for injection/exfil/destructive patterns. Returns an
-    error message if the content is dangerous, else None. Media categories skip the
-    scan (a 2 GB video isn't grepped line-by-line).
-
-    An uploaded file is UNTRUSTED content, so it gets BOTH scanner surfaces: ``script``
-    (the destructive-script ruleset — curl|sh, base64|bash, rm -rf, the S3 skill-install
-    gate) AND ``manifest`` (prose-injection + invisible-char rules, the S5 memory-write
-    gate). Scanning only ``manifest`` (the old bug) let classic shell payloads through as
-    CLEAN — the ``script`` ruleset is exactly the one that flags them."""
-    if category not in _SCANNABLE_CATEGORIES:
-        return None
-    try:
-        from gideon.security.supply_chain import SkillScanner, Verdict
-
-        with open(path, "rb") as fh:
-            head = fh.read(_SCAN_WINDOW)
-            size = path.stat().st_size
-            if size > 2 * _SCAN_WINDOW:
-                fh.seek(size - _SCAN_WINDOW)
-                tail = fh.read(_SCAN_WINDOW)
-            else:
-                tail = b""
-        window = head + b"\n" + tail
-        if b"\x00" in window:
-            return None
-        text = window.decode("utf-8", errors="replace")
-        scanner = SkillScanner()
-        for surface in ("script", "manifest"):
-            if scanner.scan_text(text, surface=surface).verdict is Verdict.DANGEROUS:
-                return "upload rejected: content failed the safety scan"
-    except Exception:
-        logger.debug(
-            "bounded scan errored (fail-open for non-scannable)", exc_info=True
-        )
-    return None
+    finally:
+        if snapshot is not None:
+            snapshot.close()
+        store.cleanup(sid)
 
 
-async def _finalize_target(request: web.Request, sess, final_path: Path) -> dict:
+async def _finalize_target(request: web.Request, sess, snapshot) -> dict:
     """Hand the assembled file to the same finalize the single-POST path uses."""
-    import shutil
     import uuid
+
+    snapshot.require_approved()
 
     if sess.target == "attachment":
         from gideon.interfaces.dashboard.attachment_extract import get_extractor
@@ -273,8 +238,7 @@ async def _finalize_target(request: web.Request, sess, final_path: Path) -> dict
 
         safe = re.sub(r"[^\w.\-]", "_", Path(sess.filename).name)
         dest = _upload_dir() / f"{uuid.uuid4().hex}_{safe}"
-        shutil.move(str(final_path), str(dest))
-        os.chmod(dest, 0o600)
+        await snapshot.persist(dest)
         try:
             import mimetypes as _mt
 
@@ -286,14 +250,12 @@ async def _finalize_target(request: web.Request, sess, final_path: Path) -> dict
     if sess.target == "knowledge":
         from gideon.cognition.knowledge.media import classify
         from gideon.interfaces.dashboard.handlers.knowledge import _store as _kn_store
-        from gideon.interfaces.dashboard.handlers.knowledge import _store_file_item
+        from gideon.cognition.knowledge.file_items import store_approved_file
 
         if classify(sess.filename, sess.mime or None) is None:
             raise UploadError(f"unsupported file type: {sess.filename}", 415)
         store = _kn_store(request)
-        item, is_new = _store_file_item(
-            store, str(final_path), sess.filename, mime=sess.mime or None
-        )
+        item, is_new = await store_approved_file(store, snapshot)
         if item is None:
             raise UploadError("failed to store item", 500)
         if is_new:
@@ -320,12 +282,12 @@ async def _finalize_target(request: web.Request, sess, final_path: Path) -> dict
             vprof.validate_id(profile_id)
             vprof.require_profile(profile_id)
             suffix = Path(sess.filename).suffix
-            if sess.target_key == "consent":
-                profile = vprof.attach_consent_audio(
-                    profile_id, final_path, suffix=suffix
-                )
-            else:
-                profile = vprof.attach_ref_audio(profile_id, final_path, suffix=suffix)
+            from gideon.cognition.knowledge.file_items import _owned_io
+            async with snapshot.reader_path() as approved_path:
+                attach = vprof.attach_consent_audio if sess.target_key == 'consent' else vprof.attach_ref_audio
+                def persist_audio():
+                    return attach(profile_id, approved_path, suffix=suffix)
+                profile = await _owned_io(persist_audio)
         except vprof.VoiceProfileError as exc:
             raise UploadError(exc.message, exc.status) from exc
         if sess.target_key == "consent":
@@ -360,7 +322,7 @@ async def _finalize_target(request: web.Request, sess, final_path: Path) -> dict
             raise UploadError(f"forbidden filename: {sess.filename}", 400)
         if os.path.exists(wdest):
             raise UploadError(f"already exists: {sess.filename}", 409)
-        shutil.move(str(final_path), wdest)
+        await snapshot.persist(wdest)
         return {"paths": [wdest]}
 
     raise UploadError(f"unknown target: {sess.target}", 400)

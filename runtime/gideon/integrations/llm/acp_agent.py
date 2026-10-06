@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+from gideon.core.turn_streams import closing_stream
+from gideon.integrations.acp.spend import AcpTurnMeter
+
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -38,7 +41,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class AcpAgentProvider(AcpToolOutcomesMixin, ModelProvider, AgentProvider):
+class AcpAgentProvider(AcpTurnMeter, AcpToolOutcomesMixin, ModelProvider, AgentProvider):
     def __init__(
         self,
         *,
@@ -58,11 +61,16 @@ class AcpAgentProvider(AcpToolOutcomesMixin, ModelProvider, AgentProvider):
         reasoning_effort: str = "",
         unattended: bool = False,
         runtime_id: str = "",
+        session_meta: dict | None = None,
+        compacts_itself: bool = False,
     ) -> None:
         from gideon.integrations.acp.dialect import get_dialect
 
         if not command:
             raise ValueError("AcpAgentProvider requires a non-empty command list")
+        from gideon.integrations.acp.options import compacts_itself as validate_compaction
+
+        self._compacts_itself = validate_compaction(compacts_itself)
         self._command = list(command)
         self._cwd = None if cwd is None else Path(cwd)
         self._env = dict(env or {})
@@ -92,8 +100,13 @@ class AcpAgentProvider(AcpToolOutcomesMixin, ModelProvider, AgentProvider):
             "mode": self._mode,
             "reasoning_effort": self._reasoning_effort,
             "unattended": self._unattended,
+            "session_meta": session_meta,
         }
         self._client = AcpClient(**configuration)
+
+    @property
+    def compacts_automatically(self) -> bool:
+        return self._compacts_itself
 
     @property
     def provider_id(self) -> str:
@@ -296,14 +309,16 @@ class AcpAgentProvider(AcpToolOutcomesMixin, ModelProvider, AgentProvider):
         event.tool_meta = metadata
 
     async def stream(self, message: str) -> AsyncIterator[LLMEvent]:
-        async for event in relay_events(self, self._client.stream_events, message):
-            self._stamp_usage_attribution(event)
-            yield event
+        async with closing_stream(self._metered(relay_events(self, self._client.stream_events, message), prompt=message)) as events:
+            async for event in events:
+                self._stamp_usage_attribution(event)
+                yield event
 
     async def stream_command(self, command: str) -> AsyncIterator[LLMEvent]:
-        async for event in relay_events(self, self._client.stream_command, command):
-            self._stamp_usage_attribution(event)
-            yield event
+        async with closing_stream(self._metered(relay_events(self, self._client.stream_command, command), prompt=command)) as events:
+            async for event in events:
+                self._stamp_usage_attribution(event)
+                yield event
 
     @property
     def supports_native_commands(self) -> bool:
@@ -311,6 +326,15 @@ class AcpAgentProvider(AcpToolOutcomesMixin, ModelProvider, AgentProvider):
 
     async def approve_tool(self, request_id: str | int) -> None:
         await self._client.approve_tool(request_id)
+
+    def deny_outcome(self, request_id: str | int) -> dict:
+        return self._client.deny_outcome(request_id)
+
+    def permission_answer(self, request_id: str | int) -> dict | None:
+        return self._client.permission_answer(request_id)
+
+    def refusal_answer(self, request_id: str | int) -> dict | None:
+        return self._client.refusal_answer(request_id)
 
     async def reject_tool(self, request_id: str | int) -> None:
         await self._client.reject_tool(request_id)
@@ -342,6 +366,9 @@ class AcpAgentProvider(AcpToolOutcomesMixin, ModelProvider, AgentProvider):
             return bool(get_dialect(self._dialect_id).supports_mid_turn_prompt)
         except Exception:
             return False
+
+    def set_question_handler(self, handler) -> None:
+        self._client.set_question_handler(handler)
 
     def set_steer_source(self, pull: Callable[[], list[str]] | None) -> bool:
         return self._client.set_steer_source(pull)

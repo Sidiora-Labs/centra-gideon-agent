@@ -93,6 +93,7 @@ from gideon.assurance.ledger import (
     STEP_COMPLETED,
     STEP_ESCALATED,
     STEP_FAILED,
+    STEP_CANCELLED,
     STEP_SCOPE,
     STEP_SKIPPED,
     STEP_STARTED,
@@ -114,7 +115,6 @@ from gideon.automation.workflows import store
 from gideon.automation.workflows.models import Failure, InstanceState
 from gideon.automation.workflows.step_usage import StepUsage
 
-STEP_CANCELLED = "step_cancelled"
 
 
 def inputs_hash(resolved: dict[str, Any]) -> str:

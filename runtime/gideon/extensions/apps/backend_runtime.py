@@ -49,6 +49,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+from gideon.operations.child_output import ChildOutput, relay
+
 _TERM_TIMEOUT = 5
 
 
@@ -164,6 +166,7 @@ class RunningBackend:
     pid: int
     health_check: str = "/health"
     proc: subprocess.Popen | None = field(default=None, repr=False)
+    output: ChildOutput | None = field(default=None, repr=False)
 
     @property
     def base_url(self) -> str:
@@ -178,6 +181,7 @@ class BackendSupervisor:
 
     def __init__(self) -> None:
         self._procs: dict[str, RunningBackend] = {}
+        self._last_runs: dict[str, ChildOutput] = {}
         self._held: set[str] = set()
         self._lock = threading.Lock()
 
@@ -198,9 +202,21 @@ class BackendSupervisor:
         with self._lock:
             rb = self._procs.get(name)
             if rb and not rb.is_alive():
+                if rb.output is not None:
+                    code = rb.proc.poll() if rb.proc is not None else None
+                    if code is not None:
+                        rb.output.ended(code)
                 self._procs.pop(name, None)
                 return None
             return rb
+
+    def last_exit(self, name: str) -> dict | None:
+        running = self.get(name)
+        if running is not None:
+            return None
+        with self._lock:
+            output = self._last_runs.get(name)
+        return output.report() if output is not None else None
 
     def list_running(self) -> list[RunningBackend]:
         with self._lock:
@@ -326,20 +342,26 @@ class BackendSupervisor:
                     launch_cmd,
                     cwd=str(root),
                     env=env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                 )
             except OSError as exc:
                 logger.warning("app %s backend failed to launch: %s", name, exc)
                 return None
+            output = ChildOutput(app=name, process="backend", pid=proc.pid, env=env)
+            relay(proc, output)
             rb = RunningBackend(
                 name=name,
                 port=port,
                 pid=proc.pid,
                 health_check=backend.healthCheck,
                 proc=proc,
+                output=output,
             )
             self._procs[name] = rb
+            self._last_runs[name] = output
+            if len(self._last_runs) > 128:
+                self._last_runs.pop(next(iter(self._last_runs)))
             logger.info("app %s backend started: pid=%s port=%s", name, proc.pid, port)
             return rb
 
@@ -348,9 +370,14 @@ class BackendSupervisor:
         True if a process was stopped."""
         with self._lock:
             rb = self._procs.pop(name, None)
+            output = self._last_runs.get(name)
+        if output is not None:
+            output.stopping()
         if rb is None or rb.proc is None:
             return False
         proc = rb.proc
+        if rb.output is not None:
+            rb.output.stopping()
         if proc.poll() is not None:
             return False
         try:

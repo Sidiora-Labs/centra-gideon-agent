@@ -18,17 +18,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libolm-dev \
     && rm -rf /var/lib/apt/lists/*
+ARG UV_VERSION=0.12.19
+RUN pip install --no-cache-dir --root-user-action=ignore "uv==${UV_VERSION}"
 RUN python -m venv /opt/venv && \
-    /opt/venv/bin/pip install --upgrade pip wheel
-
-COPY pyproject.toml setup.py ./
-RUN mkdir -p runtime/gideon && \
-    echo '__version__ = "0.1.0"' > runtime/gideon/__init__.py && \
-    GIDEON_DEPENDENCIES_ONLY=1 /opt/venv/bin/pip install --no-cache-dir \
-    --extra-index-url https://download.pytorch.org/whl/cpu \
-    ".[slack,eval,httpx,anthropic,openai,embeddings,stt,tts,mcp,channels]" && \
-    /opt/venv/bin/pip uninstall -y gideon-agent-harness && \
-    rm -rf runtime/ build/ *.egg-info
+    /opt/venv/bin/pip install --no-cache-dir wheel "setuptools==83.0.0"
+COPY pyproject.toml uv.lock ./
+RUN uv export --locked --no-emit-project --emit-index-url \
+    --extra slack --extra eval --extra httpx --extra anthropic --extra openai \
+    --extra embeddings --extra stt --extra tts --extra channels \
+    -o /build/requirements.txt && \
+    /opt/venv/bin/pip install --no-cache-dir --require-hashes --no-deps \
+    -r /build/requirements.txt
 
 FROM deps AS builder
 COPY runtime/ ./runtime/
@@ -41,8 +41,10 @@ RUN rm -rf build/ *.egg-info && \
     rm -f /tmp/hypermid-daemon
 
 FROM builder AS test
-RUN /opt/venv/bin/pip install --no-cache-dir \
-    black isort flake8 mypy pytest pytest-asyncio hypothesis
+RUN uv export --locked --no-emit-project --emit-index-url --extra dev \
+    -o /build/requirements-dev.txt && \
+    /opt/venv/bin/pip install --no-cache-dir --require-hashes --no-deps \
+    -r /build/requirements-dev.txt
 COPY checks/ ./checks/
 COPY tooling/ ./tooling/
 RUN /opt/venv/bin/python -m black --check runtime/gideon checks/runtime && \

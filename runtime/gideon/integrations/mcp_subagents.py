@@ -11,6 +11,7 @@ so a spawn's completions inject back into the parent session — plus ``_get`` /
 is owned by ``mcp_core`` and reused here.
 """
 
+import json
 import re
 import time
 from typing import Any
@@ -81,7 +82,7 @@ _NAME_UNSAFE = re.compile(r"[^a-z0-9-]+")
 
 
 def _batch_def_name() -> str:
-    return f"subagent-batch-{int(time.time() * 1000)}"
+    return f"subagent-batch-{int(time.time() * 1000)}-{__import__('uuid').uuid4().hex[:8]}"
 
 
 def _findings_report(result: batch_compile.CompileResult) -> str:
@@ -127,25 +128,16 @@ def _run_compiled_batch(
     root = result.spec.get("root")
     if not isinstance(root, dict):
         return "Error: the compiler produced no root node"
-    saved = _post(
-        "/api/workflows",
-        {
-            "name": name,
-            "root": root,
-            "description": f"Compiled batch of {len(leaves)} leaf task(s) from subagent_run.",
-            "strict": False,
-            "workspace": result.spec.get(batch_compile.WORKSPACE_KEY) or {},
-        },
-    )
-    if saved.get("error"):
-        return f"Error: could not persist the compiled batch: {saved['error']}"
-
-    body: dict[str, Any] = {"name": name, "mode": "background"}
+    body: dict[str, Any] = {"name": name, "mode": "background", "run_once": {
+        **result.spec, "name": name, "description": f"Compiled batch of {len(leaves)} tasks.",
+    }}
     if cwd:
         body["inputs"] = {"cwd": cwd}
-    started = _post("/api/workflows/runs", body)
+    started = _post("/api/workflows/batches", body)
     if started.get("error"):
         return f"Error: could not start the compiled batch: {started['error']}"
+    if started.get("status") == "awaiting_approval":
+        return json.dumps(started)
     run_id = str(started.get("run_id", "") or "")
 
     lines = [
@@ -166,13 +158,14 @@ def _run_compiled_batch(
         lines.append(f"  [warn] {finding.code}: {finding.message}")
     if parent_session:
         lines.append("\nResults arrive as completion events in this session.")
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n" + json.dumps(started)
 
 
 def _list_tools() -> list[dict[str, Any]]:
     return [
         {
             "name": "subagent_run",
+            "_meta": {"gideon/work_asks": True},
             "description": (
                 "Spawn subagent(s) to run tasks in the background. "
                 "Returns immediately — results arrive as [Subagent completion event] "
@@ -462,6 +455,11 @@ def _validate_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if schema:
         return validate_tool_args(args, schema)
     return args
+
+
+def _preflight_tool(name: str, args: dict[str, Any]) -> str:
+    from gideon.integrations.mcp_shared import preflight_tool
+    return preflight_tool(name, args, _validate_args)
 
 
 def _call_tool(name: str, raw_args: dict[str, Any]) -> str:

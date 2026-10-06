@@ -73,11 +73,11 @@ def _build_steps(project: Path):
 
 
 def build_frontend_sync(proj_path: Path, log: Callable[[str], None] = print) -> None:
+    from gideon.operations.self_update import run_install_command
+
     try:
         for command, timeout in _build_steps(proj_path):
-            result = subprocess.run(
-                command, cwd=proj_path, capture_output=True, timeout=timeout
-            )
+            result = run_install_command(command, cwd=proj_path, timeout=timeout)
             if result.returncode:
                 log("Frontend build failed — dashboard may be stale")
                 return
@@ -90,6 +90,8 @@ def build_frontend_sync(proj_path: Path, log: Callable[[str], None] = print) -> 
 async def build_frontend_async(
     proj: str, push_progress: Callable[[str, str], None] | None = None
 ) -> None:
+    from gideon.operations._installer import installer_env
+
     project = Path(proj)
 
     def report(message: str) -> None:
@@ -101,6 +103,7 @@ async def build_frontend_async(
             process = await asyncio.create_subprocess_exec(
                 *command,
                 cwd=str(project),
+                env=installer_env(),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
                 start_new_session=True,

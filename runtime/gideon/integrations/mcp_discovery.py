@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from gideon.integrations.mcp_status import StartFailure
+
 import aiohttp
 
 from gideon.core.cancellation import terminate_and_reap
@@ -89,6 +91,8 @@ class _ProbeResult:
     error: str
     probed_at: float
     definition_revision: str
+    detail: str = ""
+    failures: int = 0
 
 
 _probe_cache: dict[str, _ProbeResult] = {}
@@ -136,26 +140,83 @@ def _get_cached(server: "McpServerInfo | str") -> tuple[str, list[dict[str, Any]
         cached = None
     if cached is None:
         return ("probing" if _probing.get(server.name, {}).get(revision) else "unknown"), [], ""
+    from gideon.integrations.mcp_status import STOP_AFTER, stopped_trying
+
+    if cached.failures >= STOP_AFTER:
+        return "stopped", [], stopped_trying(server.name, cached.error)
+    if cached.status == "probing":
+        return cached.status, cached.tools, cached.error
     age = time.monotonic() - cached.probed_at
     if age <= _PROBE_TTL_SECS:
         return cached.status, cached.tools, cached.error
     return "outdated", cached.tools, ""
 
 
+def _keep(name: str, result: _ProbeResult) -> None:
+    from gideon.integrations.mcp_status import announce
+
+    if _probe_cache.get(name) != result:
+        _probe_cache[name] = result
+        announce(name)
+
+
 def _cache_probe(server: "McpServerInfo") -> None:
-    """Store probe result in cache."""
-    _probe_cache[server.name] = _ProbeResult(
-        status=server.status,
-        tools=list(server.tools),
-        error=server.error,
-        probed_at=time.monotonic(),
-        definition_revision=_definition_revision(server),
-    )
+    revision = _definition_revision(server)
+    previous = _probe_cache.get(server.name)
+    count = previous.failures if previous is not None and previous.definition_revision == revision else 0
+    _keep(server.name, _ProbeResult(server.status, list(server.tools), server.error,
+                                   time.monotonic(), revision, server.detail,
+                                   0 if server.status == "ok" else count))
 
 
 def forget_probe(name: str) -> None:
-    """Remove the cached result for a server after its definition is changed or removed."""
-    _probe_cache.pop(name, None)
+    from gideon.integrations.mcp_status import announce
+    from gideon.integrations.mcp_stdio import forget_left
+
+    forget_left(name)
+    if _probe_cache.pop(name, None) is not None:
+        announce(name)
+
+
+def definition_seal(name: str, spec: dict[str, Any]) -> str:
+    return _definition_revision(_server_from_spec(name, spec, str(spec.get("source") or "mcp.json")))
+
+
+def start_refused(name: str, seal: str) -> str | None:
+    from gideon.integrations.mcp_status import STOP_AFTER, stopped_trying
+
+    cached = _probe_cache.get(name)
+    if cached and cached.definition_revision == seal and cached.failures >= STOP_AFTER:
+        return stopped_trying(name, cached.error)
+    return None
+
+
+def note_start(name: str, seal: str, *, tools: list[Any] | None = None, failure: StartFailure | None = None) -> None:
+    current = next((server for server in list_servers() if server.name == name), None)
+    if current is None or _definition_revision(current) != seal:
+        return
+    previous = _probe_cache.get(name)
+    count = previous.failures if previous and previous.definition_revision == seal else 0
+    if failure is None:
+        rows = [{"name": tool.name, "description": tool.description, "inputSchema": tool.input_schema, "annotations": dict(tool.annotations)} for tool in tools or []]
+        result = _ProbeResult("ok", rows, "", time.monotonic(), seal)
+    else:
+        result = _ProbeResult("probing" if failure.pending else "error", [], failure.headline,
+                              time.monotonic(), seal, failure.detail, count + int(failure.counts))
+    _keep(name, result)
+    if failure is None:
+        from gideon.security import mcp_grants, mcp_read_only_trust
+        if not mcp_grants.exempt(current):
+            mcp_read_only_trust.observe(name, tools or [])
+
+
+def look_again(name: str) -> None:
+    async def probe_current() -> None:
+        server = next((row for row in list_servers() if row.name == name), None)
+        if server is not None and _server_allowed(server):
+            await probe_server(server)
+
+    asyncio.create_task(probe_current(), name=f"mcp-check:{name}")
 
 
 def _probe_error_copy(error: str, url: str) -> str:
@@ -193,6 +254,7 @@ class McpServerInfo:
     status: str = "unknown"
     tools: list[dict[str, Any]] = field(default_factory=list)
     error: str = ""
+    detail: str = ""
     source: str = "agent"
     presence: dict[str, bool] = field(
         default_factory=lambda: {
@@ -259,6 +321,7 @@ class McpServerInfo:
             "status": self.status,
             "tools": self.tools,
             "error": self.error,
+            "detail": self.detail,
             "source": self.source,
             "presence": dict(self.presence),
             "allowed": allowed,
@@ -515,6 +578,8 @@ def list_servers() -> list[McpServerInfo]:
         s.status = status
         s.tools = tools
         s.error = error
+        cached = _probe_cache.get(s.name)
+        s.detail = cached.detail if cached and cached.definition_revision == _definition_revision(s) else ""
         if not _server_allowed(s):
             s.status = "waiting"
             s.tools = []
@@ -550,229 +615,32 @@ async def _read_jsonrpc_response(resp: aiohttp.ClientResponse) -> dict:
 
 
 async def _probe_remote(server: McpServerInfo) -> McpServerInfo:
-    """Probe a remote Streamable HTTP MCP server via POST."""
-    if not _server_allowed(server):
-        return _wait_for_owner(server)
-    server.status = "probing"
-    conn = None
-    try:
-        from gideon.integrations.mcp_client import McpServerConn, _gideon_mcp_specs
-
-        spec = _gideon_mcp_specs().get(server.name)
-        if not isinstance(spec, dict):
-            raise ValueError("MCP server is no longer configured")
-        conn = McpServerConn(server.name, spec, scope=server.source)
-        tools = await conn.list_tools()
-        if conn.error:
-            server.status = "error"
-            server.error = _probe_error_copy(conn.error, server.url)
-        else:
-            server.tools = [
-                {"name": tool.name, "description": tool.description, "inputSchema": tool.input_schema}
-                for tool in tools
-            ]
-            server.status = "ok"
-        if server.status != "ok":
-            _cache_probe(server)
-            return server
-        server.status = "ok"
-    except asyncio.TimeoutError:
-        server.status = "error"
-        server.error = _probe_error_copy("timeout", server.url)
-        logger.warning("MCP probe failed [%s]: timeout", server.name)
-    except Exception as exc:
-        server.status = "error"
-        server.error = _probe_error_copy(str(exc), server.url)
-        logger.warning("MCP probe failed [%s]: %s", server.name, server.error)
-    finally:
-        if conn is not None:
-            await conn.shutdown()
-
-    _cache_probe(server)
-    return server
-
-
-async def _drain_stderr_reason(proc: Any) -> str:
-    """Read whatever the server wrote to stderr, condensed to a one-line reason.
-
-    Used when stdout is empty (server exited before responding) so the failure
-    is legible — e.g. ``server exited: Node version 18 detected, requires >=20``
-    instead of a bare ``no response``. Bounded read + short timeout so a server
-    that holds stderr open can't hang the probe.
-    """
-    if proc is None or proc.stderr is None:
-        return ""
-    try:
-        data = await asyncio.wait_for(proc.stderr.read(4096), timeout=2.0)
-    except (asyncio.TimeoutError, Exception):  # noqa: BLE001
-        return ""
-    text = (data or b"").decode("utf-8", "replace").strip()
-    if not text:
-        return ""
-    last = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    reason = last[-1] if last else text
-    return f"server exited: {reason[:200]}"
+    return await _probe_server(server)
 
 
 async def _probe_server(server: McpServerInfo) -> McpServerInfo:
-    """Probe a single MCP server by spawning it and sending initialize.
-
-    Updates server.status and server.tools in place and returns it.
-    """
     if not _server_allowed(server):
         return _wait_for_owner(server)
-    if server.is_remote:
-        return await _probe_remote(server)
+    from gideon.integrations.mcp_client import McpServerConn
 
-    if not server.command:
-        server.status = "error"
-        server.error = "no command"
-        logger.warning("MCP probe failed [%s]: no command configured", server.name)
-        _cache_probe(server)
-        return server
-
-    server.status = "probing"
-    proc = None
+    spec = {"command": server.command, "args": server.args or [], "env": server.env,
+            "cwd": server.cwd, "url": server.url, "transport": server.transport,
+            "headers": server.headers, "oauth": server.oauth, "poolable": server.poolable,
+            "allowElicitation": server.allowElicitation, "source": server.source}
+    server.status, server.error, server.detail, server.tools = "probing", "", "", []
+    conn = McpServerConn(server.name, spec, scope=server.source, connect_timeout=_get_probe_timeout())
     try:
-        from gideon.security.sandbox import build_child_env
-
-        server_env = dict(server.env)
-        if server.source in {"mcp.json", "agent"}:
-            from gideon.extensions.providers.mcp_instances import resolve_server_credentials
-
-            server_env = resolve_server_credentials(server.name, {"env": server_env}).get("env", {})
-        extra_env = {k: v for k, v in server_env.items() if k != "PATH"}
-        env = build_child_env(site=f"mcp-probe:{server.name}", extra=extra_env)
-        env["PATH"] = augmented_path(os.environ.get("PATH", ""))
-        if "PATH" in server_env:
-            env["PATH"] = server_env["PATH"] + os.pathsep + env["PATH"]
-
-        resolved = shutil.which(server.command, path=env.get("PATH"))
-        if not resolved:
-            server.status = "error"
-            server.error = f"command not found: {server.command}"
-            logger.warning(
-                "MCP probe failed [%s]: command not found: %s",
-                server.name,
-                server.command,
-            )
-            return server
-
-        from gideon.security.sandbox import PROFILE_TOOL, create_subprocess_limited
-
-        proc = await create_subprocess_limited(
-            resolved,
-            *(server.args or []),
-            profile=PROFILE_TOOL,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-            cwd=server.cwd or None,
-            limit=1024 * 1024,
-        )
-
-        init_req = (
-            json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "initialize",
-                    "params": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {},
-                        "clientInfo": {"name": "gideon-probe", "version": "1.0.0"},
-                    },
-                }
-            )
-            + "\n"
-        )
-
-        assert proc.stdin is not None
-        assert proc.stdout is not None
-        proc.stdin.write(init_req.encode())
-        await proc.stdin.drain()
-
-        line = await asyncio.wait_for(
-            proc.stdout.readline(), timeout=_get_probe_timeout()
-        )
-        if not line:
-            server.status = "error"
-            server.error = await _drain_stderr_reason(proc) or "no response"
-            return server
-
-        resp = json.loads(line.decode())
-        if "error" in resp:
-            server.status = "error"
-            server.error = resp["error"].get("message", "unknown error")
-            return server
-
-        notif = (
-            json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "method": "notifications/initialized",
-                }
-            )
-            + "\n"
-        )
-        proc.stdin.write(notif.encode())
-        await proc.stdin.drain()
-
-        list_req = (
-            json.dumps(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/list",
-                    "params": {},
-                }
-            )
-            + "\n"
-        )
-        proc.stdin.write(list_req.encode())
-        await proc.stdin.drain()
-
-        line2 = await asyncio.wait_for(
-            proc.stdout.readline(), timeout=_get_probe_timeout()
-        )
-        if line2:
-            resp2 = json.loads(line2.decode())
-            tools_data = resp2.get("result", {}).get("tools", [])
-            server.tools = [
-                {
-                    "name": t.get("name", ""),
-                    "description": t.get("description", ""),
-                    "inputSchema": t.get("inputSchema", {}),
-                }
-                for t in tools_data
-                if isinstance(t, dict) and t.get("name")
-            ]
-
-        server.status = "ok"
-
-    except asyncio.TimeoutError:
-        server.status = "error"
-        server.error = "timeout"
-        logger.warning(
-            "MCP probe failed [%s]: timeout after %ds",
-            server.name,
-            _get_probe_timeout(),
-        )
-    except FileNotFoundError:
-        server.status = "error"
-        server.error = f"command not found: {server.command}"
-        logger.warning(
-            "MCP probe failed [%s]: command not found: %s", server.name, server.command
-        )
-    except Exception as exc:
-        server.status = "error"
-        server.error = str(exc)[:200]
-        logger.warning("MCP probe failed [%s]: %s", server.name, server.error)
+        tools = await conn.list_tools()
+        if conn.error:
+            stopped = start_refused(server.name, definition_seal(server.name, spec))
+            server.status = "stopped" if stopped else "probing" if conn._failure and conn._failure.pending else "error"
+            server.error = stopped or conn.error
+            server.detail = conn._failure.detail if conn._failure else ""
+        else:
+            server.status = "ok"
+            server.tools = [{"name": tool.name, "description": tool.description, "inputSchema": tool.input_schema, "annotations": dict(tool.annotations)} for tool in tools]
     finally:
-        if proc is not None and proc.returncode is None:
-            await terminate_and_reap(proc, grace=5)
-
+        await conn.shutdown()
     _cache_probe(server)
     return server
 
@@ -828,7 +696,7 @@ async def agent_callable_status(
         for provider in providers
         if isinstance(provider, ConfiguredMcpToolProvider)
     }
-    catalog = await resolve_tool_catalog(providers)
+    catalog = await resolve_tool_catalog(providers, skip=("mcp",), cached_mcp=True)
     disabled = tool_prefs.load_disabled()
     disabled_providers = tool_prefs.load_disabled_providers()
     callable_counts: dict[str, int] = {}
@@ -1104,12 +972,17 @@ def register_servers_for_cc(
     changed = False
 
     for s in servers:
+        if not _server_allowed(s):
+            continue
+        from gideon.integrations.mcp_argument_secrets import resolve_command_line
+
+        executable = resolve_command_line(s.name, {"args": s.args or [], "url": s.url})
         if s.is_remote:
-            entry: dict = {"url": s.url, "type": "streamable-http"}
+            entry: dict = {"url": executable.get("url", ""), "type": "streamable-http"}
             if s.headers:
                 entry["headers"] = s.headers
         else:
-            entry = {"command": s.command, "args": s.args or [], "type": "stdio"}
+            entry = {"command": s.command, "args": executable.get("args", []), "type": "stdio"}
             if s.env:
                 entry["env"] = s.env
 

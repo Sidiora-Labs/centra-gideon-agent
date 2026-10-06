@@ -83,11 +83,9 @@ def _resolve_excluded_tools() -> set[str]:
     try:
         api_base = gateway_base.resolve_api_base()
 
-        secret = ""
-        try:
-            secret = (config_dir() / ".local_secret").read_text().strip()
-        except Exception:
-            pass
+        from gideon.integrations.mcp_core import _internal_secret
+
+        secret = _internal_secret()
 
         session_key = os.environ.get("GIDEON_SESSION_KEY", "")
         if not session_key:
@@ -138,7 +136,9 @@ def _resolve_excluded_tools() -> set[str]:
             headers=headers,
         )
         try:
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            from gideon.engine.home_gateway import open_loopback
+
+            with open_loopback(req, timeout=5) as resp:
                 policy = json.loads(resp.read())
         except urllib.error.HTTPError as http_exc:
             if http_exc.code == 404:
@@ -305,7 +305,7 @@ def leaf_env(parent_env: dict[str, str], lineage: dict[str, str]) -> dict[str, s
     return filtered
 
 
-def leaf_tool_denial(name: str) -> str:
+def leaf_tool_denial(name: str, arguments: dict | None = None) -> str:
     """Why this tool call is refused for a leaf, or "" when it is allowed.
 
     Two rules, both from `batch_compile` rather than restated here — a second copy of a policy is a
@@ -323,7 +323,14 @@ def leaf_tool_denial(name: str) -> str:
     from gideon.security.guardrails.policy import profile_for_session, tool_grant_denial
 
     profile = profile_for_session(os.environ.get("GIDEON_SESSION_KEY", ""))
-    denial = tool_grant_denial(name, profile.tool_grants, profile.tool_allowlist)
+    from gideon.integrations.mcp_core import _aggregated_list_tools
+    from gideon.engine.agents.native.tools import _describe_mcp_tool
+    try:
+        definitions = [_describe_mcp_tool(raw, "gideon-core", trusted_definition=True) for raw in _aggregated_list_tools() if raw.get("name") == name]
+        declared = definitions[0].risk_level if len(definitions) == 1 else ""
+    except Exception:
+        declared = ""
+    denial = tool_grant_denial(name, profile.tool_grants, profile.tool_allowlist, declared=declared, tool_input=arguments)
     if denial:
         return denial
 
@@ -335,11 +342,24 @@ def leaf_tool_denial(name: str) -> str:
             f"{name!r} is an orchestration tool and is denied to a batch leaf at every depth "
             "— a leaf that can fan out again spawns without a budget"
         )
-    if leaf_value(LEAF_READ_ONLY_KEY) == "1" and batch_compile.is_write_tool(name):
+    from gideon.engine.task_modes import classify_invocation, READ_ONLY
+    if leaf_value(LEAF_READ_ONLY_KEY) == "1" and classify_invocation(name, "", arguments, declared=declared) != READ_ONLY:
         return (
             f"{name!r} is a write tool and this leaf is capability=research (read-only) "
             "— declare capability=mutating on the leaf if it must write"
         )
+    return ""
+
+
+def preflight_tool(name: str, args: dict[str, Any], validate_fn) -> str:
+    """Check native lineage and owned argument rules without invoking or logging."""
+    from gideon.assurance.validation import ValidationError
+    if reason := leaf_tool_denial(name, args):
+        return reason
+    try:
+        validate_fn(name, args)
+    except ValidationError as exc:
+        return f"{name} was not run: {exc}"
     return ""
 
 
@@ -355,7 +375,7 @@ def call_tool_with_logging(
     from gideon.assurance.validation import ValidationError
     from gideon.security.sel import sel
 
-    denial = leaf_tool_denial(name)
+    denial = leaf_tool_denial(name, raw_args)
     if denial:
         sel().log_tool_invocation(
             session_key=session_key,

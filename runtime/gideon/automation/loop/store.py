@@ -39,8 +39,9 @@ from gideon.automation.loop.loop import (
     Loop,
     LoopStatus,
     LoopStopReason,
+    held_reason,
 )
-from gideon.core.sqlite_compat import sqlite3
+from gideon.core.sqlite_compat import connect, sqlite3
 
 logger = logging.getLogger(__name__)
 _STATUS_OBSERVERS: list[weakref.WeakMethod] = []
@@ -94,7 +95,7 @@ def _db_path() -> Path:
 
 def _connect() -> sqlite3.Connection:
     _db_path().parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(_db_path()), timeout=5.0)
+    conn = connect(str(_db_path()), timeout=5.0)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")
@@ -667,6 +668,7 @@ def get_redacted(loop_id: str) -> dict | None:
         "producer_id": loop.kind,
     }
     view["pending_question"] = files.pending_question(loop_id)
+    view["held"] = held_reason(loop.status)
     view["verdicts"] = files.get_verdicts(loop_id)
     view["marginal_scores"] = get_marginal_scores(loop_id)
     view["files_dir"] = str(files.loop_dir(loop_id) or "")
@@ -737,6 +739,7 @@ def list_redacted(project_id: str = "", kind: str = "") -> list[dict]:
         d = _redact_loop(loop.to_dict())
         d["findings"] = files.get_findings(loop.id)
         d["total_cycles"] = len(d["findings"])
+        d["held"] = held_reason(loop.status)
         d["feedback_producer"] = {
             "producer_kind": "loop_judge",
             "producer_id": loop.kind,

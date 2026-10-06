@@ -137,6 +137,8 @@ function LoginSection() {
   const [userDraft, setUserDraft] = useState('')
   const [pwDraft, setPwDraft] = useState('')
   const [pwConfirm, setPwConfirm] = useState('')
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [currentCode, setCurrentCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [pwSaved, setPwSaved] = useState(false)
 
@@ -153,13 +155,14 @@ function LoginSection() {
   const userDirty = userDraft.trim() !== (state.username || '')
   const pwLongEnough = pwDraft.length >= 12
   const pwMatches = pwDraft.length > 0 && pwDraft === pwConfirm
-  const canSavePw = pwLongEnough && pwMatches && !busy
+  const proofReady = !state.credential_configured || (!!currentPassword && (!state.totp_enabled || !!currentCode.trim()))
+  const canSavePw = pwLongEnough && pwMatches && proofReady && !busy
 
   const savePassword = () => {
     setBusy(true)
-    api.setLoginPassword(userDraft.trim(), pwDraft)
+    api.setLoginPassword(userDraft.trim(), pwDraft, state.credential_configured ? currentPassword : undefined, state.credential_configured && state.totp_enabled ? currentCode : undefined)
       .then(() => {
-        setPwDraft(''); setPwConfirm('')
+        setPwDraft(''); setPwConfirm(''); setCurrentPassword(''); setCurrentCode('')
         setPwSaved(true); setTimeout(() => setPwSaved(false), 2400)
         load()
       })
@@ -201,6 +204,8 @@ function LoginSection() {
         hint="Both are saved together, in one step — so changing the username means entering the password again. At least 12 characters: length matters more than symbols. Stored as an argon2id hash; it is never shown again, and never leaves this box.">
         <div className="flex flex-col gap-s" style={{ maxWidth: 280 }}>
           <TextInput value={userDraft} onChange={setUserDraft} placeholder="you" ariaLabel="Sign-in username" />
+          {state.credential_configured ? <TextInput type="password" value={currentPassword} onChange={setCurrentPassword} placeholder="Current password" ariaLabel="Current password" /> : null}
+          {state.credential_configured && state.totp_enabled ? <TextInput value={currentCode} onChange={setCurrentCode} placeholder="Authenticator code" ariaLabel="Authenticator code" /> : null}
           <TextInput type="password" value={pwDraft} onChange={setPwDraft} placeholder="New password" ariaLabel="New password" />
           <TextInput type="password" value={pwConfirm} onChange={setPwConfirm} placeholder="Confirm password" ariaLabel="Confirm password" />
           <div className="flex items-center gap-s">
@@ -210,7 +215,7 @@ function LoginSection() {
               disabledReason={busy ? undefined
                 : !pwLongEnough
                   ? (userDirty ? 'Enter the password too — the username is saved with it' : 'Use at least 12 characters')
-                  : 'Both fields must match'}>
+                  : !pwMatches ? 'Both fields must match' : 'Enter your current password and enrolled authenticator code'}>
               {pwSaved ? <Check size={14} /> : null} {pwSaved ? 'Saved' : 'Save sign-in'}
             </Button>
             {pwDraft.length > 0 && !pwLongEnough ? (

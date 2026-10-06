@@ -666,7 +666,7 @@ def _prompt_recall_component(result, *, source: str, policy_revision: int) -> Co
         covered_digest=digest,
         policy_revision=policy_revision,
         cache_region="delta",
-        source_cursor=f"{result.cursor.epoch}:{result.cursor.sequence}",
+        source_cursor=("scoped:" + hashlib.sha256(json.dumps(result.scope_cursors, sort_keys=True).encode()).hexdigest() if result.scope_cursors else f"{result.cursor.epoch}:{result.cursor.sequence}"),
     )
 
 
@@ -684,6 +684,7 @@ def _remote_recall_result(response):
             content_digest=str(hit.content_digest),
             source=hit.source.value,
             kind=hit.kind,
+            scope=hit.scope.to_wire(),
             scores={
                 "keyword": hit.scores.lexical,
                 "vector": hit.scores.semantic,
@@ -719,6 +720,12 @@ def _remote_recall_result(response):
             "" if vector_available else "semantic_unavailable",
         )
     )
+    scope_cursors = getattr(response, "scope_cursors", ())
+    if scope_cursors:
+        arms = []
+        for scope, source_response in response.sources:
+            label = str(scope.workspace_id or "owner")
+            arms.extend((RecallArmEvidence("keyword:" + label, "available", sum(hit.scores.lexical > 0 for hit in source_response.hits)), RecallArmEvidence("vector:" + label, "unavailable" if source_response.degraded and source_response.degradation_reason == "semantic_unavailable" else "available", sum(hit.scores.semantic > 0 for hit in source_response.hits), source_response.degradation_reason or "")))
     return HybridRecallResult(
         hits,
         response.cursor,
@@ -726,6 +733,7 @@ def _remote_recall_result(response):
         response.degraded,
         response.degradation_reason,
         response.suppressed,
+        scope_cursors,
     )
 
 
@@ -810,6 +818,7 @@ class PromptAssembler:
     ) -> PromptRecall:
         """Resolve authoritative daemon recall, with an explicit local fallback."""
         from gideon.hypermid.client import HypermidConnectionError
+        from gideon.security.session_credentials import memory_reach
 
         if not text.strip():
             return PromptRecall("unavailable", "none", reason="empty_query")
@@ -819,12 +828,17 @@ class PromptAssembler:
             candidate = service_for(self.memory).provider
             if getattr(candidate, "name", "") == "hypermid":
                 source = candidate
+        app_receipt = source._app_receipt() if source is not None and hasattr(source, "_app_receipt") else None
+        effective_scope = app_receipt.scope if app_receipt is not None else scope
+        reach = memory_reach(effective_scope, app_receipt=app_receipt)
+        if not reach.read_allowed:
+            return PromptRecall("unavailable", "none", reason=reach.reason)
         remote_failure = ""
         if source is not None:
             bound_scope = getattr(source, "scope", None)
             if scope is None:
                 scope = bound_scope
-            if bound_scope is None or scope != bound_scope:
+            if bound_scope is None or scope not in (bound_scope, app_receipt.scope if app_receipt is not None else bound_scope):
                 raise PermissionError("recall scope does not match Hypermid memory authority")
             try:
                 response = source.search_with_evidence(text, k=limit)
@@ -856,6 +870,8 @@ class PromptAssembler:
                     evidence,
                 )
 
+        if app_receipt is not None:
+            return PromptRecall("unavailable", "hypermid.memory.daemon", reason=remote_failure or "app_scope_unavailable")
         if fallback_archive is None:
             candidate = getattr(self.memory, "vector_store", None)
             if candidate is not source:
@@ -1199,8 +1215,9 @@ class PromptAssembler:
             else self._standing_memory(memory, session_key, agent)
         )
         sections.extend(standing.direct)
-        if not custom:
-            standing.ambient["skill_index"] = self.skills.get_context(agent=agent) or ""
+        skill_library = self._skill_library(agent, custom=custom, session_key=session_key)
+        if skill_library is not None:
+            standing.ambient["skill_index"] = skill_library.get_context(agent=agent) or ""
         if session_key:
             try:
                 from gideon.extensions.skills.ephemeral import context_block
@@ -1456,6 +1473,28 @@ class PromptAssembler:
             compressible=False,
         )
 
+    def _skill_library(self, agent: str | None, *, custom: bool, session_key: str | None = None):
+        from gideon.engine.agents.skill_list import agent_skills
+        from gideon.extensions.skills.loader import agent_skills_dir
+        import copy
+
+        try:
+            configuration = AppConfig.load()
+        except Exception:
+            configuration = None
+        grants = agent_skills(agent, configuration)
+        from gideon.engine.agents.loop_skills import names
+        grants = grants.beside(names(session_key or "", grants.agent))
+        if custom and not grants.listed:
+            return None
+        library = grants.library(self.skills)
+        if grants.agent and not library._scoped:
+            own = agent_skills_dir(grants.agent)
+            if own.is_dir():
+                library = copy.copy(library)
+                library._agent_dir = own
+        return library
+
     def _skill_parts(
         self,
         parts: _Parts,
@@ -1465,6 +1504,7 @@ class PromptAssembler:
         forced: list[str] | None,
         notices: list[str] | None,
         decisions: list["SkillDecision"] | None,
+        library: ProcedureLibrary | None = None,
     ) -> None:
         from gideon.extensions.skills.allocation import (
             FORCED_SCORE,
@@ -1472,10 +1512,12 @@ class PromptAssembler:
             allocate_skills,
         )
 
+        if library is None:
+            return
         requests = []
         loaded_forced = set()
         for name in forced or ():
-            body = self.skills.load_skill(name)
+            body = library.load_skill(name)
             if body:
                 requests.append(
                     SkillRequest(
@@ -1483,10 +1525,10 @@ class PromptAssembler:
                     )
                 )
                 loaded_forced.add(name)
-        if not custom:
+        if not custom or library._allows is not None:
             matches = [
                 name
-                for name in self.skills.get_surfaced_skills(text)
+                for name in library.get_surfaced_skills(text)
                 if name not in loaded_forced
             ]
             try:
@@ -1494,7 +1536,7 @@ class PromptAssembler:
             except Exception:
                 threshold = 2
             if threshold and len(matches) > threshold:
-                descriptions = {row["key"]: row for row in self.skills.list_skills()}
+                descriptions = {row["key"]: row for row in library.list_skills()}
                 lines = [
                     "[Relevant skills — INDEX only. Call skill_invoke{name} to load a skill's full "
                     "steps before using it. These are the matches for this turn; call skill_search(query) "
@@ -1508,13 +1550,13 @@ class PromptAssembler:
                 parts.add("\n".join(lines) + "\n\n", name="skill index")
             else:
                 for name in matches:
-                    body = self.skills.load_skill(name)
+                    body = library.load_skill(name)
                     if body:
                         requests.append(SkillRequest(name=name, content=body))
         if not requests:
             return
         allocation = allocate_skills(
-            self.skills, requests, query=text, session=key or ""
+            library, requests, query=text, session=key or ""
         )
         for name, block in allocation.blocks:
             parts.add(block, name=f"skill: {name}")
@@ -1546,6 +1588,7 @@ class PromptAssembler:
         mode: str = "",
         prompt_use_case: str = "chat",
         blocks_reads: bool = False,
+        blocks_writes: bool = False,
         action_context: str | None = None,
         thread_parent_text: str | None = None,
         system_prompt_override: str = "",
@@ -1617,10 +1660,11 @@ class PromptAssembler:
             parts,
             text,
             session_key,
-            bool(agent and agent != "gideon"),
+            bool(agent and agent.strip().lower() != "gideon"),
             force_skill_ids,
             notices_out,
             skill_decisions_out,
+            self._skill_library(agent, custom=bool(agent and agent.strip().lower() != "gideon"), session_key=session_key),
         )
         if result.action == HOOK_INJECT_CONTEXT:
             parts.add(

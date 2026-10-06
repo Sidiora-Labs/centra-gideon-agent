@@ -7,8 +7,8 @@ from dataclasses import dataclass
 
 from .models import JsonValue, Scope
 
-_NATIVE_OPERATIONS = ("read", "append", "revise", "delete", "restore")
-_NATIVE_RESOURCES = ("memory-records", "memory-list")
+_NATIVE_OPERATIONS = ("read", "append", "revise", "delete", "restore", "administer")
+_NATIVE_RESOURCES = ("memory-records", "memory-list", "memory-service", "memory-embedding")
 _NATIVE_GRANT_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000
 
 

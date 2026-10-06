@@ -34,6 +34,8 @@ from urllib.parse import unquote
 
 from aiohttp import web
 
+from gideon.workspace.artifacts.deploy import SERVED_PATH, redacted_serve_path
+
 from gideon.core.config.loader import _DEFAULT_PORT
 from gideon.interfaces.dashboard.origin import is_loopback, is_private_network
 from gideon.security.sel import sel as _sel_fn
@@ -418,9 +420,32 @@ _HANDLER_AUTH_ROUTES = frozenset(
 )
 
 
+def _is_openai_authenticated_route(request: web.Request) -> bool:
+    """Delegate only native resolved OpenAI operations to their own admission checks."""
+    from gideon.integrations.inbound import openai_dialect as dialect
+    resource = request.match_info.route.resource
+    if resource is None or resource.canonical != request.path:
+        return False
+    routes = {
+        ("POST", dialect.ROUTE_CHAT): dialect.handle_chat_completions,
+        ("GET", dialect.ROUTE_MODELS): dialect.handle_models,
+        ("HEAD", dialect.ROUTE_MODELS): dialect.handle_models,
+        ("POST", dialect.ROUTE_SPEECH): dialect.handle_speech,
+        ("POST", dialect.ROUTE_TRANSCRIPTIONS): dialect.handle_transcriptions,
+        ("GET", dialect.ROUTE_VOICES): dialect.handle_voices,
+        ("HEAD", dialect.ROUTE_VOICES): dialect.handle_voices,
+    }
+    expected = routes.get((request.method, resource.canonical))
+    return expected is not None and request.match_info.handler is expected
+
+
 def _uses_handler_auth(request: web.Request) -> bool:
     """Whether the resolved route authenticates request credentials itself."""
     resource = request.match_info.route.resource
+    if (resource is not None and resource.canonical in (
+        "/artifacts/serve/{slug}", "/artifacts/serve/{slug}/{path}"
+    ) and request.method in ("GET", "HEAD") and SERVED_PATH.fullmatch(request.path)):
+        return True
     return (
         resource is not None
         and (
@@ -526,7 +551,7 @@ def _sign(payload: bytes) -> str:
 
 def generate_token(
     user_id: str, ttl_seconds: int = 3600, *, app: str = "", kind: str = "cli",
-    label: str = "", client_ip: str = "",
+    label: str = "", client_ip: str = "", issuer: str = "local",
 ) -> str:
     """Return ``base64url(payload).base64url(signature)``.
 
@@ -557,7 +582,7 @@ def generate_token(
         )
 
         remember_session(
-            nonce, now + session_ttl, issuer="app" if app else "local",
+            nonce, now + session_ttl, issuer="app" if app else issuer,
             minted_at=now, ip=client_ip, kind="app" if app else display_kind,
             label=app or label, pool=pool,
         )
@@ -687,6 +712,23 @@ def token_nonce(token: str) -> str:
     return nonce if isinstance(nonce, str) else ""
 
 
+def served_port(request: Any) -> int:
+    """Read the listening socket's port; client Host headers carry no authority."""
+    try:
+        transport = getattr(request, "transport", None)
+        address = transport.get_extra_info("sockname") if transport else None
+        if isinstance(address, tuple) and len(address) > 1 and isinstance(address[1], int):
+            return address[1] if 0 < address[1] <= 65535 else 0
+    except Exception:
+        pass
+    return 0
+
+
+def session_cookie_name(request: Any, port: int) -> str:
+    """Name dynamic-port sessions for the socket that actually accepted the request."""
+    return f"gideon_token_{port or served_port(request)}"
+
+
 def attach_validated_paired_session(
     request: web.Request, *, port: int = _DEFAULT_PORT
 ) -> bool:
@@ -697,7 +739,7 @@ def attach_validated_paired_session(
     live cookie session and its nonce must still name a paired-device row before any identity is
     attached. Validation also drives the normal throttled device ``last_seen`` update.
     """
-    token = request.cookies.get(f"gideon_token_{port}", "")
+    token = request.cookies.get(session_cookie_name(request, port), "")
     if not token:
         return False
     try:
@@ -927,11 +969,66 @@ def _adopt_credentials(request: web.Request, credentials: _RequestCredentials) -
     request["session_nonce"] = token_nonce(credentials.token)
 
 
+INTERNAL_ROUTES: frozenset[str] = frozenset({
+    "POST /api/send-message", "POST /api/session-keepalive",
+    "GET /api/session-tool-policy", "POST /api/hooks/agent",
+    "POST /api/outbox/notify", "POST /api/channel/upload-file",
+    "POST /api/tools/invoke", "POST /api/computer-use/dispatch",
+})
+MIXED_INTERNAL_ROUTES: frozenset[str] = frozenset({
+    "GET /api/spawn", "POST /api/spawn", "GET /api/spawn/{agent_id}",
+    "GET /api/lessons", "POST /api/lessons", "DELETE /api/lessons",
+    "GET /api/memory/recall", "GET /api/memory/approval-rules",
+    "POST /api/memory/approval-rules", "DELETE /api/memory/approval-rules/{key:.+}",
+    "POST /api/prompts/{name:.+}/render", "POST /api/workflows",
+    "POST /api/workflows/runs", "POST /api/workflows/batches", "GET /api/workflows/batches/{name}",
+    "GET /api/autonudge/session/{session_name}",
+    "DELETE /api/autonudge/{loop_id}", "GET /api/chat/sessions/bound-project",
+    "GET /api/context", "POST /api/triggers/{id}/run",
+})
+_ROUTE_PARAM = re.compile(r"\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::(?P<regex>[^{}]+))?\}")
+
+
+@dataclass(frozen=True)
+class InternalRoute:
+    method: str
+    template: str
+    pattern: re.Pattern[str]
+
+    @classmethod
+    def parse(cls, entry: str) -> "InternalRoute":
+        method, _, template = entry.strip().partition(" ")
+        template = template.strip()
+        if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"} or not template.startswith("/"):
+            raise ValueError(f"Internal operation must be '<METHOD> /path': {entry!r}")
+        parts: list[str] = []
+        at = 0
+        for param in _ROUTE_PARAM.finditer(template):
+            parts.append(re.escape(template[at:param.start()]))
+            parts.append(f"(?:{param['regex']})" if param["regex"] else "[^{{}}/]+")
+            at = param.end()
+        parts.append(re.escape(template[at:]))
+        return cls(method, template, re.compile("".join(parts)))
+
+    def admits(self, method: str, path: str) -> bool:
+        return method == self.method and self.pattern.fullmatch(path) is not None
+
+
+def _legacy_internal_routes(paths: frozenset[str]) -> frozenset[str]:
+    known = INTERNAL_ROUTES | MIXED_INTERNAL_ROUTES
+    entries = frozenset(entry for entry in known if entry.partition(" ")[2] in paths)
+    unknown = paths - {entry.partition(" ")[2] for entry in entries}
+    if unknown:
+        raise ValueError("Internal paths require explicit method/path operation declarations")
+    return entries
+
+
 def token_auth_middleware(
     *,
+    internal_routes: frozenset[str] = frozenset(),
     internal_paths: frozenset[str] = frozenset(),
     mixed_internal_paths: frozenset[str] = frozenset(),
-    mixed_internal_routes: frozenset[tuple[str, str]] = frozenset(),
+    mixed_internal_routes: frozenset[str | tuple[str, str]] = frozenset(),
     internal_secret: str = "",
     port: int = _DEFAULT_PORT,
     local_only: bool = True,
@@ -942,23 +1039,29 @@ def token_auth_middleware(
     local port forwarders (socat, ssh -R, custom scripts) make remote
     traffic appear as 127.0.0.1, which would otherwise bypass auth entirely.
 
-    *internal_paths* are exact paths that internal processes (mcp-core,
-    doctor) call — these require loopback AND a matching
-    ``X-Internal-Secret`` header (read from ``~/.gideon/.local_secret``).
+    *internal_routes* declares exact method/path templates for internal
+    processes. These require loopback AND a matching ``X-Internal-Secret``.
     Non-loopback access to these paths is always denied.
 
-    *mixed_internal_paths* are paths called by BOTH internal processes
+    *mixed_internal_routes* declares operations called by BOTH internal processes
     (loopback + secret) AND the browser (cookie auth).  On non-loopback
     they perform explicit cookie validation (deny-by-default) instead
     of hard-denying, so DCV/SSH-forwarded browsers polling these routes
     (e.g. ``/api/spawn`` every 5s) don't trigger false session-expired
     banners.  Use this for any internal-path that the browser polls.
 
-    *mixed_internal_routes* applies the same behavior to exact ``(method,
-    path)`` pairs. Use it when internal access must be limited to a specific
-    method; other methods on that path continue through normal token auth.
+    Legacy path arguments select known operations only; they never authorize
+    arbitrary methods or descendants. Legacy method/path tuples remain accepted.
 
     """
+    strict_routes = tuple(InternalRoute.parse(entry) for entry in sorted(
+        internal_routes | _legacy_internal_routes(internal_paths)
+    ))
+    mixed_entries = frozenset(
+        " ".join(entry) if isinstance(entry, tuple) else entry for entry in mixed_internal_routes
+    ) | _legacy_internal_routes(mixed_internal_paths)
+    mixed_routes = tuple(InternalRoute.parse(entry) for entry in sorted(mixed_entries))
+
     from gideon.security.exposure import public_proxy_bypass_warning
 
     proxy_bypass_warning = public_proxy_bypass_warning()
@@ -1014,7 +1117,7 @@ def token_auth_middleware(
     def _select_credentials(request: web.Request, _port: int) -> _RequestCredentials:
         """Choose and validate one owner session across query, header and cookie carriers."""
         query_token = request.query.get("token") or ""
-        cookie_token = request.cookies.get(f"gideon_token_{_port}", "")
+        cookie_token = request.cookies.get(session_cookie_name(request, _port), "")
         bearer_present, bearer = _bearer_credential(request)
         bearer_check = (
             validate_token_with_app(bearer, use_session_exp=True) if bearer else None
@@ -1060,10 +1163,40 @@ def token_auth_middleware(
 
     @web.middleware
     async def middleware(request: web.Request, handler: object) -> web.StreamResponse:
-        if os.environ.get("GIDEON_DEV_NO_AUTH") == "1":
-            if not attach_validated_paired_session(request, port=port):
-                request["user"] = request.get("user") or "dev-local"
-            return await handler(request)  # type: ignore[operator]
+        path = request.path
+        routed = request.rel_url.path_safe
+        _matches_strict = any(route.admits(request.method, routed) for route in strict_routes)
+        _matches_mixed = any(route.admits(request.method, routed) for route in mixed_routes)
+        if "X-Internal-Secret" in request.headers:
+            from gideon.http_errors import json_error
+
+            if not (_matches_strict or _matches_mixed):
+                _sel_fn().log_api_access(
+                    caller=request.remote or "", operation="internal_auth", outcome="denied",
+                    source="token_auth", resources=path,
+                    error="operation does not take internal credential",
+                )
+                _log_auth(request, "internal", "denied", "operation does not take internal credential")
+                return json_error("internal_route_refused", status=403)
+            if not internal_secret or not hmac.compare_digest(
+                internal_secret, request.headers["X-Internal-Secret"]
+            ):
+                _sel_fn().log_api_access(
+                    caller=request.remote or "", operation="internal_auth", outcome="denied",
+                    source="token_auth", resources=path, error="wrong internal credential",
+                )
+                _log_auth(request, "internal", "denied", "wrong internal credential")
+                return json_error("internal_secret_invalid", status=403)
+            supplied_proof = request.headers.get("X-Session-Proof", "")
+            if supplied_proof:
+                from gideon.security.session_credentials import verify
+                work = verify(supplied_proof, request.headers.get("X-Session-Key", ""))
+                if work is None:
+                    return json_error("internal_secret_invalid", status=403)
+                request["_session_work_proof"] = work
+        elif "X-Session-Proof" in request.headers:
+            from gideon.http_errors import json_error
+            return json_error("internal_secret_invalid", status=403)
 
         if os.environ.get("GIDEON_BYPASS_LOCAL_NETWORKS") == "1":
             client_ip = _resolved_client_ip(request)
@@ -1078,17 +1211,6 @@ def token_auth_middleware(
         if (request.method, path) in _HANDLER_AUTH_ROUTES:
             return await handler(request)  # handler verifies the signed peer envelope
 
-        _matches_strict = internal_paths and (
-            path in internal_paths
-            or any(path.startswith(p + "/") for p in internal_paths)
-        )
-        _matches_mixed = mixed_internal_paths and (
-            path in mixed_internal_paths
-            or any(path.startswith(p + "/") for p in mixed_internal_paths)
-        )
-        _matches_mixed = bool(
-            _matches_mixed or (request.method, path) in mixed_internal_routes
-        )
         if not local_only and _matches_strict and not _matches_mixed:
             _matches_mixed = True
             _matches_strict = False
@@ -1243,7 +1365,7 @@ def token_auth_middleware(
             return await handler(request)  # type: ignore[operator]
         if path in _BYPASS_EXACT:
             return await handler(request)  # type: ignore[operator]
-        if _uses_handler_auth(request):
+        if _is_openai_authenticated_route(request) or _uses_handler_auth(request):
             return await handler(request)  # type: ignore[operator]
         credentials = _select_credentials(request, port)
         if not credentials.valid:
@@ -1255,7 +1377,7 @@ def token_auth_middleware(
         user_id = credentials.user_id
         app_name = credentials.app
         from_query = credentials.source == "query"
-        cookie_name = f"gideon_token_{port}"
+        cookie_name = session_cookie_name(request, port)
 
         client_ip = _resolved_client_ip(request)
 
@@ -1310,9 +1432,10 @@ def token_auth_middleware(
 def auth_middleware(
     auth_cfg: Any,  # gideon.security.auth.modes.AuthConfig — typed as Any to avoid circular import
     *,
+    internal_routes: frozenset[str] = frozenset(),
     internal_paths: frozenset[str] = frozenset(),
     mixed_internal_paths: frozenset[str] = frozenset(),
-    mixed_internal_routes: frozenset[tuple[str, str]] = frozenset(),
+    mixed_internal_routes: frozenset[str | tuple[str, str]] = frozenset(),
     internal_secret: str = "",
     port: int = _DEFAULT_PORT,
     local_only: bool = True,
@@ -1352,6 +1475,7 @@ def auth_middleware(
 
     if mode == AuthMode.LOCAL_TOKEN:
         return token_auth_middleware(
+            internal_routes=internal_routes,
             internal_paths=internal_paths,
             mixed_internal_paths=mixed_internal_paths,
             mixed_internal_routes=mixed_internal_routes,
@@ -1374,12 +1498,12 @@ def auth_middleware(
                 return await handler(request)  # type: ignore[operator]
             if path in _BYPASS_EXACT:
                 return await handler(request)  # type: ignore[operator]
-            if _uses_handler_auth(request):
+            if _is_openai_authenticated_route(request) or _uses_handler_auth(request):
                 return await handler(request)  # type: ignore[operator]
 
             auth_header = request.headers.get("Authorization", "")
             if not auth_header.startswith("Bearer "):
-                logger.debug("api_key_mw: missing Bearer header for %s", path)
+                logger.debug("api_key_mw: missing Bearer header for %s", redacted_serve_path(path))
                 return _deny_401(request, "Unauthorized")
             provided = auth_header[len("Bearer ") :]
             if not api_key_env:
@@ -1390,7 +1514,7 @@ def auth_middleware(
                 logger.warning("api_key_mw: env var %r is not set", api_key_env)
                 return _deny_401(request, "Unauthorized")
             if not hmac.compare_digest(provided, expected):
-                logger.debug("api_key_mw: invalid API key for %s", path)
+                logger.debug("api_key_mw: invalid API key for %s", redacted_serve_path(path))
                 return _deny_401(request, "Unauthorized")
             request["user"] = "api_key"
             return await handler(request)  # type: ignore[operator]
@@ -1422,18 +1546,18 @@ def auth_middleware(
                 return await handler(request)  # type: ignore[operator]
             if path in _BYPASS_EXACT:
                 return await handler(request)  # type: ignore[operator]
-            if _uses_handler_auth(request):
+            if _is_openai_authenticated_route(request) or _uses_handler_auth(request):
                 return await handler(request)  # type: ignore[operator]
 
             auth_header = request.headers.get("Authorization", "")
             if not auth_header.startswith("Bearer "):
-                logger.debug("oauth2_mw: missing Bearer header for %s", path)
+                logger.debug("oauth2_mw: missing Bearer header for %s", redacted_serve_path(path))
                 return _deny_401(request, "Unauthorized")
             token = auth_header[len("Bearer ") :]
             try:
                 claims = _verifier.verify(token)
             except OidcVerificationError as exc:
-                logger.debug("oauth2_mw: JWT verification failed for %s: %s", path, exc)
+                logger.debug("oauth2_mw: JWT verification failed for %s: %s", redacted_serve_path(path), exc)
                 return _deny_401(request, "Unauthorized")
             request["user"] = claims.get("sub", "")
             return await handler(request)  # type: ignore[operator]
@@ -1486,8 +1610,14 @@ def _deny(request: web.Request, reason: str) -> web.Response:
             status=302,
             headers={**headers, "Location": "/login", "Cache-Control": "no-store"},
         )
+    page = _403_HTML.format(reason=reason)
+    if os.environ.get("GIDEON_INSTALL_KIND") == "desktop":
+        start = page.index("<p>Run <code>")
+        end = page.index("</div>", start)
+        page = page[:start] + "<p>Your desktop session needs a new sign-in. Quit Gideon and open it again.</p>" + page[end:]
+        page = page[:page.index("<script>")] + "</body></html>"
     return web.Response(
-        text=_403_HTML.format(reason=reason),
+        text=page,
         status=403,
         content_type="text/html",
         headers=headers,
@@ -1502,8 +1632,30 @@ def _log_auth(
             caller=user_id or request.remote or "unknown",
             operation="dashboard.token_auth",
             outcome=outcome,
-            resources=f"{request.path};carrier={carrier}" if carrier else request.path,
+            resources=f"{redacted_serve_path(request.path)};carrier={carrier}" if carrier else redacted_serve_path(request.path),
             error=error,
         )
     except Exception:
         logger.warning("Failed to log auth event to SEL", exc_info=True)
+
+
+def renew_sign_in(request: web.Request, *, ttl_seconds: int, user_id: str) -> str:
+    """Rotate a credential-proven owner session without freshening any copied old cookie."""
+    from gideon.interfaces.dashboard.session_store import load_session_records, save_session_records, end_session
+    nonce = str(request.get("session_nonce") or "")
+    records = load_session_records()
+    previous = records.get(nonce)
+    token = generate_token(user_id, ttl_seconds=ttl_seconds, kind=previous.kind if previous else "browser", label=previous.label if previous else "Browser", client_ip=request.remote or "")
+    records = load_session_records()
+    replacement = records.get(token_nonce(token))
+    if previous is not None and replacement is not None:
+        replacement.device = previous.device
+        replacement.issuer = previous.issuer if previous.device is not None else "password"
+        if replacement.device is not None:
+            from dataclasses import replace
+            replacement.device = replace(replacement.device, minted_at=replacement.minted_at)
+        save_session_records(records)
+    if nonce:
+        end_session(nonce, "replaced")
+        revoke_nonce(nonce)
+    return token

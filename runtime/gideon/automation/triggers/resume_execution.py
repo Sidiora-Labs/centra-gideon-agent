@@ -214,4 +214,4 @@ class ResumeExecution:
         try:
             return self.invoke()
         finally:
-            executor.release_claim_for(self.trigger_id, base_dir=self.base_dir)
+            executor.release_claim_for(self.trigger_id, base_dir=self.base_dir, holder=str(self.payload.get("claim_holder") or ""))

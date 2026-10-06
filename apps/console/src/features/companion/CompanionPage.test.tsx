@@ -45,6 +45,16 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('the companion approvals queue', () => {
+  it('shows backend effects and protected removal while retaining once-only decisions', async () => {
+    approvals.mockResolvedValue([{ ...AP, risk: 'unchecked', blast_radius: { writes: true, shell: true, network: false, readOnly: false }, protected_delete: 'This would delete the working folder.' }])
+    render(<CompanionPage {...route} />)
+    await screen.findByText('Not checked')
+    expect(screen.getByText('writes files, runs a command')).toBeTruthy()
+    expect(screen.getByText('This would delete the working folder.')).toBeTruthy()
+    expect(screen.queryByText('This chat')).toBeNull()
+    expect(screen.queryByText('Reads only')).toBeNull()
+  })
+
   it('renders the full decision context from GET /api/approvals', async () => {
     approvals.mockResolvedValue([AP])
     render(<CompanionPage {...route} />)

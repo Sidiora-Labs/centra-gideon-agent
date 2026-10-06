@@ -1,4 +1,5 @@
 import { TriggerReview } from './TriggerReview'
+import { UnreadableNotice } from './UnreadableNotice'
 import { useEffect, useId, useMemo, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
 import { Plus, Zap, Clock, Pencil, CalendarDays, ChevronDown, ChevronRight, Users, ShieldOff, Trash2, FlaskConical, Play } from 'lucide-react'
@@ -55,7 +56,9 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
   const [showSuppressed, setShowSuppressed] = useState(false)
   const runHistoryId = useId()
 
-  const { data: schedules, error: schedulesErr, refresh: refreshSchedules } = useQuery('triggers:schedules', () => api.schedules().then((d) => d.jobs), { persist: false })
+  const { data: scheduleList, error: schedulesErr, refresh: refreshSchedules } = useQuery('triggers:schedules', () => api.schedules(), { persist: false })
+  const schedules = scheduleList?.jobs
+  const unreadable = scheduleList?.unreadable ?? []
   const { data: hooks, error: hooksErr, refresh: refreshHooks } = useQuery('triggers:hooks', () => api.hooks(), { persist: true })
   const catalog = useTriggerVariables()
   const { data: stores, error: storesErr, refresh: refreshStores } = useQuery('triggers:store', () => api.storeTriggers(), { persist: false })
@@ -153,11 +156,12 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
         <WeekGridView onOpenTrigger={(id) => setQuery({ open: id, edit: null, view: 'list' })} />
       ) : (
       <div className="mx-auto px-l py-l" style={{ maxWidth: 'var(--content-width)' }}>
+        <UnreadableNotice sources={unreadable} />
         {loadFailed ? (
           <LoadError what="triggers" error={schedulesErr || hooksErr || storesErr}
             onRetry={() => { loadSchedules(); refreshHooks(); loadStores(); }} />
         ) : triggers === null ? <ListSkeleton rows={6} what="triggers" /> : triggers.length === 0 ? (
-              !q && filter === 'all' ? (
+              unreadable.length > 0 ? null : !q && filter === 'all' ? (
                 <PresetEmptyState
                   title="No triggers"
                   hint="A trigger runs an action when something happens. Each of these opens the create form already filled in, ready for you to review and save."

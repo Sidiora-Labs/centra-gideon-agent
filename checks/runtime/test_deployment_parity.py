@@ -11,8 +11,13 @@ The Compose path auto-detects the container runtime (docker preferred, then
 finch); there is no command-line selector.
 """
 
+import contextlib
 import json
 import os
+import re
+import shlex
+import socket
+import sys
 import shutil
 import subprocess
 import tempfile
@@ -22,6 +27,9 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+import yaml
+
+from gideon.security.security import redact_for_display
 
 _REQUIRED_ENDPOINTS = [
     "/api/system",
@@ -33,15 +41,19 @@ _REQUIRED_ENDPOINTS = [
     "/api/agents",
 ]
 
-_PORT = 17777
-_BASE_URL = f"http://127.0.0.1:{_PORT}"
+_SERVICE_ARGS = ("gateway", "--no-open")
+_REPO = Path(__file__).resolve().parents[2]
 _STARTUP_TIMEOUT = 30
 
 
-def _wait_for_gateway(base_url: str, timeout: float = _STARTUP_TIMEOUT) -> bool:
+def _wait_for_gateway(
+    base_url: str, timeout: float = _STARTUP_TIMEOUT, proc=None
+) -> bool:
     """Poll /api/system until it responds or timeout expires."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if proc is not None and proc.poll() is not None:
+            return False
         try:
             req = urllib.request.Request(f"{base_url}/api/system")
             with urllib.request.urlopen(req, timeout=2):
@@ -69,33 +81,86 @@ def _fetch(url: str) -> dict:
         return {"_error": str(exc)}
 
 
-@pytest.fixture(scope="module")
-def service_gateway():
-    """Start the gateway via `gideon gateway` subprocess."""
-    gideon = shutil.which("gideon")
-    if not gideon:
-        pytest.skip("gideon not on PATH — service path not available")
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
 
+
+def _service_env(scratch: Path, executable: str) -> dict[str, str]:
+    home = scratch / "home"
+    runtime_home = scratch / "gideon-home"
+    home.mkdir()
+    runtime_home.mkdir()
+    (runtime_home / "config.json").write_text(
+        json.dumps({"updates": {"check_enabled": False}}), encoding="utf-8"
+    )
+    env = {
+        "HOME": str(home),
+        "PATH": os.pathsep.join(
+            [str(Path(executable).parent), "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        ),
+        "PYTHONPATH": str(_REPO / "runtime"),
+        "GIDEON_HOME": str(runtime_home),
+        "GIDEON_BIND_HOST": "127.0.0.1",
+        "GIDEON_DISABLE_LIVE_WRITES": "1",
+        "GIDEON_ACP_NO_PROVISION": "1",
+        "GIDEON_SKIP_APP_BACKENDS": "1",
+        "GIDEON_SKIP_APP_WORKERS": "1",
+    }
+    for name in ("TMPDIR", "LANG", "LC_ALL"):
+        if os.environ.get(name):
+            env[name] = os.environ[name]
+    return env
+
+
+def _exit_output(log: Path) -> str:
+    text = log.read_text(encoding="utf-8", errors="replace")
+    text = re.sub(r"([?&]token=)[^\s&#]+", r"\1<redacted>", text)
+    text = re.sub(r"(\"token\"\s*:\s*\")[^\"]+(\")", r"\1<redacted>\2", text)
+    return redact_for_display(text)[-4000:]
+
+
+@contextlib.contextmanager
+def _service_gateway_at(command: list[str]):
     with tempfile.TemporaryDirectory() as tmp:
-        env = {**os.environ, "GIDEON_HOME": tmp, "GIDEON_PORT": str(_PORT)}
-        proc = subprocess.Popen(
-            [gideon, "gateway", "--no-browser"],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        scratch = Path(tmp)
+        port = _free_port()
+        base_url = f"http://127.0.0.1:{port}"
+        output = scratch / "gateway.log"
+        with output.open("wb") as log:
+            proc = subprocess.Popen(
+                [*command, *_SERVICE_ARGS, "--port", str(port)],
+                env=_service_env(scratch, command[0]),
+                cwd=scratch,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
         try:
-            if not _wait_for_gateway(_BASE_URL):
-                proc.terminate()
-                proc.wait(timeout=5)
+            if not _wait_for_gateway(base_url, proc=proc):
+                if proc.poll() is not None:
+                    pytest.fail(
+                        f"Gateway exited ({proc.returncode}) before it answered. It printed:\n"
+                        f"{_exit_output(output)}",
+                        pytrace=False,
+                    )
                 pytest.skip(f"Gateway did not start within {_STARTUP_TIMEOUT}s")
-            yield _BASE_URL
+            yield base_url
         finally:
             proc.terminate()
             try:
                 proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 proc.kill()
+                proc.wait()
+
+
+@pytest.fixture(scope="module")
+def service_gateway():
+    executable = shutil.which("gideon")
+    command = [executable] if executable else [sys.executable, "-m", "gideon"]
+    with _service_gateway_at(command) as base_url:
+        yield base_url
 
 
 def _container_runtime() -> str | None:
@@ -183,3 +248,66 @@ def test_compose_path_endpoint_responds(compose_gateway, endpoint):
     assert "_error" not in data or data.get(
         "_auth_required"
     ), f"Endpoint {endpoint} returned error on Compose path: {data}"
+
+
+def _deployment_commands():
+    commands = []
+    for compose in sorted((_REPO / "infrastructure/compose").glob("compose*.yaml")):
+        services = (yaml.safe_load(compose.read_text()) or {}).get("services") or {}
+        for name, service in services.items():
+            for key in ("entrypoint", "command"):
+                argv = (service or {}).get(key)
+                argv = shlex.split(argv) if isinstance(argv, str) else argv
+                if argv and argv[0] == "gideon":
+                    commands.append((f"{compose.name}:{name}.{key}", argv))
+    for dockerfile in sorted((_REPO / "infrastructure/docker").glob("Dockerfile*")):
+        for line in dockerfile.read_text().splitlines():
+            match = re.match(r"\s*(CMD|ENTRYPOINT)\s+(\[.*\])\s*$", line)
+            if match:
+                argv = json.loads(match.group(2))
+                if argv and argv[0] == "gideon":
+                    commands.append((f"{dockerfile.name}:{match.group(1)}", argv))
+    return commands
+
+
+def test_deployment_commands_use_the_real_cli_parser():
+    from gideon.interfaces.cli.main import build_parser
+
+    commands = [
+        ("service fixture", ["gideon", *_SERVICE_ARGS, "--port", "10000"]),
+        *_deployment_commands(),
+    ]
+    assert any(where == "Dockerfile.backend:CMD" for where, _ in commands)
+    for where, argv in commands:
+        build_parser().parse_args(argv[1:])
+
+
+def test_service_child_environment_is_isolated(tmp_path):
+    env = _service_env(tmp_path, sys.executable)
+    assert env["HOME"] == str(tmp_path / "home")
+    assert env["GIDEON_HOME"] == str(tmp_path / "gideon-home")
+    assert not json.loads((tmp_path / "gideon-home/config.json").read_text())[
+        "updates"
+    ]["check_enabled"]
+    assert env["GIDEON_DISABLE_LIVE_WRITES"] == "1"
+    assert env["GIDEON_SKIP_APP_WORKERS"] == "1"
+
+
+def test_service_child_early_exit_fails_promptly():
+    started = time.monotonic()
+    with pytest.raises(pytest.fail.Exception, match=r"exited \(2\) before it answered"):
+        with _service_gateway_at(
+            [sys.executable, "-m", "gideon", "--not-a-valid-option"]
+        ):
+            pass
+    assert time.monotonic() - started < _STARTUP_TIMEOUT / 3
+
+
+def test_service_diagnostics_redact_dashboard_tokens(tmp_path):
+    log = tmp_path / "gateway.log"
+    log.write_text(
+        'Dashboard http://127.0.0.1:1?token=synthetic.placeholder\nGIDEON_READY:{"token":"synthetic.placeholder"}'
+    )
+    output = _exit_output(log)
+    assert "synthetic.placeholder" not in output
+    assert "<redacted>" in output

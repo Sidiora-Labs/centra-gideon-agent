@@ -35,6 +35,8 @@ export function ExternalAccessPanel() {
   const { data, status, error: readError, refresh } = useQuery(CACHE_KEY, () => api.externalAccess(), {
     persist: false,
   })
+  const [newClientLabel, setNewClientLabel] = useState('')
+  const [keepConversation, setKeepConversation] = useState(false)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [freshToken, setFreshToken] = useState<{ label: string; token: string } | null>(null)
@@ -244,6 +246,25 @@ export function ExternalAccessPanel() {
       <Section
         title="Clients"
         hint="A client is one integration, with its own token and its own limits. Its bindings are pins, not defaults: a request that asks for a different agent or an un-listed tool is refused, never quietly redirected.">
+        <form className="mb-3 flex flex-col gap-2 rounded-lg bg-surface-container px-4 py-3" onSubmit={(event) => {
+          event.preventDefault()
+          const label = newClientLabel.trim()
+          if (!label || busy) return
+          void act(async () => {
+            const made = await api.externalAccessCreateClient({ label, surfaces: ['openai'], persistent_sessions: keepConversation })
+            setFreshToken({ label: made.label, token: made.token })
+            setNewClientLabel('')
+          }, 'create-client')
+        }}>
+          <label data-type="body-s" className="flex flex-col gap-1">
+            OpenAI-compatible client name
+            <input aria-label="OpenAI-compatible client name" value={newClientLabel} onChange={(event) => setNewClientLabel(event.target.value)}
+              className="h-9 rounded-md bg-surface-high px-3 text-on-surface" />
+          </label>
+          <Toggle on={keepConversation} onChange={setKeepConversation} disabled={busy === 'create-client'} label="One conversation per user" />
+          <p data-type="caption" className="text-on-surface-low">Off: each request is answered alone. On: requests with the same user value continue a conversation.</p>
+          <Button size="sm" loading={busy === 'create-client'} disabled={!newClientLabel.trim()} type="submit">Create client</Button>
+        </form>
         {freshToken && (
           <div
             data-type="body-s" className="mb-3 rounded-lg bg-surface-container px-4 py-3"
@@ -281,6 +302,7 @@ export function ExternalAccessPanel() {
                 onToggleDisabled={(v) =>
                   act(() => api.externalAccessSetClientDisabled(c.client_id, v), c.client_id)
                 }
+                onPersistence={(value) => act(() => api.externalAccessSetClientPersistentSessions(c.client_id, value), c.client_id)}
                 onRevoke={() =>
                   act(() => api.externalAccessRevokeClient(c.client_id), c.client_id)
                 } />
@@ -376,11 +398,13 @@ function ClientRow({
   client,
   busy,
   onToggleDisabled,
+  onPersistence,
   onRevoke,
 }: {
   client: ExternalAccessClient
   busy: string
   onToggleDisabled: (v: boolean) => void
+  onPersistence: (v: boolean) => void
   onRevoke: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
@@ -406,6 +430,13 @@ function ClientRow({
           </span>
         </div>
       </div>
+      {client.surfaces.includes('openai') && (
+        <div className="flex min-w-40 flex-1 flex-col gap-1">
+          <Toggle on={!!client.persistent_sessions} onChange={onPersistence} disabled={busy === client.client_id}
+            label={`${client.label || 'Client'}: one conversation per user`} />
+          <span data-type="caption" className="text-on-surface-low">{client.persistent_sessions ? 'One per user' : 'Each request alone'}. Changing this starts new conversations. Earlier conversations remain in history.</span>
+        </div>
+      )}
       {client.disabled && (
         <span
           data-type="caption" className="shrink-0 rounded-pill px-2 py-0.5"

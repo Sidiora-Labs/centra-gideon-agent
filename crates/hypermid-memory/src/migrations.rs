@@ -2,7 +2,7 @@ use hypermid_contracts::Digest;
 use hypermid_store::authorization::AUTHORIZATION_SCHEMA_SQL;
 use hypermid_store::Migration;
 
-pub const MEMORY_SCHEMA_VERSION: u64 = 2;
+pub const MEMORY_SCHEMA_VERSION: u64 = 4;
 pub const MEMORY_COMPATIBILITY_FLOOR: u64 = 1;
 
 const MEMORY_SCHEMA_V1: u64 = 1;
@@ -92,11 +92,23 @@ fn v1_schema_digest() -> Digest {
     Digest::sha256(KNOWLEDGE_SCHEMA_SQL.as_bytes())
 }
 
-pub fn schema_digest() -> Digest {
+fn v2_schema_digest() -> Digest {
     let mut schema = b"hypermid-memory-schema-v2\0".to_vec();
     schema.extend_from_slice(KNOWLEDGE_SCHEMA_SQL.as_bytes());
     schema.push(0);
     schema.extend_from_slice(SHARING_JUDGMENTS_SCHEMA_SQL.as_bytes());
+    Digest::sha256(&schema)
+}
+
+fn v3_schema_digest() -> Digest {
+    let mut schema = v2_schema_digest().to_hex().into_bytes();
+    schema.extend_from_slice(crate::private_scopes::PRIVATE_SCOPES_SCHEMA.as_bytes());
+    Digest::sha256(&schema)
+}
+
+pub fn schema_digest() -> Digest {
+    let mut schema = v3_schema_digest().to_hex().into_bytes();
+    schema.extend_from_slice(crate::app_scopes::APP_SCOPES_SCHEMA.as_bytes());
     Digest::sha256(&schema)
 }
 
@@ -115,10 +127,10 @@ pub fn memory_migrations() -> Vec<Migration> {
              CAST(strftime('%s', 'now') AS INTEGER) * 1000, 'finished'\
          );"
     );
-    let current_digest = schema_digest().to_hex();
+    let current_digest = v2_schema_digest().to_hex();
     let v2_metadata = format!(
         "\nUPDATE hypermid_schema_version SET \
-             current_version={MEMORY_SCHEMA_VERSION},\
+             current_version=2,\
              compatibility_floor={MEMORY_COMPATIBILITY_FLOOR},\
              schema_digest='{current_digest}',\
              updated_at_ms=CAST(strftime('%s', 'now') AS INTEGER) * 1000 \
@@ -126,11 +138,15 @@ pub fn memory_migrations() -> Vec<Migration> {
          INSERT INTO hypermid_migration_journal(\
              version, migration_digest, started_at_ms, finished_at_ms, state\
          ) VALUES (\
-             {MEMORY_SCHEMA_VERSION}, '{current_digest}',\
+             2, '{current_digest}',\
              CAST(strftime('%s', 'now') AS INTEGER) * 1000,\
              CAST(strftime('%s', 'now') AS INTEGER) * 1000, 'finished'\
          );"
     );
+    let v3_digest = v3_schema_digest().to_hex();
+    let v3_sql = format!("{} UPDATE hypermid_schema_version SET current_version=3, schema_digest='{v3_digest}' WHERE singleton=1; INSERT INTO hypermid_migration_journal(version,migration_digest,started_at_ms,finished_at_ms,state) VALUES(3,'{v3_digest}',CAST(strftime('%s','now') AS INTEGER)*1000,CAST(strftime('%s','now') AS INTEGER)*1000,'finished');", crate::private_scopes::PRIVATE_SCOPES_SCHEMA);
+    let v4_digest = schema_digest().to_hex();
+    let v4_sql=format!("{} UPDATE hypermid_schema_version SET current_version=4,schema_digest='{v4_digest}' WHERE singleton=1; INSERT INTO hypermid_migration_journal(version,migration_digest,started_at_ms,finished_at_ms,state) VALUES(4,'{v4_digest}',CAST(strftime('%s','now') AS INTEGER)*1000,CAST(strftime('%s','now') AS INTEGER)*1000,'finished');",crate::app_scopes::APP_SCOPES_SCHEMA);
     vec![
         Migration::new(
             MEMORY_SCHEMA_V1,
@@ -138,9 +154,11 @@ pub fn memory_migrations() -> Vec<Migration> {
             format!("{AUTHORIZATION_SCHEMA_SQL}{KNOWLEDGE_SCHEMA_SQL}{v1_metadata}"),
         ),
         Migration::new(
-            MEMORY_SCHEMA_VERSION,
+            2,
             "hypermid_memory_v2_sharing_judgments",
             format!("{SHARING_JUDGMENTS_SCHEMA_SQL}{v2_metadata}"),
         ),
+        Migration::new(3, "hypermid_memory_v3_private_scopes", v3_sql),
+        Migration::new(4, "hypermid_memory_v4_app_scopes", v4_sql),
     ]
 }

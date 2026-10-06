@@ -38,7 +38,8 @@ async def operation(request):
         elif request.path.endswith("/import"):
             result = ideas.import_list(await read_json_body(request))
         elif operation_name == "sync":
-            result = ideas.sync(identity, await read_json_body(request))
+            from gideon.cognition.knowledge.file_items import _owned_io
+            result = await _owned_io(ideas.sync, identity, await read_json_body(request))
         elif operation_name == "schedule":
             result = request.app["capability_idea_schedules"].save(
                 identity, await read_json_body(request)

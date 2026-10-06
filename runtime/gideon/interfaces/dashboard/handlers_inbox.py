@@ -381,6 +381,10 @@ async def api_inbox_update(request: web.Request) -> web.Response:
             updates["draft"] = keep_masked_spans(updates["draft"], item.draft or "")
         except MaskConflict:
             return web.json_response({"error": MASK_CONFLICT}, status=409)
+    if "draft" in updates and updates["draft"] != (item.draft or ""):
+        updates["drafted_by"] = ""
+    if "classification" in updates:
+        updates.update(confidence="user", classified_by="", classify_error="")
     try:
         validate_updatable_fields(updates)
     except InboxFieldTypeError as exc:
@@ -546,13 +550,36 @@ async def api_inbox_draft(request: web.Request) -> web.Response:
     owner = owner_username()
     _, inbox = _get_inbox(state)
     existing = inbox.items.get(item_id)
-    if not existing:
+    if not existing or not existing.belongs_to(owner):
         return web.json_response({"error": "not found"}, status=404)
     if not getattr(existing, "can_reply", False):
         return web.json_response(
             {"error": "this item's source does not support replies"}, status=400
         )
-    item = await svc.draft_reply(item_id)
+    from gideon.integrations.reply_grounding import grounding, DRAFT_INSTRUCTIONS_MAX_CHARS
+    from gideon.security.approval_answer import of_request, OWNER
+    try:
+        body = await read_json_body(request) if request.can_read_body else {}
+    except Exception:
+        return web.json_response({"error": "body must be a JSON object"}, status=400)
+    instructions = body.get("instructions", "")
+    if not isinstance(instructions, str) or len(instructions) > DRAFT_INSTRUCTIONS_MAX_CHARS:
+        return web.json_response({"error": "instructions must be text of at most 2000 characters"}, status=400)
+    if instructions and of_request(request).kind != OWNER:
+        return web.json_response({"error": "Only the authenticated owner can supply reply instructions"}, status=403)
+    evidence = grounding(instructions)
+    if evidence.named_notes:
+        from gideon.interfaces.dashboard.handlers.knowledge import owner_note_store
+        from gideon.integrations.action_providers.knowledge_retrieve_provider import named_source_notes
+        try:
+            note_store = owner_note_store(request)
+        except web.HTTPForbidden:
+            # Refuse before any document read; preserve the original draft and
+            # return explicit availability evidence for the owner's review.
+            pass
+        else:
+            evidence = grounding(instructions, read_named=lambda name: named_source_notes(note_store, name))
+    item = await svc.draft_reply(item_id, instructions=instructions, evidence=evidence)
     if not item:
         logger.warning("Draft failed for %s", item_id)
         try:
@@ -577,7 +604,31 @@ async def api_inbox_draft(request: web.Request) -> web.Response:
     except Exception:
         logger.warning("SEL audit failed for inbox draft success", exc_info=True)
     state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
-    return web.json_response(_owner_item(item, owner))
+    return web.json_response({**_owner_item(item, owner), "drafting": _mask_inbox_projection(evidence.report())})
+
+
+async def api_inbox_sort(request: web.Request) -> web.Response:
+    """Retry an open unsorted source message without fabricating a verdict."""
+    from dataclasses import replace
+    from gideon.integrations.inbox_sorting import wants_sorting
+    from gideon.security.approval_answer import of_request, OWNER
+    if of_request(request).kind != OWNER:
+        return json_error("forbidden", status=403)
+    state = request.app["state"]
+    svc = getattr(state, "_inbox_svc", None)
+    if svc is None:
+        return json_error("inbox_not_running", message="Inbox service is not running.", status=503)
+    item = svc.inbox.items.get(request.match_info["id"])
+    owner = owner_username()
+    if item is None or not item.belongs_to(owner):
+        return json_error("not_found", status=404)
+    if not is_open_status(item.status_for(owner)) or not wants_sorting(replace(item, classify_error="")):
+        return json_error("inbox_item_not_sortable", message="Only an open unsorted source message can be sorted again.", status=409)
+    updated = svc.inbox.update(item.id, classify_error="")
+    svc.sorter.wake()
+    shown = _owner_item(updated, owner)
+    state.broadcast_ws("inbox_item_updated", shown)
+    return web.json_response(shown)
 
 
 async def api_inbox_restart(request: web.Request) -> web.Response:
@@ -858,6 +909,7 @@ async def api_inbox_status(request: web.Request) -> web.Response:
             "channel_names": inbox_state.channel_names,
             "poll_interval_seconds": sec.poll_interval_seconds,
             "style_rules": sec.style_rules,
+            "sort_messages": sec.sort_messages,
             "owner": owner,
             "shared": bool(owner and len(mine) != len(inbox.items)),
             "mine_count": len(mine),
@@ -1112,7 +1164,8 @@ async def api_inbox_proposal_create(request: web.Request) -> web.Response:
         item_kind=ItemKind.PROPOSAL.value,
         title=proposal.title,
         body=proposal.preview,
-        refs={pc.REFS_KEY: proposal.to_dict(), "app": app_name},
+        refs={pc.REFS_KEY: proposal.to_dict(), "app": app_name,
+              "app_display_name": manifest.displayName or manifest.name},
         store=inbox,
         dedup_key=str(body.get("dedup_key") or ""),
     )

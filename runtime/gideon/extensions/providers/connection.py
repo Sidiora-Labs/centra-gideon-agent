@@ -53,22 +53,24 @@ def entry_fingerprint(entry: Any) -> str:
 async def measure(catalog: Any) -> Connection:
     if catalog is None:
         return Connection(UNTESTABLE, "This provider type has no connection test.", checked_at=time.time())
-    try:
-        result = await asyncio.wait_for(catalog.test_connection(), timeout=CHECK_TIMEOUT_SECS)
-    except TimeoutError:
-        return Connection(FAILED, f"The connection test got no answer within {CHECK_TIMEOUT_SECS:.0f} s.", checked_at=time.time())
-    except Exception as exc:  # noqa: BLE001
-        from gideon.extensions.providers.failure_copy import relayed_failure_copy
-
-        logger.debug("connection test raised", exc_info=True)
-        return Connection(FAILED, relayed_failure_copy(exc), checked_at=time.time())
-    if result.ok and (result.model_count is None or result.model_count > 0):
-        detail = result.detail or (
-            f"Connected — {result.model_count} model(s) available"
-            if result.model_count is not None else "Connected"
-        )
+    from gideon.integrations.llm.catalog import capture_discovery_failures
+    with capture_discovery_failures() as failures:
+        try:
+            result = await asyncio.wait_for(catalog.test_connection(), timeout=CHECK_TIMEOUT_SECS)
+        except TimeoutError:
+            return Connection(FAILED, f"The connection test got no answer within {CHECK_TIMEOUT_SECS:.0f} s.", checked_at=time.time())
+        except Exception as exc:
+            from gideon.extensions.providers.failure_copy import relayed_failure_copy
+            logger.debug("connection test raised", exc_info=True)
+            return Connection(FAILED, relayed_failure_copy(exc), checked_at=time.time())
+    rejected = next((error for error in failures if error.rejected_credential), None)
+    if result.ok and rejected is None and (not failures or result.model_count):
+        detail = result.detail or (f"Connected — {result.model_count} model(s) available" if result.model_count is not None else "Connected")
         return Connection(CONNECTED, detail, checked_at=time.time())
-    return Connection(FAILED, result.detail or "The connection test failed without saying why.", checked_at=time.time())
+    cause = rejected or (failures[-1] if failures else None)
+    return Connection(FAILED, str(cause) if cause else result.detail or "The connection test failed without saying why.",
+                      bool(rejected or getattr(result, "rejected_credential", False)), checked_at=time.time())
+
 
 
 class ConnectionBoard:
@@ -87,8 +89,25 @@ class ConnectionBoard:
             self._checks[key] = task
         return hit[0] if hit is not None else _CHECKING
 
+    def peek(self, name: str, fingerprint: str) -> Connection | None:
+        """Return the cached answer without scheduling or recording a check."""
+        hit = self._answers.get((name, fingerprint))
+        return hit[0] if hit is not None else None
+
     def record(self, name: str, fingerprint: str, answer: Connection) -> None:
         self._answers[(name, fingerprint)] = (answer, time.monotonic())
+
+    def remeasure(self, name: str, fingerprint: str, catalog: Callable[[], Any]) -> None:
+        """Refresh now, sharing an already running check on this event loop."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        key = (name, fingerprint)
+        running = self._checks.get(key)
+        if running is not None and not running.done() and running.get_loop() is loop:
+            return
+        self._checks[key] = loop.create_task(self._check(key, catalog))
 
     async def _check(self, key: tuple[str, str], catalog: Callable[[], Any]) -> None:
         try:
@@ -123,4 +142,15 @@ def get_connection_board() -> ConnectionBoard:
     return _board
 
 
-__all__ = ["CHECKING", "CONNECTED", "FAILED", "UNTESTABLE", "Connection", "ConnectionBoard", "entry_fingerprint", "get_connection_board", "measure", "settings_fingerprint"]
+def recheck(name: str) -> None:
+    from functools import partial
+    from gideon.integrations.llm.registry import get_default_registry
+    registry = get_default_registry()
+    try:
+        entry = registry.get_entry(name)
+    except Exception:
+        return
+    get_connection_board().remeasure(name, entry_fingerprint(entry), partial(registry.build_catalog, entry))
+
+
+__all__ = ["CHECKING", "CONNECTED", "FAILED", "UNTESTABLE", "Connection", "ConnectionBoard", "entry_fingerprint", "get_connection_board", "measure", "recheck", "settings_fingerprint"]

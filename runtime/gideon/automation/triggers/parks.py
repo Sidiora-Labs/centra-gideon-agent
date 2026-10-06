@@ -31,6 +31,8 @@ class TriggerPark:
     card: dict[str, Any] = field(default_factory=dict)
     question: str = ""
     created_at: float = 0.0
+    action_revision: str = ""
+    review_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +41,8 @@ class TriggerPark:
             "card": dict(self.card),
             "question": self.question,
             "created_at": self.created_at,
+            "action_revision": self.action_revision,
+            "review_id": self.review_id,
         }
 
     @classmethod
@@ -50,6 +54,8 @@ class TriggerPark:
             card=dict(card) if isinstance(card, dict) else {},
             question=str(record.get("question") or ""),
             created_at=float(record.get("created_at") or 0.0),
+            action_revision=str(record.get("action_revision") or ""),
+            review_id=str(record.get("review_id") or ""),
         )
 
 
@@ -135,12 +141,34 @@ def raise_park(trigger: Any, result: Any, *, state: Any = None) -> TriggerPark |
                 question=_question(result, card),
                 created_at=time.time(),
             )
+            from gideon.automation.triggers.grants import action_revision
+
+            park.action_revision = action_revision(trigger)
             _save(park)
         _raise_row(trigger, park, state=state)
         return park
     except Exception:
         logger.warning("trigger %s: could not record its park", identity, exc_info=True)
         return None
+
+
+def associate_review(trigger: Any, review_id: str) -> bool:
+    from gideon.automation.triggers.grants import action_revision
+    from gideon.automation.triggers.review import TriggerReviewStore
+
+    park = load(trigger.id)
+    card = TriggerReviewStore().get(review_id)
+    revision = action_revision(trigger)
+    if park is None or card is None or card.get("status") != "running" or card.get("trigger_id") != f"store:{trigger.id}" or card.get("action_revision") != revision:
+        return False
+    park.review_id, park.action_revision = review_id, revision
+    _save(park)
+    return True
+
+
+def restore(park: TriggerPark) -> None:
+    if load(park.trigger_id) is None:
+        _save(park)
 
 
 def claim(trigger_id: str, token: str) -> TriggerPark | None:

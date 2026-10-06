@@ -2,7 +2,9 @@
 
 ``none`` composes the two host primitives Gideon already ships — the OS-level path
 sandbox (:func:`gideon.security.sandbox.wrap_argv`) and the post-exec resource ceilings
-(:func:`gideon.security.sandbox.create_subprocess_limited`) — and adds NO further isolation. It
+(:func:`gideon.security.sandbox.create_subprocess_limited`) — and enforces declared network-off where the OS backend supports it. A listed or
+registry declaration is refused because this backend cannot confine arbitrary
+programs to a host list. It
 is the default backend and is behaviour-identical to the inline logic it replaces in
 ``acp/transport.py``: the seam exists so a stronger container/VM tier can slot in as an
 installable ``sandbox`` app without touching a single spawn site.
@@ -18,7 +20,7 @@ from gideon.integrations.sandbox_providers.base import (
     SandboxProvider,
     SandboxSpec,
 )
-from gideon.security.sandbox import create_subprocess_limited, wrap_argv
+from gideon.security.sandbox import create_subprocess_limited, wrap_program_argv
 
 NONE_PROVIDER_NAME = "none"
 
@@ -55,7 +57,7 @@ class _NoneHandle(SandboxHandle):
 
 
 class NoneSandboxProvider(SandboxProvider):
-    """The default, always-available backend: OS path sandbox + resource ceilings, nothing more."""
+    """Host path/resource sandbox with explicit network declaration checks."""
 
     name = NONE_PROVIDER_NAME
     display_name = "No isolation (host)"
@@ -64,7 +66,17 @@ class NoneSandboxProvider(SandboxProvider):
         return True
 
     def wrap(self, spec: SandboxSpec, argv: list[str]) -> _NoneHandle:
-        wrapped, cleanup_path = wrap_argv(list(argv), mode=spec.mode)
+        if spec.egress_tier not in {"all", "off"}:
+            from gideon.integrations.sandbox_providers.base import SandboxUnavailableError
+
+            raise SandboxUnavailableError(
+                "The program was not started",
+                f"the host provider cannot enforce the declared {spec.egress_tier!r} host allow-list",
+                "Use guarded HTTP for host-limited work, or a provider that enforces that list",
+            )
+        wrapped, cleanup_path = wrap_program_argv(
+            list(argv), mode=spec.mode, network=spec.egress_tier == "all"
+        )
         return _NoneHandle(wrapped, spec.profile, spec.ceilings, cleanup_path)
 
 

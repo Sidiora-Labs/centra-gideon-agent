@@ -392,7 +392,7 @@ class HypermidHandlers:
         if (
             action == "install"
             and self.local_install_authority is not None
-            and not self.lifecycle.client.connected
+            and (not self.lifecycle.client.connected or getattr(self.security_owner, "process", None) is not None)
         ):
             return self.local_install_authority
         return self.lifecycle

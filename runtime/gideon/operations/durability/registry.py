@@ -90,18 +90,15 @@ class MachineEntry:
 
 @dataclass
 class Registry:
-    """The parsed ``registry.json`` — every machine's high-water mark, keyed by id, plus the
-    per-entity-family ancestor shas conflict detection compares against (§4.2, DAS-7).
+    """Machine publication high-water marks; legacy ancestry is parsed but never published.
 
-    ``ancestors`` maps ``entry id → {entity id → the content sha both sides last agreed on}``.
-    It lives in the SHARED registry on purpose: a common ancestor is by definition common
-    knowledge, so "did both sides edit since we agreed?" is only answerable from an object
-    both machines read. It is written by the same CAS bump that announces a seq, so a machine
-    publishes "here is the state I merged to" and its peer's next pull compares against it.
+    Per-peer agreements travel inside the protected complete copy.
     """
 
     machines: dict[str, MachineEntry] = field(default_factory=dict)
     ancestors: dict[str, dict[str, str]] = field(default_factory=dict)
+    _loaded_sha: str = field(default="", repr=False, compare=False)
+    _loaded_body: bytes = field(default=b"", repr=False, compare=False)
 
     @classmethod
     def empty(cls) -> Registry:
@@ -131,7 +128,10 @@ class Registry:
             if not isinstance(rows, dict):
                 continue
             ancestors[str(entry_id)] = {str(k): str(v) for k, v in rows.items() if v}
-        return cls(machines=machines, ancestors=ancestors)
+        result = cls(machines=machines, ancestors=ancestors)
+        result._loaded_sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        result._loaded_body = result.to_bytes()
+        return result
 
     def to_bytes(self) -> bytes:
         """Serialize canonically (sorted keys, compact) so two machines writing the
@@ -139,14 +139,14 @@ class Registry:
         comparison depends on."""
         obj = {
             "machines": {mid: e.to_dict() for mid, e in self.machines.items()},
-            "ancestors": {eid: dict(rows) for eid, rows in self.ancestors.items()},
         }
         return canonical_json(obj).encode("utf-8")
 
     def sha(self) -> str:
         """The sha of the canonical bytes — the ``expected_sha`` a CAS write compares
         against, and a cheap equality check between two registry states."""
-        return hashlib.sha256(self.to_bytes()).hexdigest()
+        body = self.to_bytes()
+        return self._loaded_sha if self._loaded_sha and body == self._loaded_body else hashlib.sha256(body).hexdigest()
 
     def seq_of(self, machine_id: str) -> int:
         e = self.machines.get(machine_id)
@@ -210,8 +210,8 @@ class Registry:
         out: list[str] = []
         for e in self.peers(self_id):
             already = int(seen.get(e.machine_id, 0) or 0)
-            for s in range(already + 1, e.seq + 1):
-                out.append(shard_prefix(e.machine_id, s))
+            if e.seq > already:
+                out.append(shard_prefix(e.machine_id, e.seq))
         return out
 
     def advanced_over(self, prior: Registry, *, self_id: str) -> list[MachineEntry]:

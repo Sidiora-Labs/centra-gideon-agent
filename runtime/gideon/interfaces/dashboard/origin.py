@@ -227,16 +227,13 @@ def tailscale_cli_present() -> bool:
 def auth_is_off(auth_cfg: AuthConfig | None = None) -> bool:
     """Return ``True`` when the gateway serves requests with NO authentication.
 
-    Two ways auth is genuinely off: ``AuthMode.NONE`` (pass-through), or the
-    blanket ``GIDEON_DEV_NO_AUTH=1`` middleware skip. Both are dev-only and
-    both are normally safe because ``effective_bind`` forces NONE to loopback —
+    Explicit ``AuthMode.NONE`` is the development pass-through. It is normally
+    safe because ``effective_bind`` forces NONE to loopback —
     but the ``GIDEON_BIND_HOST`` escape hatch can override that bind, which
     is exactly the exposed-without-auth misconfiguration the reachability probe
     warns about. ``local_token``/``api_key``/``oauth2`` are NOT "off": a
     non-loopback bind under those still requires a token/credential.
     """
-    if os.environ.get("GIDEON_DEV_NO_AUTH") == "1":
-        return True
     cfg = auth_cfg if auth_cfg is not None else AuthConfig.from_env()
     return cfg.mode == AuthMode.NONE
 
@@ -245,8 +242,7 @@ def loopback_requires_token(auth_cfg: AuthConfig | None = None) -> bool:
     """Return ``True`` when a request from loopback still needs a token.
 
     A loopback (indeed any private-network) request skips the token gate only in
-    the three cases the ``token_auth`` middleware short-circuits on: auth is
-    genuinely off (``AuthMode.NONE`` / ``GIDEON_DEV_NO_AUTH=1`` — both via
+    the two configured cases: auth is genuinely off (``AuthMode.NONE``, via
     :func:`auth_is_off`) or the opt-in local-network bypass
     (``GIDEON_BYPASS_LOCAL_NETWORKS=1``). Under the default ``local_token``
     mode a token IS required even on loopback — the middleware returns

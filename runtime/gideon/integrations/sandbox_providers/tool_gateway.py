@@ -178,7 +178,7 @@ class ToolGateway:
                 f"({', '.join(allow) or 'empty'})"
             )
         mode = _GRANT_TO_TASK_MODE.get(grants, "ask")
-        deny = task_mode_denies(mode, spec.name, spec.kind, {})
+        deny = task_mode_denies(mode, spec.name, spec.kind, {}, declared="safe" if spec.kind in {"read", "search", "fetch", "think"} else "caution")
         if deny:
             return (
                 f"{spec.name} is write-class and the {self._profile.name!r} profile grants "

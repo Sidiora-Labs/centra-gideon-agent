@@ -57,6 +57,8 @@ class TurnUsage:
     import_file_sha256: str | None = None
     import_record_id: str | None = None
     audit_id: str | None = None
+    unit: str | None = None
+    quantity: float | None = None
 
 
 def _path() -> Path:
@@ -149,6 +151,20 @@ def record_turn(u: TurnUsage) -> None:
         UsageJournal(_path()).append(_emission_attribution(u))
     except Exception:
         logger.debug("usage ledger append failed", exc_info=True)
+
+
+def record_units(*, source: str, session_key: str, provider: str, model: str,
+                 unit: str, quantity: float | None, cost_usd: float | None,
+                 priced: bool, estimated: bool, price_source: str,
+                 duration_ms: int = 0, usage_status: str = "reported") -> None:
+    """Record one unit-billed call without inventing token usage or an unknown quantity."""
+    record_turn(TurnUsage(
+        ts=datetime.now(timezone.utc).isoformat(), session_key=session_key,
+        source=source, agent="", provider=provider, model=model,
+        unit=unit, quantity=quantity, cost_usd=float(cost_usd or 0.0),
+        priced=priced, estimated=estimated, price_source=price_source,
+        model_calls=1, usage_status=usage_status, duration_ms=duration_ms,
+    ))
 
 
 _IMPORT_FORMATS = {"claude_code_jsonl", "codex_rollout_jsonl"}
@@ -475,13 +491,20 @@ class EventAccounting:
             if reported is not None
             else bool(cost > 0.0)
         )
-        price = resolve_effective_price(
-            provider,
-            self.model,
-            **counts,
-            reported_cost_usd=cost,
-            provider_reported=provider_reported,
-        )
+        if metadata.get("spend_charged") is True and "charged_cost_usd" in metadata:
+            from gideon.engine.routing.rates import EffectiveModelPrice
+            charged = metadata["charged_cost_usd"]
+            valid = type(charged) in (int, float) and math.isfinite(charged) and charged >= 0
+            priced = metadata.get("priced") is True and valid
+            price = EffectiveModelPrice(provider, self.model,
+                float(charged) if priced else None, priced,
+                str(metadata.get("price_source") or "unknown"),
+                bool(metadata.get("price_estimated", True)))
+        else:
+            price = resolve_effective_price(
+                provider, self.model, **counts, reported_cost_usd=cost,
+                provider_reported=provider_reported,
+            )
         return counts, price
 
     def record(self, source, session_key, agent, provider):
@@ -548,8 +571,9 @@ def _iter_rows() -> list[dict]:
     return UsageJournal(_path()).rows()
 
 
-def _day_of(ts: str) -> str:
-    return ts[:10]
+def _day_of(ts: str, zone=None) -> str:
+    from gideon.core import spend_day
+    return spend_day.day_of(ts, zone)
 
 
 def _in_window(ts: str, since: str, until: str) -> bool:
@@ -571,6 +595,7 @@ def _blank_agg() -> dict:
         "priced": True,
         "model_calls": 0,
         "usage_status_counts": {},
+        "units": {},
     }
 
 
@@ -587,6 +612,22 @@ def _fold(agg: dict, row: dict) -> None:
     )
     statuses = agg["usage_status_counts"]
     statuses[status] = statuses.get(status, 0) + 1
+    unit = row.get("unit")
+    if unit in {"image", "second", "minute", "character"}:
+        value = agg["units"].setdefault(unit, {
+            "quantity": 0.0, "calls": 0, "unknown_quantity_calls": 0,
+            "unpriced_calls": 0, "cost_usd": 0.0,
+        })
+        value["calls"] += 1
+        quantity = row.get("quantity")
+        if type(quantity) in (int, float) and math.isfinite(quantity) and quantity >= 0:
+            value["quantity"] += quantity
+        else:
+            value["unknown_quantity_calls"] += 1
+        if row.get("priced", True):
+            value["cost_usd"] += float(row.get("cost_usd", 0.0) or 0.0)
+        else:
+            value["unpriced_calls"] += 1
     if not row.get("priced", True):
         agg["priced"] = False
 
@@ -635,11 +676,13 @@ def rollup(
 ) -> list[dict]:
     if group_by not in _GROUP_KEYS:
         raise ValueError(f"group_by must be one of {_GROUP_KEYS}, got {group_by!r}")
+    from gideon.core.spend_day import zone as spend_zone
+    zone = spend_zone() if group_by == "day" else None
     groups: dict = {}
     selected = TurnSelection(since, until, session_key, session_prefix)
     for row in selected.rows():
         key = (
-            _day_of(str(row.get("ts", "")))
+            _day_of(str(row.get("ts", "")), zone)
             if group_by == "day"
             else str(row.get(group_by, ""))
         )

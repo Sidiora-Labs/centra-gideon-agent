@@ -24,6 +24,8 @@ from gideon.interfaces.dashboard.handlers._shared import (
 )
 from gideon.interfaces.dashboard.state import ConsoleState
 
+from gideon.security.session_credentials import memory_tool_endpoint, admitted_memory_tool
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,6 +36,7 @@ def _sel():
     return _pkg.sel()
 
 
+@memory_tool_endpoint('memory_remember')
 async def api_lessons_create(request: web.Request) -> web.Response:
     """POST /api/lessons — add a lesson to memory.db ``lesson.*``."""
     state: ConsoleState = request.app["state"]
@@ -53,7 +56,7 @@ async def api_lessons_create(request: web.Request) -> web.Response:
             resources="missing_session_key",
         )
         return web.json_response({"error": "missing X-Session-Key"}, status=400)
-    if sk != "dashboard:ui":
+    if sk != "dashboard:ui" and not admitted_memory_tool():
         session_name = sk.split(":", 1)[-1] if ":" in sk else sk
         in_sessions = session_name in state._sessions
         in_restricted = sk in state._restricted_keys
@@ -167,10 +170,11 @@ async def api_lessons_create(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+@memory_tool_endpoint('memory_forget')
 async def api_lessons_delete(request: web.Request) -> web.Response:
     """DELETE /api/lessons — remove lessons by substring."""
     state: ConsoleState = request.app["state"]
-    if _blocks_reads_session(state, request):
+    if _is_restricted_session(state, request):
         sk = request.headers.get("X-Session-Key", "")
         _sel().log_api_access(
             caller=sk,
@@ -200,6 +204,7 @@ async def api_lessons_delete(request: web.Request) -> web.Response:
     return web.json_response({"ok": ok})
 
 
+@memory_tool_endpoint('memory_list')
 async def api_lessons(request: web.Request) -> web.Response:
     state: ConsoleState = request.app["state"]
     if _blocks_reads_session(state, request):
@@ -229,10 +234,10 @@ async def api_lessons(request: web.Request) -> web.Response:
     standings = svc.lesson_standings(shown)
     for e in shown:
         try:
-            rule = json.loads(e["value_json"])
-        except (json.JSONDecodeError, TypeError):
+            rule = e["value"] if "value" in e else json.loads(e["value_json"])
+        except (KeyError, json.JSONDecodeError, TypeError):
             continue
-        verdict = standings.get(str(e.get("key") or ""))
+        verdict = standings.get(str(e.get("id") or e.get("key") or ""))
         evidence = getattr(verdict, "evidence", None)
         data.append(
             {

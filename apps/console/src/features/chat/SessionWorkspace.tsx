@@ -16,7 +16,7 @@ export function sessionRunIds(turns: readonly ChatTurn[]): string[] {
   turns.forEach((turn) => turn.segments.forEach((segment) => {
     if (segment.kind !== 'tool') return
     const ref = workflowRefFromTool(segment.tool, segment.output)
-    if (ref) seen.add(ref.runId)
+    if (ref) seen.add(ref.batchName ? `batch:${ref.batchName}` : ref.runId)
   }))
   return [...seen]
 }
@@ -132,9 +132,9 @@ function PaneContent({ kind, sessionKey, runIds, activity, onOpenFile, onOpenArt
   return <>
       {kind === 'activity' && <ChatActivityPanel activity={activity} onOpenFile={onOpenFile} subagents={subagents}
         onKillFanout={onKillFanout} side={side} />}
-      {kind === 'runs' && (runIds.length ? <div className="space-y-s">{runIds.map((id) => <div key={id}><WorkflowProgressCard refObj={{ runId: id, created: false }} /><RunChanges runId={id} onOpenFile={onOpenFile} /></div>)}</div>
+      {kind === 'runs' && (runIds.length ? <div className="space-y-s">{runIds.map((id) => <div key={id}><WorkflowProgressCard refObj={id.startsWith('batch:') ? { runId: '', batchName: id.slice(6), created: true } : { runId: id, created: false }} />{!id.startsWith('batch:') && <RunChanges runId={id} onOpenFile={onOpenFile} />}</div>)}</div>
         : <p className="py-xl text-center text-sm text-on-surface-low">No workflow runs in this conversation.</p>)}
-      {kind === 'delivered' && <DeliveredShelf sessionKey={sessionKey} runIds={runIds} onOpen={onOpenArtifact} />}
+      {kind === 'delivered' && <DeliveredShelf sessionKey={sessionKey} runIds={runIds.filter((id) => !id.startsWith('batch:'))} onOpen={onOpenArtifact} />}
       {kind === 'agents' && <DelegatedAgents sessionKey={sessionKey} />}
     </>
 }

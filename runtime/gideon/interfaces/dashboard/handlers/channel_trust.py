@@ -51,6 +51,15 @@ async def api_channel_trust(request: web.Request) -> web.Response:
     ]
     for row in providers:
         row["seen_channels"] = channel_trust.list_seen_channels(row["provider"])
+        from gideon.integrations.channel_transports import get_transport
+        transport = get_transport(row["provider"])
+        try:
+            capabilities = transport.capabilities() if transport else None
+            row["groups"] = bool(getattr(capabilities, "groups", False))
+            row["speaks_as_owner"] = bool(getattr(capabilities, "speaks_as_owner", False))
+            row["pairing_hint"] = str(transport.sender_pairing_hint() or "") if transport else ""
+        except Exception:
+            row.update(groups=True, speaks_as_owner=False, pairing_hint="")
     return web.json_response(
         {
             "providers": providers,

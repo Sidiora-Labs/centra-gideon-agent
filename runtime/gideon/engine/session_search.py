@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from gideon.core.sqlite_compat import FTS5_REMEDY, probe, sqlite3
+from gideon.core.sqlite_compat import FTS5_REMEDY, connect, probe, sqlite3
 
 logger = logging.getLogger(__name__)
 _DB_FILE = "session_search.db"
@@ -80,7 +80,7 @@ class _DatabaseLease:
         opened = None
         try:
             Path(location).parent.mkdir(parents=True, exist_ok=True)
-            opened = sqlite3.connect(
+            opened = connect(
                 location, timeout=15, isolation_level=None, check_same_thread=False
             )
             opened.row_factory = sqlite3.Row

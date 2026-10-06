@@ -1,3 +1,4 @@
+import { decodeBlastRadius } from '../../features/chat/approvalMeta'
 import type { WsMessage } from '../../shared/data/useChatSocket'
 import { approvalToastMessage, type ApprovalToastInput } from './approvalToast'
 
@@ -12,6 +13,6 @@ export class ApprovalNotifications {
     if (this.history.size > 200) this.history = new Set([...this.history].slice(-100))
     const source = String(data.source ?? '')
     const who = source === 'subagent' ? 'A subagent' : source ? 'A background task' : 'Another chat session'
-    return approvalToastMessage({ who, session, tool: String(data.tool ?? 'a tool'), risk: (data.risk ? String(data.risk) : undefined) as ApprovalToastInput['risk'] })
+    return approvalToastMessage({ who, session, tool: String(data.tool ?? 'a tool'), risk: (data.risk ? String(data.risk) : undefined) as ApprovalToastInput['risk'], blastRadius: decodeBlastRadius(data.blast_radius) })
   }
 }

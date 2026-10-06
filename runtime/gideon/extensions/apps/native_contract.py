@@ -134,12 +134,17 @@ def load_bundle_module(ext_dir: Path, app_name: str, module_path: str) -> Any:
     if file_path is None:
         raise ImportError(f"no bundle-local module {module_path!r} in {ext_dir}")
     file_path = file_path.resolve(strict=True)
+    root = ext_dir.resolve(strict=True)
+    if root not in file_path.parents:
+        raise ImportError("App module resolves outside its code directory")
+    from gideon.extensions.apps.code_provenance import loading
     unique_name = namespaced_module_name(app_name, module_path)
     cached = sys.modules.get(unique_name)
     if cached is not None:
         cached_file = getattr(cached, "__file__", None)
         if cached_file and Path(cached_file).resolve() == file_path:
-            return cached
+            with loading(app_name, root):
+                return cached
         sys.modules.pop(unique_name, None)
     spec = importlib.util.spec_from_file_location(unique_name, file_path)
     if spec is None or spec.loader is None:
@@ -147,7 +152,7 @@ def load_bundle_module(ext_dir: Path, app_name: str, module_path: str) -> Any:
     module = importlib.util.module_from_spec(spec)
     sys.modules[unique_name] = module
     try:
-        with app_dir_on_path(ext_dir):
+        with loading(app_name, root), app_dir_on_path(ext_dir):
             spec.loader.exec_module(module)
     except BaseException:
         sys.modules.pop(unique_name, None)

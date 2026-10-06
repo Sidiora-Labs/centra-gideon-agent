@@ -105,6 +105,14 @@ class PdfResourceLimitError(ValueError):
         super().__init__(f"PDF {resource} limit exceeded ({actual} > {limit})")
 
 
+def delimited_rows(text: str, delimiter: str = ",") -> list[list[str]]:
+    """Read quoted CSV/TSV cells consistently, skipping delimiter spaces and blank rows."""
+    import csv
+    import io
+    reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter, skipinitialspace=True)
+    return [row for row in reader if any(cell.strip() for cell in row)]
+
+
 class FileReader:
     SUPPORTED = {
         "",
@@ -178,6 +186,19 @@ class FileReader:
         )
         metadata.update(details)
         metadata["line_count"] = 1 + body.count("\n") if body else 0
+        return body, metadata
+
+    def read_approved(self, snapshot) -> tuple[str, dict]:
+        """Decode the same approved bytes; never reopen the caller's source path."""
+        from gideon.workspace.uploads.content_intake import ApprovedFile
+
+        if not isinstance(snapshot, ApprovedFile):
+            raise TypeError('An approved file snapshot is required.')
+        snapshot.require_approved()
+        with snapshot.materialize() as path:
+            body, metadata = self.read(path)
+        metadata['title'] = Path(snapshot.filename).stem
+        metadata['source_digest'] = snapshot.digest
         return body, metadata
 
     def _read_text(self, path: str, fmt: str) -> tuple[str, dict]:
@@ -439,18 +460,13 @@ class FileReader:
             return _read_error(error, "spreadsheet")
 
     def _read_csv(self, path: str) -> tuple[str, dict]:
-        import csv
-
         kind = "tsv" if Path(path).suffix.lower() == ".tsv" else "csv"
         try:
             try:
-                stream = open(path, newline="", encoding="utf-8")
+                text = _text_file(path, "utf-8")
             except UnicodeDecodeError:
-                stream = open(path, newline="", encoding="latin-1")
-            with stream:
-                rows = _nonempty_cells(
-                    csv.reader(stream, delimiter="\t" if kind == "tsv" else ",")
-                )
+                text = _text_file(path, "latin-1")
+            rows = delimited_rows(text, "\t" if kind == "tsv" else ",")
         except Exception as error:
             return _read_error(error, kind.upper())
         metadata = dict(format=kind, content_type="markdown", row_count=len(rows))

@@ -73,8 +73,15 @@ class Claim:
     holder: str
     claimed_at: float
     max_duration_secs: float = CLAIM_MAX_DURATION_SECS
+    owner_pid: int = 0
+    owner_identity: str = ""
 
     def expired(self, now: float) -> bool:
+        if self.owner_pid:
+            from gideon.automation.triggers.claims import owner_state
+
+            if owner_state(self.owner_pid, self.owner_identity) is not False:
+                return False
         deadline = self.claimed_at + max(1.0, self.max_duration_secs)
         return now >= deadline
 

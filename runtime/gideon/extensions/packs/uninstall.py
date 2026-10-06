@@ -102,11 +102,11 @@ def _safe_recorded_path(home: Path, recorded: str) -> Path | None:
         candidate.relative_to(root)
     except ValueError:
         return None
-    current = candidate
-    while current != root:
-        if current.is_symlink():
-            return None
-        current = current.parent
+    from gideon.operations.durability.home_paths import guard_path, LinkInTheWay
+    try:
+        guard_path(candidate)
+    except (LinkInTheWay, ValueError):
+        return None
     return candidate
 
 
@@ -183,7 +183,7 @@ def _classify(pack: Any, home: Path) -> tuple[UninstallPlan, dict[str, Path], li
             continue
         path = _safe_recorded_path(home, str(lock.get("path", "")))
         if path is None:
-            plan.kept.append(KeptComponent(ref, "its recorded location is unsafe or outside the pack install path, so it stays"))
+            plan.kept.append(KeptComponent(ref, "its recorded location is linked, unsafe or outside the pack install path, so it stays"))
             state.append({"ref": ref, "state": "unsafe"})
             continue
         landed_id = _landed_id(kind, path)
@@ -205,7 +205,13 @@ def _classify(pack: Any, home: Path) -> tuple[UninstallPlan, dict[str, Path], li
             plan.kept.append(KeptComponent(ref, "its installed path is a symlink, so it stays"))
             state.append({"ref": ref, "state": "symlink"})
             continue
-        digest = component_digest(path)
+        from gideon.operations.durability.home_paths import LinkInTheWay
+        try:
+            digest = component_digest(path)
+        except LinkInTheWay as link:
+            plan.kept.append(KeptComponent(ref, f"linked contents stay unchanged: {link}"))
+            state.append({"ref": ref, "state": "linked", "detail": str(link)})
+            continue
         state.append({"ref": ref, "state": "present", "digest": digest})
         if digest != lock["computedHash"]:
             plan.kept.append(KeptComponent(ref, "you edited it after it was installed, so it stays"))
@@ -319,7 +325,14 @@ def apply_uninstall(name: str, confirmation_token: str) -> UninstallPlan:
             for ref, path in targets.items():
                 pack = _installed_pack(records, name)
                 lock = pack.component_locks.get(ref) if pack else None
-                if path.is_symlink() or not lock or component_digest(path) != lock.get("computedHash"):
+                from gideon.operations.durability.home_paths import guard_path, LinkInTheWay
+                try:
+                    guard_path(path)
+                    digest = component_digest(path)
+                except LinkInTheWay:
+                    failed.append(ref)
+                    continue
+                if not lock or digest != lock.get("computedHash"):
                     failed.append(ref)
                     continue
                 try:

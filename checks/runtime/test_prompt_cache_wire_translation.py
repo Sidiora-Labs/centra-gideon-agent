@@ -194,7 +194,11 @@ def test_hint_on_the_volatile_note_is_ignored():
 
     assert system == ""
     assert _markers(out) == []
-    assert out[-1] == {"role": "user", "content": "turn note"}
+    assert len(out) == 1
+    assert out[0]["content"] == [
+        {"type": "text", "text": "stable"},
+        {"type": "text", "text": "turn note"},
+    ]
 
 
 def test_generation_never_reaches_the_wire():

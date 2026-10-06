@@ -127,6 +127,13 @@ def deregister_app_mcp_servers(app_name: str) -> int:
             logger.info(
                 "app %s: deregistered MCP servers %s (mcp.json)", app_name, doomed
             )
+    from gideon.integrations import mcp_client, mcp_stdio
+
+    mcp_stdio.stop_finishing_soon(lambda server: server.startswith(prefix))
+    if mcp_client._registry is not None:
+        for server in tuple(mcp_client._registry._specs):
+            if server.startswith(prefix):
+                mcp_client._registry.invalidate_server(server)
     _deregister_from_agent_config(prefix)
     return len(doomed)
 

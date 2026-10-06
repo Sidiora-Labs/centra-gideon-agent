@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, type InboxItem, type InboxStatus } from '../../shared/data/api'
+import { api, type InboxItem, type InboxStatus, type InboxDraftEvidence } from '../../shared/data/api'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { useChatSocket } from '../../shared/data/useChatSocket'
 import { confirm } from '../../shared/ui/dialog'
 import { reportActionFailure, reportingWrite } from '../../app/shell/reportingWrite'
-import { isOpen, kindMeta, ITEM_KINDS } from './inboxMeta'
+import { isOpen, kindMeta, ITEM_KINDS, isReplyMessage } from './inboxMeta'
 
 export function useInboxOperation(identity: string) {
   const [busy, setBusy] = useState<string | null>(null)
@@ -27,7 +27,7 @@ export function acceptsInboxFilter(item: InboxItem, filter: string): boolean {
     case 'open': return isOpen(item.status)
     case 'handled': return ['handled', 'sent', 'dismissed'].includes(item.status)
     case 'filtered': return item.status === 'filtered'
-    default: return item.classification === filter && isOpen(item.status)
+    default: return item.classification === filter && isOpen(item.status) && (filter !== 'needs_reply' || isReplyMessage(item))
   }
 }
 export function projectInbox(items: InboxItem[] | undefined, filter: string, kind: string, query: string) {
@@ -80,13 +80,27 @@ export function useInboxQueue(openId: string | null, setOpenId: (id: string) => 
 export function useInboxDetailActions(item: InboxItem, onChanged: () => void) {
   const operation = useInboxOperation(item.id)
   const [draft, setDraft] = useState(item.draft ?? '')
-  useEffect(() => { setDraft(item.draft ?? '') }, [item.id])
+  const draftRef = useRef(draft)
+  const [instructions, setInstructions] = useState('')
+  const [drafting, setDrafting] = useState<InboxDraftEvidence | null>(null)
+  const editDraft = (value: string) => { draftRef.current = value; setDraft(value) }
+  useEffect(() => { editDraft(item.draft ?? ''); setInstructions(''); setDrafting(null) }, [item.id])
   const patch = (body: Record<string, unknown>, tag: string) => operation.run(tag, () => api.updateInboxItem(item.id, body), onChanged, 'Update failed')
-  const generate = () => operation.run('draft', () => api.draftInboxReply(item.id), result => { setDraft(result.draft ?? ''); onChanged() }, 'Draft failed')
+  const generate = () => {
+    const before = draftRef.current
+    return operation.run('draft', () => api.draftInboxReply(item.id, instructions), result => {
+      const report = result.drafting
+      if (report.wrote && draftRef.current === before) editDraft(result.draft ?? '')
+      setDrafting(report.wrote && draftRef.current !== before && draftRef.current !== (result.draft ?? '')
+        ? { ...report, warnings: [...report.warnings, 'Your edits made during generation are retained in the reply editor.'] }
+        : report)
+      onChanged()
+    }, 'Draft failed')
+  }
   const send = () => {
     const content = draft.trim()
     if (!content) { operation.setErr('Write a reply first'); return }
     void operation.run('send', () => api.sendInboxReply(item.id, content), onChanged, 'Send failed')
   }
-  return { ...operation, draft, setDraft, patch, generate, send, fav: () => operation.run('fav', () => api.favoriteInboxItem(item.id, !item.favorited), onChanged, 'Favorite failed'), restore: () => operation.run('restore', () => api.restoreInboxItem(item.id), onChanged, 'Restore failed') }
+  return { ...operation, draft, setDraft: editDraft, instructions, setInstructions, drafting, patch, generate, send, sortAgain: () => operation.run('sort', () => api.sortInboxItem(item.id), onChanged, 'Sorting retry failed'), fav: () => operation.run('fav', () => api.favoriteInboxItem(item.id, !item.favorited), onChanged, 'Favorite failed'), restore: () => operation.run('restore', () => api.restoreInboxItem(item.id), onChanged, 'Restore failed') }
 }

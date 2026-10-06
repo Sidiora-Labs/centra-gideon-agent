@@ -139,7 +139,7 @@ async def handoff_to_channel(
 
         if sessions and hasattr(sessions, "set_channel_link"):
             try:
-                sessions.set_channel_link(session_key, thread_ts, target_channel)  # type: ignore[union-attr]  # noqa: E501
+                sessions.set_channel_link(session_key, thread_ts, target_channel, channel_provider=provider)  # type: ignore[union-attr]  # noqa: E501
             except Exception:
                 logger.warning(
                     "Channel thread created but session link failed", exc_info=True

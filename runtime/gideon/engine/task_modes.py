@@ -6,58 +6,10 @@ import json
 import re
 from dataclasses import dataclass
 
-_READ_ONLY_BASH_PREFIXES: tuple[str, ...] = (
-    "ls",
-    "cat",
-    "head",
-    "tail",
-    "find",
-    "grep",
-    "egrep",
-    "fgrep",
-    "wc",
-    "which",
-    "file",
-    "stat",
-    "du",
-    "df",
-    "tree",
-    "diff",
-    "pwd",
-    "echo",
-    "date",
-    "whoami",
-    "hostname",
-    "uname",
-    "readlink",
-    "realpath",
-    "basename",
-    "dirname",
-    "git status",
-    "git log",
-    "git diff",
-    "git show",
-    "git branch",
-    "git tag",
-    "git remote",
-    "git rev-parse",
-    "git describe",
-    "git ls-files",
-    "git ls-tree",
-    "git cat-file",
-    "git blame",
-    "python --version",
-    "python3 --version",
-    "node --version",
-    "java -version",
-    "javac -version",
-)
+from gideon.security.command_effects import CommandEffects, command_effects
 
-_READ_ONLY_PIPE_RE = re.compile(
-    r"^\s*(grep|egrep|fgrep|head|tail|wc|sort|uniq|cut|less|more|cat)\b"
-)
-
-_UNSAFE_SHELL_RE = re.compile(r">|`|\$\(|<\(|(?<!&)&(?!&)")
+UNCHECKED = "unchecked"
+MAY_DESTROY = frozenset({"destructive", UNCHECKED})
 
 VALID_TASK_MODES: tuple[str, ...] = ("agent", "ask", "plan", "build")
 
@@ -154,37 +106,35 @@ UNCLASSIFIED = "unclassified"
 _RISK_ORDER = {"safe": 0, "caution": 1, "destructive": 2}
 
 
-@dataclass(frozen=True)
-class _CommandPipeline:
-    commands: tuple[str, ...]
-
-    def allows_read(self) -> bool:
-        if not self.commands:
-            return False
-        head, *filters = self.commands
-        executable = head.lower()
-        known = executable.endswith(("--help", "--version")) or any(
-            executable == prefix or executable.startswith(prefix + " ")
-            for prefix in _READ_ONLY_BASH_PREFIXES
-        )
-        return known and all(
-            _READ_ONLY_PIPE_RE.match(command) is not None for command in filters
-        )
-
-
 def is_read_only_bash(cmd: str) -> bool:
-    source = cmd.strip()
-    if not source or _UNSAFE_SHELL_RE.search(cmd):
-        return False
-    chains = re.split(r"\s*(?:&&|\|\||;|\n)\s*", source)
-    pipelines = (
-        _CommandPipeline(
-            tuple(piece.strip() for piece in chain.split("|") if piece.strip())
-        )
-        for chain in chains
-        if chain.strip()
-    )
-    return all(pipeline.allows_read() for pipeline in pipelines)
+    return command_effects(cmd).reads_only
+
+
+def declared_level(declared: object) -> str:
+    value = getattr(declared, "value", declared)
+    text = str(value).strip().lower() if value else ""
+    return text if text in _RISK_ORDER else ""
+
+
+def _has_hint(name: str, hints: tuple[str, ...]) -> bool:
+    words = {word.lower() for word in re.findall(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+", name)}
+    return any(hint.strip("_") in words for hint in hints)
+
+
+@dataclass(frozen=True)
+class CallReading:
+    risk: str
+    effects: CommandEffects | None
+
+
+def read_call(declared: object, title: str, tool_kind: str, tool_input: object) -> CallReading:
+    command = shell_command(title, tool_kind, tool_input, declared=declared)
+    if not command:
+        return CallReading(declared_level(declared) or "caution", None)
+    effects = command_effects(command)
+    risk = ("safe" if effects.reads_only else "destructive" if effects.deletes
+            else UNCHECKED if effects.unread else "caution")
+    return CallReading(risk, effects)
 
 
 def extract_bash_command(tool_input: object) -> str:
@@ -211,34 +161,33 @@ class _Invocation:
 
     @classmethod
     def read(cls, title: str, kind: str, arguments: object) -> "_Invocation":
-        return cls((title or "").lower(), (kind or "").lower(), arguments)
+        return cls(title or "", (kind or "").lower(), arguments)
 
     @property
     def runs_shell(self) -> bool:
         return (
             self.kind in _COMMAND_TOOL_KINDS
-            or self.name in SHELL_TOOL_NAMES
-            or self.name.startswith(SHELL_TITLE_PREFIXES)
+            or self.name.lower() in SHELL_TOOL_NAMES
+            or self.name.lower().startswith(SHELL_TITLE_PREFIXES)
         )
 
     def command(self) -> str:
         return shell_command(self.name, self.kind, self.arguments)
 
-    def classification(self) -> str:
-        if self.runs_shell:
-            command = self.command()
+    def classification(self, declared: object = None) -> str:
+        if is_shell_invocation(self.name, self.kind, declared=declared):
+            command = shell_command(self.name, self.kind, self.arguments, declared=declared)
             if not command:
                 return UNCLASSIFIED
             return READ_ONLY if is_read_only_bash(command) else MUTATING
+        if declared is not None:
+            return READ_ONLY if declared_level(declared) == "safe" else MUTATING
         if self.kind in _MUTATING_TOOL_KINDS:
             return MUTATING
         # Tool names describe intent, not effects. Only the registry's explicit
         # read-like kind is a declaration; otherwise deny by default.
         declared_read = self.kind in _READONLY_TOOL_KINDS
-        if any(
-            fragment in self.name
-            for fragment in (*_MUTATING_NAME_HINTS, *_NETWORK_NAME_HINTS)
-        ):
+        if _has_hint(self.name, (*_MUTATING_NAME_HINTS, *_NETWORK_NAME_HINTS)):
             return MUTATING
         # A command argument on a non-shell tool never grants read authority.
         if extract_bash_command(self.arguments):
@@ -246,71 +195,47 @@ class _Invocation:
         return READ_ONLY if declared_read else MUTATING
 
     def effective_risk(self, declared: object) -> str:
-        raw = getattr(declared, "value", declared)
-        risk = str(raw).lower() if raw else ""
-        classification = self.classification()
-        if self.runs_shell and not self.command():
-            return "caution"
-        if extract_bash_command(self.arguments) and not self.runs_shell:
-            return "destructive" if classification == MUTATING else "caution"
-        if self.command():
-            if classification == READ_ONLY:
-                return "safe"
-            return (
-                "destructive"
-                if any(fragment in self.name for fragment in _DESTRUCTIVE_NAME_HINTS)
-                else "caution"
-            )
-        if risk in _RISK_ORDER:
-            if risk == "safe" and any(
-                fragment in self.name
-                for fragment in (*_MUTATING_NAME_HINTS, *_NETWORK_NAME_HINTS)
-            ):
-                return "destructive" if any(
-                    fragment in self.name for fragment in _DESTRUCTIVE_NAME_HINTS
-                ) else "caution"
-            return risk
-        if classification == UNCLASSIFIED:
-            return "caution"
-        if self.kind in _READONLY_TOOL_KINDS:
-            return "safe"
-        inferred = infer_risk_from_name(self.name)
-        return "caution" if inferred == "safe" else inferred
+        return read_call(declared, self.name, self.kind, self.arguments).risk
 
     def produces_deliverable(self) -> bool:
-        destructive = any(fragment in self.name for fragment in _DESTRUCTIVE_NAME_HINTS)
+        destructive = _has_hint(self.name, _DESTRUCTIVE_NAME_HINTS)
         return not destructive and any(
             fragment in self.name for fragment in _BUILD_NAME_HINTS
         )
 
 
-def is_shell_invocation(title: str, tool_kind: str) -> bool:
+def is_shell_invocation(title: str, tool_kind: str, *, declared: object = "") -> bool:
+    if declared_level(declared):
+        return (title or "").lower() == "bash"
     return _Invocation.read(title, tool_kind, None).runs_shell
 
 
-def shell_command(title: str, tool_kind: str, tool_input: object) -> str:
-    if tool_input and is_shell_invocation(title, tool_kind):
-        return extract_bash_command(tool_input)
+def shell_command(title: str, tool_kind: str, tool_input: object, *, declared: object = "") -> str:
+    if not is_shell_invocation(title, tool_kind, declared=declared):
+        return ""
+    command = extract_bash_command(tool_input)
+    if command:
+        return command
+    if (title or "").lower().startswith(SHELL_TITLE_PREFIXES):
+        return title[len("running: "):]
     return ""
 
 
-def classify_invocation(title: str, tool_kind: str, tool_input: object) -> str:
-    return _Invocation.read(title, tool_kind, tool_input).classification()
+def classify_invocation(title: str, tool_kind: str, tool_input: object, *, declared: object = None) -> str:
+    return _Invocation.read(title, tool_kind, tool_input).classification(declared)
 
 
-def _is_read_only_tool(title: str, tool_kind: str, tool_input: object) -> bool:
-    return classify_invocation(title, tool_kind, tool_input) == READ_ONLY
+def _is_read_only_tool(title: str, tool_kind: str, tool_input: object, *, declared: object = "") -> bool:
+    return classify_invocation(title, tool_kind, tool_input, declared=declared) == READ_ONLY
 
 
-def resolve_effective_risk(
-    declared: object, title: str, tool_kind: str, tool_input: object
-) -> str:
-    return _Invocation.read(title, tool_kind, tool_input).effective_risk(declared)
+def resolve_effective_risk(declared: object, title: str, tool_kind: str, tool_input: object) -> str:
+    return read_call(declared, title, tool_kind, tool_input).risk
 
 
 def infer_risk_from_name(name: str) -> str:
-    bare = (name or "").lower()
-    if bare.startswith("mcp/"):
+    bare = (name or "").strip()
+    if bare.lower().startswith("mcp/"):
         bare = bare.rsplit("/", 1)[-1]
     priorities = (
         (_DESTRUCTIVE_NAME_HINTS, "destructive"),
@@ -320,7 +245,7 @@ def infer_risk_from_name(name: str) -> str:
         (
             risk
             for fragments, risk in priorities
-            if any(fragment in bare for fragment in fragments)
+            if _has_hint(bare, fragments)
         ),
         "caution",
     )
@@ -334,13 +259,19 @@ _MODE_REFUSALS = {
 
 
 def task_mode_denies(
-    task_mode: str, title: str, tool_kind: str, tool_input: object
+    task_mode: str, title: str, tool_kind: str, tool_input: object, *, declared: object = None
 ) -> str:
     if task_mode == "agent" or task_mode not in VALID_TASK_MODES:
         return ""
     call = _Invocation.read(title, tool_kind, tool_input)
-    if call.classification() == READ_ONLY:
+    if call.classification(declared) == READ_ONLY:
         return ""
-    if task_mode == "build" and call.produces_deliverable():
+    if task_mode == "build" and declared_level(declared) != "destructive" and call.produces_deliverable():
         return ""
     return _MODE_REFUSALS[task_mode]
+
+
+def tool_input_to_str(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":")) if value is not None else ""

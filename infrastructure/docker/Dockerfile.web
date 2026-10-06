@@ -4,10 +4,12 @@ COPY package.json package-lock.json ./
 COPY apps/console/package.json apps/console/
 RUN npm ci --workspace=apps/console --prefer-offline
 COPY apps/console/ apps/console/
-RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build --workspace=apps/console
+COPY runtime/gideon/security/scan_rule_gloss.json runtime/gideon/security/scan_rule_gloss.json
+COPY runtime/gideon/workspace/genui_v2_catalog.json runtime/gideon/workspace/genui_v2_catalog.json
 COPY apps/assistant/package.json apps/assistant/package-lock.json apps/assistant/app.json apps/assistant/
 RUN npm --prefix apps/assistant ci --prefer-offline
 COPY apps/assistant/ apps/assistant/
+RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build --workspace=apps/console
 RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build:assistant --workspace=apps/console
 FROM mirror.gcr.io/library/nginx:1.27-alpine AS runtime
 COPY --from=builder /app/apps/console/dist /usr/share/nginx/html

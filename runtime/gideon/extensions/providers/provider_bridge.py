@@ -29,6 +29,7 @@ from gideon.integrations.llm.base import ModelProvider
 logger = logging.getLogger(__name__)
 
 ProviderFactory = Callable[..., ModelProvider]
+METERED_AXES = frozenset({"reasoning", "background", "loops", "orchestration"})
 
 _CAPABILITY_TO_ENUM = {
     "image_modality": "vision",
@@ -568,6 +569,7 @@ def _build_native_runtime(
 
     inner_axis = model_axis if model_axis in CHAT_SUBCATEGORIES else "chat"
     profile = None
+    cfg = None
     try:
         from gideon.core.config.loader import AppConfig
 
@@ -590,7 +592,13 @@ def _build_native_runtime(
         _model_axis_only=True,
         **kwargs,
     )
-    name = agent or "Gideon"
+    from gideon.engine.agents.tool_list import agent_tools
+    from gideon.engine.agents.skill_list import agent_skills
+
+    app_work = kwargs.pop("app_work", None)
+    tool_grants = agent_tools(agent, cfg)
+    skill_grants = agent_skills(agent, cfg)
+    name = tool_grants.agent or agent or "Gideon"
     if not hasattr(model_provider, "complete"):
         raise ProviderResolutionError(
             f"Native agent {name!r} resolved its inference model to "
@@ -641,6 +649,8 @@ def _build_native_runtime(
         model=model,
         tools=tools,
         skills=skills,
+        tool_grants=tool_grants,
+        skill_grants=skill_grants,
         workspace_dir=cwd or "",
     )
     _cwd = Path(cwd) if cwd else None
@@ -698,6 +708,7 @@ def _build_native_runtime(
 
     runtime = NativeAgentRuntime(  # type: ignore[assignment]  # CI-2
         definition=definition,
+        app_work=app_work,
         model_provider=model_provider,  # type: ignore[arg-type]
         tool_providers=tool_providers,
         cwd=_cwd,
@@ -750,6 +761,19 @@ def resolve_provider_for_use_case(
     if use_case not in VALID_USE_CASES:
         raise ProviderResolutionError(f"Unknown use case: {use_case!r}")
 
+    from gideon.security import execution_lineage
+    if execution_lineage.origin() is not None and not execution_lineage.admitting_host_runtime():
+        try:
+            model_override, inherited_runtime = execution_lineage.requested_model(
+                str(model_override or ""), model_only=bool(kwargs.get("_force_model_axis")) or use_case not in {"chat", "code_tools"},
+            )
+        except execution_lineage.PrivateModelRefused as error:
+            raise ProviderResolutionError(str(error)) from error
+        if inherited_runtime.startswith("acp:"):
+            kwargs["provider_kind"] = inherited_runtime
+
+    from gideon.extensions.apps.app_work import of_session
+    _app_work = kwargs.pop("app_work", None) or of_session(session_key or "")
     _force_model_axis = kwargs.pop("_force_model_axis", False)
     _provider_kind = kwargs.pop("provider_kind", "") or ""
     _extra_tool_roots = kwargs.pop("extra_tool_roots", None)
@@ -764,6 +788,8 @@ def resolve_provider_for_use_case(
         if _provider_kind
         else _agent_provider_kind(agent)
     )
+    if _app_work is not None and _kind == "acp":
+        raise ProviderResolutionError("App agent work requires the native runtime; external agent tools cannot be held to its tier")
     # §2.3 (gap 3): re-inject ``unattended`` for the ACP branch. Only the acp_agent
     # factory sees these kwargs on that branch, and it is the one place that can
     # honour the flag — it hands it to AcpClient, which is what lets sanitize_mode
@@ -775,7 +801,7 @@ def resolve_provider_for_use_case(
         kwargs["unattended"] = True
     # pinned chat model instead of its CLI. It hid because ``ConversationDirectory``'s ACP
     if _kind == "acp" and _provider_kind.startswith("acp:"):
-        return _build_acp_runtime(
+        provider = _build_acp_runtime(
             _provider_kind,
             session_key=session_key,
             agent=agent,
@@ -784,6 +810,8 @@ def resolve_provider_for_use_case(
             channel_id=kwargs.pop("channel_id", None),
             **kwargs,
         )
+        provider.set_spend_axis(use_case)
+        return provider
     if (
         not _force_model_axis
         and use_case in ("chat", "code_tools")
@@ -791,6 +819,7 @@ def resolve_provider_for_use_case(
     ):
         kwargs.pop("reasoning_effort_override", None)
         return _build_native_runtime(
+            app_work=_app_work,
             use_case=use_case,
             session_key=session_key,
             agent=agent,
@@ -834,6 +863,9 @@ def resolve_provider_for_use_case(
         )
         if direct is not None:
             return direct
+
+    if execution_lineage.origin() is not None and not execution_lineage.admitting_host_runtime():
+        raise ProviderResolutionError("The private origin's model is no longer available under current provider policy; no fallback was used.")
 
     _refs = list(active_model_refs(use_case))
     _query_class = str(kwargs.pop("routing_query_class", "") or "")
@@ -1156,7 +1188,24 @@ def _resolve_from_config_registry(
         config["agent"] = agent
     for k, v in kwargs.items():
         config.setdefault(k, v)
+    if guard_use_case == "background":
+        # A configured smaller cap wins; a larger configured cap cannot defeat
+        # this entry's derived caller limit. Synchronous legacy builds stay finite.
+        derived = int(kwargs.get("max_tokens") or 4096)
+        configured = config.get("max_tokens")
+        if configured is not None:
+            configured = int(configured)
+            if configured <= 0:
+                raise ProviderResolutionError("background max_tokens must be positive")
+            derived = min(derived, configured)
+        if derived <= 0:
+            raise ProviderResolutionError("background output budget must be positive")
+        config["max_tokens"] = derived
+        kwargs["max_tokens"] = derived
 
+    from gideon.security import execution_lineage
+    if not execution_lineage.admitting_host_runtime() and not execution_lineage.admits(f"{candidate.name}:{served_model}"):
+        raise ProviderResolutionError("The resolved provider is outside the private origin's admitted model catalog.")
     build_kwargs = dict(kwargs)
     build_kwargs["model"] = served_model
     if "credential_store" not in build_kwargs and candidate.credential:
@@ -1211,6 +1260,12 @@ def _resolve_from_config_registry(
         logger.debug("provider does not expose served-model identity", exc_info=True)
 
     if guard_use_case:
+        from gideon.integrations.acp.spend import AcpTurnMeter
+
+        if isinstance(built, AcpTurnMeter):
+            built.set_spend_axis(guard_use_case)
+            return built
+
         from gideon.security.guardrails import wrap_model_call_guard
         from gideon.security.guardrails.breaker import get_breaker
         from gideon.security.guardrails.budgets import (
@@ -1349,5 +1404,6 @@ def create_provider_factory(default_use_case: str = "chat") -> ProviderFactory:
             logger.debug("Provider does not expose model resolution identity", exc_info=True)
         return provider
 
+    _factory.spend_axis = default_use_case if default_use_case in METERED_AXES else ""
     _factory.resolution_basis = _resolution_basis  # type: ignore[attr-defined]
     return _factory

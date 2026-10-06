@@ -126,6 +126,12 @@ def _import(args: argparse.Namespace) -> int:
         print(f"❌ No such archive: {archive}")
         return 1
 
+    from gideon.operations.durability.home_paths import LinkInTheWay
+    try:
+        pa.projects_folder(config_dir())
+    except LinkInTheWay as link:
+        print(f"❌ Left unchanged: {link}")
+        return 1
     store = HierarchyStore()
     existing = [p.name for p in store.list_projects()]
     try:
@@ -154,10 +160,13 @@ def _import(args: argparse.Namespace) -> int:
         print("❌ Nothing importable in this archive.")
         return 1
 
-    created = store.create_project(plan.project_name)
-    written = pa.commit_import(
-        plan, extracted, project_root=config_dir() / "projects" / created.id
-    )
+    try:
+        created, written, left = pa.import_project(plan, extracted, store=store, home=config_dir())
+    except LinkInTheWay as link:
+        print(f"❌ Left unchanged: {link}")
+        return 1
+    for item in left:
+        print(f"⚠️ Left unchanged: {item}")
     print(
         f"✅ Imported as {created.name} ({created.id}) — {len(written)} entities written"
     )
@@ -166,7 +175,7 @@ def _import(args: argparse.Namespace) -> int:
             f"   🔑 Re-enter {len(plan.secrets_expected)} credential(s): "
             f"{', '.join(plan.secrets_expected)}"
         )
-    return 0
+    return 1 if left else 0
 
 
 def project_main(args: argparse.Namespace) -> int:

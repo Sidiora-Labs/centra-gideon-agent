@@ -85,19 +85,21 @@ async def _read_upload_file(
             status=400,
         )
 
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    from gideon.workspace.uploads.content_intake import approve_stream, IntakeRefused
+    async def chunks():
+        while chunk := await part.read_chunk(65536):
+            yield chunk
+    snapshot = None
     try:
-        while True:
-            chunk = await part.read_chunk(65536)
-            if not chunk:
-                break
-            tmp.write(chunk)
-        tmp.close()
-        return Path(tmp.name), None
-    except Exception:
-        tmp.close()
-        Path(tmp.name).unlink(missing_ok=True)
-        raise
+        snapshot = await approve_stream(chunks(), part.filename or 'import.zip',
+                                        'application/zip', surface='archive_import')
+        return await snapshot.stage_file(), None
+    except IntakeRefused as exc:
+        return None, exc.response()
+    finally:
+        if snapshot is not None:
+            snapshot.close()
+
 
 
 def _reject_app(request: web.Request) -> web.Response | None:
@@ -153,11 +155,17 @@ async def api_durability_archive(request: web.Request) -> web.Response:
                 retention.DEFAULT_WEEKLY,
                 retention.DEFAULT_MONTHLY,
             )
-        keep, prune = retention.plan_retention(
-            snapshots, daily=daily, weekly=weekly, monthly=monthly
+        verified = service.last_verified()
+        plan = retention.plan_retention(
+            snapshots, verified=verified["archive"], daily=daily, weekly=weekly, monthly=monthly
         )
-        keep_names = {s.name for s in keep}
+        keep_names = {s.name for s in plan.keep}
         drill = service.last_drill()
+        drill["on_disk"] = drill.get("archive") in {s.name for s in snapshots} if drill.get("archive") else None
+        def verdict(name):
+            if drill.get("archive") == name:
+                return drill
+            return {"ran": True, "ok": True, **verified} if verified["archive"] == name else None
         return {
             "directory": str(directory),
             "archives": [
@@ -167,12 +175,14 @@ async def api_durability_archive(request: web.Request) -> web.Response:
                     "taken_at": s.taken_at.isoformat(),
                     "size": s.size,
                     "retained": s.name in keep_names,
+                    "held": plan.held is not None and plan.held.name == s.name,
+                    "prune_reason": plan.reasons.get(s.name, ""),
                     "domains": arch.domain_counts(s.path),
-                    "validate": drill if drill.get("archive") == s.name else None,
+                    "validate": verdict(s.name),
                 }
                 for s in snapshots
             ],
-            "would_prune": [s.name for s in prune],
+            "would_prune": [s.name for s in plan.prune],
             "tiers": {"daily": daily, "weekly": weekly, "monthly": monthly},
             "last_drill": drill,
         }
@@ -309,7 +319,8 @@ async def api_durability_import(request: web.Request) -> web.Response:
     assert zip_path is not None
 
     try:
-        ok, error, manifest = await asyncio.to_thread(validate_import_zip, zip_path)
+        from gideon.cognition.knowledge.file_items import _owned_io
+        ok, error, manifest = await _owned_io(validate_import_zip, zip_path)
         if not ok:
             _audit_api(request, "durability.import", "denied", error)
             return web.json_response(
@@ -322,7 +333,7 @@ async def api_durability_import(request: web.Request) -> web.Response:
                 {"ok": True, "applied": False, "manifest": manifest}
             )
 
-        summary = await asyncio.to_thread(apply_import_zip, zip_path, mode)
+        summary = await _owned_io(apply_import_zip, zip_path, mode)
         _audit_api(
             request,
             "durability.import",
@@ -330,7 +341,7 @@ async def api_durability_import(request: web.Request) -> web.Response:
             f"mode={mode},items={len(summary.get('items', []))}",
         )
         return web.json_response(
-            {"ok": True, "applied": True, "summary": summary, "manifest": manifest}
+            {"ok": True, "applied": True, "partial": bool(summary.get("partial")), "left_unchanged": summary.get("left_unchanged", []), "summary": summary, "manifest": manifest}
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("durability import failed")
@@ -387,11 +398,11 @@ async def api_durability_run(request: web.Request) -> web.Response:
         "reclaim": service.run_reclaim,
         "export": service.run_incremental_export,
         "snapshot": service.run_nightly_snapshot,
-        "drill": lambda: service.run_restore_drill(notifier=notifier),
+        "drill": service.run_restore_drill,
     }
     result = await asyncio.get_event_loop().run_in_executor(None, runners[job])
     await asyncio.get_event_loop().run_in_executor(
-        None, lambda: service.persist_job_result(result)
+        None, lambda: service.persist_job_result(result, notifier=notifier)
     )
     _audit_api(
         request,

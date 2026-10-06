@@ -25,6 +25,7 @@ GROUP_POLICIES: tuple[str, ...] = ("tracked_only", "off")
 DEFAULT_DM_POLICY = "pairing"
 DEFAULT_GROUP_POLICY = "tracked_only"
 UNKNOWN_SENDER_RENOTIFY_SECS = 24 * 3600
+SEEN_SENDERS_MAX = 20
 OWNER_PAIRING_MAX_ATTEMPTS = 5
 _OWNER_PAIRING_EPOCH = secrets.token_hex(16)
 _OWNER_PAIRING_SECRET = secrets.token_bytes(32)
@@ -52,6 +53,7 @@ def _default_provider() -> dict[str, Any]:
             "allowed_senders",
             "tracked_channels",
             "seen_channels",
+            "seen_senders",
             "pairing",
             "policies",
             "rate",
@@ -210,12 +212,21 @@ def is_allowed_sender(provider: str, sender_id: str) -> bool:
 def allow_sender(
     provider: str, sender_id: str, name: str = "", *, via: str = "owner"
 ) -> None:
-    _update_directory(provider, "allowed_senders", sender_id, _entry(name, via=via))
+    with _editing(provider) as change:
+        change.record["allowed_senders"][sender_id] = _entry(name, via=via)
+        change.record["seen_senders"].pop(sender_id, None)
+        change.commit()
     _emit_sel("sender_paired", via, provider, sender_id)
 
 
 def deny_sender(provider: str, sender_id: str) -> None:
-    _update_directory(provider, "allowed_senders", sender_id, None)
+    with _editing(provider) as change:
+        if sender_id in change.record["allowed_senders"]:
+            del change.record["allowed_senders"][sender_id]
+            if sender_id in change.record["rate"]:
+                change.record["rate"][sender_id] = ""
+            change.record["seen_senders"].pop(sender_id, None)
+            change.commit()
     _emit_sel("sender_denied", "owner", provider, sender_id)
 
 
@@ -251,6 +262,9 @@ def set_trust_policies(
     with _editing(provider) as change:
         if dm is not None:
             change.record["policies"]["dm"] = dm
+            if dm != "pairing" and change.record["pairing"]:
+                change.record["pairing"] = {}
+                _emit_sel("pairing_code_cancelled", "policy_changed", provider)
         if group is not None:
             change.record["policies"]["group"] = group
         change.commit()
@@ -324,7 +338,16 @@ def provider_trust(provider: str) -> dict[str, Any]:
         "tracked_channels": _directory_projection(
             record["tracked_channels"], "channel_id", ("name", "added_at")
         ),
-        "pairing_active": bool(code.get("code_hash")),
+        "seen_senders": [
+            {"sender_id": key, "name": str(value.get("name") or "").strip(),
+             "since": str(value.get("since") or ""), "last_seen": str(value.get("last_seen") or ""),
+             "count": _messages_counted(value)}
+            for key, value in sorted(record["seen_senders"].items(),
+                key=lambda entry: str(entry[1].get("last_seen", "")) if isinstance(entry[1], dict) else "",
+                reverse=True)
+            if isinstance(value, dict) and key not in record["allowed_senders"] and key != owner_id
+        ],
+        "pairing_active": _PairingTicket.from_record(code).verdict("", _now()) == "wrong_code",
         "pairing_expires_at": str(code.get("expires_at", "") or ""),
     }
 
@@ -379,14 +402,17 @@ def _looks_like_a_pairing_code(text: str) -> bool:
     )
 
 
-def redeem_pairing_code(provider: str, sender_id: str, code: str) -> bool:
+def redeem_pairing_code(provider: str, sender_id: str, code: str, name: str = "") -> bool:
     with _editing(provider) as change:
         ticket = _PairingTicket.from_record(change.record["pairing"])
-        outcome = ticket.verdict(code, _now())
+        outcome = (ticket.verdict(code, _now())
+                   if change.record["policies"].get("dm") == "pairing"
+                   else "pairing_policy_required")
         if outcome in ("paired", "expired_code"):
             change.record["pairing"] = {}
             if outcome == "paired":
-                change.record["allowed_senders"][sender_id] = _entry("", via="pairing")
+                change.record["allowed_senders"][sender_id] = _entry(name, via="pairing")
+                change.record["seen_senders"].pop(sender_id, None)
             change.commit()
     accepted = outcome == "paired"
     _emit_sel(
@@ -484,6 +510,7 @@ def redeem_owner_pairing_code(
             expected = hmac.new(_OWNER_PAIRING_SECRET, code.encode(), hashlib.sha256).hexdigest()
             if hmac.compare_digest(digest, expected):
                 save_credential(owner_id_credential(provider), sender_id)
+                _update_directory(provider, "allowed_senders", sender_id, _entry(name, via="owner_pairing"))
                 _save_owner_pairing_record(
                     provider, {"ended": "paired", "paired_at": _iso(_now())}
                 )
@@ -636,10 +663,44 @@ def report_inbound_verdict(
     return verdict
 
 
-def _claim_contact(provider: str, sender_id: str) -> bool:
+def _messages_counted(metadata: Any) -> int:
+    try:
+        return max(0, int(metadata.get("count", 0))) if isinstance(metadata, dict) else 0
+    except (ValueError, TypeError):
+        return 0
+
+
+def owner_ref(provider: str) -> dict[str, str]:
+    import os
+    from gideon.core.config import loader
+    from gideon.core.config.credentials import get_credential, owner_id_credential
+
+    owner, source = "", ""
+    for key, candidate_source in ((owner_id_credential(provider), "channel"), (loader.CRED_OWNER_ID, "shared")):
+        value = os.environ.get(key, "").strip() or get_credential(key).strip()
+        if value:
+            owner, source = value, candidate_source
+            break
+    metadata = _lookup(provider, "allowed_senders").get(owner)
+    metadata = metadata if isinstance(metadata, dict) else {}
+    return {"owner_id": owner, "owner_name": str(metadata.get("name") or "").strip(),
+            "owner_source": source}
+
+
+def _claim_contact(provider: str, sender_id: str, name: str = "", *, held: bool = False) -> bool:
     with _editing(provider) as change:
         rate = change.record["rate"]
         now = _now()
+        if not held:
+            seen = change.record["seen_senders"]
+            before = seen.get(sender_id)
+            before = before if isinstance(before, dict) else {}
+            seen[sender_id] = {"name": name or str(before.get("name") or ""),
+                               "since": str(before.get("since") or "") or _iso(now),
+                               "last_seen": _iso(now), "count": _messages_counted(before) + 1}
+            newest = sorted(seen, key=lambda key: str(seen[key].get("last_seen", "")), reverse=True)
+            change.record["seen_senders"] = {key: seen[key] for key in newest[:SEEN_SENDERS_MAX]}
+            change.commit()
         previous = rate.get(sender_id, "")
         if previous:
             try:
@@ -670,7 +731,7 @@ def note_unknown_sender(
     silent: bool = False,
     held: bool = False,
 ) -> bool:
-    if not _claim_contact(provider, sender_id):
+    if not _claim_contact(provider, sender_id, sender_name, held=held):
         return False
     _emit_sel("sender_denied", "unknown_sender", provider, sender_id)
     if state is not None:
@@ -761,7 +822,7 @@ def guard_inbound(
             and _looks_like_a_pairing_code(candidate)
             and _pairing_code_outstanding(provider)
         )
-        if eligible and redeem_pairing_code(provider, sender_id, candidate):
+        if eligible and redeem_pairing_code(provider, sender_id, candidate, sender_name):
             decision = TrustVerdict(
                 False, "paired", canned_reply=CANNED_PAIRED_REPLY, meta={"paired": True}
             )

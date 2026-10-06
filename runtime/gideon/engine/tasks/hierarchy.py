@@ -1,4 +1,4 @@
-"""Project and task-list records, layout migration and deletion lineage."""
+"""Project and task-list records with layout migration."""
 
 from __future__ import annotations
 
@@ -118,45 +118,6 @@ class ProjectMigration:
                 self.store._write_project(project)
 
 
-@dataclass(frozen=True)
-class DeletionLineage:
-    store: HierarchyStore
-
-    def project(self, identifier):
-        try:
-            from gideon.operations.durability.tombstones import record_tombstone
-
-            root = self.store._projects_dir()
-            tree = self.store._project_dir(identifier)
-            if not tree.is_dir():
-                return
-            now = _now_iso()
-            for path in sorted(tree.rglob("*.json")):
-                relative = path.relative_to(tree).as_posix()
-                if relative.startswith("worktrees/") or "/worktrees/" in relative:
-                    continue
-                record_tombstone(
-                    root,
-                    path.relative_to(root).as_posix().removesuffix(".json"),
-                    now=now,
-                )
-        except Exception:
-            pass
-
-    def task_list(self, identifier):
-        try:
-            from gideon.operations.durability.tombstones import record_tombstone
-
-            row = (
-                self.store._list_path(identifier)
-                .relative_to(self.store._base())
-                .as_posix()
-            )
-            record_tombstone(
-                self.store._base(), row.removesuffix(".json"), now=_now_iso()
-            )
-        except Exception:
-            pass
 
 
 @dataclass(frozen=True)
@@ -405,12 +366,9 @@ class HierarchyStore:
         self.delete_task_lists(
             row.id for row in self.list_task_lists(project_id=project_id)
         )
-        self._record_project_subtree_tombstones(project_id)
         shutil.rmtree(self._project_dir(project_id), ignore_errors=True)
         return True
 
-    def _record_project_subtree_tombstones(self, project_id: str) -> None:
-        DeletionLineage(self).project(project_id)
 
     def _list_path(self, list_id: str) -> Path:
         return record_path(self._lists_dir(), list_id, kind="list_id")
@@ -501,13 +459,9 @@ class HierarchyStore:
         if not path.exists():
             return False
         path.unlink(missing_ok=True)
-        self._record_list_tombstone(list_id)
         return True
 
     def delete_task_lists(self, list_ids) -> int:
         return sum(
             self.delete_task_list(list_id) for list_id in dict.fromkeys(list_ids)
         )
-
-    def _record_list_tombstone(self, list_id: str) -> None:
-        DeletionLineage(self).task_list(list_id)

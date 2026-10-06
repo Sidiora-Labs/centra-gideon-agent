@@ -102,10 +102,13 @@ async def test_zero_state_reviewed_install_launches_authenticated_daemon(
         "revise",
         "delete",
         "restore",
+        "administer",
     ]
     assert plan["params"]["local_enrollment"]["resources"] == [
         "memory-records",
         "memory-list",
+        "memory-service",
+        "memory-embedding",
     ]
     assert "credential_id" not in str(plan)
     assert "capability_id" not in str(plan)

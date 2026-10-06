@@ -1,3 +1,4 @@
+import { withFreshSignIn } from './freshSignIn'
 import { apiVersionHeaders } from './apiVersion'
 import { errEnvelope } from './errText'
 
@@ -31,7 +32,15 @@ export function gatewayRequest(path: string, method: Method = 'GET', body?: unkn
   const init: RequestInit = { headers }
   if (method !== 'GET') init.method = method
   if (writesJson) init.body = body == null ? undefined : JSON.stringify(body)
-  return fetch(path, init)
+  if (method === 'GET' || path === '/api/auth/confirm') return fetch(path, init)
+  return withFreshSignIn(async () => {
+    const response = await fetch(path, init)
+    if (!response.ok) {
+      const error = await responseError(response.clone())
+      if (error.code === 'fresh_sign_in_required') throw error
+    }
+    return response
+  })
 }
 
 export function requestJson<T>(path: string, method: Method = 'GET', body?: unknown, options?: WriteOptions): Promise<T> {

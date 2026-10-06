@@ -108,6 +108,9 @@ class SQLiteStore:
             Path(f"{store_path}.lease"), lease_key
         )
         try:
+            from gideon.core.database_privacy import prepare_database
+
+            prepare_database(store_path, anywhere=True)
             connection = sqlite3.connect(store_path, timeout=5, isolation_level=None)
             connection.execute("PRAGMA foreign_keys=ON")
             os.chmod(store_path, 0o600)

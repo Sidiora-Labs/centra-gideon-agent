@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+from gideon.core.turn_streams import closing_stream
+
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,12 +34,13 @@ async def relay_events(
 ) -> AsyncIterator:
     accumulator = provider._outcome_accumulator
     accumulator.begin_turn()
-    async for raw in produce(text):
-        if stamp is not None:
-            stamp(raw)
-        translated = provider._to_llm_event(raw)
-        accumulator.observe(translated)
-        yield translated
+    async with closing_stream(produce(text)) as events:
+        async for raw in events:
+            if stamp is not None:
+                stamp(raw)
+            translated = provider._to_llm_event(raw)
+            accumulator.observe(translated)
+            yield translated
 
 
 async def cancel_turn(
@@ -168,6 +171,7 @@ class ProbePlan:
             env=self.options.get("env") or {},
             dialect=self.options.get("dialect"),
             sandbox_mode=options_sandbox_mode(self.options),
+            session_meta=self.options.get("session_meta"),
         )
         timeout = self.timeout
         closed = False
@@ -200,6 +204,7 @@ class ProbePlan:
                 dialect=dialect,
                 extra_env=self.options.get("env") or {},
                 sandbox_mode=options_sandbox_mode(self.options),
+            session_meta=self.options.get("session_meta"),
             ),
             timeout=self.timeout,
         )
@@ -269,6 +274,8 @@ def launch_arguments(entry, session_key: str | None, overrides: dict) -> dict:
         "reasoning_effort": text("reasoning_effort_override"),
         "unattended": bool(overrides.get("unattended", False)),
         "runtime_id": entry.name,
+        "session_meta": options.get("session_meta"),
+        "compacts_itself": options.get("compacts_itself", False),
     }
 
 

@@ -13,12 +13,14 @@ from gideon.automation.script_worker import Done, Report, Skip
 from gideon.core.config import loader as config_loader
 from gideon.engine import gateway_base
 from gideon.engine.hooks import validate_file_path
-from gideon.integrations.mcp_core import _internal_secret
+from gideon.integrations.mcp_core import InternalSecretUnavailable, _internal_secret
 from gideon.security.sandbox import (
     PROFILE_TOOL,
     build_child_env,
     spawn_shim_argv,
     wrap_argv,
+    wrap_refusal,
+    no_network_note,
 )
 
 _DEFAULT_SCRIPT_TIMEOUT = 30
@@ -117,16 +119,23 @@ def run_script_sandboxed(
     session_key: str = "",
 ) -> dict:
     entry, symbol = resolve_script_path(script_spec)
+    if refused := wrap_refusal("standard"):
+        return {"status": "error", "error": refused}
     deadline = timeout if timeout and timeout > 0 else _DEFAULT_SCRIPT_TIMEOUT
     try:
         port = gateway_base.resolve_port()
     except gateway_base.GatewayBaseUnresolved as failure:
         return {"status": "error", "error": str(failure)}
+    try:
+        secret, secret_unavailable = _internal_secret(), ""
+    except InternalSecretUnavailable as exc:
+        secret, secret_unavailable = "", str(exc)
     configuration = dict(
         script_path=str(entry),
         func=symbol,
         message=job_message,
-        secret=_internal_secret(),
+        secret=secret,
+        secret_unavailable=secret_unavailable,
         port=port,
         session_key=f"cron:{job_id}",
     )
@@ -148,4 +157,6 @@ def run_script_sandboxed(
             and not receipt.get("error")
         ):
             receipt["error"] = (child.stderr or "script failed")[:4000]
+        if receipt.get("status") == "error" and (note := no_network_note()):
+            receipt["error"] = f"{receipt.get('error') or 'script failed'}\n{note}"
         return receipt

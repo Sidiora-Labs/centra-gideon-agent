@@ -1,3 +1,4 @@
+import { GrantConsent } from './GrantConsent'
 import { useEffect, useState } from 'react'
 import { Pencil, Trash2, Check, X, FlaskConical, AlertTriangle, ShieldOff, ShieldCheck } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
@@ -101,6 +102,7 @@ export function LifecycleDetail({ hook, providers, onSaved, onDeleted, editing, 
           <Toggle on={hook.enabled} onChange={() => toggle()} disabled={busy} label="Toggle enabled" size="sm" />
         </label>
       </div>
+      <GrantConsent id={`lifecycle:${hook.id}`} question={hook.grant_question} required={hook.grant_required} satisfied={hook.grant_satisfied} onChanged={onSaved} />
       {err && <FieldError>{err}</FieldError>}
       {testOut && <p className="rounded-md bg-surface-container px-m py-2 text-on-surface-var text-[0.8125rem] break-words">{testOut}</p>}
 

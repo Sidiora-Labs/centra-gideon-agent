@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from gideon.core.constants import JSONRPC_METHOD_NOT_FOUND
 from gideon.integrations.acp import translate
 from gideon.integrations.acp.errors import AcpError, AcpMethodNotFound
@@ -62,7 +64,21 @@ class TurnDecoder:
             ):
                 events.append(AcpEvent(kind=EVENT_AGENT_SWITCHED, text=agent["name"]))
         events.extend(self.session._read_new_tool_results())
-        events.append(self.finish(result.get("stopReason") or ""))
+        terminal = self.finish(result.get("stopReason") or "")
+        metadata = result.get("_meta")
+        usage = metadata.get("gideon_usage") if isinstance(metadata, dict) else None
+        if isinstance(usage, dict):
+            names = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens")
+            valid = all(type(usage.get(name, 0)) is int and 0 <= usage.get(name, 0) <= 2**53 for name in names)
+            cost = usage.get("cost_usd", 0)
+            valid = valid and type(cost) in (int, float) and math.isfinite(cost) and cost >= 0
+            valid = valid and all(type(usage.get(name, False)) is bool for name in ("usage_reported", "cost_reported"))
+            if valid:
+                for name in names:
+                    setattr(terminal, name, usage.get(name, 0))
+                terminal.cost_usd = float(cost)
+                terminal.tool_meta = {name: usage.get(name, False) for name in ("usage_reported", "cost_reported")}
+        events.append(terminal)
         return events
 
     def error(self, message) -> list[AcpEvent]:
@@ -73,15 +89,14 @@ class TurnDecoder:
 
     def permission(self, message) -> list[AcpEvent]:
         owner = self.session
-        return [
-            translate.build_permission_event(
-                message,
-                owner._dialect,
-                owner._tool_call_inputs,
-                owner._tool_call_seen,
-                owner._offered_options,
-            )
-        ]
+        event = translate.build_permission_event(
+            message, owner._dialect, owner._tool_call_inputs,
+            owner._tool_call_seen, owner._offered_options,
+        )
+        from gideon.security.security import redact_field
+        owner._asked_steps[str(event.request_id)] = redact_field(event.title)[:300]
+        event.tool_meta["deny_consequence"] = owner.deny_outcome(event.request_id)["consequence"]
+        return [event]
 
     def update(self, message) -> list[AcpEvent]:
         owner = self.session
@@ -98,10 +113,6 @@ class TurnDecoder:
             if not thinking:
                 owner.last_prompt_stats.text_chunks += 1
                 self.stale_eligible = True
-                if translate.is_tool_interrupted_marker(text):
-                    events.extend(owner._read_new_tool_results())
-                    events.append(self.finish())
-                    return events
         tool = translate.extract_tool_event(
             message,
             owner._tool_call_inputs,

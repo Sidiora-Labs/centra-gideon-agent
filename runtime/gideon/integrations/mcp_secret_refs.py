@@ -43,6 +43,9 @@ def safe_display_args(values: Any) -> list[str]:
 
     if not isinstance(values, (list, tuple)):
         return []
+    from gideon.integrations.mcp_argument_secrets import sealed_arguments
+
+    values = sealed_arguments([value if isinstance(value, str) else "[REDACTED: invalid argument]" for value in values])
     result: list[str] = []
     redact_next = False
     for raw in values:

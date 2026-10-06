@@ -111,12 +111,24 @@ class DefinitionDraft:
                 for operation in (self.fields.get("_version_ops") or [])
                 if isinstance(operation, dict)
             ]
+            owner_calls = None
+            source = str(self.fields.get("_version_source") or versions.SOURCE_USER)
+            if self.fields.get("_owner_saved") is True and source == versions.SOURCE_USER and document.get("provenance") == "user":
+                from gideon.automation.workflows.automation_versions import snapshot
+                try:
+                    owner_calls = snapshot(self.name, root_spec=document, keeping=True)
+                except ValueError:
+                    logger.info("owner workflow closure unavailable for %s", self.name)
             versions.record_version(
                 self.name,
                 document,
-                source=str(self.fields.get("_version_source") or versions.SOURCE_USER),
+                source=source,
+                owner_calls=owner_calls,
                 ops=operations,
             )
+            if owner_calls is not None:
+                from gideon.automation.workflows.automation_versions import record_owner_save
+                record_owner_save(self.name, document, owner_calls)
         except Exception:
             logger.debug(
                 "versions: could not record snapshot for %s", self.name, exc_info=True
@@ -183,7 +195,7 @@ class NativeWorkflowDefProvider(WorkflowDefProvider):
                 document["version"] = current.version + 1
                 document["updated_at"] = _now()
                 atomic_write(path, json.dumps(document, indent=2, ensure_ascii=False))
-                DefinitionDraft(document).snapshot(document)
+                DefinitionDraft({**document, "_owner_saved": False}).snapshot(document)
                 return WorkflowDef.from_dict(document)
             finally:
                 fcntl.flock(lock, fcntl.LOCK_UN)

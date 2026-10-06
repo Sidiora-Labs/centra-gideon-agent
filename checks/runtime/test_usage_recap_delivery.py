@@ -51,7 +51,7 @@ def stub_rates(monkeypatch):
     `priced=True` rows carry their own `cost_usd`, so a None rate is enough: the fold uses the
     recorded cost and never consults the table.
     """
-    monkeypatch.setattr(U, "rate_for", lambda p, m, home=None: _STUB_RATES.get((p, m)))
+    monkeypatch.setattr("gideon.engine.routing.rates.rate_for", lambda p, m, home=None: _STUB_RATES.get((p, m)))
 
 
 def _turns() -> list[dict]:

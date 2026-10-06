@@ -106,7 +106,9 @@ class RuntimeBundlePlan:
             copy_metadata,
         )
 
-        imports = [*ENTRYPOINT_IMPORTS, *self.provider_imports()]
+        from gideon.core.frozen_child import CHILD_MODULES
+
+        imports = [*ENTRYPOINT_IMPORTS, *CHILD_MODULES, *self.provider_imports()]
         from gideon.integrations.mcp_core import _AGGREGATED_CATEGORY_MODULES
 
         imports.extend(_AGGREGATED_CATEGORY_MODULES)

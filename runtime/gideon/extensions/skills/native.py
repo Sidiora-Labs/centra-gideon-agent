@@ -151,7 +151,5 @@ get_default_skills_registry().register(
 
 
 def create_provider(config=None):
-    """Extension factory for native skills provider."""
-    from gideon.extensions.skills.loader import ProcedureLibrary
-
-    return ProcedureLibrary()
+    """The native skills seam exposes the import-registered catalogs, with no live loader."""
+    return None

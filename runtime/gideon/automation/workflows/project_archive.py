@@ -350,38 +350,67 @@ def read_archive_plan(
     return admission, extracted
 
 
+def projects_folder(home: Path) -> Path:
+    from gideon.operations.durability.home_paths import home_path
+    return home_path(home, "projects")
+
+
 class ImportDestination:
     def __init__(self, root):
-        self.directory, self.resolved = root, root.resolve()
+        self.directory = Path(root)
 
     def target(self, relative):
         if not safe_member(relative)[0]:
             return None
-        destination = (self.directory / relative).resolve()
-        if destination == self.resolved or self.resolved in destination.parents:
-            return destination
-        return None
+        from gideon.operations.durability.home_paths import guard_path
+        return guard_path(self.directory / relative)
 
-    def commit(self, accepted, contents):
+    def commit(self, accepted, contents, *, left=None):
+        from gideon.core.atomic_write import atomic_write_bytes
+        from gideon.operations.durability.home_paths import LinkInTheWay
         written = []
         for relative in accepted:
-            if not safe_member(relative)[0]:
+            if relative == "project.json" or not safe_member(relative)[0]:
                 continue
             content = contents.get(relative)
             if content is None:
                 continue
-            destination = self.target(relative)
-            if destination is not None:
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes(content)
-                written.append(relative)
+            try:
+                destination = self.target(relative)
+                if destination is not None:
+                    atomic_write_bytes(destination, content, mode=0o600)
+                    written.append(relative)
+            except LinkInTheWay as link:
+                if left is None:
+                    raise
+                link.put_on(left)
         return written
 
 
 def commit_import(
-    plan: ImportPlan, archive: ExtractedArchive, *, project_root: Path
+    plan: ImportPlan, archive: ExtractedArchive, *, project_root: Path, left=None
 ) -> list[str]:
-    return ImportDestination(project_root).commit(plan.accepted, archive.contents)
+    return ImportDestination(project_root).commit(plan.accepted, archive.contents, left=left)
+
+
+def import_project(plan: ImportPlan, archive: ExtractedArchive, *, store, home: Path):
+    """Create native project identity, apply portable fields, and report blocked files."""
+    projects_folder(home)
+    portable = {}
+    if "project.json" in plan.accepted:
+        try:
+            record = json.loads(archive.contents.get("project.json", b"").decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            record = {}
+        if isinstance(record, dict):
+            portable = {name: record[name] for name in ("brief", "agent_instructions_template")
+                        if isinstance(record.get(name), str)}
+    project = store.create_project(plan.project_name, **portable)
+    left = []
+    written = commit_import(plan, archive, project_root=home / "projects" / project.id, left=left)
+    if "project.json" in plan.accepted:
+        written.insert(0, "project.json")
+    return project, written, left
 
 
 def encryption_available() -> bool:

@@ -685,7 +685,8 @@ class KnowledgeCapabilityTools(ToolProvider):
                 elif tool_name == "knowledge_idea_export":
                     result = self._ideas.export(arguments["id"])
                 elif tool_name == "knowledge_idea_sync":
-                    result = self._ideas.sync(
+                    from gideon.cognition.knowledge.file_items import _owned_io
+                    result = await _owned_io(self._ideas.sync,
                         arguments["id"],
                         {key: value for key, value in arguments.items() if key != "id"},
                     )

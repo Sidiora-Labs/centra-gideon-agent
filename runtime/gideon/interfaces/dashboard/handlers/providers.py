@@ -785,6 +785,9 @@ def _refresh_media_registries() -> None:
     from gideon.integrations.tts.registry import refresh_providers as _tts_refresh
     from gideon.integrations.video_gen.registry import refresh_providers as _vid_refresh
 
+    from gideon.integrations.embedding_providers.registry import refresh_providers as _embed_refresh
+
+    _embed_refresh()
     _stt_refresh()
     _tts_refresh()
     _img_refresh()

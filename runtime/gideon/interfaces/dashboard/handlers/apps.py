@@ -190,11 +190,18 @@ def _app_status(name: str) -> dict[str, Any]:
     """Runtime status for an app: enabled + backend running/port."""
     from gideon.extensions.apps.backend_runtime import get_backend_supervisor
     from gideon.extensions.apps.app_runtime import restart_reason, ui_revision
+    from gideon.extensions.apps.worker_runtime import get_worker_supervisor
+    from gideon.integrations.local_models.sidecar import get_runner
 
-    rb = get_backend_supervisor().get(name)
+    supervisor = get_backend_supervisor()
+    rb = supervisor.get(name)
+    engine = get_runner(name)
     return {
         "backendRunning": rb is not None,
         "backendPort": rb.port if rb else None,
+        "backendExit": supervisor.last_exit(name) if rb is None else None,
+        "workers": get_worker_supervisor().statuses(name),
+        "engine": {"running": engine.is_alive(), "exit": engine.last_exit()} if engine is not None else None,
         "restartRequired": bool(restart_reason(name)),
         "restartReason": restart_reason(name),
         "uiRevision": ui_revision(name),
@@ -904,13 +911,23 @@ async def api_app_agent_run(request: web.Request) -> web.Response:
     except (TypeError, ValueError):
         max_turns = 0
 
+    from gideon.extensions.apps.app_work import AppWork
+    from gideon.extensions.apps.agent_tiers import AGENT_TIERS, capability_class
+    work = AppWork.for_app(name)
+    requested = body.get("tier", work.tier)
+    if requested not in AGENT_TIERS:
+        return json_error("agent_tier_unknown", message="tier must be text, read or tools", status=400)
+    if work.child(requested).tier != requested:
+        return json_error("agent_tier_exceeded", message="requested work exceeds the app agent tier", status=403)
+    work = work.child(requested)
     info = state.subagents.spawn(
         task,
         parent_session_key=f"app:{name}",
         agent=agent,
         max_turns=max_turns,
-        approval_mode="auto",
-        capability_class="mutating",
+        approval_mode="",
+        capability_class=capability_class(work.tier),
+        app_work=work,
         silent=True,
     )
     if not info:

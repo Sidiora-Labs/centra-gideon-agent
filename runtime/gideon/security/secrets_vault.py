@@ -425,3 +425,19 @@ def _trigger_references() -> list[tuple[str, str, list[str]]]:
         label = str(getattr(trigger, "name", "") or ident)
         found.append((ident, label, keys))
     return found
+
+
+SIGN_IN_ENVIRONMENT = (
+    "GIDEON_AUTH_MODE", "GIDEON_BYPASS_LOCAL_NETWORKS", "GIDEON_BIND_HOST",
+    "GIDEON_CORS_ORIGINS", "GIDEON_LOGIN_USER", "GIDEON_LOGIN_PASSWORD",
+)
+
+
+def is_sign_in_key(key: str) -> bool:
+    """Global names consumed by sign-in or owner binding, never project names."""
+    from gideon.security.auth.credentials import TOTP_SECRET_KEY
+    from gideon.core.config.loader import CRED_OWNER_ID
+    from gideon.integrations.inbound.auth import surfaces, token_env_key
+    return (key == TOTP_SECRET_KEY or key in SIGN_IN_ENVIRONMENT
+            or key == CRED_OWNER_ID or key.startswith(f"{CRED_OWNER_ID}_")
+            or key in {token_env_key(surface) for surface in surfaces()})

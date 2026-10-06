@@ -57,7 +57,8 @@ def component_digest(path: Path) -> str:
     its files, so a rename, an addition and an edit all move the value. Returns ``""`` when the
     path does not exist, which a caller reads as "gone" rather than as a hash collision.
     """
-    path = Path(path)
+    from gideon.operations.durability.home_paths import guard_path
+    path = guard_path(Path(path), read=True)
     if path.is_file():
         try:
             return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -67,6 +68,7 @@ def component_digest(path: Path) -> str:
         return ""
     h = hashlib.sha256()
     for child in sorted(path.rglob("*")):
+        guard_path(child, read=True)
         if not child.is_file() or child.name in _DIGEST_EXCLUDE:
             continue
         try:

@@ -133,11 +133,23 @@ class SseRegistry:
 
     def publish(self, key: str, event: str, data: Any) -> None:
         """Publish to ``key``'s hub iff it has live subscribers (else no-op)."""
-        if _trace.is_recording():
+        private = False
+        if key.startswith("workflow:"):
+            from gideon.automation.workflows import chat_runs, store
+            try:
+                run = store.get(key.removeprefix("workflow:"))
+                private = run is None or chat_runs.whose(run) is not None
+            except Exception:
+                private = True
+        if _trace.is_recording() and not private:
             _trace.record("sse", key, event, data)
         hub = self._hubs.get(key)
         if hub is not None:
             hub.publish(event, data)
+
+    def discard(self, key: str) -> None:
+        """Forget a deleted resource's buffered event hub."""
+        self._hubs.pop(key, None)
 
     def _evict_if_empty(self, key: str, hub: SseHub) -> None:
         if hub.subscriber_count == 0 and self._hubs.get(key) is hub:

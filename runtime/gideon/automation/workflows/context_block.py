@@ -59,7 +59,9 @@ def active_workflows_block(*, project_id: str = "") -> str:
         from gideon.automation.workflows import store
         from gideon.automation.workflows.models import RunStatus
 
-        runs = store.active_runs()
+        from gideon.automation.workflows import chat_runs
+        reader = chat_runs.current_reader()
+        runs = [run for run in store.active_runs() if chat_runs.reads(run, **reader)]
     except Exception:
         logger.debug(
             "active-workflows block skipped (store unavailable)", exc_info=True

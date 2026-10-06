@@ -401,7 +401,7 @@ def test_quiet_hours_persist_warning_and_attention_without_broadcast(home, monke
     broadcasts = []
     monkeypatch.setattr(state, "_broadcast", broadcasts.append)
     state.notify(nk.WARNING, "Warning", "persist me")
-    assert state._notification_log[-1]["mode"] == "quiet"
+    assert state._notification_log[-1]["mode"] == "badge"
     assert state._notification_log[-1]["badge_only"] is True
     assert broadcasts == []
 

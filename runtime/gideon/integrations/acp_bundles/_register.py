@@ -47,6 +47,8 @@ def register_acp_cli_entry(
     extension: str | None = None,
     login_command: list[str] | None = None,
     requires_executable: dict[str, str] | None = None,
+    session_meta: dict | None = None,
+    compacts_itself: bool = False,
 ) -> ProviderEntry | None:
     """Register (idempotently) an ``acp_agent`` entry named ``acp:<cli>``.
 
@@ -113,6 +115,10 @@ def register_acp_cli_entry(
     The registered :class:`ProviderEntry`, or ``None`` if the CLI was
     unavailable.
     """
+    from gideon.integrations.acp.options import session_metadata, compacts_itself as validate_compaction
+
+    metadata = session_metadata(session_meta)
+    compacts_itself = validate_compaction(compacts_itself)
     if not command:
         logger.info(
             "acp:%s bundle: CLI not resolved on this machine — provider not "
@@ -123,6 +129,10 @@ def register_acp_cli_entry(
 
     name = f"acp:{cli}"
     options: dict[str, object] = {"command": list(command), "dialect": dialect}
+    if metadata:
+        options["session_meta"] = metadata
+    if compacts_itself:
+        options["compacts_itself"] = True
     if self_sandboxing:
         options["sandbox_mode"] = "off"
     if env:

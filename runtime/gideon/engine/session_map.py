@@ -120,20 +120,26 @@ class _SessionLinks:
                 self.threads.pop(thread)
         return bool(removed)
 
-    def link(self, key, thread, channel):
-        previous = self.entries.get(key)
-        if previous and (previous.get("thread_ts"), previous.get("channel_id")) == (
-            thread,
-            channel,
-        ):
-            self.threads.setdefault(thread, key)
+    def link(self, key, thread, channel, provider=""):
+        previous = self.entries.get(key) or {}
+        destination = (thread, channel, provider)
+        if (previous.get("thread_ts", ""), previous.get("channel_id", ""), previous.get("channel_provider", "")) == destination:
             return False
-        old = previous.get("thread_ts") if previous else None
-        if old and old != thread:
-            self.threads.pop(old, None)
-        self.merge(key, {"thread_ts": thread, "channel_id": channel}, {"sid": ""})
-        self.threads[thread] = key
+        if thread:
+            for other, entry in self.entries.items():
+                if other != key and other.startswith("dashboard:") and (entry.get("thread_ts"), entry.get("channel_provider", "")) == (thread, provider):
+                    entry.update(thread_ts="", channel_id="", channel_provider="")
+        self.merge(key, {"thread_ts": thread, "channel_id": channel, "channel_provider": provider if thread and channel else ""}, {"sid": ""})
+        self.index_threads()
         return True
+
+    def for_thread(self, thread, provider=None):
+        matches = [key for key, entry in self.entries.items()
+                   if thread and entry.get("thread_ts") == thread
+                   and (provider is None or entry.get("channel_provider", "") == provider)]
+        dashboards = [key for key in matches if key.startswith("dashboard:")]
+        candidates = dashboards or matches
+        return candidates[0] if len(candidates) == 1 else None
 
 
 class SessionMap:
@@ -244,17 +250,21 @@ class SessionMap:
         return len(expired)
 
     def set_channel_link(
-        self, key: str, thread_ts: str, channel_id: str | None
+        self, key: str, thread_ts: str, channel_id: str | None, channel_provider: str = ""
     ) -> None:
-        if self._links.link(key, thread_ts, channel_id):
+        if self._links.link(key, thread_ts, channel_id, channel_provider):
             self._save()
 
     def get_channel_link(self, key: str) -> tuple[str | None, str | None]:
         entry = self._data.get(key) or {}
         return entry.get("thread_ts"), entry.get("channel_id")
 
-    def get_session_for_thread(self, thread_ts: str) -> str | None:
-        return self._links.threads.get(thread_ts)
+    def get_channel_provider(self, key: str) -> str:
+        value = (self._data.get(key) or {}).get("channel_provider", "")
+        return value if isinstance(value, str) else ""
+
+    def get_session_for_thread(self, thread_ts: str, provider: str | None = None) -> str | None:
+        return self._links.for_thread(thread_ts, provider)
 
     def find_key_by_sid(self, session_id: str) -> str | None:
         return next(

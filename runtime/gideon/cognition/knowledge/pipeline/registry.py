@@ -57,3 +57,55 @@ def can_resolve_use_case(use_case: str | None) -> bool:
             "use-case resolvability check failed for %s", use_case, exc_info=True
         )
         return False
+
+
+def unserved_reason_sync(use_case: str | None) -> str:
+    """The actual provider readiness decision, expressed for a recorded outcome."""
+    if not use_case:
+        return ""
+    from gideon.cognition.knowledge.pipeline.outcomes import use_case_name
+
+    name = use_case_name(use_case)
+    try:
+        from gideon.extensions.providers.provider_bridge import use_case_problem
+        from gideon.extensions.providers.use_cases import active_model_refs
+
+        if can_resolve_use_case(use_case):
+            return ""
+        problem = use_case_problem(use_case)
+        if problem is not None and problem[1]:
+            return str(problem[1])
+        if active_model_refs(use_case):
+            return f"The {name} model chosen in Settings → Models cannot run right now."
+        return f"No {name} model is set up."
+    except Exception:
+        logger.debug("use-case readiness could not be read for %s", use_case, exc_info=True)
+        return f"The {name} model could not be checked."
+
+
+def node_available(node: "ProcessingNode") -> bool:
+    """Respect a concrete node's live optional dependency probe, if declared."""
+    available = getattr(node, "available", None)
+    if available is None:
+        return True
+    try:
+        return bool(available() if callable(available) else available)
+    except Exception:
+        logger.debug("node dependency check failed for %s", node.node_type, exc_info=True)
+        return False
+
+
+def unavailable_outcome(node: "ProcessingNode"):
+    from gideon.cognition.knowledge.pipeline import outcomes
+
+    declared = getattr(node, "unavailable_outcome", None)
+    if callable(declared):
+        try:
+            result = declared()
+            if isinstance(result, outcomes.PhaseOutcome):
+                return result
+        except Exception:
+            logger.debug("node unavailable outcome failed", exc_info=True)
+    return outcomes.skipped(
+        f"What {outcomes.step_name(node.node_type)} runs on is not available in this install."
+    )

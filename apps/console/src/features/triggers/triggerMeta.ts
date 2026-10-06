@@ -143,6 +143,7 @@ export function actionLabel(provider?: string): string {
 }
 
 export interface Trigger {
+  document_revision?: string
   kind: TriggerKind
   id: string
   rawId: string
@@ -182,6 +183,7 @@ export function scheduleToTrigger(j: ScheduleJob): Trigger {
   const provider = j.action?.provider
   const metadata = j as ScheduleJob & { state?: string | null; health?: string | null }
   return {
+    document_revision: j.document_revision,
     kind: 'schedule', id: `schedule:${j.id}`, rawId: j.id, name: j.name || j.id, enabled: j.enabled,
     whenLabel: j.schedule, whenIcon: km.icon, whenTone: km.tone,
     actionLabel: provider ? actionLabel(provider) : mm.label,
@@ -204,6 +206,7 @@ function humanizeEvent(event: string): string {
 }
 export function hookToTrigger(h: HookItem): Trigger {
   return {
+    document_revision: h.document_revision,
     kind: 'lifecycle', id: `lifecycle:${h.id}`, rawId: h.id, name: h.name, enabled: h.enabled,
     whenLabel: humanizeEvent(h.event), whenIcon: Anchor, whenTone: 'var(--color-primary)',
     actionLabel: actionLabel(h.provider), actionIcon: actionIcon(h.provider), actionProvider: h.provider,
@@ -222,6 +225,7 @@ export function storeToTrigger(t: WireTrigger): Trigger {
     : storeKindMeta(t.store_kind)
   const provider = t.action?.provider
   return {
+    document_revision: t.document_revision,
     kind: isEvent ? 'event' : 'store', id: t.id, rawId: t.raw_id, name: t.name || t.raw_id, enabled: t.enabled,
     whenLabel: km.label, whenIcon: km.icon, whenTone: isEvent ? 'var(--color-secondary)' : 'var(--color-primary)',
     actionLabel: provider ? actionLabel(provider) : 'Action',

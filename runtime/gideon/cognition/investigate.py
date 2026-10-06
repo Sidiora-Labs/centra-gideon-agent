@@ -354,24 +354,30 @@ async def _resolve_schedule_run(entity_id: str, state) -> InvestigateContext | N
     """One schedule run, addressed ``<job_id>:<run_id>`` (a run is only readable
     through its job's history file, so the id must carry both — same composite
     shape as ``loop_finding``). A bare job id resolves its most recent run."""
-    job_id, _, run_id = entity_id.partition(":")
-    if not job_id:
+    if not entity_id:
         return None
+    job_part, _, run_part = entity_id.rpartition(":")
+    addresses = [(job_part, run_part)] if job_part and run_part else []
+    addresses.append((entity_id, ""))
     # `ExecutionJournal` directly + the unified store for the job's metadata (S111). The run half
     from gideon.automation.schedule_history import ExecutionJournal
     from gideon.automation.triggers.store import TriggerStore
     from gideon.core.config.loader import config_dir
 
     runs = ExecutionJournal(config_dir())
-    try:
-        if run_id:
-            run = await runs.get_run(job_id, run_id)
-        else:
-            rows, _total = await runs.list_for_job(job_id, offset=0, limit=1)
-            run = rows[0] if rows else None
-    except Exception:  # noqa: BLE001 — a bad/unsafe job id is an entity miss
-        logger.debug("schedule-run read failed for %s", entity_id, exc_info=True)
-        return None
+    run = None
+    for job_id, run_id in addresses:
+        try:
+            if run_id:
+                run = await runs.get_run(job_id, run_id)
+            else:
+                rows, _total = await runs.list_for_job(job_id, offset=0, limit=1)
+                run = rows[0] if rows else None
+        except Exception:  # noqa: BLE001 — a bad/unsafe job id is an entity miss
+            logger.debug("schedule-run read failed for %s", entity_id, exc_info=True)
+            run = None
+        if run:
+            break
     if not run:
         return None
     _row = TriggerStore(base_dir=config_dir()).get(job_id)
@@ -605,6 +611,9 @@ def _resolve_knowledge_item(entity_id: str, state) -> InvestigateContext | None:
     lines.append(f"Indexed for search: {'yes' if item.get('has_embedding') else 'no'}")
     if item.get("processing_error"):
         lines.append(f"Processing error: {item['processing_error']}")
+    from gideon.cognition.knowledge.pipeline.outcomes import told
+
+    lines.extend(f"Step {step}" for step in told((item.get("file_metadata") or {}).get("node_phases")))
     if item.get("summary"):
         lines.append(f"\nSummary: {item['summary']}")
     insights = item.get("insights")

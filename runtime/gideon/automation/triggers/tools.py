@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from gideon.security.safety_flags import yes_or_no
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_AGENT_TRIGGERS = 20
@@ -303,7 +305,7 @@ class CreationPlan:
             id=_unique_id(self.store, slug_for(self.name, self.kind)),
             name=self.name.strip(),
             kind=self.kind,
-            enabled=bool(self.enabled),
+            enabled=yes_or_no(self.enabled) is True,
             created_by=self.created_by,
             origin_harness=_origin_harness_for(self.store),
             spec=self.spec,
@@ -472,7 +474,25 @@ def update(store: Any, *, trigger_id: str, patch: dict[str, Any]) -> ToolResult:
             f"Error: nothing to update. Not settable here: {', '.join(rejected) or 'none given'}.",
             dict(rejected=rejected),
         )
+    from gideon.security.safety_flags import yes_or_no
+
+    for name in ("enabled", "yield_to_user", "catch_up"):
+        if name in accepted:
+            parsed = yes_or_no(accepted[name])
+            if parsed is None:
+                return ToolResult(False, f"Error: nothing was changed: {name} must be a boolean.")
+            accepted[name] = parsed
     if "workflow" in accepted:
+        from gideon.automation.triggers.action_edit import edited_workflow
+
+        try:
+            accepted["workflow"] = edited_workflow(row.trigger.workflow, accepted["workflow"])
+        except ValueError as exc:
+            return ToolResult(False, f"Error: nothing was changed: {exc}.")
+        from gideon.extensions.apps.app_crons import posture_refusal
+        problem = posture_refusal(trigger_id, accepted["workflow"])
+        if problem:
+            return ToolResult(False, f"Error: nothing was changed: {problem}")
         refusal = unattended_action_refusal(accepted["workflow"])
         if refusal is not None:
             return refusal

@@ -178,7 +178,24 @@ async def test_a_trigger_fired_run_pins_the_def_version_it_executed(
         "on_overlap": "queue",
         "root": {"kind": "transform", "id": "only", "config": {"expr": "done"}},
     }
-    defs_mod.register_provider(_StubDefs(spec))
+    from gideon.automation.workflows.native_defs import NativeWorkflowDefProvider
+    from gideon.automation.triggers import grants
+    from gideon.automation.triggers.models import Trigger
+    from gideon.automation.triggers.store import TriggerStore
+    from gideon.security.approval_answer import YOU
+    from gideon.integrations.action_providers.base import ActionContext
+
+    provider = NativeWorkflowDefProvider()
+    for _ in range(4):
+        await provider.save_def(name="sample", root=spec["root"], on_overlap="queue", provenance="chat", _version_source=versions.SOURCE_REFINER)
+    defs_mod.register_provider(provider)
+    trigger = Trigger(id="trigger-wf2lea6", name="Workflow version", kind="manual", workflow={"provider": "run-workflow", "config": {"workflow": "sample"}})
+    rows = TriggerStore()
+    rows.upsert(trigger)
+    trigger = rows.get(trigger.id).trigger
+    question = grants.question(trigger)
+    assert grants.grant(trigger, confirmed_revision=question.revision, principal=YOU, shown=question.shown)
+    rows.upsert(trigger)
     monkeypatch.setattr(
         "gideon.integrations.action_providers.services.get_action_services",
         lambda: SimpleNamespace(workflows=WorkflowWatchdog()),
@@ -188,12 +205,13 @@ async def test_a_trigger_fired_run_pins_the_def_version_it_executed(
     )
     store.write_spec(prior.id, spec)
     try:
-        ctx = cast(Any, SimpleNamespace(context="trigger-wf2lea6"))
+        ctx = ActionContext(event="manual", trigger_id="trigger-wf2lea6", context="trigger-wf2lea6")
         result = await RunWorkflowActionProvider().execute({"workflow": "sample"}, ctx)
+        assert result.success, result.error
         run_id = json.loads(result.stdout)["run_id"]
         assert store.get(run_id).spec_version == 4
     finally:
-        defs_mod.unregister_provider("wf2lea6-stub")
+        defs_mod.unregister_provider("native")
 
 
 @pytest.mark.anyio

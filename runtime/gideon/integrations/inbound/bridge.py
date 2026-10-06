@@ -234,7 +234,11 @@ async def _toggle_automation(state: Any, params: dict) -> dict:
     if loaded is None:
         raise ValueError(f"unknown automation: {trigger_id}")
     target = params.get("enabled")
-    enabled = (not loaded.trigger.enabled) if target is None else bool(target)
+    from gideon.security.safety_flags import yes_or_no
+
+    enabled = (not loaded.trigger.enabled) if "enabled" not in params else yes_or_no(target)
+    if enabled is None:
+        raise ValueError("enabled must be a boolean")
     updated = store.set_enabled(trigger_id, enabled)
     if updated is None:
         raise ValueError(f"could not set enabled on {trigger_id}")

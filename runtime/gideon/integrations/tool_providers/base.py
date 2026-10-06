@@ -26,6 +26,21 @@ class RiskLevel(str, Enum):
     SAFE = "safe"
     CAUTION = "caution"
     DESTRUCTIVE = "destructive"
+    UNCHECKED = "unchecked"
+
+
+def risk_from_annotations(annotations: Any, *, trusted: bool) -> RiskLevel:
+    """Only trusted tool definitions turn a read-only claim into read authority."""
+    hints = annotations if isinstance(annotations, dict) else {}
+    reads = hints.get("readOnlyHint") is True
+    if reads and trusted:
+        return RiskLevel.SAFE
+    if hints.get("destructiveHint") is True and not reads:
+        return RiskLevel.DESTRUCTIVE
+    return RiskLevel.CAUTION
+
+
+WORK_ASKS_META_KEY = "gideon/work_asks"
 
 
 @dataclass
@@ -40,6 +55,10 @@ class ToolDefinition:
     risk_level: RiskLevel = RiskLevel.SAFE
     interactive: bool = False
     max_output: int | None = None
+    annotations: dict[str, Any] = field(default_factory=dict)
+    mcp_definition_digest: str = ""
+    mcp_configuration_revision: str = ""
+    work_asks: bool = False
 
 
 INTERACTIVE_TOOL_NAME_HINTS: tuple[str, ...] = (
@@ -131,6 +150,10 @@ class ToolProvider(ABC):
     async def list_tools(self) -> list[ToolDefinition]:
         """List all tools available from this provider."""
         ...
+
+    async def preflight(self, tool_name: str, arguments: dict[str, Any]) -> ToolResult | None:
+        """Pure optional argument checks; no tool effects or approval requests."""
+        return None
 
     @abstractmethod
     async def invoke(self, tool_name: str, arguments: dict[str, Any]) -> ToolResult:

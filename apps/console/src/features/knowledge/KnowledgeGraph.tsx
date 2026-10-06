@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Network, Sparkles } from 'lucide-react'
 import { GraphZoomControls } from '../../shared/ui/GraphZoomControls'
 import { EmptyState } from '../../shared/ui/ListScaffold'
+import type { EntityExtractionTally } from '../../shared/data/api'
 
 interface GraphNode {
   id: string
@@ -116,13 +117,36 @@ export function weightWidth(f: number, active: boolean): number {
   return Math.round(((active ? 1.6 : 1) + f * 1.4) * 100) / 100
 }
 
+export function KnowledgeGraphEmptyState({ extraction, onRegenerate, regenerating }: {
+  extraction?: EntityExtractionTally | null
+  onRegenerate?: () => void
+  regenerating?: boolean
+}) {
+  let hint = 'No recorded extraction outcomes are available.'
+  if (extraction) {
+    const details: string[] = []
+    if (extraction.running) details.push(`Entity processing is running for ${extraction.running} item(s).`)
+    if (extraction.failed) details.push(`Entity processing failed for ${extraction.failed} item(s).`)
+    if (extraction.ran) details.push(`Entity processing completed for ${extraction.ran} item(s).`)
+    if (extraction.skipped) details.push(`${extraction.skipped} item(s) skipped entity processing.`)
+    if (extraction.not_applicable) details.push(`${extraction.not_applicable} item(s) did not need entity processing.`)
+    if (extraction.not_run) details.push(`${extraction.not_run} item(s) have no recorded extraction outcome.`)
+    hint = details.join(' ') || (extraction.total === 0 ? 'The current library view has no items.' : hint)
+  }
+  const retry = extraction && !extraction.running && (extraction.failed > 0 || extraction.not_run > 0)
+  return <EmptyState icon={Network} title="No entities to draw" hint={hint}
+    action={retry && onRegenerate ? { label: regenerating ? 'Extracting…' : 'Regenerate intelligence', onClick: regenerating ? () => {} : onRegenerate, icon: Sparkles } : undefined} />
+}
+
 export function KnowledgeGraph({ selectedId, onSelect, onRegenerate, regenerating }: {
   selectedId?: string | null
   onSelect?: (name: string) => void
   onRegenerate?: () => void
   regenerating?: boolean
 } = {}) {
-  const [graph, setGraph] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null)
+  const [graph, setGraph] = useState<{ nodes: GraphNode[]; edges: GraphEdge[]; extraction?: EntityExtractionTally | null } | null>(null)
+  const [loadError, setLoadError] = useState(false)
+  const [reload, setReload] = useState(0)
   const [hover, setHover] = useState<string | null>(null)
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
   const [pxPerWorld, setPxPerWorld] = useState(1)
@@ -131,10 +155,21 @@ export function KnowledgeGraph({ selectedId, onSelect, onRegenerate, regeneratin
 
   useEffect(() => {
     let alive = true
+    setLoadError(false)
     fetch('/api/knowledge/graph', { headers: { 'X-Session-Key': 'dashboard:ui' } })
-      .then((r) => r.json()).then((d) => { if (alive) setGraph(d) }).catch(() => { if (alive) setGraph({ nodes: [], edges: [] }) })
+      .then((response) => { if (!response.ok) throw new Error('Graph unavailable'); return response.json() })
+      .then((data) => {
+        if (!Array.isArray(data.nodes) || !Array.isArray(data.edges)) throw new Error('Graph unavailable')
+        if (alive) setGraph(data)
+      }).catch(() => { if (alive) setLoadError(true) })
     return () => { alive = false }
-  }, [])
+  }, [reload, regenerating])
+
+  useEffect(() => {
+    if (!graph?.extraction?.running) return
+    const timer = window.setTimeout(() => setReload((value) => value + 1), 5000)
+    return () => window.clearTimeout(timer)
+  }, [graph])
 
   useEffect(() => {
     const el = svgRef.current
@@ -205,13 +240,14 @@ export function KnowledgeGraph({ selectedId, onSelect, onRegenerate, regeneratin
   }
   const endDrag = () => { drag.current = null }
 
+  if (loadError) return <EmptyState icon={Network} title="Graph unavailable"
+    hint="The graph could not be read. Its contents and extraction status are unknown."
+    action={{ label: 'Retry', onClick: () => setReload((value) => value + 1) }} />
   if (!graph) return <div className="grid h-full place-items-center text-on-surface-low"><Loader2 size={20} className="animate-spin" /></div>
   if (graph.nodes.length === 0) {
     return (
       <div className="grid h-full place-items-center">
-        <EmptyState icon={Network} title="No entities extracted yet"
-          hint="Your items have not been through entity extraction, so there is nothing to draw. Running it re-derives insights for items that are missing them."
-          action={onRegenerate ? { label: regenerating ? 'Extracting…' : 'Regenerate intelligence', onClick: regenerating ? () => {} : onRegenerate, icon: Sparkles } : undefined} />
+        <KnowledgeGraphEmptyState extraction={graph.extraction} onRegenerate={onRegenerate} regenerating={regenerating} />
       </div>
     )
   }

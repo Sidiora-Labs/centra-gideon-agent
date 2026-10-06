@@ -101,7 +101,7 @@ export function UpdatesPanel() {
   const canApplyInApp = isGit || kind === 'pip'
   const updateStateLabel = {
     applying: 'Applying update', applied: 'Last update applied', failed: 'Last update failed',
-    rolling_back: 'Rolling back', rolled_back: 'Last update rolled back', idle: '',
+    rolling_back: 'Rolling back', rolled_back: 'Last update rolled back', cancelled: 'Last update stopped — review recovery', idle: '',
   }[info.update_state ?? 'idle']
   const kindLabel = ({ git: 'Git checkout', pip: 'pip / uv install', container: 'Container', desktop: 'Desktop app' } as Record<string, string>)[kind] ?? kind
   return (

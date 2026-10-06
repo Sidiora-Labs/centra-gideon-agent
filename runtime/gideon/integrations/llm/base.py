@@ -1,6 +1,8 @@
 """Provider contracts and fallback routing shared by inference integrations."""
 
 from abc import ABC, abstractmethod
+
+from gideon.core.turn_streams import closing_stream
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,8 +65,9 @@ def _last_user_text(messages: list[dict]) -> str:
 
 
 async def _forward_events(events: AsyncIterator[LLMEvent]) -> AsyncIterator[LLMEvent]:
-    async for event in events:
-        yield event
+    async with closing_stream(events) as _owned_events:
+        async for event in _owned_events:
+            yield event
 
 
 class ModelProvider(ABC):
@@ -132,12 +135,18 @@ class ModelProvider(ABC):
         return False
 
     @property
+    def compacts_automatically(self) -> bool:
+        """Whether an external runtime owns its own context compaction."""
+        return False
+
+    @property
     def compacts_in_process(self) -> bool:
         return False
 
     async def stream_command(self, command: str) -> AsyncIterator[LLMEvent]:
-        async for event in _forward_events(self.stream(command)):
-            yield event
+        async with closing_stream(_forward_events(self.stream(command))) as _owned_events:
+            async for event in _owned_events:
+                yield event
 
     async def compact(self, context: str = "") -> None:
         return None
@@ -171,5 +180,6 @@ class ModelProvider(ABC):
         model: str | None = None,
         reasoning_effort: str = "",
     ) -> AsyncIterator[LLMEvent]:
-        async for event in _forward_events(self.stream(_last_user_text(messages))):
-            yield event
+        async with closing_stream(_forward_events(self.stream(_last_user_text(messages)))) as _owned_events:
+            async for event in _owned_events:
+                yield event

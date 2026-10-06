@@ -1,10 +1,11 @@
 """Local static artifact deploy — the webapp serve registry and path spine (PEP-8).
 
-Deploying an artifact makes its own bytes reachable at a stable in-gateway URL
-(``/artifacts/serve/<slug>/``) so an html/widget artifact can be opened and driven
+Deploying an artifact makes its own bytes reachable at a rotating in-gateway URL
+(``/artifacts/serve/<slug>/<capability>/``) so an html/widget artifact can be opened and driven
 as a real page instead of only rendered inside a chat bubble. Local-only: public
-exposure is explicitly out of scope, so the route sits behind the same session auth
-as every other gateway path (``/artifacts/`` is in no auth-bypass prefix).
+exposure is explicitly out of scope. The capability authorizes only this deployment
+and its own files, so its sandboxed page needs no owner session. Every response
+carries CSP sandbox allow-scripts, including refusals and redirects.
 
 Three properties are load-bearing here, because this route serves
 **model- or user-authored HTML** rather than shipped assets:
@@ -35,6 +36,9 @@ and the provider's directory-only ``list`` ignores it (same bargain as
 
 from __future__ import annotations
 
+import hmac
+import re
+import secrets
 import json
 import logging
 import mimetypes
@@ -64,6 +68,16 @@ logger = logging.getLogger(__name__)
 
 SERVE_URL_PREFIX = "/artifacts/serve"
 
+CAPABILITY_BYTES = 32
+_CAPABILITY = re.compile(r"[A-Za-z0-9_-]{43}")
+SERVED_PATH = re.compile(rf"{SERVE_URL_PREFIX}/[a-z0-9-]{{1,80}}/{_CAPABILITY.pattern}(?:/.*)?")
+
+def redacted_serve_path(path: str) -> str:
+    """Remove deployment capabilities from diagnostic paths."""
+    if path.startswith(SERVE_URL_PREFIX + "/"):
+        return SERVE_URL_PREFIX + "/" + path[len(SERVE_URL_PREFIX) + 1:].split("/", 1)[0] + "/[redacted]"
+    return path
+
 DEFAULT_ENTRY = "index.html"
 
 DEPLOYABLE_KINDS = frozenset({"widget", "html", "react"})
@@ -79,19 +93,32 @@ ARTIFACT_SERVE_CSP = (
     "img-src 'self' data: blob:; "
     "font-src 'self' data:; "
     "connect-src 'none'; "
+    "worker-src 'none'; "
     "form-action 'none'; "
     "base-uri 'none'; "
     "object-src 'none'; "
-    "frame-ancestors 'self'"
+    "frame-ancestors 'self'; sandbox allow-scripts"
 )
 
 SERVE_HEADERS: dict[str, str] = {
     "Content-Security-Policy": ARTIFACT_SERVE_CSP,
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Permissions-Policy": ", ".join(f"{feature}=()" for feature in (
+        "camera", "microphone", "geolocation", "clipboard-read", "clipboard-write",
+        "display-capture", "fullscreen", "payment", "usb", "serial", "hid",
+        "storage-access", "publickey-credentials-get", "publickey-credentials-create",
+        "accelerometer", "gyroscope", "magnetometer", "midi", "bluetooth",
+        "browsing-topics", "gamepad", "identity-credentials-get", "idle-detection",
+        "local-fonts", "otp-credentials", "screen-wake-lock", "window-management",
+        "xr-spatial-tracking",
+    )),
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
 }
 
+
+SERVED_FILE_HEADERS = {**SERVE_HEADERS, "Access-Control-Allow-Origin": "*"}
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -104,12 +131,19 @@ class ArtifactDeployment:
     slug: str
     entry: str = DEFAULT_ENTRY
     created_at: str = ""
+    capability: str = ""
 
     @property
     def url(self) -> str:
-        return f"{SERVE_URL_PREFIX}/{self.slug}/"
+        return f"{SERVE_URL_PREFIX}/{self.slug}/{self.capability}/"
+
+    def admits(self, capability: str) -> bool:
+        return bool(self.capability) and hmac.compare_digest(self.capability.encode(), capability.encode())
 
     def to_dict(self) -> dict[str, Any]:
+        return {"slug": self.slug, "entry": self.entry, "created_at": self.created_at, "capability": self.capability}
+
+    def to_public(self) -> dict[str, Any]:
         return {
             "slug": self.slug,
             "entry": self.entry,
@@ -123,6 +157,7 @@ class ArtifactDeployment:
             slug=str(d.get("slug", "")),
             entry=str(d.get("entry", "") or DEFAULT_ENTRY),
             created_at=str(d.get("created_at", "")),
+            capability=str(d.get("capability", "")),
         )
 
 
@@ -171,7 +206,7 @@ class ArtifactDeployStore:
             if not isinstance(entry, dict):
                 continue
             dep = ArtifactDeployment.from_dict(entry)
-            if dep.slug and is_valid_slug(dep.slug):
+            if dep.slug and is_valid_slug(dep.slug) and _CAPABILITY.fullmatch(dep.capability):
                 out.append(dep)
         return out
 
@@ -200,8 +235,14 @@ class ArtifactDeployStore:
     def is_deployed(self, slug: str) -> bool:
         return self.get(slug) is not None
 
+    def authorize(self, slug: str, capability: str) -> ArtifactDeployment | None:
+        if not _CAPABILITY.fullmatch(capability or ""):
+            return None
+        dep = self.get(slug)
+        return dep if dep is not None and dep.admits(capability) else None
+
     def deploy(self, slug: str, *, entry: str = "") -> ArtifactDeployment:
-        """Register *slug* as deployed (idempotent — re-deploying refreshes entry)."""
+        """Publish *slug* under a fresh capability; redeploy revokes its old URL."""
         if not is_valid_slug(slug):
             raise ValueError(f"invalid slug: {slug!r}")
         clean_entry = (entry or "").strip() or DEFAULT_ENTRY
@@ -212,11 +253,12 @@ class ArtifactDeployStore:
             existing = next((d for d in deployments if d.slug == slug), None)
             if existing is not None:
                 existing.entry = clean_entry
+                existing.capability = secrets.token_urlsafe(CAPABILITY_BYTES)
                 self._save(deployments)
                 return existing
             if len(deployments) >= MAX_DEPLOYMENTS:
                 raise ValueError(f"too many deployed artifacts (max {MAX_DEPLOYMENTS})")
-            dep = ArtifactDeployment(slug=slug, entry=clean_entry, created_at=_now())
+            dep = ArtifactDeployment(slug=slug, entry=clean_entry, created_at=_now(), capability=secrets.token_urlsafe(CAPABILITY_BYTES))
             deployments.append(dep)
             self._save(deployments)
             return dep

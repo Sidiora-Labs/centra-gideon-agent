@@ -66,6 +66,177 @@ class DashboardApprovalState:
         self._hold_approval(entry, broadcast=False)
         data["approval_id"] = approval_id
         data["revision"] = entry["revision"]
+        self._ask_origin_channel(entry)
+
+    def _channel_context(self, entry: dict) -> dict | None:
+        from gideon.interfaces.dashboard.chat_utils import _history_key_for
+        from gideon.integrations.channel_transports import get_transport
+        from gideon.integrations.channel_trust import is_allowed_sender
+        from gideon.security.approval_answer import on_channel
+        from gideon.security.session_credentials import credential_for, verify
+
+        key = str(entry.get("session") or "")
+        if not key or self.channel_provider_for(key) != "telegram":
+            return None
+        history_key = _history_key_for(key)
+        thread, channel = self.sessions.get_channel_link(history_key)
+        pieces = str(thread).split(":")
+        if not pieces or pieces[0] != "telegram":
+            return None
+        slot = pieces[1] if len(pieces) == 4 else "primary"
+        transport = get_transport("telegram")
+        child = (getattr(transport, "bots", {}) or {}).get(slot)
+        if child is None and getattr(transport, "slot", None) == slot:
+            child = transport
+        if child is None or not getattr(child, "connected", False):
+            return None
+        owner = str(child.config.get("owner_id") or "")
+        if not owner or not is_allowed_sender("telegram", owner):
+            return None
+        return {"provider": "telegram", "thread": str(thread), "channel": str(channel),
+                "owner": owner, "tenant": f"telegram:{slot}", "transport": child,
+                "principal": on_channel("telegram", owner, f"telegram:{slot}"),
+                "work": verify(credential_for(history_key), history_key)}
+
+    def channel_answers(self, entry: dict, *, context: dict | None) -> tuple:
+        from gideon.integrations.channel_delivery import APPROVAL_ANSWERS, ONE_CALL_ANSWERS
+        from gideon.security.approval_answer import OWNER, CHANNEL, APP
+        from gideon.security.approval_grants import stands, TRUST
+        from gideon.security.guardrails.ladder import approval_screening_verdict
+
+        if context is None:
+            return ONE_CALL_ANSWERS
+        session = self._sessions.get(str(entry.get("session") or ""))
+        work = context.get("work")
+        own = session is not None and entry.get("id") == chat_approval_id(session.key, str(entry.get("request_id") or ""))
+        eligible_work = work is not None and not work.created_by_app and (work.work_actor is None or work.work_actor.kind != APP)
+        if eligible_work:
+            eligible_work = work.initiator.kind == OWNER or (
+                work.initiator.kind == CHANNEL and work.initiator == context["principal"])
+        if (not own or not eligible_work or getattr(session, "created_by_app", "")
+            or getattr(session, "_app", "") in {"loop", "loops", "room"}
+            or context["channel"] != context["owner"]
+            or entry.get("owner_only") or entry.get("protected_delete")
+            or entry.get("risk") not in {"safe", "caution"}
+            or (work is not None and work.durable_run_id)
+            or not approval_screening_verdict(TRUST).allowed
+            or not stands(TRUST, caller="channel", audit=False)):
+            return ONE_CALL_ANSWERS
+        return APPROVAL_ANSWERS
+
+    def grant_chat_trust(self, session: Any, request_id: str, *, by: Any, channel_offer: dict | None = None) -> bool:
+        from gideon.security.approval_answer import OWNER, CHANNEL, check
+        from gideon.security.approval_grants import stands, TRUST
+        registry_id = chat_approval_id(session.key, request_id)
+        entry = self._pending_approvals.get(registry_id) or {}
+        future = session._approval_futures.get(request_id)
+        if future is None or future.done() or check(by, what=f"approval:{registry_id}", asked_by=self.approval_asked_by(registry_id, session)):
+            return False
+        if by.kind == CHANNEL:
+            if channel_offer is None or self.__dict__.get("_channel_offers", {}).get(registry_id) is not channel_offer:
+                return False
+        elif by.kind != OWNER:
+            return False
+        if self.refuse_ended_owner(registry_id) or not stands(TRUST, caller=by.label, subject=f"session={session.key}"):
+            return False
+        session._trust = True
+        session._agent_floor_seeded = False
+        from gideon.interfaces.dashboard.chat_utils import _history_key_for
+        self.sessions.set_approval_policy(_history_key_for(session.key), "auto")
+        return True
+
+    def answer_on_channel(self, approval_id: str, answer: str, *, by: Any) -> bool:
+        from gideon.security.approval_answer import CHANNEL, Principal
+        from gideon.integrations.channel_delivery import ALLOW_FOR_THIS_CHAT
+        offer = self.__dict__.get("_channel_offers", {}).get(approval_id)
+        entry = self._pending_approvals.get(approval_id)
+        if offer is None or entry is None or entry.get("revision") != offer["revision"]:
+            return False
+        context = self._channel_context(entry)
+        if context is None or not isinstance(by, Principal) or by.kind != CHANNEL or by != offer["context"]["principal"]:
+            return False
+        original = offer["context"]
+        if any(context.get(k) != original.get(k) for k in ("provider", "thread", "channel", "owner", "tenant", "transport")):
+            return False
+        chosen = next((value for value in offer["answers"] if value.key == answer), None)
+        if chosen is None:
+            return False
+        if chosen == ALLOW_FOR_THIS_CHAT:
+            if context["work"] is not original["work"] or chosen not in self.channel_answers(entry, context=context):
+                return False
+            session = self._sessions.get(str(entry.get("session") or ""))
+            request_id = str(entry.get("request_id") or "")
+            if session is None or not self.grant_chat_trust(session, request_id, by=by, channel_offer=offer):
+                return False
+            if not self.resolve_session_approval(session, request_id, "approved", by=by):
+                return False
+            from gideon.interfaces.dashboard.state import _mark_permission_resolved
+            _mark_permission_resolved(session.messages, request_id, "trust")
+            self.push_sessions_update()
+            return True
+        return self.resolve_approval(approval_id, chosen.ends == "approved", by=by)
+
+    def _ask_origin_channel(self, entry: dict) -> None:
+        if not entry.get("request_id"):
+            return
+        context = self._channel_context(entry)
+        if context is None:
+            return
+        tasks = self.__dict__.setdefault("_background_tasks", set())
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(self._approval_on_origin_channel(dict(entry), context))
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+
+    async def _approval_on_origin_channel(self, entry: dict, context: dict) -> None:
+        import secrets
+        from types import SimpleNamespace
+        from gideon.integrations.channel_delivery import delivery_for
+        from gideon.security.approval_brief import APPROVAL_BRIEF_META_KEY, entry_approval_brief
+        approval_id = str(entry["id"])
+        current = self._pending_approvals.get(approval_id)
+        if current is None or current.get("revision") != entry.get("revision"):
+            return
+        answers = self.channel_answers(entry, context=context)
+        offer = {"revision": entry["revision"], "context": context, "answers": answers}
+        offers = self.__dict__.setdefault("_channel_offers", {})
+        offers[approval_id] = offer
+        event = SimpleNamespace(request_id=secrets.token_hex(12), title=entry.get("tool", ""),
+            tool_input=entry.get("tool_input", ""), tool_purpose=entry.get("tool_purpose", ""),
+            risk_level=entry.get("risk", ""), tool_meta={APPROVAL_BRIEF_META_KEY: entry_approval_brief(entry, answers=answers)})
+        delivery = delivery_for(context["provider"])
+        if delivery is None:
+            offers.pop(approval_id, None)
+            return
+        seen = {}
+        def prompted(pending):
+            if approval_id not in self._pending_approvals:
+                if not pending.future.done():
+                    pending.future.set_result(self.ended_as(approval_id) or "cancelled")
+                return True
+            seen["pending"] = pending
+            pending.on_answer = lambda answer, by: self.answer_on_channel(approval_id, answer, by=by)
+            self.__dict__.setdefault("_channel_prompts", {})[approval_id] = pending
+            return True
+        try:
+            await delivery.request_approval(event, source=str(entry.get("source") or "chat"),
+                parent_session_key=str(entry.get("session") or ""), sessions=self.sessions, on_prompted=prompted)
+            pending = seen.get("pending")
+            if pending is not None and pending.future.done() and not pending.future.cancelled():
+                by = getattr(pending, "answerer", None)
+                if by is not None:
+                    self.answer_on_channel(approval_id, str(pending.future.result()), by=by)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self._log.debug("origin channel approval unavailable", exc_info=True)
+        finally:
+            self.__dict__.get("_channel_prompts", {}).pop(approval_id, None)
+            if offers.get(approval_id) is offer:
+                offers.pop(approval_id, None)
 
     def _raise_approval_row(self, entry: dict[str, Any]) -> None:
         try:
@@ -136,6 +307,10 @@ class DashboardApprovalState:
         entry = self._pending_approvals.pop(approval_id, None)
         if entry is None:
             return False
+        pending = self.__dict__.get("_channel_prompts", {}).pop(approval_id, None)
+        if pending is not None and not pending.future.done():
+            pending.future.set_result(outcome)
+        self.__dict__.get("_channel_offers", {}).pop(approval_id, None)
         self._approval_endings[approval_id] = outcome
         if len(self._approval_endings) > 512:
             self._approval_endings.pop(next(iter(self._approval_endings)))
@@ -228,6 +403,8 @@ class DashboardApprovalState:
             for request_id, future in session._approval_futures.items()
             if not future.done()
         ]
+        ids.extend(aid for aid, entry in self._pending_approvals.items()
+                   if entry.get("source") == "workflow_batch" and entry.get("session") == key and aid not in ids)
         return sum(self.cancel_approval(aid, reason="its chat turn was stopped") for aid in ids)
 
     def loop_status_changed(self, loop_id: str, _old: Any, new: Any) -> None:
@@ -333,6 +510,8 @@ class DashboardApprovalState:
     async def request_approval(
         self, approval_id: str, source: str, tool: str, *, tool_input: str = "",
         tool_purpose: str = "", session: str = "", asked_by: str = "",
+        risk_level: object = "", tool_kind: str = "", tool_annotations: dict | None = None,
+        owner_only: bool = False, on_decision: Any = None, approval_timeout_secs: float | None = None,
     ) -> bool:
         current = self._approval_futures.get(approval_id)
         if current is not None and not current.done():
@@ -341,17 +520,31 @@ class DashboardApprovalState:
         self._approval_futures[approval_id] = fut
         from gideon.interfaces.dashboard.auto_denials import call_fingerprint
 
+        from types import SimpleNamespace
+        from gideon.security.approval_brief import compose_approval_brief
+        from gideon.security.protected_folders import call_protected_delete, provider_working_folder, sentence
+        event = SimpleNamespace(title=tool, tool_kind=tool_kind, tool_input=tool_input, tool_purpose=tool_purpose, risk_level=risk_level, tool_annotations=tool_annotations)
+        brief = compose_approval_brief(event) or {}
+        provider = self.sessions.get_provider(session) or self.sessions.get_provider(f"dashboard:{session}")
+        protected = call_protected_delete(risk_level, tool, tool_kind, tool_input, cwd=provider_working_folder(provider))
         raw_call_fingerprint = call_fingerprint(tool, tool_input)
         safe_tool, _ = self._redact_approval_text(tool)
         safe_input, _ = self._redact_approval_text(tool_input)
         safe_purpose, _ = self._redact_approval_text(tool_purpose)
         entry = {
             "id": approval_id, "revision": uuid.uuid4().hex, "source": source,
+            "owner_only": owner_only,
             "tool": safe_tool, "tool_input": safe_input, "tool_purpose": safe_purpose,
+            "risk": brief.get("risk", "caution"), "blast_radius": brief.get("blastRadius"), "deny_consequence": brief.get("denyConsequence"), "protected_delete": sentence(protected),
             "session": session, "asked_by": asked_by or self._approval_requester(source, session),
             "ts": time.time(),
             "_call_fingerprint": raw_call_fingerprint,
         }
+        if on_decision is not None:
+            callbacks = getattr(self, "_approval_decision_callbacks", None)
+            if callbacks is None:
+                callbacks = self._approval_decision_callbacks = {}
+            callbacks[approval_id] = on_decision
         self._hold_approval(entry)
         from gideon.automation.triggers.lifecycle_fire import approval_request_payload
         from gideon.automation.triggers.lifecycle_fire import fire
@@ -364,6 +557,8 @@ class DashboardApprovalState:
             from gideon.security.approval_grants import approval_window_secs
 
             timeout = min(self._approval_timeout_for(source), approval_window_secs(self._approval_timeout_for(source)))
+            if approval_timeout_secs is not None:
+                timeout = min(timeout, max(0.0, approval_timeout_secs))
             try:
                 return bool(await asyncio.wait_for(fut, timeout=timeout))
             except asyncio.TimeoutError:
@@ -375,6 +570,7 @@ class DashboardApprovalState:
         finally:
             if approval_id in self._pending_approvals:
                 self.end_approval(approval_id, outcome="cancelled")
+            getattr(self, "_approval_decision_callbacks", {}).pop(approval_id, None)
             if self._approval_futures.get(approval_id) is fut:
                 self._approval_futures.pop(approval_id, None)
 
@@ -455,6 +651,8 @@ class DashboardApprovalState:
         entry = self._pending_approvals.get(approval_id)
         if entry is None:
             return False
+        if entry.get("owner_only") and principal.kind != OWNER:
+            return False
         if check(principal, what=f"approval:{approval_id}", asked_by=str(entry.get("asked_by") or "")):
             return False
         if self.refuse_ended_owner(approval_id):
@@ -466,6 +664,9 @@ class DashboardApprovalState:
         fut = self._approval_futures.get(approval_id)
         if fut is None or fut.done():
             return False
+        callback = getattr(self, "_approval_decision_callbacks", {}).get(approval_id)
+        if callable(callback):
+            callback(approved, principal)
         fut.set_result(approved)
         decided_by = "you" if principal.kind == OWNER else principal.label
         note_id = str(entry.get("_auto_denied_note_id") or "")

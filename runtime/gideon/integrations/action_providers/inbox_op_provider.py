@@ -138,7 +138,7 @@ class _InboxCommand:
         if not draft:
             return ActionResult(False, error="inbox-op: reply_draft needs a draft body")
         prior = str(getattr(item, "draft", "") or "")
-        live.update(item, draft=draft)
+        live.update(item, draft=draft, drafted_by="")
         return _result(
             {**identity, "drafted": len(draft)}, {**identity, "prior": prior}
         )
@@ -174,11 +174,48 @@ class _InboxCommand:
                 live.dismissal(self.item_id, False)
             _broadcast(live.state, live.store.items.get(self.item_id) or item)
         elif operation == "reply_draft":
-            live.update(item, draft=prior)
+            live.update(item, draft=prior, drafted_by="")
         else:
             return ActionResult(False, error=f"inbox-op: cannot undo {operation!r}")
         return _result(dict(undone=operation, item_id=self.item_id))
 
+
+async def _draft_through_the_inbox(state: Any, item: Any) -> str:
+    """Draft a reply to *item* through the Inbox's own drafting path: ``""`` when it wrote one,
+    else why it did not, in words the action's result can say.
+
+    A message that takes no reply is refused before the model runs, as the Inbox page's Draft
+    refuses it. A draft that did not happen changes nothing: the drafting path clears the draft
+    when its model judges no reply is wanted, so the draft she had is put back, with what it
+    stood on and who wrote it.
+    """
+    from gideon.integrations.inbox_service import InboxService
+
+    if not getattr(item, "can_reply", False):
+        return f"{str(item.id)} takes no reply, so there is no reply to draft"
+    # Type-checked for `live_store`'s reason: an object answering every getattr must not stand
+    # in for the service and swallow the draft.
+    service = getattr(state, "_inbox_svc", None)
+    if not isinstance(service, InboxService):
+        return "no running inbox service to draft the reply with"
+    before = {
+        "draft": str(getattr(item, "draft", "") or ""),
+        "drafted_by": str(getattr(item, "drafted_by", "") or ""),
+        "context_summary": str(getattr(item, "context_summary", "") or ""),
+    }
+    outcome = await service.draft_reply(item.id)
+    if outcome is None:
+        return "the reply could not be drafted: the call to the drafting model failed"
+    if outcome.unread:
+        return outcome.unread_sentence()
+    if outcome.question:
+        return f"the reply needs your word first: {outcome.question}"
+    if outcome.skipped or not str(getattr(outcome.item, "draft", "") or "").strip():
+        service.inbox.update(item.id, **before)
+        if outcome.skipped:
+            return "the drafting model judged that this message needs no reply"
+        return "the drafting model wrote no reply"
+    return ""
 
 class InboxOpActionProvider(ActionProvider):
     @property
@@ -216,6 +253,14 @@ class InboxOpActionProvider(ActionProvider):
         item = live.store.items.get(item_id)
         if item is None:
             return ActionResult(False, error=f"inbox-op: no inbox item {item_id!r}")
+        if operation == "reply_draft" and not str(action_config.get("draft") or action_config.get("body") or "").strip():
+            prior = str(getattr(item, "draft", "") or "")
+            reason = await _draft_through_the_inbox(live.state, item)
+            if reason:
+                return ActionResult(False, error="inbox-op: " + reason)
+            updated = live.store.items.get(item_id)
+            draft = str(getattr(updated, "draft", "") or "")
+            return _result(dict(op=operation, item_id=item_id, drafted=len(draft)), dict(op=operation, item_id=item_id, prior=prior))
         return _InboxCommand(operation, item_id).apply(live, item, action_config)
 
     async def reverse(self, handle: str) -> ActionResult:

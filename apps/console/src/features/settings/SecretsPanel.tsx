@@ -44,6 +44,12 @@ export function SecretsPanel() {
           + 'read back — not by this page and not by any API.'}
       />
 
+      {v.keychain && (
+        <Section title="Keychain namespace" icon={KeyRound} iconTone="muted" hint={v.keychain.summary}>
+          <RowGroup><Row label="This home" hint={v.keychain.summary}><span>{v.keychain.service || "None"}</span></Row></RowGroup>
+        </Section>
+      )}
+
       <AddSecret onSaved={refresh} />
 
       {v.secrets.length === 0 ? (

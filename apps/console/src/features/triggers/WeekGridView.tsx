@@ -1,3 +1,4 @@
+import { UnreadableNotice } from './UnreadableNotice'
 import { useMemo, useState } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react'
 import { fvs } from '../../shared/theme/fontWeight'
@@ -44,6 +45,7 @@ export function WeekGridView({ onOpenTrigger }: { onOpenTrigger?: (triggerId: st
 
   return (
     <div className="mx-auto px-l py-l" style={{ maxWidth: 'var(--content-width)' }}>
+      <UnreadableNotice sources={week?.unreadable ?? []} />
       <div className="mb-m flex flex-wrap items-center justify-between gap-s">
         <div className="min-w-0">
           <div className="flex items-center gap-s">
@@ -51,7 +53,7 @@ export function WeekGridView({ onOpenTrigger }: { onOpenTrigger?: (triggerId: st
             {offset !== 0 && <Button size="sm" variant="ghost" onClick={() => setOffset(0)}>Today</Button>}
           </div>
           <div className="mt-0.5 text-on-surface-low text-[0.8125rem]">
-            {week === undefined ? 'Projecting…' : weekSummary(grid)}
+            {week === undefined ? 'Projecting…' : week.unreadable?.length ? 'Some automations could not be read' : weekSummary(grid)}
             {tzMismatch && <span> · times in {viewerTz} (server: {week?.server_tz})</span>}
           </div>
         </div>
@@ -76,11 +78,13 @@ export function WeekGridView({ onOpenTrigger }: { onOpenTrigger?: (triggerId: st
       )}
 
       {week !== undefined && grid.totalFires === 0 ? (
+        week.unreadable?.length ? null : (
         <EmptyState
           icon={CalendarDays}
           title="No fires this week"
           hint="Only enabled schedules with a fire inside this week are plotted — one-shot, interval, and cron alike. A disabled trigger has no fires."
         />
+        )
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full border-separate" style={{ borderSpacing: '2px' }}>

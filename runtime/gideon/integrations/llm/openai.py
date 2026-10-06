@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from gideon.core.turn_streams import closing_stream
+
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
@@ -18,6 +20,7 @@ from gideon.integrations.llm.protocol_turn import (
     ConversationProtocol,
     ToolFragment,
     TurnUsage,
+    until_terminal,
     wire_value,
 )
 from gideon.integrations.llm.registry import CredentialMissing
@@ -38,6 +41,7 @@ class _ChatDecoder:
         self._calls: dict[str, ToolFragment] = {}
         self._indices: dict[int, str] = {}
         self._last_identifier = ""
+        self.stop_reason = ""
 
     def _segments(self, segments) -> list[LLMEvent]:
         events = []
@@ -91,8 +95,8 @@ class _ChatDecoder:
             for fragment in wire_value(delta, "tool_calls") or []:
                 self._append_call(fragment)
             reason = wire_value(choice, "finish_reason")
-            if reason in {"tool_calls", "stop", "length"}:
-                events.extend(self._flush_calls(str(reason)))
+            if reason:
+                self.stop_reason = str(reason)
         usage = wire_value(chunk, "usage")
         prompt = wire_value(usage, "prompt_tokens")
         if type(prompt) is int and prompt >= 0:
@@ -139,7 +143,7 @@ class _ChatDecoder:
         return None
 
     def finish(self) -> list[LLMEvent]:
-        return self._segments(self._splitter.flush()) + self._flush_calls()
+        return self._segments(self._splitter.flush()) + self._flush_calls(self.stop_reason)
 
 
 class OpenAIProvider(ConversationProtocol):
@@ -207,7 +211,7 @@ class OpenAIProvider(ConversationProtocol):
                     reported = declared_context_window(item.extra.get(field))
                     if reported is not None:
                         self._served_context_window = reported
-                        register_served_context_window(item.id, reported)
+                        register_served_context_window(item.id, reported, endpoint=self._base_url or "")
                         break
         except Exception:
             logger.debug("Default chat model discovery failed", exc_info=True)
@@ -263,7 +267,16 @@ class OpenAIProvider(ConversationProtocol):
         decoder = _ChatDecoder()
         response = await self._open_response(request)
         try:
-            async for frame in response:
+            async for frame in until_terminal(
+                response,
+                ends=lambda frame: any(
+                    wire_value(choice, "finish_reason")
+                    for choice in (wire_value(frame, "choices") or [])
+                ),
+                adapter="OpenAI-compatible",
+                missing="a finish_reason",
+                model=model,
+            ):
                 for event in decoder.feed(frame):
                     yield event
         finally:
@@ -287,8 +300,9 @@ class OpenAIProvider(ConversationProtocol):
     async def stream(self, message: str) -> AsyncIterator[LLMEvent]:
         messages = self._begin_message(message, _MAX_HISTORY)
         request = self._request(messages, model=self._model)
-        async for event in self._run_turn(request, self._model, remember=True):
-            yield event
+        async with closing_stream(self._run_turn(request, self._model, remember=True)) as _owned_events:
+            async for event in _owned_events:
+                yield event
 
     async def complete(
         self,
@@ -302,8 +316,9 @@ class OpenAIProvider(ConversationProtocol):
         request = self._request(
             messages, model=selected, tools=tools, reasoning_effort=reasoning_effort
         )
-        async for event in self._run_turn(request, selected, remember=False):
-            yield event
+        async with closing_stream(self._run_turn(request, selected, remember=False)) as _owned_events:
+            async for event in _owned_events:
+                yield event
 
     async def embed(self, inputs: list[str]) -> list[list[float]]:
         if not inputs:

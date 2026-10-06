@@ -68,6 +68,7 @@ class SttError(Exception):
     """A transcription failure with a stable code and safe, actionable copy."""
 
     _MESSAGES = {
+        "budget_exceeded": "Speech-to-text was refused by the spend budget. Check Settings → Usage or Guardrails.",
         "disabled": "Speech-to-text is turned off. Enable it in Settings → Speech & Transcription.",
         "no_model": "No speech-to-text model is selected. Choose one in Settings → Models.",
         "sensitive_path": "This recording is in a protected location and cannot be transcribed.",
@@ -75,9 +76,10 @@ class SttError(Exception):
         "no_transcript": "The speech-to-text provider returned no transcript or explanation. Check the selected model or choose another provider.",
     }
 
-    def __init__(self, code: str = "provider_failed") -> None:
+    def __init__(self, code: str = "provider_failed", *, detail: str = "") -> None:
         self.code = code if code in self._MESSAGES else "provider_failed"
-        super().__init__(self._MESSAGES[self.code])
+        self.detail = detail if self.code == "budget_exceeded" else ""
+        super().__init__(detail if self.code == "budget_exceeded" and detail else self._MESSAGES[self.code])
 
 
 class SttProvider(ABC):

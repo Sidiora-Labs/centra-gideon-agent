@@ -247,6 +247,55 @@ class TestBothEndsAgree:
         assert task.notes == [{"content": "old", "timestamp": ""}]
         assert coerce_task_field("notes", task.notes) == task.notes
 
+    @pytest.mark.asyncio
+    async def test_json_array_text_round_trips_through_create_and_update(
+        self, provider, tmp_path
+    ):
+        supplied = {
+            "labels": '["build", "verify"]',
+            "exit_criteria": '[{"description": "tests pass", "met": true}]',
+            "action_plan": '[{"content": "Run checks", "completed": true}]',
+            "notes": '[{"content": "Checked", "timestamp": "2026-10-06T12:00:00Z"}]',
+            "research_notes": '[{"content": "Measured"}]',
+            "execution_notes": '[{"content": "Passed"}]',
+            "dependencies": '["task-one", {"depends_on_task_id": "task-two"}]',
+            "evidence": '[{"kind": "gate", "node": "check"}]',
+            "attempts": '[{"n": 2, "error": "timeout"}]',
+        }
+        created = await provider.create_task(title="Encoded lists", **supplied)
+        updated = await provider.create_task(title="Updated lists")
+        await provider.update_task(updated.id, **supplied)
+        for task_id in (created.id, updated.id):
+            stored = _stored(tmp_path, task_id)
+            assert stored["labels"] == ["build", "verify"]
+            assert stored["exit_criteria"][0]["description"] == "tests pass"
+            assert stored["exit_criteria"][0]["met"] is True
+            assert stored["action_plan"][0]["content"] == "Run checks"
+            assert stored["action_plan"][0]["completed"] is True
+            assert stored["notes"] == [
+                {"content": "Checked", "timestamp": "2026-10-06T12:00:00Z"}
+            ]
+            assert stored["research_notes"][0]["content"] == "Measured"
+            assert stored["execution_notes"][0]["content"] == "Passed"
+            assert stored["evidence"] == [{"kind": "gate", "node": "check"}]
+            assert stored["attempts"] == [{"n": 2, "error": "timeout"}]
+            loaded = await provider.get_task(task_id)
+            assert loaded.can_mark_complete()
+            assert loaded.prerequisite_ids() == ["task-one", "task-two"]
+
+    @pytest.mark.parametrize("value", ["plain text", "[broken", '{"key": "value"}', '"text"', "42", "null"])
+    def test_non_array_text_keeps_its_original_list_field_meaning(self, value):
+        assert coerce_task_field("labels", value) == [value]
+        assert coerce_task_field("exit_criteria", value)[0]["description"] == value
+        assert coerce_task_field("dependencies", value)[0].depends_on_task_id == value
+
+    def test_encoded_array_items_still_obey_write_admission(self):
+        with pytest.raises(ValueError):
+            coerce_task_field("labels", '[{"unsafe": "object"}]')
+        with pytest.raises(ValueError):
+            coerce_task_field("evidence", '["not-an-object"]')
+        assert coerce_task_field("evidence", '["not-an-object"]', strict=False) == []
+
 
 class TestShapesThisModuleDoesNotOwn:
     """`evidence` and `attempts` carry whatever the ENGINE records, so they get list-ification and

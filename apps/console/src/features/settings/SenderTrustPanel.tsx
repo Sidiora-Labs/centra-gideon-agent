@@ -8,6 +8,7 @@ import { useQuery } from '../../shared/data/data'
 import { PanelHeader, Section, RowGroup } from './settingsUI'
 import { Button } from '../../shared/ui/Button'
 import { EmptyState, FormSkeleton, ListRow, LoadError } from '../../shared/ui/ListScaffold'
+import { channelPerson } from './channelPerson'
 import { ChannelOwnerSection } from './ChannelOwnerSection'
 import { ApprovalChannelSection } from './ApprovalChannelSection'
 
@@ -126,9 +127,11 @@ function ProviderSection({ p, revoking, onRevoke, refresh }: {
   const label = providerLabel(p.provider)
   const senders = p.allowed_senders
   const seenChannels = p.seen_channels ?? []
+  const groups = p.groups !== false || seenChannels.length > 0 || p.tracked_channels.length > 0
+  const policySentence = p.speaks_as_owner && p.policies.dm !== 'open' ? 'Messages from strangers are held in your Inbox; nothing is sent to them.' : dmPolicyLabel(p.policies.dm) + '.'
   const updatePolicy = async (field: 'dm' | 'group', value: string) => {
     if (field === 'dm' && value === 'open') {
-      const accepted = await confirm({ title: `Allow any ${label} user to message?`, body: 'Anyone who can reach this channel may start a conversation with your agent. This is broader than pairing or owner-only access.', confirmLabel: 'Open direct messages' })
+      const accepted = await confirm({ title: `Allow any ${label} user to message?`, body: p.speaks_as_owner ? 'Anyone who can reach this channel may start a conversation and receive replies as you. Confirm that you want your agent to answer as you.' : 'Anyone who can reach this channel may start a conversation with your agent. This is broader than pairing or owner-only access.', confirmLabel: 'Open direct messages' })
       if (!accepted) return
     }
     setBusy(true)
@@ -153,7 +156,7 @@ function ProviderSection({ p, revoking, onRevoke, refresh }: {
       title={`${label}${senders.length ? ` (${senders.length})` : ''}`}
       icon={ShieldCheck}
       iconTone="muted"
-      hint={`${dmPolicyLabel(p.policies.dm)}. ${groupPolicyLabel(p.policies.group)}.`}
+      hint={`${policySentence}${groups ? ` ${groupPolicyLabel(p.policies.group)}.` : ''}`}
     >
       <div className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -162,17 +165,22 @@ function ProviderSection({ p, revoking, onRevoke, refresh }: {
               <option value="pairing">Pairing required</option><option value="owner_only">Owner only</option><option value="open">Anyone may message</option>
             </select>
           </label>
-          <label className="flex flex-col gap-1" data-type="caption"><span>Groups</span>
+          {groups && <label className="flex flex-col gap-1" data-type="caption"><span>Groups</span>
             <select aria-label={`${label} group trust`} disabled={busy} value={p.policies.group} onChange={event => void updatePolicy('group', event.currentTarget.value)} className="min-h-9 rounded-md border border-outline-low bg-surface px-2 text-on-surface">
               <option value="tracked_only">Tracked groups only</option><option value="off">Ignore group messages</option>
             </select>
-          </label>
+          </label>}
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Button size="xs" onClick={() => void pairing()} loading={busy}>{p.pairing_active ? 'Cancel sender code' : 'Create sender code'}</Button>
+          <Button size="xs" disabled={p.policies.dm !== 'pairing' && !p.pairing_active} onClick={() => void pairing()} loading={busy}>{p.pairing_active ? 'Cancel sender code' : 'Create sender code'}</Button>
           {pairCode ? <span role="status" className="select-all font-mono text-on-surface">{pairCode}</span> : null}
           {pairCode ? <span data-type="caption" className="text-on-surface-low">Shown once; expires in ten minutes.</span> : null}
         </div>
+        {p.pairing_hint ? <p data-type="body-s" className="text-on-surface-low">{p.pairing_hint}</p> : null}
+        {(p.seen_senders ?? []).length ? <div className="space-y-2"><p data-type="label-m">People who messaged your agent and aren’t paired</p><RowGroup>{p.seen_senders!.map((person, index) => {
+          const who = channelPerson(label, person.sender_id, person.name)
+          return <ListRow key={person.sender_id} index={index} label={who.name}><div className="py-2"><p data-type="body-s">{who.name}</p>{who.detail ? <p data-type="caption" className="text-on-surface-low">{who.detail}</p> : null}<p data-type="caption" className="text-on-surface-low">{person.count} {person.count === 1 ? 'message' : 'messages'} since {addedLabel(person.since)}; latest {addedLabel(person.last_seen)} · not read</p></div></ListRow>
+        })}</RowGroup></div> : null}
         {seenChannels.length ? <div className="space-y-2"><p data-type="caption" className="text-on-surface-low">Groups seen on {label}</p>
           <RowGroup>{seenChannels.map((channel, i) => {
             const tracked = p.tracked_channels.some(item => item.channel_id === channel.channel_id)
@@ -201,7 +209,7 @@ function ProviderSection({ p, revoking, onRevoke, refresh }: {
         ) : (
           <RowGroup>
             {senders.map((s, i) => {
-              const who = s.name || s.sender_id
+              const who = channelPerson(label, s.sender_id, s.name).name
               const tag = `${p.provider}:${s.sender_id}`
               return (
                 <ListRow key={s.sender_id} index={i} label={who}>

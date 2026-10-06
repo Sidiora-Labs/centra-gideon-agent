@@ -90,6 +90,8 @@ class ChannelManager:
         if selected is None:
             return None
         description = await _TransportProbe(selected).describe()
+        from gideon.integrations.channel_trust import owner_ref
+        description.update(owner_ref(name))
         from gideon.extensions.providers.registry import get_provider_registry
 
         owner = next(

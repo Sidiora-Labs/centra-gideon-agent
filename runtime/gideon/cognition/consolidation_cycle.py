@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger("gideon.cognition.history")
@@ -31,7 +32,29 @@ def redact_text(value):
     return result
 
 
+class ConsolidationUnavailable(RuntimeError):
+    """Extraction could not produce an applicable model result."""
+
+
+class ConsolidationPolicyDenied(PermissionError):
+    """Current session policy does not permit background memory writes."""
+
+
+def retryable_extraction(error):
+    import httpx
+    from gideon.security.guardrails.failure import FailureMode, GuardError
+
+    if isinstance(error, GuardError):
+        return error.mode in {
+            FailureMode.PROVIDER_ERROR, FailureMode.TIMEOUT,
+            FailureMode.FIRST_TOKEN_TIMEOUT, FailureMode.CIRCUIT_OPEN,
+        }
+    return isinstance(error, (httpx.HTTPError, TimeoutError, ConnectionError, OSError))
+
+
 class ConsolidationTasks:
+    SEAL_PENDING = "consolidation_seal_pending"
+
     def __init__(self, owner):
         self.owner = owner
         self.running = set()
@@ -43,13 +66,41 @@ class ConsolidationTasks:
         self.concurrent = asyncio.Semaphore(2)
         self.inflight = set()
         self.deferred = set()
+        self.debt = {}
+        self.denied = set()
+
+    def owe(self, key, error=None, *, include_history=True):
+        self.deferred.add(key)
+        previous = self.debt.get(key, {})
+        wait = min(float(previous.get("wait", 0)) * 2, 1800) or 60
+        retryable = error is None or retryable_extraction(error)
+        self.debt[key] = {
+            "due": time.monotonic() + wait if retryable else None,
+            "wait": wait,
+            "history": include_history or previous.get("history", False),
+        }
+
+    def deny(self, key):
+        self.denied.add(key)
+        self.debt.pop(key, None)
+        self.deferred.discard(key)
+        self.owner._log.update_metadata(key, {self.SEAL_PENDING: False})
 
     def start(self, key, include_history, destination, stamp):
         owner = self.owner
-        if key in owner._running:
+        if owner._quiesced or key in owner._running:
+            return False
+        if key in self.denied:
+            try:
+                owner._admit_consolidation(key)
+            except ConsolidationPolicyDenied:
+                return False
+            self.denied.discard(key)
+        debt = self.debt.get(key)
+        if debt and (debt["due"] is None or debt["due"] > time.monotonic()):
             return False
         if len(owner._tasks) >= self.capacity:
-            self.deferred.add(key)
+            self.owe(key, include_history=include_history)
             return False
         owner._running.add(key)
         self.deferred.discard(key)
@@ -59,14 +110,7 @@ class ConsolidationTasks:
             async with self.concurrent:
                 self.inflight.add(key)
                 try:
-                    for attempt in range(2):
-                        try:
-                            await owner._consolidate(key, include_history=include_history)
-                            return
-                        except Exception:
-                            if attempt:
-                                raise
-                            await asyncio.sleep(0.5)
+                    return await owner._consolidate(key, include_history=include_history)
                 finally:
                     self.inflight.discard(key)
                     owner._running.discard(key)
@@ -76,13 +120,24 @@ class ConsolidationTasks:
 
         def settled(completed):
             owner._tasks.discard(completed)
-            if not completed.cancelled() and completed.exception() is None:
+            owner._running.discard(key)
+            if completed.cancelled():
+                self.owe(key, include_history=include_history)
+                return
+            error = completed.exception()
+            if isinstance(error, ConsolidationPolicyDenied):
+                self.deny(key)
+            elif error is not None or not completed.result():
+                self.owe(key, error, include_history=include_history)
+            else:
+                self.debt.pop(key, None)
+                self.deferred.discard(key)
                 destination[key] = stamp
+                if include_history:
+                    owner._seal_if_complete(key)
                 current_count = len(owner._log._read_messages(key))
                 if current_count > initial_count and owner._log.unconsolidated_count(key) >= 1:
                     self.start(key, include_history, destination, current_count)
-            else:
-                self.deferred.add(key)
 
         task.add_done_callback(settled)
         return True
@@ -92,6 +147,10 @@ class ConsolidationTasks:
             key = session.get("key")
             if key and self.owner._log.unconsolidated_count(key):
                 self.activity.setdefault(key, float(session.get("modified") or 0))
+                self.debt[key] = {"due": time.monotonic(), "wait": 0, "history": True}
+                self.deferred.add(key)
+            elif key and self.owner._log.get_metadata(key).get(self.SEAL_PENDING):
+                self.debt[key] = {"due": time.monotonic(), "wait": 0, "history": True}
 
     async def drain(self, timeout=3.0):
         tasks = list(self.tasks)
@@ -104,6 +163,8 @@ class ConsolidationTasks:
                    "deferred": len(self.deferred)}
         for task in unfinished:
             task.cancel()
+        if unfinished:
+            await asyncio.gather(*unfinished, return_exceptions=True)
         from gideon.core.atomic_write import atomic_write
         from gideon.core.config.loader import config_dir
 
@@ -117,7 +178,12 @@ class ConsolidationTasks:
 
     def idle(self, now):
         owner = self.owner
+        for key, debt in list(self.debt.items()):
+            if debt["due"] is not None and debt["due"] <= time.monotonic() and key not in owner._running:
+                yield key
         for key, latest in list(owner._last_activity.items()):
+            if key in self.debt or key in self.denied:
+                continue
             if now - latest < owner._history_idle_secs:
                 continue
             if owner._log.unconsolidated_count(key) < 1:
@@ -126,6 +192,71 @@ class ConsolidationTasks:
                 continue
             if key not in owner._running:
                 yield key
+
+
+def consolidation_problem(text):
+    """Check the fields the native extraction consumers actually read."""
+    import math
+    from gideon.integrations.llm_helpers import parse_llm_json
+
+    result = parse_llm_json(text)
+    if not isinstance(result, dict) or not result:
+        return "a nonempty consolidation object"
+    strings = {"history_entry", "preferences_update", "projects_update"}
+    arrays = {"semantic", "episodic", "lessons", "self_persona", "commitments"}
+    optional = {"new_skill", "refined_skill"}
+    if not set(result).intersection(strings | arrays | optional):
+        return "recognized consolidation fields"
+    for field in strings.intersection(result):
+        if not isinstance(result[field], str):
+            return field + " must be text"
+    for field in arrays.intersection(result):
+        if not isinstance(result[field], list):
+            return field + " must be an array"
+        for row in result[field]:
+            if field == "self_persona":
+                if not isinstance(row, str):
+                    return "self_persona must contain text"
+                continue
+            if not isinstance(row, dict):
+                return field + " must contain objects"
+            required = {"semantic": "key", "episodic": "text", "lessons": "rule", "commitments": "text"}[field]
+            if not isinstance(row.get(required), str) or not row[required].strip():
+                return field + " requires " + required
+            if field == "semantic" and "value" not in row and not row.get("delete"):
+                return "semantic requires a value or deletion"
+            for numeric in {"confidence", "importance", "weight"}.intersection(row):
+                value = row[numeric]
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                    return numeric + " must be finite numeric data"
+            if "tags" in row and (not isinstance(row["tags"], list) or any(not isinstance(tag, str) for tag in row["tags"])):
+                return "tags must contain text"
+            if "due_window" in row and not isinstance(row["due_window"], str):
+                return "due_window must be text"
+    for field in optional.intersection(result):
+        if result[field] is not None and not isinstance(result[field], dict):
+            return field + " must be an object or null"
+    return ""
+
+
+def formation_problem(text, candidates):
+    from gideon.cognition import memory_formation
+    from gideon.integrations.llm_helpers import parse_llm_json
+
+    result = parse_llm_json(text)
+    decisions = memory_formation.parse_decisions(result, candidates)
+    rows = result.get("verdicts") if isinstance(result, dict) else None
+    expected = {candidate.index for candidate in candidates}
+    if not isinstance(rows, list) or len(rows) != len(expected) or set(decisions) != expected:
+        return "exactly one valid verdict for every candidate"
+    if any(not isinstance(row, dict) or isinstance(row.get("index"), bool) or not isinstance(row.get("index"), int) for row in rows):
+        return "integer candidate indices"
+    for candidate in candidates:
+        decision = decisions[candidate.index]
+        admitted = memory_formation.adjudicate(candidate, decision)
+        if decision.verdict in {memory_formation.VERDICT_UPDATE, memory_formation.VERDICT_SUPERSEDE} and admitted.verdict == memory_formation.VERDICT_ADD:
+            return "an existing target for update or supersede"
+    return ""
 
 
 class ConsolidationRound:
@@ -241,23 +372,30 @@ class ConsolidationRound:
         )
 
     async def run(self):
-        if self.load():
-            result = await self.owner._call_llm(self.render())
-            if result:
-                await self.apply(result)
+        self.owner._admit_consolidation(self.key)
+        if not self.load():
+            return True
+        result = await self.owner._call_llm(self.render(), validate=consolidation_problem)
+        if not isinstance(result, dict) or not result:
+            raise ConsolidationUnavailable("model returned no extraction object")
+        self.owner._admit_consolidation(self.key)
+        await self.apply(result)
+        return True
 
     async def apply(self, result):
         owner, key = self.owner, self.key
+        problem = consolidation_problem(json.dumps(result))
+        if problem:
+            raise ConsolidationUnavailable(problem)
+        if owner._svc.has_vector:
+            await owner._form_semantic_memory(result, key)
+        owner._admit_consolidation(key)
         entry = result.get("history_entry")
         if entry:
             self.memory.append_history(entry)
             logger.info("Consolidated %d messages for %s", len(self.messages), key)
-            try:
-                owner._svc.write_working_memory(key, entry)
-            except Exception:
-                logger.debug("working-memory write failed for %s", key, exc_info=True)
+            owner._svc.write_working_memory(key, entry)
         if owner._svc.has_vector:
-            await owner._form_semantic_memory(result, key)
             owner._write_episodic_memory(result, key)
         if not owner._migrated:
             for field, previous, write in (
@@ -284,6 +422,7 @@ class ConsolidationRound:
                     "Auto-skill processing failed for %s", key, exc_info=True
                 )
         if self.include_history:
+            owner._admit_consolidation(key)
             owner._log.mark_consolidated(key, self.total)
             await self.maintain()
 
@@ -422,21 +561,15 @@ class SemanticFormationBatch:
         )
         if not candidates:
             return
-        verdicts, degraded = {}, False
-        try:
-            memory_formation.gather(owner._vector_store, candidates)
-            prompt = memory_formation.build_decide_prompt(candidates)
-            if prompt:
-                answer = await owner._call_llm(prompt)
-                verdicts = memory_formation.parse_decisions(answer, candidates)
-                degraded = not verdicts
-        except Exception:
-            logger.warning(
-                "Memory formation degraded for %s — writing as ADD",
-                self.key,
-                exc_info=True,
-            )
-            verdicts, degraded = {}, True
+        memory_formation.gather(owner._vector_store, candidates)
+        prompt = memory_formation.build_decide_prompt(candidates)
+        if not prompt:
+            raise ConsolidationUnavailable("memory decision prompt unavailable")
+        answer = await owner._call_llm(prompt, validate=lambda text: formation_problem(text, candidates))
+        verdicts = memory_formation.parse_decisions(answer, candidates)
+        if any(candidate.index not in verdicts for candidate in candidates):
+            raise ConsolidationUnavailable("model omitted memory formation decisions")
+        owner._admit_consolidation(self.key)
         report = memory_formation.apply_decisions(
             owner._vector_store,
             candidates,
@@ -444,7 +577,8 @@ class SemanticFormationBatch:
             source=f"consolidation:{self.key}",
             holder_attribution=owner._holder_attribution,
         )
-        report.degraded = report.degraded or degraded
+        if report.rejected:
+            raise ConsolidationUnavailable("memory formation rejected extracted records")
         logger.info("Memory formation for %s: %s", self.key, report.summary())
 
 

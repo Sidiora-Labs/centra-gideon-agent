@@ -172,12 +172,15 @@ def kind_for_legacy_pair(source: str, kind: str) -> str:
     lives, so a new attention kind cannot invent a second convention.
 
     Prefers an existing legacy string when one maps to this pair — so ``inbox/alert`` keeps
-    emitting ``inbox_alert`` and its persisted history stays one kind — and otherwise falls
-    back to the bare ``kind``, which is what a brand-new attention kind wants.
+    emitting ``inbox_alert`` and its persisted history stays one kind — and otherwise uses
+    the registered pair key for dynamic kinds so app rules cannot collide. Unknown pairs
+    retain their bare kind for the generic fallback.
     """
     for flat, ident in _WIRE_TO_PAIR.items():
         if ident == (source, kind):
             return flat
+    if (source, kind) in _REGISTRY:
+        return f"{source}/{kind}"
     return kind
 
 
@@ -190,10 +193,22 @@ def kind_for_legacy(kind: str) -> NotificationKind:
     its registration. Unknown → generic, fail-open.
     """
     flat = (kind or "").strip().lower()
-    ident = _WIRE_TO_PAIR.get(flat)
+    ident = _WIRE_TO_PAIR.get(flat) or _pair_of_key(flat)
     if ident is None:
         return resolve_kind(GENERIC_SOURCE, flat or GENERIC_KIND)
     return resolve_kind(*ident)
+
+
+def _pair_of_key(key: str) -> tuple[str, str] | None:
+    source, separator, kind = key.partition("/")
+    return (source, kind) if separator and (source, kind) in _REGISTRY else None
+
+
+def label_for_wire(wire: str) -> str:
+    key = (wire or "").strip().lower()
+    pair = _WIRE_TO_PAIR.get(key) or _pair_of_key(key)
+    found = _REGISTRY.get(pair) if pair is not None else None
+    return found.label if found is not None else ""
 
 
 _PRODUCTION_OWNERS: dict[tuple[str, str], str | None] = {
@@ -234,6 +249,7 @@ _PRODUCTION_OWNERS: dict[tuple[str, str], str | None] = {
     ): "gideon.integrations.action_providers.knowledge_report_provider",
     ("learning", "report"): "gideon.cognition.learning_report",
     ("approval", "requested"): "gideon.interfaces.dashboard.state",
+    ("mcp", "description_changed"): "gideon.security.mcp_read_only_trust",
     ("user", "note"): "gideon.interfaces.dashboard.handlers_inbox",
     (
         "personal",
@@ -411,6 +427,7 @@ _LEGACY_FLAT: dict[str, tuple[str, str]] = {
 }
 
 _ATTENTION_FLAT: dict[str, tuple[str, str]] = {
+    "room_paused": ("agent", "room_paused"),
     "task_due": ("tasks", "due"),
     "personal_domain_alert": ("personal", "domain_alert"),
     "cron_failed": ("cron", "failed"),
@@ -462,7 +479,12 @@ LOOP_STALLED = "loop_stalled"
 AUTONOMY_REVOCATION = "autonomy_revocation"
 GENERIC = GENERIC_KIND
 
+MCP_DESCRIPTION_CHANGED = "mcp_description_changed"
+register(NotificationKind(source="mcp", kind="description_changed", label="MCP tool description changed", default_mode="badge", production_owner="gideon.security.mcp_read_only_trust"))
+_WIRE_TO_PAIR[MCP_DESCRIPTION_CHANGED] = ("mcp", "description_changed")
+
 WIRE_CONSTANTS: tuple[str, ...] = (
+    MCP_DESCRIPTION_CHANGED,
     CRON,
     CRON_FAILED,
     HEARTBEAT,

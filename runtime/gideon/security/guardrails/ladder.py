@@ -298,6 +298,10 @@ def record_reversal_handle(
             action_type,
         )
         return ""
+    kind, _ = parse_handle(handle)
+    if _reverser_for(action_type, kind) is None:
+        logger.warning("autonomy: no declared provider can reverse %s for %s", kind, action_type)
+        return ""
     record = ReversalRecord(
         id=f"rev_{secrets.token_hex(8)}",
         action_type=action_type,
@@ -459,7 +463,16 @@ async def reverse_action(record_id: str) -> ReversalOutcome:
             record_id=record.id,
             action_type=record.action_type,
         )
-    if not getattr(result, "success", False):
+    from gideon.automation.triggers.executor import classify
+    from gideon.automation.triggers.models import Outcome
+    observed, _ = classify(str(getattr(result, "outcome", "") or ""))
+    if getattr(result, "success", False) is True and observed != Outcome.RAN.value:
+        return _refuse(
+            "provider_outcome_unknown", "The provider did not confirm that this action was undone.",
+            record_id=record.id, action_type=record.action_type,
+        )
+    if (getattr(result, "success", False) is not True or getattr(result, "blocked", False)
+            or getattr(result, "exit_code", 0) not in (0, None)):
         return _refuse(
             "provider_refused",
             str(getattr(result, "error", "") or "")
@@ -494,7 +507,7 @@ async def reverse_action(record_id: str) -> ReversalOutcome:
     )
 
 
-def _authority_sentence(spec, resolved: str, granted: str, state, held: bool) -> str:
+def _provenance(spec, resolved: str, granted: str, state, held: bool) -> str:
     """WHERE this type's current rung came from, in one sentence.
 
     The chip's whole job (done_when 3) is to answer "why is this allowed to run by itself?"
@@ -525,6 +538,16 @@ def _authority_sentence(spec, resolved: str, granted: str, state, held: bool) ->
     )
 
 
+def _authority_sentence(spec, resolved: str, granted: str, state, held: bool, route) -> str:
+    from gideon.security.guardrails.rungs import NARROWED_BY_NO_UNDO, NARROWED_BY_POSTURE, rung_label
+    sentence = _provenance(spec, resolved, granted, state, held)
+    if route.narrowed_by == NARROWED_BY_NO_UNDO:
+        sentence += f" What it does cannot be taken back, so it {rung_label(route.rung)}."
+    elif route.narrowed_by == NARROWED_BY_POSTURE:
+        sentence += f" When it runs with nobody watching, it {rung_label(route.rung)}."
+    return sentence
+
+
 def _type_row(spec) -> dict:
     """One action type, as the panel needs it: the rung, WHERE it came from, the record."""
     resolved = resolve_rung(spec.key)
@@ -532,16 +555,19 @@ def _type_row(spec) -> dict:
     state = rung_state(spec.key)
     el = promotion_eligibility(spec.key)
     held = rung_rank(granted) > rung_rank(resolved)
+    from gideon.security.guardrails.policy import unattended_dispatch_key
+    from gideon.security.guardrails.rungs import route_action_type
+    route = route_action_type(spec.key, session_key=unattended_dispatch_key("autonomy-ladder"))
     return {
         "key": spec.key,
         "floor": spec.floor,
         "ceiling": spec.ceiling,
         "leaves_machine": spec.leaves_machine,
         "providers": list(spec.providers),
-        "resolved_rung": resolved,
+        "resolved_rung": route.rung,
         "granted_rung": granted,
         "held_by_incident": held,
-        "authority": _authority_sentence(spec, resolved, granted, state, held),
+        "authority": _authority_sentence(spec, resolved, granted, state, held, route),
         "granted_at": state.granted_at if state else "",
         "evidence_window": state.evidence_window if state else "",
         "demotions": [

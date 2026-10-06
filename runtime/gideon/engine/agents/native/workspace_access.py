@@ -149,8 +149,8 @@ class WorkspaceTree:
         names = [item.name + ("/" if item.is_dir() else "") for item in path.iterdir()]
         return "\n".join(sorted(names)) or "(empty)"
 
-    def matching_files(self, pattern: str):
-        return (path for path in self.root.glob(pattern) if path.is_file())
+    def matching_files(self, pattern: str, *, case_sensitive: bool | None = None):
+        return (path for path in self.root.glob(pattern, case_sensitive=case_sensitive) if path.is_file())
 
     def glob_listing(self, pattern: str) -> str:
         paths = sorted(

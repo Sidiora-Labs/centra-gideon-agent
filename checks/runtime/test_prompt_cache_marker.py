@@ -433,7 +433,11 @@ def test_ordering_repairs_are_not_gated_by_the_switch(cache_switch, tmp_path):
     )
     assert system == "stable assembled context"
     assert "per-turn tool catalog" not in system
-    assert out[-1] == {"role": "user", "content": "per-turn tool catalog"}
+    assert len(out) == 1
+    assert out[0]["content"] == [
+        {"type": "text", "text": "hello"},
+        {"type": "text", "text": "per-turn tool catalog"},
+    ]
 
     ctx = PromptAssembler(
         memory=MemoryJournal(workspace=tmp_path / "ws"),
@@ -456,10 +460,11 @@ async def test_switch_off_keeps_the_volatile_tag_on_the_per_turn_note(cache_swit
     rt = NativeAgentRuntime(definition=_defn(), model_provider=model, tool_providers=[])
     await rt.start()
     note = "per-turn tool catalog"
-    rt._prepare_turn_tools = lambda message: (None, note)  # type: ignore[method-assign]
+    rt._pending_group_note = note
     await _drain(rt)
-    notes = [m for m in rt._messages if m.get("role") == "system"]
-    assert notes, "the per-turn note never reached the history"
+    notes = [m for m in model.seen if m.get("role") == "system"]
+    assert notes, "the per-turn note never reached the request"
+    assert not any(m.get("_volatile") for m in rt._messages)
     assert all(m.get("_volatile") is True for m in notes)
 
 

@@ -141,6 +141,7 @@ class ActionTypeSpec:
     leaves_machine: bool = False
     promotion: PromotionRule = field(default_factory=PromotionRule)
     providers: tuple[str, ...] = ()
+    runs_code: bool = False
 
 
 _REGISTRY: dict[str, ActionTypeSpec] = {}
@@ -648,6 +649,11 @@ def promotion_eligibility(key: str) -> Eligibility:
     its ceiling; the next rung would be ``autonomous`` for a type that leaves the
     machine; or the evidence bar is not met. Any failure to READ the evidence is also
     ineligible — an unreadable record proves nothing.
+
+    ``auto_with_undo`` is never offered to an action that cannot be undone
+    (:func:`~gideon.security.guardrails.rungs.can_be_undone`): it would ask first there instead
+    (``rungs.route_action_type``), so a promotion to it would change nothing it said it would.
+    Its next rung is the one above, within the ceiling and the rules above.
     """
     spec = _REGISTRY.get(key)
     if spec is None:
@@ -666,6 +672,12 @@ def promotion_eligibility(key: str) -> Eligibility:
 
     cooldown_until = _cooldown_until(grant)
     if _in_cooldown(grant, now):
+        # Every other branch of this sentence QUANTIFIES what is missing — "4 of 10 clean
+        # approvals so far", "Approvals span 2.5 of the 14 days required". This one held the
+        # concrete number (it is set on this very Eligibility) and did not say it, so the
+        # panel told a demoted user they were in cooldown and gave them no way to learn when
+        # it lifts. `explain_refused_grant` already names the date for the same fact, so the
+        # two server-composed explanations of one thing disagreed.
         when = cooldown_date(cooldown_until)
         return Eligibility(
             key=key,
@@ -681,13 +693,31 @@ def promotion_eligibility(key: str) -> Eligibility:
     base = granted_rung(key)
     next_index = rung_rank(base) + 1
     ceiling_index = max(rung_rank(spec.ceiling), 0)
-    if next_index > ceiling_index or next_index >= len(RUNGS):
-        from gideon.security.guardrails.rungs import rung_label
+    from gideon.security.guardrails.rungs import can_be_undone, rung_label
 
+    # The undo rung is skipped only where it is in reach: above the ceiling it is not offered
+    # to anything, and the plain ceiling sentence below is the true one.
+    skips_undo = (
+        next_index == rung_rank(RUNG_AUTO_WITH_UNDO)
+        and next_index <= ceiling_index
+        and not can_be_undone(key)
+    )
+    if skips_undo:
+        next_index += 1
+    if next_index > ceiling_index or next_index >= len(RUNGS):
+        # 🪤 Read "Already at its ceiling (autonomous)." on twelve rows of the Guardrails panel.
+        # `autonomous` is the code's name for the rung; `RUNG_LABELS`' own docstring says so. The
+        # label is a predicate, so it gets a subject rather than a parenthesis.
         return Eligibility(
             key=key,
             current_rung=current,
-            reason=f"Already at its ceiling: it {rung_label(spec.ceiling)}.",
+            reason=(
+                "What it does cannot be taken back, so it cannot climb to "
+                f"\u201c{rung_label(RUNG_AUTO_WITH_UNDO)}\u201d, the highest rung it was "
+                "declared for."
+                if skips_undo
+                else f"Already at its ceiling: it {rung_label(spec.ceiling)}."
+            ),
         )
     next_rung = RUNGS[next_index]
     if next_rung == RUNG_AUTONOMOUS and spec.leaves_machine:
@@ -703,9 +733,7 @@ def promotion_eligibility(key: str) -> Eligibility:
     rule = _rule_for(key)
     window_days = max(rule.min_days, _config_window_days())
     try:
-        approvals, rejections, observed = _sel_evidence(
-            key, now - timedelta(days=window_days)
-        )
+        approvals, rejections, observed = _sel_evidence(key, now - timedelta(days=window_days))
         rejections += _feedback_rejections(key, window_days)
     except Exception:  # noqa: BLE001 — unreadable evidence proves nothing
         logger.warning("autonomy evidence read failed for %s", key, exc_info=True)
@@ -739,9 +767,7 @@ def promotion_eligibility(key: str) -> Eligibility:
     if observed < rule.min_days:
         return replace(
             partial,
-            reason=(
-                f"Approvals span {observed:.1f} of the {rule.min_days} days required."
-            ),
+            reason=(f"Approvals span {observed:.1f} of the {rule.min_days} days required."),
         )
     return replace(
         partial,

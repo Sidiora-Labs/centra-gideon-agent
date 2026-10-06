@@ -154,7 +154,7 @@ export function LoopsListPage({ onOpen, onCreate, query, setQuery }: { onOpen: (
               {loops
                 .filter(matches)
                 .map((c, i) => {
-                const dispStatus = effectiveLoopStatus(c.status, c.stop_reason)
+                const dispStatus = effectiveLoopStatus(c.status, c.stop_reason, c.held)
                 const endedEarly = dispStatus === 'ended_early'
                 const pct = c.status === 'complete' && !endedEarly
                   ? 1
@@ -244,7 +244,7 @@ export function LoopsListPage({ onOpen, onCreate, query, setQuery }: { onOpen: (
 }
 
 export function LoopPeek({ loop, onOpenFull }: { loop: GoalLoop; onOpenFull: () => void }) {
-  const dispStatus = effectiveLoopStatus(loop.status, loop.stop_reason)
+  const dispStatus = effectiveLoopStatus(loop.status, loop.stop_reason, loop.held)
   const running = loop.status === 'running'
   const kind = (loop as { kind?: string }).kind
   const cycle = shownCycle(loop.total_cycles, loop.status)

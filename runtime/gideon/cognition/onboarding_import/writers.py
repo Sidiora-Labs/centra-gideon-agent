@@ -35,6 +35,8 @@ Destinations
 
 from __future__ import annotations
 
+from gideon.integrations.mcp_argument_secrets import credential_values
+
 import json
 import logging
 import re
@@ -187,11 +189,7 @@ def _write_mcp_server(item: ImportItem) -> WriteResult:
         stored = (config.get("mcpServers") or {}).get(server_name, {})
     except (OSError, ValueError):
         stored = {}
-    retained = {
-        **(stored.get("env") if isinstance(stored, dict) and isinstance(stored.get("env"), dict) else {}),
-        **(stored.get("headers") if isinstance(stored, dict) and isinstance(stored.get("headers"), dict) else {}),
-        **(stored.get("oauth") if isinstance(stored, dict) and isinstance(stored.get("oauth"), dict) else {}),
-    }
+    retained = credential_values(stored)
     purge_unused(SecretOwner("MCP", server_name), retained)
     return result
 

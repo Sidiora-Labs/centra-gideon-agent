@@ -44,7 +44,16 @@ from typing import Any, Mapping
 from aiohttp import web
 
 HTTP_ERROR_CODES: dict[str, str] = {
+    "fresh_sign_in_required": "This action needs a recent owner sign-in.",
+    "auth_password_required": "Enter your current password.",
+    "model_rates_unreadable": "Settings cannot be read safely to change a model price.",
+    "model_rate_unsaved": "The model price could not be saved.",
+    "model_cannot_serve_use_case": "The listed model cannot serve this job.",
     "bad_request": "The request was malformed or carried an unusable parameter.",
+    "field_not_a_boolean": "The field must be a JSON boolean, true or false.",
+    "field_required": "The request is missing a required field.",
+    "internal_route_refused": "This operation does not accept the gateway's internal credential.",
+    "internal_secret_invalid": "The internal credential is not the one this gateway issued.",
     "invalid_request": "The request was well-formed JSON but failed validation.",
     "invalid_json": "The request body is not valid JSON.",
     "invalid_body": "The request body is valid JSON but not the expected object.",

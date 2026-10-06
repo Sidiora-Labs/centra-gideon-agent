@@ -111,13 +111,6 @@ def _current_origin_harness() -> str:
         return ""
 
 
-def _record_task_tombstone(task_id: str) -> None:
-    try:
-        from gideon.operations.durability.tombstones import record_tombstone
-
-        record_tombstone(_tasks_dir(), task_id, now=_now_iso())
-    except Exception:
-        pass
 
 
 def _coerce_binding(raw: Any) -> WorkflowTaskBinding | None:
@@ -381,7 +374,6 @@ class TaskMutation:
         if not path.exists():
             return False
         path.unlink()
-        _record_task_tombstone(identifier)
         tasks = self.provider._task_map()
         for task in tasks.values():
             retained = [
@@ -513,18 +505,7 @@ class NativeTaskProvider(TaskProvider):
 
     @staticmethod
     def _coerce_dependencies(value: Any) -> list[TaskDependency]:
-        values = (
-            [value] if isinstance(value, (str, dict, TaskDependency)) else value or []
-        )
-        edges = []
-        for item in values:
-            if isinstance(item, TaskDependency):
-                edges.append(item)
-            elif isinstance(item, dict):
-                edges.append(TaskDependency.from_dict(item))
-            elif isinstance(item, str) and item.strip():
-                edges.append(TaskDependency(item.strip()))
-        return edges
+        return models_coerce("dependencies", value, strict=True)
 
     async def list_tasks(
         self,

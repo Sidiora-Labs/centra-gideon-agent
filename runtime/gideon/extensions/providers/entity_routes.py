@@ -197,6 +197,19 @@ def _in_quiet_window(start: str, end: str, now_minutes: int) -> bool:
     return now_minutes >= s or now_minutes < e
 
 
+def quiet_window_moments(settings: dict) -> "tuple[object, object] | None":
+    from datetime import datetime
+
+    if not settings.get("quiet_hours_enabled"):
+        return None
+    start, end = (_parse_hhmm(settings.get(key, "")) for key in ("quiet_hours_start", "quiet_hours_end"))
+    if start is None or end is None or start == end:
+        return None
+    today = datetime.now().replace(second=0, microsecond=0)
+    return (today.replace(hour=start // 60, minute=start % 60),
+            today.replace(hour=end // 60, minute=end % 60))
+
+
 def notification_posture(kind: str, *, now: "object | None" = None) -> str:
     """THE delivery gate for dashboard notifications (ConsoleState.notify()).
 
@@ -204,7 +217,8 @@ def notification_posture(kind: str, *, now: "object | None" = None) -> str:
       * ``mute_all`` — pause every notification regardless of severity.
       * ``min_severity`` — deliver only kinds at or above the threshold
         (info < warning < error; unknown kinds rank as info).
-      * quiet hours — suppress everything below *error* inside the window
+      * quiet hours — constrain interruptions below *error* inside the window;
+        the shared rule decision preserves explicit badge/digest modes
         (24-hour, server-local time; the window may wrap midnight).
 
     ``now`` is an optional ``datetime`` for tests; defaults to local time.
@@ -229,12 +243,12 @@ def notification_posture(kind: str, *, now: "object | None" = None) -> str:
         ):
             if registered.attention or severity == notification_kinds.SEV_WARNING:
                 return "quiet"
-            return "blocked"
+            return "hush"
     return "allowed"
 
 
 def notification_allowed(kind: str, *, now: "object | None" = None) -> bool:
-    return notification_posture(kind, now=now) != "blocked"
+    return notification_posture(kind, now=now) not in {"blocked", "hush"}
 
 
 def register_entity_routes(app: web.Application) -> None:

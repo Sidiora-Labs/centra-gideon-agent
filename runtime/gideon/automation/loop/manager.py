@@ -288,6 +288,8 @@ async def start(state, svc, loop_id: str) -> Loop:
         project_id=loop.tasks_project_id or loop.project_id or "",
     )
     store.set_session_key(loop_id, session.key)
+    from gideon.engine.agents.loop_skills import bind
+    bind(session.key, loop.id, session.agent or strat.default_agent)
 
     extra_roots = [str(d)] if d is not None else []
     ctx = _context_dir(loop)
@@ -369,6 +371,42 @@ async def rearm_nudge_message(svc, loop_id: str) -> None:
         )
     except Exception:
         logger.debug("rearm_nudge_message failed for %s", loop_id, exc_info=True)
+
+
+def worker_session_keys(state, loop_id: str) -> list[str]:
+    """The stage worker and parallel task workers belonging to one loop."""
+    main = session_key(loop_id)
+    return [key for key in (getattr(state, "_sessions", None) or {})
+            if key == main or key.startswith(f"{main}-")]
+
+
+async def halt_turn(state, key: str) -> bool:
+    """Clear queued turns and stop the running turn through the session stop path."""
+    from gideon.core.constants import dashboard_session_key
+
+    session = (getattr(state, "_sessions", None) or {}).get(key)
+    if session is None:
+        return False
+    queue = getattr(session, "_queue", None)
+    if queue:
+        queue.clear()
+    sessions = getattr(state, "sessions", None)
+    if not getattr(session, "running", False) or sessions is None:
+        return False
+    try:
+        await sessions.stop_turn(dashboard_session_key(key), force=False)
+        return True
+    except Exception:
+        logger.warning("loop: stopping the worker turn failed for %s", key, exc_info=True)
+        return False
+
+
+async def halt_worker_turns(state, loop_id: str) -> int:
+    """Stop the in-flight turn on every worker belonging to this loop."""
+    halted = 0
+    for key in worker_session_keys(state, loop_id):
+        halted += int(await halt_turn(state, key))
+    return halted
 
 
 async def pause(state, svc, loop_id: str) -> Loop:
@@ -576,6 +614,8 @@ async def spawn_task_worker(
         workspace_dir=worktree_dir,
         app="loop",
     )
+    from gideon.engine.agents.loop_skills import bind
+    bind(session.key, loop.id, session.agent or (strat.default_agent if strat else ""))
     if loop.provider:
         session.acp_provider = loop.provider
         session.acp_provider_agent = loop.provider_agent

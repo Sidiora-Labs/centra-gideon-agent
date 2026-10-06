@@ -35,16 +35,21 @@ class ArchiveUpload:
         part = await reader.next()
         if not isinstance(part, BodyPartReader) or part.name != "file":
             return None, refusal("file field required")
-        temporary = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
-        path = Path(temporary.name)
+        from gideon.workspace.uploads.content_intake import approve_stream, IntakeRefused
+        async def chunks():
+            while chunk := await part.read_chunk(65536):
+                yield chunk
+        snapshot = None
         try:
-            with temporary:
-                while chunk := await part.read_chunk(65536):
-                    temporary.write(chunk)
-        except Exception:
-            path.unlink(missing_ok=True)
-            raise
-        return path, None
+            snapshot = await approve_stream(chunks(), part.filename or 'import.zip',
+                                            'application/zip', surface='archive_import')
+            return await snapshot.stage_file(), None
+        except IntakeRefused as exc:
+            return None, exc.response()
+        finally:
+            if snapshot is not None:
+                snapshot.close()
+
 
 
 class ProjectExport:
@@ -136,15 +141,23 @@ class ProjectImport:
         assert upload is not None
         preview = self.request.query.get("preview", "") in ("1", "true", "yes")
         passphrase = self.request.query.get("passphrase", "")
+        from gideon.operations.durability.home_paths import LinkInTheWay
+        try:
+            archive.projects_folder(config_dir())
+        except LinkInTheWay as link:
+            upload.unlink(missing_ok=True)
+            return refusal(str(link), reason="link")
         store = self.store_factory()
         existing_names = [project.name for project in store.list_projects()]
         try:
-            plan, contents = await asyncio.to_thread(
+            from functools import partial
+            from gideon.cognition.knowledge.file_items import _owned_io
+            plan, contents = await _owned_io(partial(
                 archive.read_archive_plan,
                 upload,
                 existing_names=existing_names,
                 passphrase=passphrase,
-            )
+            ))
         except archive.ArchiveRefused as exc:
             return refusal(str(exc), reason=exc.reason)
         except archive.EncryptionUnavailable as exc:
@@ -159,29 +172,14 @@ class ProjectImport:
                 {**payload, "error": "the archive contributed nothing importable"},
                 status=400,
             )
-        record = contents.contents.get("project.json", b"")
         try:
-            imported_record = json.loads(record.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            imported_record = {}
-        if not isinstance(imported_record, dict):
-            imported_record = {}
-        portable = {
-            name: imported_record.get(name, "")
-            for name in ("brief", "agent_instructions_template")
-            if isinstance(imported_record.get(name, ""), str)
-        }
-        project = store.create_project(plan.project_name, **portable)
-        project_files = replace(
-            plan, accepted=[relative for relative in plan.accepted if relative != "project.json"]
-        )
-        written = await asyncio.to_thread(
-            archive.commit_import,
-            project_files,
-            contents,
-            project_root=config_dir() / "projects" / project.id,
-        )
+            project, written, left = await asyncio.to_thread(
+                archive.import_project, plan, contents, store=store, home=config_dir()
+            )
+        except LinkInTheWay as link:
+            return refusal(str(link), reason="link")
         return web.json_response(
-            {**payload, "preview": False, "project_id": project.id, "written": written},
+            {**payload, "preview": False, "project_id": project.id, "written": written,
+             "partial": bool(left), "left_unchanged": left},
             status=201,
         )

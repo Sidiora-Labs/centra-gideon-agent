@@ -5,6 +5,7 @@ import { api } from '../../../shared/data/api'
 import { confirm } from '../../../shared/ui/dialog'
 import { useDashboardLive } from '../DashboardLive'
 import { RowAction } from './kit'
+import { NO_READING, fixedReading, isReading, percentReading } from '../../../shared/data/readings'
 import type { RouteProps } from '../../../app/shell/useQueryState'
 
 function Metric({ icon: Icon, value, label, tone }: { icon: LucideIcon; value: string | number; label: string; tone?: string }) {
@@ -43,15 +44,15 @@ function capLabel(key: string): string {
 }
 
 function fmtRate(kbs: number | undefined): string {
-  const v = kbs ?? 0
-  return v >= 1024 ? `${(v / 1024).toFixed(1)}MB/s` : `${Math.round(v)}KB/s`
+  if (!isReading(kbs)) return NO_READING
+  return kbs >= 1024 ? `${(kbs / 1024).toFixed(1)}MB/s` : `${Math.round(kbs)}KB/s`
 }
 
 export function SystemHealth({ navigate }: RouteProps) {
   const { status, system, doctor, doctorErr } = useDashboardLive()
   const cpuHist = useRef<number[]>([])
   useEffect(() => {
-    if (system && typeof system.cpu_pct === 'number') {
+    if (system && isReading(system.cpu_pct)) {
       const h = cpuHist.current
       h.push(system.cpu_pct)
       if (h.length > _SPARK_MAX) h.shift()
@@ -70,9 +71,9 @@ export function SystemHealth({ navigate }: RouteProps) {
     })
   }
 
-  const cpuTone = system && system.cpu_pct >= 85 ? 'var(--color-warn)' : 'var(--color-primary)'
-  const memPct = system && system.mem_total_gb ? (system.mem_used_gb / system.mem_total_gb) * 100 : 0
-  const memTone = memPct >= 90 ? 'var(--color-warn)' : 'var(--color-info)'
+  const cpuTone = system && isReading(system.cpu_pct) && system.cpu_pct >= 85 ? 'var(--color-warn)' : 'var(--color-primary)'
+  const memPct = system ? percentReading(system.mem_used_gb, system.mem_total_gb) : null
+  const memTone = memPct !== null && memPct >= 90 ? 'var(--color-warn)' : 'var(--color-info)'
 
   return (
     <div className="flex h-full w-full flex-wrap items-center gap-x-l gap-y-s @6xl:gap-x-xl">
@@ -82,22 +83,22 @@ export function SystemHealth({ navigate }: RouteProps) {
       {system && (
         <>
           <div className="flex shrink-0 items-center gap-s">
-            <Metric icon={Activity} value={`${Math.round(system.cpu_pct)}%`} label="cpu" tone={cpuTone} />
+            <Metric icon={Activity} value={isReading(system.cpu_pct) ? `${Math.round(system.cpu_pct)}%` : NO_READING} label="cpu" tone={cpuTone} />
             { }
             <span className="hidden @3xl:inline-flex"><Spark samples={cpuHist.current} tone={cpuTone} /></span>
           </div>
-          {system.mem_total_gb > 0 && (
-            <Metric icon={MemoryStick} value={`${system.mem_used_gb.toFixed(1)}/${system.mem_total_gb}GB`} label="mem" tone={memTone} />
+          {(
+            <Metric icon={MemoryStick} value={`${fixedReading(system.mem_used_gb, 1)}/${fixedReading(system.mem_total_gb, 1)}GB`} label="mem" tone={memTone} />
           )}
           {(system.net_rx_kbs != null || system.net_tx_kbs != null) && (
             <Metric icon={Network} value={`↓${fmtRate(system.net_rx_kbs)} ↑${fmtRate(system.net_tx_kbs)}`} label="net" />
           )}
-          {system.disk_total_gb != null && system.disk_free_gb != null && system.disk_total_gb > 0 && (
+          {isReading(system.disk_total_gb) && isReading(system.disk_free_gb) && system.disk_total_gb > 0 && (
             <Metric icon={HardDrive}
               value={`${(system.disk_total_gb - system.disk_free_gb).toFixed(0)}/${system.disk_total_gb.toFixed(0)}GB`}
               label="disk" />
           )}
-          {system.load_1m != null && <Metric icon={Cpu} value={system.load_1m.toFixed(2)} label={`load · ${system.cpu_count}cpu`} />}
+          {isReading(system.load_1m) && <Metric icon={Cpu} value={system.load_1m.toFixed(2)} label={`load · ${system.cpu_count}cpu`} />}
         </>
       )}
       {

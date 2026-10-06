@@ -196,6 +196,16 @@ async def api_evals_ablation(request: web.Request) -> web.Response:
     return web.json_response(view)
 
 
+def _learning_benchmark_next_action() -> str:
+    import shlex
+    from gideon.core.config.loader import config_dir, default_config_dir
+
+    home = config_dir()
+    prefix = f"GIDEON_HOME={shlex.quote(str(home))} " if home.resolve() != default_config_dir().resolve() else ""
+    command = f"{prefix}python tooling/scripts/learning_benchmark.py"
+    return f"Run `{command} --preflight` and then `{command} --run`."
+
+
 async def api_evals_learning_benchmark(request: web.Request) -> web.Response:
     """GET /api/evals/learning-benchmark — the newest skill-impact benchmark report (LV-7).
 
@@ -230,7 +240,7 @@ async def api_evals_learning_benchmark(request: web.Request) -> web.Response:
     if report is None:
         return web.json_response({
             "state": "not_run",
-            "next_action": "Run `python tooling/scripts/learning_benchmark.py --preflight` and then `--run`.",
+            "next_action": _learning_benchmark_next_action(),
         })
     _audit(
         request, "evals_learning_benchmark", "read", f"run_id={report.get('run_id')}"

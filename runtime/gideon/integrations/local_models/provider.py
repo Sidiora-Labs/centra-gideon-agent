@@ -122,6 +122,7 @@ class LocalModel:
     config_only: bool = False
     instance_id: str = ""
     instance_label: str = ""
+    runs_here: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -147,6 +148,7 @@ class LocalModel:
             "config_only": self.config_only,
             "instance_id": self.instance_id,
             "instance_label": self.instance_label,
+            "runs_here": self.runs_here,
         }
 
 

@@ -1,4 +1,4 @@
-"""Stage 1 — Collect: the digest's ordinal manifest (PROACTIVE-ASSISTANT §1.1).
+"""Stage 1 — Collect: the digest's ordinal manifest.
 
 The manifest is the pipeline's *anti-hallucination contract*. Every later stage — the
 classifier gate, the strict-JSON proposal call, the ranking, the digest body — addresses an
@@ -13,7 +13,7 @@ Two properties make that contract worth having, and both are properties of this 
 sorts before numbering (source lane, then timestamp, then source id), so two collects over
 the same window mint the same ordinals. Without that, a re-collect after a gateway restart
 would renumber the window and a reply that said `3 yes` would act on a different item —
-which is success criterion 9's wrong-target execution, reached without any adversary.
+which is a wrong-target execution, reached without any adversary.
 
 **One real item is one ordinal.** Deduplication is by fingerprint, and the fingerprint is
 derived from provenance (source + source id) rather than from rendered text, so an item
@@ -32,6 +32,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+#: The three collect lanes. Ordered — this tuple IS the manifest's lane order,
+#: so "inbox first" is one list, not a comparison scattered across the ranking code.
 SOURCE_INBOX = "inbox"
 SOURCE_CHANNEL = "channel"
 SOURCE_RUN = "run"
@@ -39,6 +41,10 @@ COLLECT_SOURCES: tuple[str, ...] = (SOURCE_INBOX, SOURCE_CHANNEL, SOURCE_RUN)
 
 _LANE_ORDER = {name: i for i, name in enumerate(COLLECT_SOURCES)}
 
+#: The substrate's materiality vocabulary, consumed
+#: here rather than re-derived: `action` touched the world, `error` needs a human, `response`
+#: produced words, `none` is noise. Ranking is this order and nothing else, so a new
+#: weight is one entry here rather than a new comparator.
 MATERIALITY_ACTION = "action"
 MATERIALITY_ERROR = "error"
 MATERIALITY_RESPONSE = "response"
@@ -50,14 +56,15 @@ MATERIALITY_ORDER: dict[str, int] = {
     MATERIALITY_NONE: 3,
 }
 
+#: An unknown materiality sorts with `response` rather than last. Last would let a
+#: mis-spelled weight hide a world-touching row at the bottom of the digest, which is the
+#: one placement the ranking exists to prevent.
 _UNKNOWN_MATERIALITY_RANK = MATERIALITY_ORDER[MATERIALITY_RESPONSE]
 
 
 def materiality_rank(value: str) -> int:
     """Sort key for a materiality weight; unknown values sort with `response`."""
-    return MATERIALITY_ORDER.get(
-        (value or "").strip().lower(), _UNKNOWN_MATERIALITY_RANK
-    )
+    return MATERIALITY_ORDER.get((value or "").strip().lower(), _UNKNOWN_MATERIALITY_RANK)
 
 
 @dataclass(frozen=True)
@@ -77,6 +84,9 @@ class CollectedItem:
     permalink: str = ""
     ts: str = ""
     ordinal: str = ""
+    #: Whether the item's message takes a reply (an Inbox row's ``can_reply``): what a reply
+    #: proposal needs. False for every other lane, which has no message to answer.
+    can_reply: bool = False
 
     @property
     def fingerprint(self) -> str:
@@ -87,9 +97,7 @@ class CollectedItem:
         decisions never hit and every window pays full price.
         """
         raw = f"{self.source}\x1f{self.source_id}"
-        return hashlib.md5(
-            raw.encode("utf-8", "replace"), usedforsecurity=False
-        ).hexdigest()[:12]
+        return hashlib.md5(raw.encode("utf-8", "replace"), usedforsecurity=False).hexdigest()[:12]
 
 
 @dataclass(frozen=True)
@@ -98,6 +106,9 @@ class Manifest:
 
     items: tuple[CollectedItem, ...] = ()
     window_start: str = ""
+    #: Fingerprints dropped as duplicates of an item already in `items`. Kept rather than
+    #: discarded so a collector that double-reports a lane is visible in the ledger row
+    #: instead of silently halving its own count.
     duplicates: tuple[str, ...] = field(default_factory=tuple)
 
     def __len__(self) -> int:
@@ -135,7 +146,7 @@ class Manifest:
         outlives the process which minted it — the digest card a user opens tomorrow, a channel
         reply that arrives after a restart — has to resolve to a store id without re-collecting,
         because a re-collect renumbers the window and `3 yes` then acts on a different item
-        (criterion 9's wrong-target execution, reached with no adversary). So the map travels
+        (a wrong-target execution, reached with no adversary). So the map travels
         with the run's own output rather than being rebuilt from a fresh read.
 
         Provenance only: source lane, store id, title, permalink, materiality. Never `detail`,
@@ -215,9 +226,7 @@ def build_manifest(
             continue
         seen.add(fp)
         kept.append(replace(item, ordinal=str(len(kept) + 1)))
-    return Manifest(
-        items=tuple(kept), window_start=window_start, duplicates=tuple(dupes)
-    )
+    return Manifest(items=tuple(kept), window_start=window_start, duplicates=tuple(dupes))
 
 
 def render_manifest_lines(manifest: Manifest) -> str:
@@ -228,6 +237,9 @@ def render_manifest_lines(manifest: Manifest) -> str:
     a single fence around a composed block lets one crafted item's content read as
     commentary on its neighbours, and per-item provenance is what makes `source_id`
     available to a reader auditing which row produced a proposal.
+
+    The lane tag, outside the fence, also says when an Inbox message takes no reply: the
+    proposal prompt offers a reply only for one that does.
     """
     from gideon.security.security import fence_untrusted
 
@@ -241,7 +253,10 @@ def render_manifest_lines(manifest: Manifest) -> str:
             source_id=item.source_id,
             transformation_path="collect",
         )
-        lines.append(f"{item.ordinal}. [{item.source}] {fenced}")
+        lane = item.source
+        if item.source == SOURCE_INBOX and not item.can_reply:
+            lane = f"{item.source}, takes no reply"
+        lines.append(f"{item.ordinal}. [{lane}] {fenced}")
     return "\n".join(lines)
 
 

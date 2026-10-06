@@ -38,6 +38,9 @@ class _WorkflowStart:
     name: str
     config: dict[str, Any]
     trigger_id: str
+    bounds: dict[str, Any] | None = None
+    parent_run_id: str = ""
+    accepted_origin: Any = None
 
     @property
     def caller_key(self) -> str:
@@ -61,9 +64,25 @@ class _WorkflowStart:
             origin=models.RunOrigin(
                 kind=models.OriginKind.HOOK, trigger_id=self.trigger_id
             ),
-            extra=engine.overlap.queued_extra() if queued else {},
+            parent_run_id=self.parent_run_id or None,
+            extra={**(engine.overlap.queued_extra() if queued else {}), **({"owner_workflow_versions": self.bounds} if self.bounds is not None else {})},
         )
+        from gideon.extensions.apps import app_work as app_scopes
+        inherited = app_scopes.held()
+        parent = app_scopes.of_run_id(self.parent_run_id) if self.parent_run_id else None
+        work = inherited or parent
+        if inherited is not None and parent is not None:
+            work = inherited.child(parent.tier) if inherited.app == parent.app else inherited.child("")
+        fields["extra"] = app_scopes.stamp(fields["extra"], work)
+        refusal = app_scopes.run_refusal(work)
+        if refusal:
+            raise ValueError(refusal)
         run = engine.store.create(models.WorkflowRun(**fields))
+        from gideon.security.durable_work import bind_run_origin
+        if self.accepted_origin is not None:
+            if not bind_run_origin(run, self.accepted_origin):
+                raise ValueError("authenticated work origin does not match the workflow's app or privacy scope")
+            engine.store.save(run)
         engine.store.write_spec(run.id, spec)
         if self.caller_key:
             engine.dedupe.remember(self.caller_key, run.id)
@@ -143,7 +162,7 @@ class _OverlapPlan:
                 started=False,
                 behind=[previous.id for previous in self.active],
             )
-            return clock.result(True, outcome="queued", stdout=json.dumps(body))
+            return _with_completion(clock.result(True, outcome="queued", stdout=json.dumps(body)), run.id)
         if self.action == Act.CANCEL_THEN_START:
             for previous in self.active:
                 self.engine.store.request_cancel(previous.id)
@@ -154,11 +173,12 @@ class _OverlapPlan:
                 stderr=f"run {run.id} was created but not started",
                 stdout=json.dumps(dict(run_id=run.id, started=False)),
             )
-        return clock.result(
+        result = clock.result(
             True,
             outcome="launched",
             stdout=json.dumps(dict(run_id=run.id, workflow=request.name, started=True)),
         )
+        return _with_completion(result, run.id)
 
 
 class RunWorkflowActionProvider(ActionProvider):
@@ -213,15 +233,16 @@ class RunWorkflowActionProvider(ActionProvider):
                 error=f"workflow engine unavailable: {error}",
                 stderr="could not import the v2 workflow engine",
             )
-        request = _WorkflowStart(name, config, str(getattr(ctx, "context", "") or ""))
+        request = _WorkflowStart(name, config, str(getattr(ctx, "trigger_id", "") or ""))
         if request.caller_key:
             previous = engine.dedupe.lookup(request.caller_key)
             if previous:
-                return clock.result(
+                result = clock.result(
                     True,
                     outcome="launched",
                     stdout=json.dumps(dict(run_id=previous, deduped=True)),
                 )
+                return _with_completion(result, previous)
         definition = await _load_def(engine.definitions, name)
         if definition is None:
             return ActionResult(
@@ -230,6 +251,21 @@ class RunWorkflowActionProvider(ActionProvider):
                 stderr="no workflow definition by that name is registered",
             )
         spec = _spec_of(definition)
+        from gideon.automation.workflows import automation_versions as consent
+        bounds = None
+        parent_run_id = str((getattr(ctx, "payload", {}) or {}).get("run_id") or "") if getattr(ctx, "event", "") == "workflow_node" else ""
+        try:
+            if parent_run_id:
+                bounds = consent.run_bounds(parent_run_id)
+            elif request.trigger_id:
+                bounds = consent.trigger_bounds(request.trigger_id, name)
+            else:
+                raise consent.VersionConsentError("no owner-granted trigger or ancestor workflow")
+            if bounds is not None:
+                spec, bounds = consent.selection(name, bounds)
+                definition = spec
+        except consent.VersionConsentError as error:
+            return ActionResult(False, error=str(error), blocked=True)
         if not isinstance(spec, dict) or not spec.get("root"):
             return ActionResult(
                 False,
@@ -246,7 +282,10 @@ class RunWorkflowActionProvider(ActionProvider):
         request = _WorkflowStart(
             name,
             {**config, "inputs": inputs},
-            str(getattr(ctx, "context", "") or ""),
+            str(getattr(ctx, "trigger_id", "") or ""),
+            bounds=bounds,
+            parent_run_id=parent_run_id,
+            accepted_origin=getattr(ctx, "accepted_origin", None),
         )
         plan = _OverlapPlan.prepare(engine, name, definition)
         immediate = plan.without_start(request, clock)
@@ -316,6 +355,19 @@ def _overlap_of(definition: Any, policy_cls: Any) -> Any:
         return policy_cls(str(value or "skip"))
     except ValueError:
         return policy_cls.SKIP
+
+
+def _with_completion(result: ActionResult, run_id: str) -> ActionResult:
+    from gideon.integrations.action_providers.completion import workflow_result
+    from gideon.integrations.action_providers.services import get_action_services
+
+    services = get_action_services()
+    supervisor = getattr(services, "workflows", None) if services else None
+    if supervisor is None:
+        return ActionResult(False, error="workflow supervisor unavailable to observe completion", work_id=run_id)
+    result.work_id = run_id
+    result.completion = lambda: workflow_result(supervisor, run_id)
+    return result
 
 
 async def _launch(run: Any, spec: dict[str, Any]) -> bool:

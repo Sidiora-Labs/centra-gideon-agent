@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import hmac
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -67,7 +70,9 @@ def of_request(request: Any) -> Principal:
     app_name = str(request.get("app") or "")
     if app_name:
         return app(app_name)
-    if "X-Internal-Secret" in getattr(request, "headers", {}):
+    supplied = getattr(request, "headers", {}).get("X-Internal-Secret", "")
+    expected = getattr(request, "app", {}).get("local_secret", "")
+    if supplied and expected and hmac.compare_digest(str(supplied), str(expected)):
         return agent(str(request.headers.get("X-Session-Key", "") or "").strip())
     if request.get("user"):
         return Principal(OWNER, str(request.get("user")))
@@ -106,3 +111,33 @@ def check(by: Principal, *, what: str, asked_by: str, event: bool = False) -> st
     if why:
         refuse(by, what=what, asked_by=asked_by, why=why)
     return why
+
+
+def principal_record(principal: Principal) -> dict[str, str]:
+    return {"kind": principal.kind, "name": principal.name, "tenant": principal.tenant}
+
+
+def principal_from_record(value: Any) -> Principal:
+    if not isinstance(value, dict) or set(value) != {"kind", "name", "tenant"}:
+        return Principal(UNKNOWN)
+    if not all(isinstance(v, str) for v in value.values()):
+        return Principal(UNKNOWN)
+    if value["kind"] not in {OWNER, CHANNEL, APP, AGENT, BRIDGE, TRIGGER, RUN}:
+        return Principal(UNKNOWN)
+    return Principal(**value)
+
+
+def ingress_record(principal: Principal, session_key: str, own_text: str) -> dict:
+    """Server-authenticated provenance; this record is evidence, never a capability."""
+    record = {"principal": principal_record(principal), "source_thread": session_key,
+            "source_user": principal.label, "source_event_id": uuid.uuid4().hex,
+            "source_digest": hashlib.sha256(own_text.encode("utf-8")).hexdigest()}
+    from gideon.security.durable_work import sign_ingress
+    return sign_ingress(record)
+
+
+def work_principal_of_request(request: Any) -> Principal:
+    """Work constraints can inherit proven ancestry; approval answers never do."""
+    from gideon.security.session_credentials import work_of_request
+    proof = work_of_request(request)
+    return (proof.work_actor or proof.initiator) if proof is not None else of_request(request)

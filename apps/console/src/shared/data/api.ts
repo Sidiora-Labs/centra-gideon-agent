@@ -3,6 +3,22 @@ import { gatewayHeaders as SK, gatewayRequest, requestJson, requestDelete, readJ
 import { emitTaskListCreated } from './taskListCount'
 export { ApiError, hasApiCode } from './gatewayRequest'
 
+export interface OwnerQuestionPayload {
+  id: string; session: string; tool_call_id?: string
+  questions: { question: string; header: string; multiSelect: boolean; free_text?: boolean; options: { label: string; description: string }[] }[]
+  answerable: boolean; outcome: 'pending' | 'answered' | 'skipped' | 'expired' | 'cancelled' | 'unanswerable'
+  deadline?: number; reason?: string
+}
+export interface OwnerQuestionAnswer { selected: number[]; other: string }
+
+export type LocalModelEndpoint = { endpoint: string; model: string; provider?: string }
+export type LocalModelDetection = { detected: boolean; endpoint?: string; model?: string; provider?: string }
+export type LocalModelSetupResult = { ok: boolean; status: string; provider: string; model: string; endpoint: string }
+
+export type ModelTestResult = { ok: boolean; detail: string; reason: string; duration_ms: number }
+
+export type LocalInferenceWait = { id: string; step: string; provider: string; model: string; holder: string; position: number; next_ref: string; seconds_left: number | null }
+
 export type FeatureOffEnvelope = { enabled: false }
 export type ReportNotRunEnvelope = { state: 'not_run'; next_action: string }
 
@@ -190,6 +206,7 @@ export interface ExternalAccessClient {
   last_seen_at: string
   requests_seen: number
   refusals_seen: number
+  persistent_sessions: boolean
 }
 export interface ExternalAccess {
   enabled: boolean
@@ -241,12 +258,31 @@ export interface DegradedSurface {
   backlog: number
   use_cases: string[]
 }
+export interface DurabilityProblem {
+  code: string
+  message: string
+  remedy: string
+  since: number
+  failures: number
+}
 export interface DurabilityJob {
+  ok?: boolean | null
+  last_success?: number
+  problem?: DurabilityProblem | null
+  detail?: string
+  newest?: { name: string; taken_at: number } | null
+  folder?: string
   last_run: number
   due_in_secs: number
   due: boolean
 }
 export interface DurabilitySyncStatus extends DurabilityJob {
+  passphrase_credential?: string
+  passphrase_stored?: boolean
+  removal_failed?: string
+  removes_old_copies?: boolean | null
+  keeps_previous_secs?: number
+  skipped?: string
   enabled: boolean
   transport: string
   encrypt: 'auto' | 'on' | 'off' | string
@@ -260,6 +296,7 @@ export interface DurabilityStatus {
   sync: DurabilitySyncStatus
 }
 export interface DurabilityConflict {
+  deleted?: 'here' | 'there' | ''
   id: string
   entry_id: string
   entity_id: string
@@ -362,6 +399,7 @@ export interface DurabilityDrill {
   detail: string
   archive: string
   databases_checked?: number
+  on_disk?: boolean | null
 }
 export interface DurabilityArchive {
   id: string
@@ -369,6 +407,8 @@ export interface DurabilityArchive {
   taken_at: string
   size: number
   retained: boolean
+  held?: boolean
+  prune_reason?: string
   domains: DurabilityDomainCounts | null
   validate: DurabilityDrill | null
 }
@@ -478,6 +518,7 @@ export interface RemediationSnapshot {
 
 export interface ChannelHealth { state: string; detail?: string }
 export interface ChannelRuntime {
+  owner_id?: string; owner_name?: string; owner_source?: string
   name: string; display_name: string; connected: boolean
   app?: string
   capabilities?: Record<string, unknown>
@@ -489,6 +530,7 @@ export interface ChannelTrustSender {
   added_at: string
   via: string
 }
+export interface ChannelTrustSeenSender { sender_id: string; name: string; since: string; last_seen: string; count: number }
 export interface ChannelTrustChannel { channel_id: string; name: string; added_at: string }
 export interface ChannelTrustProvider {
   provider: string
@@ -496,6 +538,10 @@ export interface ChannelTrustProvider {
   allowed_senders: ChannelTrustSender[]
   tracked_channels: ChannelTrustChannel[]
   seen_channels?: ChannelTrustChannel[]
+  seen_senders?: ChannelTrustSeenSender[]
+  groups?: boolean
+  speaks_as_owner?: boolean
+  pairing_hint?: string
   pairing_active: boolean
   pairing_expires_at: string
 }
@@ -510,6 +556,9 @@ export interface ChannelOwnerState {
   provider: string
   supported: boolean
   owner_configured: boolean
+  owner_id: string
+  owner_name: string
+  owner_source: string
   pairing: { active: boolean; created_at: string; expires_at: string; attempts_left: number; ended: string }
 }
 
@@ -624,7 +673,7 @@ export interface AppQualityWire {
   a11y?: boolean
 }
 export interface AppHookSummary { name: string; event: string; provider: string }
-export interface AppSummary {
+export interface AppSummary extends AppProcessStatus {
   name: string; displayName: string; version: string; description: string
   enabled: boolean; origin: string; source?: string; icon: string
   sourceKind?: string
@@ -650,7 +699,22 @@ export interface AppSummary {
   quality?: AppQualityWire
   hooks?: AppHookSummary[]
 }
-export interface AppDetail {
+export interface AppProcessExit {
+  pid: number; exitCode: number; ended: string; endedAt: string
+  cause: string; lines: string[]
+}
+export interface AppWorkerStatus {
+  name: string; running: boolean; state: string; reason: string
+  exit: AppProcessExit | null
+}
+export interface AppProcessStatus {
+  backendRunning: boolean; backendPort: number | null
+  backendExit?: AppProcessExit | null
+  workers?: AppWorkerStatus[]
+  engine?: { running: boolean; exit: AppProcessExit | null } | null
+}
+export interface AppDetail extends AppProcessStatus {
+  uiRevision: string
   name: string
   installed: Record<string, unknown>
   manifest: Record<string, unknown> | null
@@ -921,7 +985,7 @@ export interface ChatActionAccepted {
 }
 
 export interface NotificationItem {
-  kind: string; title: string; body: string; ts: string
+  kind: string; title: string; body: string; ts: string; kind_label?: string
   job_id?: string; loop_id?: string; loop_kind?: string; acked: boolean
   reversal_id?: string; reversal?: string; action_type?: string; rung?: string
   event?: string; provider?: string; sender_id?: string; sender_name?: string
@@ -930,6 +994,8 @@ export interface NotificationItem {
 export type ScheduleKind = 'every' | 'cron' | 'at'
 export type ScheduleExecMode = 'agent' | 'script' | 'command' | 'other'
 export interface ScheduleJob {
+  grant_question?: TriggerGrantQuestion | null
+  grant_required?: boolean; grant_satisfied?: boolean
   id: string; name: string; message: string; enabled: boolean
   document_revision?: string
   author?: string; read_only?: boolean
@@ -1521,7 +1587,7 @@ export interface PromptPreview { ok: boolean; rendered?: string; error?: string;
 export interface PromptSyntaxFn { name: string; category: string; signature: string; description: string; insert: string }
 export interface PromptSyntaxConstruct { category: string; label: string; snippet: string; description: string }
 export interface PromptSyntax { functions: PromptSyntaxFn[]; constructs: PromptSyntaxConstruct[] }
-export interface SkillItem { key: string; name: string; description: string; always: boolean; path?: string; source: string; type: string; provenance?: 'auto' | 'taught' | ''; loaded_by_agents: string[]; integrity?: 'intact' | 'tampered' | 'unverified'; agent?: string }
+export interface SkillItem { key: string; name: string; description: string; always: boolean; path?: string; source: string; type: string; provenance?: 'auto' | 'taught' | ''; loaded_by_agents: string[]; integrity?: 'intact' | 'edited' | 'tampered' | 'unverified'; agent?: string; copy?: string; read_only?: boolean; bundled_update?: string | null }
 export interface EphemeralDraft { slug: string; title: string; body: string; created_at: string }
 export interface SkillProposal { id: string; slug: string; description: string; triggers: string; kind: string; refine_target?: string; trigger?: string; session_key: string; created_at: string; status: string; procedure_preview: string }
 export interface SkillLadderReview { verdict: string; elapsed_ms: number; session_key: string; detail: string; at: string }
@@ -1536,7 +1602,9 @@ export interface LearningSummary {
   pending_proposals: LearningSummaryGroup
   facts: LearningSummaryGroup
 }
-export interface SkillIntegrity { name: string; integrity: 'intact' | 'tampered' | 'unverified'; ok: boolean; unlocked: boolean; mutated: string[]; missing: string[]; added: string[]; summary: string }
+export interface SkillIntegrity { name: string; integrity: 'intact' | 'edited' | 'tampered' | 'unverified'; ok: boolean; unlocked: boolean; mutated: string[]; missing: string[]; added: string[]; summary: string }
+export interface SkillRefinement { id: string; version: number; description: string; created_at: string; text: string }
+export interface SkillDocument { content: string; revision: string; loaded_content?: string; recognized_copies?: boolean; refinements?: SkillRefinement[] }
 export interface SkillFile { path: string; size: number }
 export interface SkillMarketplace { name: string; type: string }
 export interface SkillSearchResult { id: string; name: string; description: string; source: string; url?: string; installs?: number }
@@ -1564,13 +1632,15 @@ export interface AlwaysOnResponse {
   counts: { total: number; always_skills: number; project_instructions: number }
   always_skill_mechanism: string
 }
+export interface McpReadOnlyTrust { trusted: boolean; listed: Record<string, string> | null; configurationRevision: string; catalogRevision: string | null; added?: string[]; changed?: Array<{ name: string; parts: string[] }>; removed?: string[] }
 export interface McpServer {
-  name: string; command?: string; args?: string[]; status: string; tools: Array<string | { name: string; description?: string }>
+  name: string; command?: string; args?: string[]; status: string; tools: Array<string | { name: string; description?: string; inputSchema?: Record<string, unknown>; annotations?: Record<string, unknown> }>
   disabledTools?: string[]
   healthStatus?: string; healthError?: string; agentCallable?: boolean; agentCallableToolCount?: number; unservedReason?: string
-  error?: string; source?: string; enabled?: boolean; presence?: Record<string, boolean>
+  error?: string; detail?: string; source?: string; enabled?: boolean; presence?: Record<string, boolean>
   url?: string; transport?: string; env?: string[]; headers?: string[]; header_credentials?: string[]; oauth?: string[]
   allowed?: boolean; allowRevision?: string; allowQuestion?: string
+  readOnlyTrust?: McpReadOnlyTrust | null
   oauth_status?: { state: 'signin' | 'connected' | 'renewal_needed'; renewable?: boolean }
 }
 export type McpTransport = 'streamable_http' | 'sse'
@@ -1595,6 +1665,8 @@ export interface McpServerUpdate {
 export interface ToolInvokeResult { ok: boolean; output?: string; error?: string }
 export type HookEnforcement = 'enforcing' | 'not_enforcing' | 'advisory'
 export interface HookItem {
+  grant_question?: TriggerGrantQuestion | null
+  grant_required?: boolean; grant_satisfied?: boolean
   id: string; name: string; event: string; matcher: string; provider: string; provider_config: Record<string, unknown>
   document_revision?: string
   timeout: number; enabled: boolean; last_run: number; last_status: string; run_count: number; used_by: string[]
@@ -1610,9 +1682,15 @@ export function isOutcomeRoute(value: string): boolean {
   return route === '' || route === 'none' || route === 'inbox' || route === 'notify'
     || (route.startsWith('channel:') && route.slice('channel:'.length).length > 0 && !/\s/.test(route))
 }
+export interface TriggerGrantQuestion {
+  provider: string; revision: string; sentence: string
+  shown?: { root: string; workflows: Record<string, { version: number; digest: string }> } | null
+}
 export interface Trigger {
   kind: 'schedule' | 'lifecycle' | 'event' | 'store'; id: string; raw_id: string; name: string; enabled: boolean
   document_revision?: string
+  grant_question?: TriggerGrantQuestion | null
+  grant_required?: boolean; grant_satisfied?: boolean
   action: TriggerAction
   delivery?: string; failure_delivery?: string; failure_policy?: Record<string, unknown>
   pattern?: string; sender_glob?: string; address_glob?: string; key_glob?: string; content_re?: string
@@ -1632,13 +1710,22 @@ export interface Trigger {
   blocking?: boolean; enforcement?: HookEnforcement
 }
 function _scheduleBodyToWire(body: Record<string, unknown>): Record<string, unknown> {
-  const { message, agent, model, approval_mode, script, command, zt_timeout, action, ...rest } = body
+  const { message, agent, model, approval_mode, capability, may_change, max_turns, script, command, zt_timeout, action, ...rest } = body
   if (action) return { ...rest, action }
+  const configValue = (value: unknown) => value === undefined ? undefined
+    : value === '' || (Array.isArray(value) && value.length === 0) ? null : value
   let act: TriggerAction
-  if (script) act = { provider: 'run-script', config: { script, timeout: Number(zt_timeout) || 0 } }
-  else if (command) act = { provider: 'bash', config: { command, timeout: Number(zt_timeout) || 0 } }
+  if (script) act = { provider: 'run-script', config: { script } }
+  else if (command) act = { provider: 'bash', config: { command } }
   else if (!('message' in body)) return rest
-  else act = { provider: 'invoke-agent', config: { task_template: message ?? '', agent: agent ?? '', model: model ?? '', approval_mode: approval_mode ?? '' } }
+  else {
+    const config: Record<string, unknown> = { task_template: message ?? '' }
+    for (const [key, value] of Object.entries({ agent, model, approval_mode, capability, may_change, max_turns })) {
+      if (value !== undefined) config[key] = configValue(value)
+    }
+    act = { provider: 'invoke-agent', config }
+  }
+  if (zt_timeout !== undefined) act.config.timeout = configValue(zt_timeout)
   return { ...rest, action: act }
 }
 
@@ -1646,6 +1733,7 @@ function _triggerToHook(t: Trigger): HookItem {
   return {
     id: t.raw_id, name: t.name, event: t.event ?? '', matcher: t.matcher ?? '',
     document_revision: t.document_revision,
+    grant_question: t.grant_question, grant_required: t.grant_required, grant_satisfied: t.grant_satisfied,
     provider: t.action.provider, provider_config: t.action.config ?? {},
     timeout: t.timeout ?? 30, enabled: t.enabled, last_run: t.last_run ?? 0,
     last_status: t.last_status ?? '', run_count: t.run_count ?? 0, used_by: t.used_by ?? [],
@@ -2218,7 +2306,14 @@ export interface WeekOccurrence {
   reason: string
 }
 
+export interface TriggerSourceUnreadable {
+  file: string
+  said: string
+  remedy: string
+}
+
 export interface WeekProjection {
+  unreadable?: TriggerSourceUnreadable[]
   start: string
   end: string
   server_tz: string
@@ -2302,12 +2397,29 @@ export interface KnowledgeStaleness {
   scope: string
 }
 
+export interface EntityExtractionTally {
+  running: number
+  failed: number
+  ran: number
+  skipped: number
+  not_applicable: number
+  not_run: number
+  total: number
+}
+export interface PhaseFix { text: string; href?: string }
+export interface PhaseOutcome {
+  status: 'done' | 'failed' | 'skipped' | 'not_applicable'
+  reason?: string
+  fix?: PhaseFix[]
+  needs?: string[]
+  ready?: boolean
+}
 export interface KnowledgeIngestGraph {
   item_type: string
-  nodes: { node_type: string; backend?: string; model_backed?: boolean; terminal?: boolean }[]
+  nodes: { node_type: string; label?: string; backend?: string; model_backed?: boolean; terminal?: boolean }[]
   edges: { from: string; to: string; when?: string; loop?: boolean; max_iters?: number }[]
   processing_status?: string
-  node_phases?: Record<string, string>
+  node_phases?: Record<string, PhaseOutcome>
 }
 export interface ExtractedContent {
   id: string; item_id: string; node_type: string; backend?: string
@@ -2393,8 +2505,8 @@ export interface IntentOutcome {
   takeaway?: string; fields?: IntentOutcomeField[]; created_at?: string
 }
 export interface KnowledgeStats { items: number; entities: number; relations: number; embeddings: { enabled: boolean; model?: string; embedded_items?: number; stale_items?: number } }
-export type InboxClassification = 'needs_reply' | 'fyi' | 'noise'
-export type InboxConfidence = 'high' | 'needs_review' | 'escalate' | 'user'
+export type InboxClassification = '' | 'needs_reply' | 'fyi' | 'noise'
+export type InboxConfidence = '' | 'high' | 'needs_review' | 'escalate' | 'user'
 export type InboxItemStatus = 'pending' | 'seen' | 'sent' | 'dismissed' | 'handled' | 'filtered'
 export type InboxItemKind =
   | 'message' | 'mention' | 'email' | 'agent_request'
@@ -2408,6 +2520,9 @@ export interface InboxItem {
   status: InboxItemStatus; created_at?: number; context_summary?: string; ts?: string
   source?: string; can_reply?: boolean; reply_target?: string
   replied_at?: number
+  classified_by?: string
+  classify_error?: string
+  drafted_by?: string
   favorited?: boolean
   feedback_producers?: Record<'classification' | 'draft' | 'digest', FeedbackProducer | undefined>
   item_kind?: InboxItemKind
@@ -2433,9 +2548,10 @@ export interface InboxProposalApplyResult {
 }
 export interface InboxKindCount { kind: InboxItemKind; total: number; open: number; channel: boolean }
 export interface InboxProvider { name: string; display_name: string; source_name: string; active?: boolean; watches_channels?: boolean }
-export interface InboxHealth { running: boolean; last_poll_at?: number; last_poll_ok?: boolean; last_error?: string; poll_count?: number; stale?: boolean; sources?: InboxSourceHealth[] }
+export interface InboxHealth { sorting?: { held: string; waiting: number }; running: boolean; last_poll_at?: number; last_poll_ok?: boolean; last_error?: string; poll_count?: number; stale?: boolean; sources?: InboxSourceHealth[] }
 export interface InboxSourceHealth { name: string; active: boolean; kind: 'push' | 'poll'; can_reply: boolean; watches_channels?: boolean; last_poll_at?: number; last_poll_ok?: boolean; last_error?: string; poll_count?: number; stale?: boolean }
 export interface InboxStatus {
+  sort_messages?: boolean
   enabled: boolean; user_id?: string
   native_source_active?: boolean; sources?: InboxSourceHealth[]
   watched_channels?: Array<{ id: string; name: string }>
@@ -2517,10 +2633,14 @@ export interface DurabilityImportResult {
   ok: boolean
   applied?: boolean
   error?: { code: string; message: string }
-  summary?: { mode: string; items: string[]; refused?: string[]; pre_restore?: string }
+  partial?: boolean
+  left_unchanged?: string[]
+  summary?: { mode: string; items: string[]; refused?: string[]; pre_restore?: string; partial?: boolean; left_unchanged?: string[] }
   manifest?: PortabilityManifest
 }
 export interface DurabilityRestoreResult {
+  partial?: boolean
+  left_unchanged?: string[]
   ok?: boolean
   plan?: boolean
   error?: { code: string; message: string }
@@ -2532,7 +2652,7 @@ export interface ProjectImportResult {
   secrets_expected: string[]; ok: boolean; summary?: string; preview?: boolean
   project_id?: string; written?: string[]; error?: string
 }
-export type UpdateState = 'idle' | 'applying' | 'applied' | 'failed' | 'rolling_back' | 'rolled_back'
+export type UpdateState = 'idle' | 'applying' | 'applied' | 'failed' | 'rolling_back' | 'rolled_back' | 'cancelled'
 export interface UpdateCheck { available: boolean; changes: string; checked: boolean; auto_update: boolean; version?: string; latest?: string; kind?: 'git' | 'pip' | 'container' | 'desktop'; current?: string; update_available?: boolean; commits_behind?: number | null; apply_method?: string; instructions?: string[]; update_dev_mode?: boolean; release_notes?: string; update_state?: UpdateState; update_from_version?: string; update_target?: string; update_started_at?: number | null; update_updated_at?: number | null; update_error?: string; rollback_available?: boolean; rollback_version?: string }
 export interface UpdateActionResult { ok?: boolean; status?: string; kind?: string; detail?: string; error?: string }
 
@@ -2576,6 +2696,13 @@ export interface TriageAutoDone {
 }
 
 export interface TriagePending {
+  action_config?: { title?: string }
+  not_done?: string
+  answer_not_done?: string
+  carried_over?: boolean
+  carried_note?: string
+  first_proposed_at?: string
+  first_run_id?: string
   ordinal: string; action_type: string; tier: string; pattern_key: string; clamped: boolean
   reason: string; rule: string; answered: boolean; answer: string
   permalink: string; title: string; source: string; item_permalink: string; materiality: string
@@ -2615,6 +2742,17 @@ export interface DecisionJournalView {
   statuses: string[]; domains: string[]; grades: string[]
 }
 
+export type TriageNoticeOutcome = 'immediate' | 'badge' | 'digest' | 'never' | 'suppressed' | 'dropped'
+export type TriageDigestNotice = { known: false } | {
+  known: true
+  mute_all: boolean
+  min_severity: string
+  quiet_hours: { enabled: boolean; start: string; end: string }
+  rule: string
+  inside: TriageNoticeOutcome
+  outside: TriageNoticeOutcome
+}
+
 export interface TriageDigestView {
   state: TriageDigestState
   enabled: boolean
@@ -2632,12 +2770,20 @@ export interface TriageDigestView {
   title?: string
   body?: string
   handed_to_notify?: boolean
+  notice?: TriageDigestNotice
   quiet_hours?: { known: boolean; enabled: boolean; start: string; end: string; mute_all: boolean }
   collected?: number
   lanes?: Record<string, number>
   dropped?: number
   auto_stage_ran?: boolean
   auto_done?: TriageAutoDone[]
+  no_longer_offered?: Array<{ action_type: string; title: string; source: string; item_permalink: string; first_proposed_at: string; note: string }>
+  carry_rule?: string
+  numbered?: number
+  ran?: Array<{ ordinal: string; title: string; source: string; item_permalink: string; materiality: string; needs_you: boolean }>
+  waiting?: Array<{ ordinal: string; title: string; source: string; item_permalink: string; materiality: string }>
+  auto_stopped?: string
+  journal?: TriageLedgerRow[]
   pending?: TriagePending[]
   budget_breached?: boolean
   budget_reason?: string
@@ -2662,7 +2808,7 @@ export interface TriageReplyResult {
   help?: string
   results?: Array<{
     ordinal: string; outcome: 'acted' | 'already' | 'unknown'; verb?: string
-    executed?: boolean; detail?: string; rule?: string; rule_error?: string
+    executed?: boolean; detail?: string; rule?: string; rule_error?: string; not_done?: string
     recorded?: boolean
   }>
 }
@@ -2869,7 +3015,13 @@ export interface SecretPresenceWire {
   inherited_from_host: boolean
   consumers: SecretConsumerWire[]
 }
+export interface KeychainNamespaceWire {
+  service: string
+  scope: 'default' | 'own' | 'unnamed' | 'unreadable'
+  summary: string
+}
 export interface SecretsVaultState {
+  keychain?: KeychainNamespaceWire | null
   secrets: SecretPresenceWire[]
   counts: { total: number; global: number; project: number; host: number }
   empty_hint: string
@@ -2961,8 +3113,8 @@ export interface SystemAgentStats {
 }
 export interface SystemInfo {
   hostname: string; version?: string; os: string; platform: string; python: string; arch: string; pid: number; cpu_count: number; cwd: string
-  mem_total_gb: number; proc_mem_mb: number; mem_free_gb: number; mem_used_gb: number
-  load_1m: number; load_5m: number; load_15m: number; cpu_pct: number; proc_cpu_pct?: number; ip?: string
+  mem_total_gb?: number; proc_mem_mb?: number; mem_free_gb?: number; mem_used_gb?: number
+  load_1m?: number; load_5m?: number; load_15m?: number; cpu_pct?: number; proc_cpu_pct?: number; ip?: string
   disk_total_gb?: number; disk_free_gb?: number
   gpu_present?: boolean; gpu_vendor?: string; gpu_model?: string
   net_rx_kbs?: number; net_tx_kbs?: number
@@ -2972,9 +3124,18 @@ export interface SystemInfo {
 }
 export interface AuthStatus { mode: string; bind_host: string; valid: boolean; minutes_remaining?: number; oauth2_issuer?: string }
 
+export interface WorkflowBatchState {
+  batch: string; status: 'awaiting_approval' | 'starting' | 'running' | 'not_started';
+  run_id?: string; error?: string; tasks: number; may_change: string[]; approval: string; digest: string
+}
+
 export interface PendingApproval {
   id: string; revision?: string; source: string; tool: string
   tool_input?: unknown; tool_purpose?: string
+  risk?: import('../../features/chat/approvalMeta').ApprovalRisk
+  blast_radius?: import('../../features/chat/approvalMeta').BlastRadius
+  protected_delete?: string
+  deny_consequence?: import("../../features/chat/denyConsequence").DenyConsequence
   session: string; ts: number
 }
 
@@ -3074,7 +3235,32 @@ export interface CapabilityMatrix {
   languages?: string[]; reasoning_budget_control?: boolean
 }
 // The catalog-contract fields (matrix/license/…, LMMV §2) are optional — only local
+export type ModelRateUnit = 'token' | 'image' | 'second' | 'minute' | 'character'
+export type ModelRateSource = '' | 'overlay' | 'local' | 'app_default' | 'builtin'
+export interface ImageTier { size: string; quality: string; per_image: number }
+export interface ModelRateFields {
+  unit: ModelRateUnit | ''; in_per_mtok: number | null; out_per_mtok: number | null
+  cache_read_per_mtok: number | null; cache_write_per_mtok: number | null
+  per_unit: number | null; tiers: ImageTier[]; default_size: string; default_quality: string
+}
+export interface ModelRateProvenance extends ModelRateFields {
+  source: ModelRateSource; vendor: string; recorded: string; priced_as: string
+}
+export interface ModelRateBody {
+  key: string; unit: ModelRateUnit; in_per_mtok?: number; out_per_mtok?: number
+  cache_read_per_mtok?: number | null; cache_write_per_mtok?: number | null
+  per_image?: number; per_second?: number; per_minute?: number; per_mchar?: number
+  tiers?: ImageTier[]; default_size?: string; default_quality?: string
+}
+export interface ModelRatesView {
+  rates: Array<ModelRateProvenance & { key: string }>
+  models: Array<ModelRateProvenance & { ref: string; priced: boolean; default: ModelRateProvenance | null }>
+  unreadable: string
+}
+
 export interface AvailableModel {
+  untestable?: Record<string, string>
+  runs_here?: boolean | null
   id: string; name: string; capabilities: string[]; provider: string; provider_type: string
   size?: number; downloaded?: boolean; gated?: boolean; description?: string; size_mb?: number; source?: string
   matrix?: CapabilityMatrix | null; license?: string; non_commercial?: boolean
@@ -3298,6 +3484,7 @@ export interface LoopVerdict {
 export interface LoopNudge { text: string; sent_at: number; sent_at_cycle: number; applied_cycle: number | null }
 export interface RosterMember { role: string; persona: string; role_hint?: string; agent_name?: string }
 export interface GoalLoop {
+  held?: string
   run_id?: string; workflow_name?: string
   id: string; name: string; goal: string; sub_goals: string[]; deliverables?: string[]; scope?: string[]
   goal_type: GoalType; intake_rigor: string
@@ -3377,6 +3564,7 @@ export interface CodeProject {
   files_dir?: string
   max_cycles: number; max_cost_usd?: number; deadline_secs?: number; idle_secs: number
   stop_reason?: string
+  held?: string
   success_criteria: string | null; verify_command?: string; test_command?: string
   status: UnifiedLoopStatus; total_cycles: number; error_message: string | null
   created_at: number; started_at: number | null; completed_at: number | null; elapsed_seconds?: number
@@ -3462,6 +3650,7 @@ export interface Loop {
   files_dir?: string
   max_cycles: number; max_cost_usd?: number; deadline_secs?: number; idle_secs: number
   stop_reason?: string
+  held?: string
   success_criteria: string | null
   status: UnifiedLoopStatus; total_cycles: number; error_message: string | null
   created_at: number; started_at: number | null; completed_at: number | null; elapsed_seconds?: number
@@ -3693,10 +3882,23 @@ export interface ArtifactDeployment {
   url: string
 }
 
+export type DailySpend = {
+  tokens: number; dollars: number; max_tokens: number; max_dollars: number;
+  status: string; reason: string; paused: boolean; paid_calls_paused: boolean;
+  unpriced: number; held_tokens: number; held_dollars: number; resumes_at: string;
+  day?: string; timezone?: string;
+}
+
+export interface UnitUsageAgg {
+  quantity: number; calls: number; unknown_quantity_calls: number
+  unpriced_calls: number; cost_usd: number
+}
+
 export interface UsageAgg {
   input_tokens: number; output_tokens: number
   cache_read_tokens: number; cache_creation_tokens: number
   cost_usd: number; turns: number; priced: boolean
+  units?: Partial<Record<'image' | 'second' | 'minute' | 'character', UnitUsageAgg>>
 }
 
 export interface UsageFoldRow {
@@ -3712,6 +3914,8 @@ export interface UsageFoldRow {
 }
 
 export interface UsageFold {
+  calendar_timezone?: string
+  legacy_total?: UsageFoldRow
   window: string
   group: string
   dates: string[]
@@ -3773,9 +3977,10 @@ function _usageSessionKey(session: string): string {
   return session.includes(':') ? session : `dashboard:${session}`
 }
 
-function _usageQuery(opts?: { since?: string; until?: string; session?: string; group_by?: string }): string {
+function _usageQuery(opts?: { since?: string; until?: string; session?: string; group_by?: string; window?: string }): string {
   const p = new URLSearchParams()
   if (opts?.group_by) p.set('group_by', opts.group_by)
+  if (opts?.window) p.set('window', opts.window)
   if (opts?.since) p.set('since', opts.since)
   if (opts?.until) p.set('until', opts.until)
   if (opts?.session) p.set('session', _usageSessionKey(opts.session))
@@ -4386,6 +4591,12 @@ function hypermidQuery(path: string, params: Record<string, string | undefined>)
 }
 
 export const api = {
+  detectLocalModel: () => get<LocalModelDetection>('/api/onboarding/local-model'),
+  scanLocalModels: () => post<{ endpoints: LocalModelEndpoint[] }>('/api/onboarding/local-model/scan'),
+  bindLocalModel: (endpoint: string, bindChat: boolean) => post<LocalModelSetupResult>('/api/onboarding/local-model/bind', { endpoint, bind_chat: bindChat }),
+  modelTest: (useCase: string, model: string) => post<ModelTestResult & { use_case: string; model: string }>('/api/models/test', { use_case: useCase, model }),
+  localInferenceWaits: () => get<{ waits: LocalInferenceWait[] }>('/api/models/local/waits'),
+  localInferenceMoveOn: (id: string) => post<{ moved: boolean }>(`/api/models/local/waits/${encodeURIComponent(id)}/move-on`),
   hypermidOverview: () => get<HypermidOverviewWire>('/api/hypermid/overview'),
   hypermidSessions: (filters: Record<string, string | undefined> = {}) =>
     get<HypermidCollectionWire<HypermidSessionWire>>(hypermidQuery('/api/hypermid/sessions', filters)),
@@ -4522,14 +4733,15 @@ export const api = {
   previewAgentExport: (body: { agents: string[]; destination?: string }) => post<AgentExportPreview>('/api/agents/export/preview', body),
   writeAgentExport: (previewToken: string) => post<AgentExportReceipt>('/api/agents/export', { preview_token: previewToken }),
   createAgent: (body: Record<string, unknown>) => post<{ ok: boolean }>('/api/agents', body),
+  previewAgentGrants: (name: string, body: Record<string, unknown>) => put<{ confirmation_required: boolean; grant_receipt?: string; changes: { field: string; before: string[]; after: string[]; every: boolean }[] }>(`/api/agents/${encodeURIComponent(name)}`, { ...body, grant_preview: true }),
   updateAgent: (name: string, body: Record<string, unknown>) => put<{ ok: boolean }>(`/api/agents/${encodeURIComponent(name)}`, body),
   deleteAgent: (name: string) => del(`/api/agents/${encodeURIComponent(name)}`),
   setDefaultAgent: (name: string) => put<{ ok: boolean; default_agent: string }>('/api/config/default-agent', { agent: name }),
   routingDismiss: (agent: string) => post<{ ok: boolean; count: number; muted: boolean }>('/api/agents/routing/dismiss', { agent }),
   routingUnmute: (agent: string) => post<{ ok: boolean; agent: string }>('/api/agents/routing/unmute', { agent }),
   routingStatus: () => get<{ enabled: boolean; muted: string[]; dismissals: Record<string, { count: number; last_dismissed_at: number }> }>('/api/agents/routing/status'),
-  usageTotals: (opts?: { session?: string; since?: string; until?: string }) => get<{ session: string; totals: UsageAgg }>(`/api/usage/totals${_usageQuery(opts)}`),
-  usageRollup: (opts?: { group_by?: 'model' | 'source' | 'agent' | 'provider' | 'day'; since?: string; until?: string; session?: string }) => get<{ group_by: string; rows: Array<UsageAgg & Partial<Record<'model' | 'source' | 'agent' | 'provider' | 'day', string>>> }>(`/api/usage/rollup${_usageQuery(opts)}`),
+  usageTotals: (opts?: { session?: string; since?: string; until?: string; window?: 'day' | 'week' | 'month' }) => get<{ session: string; totals: UsageAgg }>(`/api/usage/totals${_usageQuery(opts)}`),
+  usageRollup: (opts?: { group_by?: 'model' | 'source' | 'agent' | 'provider' | 'day'; since?: string; until?: string; session?: string; window?: 'day' | 'week' | 'month' }) => get<{ group_by: string; rows: Array<UsageAgg & Partial<Record<'model' | 'source' | 'agent' | 'provider' | 'day', string>>> }>(`/api/usage/rollup${_usageQuery(opts)}`),
   usageFold: (opts?: { window?: 'day' | 'week' | 'month'; group?: 'model' | 'provider' | 'purpose' }) => {
     const p = new URLSearchParams()
     if (opts?.window) p.set('window', opts.window)
@@ -4593,12 +4805,13 @@ export const api = {
     lockout_window: string
     user: string
   }>('/api/auth/session'),
-  setLoginPassword: (username: string, password: string) =>
-    post<{ ok: boolean; username: string }>('/api/auth/password', { username, password }),
+  setLoginPassword: (username: string, password: string, currentPassword?: string, totp?: string) =>
+    post<{ ok: boolean; username: string }>('/api/auth/password', { username, password, current_password: currentPassword, totp }),
   authLogout: () => post<{ ok: boolean; revoked: boolean }>('/api/auth/logout'),
 
   externalAccess: () => get<ExternalAccess>('/api/external-access'),
   externalAccessCreateClient: (body: {
+    persistent_sessions?: boolean
     label: string
     surfaces: string[]
     agent?: string
@@ -4614,6 +4827,10 @@ export const api = {
       token: string
       token_notice: string
     }>('/api/external-access/clients', body),
+  externalAccessSetClientPersistentSessions: (clientId: string, persistent_sessions: boolean) =>
+    post<{ ok: boolean; client_id: string; persistent_sessions: boolean }>(
+      `/api/external-access/clients/${encodeURIComponent(clientId)}/persistent-sessions`, { persistent_sessions },
+    ),
   externalAccessRevokeClient: (clientId: string) =>
     del(`/api/external-access/clients/${encodeURIComponent(clientId)}`),
   externalAccessSetClientDisabled: (clientId: string, disabled: boolean) =>
@@ -4888,6 +5105,9 @@ export const api = {
     if (!response.ok) throw await apiError(errorResponse)
     throw new Error('Local model self-test returned an invalid response')
   },
+  modelRates: () => get<ModelRatesView>('/api/models/rates'),
+  setModelRate: (body: ModelRateBody) => put<ModelRatesView>('/api/models/rates', body),
+  clearModelRate: (key: string) => requestJson<ModelRatesView>(`/api/models/rates?key=${encodeURIComponent(key)}`, 'DELETE'),
   modelsAvailable: () => get<AvailableModelsResponse>('/api/models/available').then((d) => {
     const hostFit = d.fit
     if (!hostFit) return d.providers
@@ -5102,6 +5322,9 @@ export const api = {
     post<{ ok: boolean; session?: string; queued?: boolean; steered?: boolean }>('/api/chat?ws=1', { message, session, meta, ...(queue_mode ? { queue_mode } : {}), ...(input_origin ? { input_origin } : {}) }),
   cancelQueued: (session: string, queueId: string) => del(`/api/chat/sessions/${encodeURIComponent(session)}/queue/${encodeURIComponent(queueId)}`),
   stopChat: (session: string, force = false) => post<ChatActionAccepted>(`/api/chat/sessions/${encodeURIComponent(session)}/stop${force ? '?force=true' : ''}`),
+  ownerQuestions: (session: string) => get<{ questions: OwnerQuestionPayload[] }>(`/api/chat/questions?session=${encodeURIComponent(session)}`),
+  answerOwnerQuestion: (session: string, id: string, answers: OwnerQuestionAnswer[], skip = false) =>
+    post<{ ok: boolean }>('/api/chat/questions/answer', { session, id, answers, skip }),
   approve: (session: string, action: string, request_id?: string, revision?: string) =>
     post<{ ok: boolean; mode?: ApprovalMode; approval_screening?: ApprovalScreeningVerdict }>(
       `/api/chat/sessions/${session}/approve`, { action, request_id, revision }),
@@ -5239,7 +5462,7 @@ export const api = {
   clearNotifications: () => post('/api/notifications/clear'),
 
   triggers: (type?: 'schedule' | 'lifecycle' | 'event') =>
-    get<{ triggers: Trigger[]; server_tz: string; owner?: string }>(
+    get<{ triggers: Trigger[]; server_tz: string; owner?: string; unreadable?: TriggerSourceUnreadable[] }>(
       `/api/triggers${type ? `?type=${type}` : ''}`,
     ),
   triggersWeek: (start?: Date, days = 7, until?: Date) => {
@@ -5269,8 +5492,8 @@ export const api = {
     post<EventFireResult>(`/api/triggers/event:${encodeURIComponent(id)}/test`, { ...(body ?? {}), test: true }),
   eventTriggerHistory: (id: string) =>
     get<{ runs: never[]; total: number; supported: boolean; reason: string; fire_count: number; last_fired_at: number }>(`/api/triggers/event:${encodeURIComponent(id)}/history`),
-  schedules: () => get<{ triggers: Trigger[]; server_tz: string }>('/api/triggers?type=schedule')
-    .then((d) => ({ jobs: d.triggers.map((t) => ({ ...t, id: t.raw_id })) as unknown as ScheduleJob[], server_tz: d.server_tz })),
+  schedules: () => get<{ triggers: Trigger[]; server_tz: string; unreadable?: TriggerSourceUnreadable[] }>('/api/triggers?type=schedule')
+    .then((d) => ({ jobs: d.triggers.map((t) => ({ ...t, id: t.raw_id })) as unknown as ScheduleJob[], server_tz: d.server_tz, unreadable: d.unreadable ?? [] })),
   createSchedule: (body: Record<string, unknown>) =>
     post<{ ok: boolean; trigger: Trigger }>('/api/triggers', { trigger_type: 'schedule', ..._scheduleBodyToWire(body) }),
   updateSchedule: (id: string, body: Record<string, unknown>, basedOn?: string) =>
@@ -5292,7 +5515,7 @@ export const api = {
   scheduleHistory: (id: string, limit = 10, offset = 0) => get<{ runs: ScheduleRun[]; total: number }>(`/api/triggers/schedule:${encodeURIComponent(id)}/history?limit=${limit}&offset=${offset}`),
   scheduleRunDetail: (id: string, runId: string) => get<{ run: ScheduleRun }>(`/api/triggers/schedule:${encodeURIComponent(id)}/history/${encodeURIComponent(runId)}`).then((d) => d.run),
   triggerVariables: () => get<TriggerVariables>('/api/triggers/variables'),
-  triggerBudget: () => get<{ tokens: number; dollars: number; max_tokens: number; max_dollars: number; status: string; reason: string; paused: boolean; resumes_at: string }>('/api/triggers/budget'),
+  triggerBudget: () => get<DailySpend>('/api/triggers/budget'),
 
   tasks: (opts: { project?: string; task_list?: string; status?: string; limit?: number; offset?: number; mine?: boolean } = {}) => {
     const qs = new URLSearchParams()
@@ -5391,12 +5614,15 @@ export const api = {
   setPromptBinding: (use_case: string, ref: string) => put<PromptBindings>('/api/prompts/bindings', { use_case, ref }),
 
   skills: () => get<SkillItem[]>('/api/skills'),
-  skillFiles: (name: string, path?: string) => get<{ name: string; files?: SkillFile[]; path?: string; content?: string }>(`/api/skills/${encodeURIComponent(name)}/files${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  skillFiles: (name: string, path?: string, copy?: string) => get<{ name: string; files?: SkillFile[]; path?: string; content?: string }>(`/api/skills/${encodeURIComponent(name)}/files?${new URLSearchParams({ ...(path ? { path } : {}), ...(copy ? { copy } : {}) })}`),
   skillContent: (name: string) => get<{ content?: string }>(`/api/skills/${encodeURIComponent(name)}`).then((d) => d.content ?? ''),
+  skillDocument: (name: string, copy?: string) => get<SkillDocument>(`/api/skills/${encodeURIComponent(name)}?${new URLSearchParams(copy ? { copy } : {})}`),
   createSkill: (name: string, content: string) => post<{ ok: boolean }>('/api/skills', { name, content }),
-  updateSkill: (name: string, content: string) => put<{ ok: boolean }>(`/api/skills/${encodeURIComponent(name)}`, { content }),
-  deleteSkill: (name: string) => del(`/api/skills/${encodeURIComponent(name)}`),
-  verifySkill: (name: string) => post<SkillIntegrity>(`/api/skills/${encodeURIComponent(name)}/verify`),
+  updateSkill: (name: string, content: string, revision?: string, copy?: string) => put<{ ok: boolean }>(`/api/skills/${encodeURIComponent(name)}?${new URLSearchParams(copy ? { copy } : {})}`, { content, revision }),
+  deleteSkill: (name: string, copy?: string) => del(`/api/skills/${encodeURIComponent(name)}?${new URLSearchParams(copy ? { copy } : {})}`),
+  verifySkill: (name: string, copy?: string) => post<SkillIntegrity>(`/api/skills/${encodeURIComponent(name)}/verify?${new URLSearchParams(copy ? { copy } : {})}`),
+  revertSkillRefinement: (name: string, copy?: string, refinement?: string) => post<{ ok: boolean; reverted: number }>('/api/skills/overlay/revert', { name, copy, refinement }),
+  skillBundledChoice: (name: string, copy: string | undefined, digest: string, choice: 'update' | 'keep') => post<{ ok: boolean }>(`/api/skills/${encodeURIComponent(name)}/bundled/${choice}?${new URLSearchParams(copy ? { copy } : {})}`, { digest }),
   learningProposals: (opts?: { kind?: string; tier?: string; flagged?: boolean }) => {
     const q = new URLSearchParams()
     if (opts?.kind) q.set('kind', opts.kind)
@@ -5477,6 +5703,8 @@ export const api = {
   }>('/api/tools'),
   invokeTool: (tool: string, args: Record<string, unknown>, provider?: string, confirmRisk?: 'destructive') =>
     post<ToolInvokeResult>('/api/tools/invoke', { tool, arguments: args, provider, confirm_risk: confirmRisk }),
+  trustMcpReadOnlyDefinitions: (name: string, tools: Record<string, string>, configurationRevision: string, catalogRevision: string) => post<{ ok: boolean; sealed: string[]; changedSince: string[] }>(`/api/mcp/servers/${encodeURIComponent(name)}/read-only-trust`, { tools, configurationRevision, catalogRevision, confirm: true }),
+  revokeMcpReadOnlyTrust: (name: string) => del(`/api/mcp/servers/${encodeURIComponent(name)}/read-only-trust`),
   mcpServers: () => get<McpServer[]>('/api/mcp'),
   toggleMcpServer: (name: string, enabled: boolean) => post('/api/mcp/toggle', { name, enabled }),
   toggleMcpTool: (server: string, tool: string, enabled: boolean) => post('/api/mcp/toggle-tool', { server, tool, enabled }),
@@ -5530,6 +5758,7 @@ export const api = {
 
   triggerReview: () => get<{ cards: TriggerReviewCard[] }>('/api/triggers/review'),
   decideTriggerReview: (body: { trigger_id: string; review_id: string; decision: TriggerReviewDecision; expected_revision: string }) => post<TriggerReviewResult>('/api/triggers/review', body),
+  grantTrigger: (id: string, question: TriggerGrantQuestion) => post<{ ok: boolean; trigger: Trigger }>(`/api/triggers/${encodeURIComponent(id)}/grant`, { approved: true, expected_revision: question.revision, shown: question.shown }),
   storeTriggers: () => get<{ triggers: Trigger[] }>('/api/triggers?type=store').then((d) => d.triggers),
   toggleStoreTrigger: (rawId: string, enabled: boolean) =>
     post(`/api/triggers/store:${encodeURIComponent(rawId)}/toggle`, { enabled }),
@@ -5588,6 +5817,7 @@ export const api = {
     ]).then(([item, result]): KnowledgeReadingItem => ({ item, annotations: result.annotations }))
   },
   knowledgeGraph: () => get<{
+    extraction?: EntityExtractionTally | null
     nodes: { id: string; name?: string; type?: string; x?: number; y?: number; placed?: boolean; degree?: number; cluster?: number | null }[]
     edges: { source: string; target: string; type?: string; weight?: number }[]
   }>('/api/knowledge/graph'),
@@ -5761,7 +5991,8 @@ export const api = {
       `/api/inbox/${encodeURIComponent(id)}/apply`,
       edited ? { proposal: edited } : {},
     ),
-  draftInboxReply: (id: string) => post<InboxItem>(`/api/inbox/${encodeURIComponent(id)}/draft`),
+  sortInboxItem: (id: string) => post<InboxItem>(`/api/inbox/${encodeURIComponent(id)}/sort`),
+  draftInboxReply: (id: string, instructions = "") => post<InboxDraftResult>(`/api/inbox/${encodeURIComponent(id)}/draft`, { instructions }),
   digestInboxChannel: (channelId: string, hours = 4) =>
     get<InboxItem>(`/api/inbox/digest?channel_id=${encodeURIComponent(channelId)}&hours=${hours}`),
   sendInboxReply: (id: string, text: string) => post<{ ok: boolean; delivered_to_session?: boolean }>('/api/inbox/send', { id, text }),
@@ -5797,7 +6028,8 @@ export const api = {
   changelog: () => get<{ content: string }>('/api/changelog').then((d) => d.content),
   applyUpdate: () => post<UpdateActionResult>('/api/update'),
   rollbackUpdate: () => post<UpdateActionResult>('/api/update', { action: 'rollback' }),
-  cancelUpdate: () => post<{ ok?: boolean }>('/api/update/cancel'),
+  cancelUpdate: () => post<{ ok: boolean; status: 'stopped' | 'stopping' | 'not_running' }>('/api/update/cancel'),
+  dismissUpdate: () => post<{ ok: boolean }>('/api/update/dismiss'),
   setAutoUpdate: (enabled: boolean) => post<{ ok?: boolean }>('/api/update/auto', { enabled }),
   setUpdateDevMode: (enabled: boolean) => post<{ ok?: boolean }>('/api/update/dev-mode', { enabled }),
   restartProbe: () => post<{ ok: boolean; running_agents: number; sessions: number }>('/api/system/restart?probe=1'),
@@ -6055,6 +6287,7 @@ export const api = {
   },
   startWorkflowRun: (body: { name: string; inputs?: Record<string, unknown>; mode?: 'blocking' | 'background'; project_id?: string; idempotency_key?: string }) =>
     post<{ run_id: string; status: string; blocking?: boolean; needs_input?: WorkflowContinuation[] }>('/api/workflows/runs', body),
+  workflowBatch: (name: string) => get<WorkflowBatchState>(`/api/workflows/batches/${encodeURIComponent(name)}`),
   workflowRun: (id: string) => get<WorkflowRunDetailData>(`/api/workflows/runs/${encodeURIComponent(id)}`),
   setWorkflowRunPolicyOverrides: (id: string, overrides: Record<string, unknown>) =>
     put<{ run_id: string; status: string; policy_overrides: Record<string, unknown> }>(
@@ -6236,3 +6469,14 @@ export const api = {
   addLocalAppSource: (path: string) => post<{ ok: boolean; sources: string[] }>('/api/apps/local-sources', { path }),
   removeLocalAppSource: (path: string) => del(`/api/apps/local-sources?path=${encodeURIComponent(path)}`),
 }
+
+export interface InboxDraftEvidence {
+  question: string
+  warnings: string[]
+  named_notes: Array<{ name: string; available: boolean; reason: string }>
+  word_limit: number | null
+  words: number
+  wrote: boolean
+  skipped: boolean
+}
+export type InboxDraftResult = InboxItem & { drafting: InboxDraftEvidence }

@@ -18,6 +18,7 @@ class GrantQuestion:
     provider: str
     revision: str
     sentence: str
+    shown: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,14 @@ def _owner_recorded(trigger: Any, revision: str) -> bool:
     if not trigger_id or not revision:
         return False
     try:
+        provider, _ = _action(trigger)
+        if provider == "run-workflow":
+            from gideon.automation.workflows.automation_versions import grant_content
+            caps = getattr(trigger, "capabilities", {}) or {}
+            seal = caps.get(SEAL_KEY) or {}
+            revision = grant_content(revision, seal.get("workflows"))
+            if not revision:
+                return False
         return _book().holds(trigger_id, revision)
     except Exception:
         return False
@@ -117,6 +126,28 @@ def is_granted(trigger: Any) -> bool:
     )
 
 
+
+def hook_trigger(hook: Any) -> Any:
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        id="lifecycle:" + str(hook.id), kind="lifecycle",
+        workflow={"provider": str(hook.provider), "config": dict(hook.provider_config)},
+        capabilities=dict(getattr(hook, "capabilities", {}) or {}),
+        spec={"event": str(hook.event), "matcher": str(hook.matcher), "timeout": hook.timeout},
+        gates={}, enabled=hook.enabled,
+    )
+
+
+def _loaded_trigger(trigger_id: str) -> Any:
+    from gideon.automation.triggers.store import TriggerStore
+    if trigger_id.startswith("lifecycle:"):
+        from gideon.engine.hooks import get_global_hook_store
+        from types import SimpleNamespace
+        hooks = get_global_hook_store()
+        hook = next((hook for hook in hooks._read_records() if hook.id == trigger_id.removeprefix("lifecycle:")), None) if hooks else None
+        return SimpleNamespace(trigger=hook_trigger(hook), ok=True) if hook else None
+    return TriggerStore().get(trigger_id)
+
 def agent_start_approval(
     trigger_id: str, action_config: dict[str, Any]
 ) -> AgentStartApproval | None:
@@ -126,7 +157,7 @@ def agent_start_approval(
     try:
         from gideon.automation.triggers.store import TriggerStore
 
-        row = TriggerStore().get(trigger_id)
+        row = _loaded_trigger(trigger_id)
     except Exception:
         return None
     if row is None or not row.ok or str(getattr(row.trigger, "id", "")) != trigger_id:
@@ -164,7 +195,7 @@ def allows_agent_start(approval: AgentStartApproval) -> bool:
     try:
         from gideon.automation.triggers.store import TriggerStore
 
-        row = TriggerStore().get(approval.trigger_id)
+        row = _loaded_trigger(approval.trigger_id)
     except Exception:
         return False
     if row is None or not row.ok:
@@ -188,16 +219,27 @@ def missing(trigger: Any) -> list[str]:
 def question(trigger: Any) -> GrantQuestion | None:
     provider = required_provider(trigger)
     revision = action_revision(trigger)
-    if not provider or not revision or is_granted(trigger):
+    granted = is_granted(trigger)
+    if not provider or not revision or (granted and provider != "run-workflow"):
         return None
-    return GrantQuestion(
-        provider,
-        revision,
-        f"Allow this trigger to use {provider} with its current action and reach?",
-    )
+    shown = None
+    sentence = f"Allow this trigger to use {provider} with its current action and reach?"
+    if provider == "run-workflow":
+        from gideon.automation.workflows.automation_versions import definitions_lock, snapshot
+        _, action = _action(trigger)
+        try:
+            with definitions_lock():
+                shown = snapshot(str((action.get("config") or {}).get("workflow") or ""))
+        except Exception:
+            return None
+        if granted and shown == (getattr(trigger, "capabilities", {}).get(SEAL_KEY) or {}).get("workflows"):
+            return None
+        versions = ", ".join(f"{name} v{entry['version']}" for name, entry in shown["workflows"].items())
+        sentence = f"{'Use' if granted else 'Allow this trigger to run'} these workflow versions: {versions}?"
+    return GrantQuestion(provider, revision, sentence, shown)
 
 
-def grant(trigger: Any, *, confirmed_revision: str, principal: Any) -> bool:
+def grant(trigger: Any, *, confirmed_revision: str, principal: Any, shown: Any = None) -> bool:
     from gideon.security.approval_answer import OWNER
 
     provider = required_provider(trigger)
@@ -212,7 +254,16 @@ def grant(trigger: Any, *, confirmed_revision: str, principal: Any) -> bool:
     ):
         return False
     try:
-        _book().give(trigger_id, revision, principal=str(principal.label))
+        if provider == "run-workflow":
+            from gideon.automation.workflows.automation_versions import definitions_lock, snapshot, grant_content
+            _, action = _action(trigger)
+            name = str((action.get("config") or {}).get("workflow") or "")
+            with definitions_lock():
+                if not isinstance(shown, dict) or shown != snapshot(name, keeping=True):
+                    return False
+                _book().give(trigger_id, grant_content(revision, shown), principal=str(principal.label))
+        else:
+            _book().give(trigger_id, revision, principal=str(principal.label))
     except Exception:
         return False
     capabilities = getattr(trigger, "capabilities", None)
@@ -227,7 +278,14 @@ def grant(trigger: Any, *, confirmed_revision: str, principal: Any) -> bool:
         "provider": provider,
         "revision": revision,
     }
+    if provider == "run-workflow":
+        updated[SEAL_KEY]["workflows"] = json.loads(json.dumps(shown))
     trigger.capabilities = updated
+    from gideon.security.durable_work import seal_trigger_acceptance, TRIGGER_ORIGIN_KEY
+    receipt = seal_trigger_acceptance(trigger, principal)
+    if receipt is None:
+        return False
+    trigger.capabilities[TRIGGER_ORIGIN_KEY] = receipt
     return True
 
 

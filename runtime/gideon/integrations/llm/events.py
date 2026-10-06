@@ -21,6 +21,7 @@ EVENT_TOOL_CALL_UPDATE = "tool_call_update"
 EVENT_TOOL_RESULT = "tool_result"
 EVENT_PERMISSION_REQUEST = "permission_request"
 EVENT_COMPLETE = "complete"
+EVENT_CARRIED_ON = "carried_on"
 EVENT_COMPACTION_STATUS = "compaction_status"
 EVENT_CLEAR_STATUS = "clear_status"
 EVENT_AGENT_SWITCHED = "agent_switched"
@@ -63,6 +64,7 @@ class AgentEvent:
     tool_kind: str = ""
     tool_purpose: str = ""
     risk_level: str = ""
+    tool_annotations: dict[str, Any] = field(default_factory=dict)
     context_usage_pct: float | None = None
     context_usage: ContextUsage | None = None
     stop_reason: str = ""

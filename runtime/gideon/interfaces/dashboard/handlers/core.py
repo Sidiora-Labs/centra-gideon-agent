@@ -1129,6 +1129,11 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
             for segment in path_key.split("."):
                 current = current.get(segment) if isinstance(current, dict) else None
             consent = security_loosening(path_key, current, value)
+            if consent and path_key.split(".", 1)[0] == "auth":
+                from gideon.interfaces.dashboard.owner_presence import ACTION_SIGN_IN_SETTING, require_owner_presence
+                refused = require_owner_presence(request, ACTION_SIGN_IN_SETTING)
+                if refused is not None:
+                    return {"status": "presence_refused", "response": refused}
             if consent and body.get("confirm") is not True:
                 return {"status": "confirmation_required", "consent": consent}
 
@@ -1150,6 +1155,8 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
     except Exception:
         _log_sel("error", f"{path_key}=write_failed")
         return web.json_response({"error": "failed to write config file"}, status=500)
+    if outcome["status"] == "presence_refused":
+        return outcome["response"]
     if outcome["status"] == "revision_refused":
         refusal = outcome["response"]
         _sel().log_api_access(
@@ -1184,6 +1191,10 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
         )
 
     _log_sel("success", f"{path_key}={value}")
+    if path_key.startswith("voice."):
+        state = request.app.get("state")
+        if state is not None:
+            state.push_refresh("voice")
 
     if path_key == "agent.log_level":
         try:

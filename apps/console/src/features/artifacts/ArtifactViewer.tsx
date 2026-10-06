@@ -166,15 +166,15 @@ export function ArtifactViewer({ slug, onChanged, onDeleted, onOpenSourceFile, c
     }
     catch (e) { notify(`Could not delete artifact: ${(e as Error).message}`, 'error') }
   }
-  const ext = ({ markdown: 'md', html: 'html', react: 'jsx', svg: 'svg', json: 'json', text: 'txt', widget: 'html', document: 'html', infographic: 'txt' } as Record<string, string>)
+  const ext = ({ markdown: 'md', html: 'html', react: 'jsx', svg: 'svg', json: 'json', text: 'txt', widget: 'html', document: 'html', infographic: 'txt', csv: 'csv' } as Record<string, string>)
   const download = () => {
     if (!art) return
     const suffix = selVersion === null ? '' : `-v${selVersion}`
-    if (ctype?.binary) {
+    if (ctype?.binary || art.kind === 'csv') {
       const q = selVersion === null ? '' : `?version=${selVersion}`
       const a = document.createElement('a')
-      a.href = `/api/artifacts/${encodeURIComponent(slug)}/raw${q}`
-      a.download = `${safeFilename(art.name, art.slug)}${suffix}`
+      a.href = `/api/artifacts/${encodeURIComponent(slug)}/${art.kind === 'csv' ? 'export.csv' : 'raw'}${q}`
+      a.download = `${safeFilename(art.name, art.slug)}${suffix}${art.kind === 'csv' ? '.csv' : ''}`
       document.body.appendChild(a); a.click(); a.remove()
       return
     }

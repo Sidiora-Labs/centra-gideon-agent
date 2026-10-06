@@ -18,6 +18,7 @@ export default defineConfig({
     port: 3100,
     proxy: {
       '/api': { target: backend, changeOrigin: true, ws: true },
+      '/artifacts/serve': { target: backend, changeOrigin: true },
       '/apps': { target: backend, changeOrigin: true },
     },
   },

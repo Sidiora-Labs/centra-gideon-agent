@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
+import hashlib
+import importlib.metadata
+import signal
 import json
 import logging
 import os
@@ -14,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast, get_args
 
-from packaging.version import InvalidVersion, Version
+from gideon.core.versions import is_newer, normalize_version, order_key, parse_version, same_version
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +60,7 @@ _LIST_CACHE_FILENAME = "update_releases.json"
 
 _UPDATE_STATE_FILENAME = "update_state.json"
 
-_ROLLBACK_PHASES = frozenset({"applying", "applied", "failed"})
+_ROLLBACK_PHASES = frozenset({"applying", "applied", "failed", "cancelled"})
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
@@ -141,33 +146,9 @@ def container_instructions(tag: str = "") -> list[str]:
     return update_commands(tag)
 
 
-def normalize_version(v: str) -> str:
-    return (v or "").strip().removeprefix("v")
-
-
-def version_tuple(v: str) -> tuple[int, ...]:
-    core = normalize_version(v).partition("+")[0].partition("-")[0]
-    try:
-        return tuple(map(int, core.split(".")))
-    except (ValueError, AttributeError):
-        return (0,)
-
-
-def parse_version(v: str) -> Version | None:
-    try:
-        return Version(normalize_version(v))
-    except InvalidVersion:
-        return None
-
-
-def is_newer(candidate: str, current: str) -> bool:
-    new, now = parse_version(candidate), parse_version(current)
-    return new is not None and now is not None and new > now
-
-
-def same_version(a: str, b: str) -> bool:
-    version = parse_version(a)
-    return version is not None and version == parse_version(b)
+def version_tuple(v: str):
+    """Compatibility alias for canonical release ordering."""
+    return order_key(v)
 
 
 def moves_to(target: str, current: str, pin: str = "") -> bool:
@@ -647,3 +628,172 @@ async def commits_behind_upstream(proj: str) -> int | None:
         return None if code else int(output.decode(errors="replace").strip())
     except Exception:
         return None
+
+
+_active_update = contextvars.ContextVar("active_update", default=None)
+
+
+async def launch_update_process(*args, **kwargs):
+    """Finish child creation before propagating cancellation, then retire its group."""
+    from gideon.core.cancellation import terminate_and_reap
+
+    from gideon.operations._installer import installer_env
+
+    kwargs.setdefault("env", installer_env())
+    launch = asyncio.create_task(asyncio.create_subprocess_exec(*args, **kwargs))
+    try:
+        child = await asyncio.shield(launch)
+        operation = _active_update.get()
+        if operation is not None:
+            operation.children.append(child)
+        return child
+    except asyncio.CancelledError:
+        child = await launch
+        if not await terminate_and_reap(child):
+            raise RuntimeError("Update child retirement could not be confirmed")
+        raise
+
+
+class UpdateOperation:
+    """Own one update task through child retirement and durable cancellation."""
+
+    def __init__(self, work, progress, project=""):
+        try:
+            self.metadata = installed_metadata()
+        except Exception:
+            self.metadata = None
+        self.children = []
+        self.cancellable = True
+        self.stopping = False
+        self.project = git_root(project) if project else ""
+        self.head = git_commit_for(self.project, "HEAD") if self.project else ""
+        self.branch = GitCheckout(self.project).branch() if self.project else ""
+        self.started = asyncio.Event()
+        self.task = asyncio.create_task(self._run(work, progress))
+
+    async def _run(self, work, progress):
+        self.started.set()
+        token = _active_update.set(self)
+        try:
+            await work
+            journal = read_update_state()
+            if self.cancellable and journal.get("phase") == "failed":
+                detail = str(journal.get("error") or "Update failed") + installation_delta(self.metadata)
+                if self.head:
+                    detail += await asyncio.to_thread(restore_checkout, self.project, self.head, self.branch)
+                transition_update("failed", error=detail)
+                progress("error", detail)
+        except asyncio.CancelledError:
+            from gideon.core.cancellation import terminate_and_reap
+
+            for child in self.children:
+                if child.returncode is None and not await terminate_and_reap(child):
+                    raise RuntimeError("Update process has not stopped")
+                if sys.platform.startswith("linux"):
+                    for stat in Path("/proc").glob("[0-9]*/stat"):
+                        try:
+                            fields = stat.read_text().rsplit(")", 1)[1].split()
+                            if int(fields[2]) == child.pid and fields[0] != "Z":
+                                raise RuntimeError("Update process group has not stopped")
+                        except (FileNotFoundError, ProcessLookupError, PermissionError):
+                            continue
+            # Inspect retirement before publishing any stopped state.
+            detail = "Update stopped. Package installation may be incomplete; review or roll back before restarting."
+            detail += installation_delta(self.metadata)
+            if self.head:
+                detail += await asyncio.to_thread(restore_checkout, self.project, self.head, self.branch)
+            transition_update("cancelled", error=detail)
+            progress("cancelled", detail)
+        finally:
+            _active_update.reset(token)
+
+    async def cancel(self, timeout=15):
+        await self.started.wait()
+        if self.task.done():
+            self.task.result()
+            return "not_running"
+        if not self.cancellable:
+            return "too_late"
+        if not self.stopping:
+            self.stopping = True
+            if not self.task.cancelling():
+                self.task.cancel()
+        done, _ = await asyncio.wait({self.task}, timeout=timeout)
+        if done:
+            # Surface journal/cleanup failures rather than claiming successful retirement.
+            self.task.result()
+            return "stopped"
+        return "stopping"
+
+
+def installed_metadata():
+    """Snapshot installed distribution metadata, without trusting it as code integrity."""
+    result = {}
+    for distribution in importlib.metadata.distributions():
+        name = distribution.metadata.get("Name", "")
+        if name:
+            result[name] = (distribution.version, hashlib.sha256((distribution.read_text("RECORD") or "").encode()).hexdigest())
+    return result
+
+
+def installation_delta(before):
+    try:
+        after = installed_metadata()
+        changed = sorted(name for name in before.keys() | after.keys() if before.get(name) != after.get(name))
+        if changed:
+            return " Changed distribution metadata: " + ", ".join(changed) + ". Package files may be incomplete."
+        return " No distribution metadata changes observed; package files may still be incomplete."
+    except Exception:
+        return " Distribution metadata could not be verified; package files may be incomplete."
+
+
+def restore_checkout(project, head, branch):
+    """Restore only a clean checkout that retained its original branch identity."""
+    if not head:
+        return ""
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=project, capture_output=True)
+    if status.returncode or status.stdout.strip() or GitCheckout(project).branch() != branch:
+        return f" Checkout preserved at {project}; inspect changes and restore {head} manually."
+    reset = git_reset_to(project, head)
+    if reset.returncode:
+        return f" Checkout restoration failed at {project}; restore {head} manually."
+    return " Checkout restored."
+
+
+def run_install_command(argv, *, cwd=None, timeout=400):
+    """Own the CLI installer session through Ctrl-C and bounded retirement."""
+    from gideon.operations._installer import installer_env
+
+    child = subprocess.Popen(argv, cwd=cwd, env=installer_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        stdout, stderr = child.communicate(timeout=timeout)
+        return subprocess.CompletedProcess(argv, child.returncode, stdout, stderr)
+    except (KeyboardInterrupt, subprocess.TimeoutExpired):
+        previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        try:
+            for action in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.killpg(child.pid, action)
+                except ProcessLookupError:
+                    pass
+                try:
+                    child.communicate(timeout=1)
+                except subprocess.TimeoutExpired:
+                    continue
+                if action == signal.SIGTERM:
+                    # Descendants can outlive an already reaped group leader.
+                    try:
+                        os.killpg(child.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                break
+            if child.returncode is None:
+                raise RuntimeError("Installer retirement could not be confirmed")
+        finally:
+            signal.signal(signal.SIGINT, previous)
+        raise
+
+
+def cli_argv():
+    """Launch this install's CLI, including its frozen executable entrypoint."""
+    return [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "gideon"]

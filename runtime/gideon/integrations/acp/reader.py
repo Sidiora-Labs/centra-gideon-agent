@@ -132,6 +132,9 @@ class FrameRouter:
             elif not waiter.done():
                 waiter.set_result(msg)
             return
+        if msg.method == "elicitation/create" and msg.id is not None and self._on_server_request is not None:
+            self._on_server_request(msg)
+            return
         session_id = (
             msg.params.get("sessionId") if isinstance(msg.params, dict) else None
         )

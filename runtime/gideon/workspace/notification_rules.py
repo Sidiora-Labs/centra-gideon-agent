@@ -15,11 +15,10 @@ This module adds the second axis. Each ``(source, kind)`` from
   content-free phone ping (:mod:`gideon.workspace.push`, live since MOBILE-COMPANION ``MC-5``).
 * **conditions** — keywords / name-mention that ESCALATE a quieter mode to ``immediate``.
 
-**The global gate still runs first, unchanged.** ``notification_allowed()`` in
-`providers/entity_routes.py` remains the outermost check: mute-all means mute, whatever a
-rule says. Rules refine *delivery* for notifications that already passed the gate; they
-never resurrect a suppressed one. Keeping that order means the existing settings keep
-their meaning and this file cannot become a way to bypass them.
+**The global gate runs first.** Mute-all and minimum severity remain hard limits.
+Quiet hours suppress an ordinary immediate notice, retain attention as a badge, and
+preserve explicit badge/digest rules. Keyword escalation can retain a badge during
+quiet hours, but cannot bypass mute-all or minimum severity.
 
 **Conditions generalize the inbox's own alert fields.** The keyword and name-mention
 semantics are lifted verbatim from ``inbox.evaluate_alert`` — case-insensitive substring
@@ -402,6 +401,44 @@ def resolve_rule_for_legacy(flat_kind: str) -> Rule:
     """The effective rule for a flat pre-registry kind string (the wire format)."""
     registered = nk.kind_for_legacy(flat_kind)
     return resolve_rule(registered.source, registered.kind)
+
+
+SUPPRESSED = "suppressed"
+
+
+@dataclass(frozen=True)
+class RuleOutcome:
+    mode: str
+    rule: Rule | None = None
+    escalated_by: str = ""
+
+
+def operator_name() -> str:
+    try:
+        from gideon.core.config.loader import AppConfig
+
+        return (AppConfig.load().dashboard.user_name or "").strip()
+    except Exception:
+        logger.debug("operator name lookup failed", exc_info=True)
+        return ""
+
+
+def rule_outcome(kind: str, text: str, *, posture: str) -> RuleOutcome:
+    """The shared rule decision for delivery and notice explanations after the global gate."""
+    raised, reason, rule = False, "", None
+    try:
+        rule = resolve_rule_for_legacy(kind)
+        reason = rule.conditions.matches(text, operator_name())
+        if reason:
+            raised = rule.mode != "immediate"
+            rule = rule.escalated()
+    except Exception:
+        logger.debug("notification rule resolution failed; delivering", exc_info=True)
+        rule, reason, raised = None, "", False
+    mode = rule.mode if rule is not None else "immediate"
+    if mode == "immediate" and posture in {"quiet", "hush"}:
+        mode = SUPPRESSED if posture == "hush" and not raised else "badge"
+    return RuleOutcome(mode, rule, reason)
 
 
 def digest_settings() -> dict[str, Any]:

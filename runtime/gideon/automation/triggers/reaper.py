@@ -20,6 +20,7 @@ RUN_DEADLINE_SECS = 1800.0
 class ClaimRetirement:
     identity: str
     elapsed: float
+    holder: str = ""
 
     def mark_health(self, store: Any) -> bool:
         if store is None:
@@ -58,7 +59,7 @@ class ClaimRetirement:
     def apply(self, store: Any, base_dir: Path | str | None) -> dict[str, Any]:
         from gideon.automation.triggers import claims
 
-        released = claims.release_claim(self.identity, base_dir=base_dir)
+        released = claims.release_claim(self.identity, base_dir=base_dir, holder=self.holder)
         receipt = dict(
             trigger_id=self.identity,
             elapsed=int(self.elapsed),
@@ -66,6 +67,9 @@ class ClaimRetirement:
             deadline_secs=int(RUN_DEADLINE_SECS),
             recorded=False,
         )
+        if not released:
+            receipt["reason"] = "the run owner is still live or its process identity is unknown"
+            return receipt
         logger.warning(
             "Reaper: trigger %s exceeded %ds (ran %.0fs), releasing its claim",
             self.identity,
@@ -87,10 +91,13 @@ def overdue(
 
     instant = now or time.time()
     found = []
-    for identity in claims.running_ids(now=instant, base_dir=base_dir):
-        started = claims.running_since(identity, now=instant, base_dir=base_dir)
-        if started is not None and instant - started > deadline_secs:
-            found.append((identity, instant - started))
+    for identity in claims.ClaimJournal(base_dir).identities():
+        for claim in claims.read_claims(identity, base_dir=base_dir):
+            if claim.owner_pid and claims.owner_state(claim.owner_pid, claim.owner_identity) is not False:
+                continue
+            if instant - claim.claimed_at > deadline_secs:
+                found.append((identity, instant - claim.claimed_at))
+                break
     found.sort()
     return found
 
@@ -103,7 +110,16 @@ def reap_one(
     now: float = 0.0,
     base_dir: Path | str | None = None,
 ) -> dict[str, Any]:
-    return ClaimRetirement(trigger_id, elapsed).apply(store, base_dir)
+    from gideon.automation.triggers import claims
+
+    instant = now or time.time()
+    eligible = [claim for claim in claims.read_claims(trigger_id, base_dir=base_dir)
+                if abs((instant - claim.claimed_at) - elapsed) < 1.0
+                and (not claim.owner_pid or claims.owner_state(claim.owner_pid, claim.owner_identity) is False)]
+    if not eligible:
+        return {"trigger_id": trigger_id, "released": False, "recorded": False,
+                "reason": "no matching departed or unowned holder"}
+    return ClaimRetirement(trigger_id, elapsed, eligible[0].holder).apply(store, base_dir)
 
 
 def sweep_once(

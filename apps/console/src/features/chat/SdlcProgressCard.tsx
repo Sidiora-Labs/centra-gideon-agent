@@ -93,7 +93,7 @@ export function SdlcProgressCard({ refObj, controllable = false, onDeleted }: {
     finally { setBusy(false) }
   }
 
-  const status = entity ? effectiveLoopStatus(entity.status, entity.stop_reason) : (created ? 'ready' : '…')
+  const status = entity ? effectiveLoopStatus(entity.status, entity.stop_reason, entity.held) : (created ? 'ready' : '…')
   const dispKind = entity?.kind || (kind === 'code' ? 'code' : 'goal')
   const meta = loopKindMeta(dispKind)
   const title = entity?.name || `${meta.noun}${dispKind === 'code' ? ' project' : ''}`
@@ -103,7 +103,7 @@ export function SdlcProgressCard({ refObj, controllable = false, onDeleted }: {
 
   const vm = entity ? foldRunSnapshot({ ...entity, kind: dispKind, status }) : null
   const progress = vm?.progressLabel ?? ''
-  const parked = vm?.parked ?? false
+  const parked = status === 'held' || (vm?.parked ?? false)
   const steps = vm?.steps ?? []
   const elapsed = entity?.elapsed_seconds ?? 0
 

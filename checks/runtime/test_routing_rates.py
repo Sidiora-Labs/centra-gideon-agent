@@ -97,21 +97,24 @@ def test_local_provider_prices_zero_and_is_not_absent(tmp_path):
 
     original = get_default_registry()
     registry = ProviderRegistry()
+    from gideon.integrations.llm.capabilities import ProviderCapability
+    registry.register_type(ProviderCapability(type="ollama", capabilities=frozenset(),
+        supports_streaming=True, supports_tools=True, supports_embeddings=True,
+        supports_vision=False, max_context_tokens=0, hosts_model=True,
+        default_endpoint="http://localhost:11434"), lambda **kwargs: None)
     registry.register_entry(
         ProviderEntry(name="ollama-models", type="ollama", model="qwen3:8b")
     )
     set_default_registry(registry)
     try:
         rate = rate_for("ollama-models", "qwen3:8b", home=tmp_path)
+        cost = cost_for("ollama-models", "qwen3:8b", input_tokens=1_000_000, home=tmp_path)
     finally:
         set_default_registry(original)
 
     assert rate == ModelRate(0.0, 0.0)
     assert rate is not None and rate.source == "local"
-    assert (
-        cost_for("ollama-models", "qwen3:8b", input_tokens=1_000_000, home=tmp_path)
-        == 0.0
-    )
+    assert cost == 0.0
 
 
 def test_overlay_wins_over_local_zero(tmp_path):
@@ -223,10 +226,10 @@ def test_overlay_written_atomically_and_round_trips(tmp_path):
         {"acme:acme-large": {"in_per_mtok": 1.5, "out_per_mtok": 2.5}}, home=tmp_path
     )
 
-    assert path == tmp_path / "model_rates.json"
+    assert path == tmp_path / "config.json"
     on_disk = json.loads(path.read_text(encoding="utf-8"))
-    assert on_disk["version"] == rates_mod.RATES_VERSION
-    assert load_overlay(tmp_path)["rates"] == on_disk["rates"]
+    assert "model_prices" in on_disk
+    assert load_overlay(tmp_path)["rates"] == on_disk["model_prices"]["overrides"]
     assert not list(tmp_path.glob("*.tmp*")), "atomic_write left a temp file behind"
 
 
@@ -238,20 +241,20 @@ def test_corrupt_overlay_fails_open_to_the_app_default(
     registered_pricing(
         "acme", {"acme-large": {"in_per_mtok": 3.0, "out_per_mtok": 15.0}}
     )
-    (tmp_path / "model_rates.json").write_text("{not json at all", encoding="utf-8")
+    (tmp_path / "config.json").write_text("{not json at all", encoding="utf-8")
 
     rate = rate_for("acme", "acme-large", home=tmp_path)
 
     assert rate == ModelRate(3.0, 15.0)
     assert rate is not None and rate.source == "app_default"
-    assert any("model_rates.json" in r.message for r in caplog.records)
+    assert any("config.json" in r.message for r in caplog.records)
 
 
 def test_overlay_missing_rates_object_fails_open(tmp_path, registered_pricing):
     registered_pricing(
         "acme", {"acme-large": {"in_per_mtok": 3.0, "out_per_mtok": 15.0}}
     )
-    (tmp_path / "model_rates.json").write_text('{"version": 1}', encoding="utf-8")
+    (tmp_path / "config.json").write_text('{"version": 1}', encoding="utf-8")
 
     assert rate_for("acme", "acme-large", home=tmp_path) == ModelRate(3.0, 15.0)
 
@@ -272,7 +275,7 @@ def test_default_home_comes_from_config_dir(tmp_path, monkeypatch):
     monkeypatched dir so the real home is never touched."""
     import gideon.core.config.loader as loader
 
-    monkeypatch.setattr(loader, "config_dir", lambda: tmp_path)
+    monkeypatch.setattr(loader, "resolve_config_dir", lambda: tmp_path)
     save_overlay(
         {"acme:acme-large": {"in_per_mtok": 6.0, "out_per_mtok": 7.0}}, home=tmp_path
     )

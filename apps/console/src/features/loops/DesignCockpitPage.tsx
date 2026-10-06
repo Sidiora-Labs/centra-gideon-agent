@@ -95,7 +95,7 @@ export function DesignCockpitPage({ id, onBack, onDeleted, onOpenProject, onBuil
 
   const status = loop?.status
   const active = !!status && ACTIVE_LOOP_STATUSES.has(status)
-  const running = status === 'running'
+  const running = status === 'running' && !loop?.held
   const canAct = (action: LoopAction) => !!status && LOOP_ACTION_SOURCE_STATUSES[action].has(status)
   const specFrozen = !!status && !PRELAUNCH_LOOP_STATUSES.has(status)
 
@@ -232,8 +232,8 @@ export function DesignCockpitPage({ id, onBack, onDeleted, onOpenProject, onBuil
       <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-outline-variant/30 px-2xl py-1.5"
         style={{ background: 'var(--color-surface-container)' }}>
         <DesignPhaseTrail plan={(loop.plan ?? []) as LoopPhase[]} phaseStatus={loop.phase_status || {}}
-          cycle={loop.total_cycles || 0} active={active} complete={status === 'complete'} />
-        <span data-type="caption" className="text-on-surface-var capitalize">{effectiveLoopStatus(status || '', loop.stop_reason).replace('_', ' ')}{(loop.total_cycles || active) ? ` · cycle ${shownCycle(loop.total_cycles, loop.status)}/${loop.max_cycles}` : ''}</span>
+          cycle={loop.total_cycles || 0} active={active && !loop.held} complete={status === 'complete'} />
+        <span data-type="caption" className="text-on-surface-var capitalize">{effectiveLoopStatus(status || '', loop.stop_reason, loop.held).replace('_', ' ')}{(loop.total_cycles || active) ? ` · cycle ${shownCycle(loop.total_cycles, loop.status)}/${loop.max_cycles}` : ''}</span>
         {(loop.elapsed_seconds ?? 0) > 0 && (
           <span data-type="caption" className="inline-flex items-center gap-1 text-on-surface-low" title="Elapsed (running time)">
             <Clock size={11} />{fmtDesignElapsed(loop.elapsed_seconds ?? 0)}

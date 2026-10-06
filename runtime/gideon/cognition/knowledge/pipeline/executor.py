@@ -19,8 +19,12 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from gideon.cognition.knowledge.pipeline import outcomes as oc
 from gideon.cognition.knowledge.pipeline.graph import PipelineGraph
-from gideon.cognition.knowledge.pipeline.registry import can_resolve_use_case, get_node
+from gideon.cognition.knowledge.pipeline.outcomes import PhaseOutcome
+from gideon.cognition.knowledge.pipeline.registry import (
+    get_node, node_available, unavailable_outcome, unserved_reason_sync,
+)
 from gideon.cognition.knowledge.pipeline.types import NodeContext, NodeOutput, PoolRow
 
 logger = logging.getLogger(__name__)
@@ -34,6 +38,8 @@ class ExecutionResult:
     ran: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
+    not_taken: list[str] = field(default_factory=list)
+    outcomes: dict[str, PhaseOutcome] = field(default_factory=dict)
 
     @property
     def status(self) -> str:
@@ -62,7 +68,7 @@ class PipelineExecutor:
     *params_for* (node_type → execution-param dict) layers user config
     over the graph defaults: ``enabled``, ``backend``, ``use_case``, ``timeout_s``.
     *on_node* (node_type, phase) is called for SSE progress (phase ∈
-    queued|running|done|skipped|failed).
+    queued|running|done|skipped|failed|not_applicable).
     """
 
     def __init__(self, graph: PipelineGraph, *, params_for=None, on_node=None):
@@ -106,7 +112,8 @@ class PipelineExecutor:
         """Drop a node set's recorded outputs/phases so a re-run can re-resolve them."""
         for nt in nodes:
             result.outputs.pop(nt, None)
-            for lst in (result.ran, result.failed, result.skipped):
+            result.outcomes.pop(nt, None)
+            for lst in (result.ran, result.failed, result.skipped, result.not_taken):
                 while nt in lst:
                     lst.remove(nt)
 
@@ -136,7 +143,7 @@ class PipelineExecutor:
             if not wave:
                 logger.warning("knowledge pipeline stalled; remaining=%s", remaining)
                 for n in remaining:
-                    result.skipped.append(n)
+                    self._skip(n, result, oc.skipped("It never became ready to run."))
                 break
             coros = [self._run_one(n, ctx, result) for n in wave]
             await asyncio.gather(*coros)
@@ -198,72 +205,103 @@ class PipelineExecutor:
                 return True
         return False
 
+    def _untaken_outcome(self, node_type: str, result: ExecutionResult) -> PhaseOutcome:
+        upstream: dict[str, PhaseOutcome] = {}
+        for edge in self._graph.predecessors(node_type):
+            output = result.outputs.get(edge.from_node)
+            if output is not None and output.success:
+                outcome = oc.branch_not_taken(oc.step_name(edge.from_node))
+            else:
+                outcome = result.outcomes.get(edge.from_node) or oc.skipped("It did not run.")
+            upstream.setdefault(edge.from_node, outcome)
+        if len(upstream) == 1:
+            outcome = next(iter(upstream.values()))
+            if outcome.status == oc.NOT_APPLICABLE:
+                return outcome
+        return oc.waited_on([(oc.step_name(name), outcome) for name, outcome in upstream.items()])
+
+    def _skip(self, node_type: str, result: ExecutionResult, outcome: PhaseOutcome) -> None:
+        result.skipped.append(node_type)
+        result.outcomes[node_type] = outcome
+        self._notify(node_type, outcome.status)
+
+    def _fail(self, node_type: str, result: ExecutionResult, output: NodeOutput) -> None:
+        result.outputs[node_type] = output
+        result.failed.append(node_type)
+        result.outcomes[node_type] = oc.failed(output.error or "It did not finish.")
+        self._notify(node_type, oc.FAILED)
+
     async def _run_one(
         self, node_type: str, ctx: NodeContext, result: ExecutionResult
     ) -> None:
         spec = self._graph.nodes[node_type]
         params = self._params_for(node_type) or {}
         if not params.get("enabled", spec.enabled):
-            result.skipped.append(node_type)
-            self._notify(node_type, "skipped")
+            self._skip(node_type, result, oc.skipped("This step is turned off."))
             return
         if not self._edges_satisfied(node_type, result):
-            result.skipped.append(node_type)
-            self._notify(node_type, "skipped")
+            outcome = self._untaken_outcome(node_type, result)
+            result.not_taken.append(node_type)
+            result.outcomes[node_type] = outcome
+            self._notify(node_type, outcome.status)
             return
 
         backend = params.get("backend") or spec.backend
         use_case = params.get("use_case", spec.uses_use_case)
         node = get_node(node_type, backend)
         if node is None:
-            logger.warning("no node registered for (%s, %s)", node_type, backend)
-            result.skipped.append(node_type)
-            self._notify(node_type, "skipped")
+            self._skip(node_type, result, oc.skipped("This step is not available in this install."))
             return
-        if not can_resolve_use_case(use_case):
-            logger.info(
-                "skipping node %s — use-case %s has no active model",
-                node_type,
-                use_case,
-            )
-            result.skipped.append(node_type)
-            self._notify(node_type, "skipped")
+        reason = unserved_reason_sync(use_case)
+        if reason:
+            self._skip(node_type, result, oc.no_model(use_case or "", reason))
+            return
+        if not node_available(node):
+            self._skip(node_type, result, unavailable_outcome(node))
             return
 
         self._notify(node_type, "running")
         inputs = {
-            e.from_node: result.outputs[e.from_node]
-            for e in self._graph.predecessors(node_type)
-            if e.from_node in result.outputs and result.outputs[e.from_node].success
+            edge.from_node: result.outputs[edge.from_node]
+            for edge in self._graph.predecessors(node_type)
+            if edge.from_node in result.outputs and result.outputs[edge.from_node].success
         }
-        if "timeout_s" in params:
-            timeout_s = float(params["timeout_s"])
-        else:
-            timeout_s = self._scaled_timeout(node_type, spec, use_case, ctx)
+        timeout_s = float(params["timeout_s"]) if "timeout_s" in params else self._scaled_timeout(node_type, spec, use_case, ctx)
         try:
-            out = await asyncio.wait_for(node.run(inputs, ctx), timeout=timeout_s)
+            output = await asyncio.wait_for(node.run(inputs, ctx), timeout=timeout_s)
         except asyncio.TimeoutError:
-            result.outputs[node_type] = NodeOutput(
-                node_type=node_type, backend=backend, success=False, error="timeout"
-            )
-            result.failed.append(node_type)
-            self._notify(node_type, "failed")
+            self._fail(node_type, result, NodeOutput(
+                node_type=node_type, backend=backend, success=False,
+                error=f"It did not finish within {timeout_s:g} seconds, so it was stopped.",
+            ))
             return
-        except Exception as exc:
+        except Exception as error:
             logger.exception("knowledge node %s failed", node_type)
-            result.outputs[node_type] = NodeOutput(
-                node_type=node_type, backend=backend, success=False, error=str(exc)
-            )
-            result.failed.append(node_type)
-            self._notify(node_type, "failed")
+            self._fail(node_type, result, NodeOutput(
+                node_type=node_type, backend=backend, success=False, error=str(error),
+            ))
             return
-        result.outputs[node_type] = out
-        if out.success:
+        if output.success and (ctx.file_path or ctx.params.get('_content_scan_required') or node_type == 'bookmark_scrape'):
+            from gideon.workspace.uploads.content_intake import approve_text, IntakeRefused
+            import json
+
+            # Segments and self-named pool rows can reach a later model without
+            # appearing in the node's primary text. Read those representations too.
+            text = '\n\n'.join([output.text, *(row.text for row in output.pool_rows),
+                                 json.dumps(output.segments, ensure_ascii=False),
+                                 json.dumps(output.metadata, ensure_ascii=False, default=str)])
+            try:
+                await approve_text(text, surface='knowledge_extraction')
+            except IntakeRefused as refused:
+                output = NodeOutput(node_type=node_type, backend=backend, success=False,
+                                    error=refused.message, metadata={'content_refusal': refused.code})
+        if output.success:
+            result.outputs[node_type] = output
             result.ran.append(node_type)
-            self._notify(node_type, "done")
+            result.outcomes[node_type] = oc.done()
+            self._notify(node_type, oc.DONE)
         else:
-            result.failed.append(node_type)
-            self._notify(node_type, "failed")
+            self._fail(node_type, result, output)
 
     _DURATION_SCALED_NODES = frozenset(
         {"transcription", "video_classify", "ocr", "vision", "video_consolidate"}

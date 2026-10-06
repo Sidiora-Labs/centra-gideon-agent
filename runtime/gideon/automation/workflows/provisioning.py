@@ -382,7 +382,34 @@ class _StepExecution:
         )
 
 
-async def run_step(
+async def run_step(command: str, cwd: str | Path, *, env=None, runner=None,
+                   timeout: float = STEP_TIMEOUT_SECS, durable_session: str = "",
+                   run_id: str = "") -> tuple[bool, str]:
+    if runner is not None:
+        return await _run_step_bound(command, cwd, env=env, runner=runner, timeout=timeout,
+                                     durable_session=durable_session)
+    arguments = shlex.split(command or "")
+    if not arguments:
+        return False, "empty command"
+    from gideon.security.sandbox import egress_bound_argv, remove_wrap, no_network_note
+    from gideon.security.net.policy import run_of_this_call
+    from gideon.security.guardrails.policy import unattended_dispatch_key
+    key = unattended_dispatch_key(f"workflow:{run_id}") if run_id else (run_of_this_call() or unattended_dispatch_key("workflow:step"))
+    try:
+        argv, cleanup = egress_bound_argv(arguments, run=key)
+    except PermissionError as error:
+        return False, str(error)
+    try:
+        success, detail = await _run_step_bound(command, cwd, env=env, timeout=timeout,
+                                               durable_session=durable_session, _argv=argv)
+        if not success and (note := no_network_note(key)):
+            detail = f"{detail}\n{note}"
+        return success, detail
+    finally:
+        remove_wrap(cleanup)
+
+
+async def _run_step_bound(
     command: str,
     cwd: str | Path,
     *,
@@ -390,13 +417,14 @@ async def run_step(
     runner: Any = None,
     timeout: float = STEP_TIMEOUT_SECS,
     durable_session: str = "",
+    _argv: list[str] | None = None,
 ) -> tuple[bool, str]:
     if runner is not None:
         try:
             return await runner(command, str(cwd))
         except Exception as error:
             return False, f"{type(error).__name__}: {error}"[:500]
-    argv = shlex.split(command or "")
+    argv = _argv if _argv is not None else shlex.split(command or "")
     if not argv:
         return False, "empty command"
     executable = argv[0]
@@ -508,6 +536,7 @@ class _WorkspacePreparation:
                 result,
                 runner=runner,
                 durable_session=session if result.isolated else "",
+                run_id=self.location["run_id"],
             )
         return result
 
@@ -658,6 +687,7 @@ async def _run_setup(
     *,
     runner: Any = None,
     durable_session: str = "",
+    run_id: str = "",
 ) -> None:
     pending, completed = worktrees.pending_setup(root, spec.setup)
     out.setup_skipped = list(completed)
@@ -669,6 +699,7 @@ async def _run_setup(
             env=environment,
             runner=runner,
             durable_session=durable_session,
+            run_id=run_id,
         )
         if not success:
             out.setup_failed.append(f"{command}: {detail}"[:500])
@@ -723,7 +754,7 @@ class _WorkspaceRemoval:
             if self.commands:
                 for command in worktrees.setup_steps(self.commands):
                     success, detail = await run_step(
-                        command, self.path, runner=self.runner
+                        command, self.path, runner=self.runner, run_id=self.run.id
                     )
                     self.record(success, command, detail)
             if plan.commits_first:

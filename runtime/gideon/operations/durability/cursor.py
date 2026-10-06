@@ -11,8 +11,7 @@ unpulled. Its one hard rule, verbatim from §4.1:
 So the cursor is *not* advanced merely because a pull was attempted. Three consume verdicts:
 
 * **consumed** — the shard set merged cleanly → advance the peer's high-water mark to that
-  seq. Because prefixes are pulled oldest-first (the registry yields them ascending), the
-  mark only ever moves forward by contiguous seqs; a gap is never skipped.
+  seq. Each pull takes the newest complete peer copy, so the mark moves directly to it.
 * **prerequisite-absent** — the shard references state this machine doesn't have yet (an
   out-of-order arrival) → **hold**: do not advance, so the same seq is retried next cycle
   once its prerequisite lands. This is the one verdict that must not advance, or the drain
@@ -104,6 +103,8 @@ class Cursor:
         return True
 
     def _persist(self) -> None:
+        from gideon.operations.durability.home_paths import guard_path
+        guard_path(self._path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write(
             self._path,

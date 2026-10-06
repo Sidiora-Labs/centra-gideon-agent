@@ -111,3 +111,10 @@ describe('local-model token status', () => {
     })).toBe('Token was rejected by Hugging Face.')
   })
 })
+
+it('retains the actual listed jobs of an incompatible active binding', () => {
+  const listed = M('Ollama', 'embed', ['embedding'], true)
+  const out = capableModels('chat', [listed], ['Ollama:embed'])
+  expect(out).toEqual([listed])
+  expect(out[0].capabilities).not.toContain('chat')
+})

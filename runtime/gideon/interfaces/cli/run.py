@@ -6,12 +6,8 @@ non-interactive caller runs ONE agent turn and consumes structured output. It is
 ``POST /api/chat`` + ``/api/ws`` pair the dashboard drives, so there is exactly one
 turn path and one stream contract.
 
-Why not extend ``gideon chat -m``: that command talks to a provider factory
-directly (``cli_chat._chat``), which means no gateway, no session store, no safety
-profile, no tool-approval gate and no spend attribution. It is a provider smoke test.
-A scripted/CI caller needs the gated path, and §9.5 says so explicitly ("executes one
-turn against the local gateway"). ``chat -m`` keeps its behaviour; ``run`` is the
-gated sibling, and the two are told apart in ``docs/reference/CLI.md``.
+The attended ``chat`` command shares this gateway transport, while ``run`` keeps its
+explicit unattended session and task-mode contract.
 
 Safety posture (fail-CLOSED, and the reason this module exists at all):
 
@@ -44,6 +40,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from gideon.engine.home_gateway import open_loopback
 from typing import Any
 
 CLI_SESSION_PREFIX = "inbound:cli:"
@@ -74,58 +71,15 @@ def probe_gateway(
     attempts: int = _PROBE_ATTEMPTS,
     announce: bool = False,
 ) -> bool:
-    """True when a Gideon gateway answers on ``port``.
-
-    Probes ``/api/healthz``, which is in ``token_auth._BYPASS_EXACT`` and so answers
-    without a token. ``doctor`` and ``status`` both probe ``/api/status`` instead and
-    then have to read 401/403 as "up" — an auth-gated liveness check needing a
-    treat-the-error-as-success branch. This is the same readiness question asked at the
-    route that exists to answer it; nothing here reads an HTTP error as alive.
-
-    Retries because a timeout is ambiguous (absent vs. busy) while a refused connection
-    is not. Only a *connection* failure short-circuits to False; a timeout is retried,
-    because concluding "absent" from a slow answer is the expensive mistake.
-    """
-    for attempt in range(max(1, attempts)):
-        try:
-            with urllib.request.urlopen(  # noqa: S310 — fixed loopback scheme
-                urllib.request.Request(f"http://127.0.0.1:{port}/api/healthz"),
-                timeout=timeout,
-            ) as resp:
-                alive = 200 <= int(resp.status) < 300
-                if alive and announce:
-                    try:
-                        payload = json.loads(resp.read())
-                    except (OSError, ValueError):
-                        payload = {}
-                    gateway_id = str(payload.get("gateway_id", "")).strip()
-                    pid = payload.get("pid")
-                    answered_port = payload.get("port", port)
-                    if gateway_id:
-                        pid_note = f", pid {pid}" if isinstance(pid, int) else ""
-                        print(
-                            f"gideon run: gateway {gateway_id} answered on port "
-                            f"{answered_port}{pid_note}.",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-                    else:
-                        print(
-                            f"gideon run: gateway on port {port} answered without an "
-                            "instance identity.",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-                return alive
-        except urllib.error.HTTPError:
-            return False
-        except (urllib.error.URLError, OSError) as exc:
-            reason = getattr(exc, "reason", exc)
-            if isinstance(reason, ConnectionRefusedError):
-                return False
-            if attempt == attempts - 1:
-                return False
-    return False  # pragma: no cover — the loop always returns
+    """A mismatch is a refusal, never permission to launch another gateway."""
+    from gideon.engine.home_gateway import require_home_gateway, NoGatewayRunning, HomeGatewayMismatch
+    try:
+        require_home_gateway(port, timeout=timeout)
+        return True
+    except NoGatewayRunning:
+        return False
+    except HomeGatewayMismatch as error:
+        raise RunError(str(error)) from error
 
 
 def mint_local_token(port: int, *, timeout: float = 5.0) -> str:
@@ -138,6 +92,8 @@ def mint_local_token(port: int, *, timeout: float = 5.0) -> str:
     """
     from gideon.core.config.loader import config_dir
 
+    from gideon.engine.home_gateway import require_home_gateway
+    require_home_gateway(port, timeout=timeout)
     secret_path = config_dir() / ".local_secret"
     try:
         secret = secret_path.read_text(encoding="utf-8").strip()
@@ -151,11 +107,11 @@ def mint_local_token(port: int, *, timeout: float = 5.0) -> str:
     if not secret:
         raise RunError(f"{secret_path} is empty — cannot mint a token.")
     req = urllib.request.Request(
-        f"http://127.0.0.1:{port}/api/token/local?ttl={_TOKEN_TTL_SECS}",
+        f"http://127.0.0.1:{port}/api/token/local?ttl=1h",
         headers={"X-Local-Secret": secret},
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        with open_loopback(req, timeout=timeout) as resp:  # noqa: S310
             token = str(json.loads(resp.read()).get("token", ""))
     except (urllib.error.URLError, OSError, ValueError) as exc:
         raise RunError(f"token mint failed against port {port}: {exc}") from exc
@@ -178,10 +134,10 @@ def start_transient_gateway() -> tuple[int, str, subprocess.Popen]:
     it by pid in ``_shutdown_transient``, so a headless invocation cannot leave a
     gateway running behind the operator's back.
     """
+    from gideon.operations.self_update import cli_argv
+
     cmd = [
-        sys.executable,
-        "-m",
-        "gideon",
+        *cli_argv(),
         "gateway",
         "--port",
         "auto",
@@ -351,7 +307,7 @@ def _api(port: int, token: str, path: str, body: dict | None = None) -> dict:
         headers={"Content-Type": "application/json", **_bearer_headers(token)},
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+        with open_loopback(req, timeout=30) as resp:  # noqa: S310
             raw = resp.read()
     except urllib.error.HTTPError as exc:
         detail = ""
@@ -377,6 +333,7 @@ class _Collector:
         self.tool_calls: list[dict[str, Any]] = []
         self.errors: list[str] = []
         self.done = False
+        self.outcome = ""
 
     def feed(self, envelope: dict) -> None:
         """Consume one ``{"type", "data"}`` envelope. Ignores other sessions' frames."""
@@ -405,62 +362,69 @@ class _Collector:
         elif kind == "chat_message" and str(data.get("role", "")) == "error":
             self.errors.append(str(data.get("content", "")))
         elif kind == "chat_done":
+            self.outcome = str(data.get("outcome") or data.get("last_turn_outcome") or "")
             self.done = True
 
     def result_text(self) -> str:
         return "".join(self.text_parts).strip()
 
 
-async def _consume(
-    port: int, token: str, collector: _Collector, prompt: str, timeout: float
-) -> None:
-    """Open the WS, POST the turn, and consume frames until ``chat_done``.
-
-    The WS is opened BEFORE the POST: ``POST /api/chat?ws=1`` returns as soon as the
-    turn task is created, so a reader attached afterwards races the first chunk. No
-    ``Origin`` header is sent — ``dashboard.origin.check_origin`` trusts a loopback peer
-    that sends none, and sending a wrong one is a 403.
-    """
+@contextlib.asynccontextmanager
+async def _turn_socket(port: int, token: str, session_key: str, prompt: str):
     import aiohttp
-
     base = f"http://127.0.0.1:{port}"
-    async with aiohttp.ClientSession() as http:
-        headers = _bearer_headers(token)
-        async with http.ws_connect(base + "/api/ws", headers=headers) as ws:
-            resp = await http.post(
-                base + "/api/chat?ws=1",
-                json={"message": prompt, "session": collector.session_key},
-                headers=headers,
-            )
-            async with resp:
-                if resp.status != 200:
-                    raise RunError(
-                        f"POST /api/chat failed: HTTP {resp.status} {await resp.text()}"
-                    )
-            deadline = time.monotonic() + timeout
-            while not collector.done:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise RunError(f"turn did not finish within {timeout:.0f}s")
-                try:
-                    msg = await asyncio.wait_for(ws.receive(), timeout=remaining)
-                except TimeoutError as exc:
-                    raise RunError(
-                        f"turn did not finish within {timeout:.0f}s"
-                    ) from exc
-                if msg.type is aiohttp.WSMsgType.TEXT:
-                    with contextlib.suppress(ValueError):
-                        envelope = json.loads(msg.data)
-                        if isinstance(envelope, dict):
-                            collector.feed(envelope)
-                elif msg.type in (
-                    aiohttp.WSMsgType.CLOSED,
-                    aiohttp.WSMsgType.CLOSE,
-                    aiohttp.WSMsgType.ERROR,
-                ):
-                    raise RunError(
-                        "gateway closed the websocket before the turn finished"
-                    )
+    async def refuse_redirect(session, context, params):
+        raise RunError("gateway callbacks must not redirect")
+    trace = aiohttp.TraceConfig()
+    trace.on_request_redirect.append(refuse_redirect)
+    try:
+        async with aiohttp.ClientSession(trust_env=False, trace_configs=[trace]) as http:
+            headers = _bearer_headers(token)
+            async with http.ws_connect(base + "/api/ws", headers=headers) as ws:
+                async with http.post(base + "/api/chat?ws=1", allow_redirects=False,
+                                     json={"message": prompt, "session": session_key},
+                                     headers=headers) as response:
+                    if response.status != 200:
+                        raise RunError(f"POST /api/chat failed: HTTP {response.status} {await response.text()}")
+                yield http, ws
+    except aiohttp.ClientError as error:
+        raise RunError(f"the turn's connection to the gateway on port {port} failed: {error}") from error
+
+
+async def _read_turn(ws, collector: _Collector, timeout: float | None) -> None:
+    import aiohttp
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while not collector.done:
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            raise RunError(f"turn did not finish within {timeout:.0f}s")
+        try:
+            message = await asyncio.wait_for(ws.receive(), timeout=remaining)
+        except TimeoutError as error:
+            raise RunError(f"turn did not finish within {timeout:.0f}s") from error
+        if message.type is aiohttp.WSMsgType.TEXT:
+            with contextlib.suppress(ValueError):
+                envelope = json.loads(message.data)
+                if isinstance(envelope, dict):
+                    collector.feed(envelope)
+        elif message.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.ERROR):
+            raise RunError("gateway closed the websocket before the turn finished")
+
+
+_STOP_WAIT_SECS = 30.0
+
+
+async def _ask_to_stop(http, port: int, session_key: str, *, headers: dict[str, str]) -> None:
+    from urllib.parse import quote
+    path = f"http://127.0.0.1:{port}/api/chat/sessions/{quote(session_key, safe='')}/stop"
+    async with http.post(path, json={}, headers=headers, allow_redirects=False) as response:
+        if response.status != 200:
+            raise RunError(f"the gateway did not stop the turn: HTTP {response.status}")
+
+
+async def _consume(port: int, token: str, collector: _Collector, prompt: str, timeout: float) -> None:
+    async with _turn_socket(port, token, collector.session_key, prompt) as (_http, ws):
+        await _read_turn(ws, collector, timeout)
 
 
 def _token_total(session_key: str) -> int:
@@ -516,11 +480,15 @@ def _run_one(args) -> int:
 
     from gideon.interfaces.cli.server import resolve_client_port
 
-    port = resolve_client_port(getattr(args, "port", None))
+    from gideon.engine.gateway_base import GatewayBaseUnresolved
+    try:
+        port = resolve_client_port(getattr(args, "port", None))
+    except GatewayBaseUnresolved:
+        port = None
     transient: subprocess.Popen | None = None
     started = time.monotonic()
     try:
-        if probe_gateway(port, announce=True):
+        if port is not None and probe_gateway(port, announce=True):
             token = mint_local_token(port)
         else:
             print(

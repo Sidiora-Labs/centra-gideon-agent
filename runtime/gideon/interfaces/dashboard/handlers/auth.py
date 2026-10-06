@@ -242,11 +242,12 @@ def _set_session_cookie(
 
 
 def _cookie_port(request: web.Request) -> int:
-    from gideon.interfaces.dashboard.token_auth import _DEFAULT_PORT
+    from gideon.interfaces.dashboard.token_auth import _DEFAULT_PORT, served_port
 
     port = request.app.get("port")
     try:
-        return int(port) if port else _DEFAULT_PORT
+        started_on = int(port) if port is not None else _DEFAULT_PORT
+        return started_on or served_port(request)
     except (TypeError, ValueError):
         return _DEFAULT_PORT
 
@@ -352,6 +353,16 @@ async def api_auth_set_password(request: web.Request) -> web.Response:
     if not isinstance(body, dict):
         body = {}
 
+    from gideon.interfaces.dashboard.owner_presence import (
+        ACTION_CHANGE_PASSWORD, ACTION_SET_PASSWORD, Identity, require_owner_presence,
+    )
+    configured = creds.has_credentials()
+    refused = require_owner_presence(
+        request, ACTION_CHANGE_PASSWORD if configured else ACTION_SET_PASSWORD,
+        identity=Identity(str(body.get("current_password") or ""), str(body.get("totp") or "")) if configured else None,
+    )
+    if refused is not None:
+        return refused
     username = str(body.get("username") or "").strip()
     password = str(body.get("password") or "")
     if not username:
@@ -387,6 +398,10 @@ async def api_auth_enroll_start(request: web.Request) -> web.Response:
     if not check_origin(request):
         return json_error(ERR_ORIGIN, status=403)
 
+    from gideon.interfaces.dashboard.owner_presence import ACTION_ENROLL_DEVICE, require_owner_presence
+    refused = require_owner_presence(request, ACTION_ENROLL_DEVICE)
+    if refused is not None:
+        return refused
     from gideon.security.auth import enrollment
 
     try:
@@ -481,7 +496,7 @@ async def login_page(request: web.Request) -> web.Response:
 def has_valid_session(request: web.Request, port: int) -> bool:
     """Whether *request* already carries a valid session (used by the redirect decision)."""
     token = request.query.get("token") or request.cookies.get(
-        f"gideon_token_{port}", ""
+        f"gideon_token_{port or _cookie_port(request)}", ""
     )
     if not token:
         return False
@@ -601,3 +616,27 @@ document.getElementById('f').addEventListener('submit', function (ev) {
 _LOGIN_HTML = page_document(
     title="Sign in — Gideon", body=_LOGIN_BODY, script=_LOGIN_SCRIPT
 )
+
+
+async def api_auth_confirm(request: web.Request) -> web.Response:
+    """Verify the owner now and replace only this session; failed proof leaves it live."""
+    if not check_origin(request):
+        return json_error(ERR_ORIGIN, status=403)
+    from gideon.interfaces.dashboard.owner_presence import ACTION_CONFIRM, Identity, PRESENCE_WINDOW_SECS, require_owner_presence
+    from gideon.interfaces.dashboard.token_auth import _login_offered, renew_sign_in
+    if not _login_offered():
+        return json_error("auth_not_enabled", message="Open a new sign-in link from gideon token.", status=403)
+    try:
+        body = await read_json_body(request)
+    except Exception:
+        return json_error("invalid_json", status=400)
+    if not isinstance(body, dict):
+        return json_error("invalid_body", status=400)
+    refused = require_owner_presence(request, ACTION_CONFIRM, identity=Identity(str(body.get("password") or ""), str(body.get("totp") or "")))
+    if refused is not None:
+        return refused
+    ttl = parse_config_duration(_auth_cfg().session_ttl, default_secs=DEFAULT_BROWSER_SESSION_TTL_SECS)
+    token = renew_sign_in(request, ttl_seconds=ttl, user_id=str(creds.status()["username"] or "owner"))
+    resp = web.json_response({"ok": True, "expires_in": ttl, "recent_for": PRESENCE_WINDOW_SECS})
+    _set_session_cookie(request, resp, token, ttl)
+    return resp

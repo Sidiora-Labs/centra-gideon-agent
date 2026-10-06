@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { denyConsequenceText } from '../chat/denyConsequence'
+import { blastRadiusLine, decodeBlastRadius } from '../chat/approvalMeta'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { Check, Ban, BellRing, LayoutDashboard, RefreshCw, ShieldCheck, CheckCheck, Smartphone } from 'lucide-react'
 import { api, type PendingApproval, type PushStatus } from '../../shared/data/api'
 import { disablePush, enablePush, pushDeviceId, pushSupported } from '../../app/shell/pushClient'
 import { disableNativePush, enableNativePush, nativeBridge, watchNativePushTaps } from '../../app/shell/nativePush'
 import { useQuery } from '../../shared/data/data'
-import { useChatSocket } from '../../shared/data/useChatSocket'
+import { FOLLOWS, useLiveLane } from './useLiveLane'
 import { ApprovalPrompt } from '../../shared/ui/ApprovalPrompt'
 import { RungChip } from '../../shared/ui/RungChip'
 import { providerRungIndex, useAutonomyLadder } from '../../shared/data/rungs'
@@ -38,10 +40,7 @@ export function CompanionPage({ navigate, query }: RouteProps) {
     })
   }, [data])
 
-  const onWs = useCallback((m: { type: string }) => {
-    if (m.type === 'approval' || m.type === 'approval_resolved') refresh()
-  }, [refresh])
-  useChatSocket(onWs)
+  useLiveLane('companion:approvals', FOLLOWS.approvals)
 
   const act = async (ap: PendingApproval, action: 'approve' | 'reject') => {
     setBusy((s) => new Set(s).add(ap.id))
@@ -124,7 +123,7 @@ export function CompanionPage({ navigate, query }: RouteProps) {
                   meta={<ApprovalMeta ap={ap} />}
                   choices={[
                     { key: 'approve', icon: Check, label: 'Allow', tone: 'primary', name: `Allow ${ap.tool}`, busy: busy.has(ap.id), onClick: () => act(ap, 'approve') },
-                    { key: 'reject', icon: Ban, label: 'Deny', tone: 'danger', name: `Deny ${ap.tool}`, busy: busy.has(ap.id), onClick: () => act(ap, 'reject') },
+                    { key: 'reject', icon: Ban, label: 'Deny', tone: 'danger', name: `Deny ${ap.tool}${ap.deny_consequence ? " — " + denyConsequenceText(ap.deny_consequence) : ""}`, busy: busy.has(ap.id), onClick: () => act(ap, 'reject') },
                   ]}
                 />
                 </div>
@@ -272,6 +271,11 @@ function PushRow({ navigate }: { navigate: RouteProps['navigate'] }) {
 
 function ApprovalMeta({ ap }: { ap: PendingApproval }) {
   const rows: [string, string][] = []
+  const touches = blastRadiusLine(decodeBlastRadius(ap.blast_radius))
+  if (touches) rows.push(['Touches', touches])
+  if (ap.risk) rows.push(['Risk', ap.risk === 'unchecked' ? 'Not checked' : ap.risk[0].toUpperCase() + ap.risk.slice(1)])
+  if (ap.deny_consequence) rows.push(['Deny', denyConsequenceText(ap.deny_consequence)])
+  if (ap.protected_delete) rows.push(['This call only', ap.protected_delete])
   if (ap.session) rows.push(['Session', ap.session])
   if (ap.source) rows.push(['Requested by', ap.source])
   const waited = waitedFor(ap.ts)

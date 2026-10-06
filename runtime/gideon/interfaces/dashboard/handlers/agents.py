@@ -588,6 +588,12 @@ async def api_agent_detail(request: web.Request) -> web.Response:
                 if request.method == "PATCH" and patch_body is not None:
                     async with _get_config_lock():
                         data = json.loads(f.read_text(encoding="utf-8"))
+                        from gideon.engine.agents.defaults import is_reserved_agent
+                        if is_reserved_agent(name) and any(key != "model" for key in patch_staged):
+                            return json_error("forbidden", message="Only the model of a built-in agent may be changed", status=403)
+                        refusal = _grant_change_response(request, name, data, patch_staged, patch_body)
+                        if refusal is not None:
+                            return refusal
                         for key in (
                             "model",
                             "description",
@@ -1235,6 +1241,21 @@ async def api_gideon_agents_create(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "name": name})
 
 
+def _grant_change_response(request, name, current, staged, body):
+    from gideon.engine.agents import grant_changes
+
+    if not grant_changes.widening(current, staged):
+        return web.json_response({"confirmation_required": False, "changes": []}) if body.get("grant_preview") is True else None
+    owner = request.get("user")
+    if not isinstance(owner, str) or not owner or request.get("app"):
+        return json_error("forbidden", message="Only the authenticated owner may widen agent grants", status=403)
+    if body.get("grant_preview") is True:
+        return web.json_response(grant_changes.preview(owner, name, current, staged))
+    if not grant_changes.accept(body.get("grant_receipt"), owner, name, current, staged):
+        return json_error("grant_confirmation_required", message="Review and confirm the exact changed grants before saving", status=409)
+    return None
+
+
 async def api_gideon_agent_update(request: web.Request) -> web.Response:
     """PUT /api/agents/{name} — update a Gideon agent."""
 
@@ -1266,6 +1287,15 @@ async def api_gideon_agent_update(request: web.Request) -> web.Response:
         if name not in cfg.agents:
             return web.json_response({"error": f"Agent '{name}' not found"}, status=404)
         agent = cfg.agents[name]
+        current = dataclasses.asdict(agent)
+        raw = (getattr(cfg, "_loaded_values", {}) or {}).get("agents", {}).get(name, {})
+        if isinstance(raw, dict):
+            for grant in ("tools", "skills"):
+                if grant in raw:
+                    current[grant] = raw[grant]
+        refusal = _grant_change_response(request, name, current, staged, body)
+        if refusal is not None:
+            return refusal
         changed: list[str] = []
         for field_name, value in staged.items():
             setattr(agent, field_name, value)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib
 import threading
+
+from gideon.core.database_privacy import prepare_database
 from contextlib import closing
 from dataclasses import dataclass
 from functools import lru_cache
@@ -22,6 +24,7 @@ __all__ = [
     "sqlite3",
     "SharedConnection",
     "connect_shared",
+    "connect",
     "SqliteCapabilities",
     "probe",
     "driver_name",
@@ -153,10 +156,17 @@ class SharedConnection(sqlite3.Connection):
             return super().__exit__(exc_type, exc_value, traceback)
 
 
+def connect(database, *args, **kwargs):
+    """Open the selected driver after securing Gideon-owned database files."""
+    prepare_database(database)
+    return sqlite3.connect(database, *args, **kwargs)
+
+
 def connect_shared(database, *args, **kwargs) -> SharedConnection:
     """Open the selected SQLite driver with serialized shared-connection access."""
     if "factory" in kwargs:
         raise TypeError("connect_shared manages the SQLite connection factory")
+    prepare_database(database)
     return sqlite3.connect(database, *args, factory=SharedConnection, **kwargs)
 
 

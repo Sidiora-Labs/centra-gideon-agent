@@ -77,6 +77,8 @@ def read_tombstones(entry_dir: Path) -> list[dict]:
             row = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(row, dict):
+            continue
         rid = row.get("id")
         ts = row.get(_TOMBSTONE_FIELD, "")
         if not isinstance(rid, str) or not rid:

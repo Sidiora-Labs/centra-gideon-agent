@@ -8,27 +8,27 @@ import { Skeleton, LoadError } from '../../shared/ui/ListScaffold'
 import { confirmDelete } from '../../shared/ui/dialog'
 import { TextArea, FieldError } from '../../shared/ui/forms'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
-import { api, type SkillItem, type SkillFile, type SkillIntegrity } from '../../shared/data/api'
+import { api, type SkillItem, type SkillFile, type SkillIntegrity, type SkillDocument } from '../../shared/data/api'
 import { SOURCE_TONE } from './skillMeta'
 import { toneChipSkin } from '../../shared/theme/accent'
 import { reportingWrite } from '../../app/shell/reportingWrite'
 
 export function SkillInspector({ skill, onDeleted, onSaved }: { skill: SkillItem; onDeleted: () => void; onSaved?: () => void }) {
   const [view, show] = useReducer((_previous: { kind: 'overview' | 'editor' | 'file'; path?: string }, next: { kind: 'overview' | 'editor' | 'file'; path?: string }) => next, { kind: 'overview' })
-  const deletion = useSkillRequest(skill.name)
+  const deletion = useSkillRequest(skill.copy ?? skill.key)
   const tone = SOURCE_TONE[skill.source] ?? 'var(--color-on-surface-low)'
-  const editable = skill.source !== 'bundled'
+  const editable = !skill.read_only && !['bundled', 'shared'].includes(skill.source)
 
-  const { data: files, error: filesErr, refresh: refreshFiles } = useQuery<SkillFile[]>(`skill:files:${skill.name}`, () => api.skillFiles(skill.name).then((d) => d.files ?? []), { persist: true })
-  useEffect(() => { show({ kind: 'overview' }) }, [skill.name])
+  const { data: files, error: filesErr, refresh: refreshFiles } = useQuery<SkillFile[]>(`skill:files:${skill.copy ?? skill.key}`, () => api.skillFiles(skill.name, undefined, skill.copy).then((d) => d.files ?? []), { persist: true })
+  useEffect(() => { show({ kind: 'overview' }) }, [skill.copy, skill.key])
 
   const del = () => deletion.run(async () => {
     if (!editable || !await confirmDelete('skill', skill.name, { body: 'This removes it from disk. This cannot be undone.' })) return false
-    return reportingWrite(`delete the skill "${skill.name}"`, () => api.deleteSkill(skill.name))
+    return reportingWrite(`delete the skill "${skill.name}"`, () => api.deleteSkill(skill.name, skill.copy))
   }, removed => { if (removed) onDeleted() }, 'Delete failed')
   const overview = () => show({ kind: 'overview' })
-  if (view.kind === 'editor') return <SkillEditor name={skill.name} onBack={overview} onSaved={() => { overview(); onSaved?.() }} />
-  if (view.kind === 'file') return <FileView name={skill.name} path={view.path!} onBack={overview} />
+  if (view.kind === 'editor') return <SkillEditor skill={skill} onBack={overview} onSaved={() => { overview(); onSaved?.() }} />
+  if (view.kind === 'file') return <FileView skill={skill} path={view.path!} onBack={overview} />
 
   return (
     <div className="grid gap-l">
@@ -68,6 +68,8 @@ export function SkillInspector({ skill, onDeleted, onSaved }: { skill: SkillItem
       </Section>
 
       <IntegritySection skill={skill} />
+      <RefinementsSection skill={skill} editable={editable} />
+      {editable && skill.bundled_update && <BundledUpdate skill={skill} onUpdated={onSaved} />}
 
       {skill.path && <div className="flex items-start gap-s text-on-surface-low text-[0.75rem]"><FileText size={13} className="shrink-0 mt-0.5" /><span className="font-mono break-all">{skill.path}</span></div>}
 
@@ -81,14 +83,53 @@ export function SkillInspector({ skill, onDeleted, onSaved }: { skill: SkillItem
   )
 }
 
+function RefinementsSection({ skill, editable }: { skill: SkillItem; editable: boolean }) {
+  const identity = skill.copy ?? skill.key
+  const document = useQuery<SkillDocument>(`skill:document:${identity}`, () => api.skillDocument(skill.name, skill.copy), { persist: false })
+  const request = useSkillRequest(identity)
+  const revert = (id: string) => request.run(() => api.revertSkillRefinement(skill.name, skill.copy, id), () => {
+    invalidateKeys(`skill:document:${identity}`)
+    invalidateKeys(`skill:files:${identity}`)
+    invalidateKeys(`skill:content:${identity}:`, true)
+    document.refresh()
+  }, 'Could not revert refinement')
+  if (document.error) return <Section label="Accepted refinements"><LoadError what="refinements" error={document.error} onRetry={document.refresh} /></Section>
+  if (!document.data?.refinements?.length) return null
+  return <Section label="Accepted refinements">
+    <p className="text-on-surface-low text-[0.8125rem]">These additions are applied when the skill loads. They are separate from your source text.</p>
+    {document.data.refinements.map(refinement => <div key={refinement.id} className="rounded-md border border-outline-variant/25 bg-surface-container/30 p-m grid gap-s">
+      <div className="flex items-center gap-s"><span className="text-on-surface text-[0.8125rem]">Refinement {refinement.version}</span>{editable && <Button size="sm" variant="ghost" className="ml-auto" loading={request.busy} onClick={() => revert(refinement.id)}>Revert this refinement</Button>}</div>
+      <Markdown>{refinement.text}</Markdown>
+    </div>)}
+    {request.err && <FieldError>{request.err}</FieldError>}
+  </Section>
+}
+
+function BundledUpdate({ skill, onUpdated }: { skill: SkillItem; onUpdated?: () => void }) {
+  const request = useSkillRequest(skill.copy ?? skill.key)
+  const [done, setDone] = useState('')
+  const choose = (choice: 'update' | 'keep') => request.run(async () => {
+    if (choice === 'update' && !await confirmDelete('local edits', skill.name, { body: 'Use the shipped version of this skill? This replaces the selected copy, including your edited files.' })) return false
+    await api.skillBundledChoice(skill.name, skill.copy, skill.bundled_update!, choice)
+    return true
+  }, changed => { if (changed) { setDone(choice === 'update' ? 'Shipped version installed' : 'Your version kept'); invalidateKeys(`skill:document:${skill.copy ?? skill.key}`); invalidateKeys(`skill:files:${skill.copy ?? skill.key}`); invalidateKeys(`skill:content:${skill.copy ?? skill.key}:`, true); onUpdated?.() } }, 'Could not apply your choice')
+  return <Section label="Update available">
+    <p className="text-on-surface-low text-[0.8125rem]">A new shipped version is available. Your changes have been preserved. Choose which version this copy should use.</p>
+    {!done && <div className="flex flex-wrap gap-s"><Button size="sm" variant="secondary" loading={request.busy} onClick={() => choose('keep')}>Keep my version</Button><Button size="sm" loading={request.busy} onClick={() => choose('update')}>Use shipped version</Button></div>}
+    {done && <p role="status" className="text-on-surface text-[0.8125rem]">{done}</p>}
+    {request.err && <FieldError>{request.err}</FieldError>}
+  </Section>
+}
+
 function IntegritySection({ skill }: { skill: SkillItem }) {
   const [result, setResult] = useState<SkillIntegrity | null>(null)
-  const request = useSkillRequest(skill.name)
-  useEffect(() => { setResult(null) }, [skill.name])
+  const request = useSkillRequest(skill.copy ?? skill.key)
+  useEffect(() => { setResult(null) }, [skill.copy, skill.key])
   const status = result?.integrity ?? skill.integrity ?? 'unverified'
   const presentation = {
     intact: { tone: 'var(--color-ok)', icon: ShieldCheck, label: 'Verified — matches install baseline', outcome: 'Integrity verified' },
-    tampered: { tone: 'var(--color-danger)', icon: ShieldAlert, label: 'Tampered — files changed since install', outcome: 'Changes found' },
+    edited: { tone: 'var(--color-warn)', icon: Pencil, label: 'Edited — files differ from their install baseline', outcome: 'Edits found' },
+    tampered: { tone: 'var(--color-danger)', icon: ShieldAlert, label: 'Install record damaged — installed files cannot be verified', outcome: 'Record damaged' },
     unverified: { tone: 'var(--color-on-surface-low)', icon: ShieldQuestion, label: 'Unverified — no install baseline (bundled or hand-placed)', outcome: 'No integrity baseline' },
   }
   const { tone, icon: Icon, label } = presentation[status] ?? presentation.unverified
@@ -98,7 +139,7 @@ function IntegritySection({ skill }: { skill: SkillItem }) {
     ...result.missing.map(path => ({ key: `missing:${path}`, label: `missing: ${path}`, tone: 'text-danger' })),
     ...result.added.map(path => ({ key: `added:${path}`, label: `added: ${path}`, tone: 'text-warn' })),
   ] : []
-  const verify = () => request.run(() => api.verifySkill(skill.name), setResult, 'Could not verify skill')
+  const verify = () => request.run(() => api.verifySkill(skill.name, skill.copy), setResult, 'Could not verify skill')
 
   return (
     <Section label="Integrity">
@@ -115,16 +156,18 @@ function IntegritySection({ skill }: { skill: SkillItem }) {
   )
 }
 
-function SkillEditor({ name, onBack, onSaved }: { name: string; onBack: () => void; onSaved: () => void }) {
-  const { data: fetched, error: loadError, refresh } = useQuery<string>(`skill:content:${name}:SKILL.md`, () => api.skillContent(name), { persist: true })
+function SkillEditor({ skill, onBack, onSaved }: { skill: SkillItem; onBack: () => void; onSaved: () => void }) {
+  const { name } = skill
+  const identity = skill.copy ?? skill.key
+  const { data: fetched, error: loadError, refresh } = useQuery<SkillDocument>(`skill:document:${identity}`, () => api.skillDocument(name, skill.copy), { persist: false })
   const [content, setContent] = useState<string | null>(null)
-  const request = useSkillRequest(name)
+  const request = useSkillRequest(skill.copy ?? skill.key)
   const { busy, err } = request
-  useEffect(() => { if (fetched !== undefined) setContent(fetched) }, [fetched])
+  useEffect(() => { if (fetched !== undefined) setContent(fetched.content) }, [fetched])
   const save = () => {
     if (content === null) return
-    void request.run(() => api.updateSkill(name, content), () => {
-      for (const key of [`skill:content:${name}:SKILL.md`, `skill:files:${name}`]) invalidateKeys(key)
+    void request.run(() => api.updateSkill(name, content, fetched?.revision, skill.copy), () => {
+      for (const key of [`skill:document:${identity}`, `skill:files:${identity}`]) invalidateKeys(key)
       onSaved()
     }, 'Save failed')
   }
@@ -136,6 +179,7 @@ function SkillEditor({ name, onBack, onSaved }: { name: string; onBack: () => vo
       {content === null && loadError ? <LoadError what="skill definition" error={loadError} onRetry={refresh} /> : content === null
         ? <Skeleton className="h-72 w-full" />
         : <TextArea value={content} onChange={setContent} rows={18} mono ariaLabel="Skill definition (SKILL.md)" />}
+      {fetched?.recognized_copies && <p role="status" className="text-warn text-[0.8125rem]">Unchanged copies of accepted refinements were recognized in this file. The editor shows your own text; saving removes those duplicate copies.</p>}
       {err && <FieldError>{err}</FieldError>}
       <div className="flex justify-end gap-s">
         <Button size="sm" variant="ghost" onClick={onBack}><X size={14} /> Cancel</Button>
@@ -145,8 +189,8 @@ function SkillEditor({ name, onBack, onSaved }: { name: string; onBack: () => vo
   )
 }
 
-function FileView({ name, path, onBack }: { name: string; path: string; onBack: () => void }) {
-  const file = useQuery<string>(`skill:content:${name}:${path}`, () => api.skillFiles(name, path).then(response => response.content ?? ''), { persist: true })
+function FileView({ skill, path, onBack }: { skill: SkillItem; path: string; onBack: () => void }) {
+  const file = useQuery<string>(`skill:content:${skill.copy ?? skill.key}:${path}`, () => api.skillFiles(skill.name, path, skill.copy).then(response => response.content ?? ''), { persist: true })
   const error = file.error instanceof Error ? file.error.message : file.error ? 'failed to load' : ''
   const content = error ? <FieldError>{error}</FieldError> : file.data === undefined ? <Skeleton className="h-48 w-full" /> : /\.md$/i.test(path) ? <Markdown>{file.data}</Markdown> : <Code text={file.data} />
   return <div className="grid gap-m"><button type="button" onClick={onBack} className="inline-flex items-center justify-self-start gap-s text-[0.8125rem] text-on-surface-low hover:text-on-surface"><ArrowLeft size={14} /> Back to files</button><h2 className="break-all font-mono text-[0.8125rem] text-on-surface">{path}</h2>{content}</div>

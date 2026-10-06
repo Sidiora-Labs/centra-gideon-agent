@@ -92,7 +92,7 @@ def pending(
     out = [
         r
         for r in queue.items(status=STATUS_NEEDS_REVIEW)
-        if r.proposal is None and not r.proposal_error
+        if r.proposal is None and not r.proposal_error and not r.deleted
     ]
     return out[: max(0, int(limit))]
 

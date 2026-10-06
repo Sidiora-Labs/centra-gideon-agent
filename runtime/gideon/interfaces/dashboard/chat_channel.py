@@ -28,87 +28,39 @@ async def api_chat_session_channel_link(request: web.Request) -> web.Response:
         return web.json_response({"error": "not found"}, status=404)
     session_key = _history_key_for(name)
 
-    existing_ts, existing_chan = state.sessions.get_channel_link(session_key)
-    if existing_ts and existing_chan:
-        provider = state.channel_provider_for(session_key)
-        delivery = state.delivery_for(provider)
-        if delivery is None:
-            return web.json_response({"error": "Channel not connected"}, status=503)
-        try:
-            await delivery.deliver_text(
-                existing_chan,
-                "🔗 Session linked from dashboard — continuing here.",
-                existing_ts,
-            )
-        except Exception:
-            pass
-        return web.json_response(
-            {
-                "ok": True,
-                "already_linked": True,
-                "thread_ts": existing_ts,
-                "channel": existing_chan,
-            }
-        )
-
     try:
         body = await read_json_body(request)
     except RequestValidationError:
         return web.json_response({"error": "invalid handoff destination"}, status=400)
-    raw_channel = body.get("channel", "")
+    provider = body.get("provider", "")
+    raw_channel = body.get("channel", "dm")
+    if not isinstance(provider, str) or not isinstance(raw_channel, str) or not provider.strip():
+        return web.json_response({"error": "provider required for channel destination"}, status=400)
+    provider = provider.strip()
+    delivery = state.delivery_for(provider)
+    if delivery is None:
+        return web.json_response({"error": "channel unavailable"}, status=503)
+    if raw_channel and raw_channel != "dm":
+        if not delivery.is_tracked_channel(raw_channel):
+            return web.json_response({"error": "channel destination is not authorized"}, status=403)
+        target_channel = raw_channel
+    else:
+        from gideon.core.config.credentials import owner_id_for
+
+        owner = owner_id_for(provider)
+        target_channel = str(await delivery.open_dm(owner) or "") if owner else ""
+        if not target_channel:
+            return web.json_response({"error": "owner destination unavailable"}, status=503)
+    existing_ts, existing_chan = state.sessions.get_channel_link(session_key)
+    if existing_ts and existing_chan == target_channel and state.channel_provider_for(session_key) == provider:
+        return web.json_response({"ok": True, "already_linked": True,
+                                  "provider": provider, "thread_ts": existing_ts, "channel": target_channel})
     title = redact_and_truncate(session.title or name, max_chars=200)
     opening = f"\U0001f9f5 *{title}*\nSession linked from dashboard."
-    selected: dict[str, object] = {}
-    if raw_channel and raw_channel != "dm":
-        from gideon.integrations.channel_delivery import delivery_for, registered_providers
-
-        providers = [
-            provider
-            for provider in registered_providers()
-            if (candidate := delivery_for(provider)) is not None
-            and candidate.is_tracked_channel(raw_channel)
-        ]
-        if len(providers) != 1:
-            return web.json_response(
-                {
-                    "error": "channel destination is ambiguous"
-                    if providers
-                    else "channel destination is not authorized"
-                },
-                status=409 if providers else 403,
-            )
-        selected["provider"] = providers[0]
-        delivery = state.delivery_for(providers[0])
-        target_channel = raw_channel
-        thread_ts = await delivery.deliver_text(target_channel, opening)
-    else:
-        from gideon.integrations.channel_delivery import reach_owner
-
-        async def send(provider, owner_delivery, destination):
-            thread = await owner_delivery.deliver_text(destination, opening)
-            if not thread:
-                return False
-            selected.update(
-                provider=provider, delivery=owner_delivery,
-                channel=destination, thread=thread,
-            )
-            return True
-
-        result = await reach_owner(send)
-        if not result.delivered:
-            return web.json_response(
-                {"error": result.reason or "owner channel unavailable"}, status=503
-            )
-        delivery = selected["delivery"]
-        target_channel = str(selected["channel"])
-        thread_ts = str(selected["thread"])
+    thread_ts = await delivery.deliver_text(target_channel, opening)
     if not thread_ts:
         return web.json_response({"error": "failed to create thread"}, status=500)
 
-    provider = str(selected.get("provider") or "")
-    if provider:
-        session._channel_provider = provider
-        session._app = provider
     try:
         save_session_to_history(state, session)
     except Exception:
@@ -135,7 +87,7 @@ async def api_chat_session_channel_link(request: web.Request) -> web.Response:
     )
     state.push_sessions_update()
     return web.json_response(
-        {"ok": True, "thread_ts": thread_ts, "channel": target_channel}
+        {"ok": True, "provider": provider, "thread_ts": thread_ts, "channel": target_channel}
     )
 
 

@@ -254,6 +254,9 @@ _UPDATABLE_FIELD_TYPES: dict[str, type] = {
     "draft": str,
     "classification": str,
     "confidence": str,
+    "classified_by": str,
+    "classify_error": str,
+    "drafted_by": str,
     "favorited": bool,
 }
 
@@ -317,9 +320,9 @@ class InboxItem:
     sender_id: str
     sender_name: str
     thread_context: list[dict[str, str]] = field(default_factory=list)
-    classification: str = Classification.NEEDS_REPLY
+    classification: str = ""
     draft: str = ""
-    confidence: str = Confidence.NEEDS_REVIEW
+    confidence: str = ""
     status: str = ItemStatus.PENDING
     created_at: float = 0.0
     context_summary: str = ""
@@ -332,6 +335,9 @@ class InboxItem:
     owner: str = ""
     owner_states: dict[str, str] = field(default_factory=dict)
     replied_at: float = 0.0
+    classified_by: str = ""
+    classify_error: str = ""
+    drafted_by: str = ""
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -413,6 +419,10 @@ class InboxItem:
                 )
                 continue
             clean[key] = value
+        if "classified_by" not in d and clean.get("confidence") != Confidence.USER.value:
+            if clean.get("source") not in {"native", "digest"}:
+                clean["classification"] = ""
+            clean["confidence"] = ""
         return cls(**clean)
 
 
@@ -630,6 +640,41 @@ class InboxStore:
         self.save()
         return item
 
+    def apply_sort_batch(self, expected: dict[str, dict], changes: dict[str, dict]) -> list[InboxItem]:
+        """Compare complete sent-row snapshots and apply verdicts under one file lock.
+
+        A second process's human edit, removal or status move wins over a late
+        model answer. No stale in-memory verdict is merged over the current disk row.
+        """
+        allowed = {"classification", "confidence", "classified_by", "classify_error"}
+        for fields in changes.values():
+            if set(fields) - allowed:
+                raise ValueError("sort batch may only update machine verdict fields")
+            validate_updatable_fields(fields)
+        changed = []
+        with record_files.locked_store(self._path.parent) as root:
+            document = _read_record_document(self._path, "items")
+            live = {row["id"]: row for row in document["items"]}
+            for identity, fields in changes.items():
+                raw = live.get(identity)
+                if raw is None:
+                    continue
+                row = InboxItem.from_dict(raw)
+                if row.to_dict() != expected.get(identity):
+                    continue
+                for key, value in fields.items():
+                    setattr(row, key, value)
+                live[identity] = row.to_dict()
+                changed.append(row)
+            if changed:
+                document["items"] = list(live.values())
+                target = record_files.safe_target(root, self._path.name)
+                atomic_write(target, json.dumps(document, indent=2), mode=0o600)
+        self.items = {identity: InboxItem.from_dict(row) for identity, row in live.items()}
+        self._baseline_items = {identity: item.to_dict() for identity, item in self.items.items()}
+        self._dirty = False
+        return changed
+
     def pending(self, owner: str = "") -> list[InboxItem]:
         return [
             i
@@ -702,6 +747,20 @@ def evaluate_alert(item: InboxItem, user_name: str = "") -> str:
     return rule.conditions.matches(text, user_name)
 
 
+FEEDBACK_TARGETS = {"inbox_classification": "classification", "inbox_draft": "draft", "inbox_digest": "digest"}
+
+
+def judgment_producers(item: dict) -> dict[str, dict]:
+    """Only the stored maker can receive feedback for a machine judgment."""
+    producers = {}
+    for field, maker in (("classification", "classified_by"), ("draft", "drafted_by")):
+        if item.get(field) and item.get(maker):
+            producers[field] = {"producer_kind": "prompt", "producer_id": item[maker]}
+    if item.get("source") == "digest" and item.get("classified_by"):
+        producers["digest"] = {"producer_kind": "prompt", "producer_id": item["classified_by"]}
+    return producers
+
+
 def redact_item(item: dict) -> dict:
     """Redact LLM-generated fields, and stamp the feedback-producer meta, on one item dict.
 
@@ -721,29 +780,11 @@ def redact_item(item: dict) -> dict:
         if ctx.get("text"):
             ctx["text"], _ = redact_exfiltration_urls(ctx["text"])
             ctx["text"], _ = redact_credentials(ctx["text"])
-    try:
-        from gideon.extensions.providers.prompt_use_cases import active_prompt_ref
-
-        producers: dict[str, dict] = {}
-        if item.get("classification"):
-            producers["classification"] = {
-                "producer_kind": "prompt",
-                "producer_id": active_prompt_ref("inbox_classify"),
-            }
-        if item.get("draft"):
-            producers["draft"] = {
-                "producer_kind": "prompt",
-                "producer_id": active_prompt_ref("inbox_draft"),
-            }
-        if item.get("source") == "digest":
-            producers["digest"] = {
-                "producer_kind": "prompt",
-                "producer_id": active_prompt_ref("inbox_digest"),
-            }
-        if producers:
-            item["feedback_producers"] = producers
-    except Exception:  # noqa: BLE001 — meta must never break the inbox payload
-        logger.debug("feedback producer meta failed", exc_info=True)
+    producers = judgment_producers(item)
+    if producers:
+        item["feedback_producers"] = producers
+    else:
+        item.pop("feedback_producers", None)
     return item
 
 
@@ -839,8 +880,8 @@ def emit_attention_item(
         created_at=now,
         source=source,
         can_reply=False,
-        classification=Classification.NEEDS_REPLY.value,
-        confidence=Confidence.HIGH.value,
+        classification="",
+        confidence="",
         item_kind=resolved_kind,
         refs=dict(refs or {}),
     )

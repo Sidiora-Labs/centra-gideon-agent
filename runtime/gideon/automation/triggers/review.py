@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import json
 import logging
+import os
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -159,11 +160,21 @@ class TriggerReviewStore:
             cards = document["cards"]
             for row in cards.values():
                 if isinstance(row, dict) and row.get("status") == "running":
+                    from gideon.automation.triggers import claims
+                    from gideon.engine.automation_boot import _owner_provably_dead
+
+                    pid = int(row.get("owner_pid") or 0)
+                    identity = str(row.get("owner_identity") or "")
+                    dead = claims.owner_state(pid, identity) is False if identity else _owner_provably_dead(pid)
+                    if not dead:
+                        continue
                     row["status"] = "pending"
                     row["last_error"] = "review decision was interrupted before completion"
             for candidate in candidates:
                 previous = cards.get(candidate["id"])
                 if isinstance(previous, dict):
+                    if previous.get("status") == "running":
+                        continue
                     if previous.get("status") == "pending":
                         if previous.get("action_revision") == candidate["action_revision"]:
                             previous["missed_count"] = max(
@@ -203,8 +214,14 @@ class TriggerReviewStore:
             row["decision"] = decision
             row["outcome"] = outcome
             row["resolved_at"] = time.time()
+            row["owner_pid"] = 0
             self._write(document)
-            return True
+        from gideon.integrations.action_providers.services import get_action_services
+        from gideon.integrations.inbox import resolve_attention_items
+
+        services = get_action_services()
+        resolve_attention_items(services.state if services else None, {"trigger_review": review_id})
+        return True
 
     def begin_run(self, review_id: str) -> dict[str, Any] | None:
         with self._locked():
@@ -212,7 +229,18 @@ class TriggerReviewStore:
             row = document["cards"].get(review_id)
             if not isinstance(row, dict) or row.get("status") != "pending":
                 return None
+            if any(
+                other.get("status") == "running"
+                and other.get("trigger_id") == row.get("trigger_id")
+                for other in document["cards"].values() if isinstance(other, dict)
+            ):
+                return None
             row["status"] = "running"
+            from gideon.automation.triggers.claims import process_identity
+
+            row["owner_pid"] = os.getpid()
+            row["owner_identity"] = process_identity(os.getpid())
+            row["started_at"] = time.time()
             self._write(document)
             return dict(row)
 
@@ -223,6 +251,7 @@ class TriggerReviewStore:
             if not isinstance(row, dict) or row.get("status") != "running":
                 return
             row["status"] = "pending"
+            row["owner_pid"] = 0
             row["last_error"] = error[:300]
             self._write(document)
 

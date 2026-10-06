@@ -1,26 +1,33 @@
-"""Stage 5 — rank + render (PROACTIVE-ASSISTANT §1.5).
+"""Stage 5 — rank + render.
 
-Ranking is the substrate's materiality order and nothing else (`MATERIALITY_ORDER`, AUTO-R2):
+Ranking is the substrate's materiality order and nothing else (`MATERIALITY_ORDER`):
 runs that touched the world lead, errors follow, words follow those, noise sinks. Re-deriving
 a second weighting here — "importance", "urgency" — would be a fifth dialect for the same
 question the Run Ledger already answers, so this module consumes that vocabulary rather than
 inventing beside it.
 
 Rendering is deliberately deterministic and deliberately NOT a model call. A digest whose body
-was written by a model is a second place injected content can reach a human, and the §1.3 call
+was written by a model is a second place injected content can reach a human, and the call
 has already been paid; the body here is assembled from typed fields the pipeline holds. That
 also makes the digest assertable: a test can require that a dropped item's title is absent,
 which is the property the gate's refusal path only *means* something through.
 
 The digest is `info`-ranked on purpose. `notification_allowed` defers `info` inside quiet
-hours, which for a MORNING digest is the correct behaviour rather than a limitation — success
-criterion 1 asks for exactly that deferral.
+hours, which for a MORNING digest is the correct behaviour rather than a limitation.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
+from gideon.cognition.proactive.autoexec import (
+    AutoExecResult,
+    not_done_note,
+    render_auto_lines,
+    stopped_note,
+)
+from gideon.cognition.proactive.carry import CARRY_RULE, CarryResult, carried_note, dropped_note
 from gideon.cognition.proactive.manifest import (
     MATERIALITY_ERROR,
     SOURCE_RUN,
@@ -30,12 +37,18 @@ from gideon.cognition.proactive.manifest import (
 )
 from gideon.cognition.proactive.proposals import Proposal
 
+#: Notification kind for a digest. `info` so quiet hours defer it. An error inside the
+#: window does NOT promote the digest: promoting would mean a run failure at 02:00 wakes the
+#: user through the surface whose whole promise is that it waits until morning.
 DIGEST_NOTIFY_KIND = "info"
 
+#: Digest title. Stable, because it is also the notification's dedupe-visible text.
 DIGEST_TITLE = "Morning triage"
 
 
 def _item_sort_key(item: CollectedItem) -> tuple[int, str, str]:
+    # Descending timestamp inside a materiality band: within "things that touched the world",
+    # the most recent is the one the user has least context on.
     return (materiality_rank(item.materiality), _invert(item.ts), item.ordinal)
 
 
@@ -44,9 +57,7 @@ def _invert(ts: str) -> str:
     return "".join(chr(0x10FFFD - ord(c)) if ord(c) < 0x10FFFD else c for c in ts)
 
 
-def rank_items(
-    items: tuple[CollectedItem, ...] | list[CollectedItem],
-) -> tuple[CollectedItem, ...]:
+def rank_items(items: tuple[CollectedItem, ...] | list[CollectedItem]) -> tuple[CollectedItem, ...]:
     """Materiality-first ordering. Ordinals are untouched — ranking reorders, never renumbers."""
     return tuple(sorted(items, key=_item_sort_key))
 
@@ -98,57 +109,110 @@ def render_digest(
     proposals: tuple[Proposal, ...],
     dropped_count: int,
     degraded: bool = False,
-    auto_lines: tuple[str, ...] = (),
+    auto: AutoExecResult | None = None,
+    carry: CarryResult | None = None,
+    now: datetime | None = None,
 ) -> Digest:
     """Assemble the digest body from typed fields — no model call, no free-text passthrough.
 
-    Sections, in the order §1.5 asks for: what your machine did (the run lane, permalinks
+    Sections, in order: what your machine did (the run lane, permalinks
     inline), what needs you (ranked proposals with their enforced tier), then everything else
     as a ranked list. A window the gate emptied renders the "nothing needs you" line rather
     than an empty body, because a blank digest reads as a broken digest.
 
-    `auto_lines` is §1.6 bound 4's half of the first section: what the machine did WITHOUT
-    being asked, each line naming the rule that authorised it. It joins the run lane under one
-    heading rather than getting its own, because "what your machine did" is one question and
-    two headings would make the user read twice to answer it — and it is rendered FIRST inside
-    that section, since an action already taken outranks a run that merely finished.
+    ``auto`` is the auto-execution stage's outcome, when it ran. What LANDED is the other half
+    of the first section: what the machine did WITHOUT being asked, each line naming the rule
+    that authorised it. It joins the run lane under one heading rather than getting its own,
+    because "what your machine did" is one question and two headings would make the user read
+    twice to answer it — and it is rendered FIRST inside that section, since an action already
+    taken outranks a run that merely finished. What did NOT land is never under that heading: a
+    failed or held action carries a "Not done: …" line on its proposal under "Needs you", and a
+    stage that stopped as a whole (incident mode, the approval ceiling, the spend floor) says so
+    once at the top of that section.
 
     **`proposals` must be the PENDING set, not the batch.** The caller auto-executes before
-    rendering (`pipeline.run_triage`), so anything that ran is in `auto_lines`; passing the
+    rendering (`pipeline.run_triage`), so anything that ran is in ``auto.executed``; passing the
     whole batch here would list an item under "needs you" that the machine had already handled
-    seconds earlier, which is the one thing a digest cannot get wrong.
+    seconds earlier, which is the one thing a digest cannot get wrong. Nor is an item it handled
+    "also waiting", for the same reason one section down.
+
+    ``carry`` is what an earlier digest left waiting on you (`carry.place`): each carried proposal
+    follows this window's own under "Needs you", under the number this digest gave it, saying it is
+    carried over and how long it has waited (``now`` dates it), and the section says once how long
+    a proposal comes back for. One dropped for its age is named in a section of its own, so it
+    does not simply vanish. One dealt with meanwhile is not mentioned: there is nothing to ask.
     """
     ranked = rank_items(kept)
     ranked_proposals = rank_proposals(proposals, manifest)
-    proposal_ids = {p.item_id for p in ranked_proposals}
+    carried = carry.carried if carry is not None else ()
+    numbered = carry.numbered(manifest) if carry is not None else manifest
+    ranked_carried = rank_proposals(tuple(c.proposal for c in carried), numbered)
+    carried_by_item = {c.proposal.item_id: c for c in carried}
+    expired = carry.expired if carry is not None else ()
+    proposal_ids = {p.item_id for p in ranked_proposals} | set(carried_by_item)
+    acted_on = {a.proposal.item_id for a in auto.executed} if auto is not None else set()
+    deferred = auto.deferred if auto is not None else ()
+    not_done = {d.proposal.item_id: not_done_note(d.reason, d.detail) for d in deferred}
+    stopped = (
+        stopped_note((d.reason for d in deferred), budget_reason=auto.budget_reason)
+        if auto is not None
+        else ""
+    )
+    done_lines = render_auto_lines(auto) if auto is not None else ()
 
     sections: list[str] = []
 
     machine = [i for i in ranked if i.source == SOURCE_RUN]
-    if machine or auto_lines:
+    if machine or done_lines:
         lines = ["What your machine did:"]
-        lines.extend(auto_lines)
+        lines.extend(done_lines)
         for item in machine:
             flag = " [needs you]" if item.materiality == MATERIALITY_ERROR else ""
             lines.append(f"{_line(item)}{flag}")
         sections.append("\n".join(lines))
 
-    if ranked_proposals:
+    if ranked_proposals or ranked_carried:
         lines = ["Needs you:"]
-        for p in ranked_proposals:
-            about = manifest.by_ordinal(p.item_id)
+        if stopped and ranked_proposals:
+            lines.append(f"  {stopped}")
+        if degraded and not ranked_proposals:
+            # What was carried is listed; that this window got no proposals is still said.
+            lines.append("  (no new proposals this run — the proposal stage was refused)")
+        for p in (*ranked_proposals, *ranked_carried):
+            about = numbered.by_ordinal(p.item_id)
             subject = about.title if about is not None else f"item {p.item_id}"
             lines.append(f"  {p.item_id}. [{p.tier}] {p.action_type} — {subject}")
+            # The task a yes files, by the title it is filed under, as the card shows it.
+            if p.action_config.get("title"):
+                lines.append(f"       Task: {p.action_config['title']}")
+            if p.item_id in carried_by_item:
+                first = carried_by_item[p.item_id].first_proposed_at
+                lines.append(f"       {carried_note(first, now)}")
+            if not_done.get(p.item_id):
+                lines.append(f"       {not_done[p.item_id]}")
             if p.reasoning:
                 lines.append(f"       {p.reasoning}")
+        if ranked_carried:
+            lines.append(f"  {CARRY_RULE}")
         sections.append("\n".join(lines))
     elif degraded:
-        sections.append(
-            "Needs you:\n  (no proposals this run — the proposal stage was refused)"
-        )
+        sections.append("Needs you:\n  (no proposals this run — the proposal stage was refused)")
+
+    if expired:
+        lines = ["No longer offered:"]
+        for gone in expired:
+            item = gone.waiting.item
+            link = f" ({item.permalink})" if item.permalink else ""
+            lines.append(f"  {gone.waiting.proposal.action_type} — {item.title}{link}")
+            lines.append(f"       {dropped_note(gone.waiting.first_proposed_at, now)}")
+        if not ranked_carried:
+            lines.append(f"  {CARRY_RULE}")
+        sections.append("\n".join(lines))
 
     rest = [
-        i for i in ranked if i.source != SOURCE_RUN and i.ordinal not in proposal_ids
+        i
+        for i in ranked
+        if i.source != SOURCE_RUN and i.ordinal not in proposal_ids and i.ordinal not in acted_on
     ]
     if rest:
         lines = ["Also waiting:"]
@@ -166,7 +230,9 @@ def render_digest(
         body="\n\n".join(sections),
         kind=DIGEST_NOTIFY_KIND,
         collected=len(manifest),
-        proposed=len(ranked_proposals),
+        # What waits for an answer, a carried proposal among it: what a reply to this digest
+        # answers (`pipeline.make_notify_deliver`).
+        proposed=len(ranked_proposals) + len(ranked_carried),
         surfaced=len(kept),
         dropped=dropped_count,
     )

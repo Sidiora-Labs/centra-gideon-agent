@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from gideon.security.safety_flags import yes_or_no
+
 import asyncio
 import hashlib
 import json
@@ -107,7 +109,7 @@ def redo_blocked(
     """True when re-execution must be refused (WF2-R1)."""
     if committed is None or committed.epoch == epoch:
         return False
-    return not bool((node_config or {}).get("redo_effects", False))
+    return yes_or_no((node_config or {}).get("redo_effects")) is not True
 
 
 def parse_byoi_output(stdout: str) -> dict[str, Any] | None:
@@ -161,6 +163,11 @@ class CallerDedupe:
                 self._entries.pop(caller_key, None)
         return None
 
+    def forget_run(self, run_id: str) -> None:
+        for key, value in list(self._entries.items()):
+            if value[0] == run_id:
+                self._entries.pop(key, None)
+
     def _sweep(self) -> None:
         observed = float(self.clock())
         expired = tuple(
@@ -204,6 +211,23 @@ class _TeardownInvocation:
         return cls(arguments, environment), ""
 
     async def run(self, timeout: float) -> tuple[bool, str]:
+        from gideon.security.sandbox import egress_bound_argv, remove_wrap, no_network_note
+        from gideon.security.net.policy import run_of_this_call
+        from gideon.security.guardrails.policy import unattended_dispatch_key
+        key = run_of_this_call() or unattended_dispatch_key("workflow:teardown")
+        try:
+            argv, cleanup = egress_bound_argv(self.argv, run=key)
+        except PermissionError as error:
+            return False, str(error)
+        try:
+            success, detail = await _TeardownInvocation(argv, self.environment)._run_bound(timeout)
+            if not success and (note := no_network_note(key)):
+                detail = f"{detail}\n{note}"
+            return success, detail
+        finally:
+            remove_wrap(cleanup)
+
+    async def _run_bound(self, timeout: float) -> tuple[bool, str]:
         from gideon.core.cancellation import run_with_timeout
         from gideon.security.sandbox import PROFILE_TOOL, create_subprocess_limited
 

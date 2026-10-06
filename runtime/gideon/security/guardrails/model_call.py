@@ -24,10 +24,15 @@ generation paths) are intercepted.
 
 from __future__ import annotations
 
+from gideon.core.turn_streams import closing_stream
+
 import asyncio
+import contextlib
+import json
 import logging
 import time
 import uuid
+from dataclasses import replace
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -40,6 +45,7 @@ from gideon.integrations.llm.base import (
     LLMEvent,
     ModelProvider,
 )
+from gideon.integrations.llm.prompt_cache import PromptCache
 from gideon.security.guardrails.audit import (
     AttemptRecord,
     current_caller,
@@ -49,17 +55,22 @@ from gideon.security.guardrails.audit import (
 from gideon.security.guardrails.breaker import CircuitBreaker, get_breaker
 from gideon.security.guardrails.budgets import (
     Budget,
-    BudgetVerdict,
+    CallCost,
+    Hold,
+    Waiting,
+    prompt_tokens,
     SpendMeter,
     current_run_budget,
     current_run_key,
     get_meter,
 )
 from gideon.security.guardrails.failure import (
+    AnswerCutOff,
     BudgetExceededError,
     CircuitOpenError,
     FailureMode,
     FirstTokenTimeout,
+    GuardError,
     ModelCallTimeout,
     PromptInjectionBlocked,
     SecretLeakBlocked,
@@ -136,6 +147,112 @@ def _joined_content(messages: list[dict]) -> str:
     return "\n".join(parts)
 
 
+#: The longest a call waits for the calls running beside it to leave the room it needs under a
+#: spend ceiling, before it is refused. A guarded call is bounded by its own clock, so what it
+#: waits for ends within about this long.
+ROOM_WAIT_SECS = _DEFAULT_TIMEOUT_SECS
+#: How often a call that is waiting for room looks again.
+_ROOM_POLL_SECS = 0.05
+
+#: An image in a request, as the characters of text its tokens would be: about 1,600 tokens, the
+#: order a large image costs a vision model.
+_IMAGE_CHARS = 4_800
+
+
+def call_cost(provider: str, model: str, *, prompt_chars: int) -> CallCost:
+    """The call to *model* on the entry *provider* a request of *prompt_chars* characters is,
+    as the spend ceilings weigh it before it starts (``SpendMeter.admit``): at the rate it is
+    priced at when it settles (``routing.rates.effective_rate``), or unpriced when there is none.
+    """
+    from gideon.engine.routing.rates import rate_for
+
+    rate = rate_for(provider, model)
+    return CallCost(
+        ref=f"{provider}:{model}",
+        prompt_tokens=prompt_tokens(prompt_chars),
+        rate=rate.dearest_per_mtok() if rate is not None else None,
+    )
+
+
+def request_chars(messages: list[dict], tools: list[dict] | None = None) -> int:
+    """How much a structured request sends, in characters: every message's text, the calls and
+    results it carries, and the tool schemas. An image counts as :data:`_IMAGE_CHARS`, never as
+    the length of its encoding."""
+
+    def _content(content: object) -> int:
+        if isinstance(content, str):
+            return len(content)
+        if isinstance(content, list):
+            total = 0
+            for block in content:
+                if isinstance(block, str):
+                    total += len(block)
+                elif isinstance(block, dict):
+                    if str(block.get("type") or "").startswith("image"):
+                        total += _IMAGE_CHARS
+                    elif isinstance(block.get("text"), str):
+                        total += len(block["text"])
+                    else:
+                        total += len(json.dumps(block, default=str))
+            return total
+        return len(json.dumps(content, default=str)) if content else 0
+
+    total = 0
+    for message in messages or []:
+        if not isinstance(message, dict):
+            total += len(str(message))
+            continue
+        for key, value in message.items():
+            if key == "content":
+                total += _content(value)
+            elif key != "role" and value:
+                total += len(json.dumps(value, default=str))
+    if tools:
+        total += len(json.dumps(tools, default=str))
+    return total
+
+
+async def admit_call(
+    meter: SpendMeter,
+    cost: CallCost,
+    day: Budget,
+    run: Budget,
+    *,
+    wait_secs: float = ROOM_WAIT_SECS,
+) -> Hold | None:
+    """Admit a call BEFORE it is made, against the day's ceiling and the ambient run's
+    (``SpendMeter.admit``): what it set aside, which the caller settles or releases, or ``None``
+    when no ceiling applies to it. A call the calls running beside it hold the room for waits for
+    them, up to *wait_secs*; the refusal is raised (:class:`BudgetExceededError`).
+
+    The guard admits each call through it, and an agent CLI's turn on a metered axis too
+    (``acp.spend``), so the two share one set of ceilings and one account of what is set aside.
+
+    The run's ceiling is read HERE, beside the day's, rather than as a ``firepath`` gate: run
+    totals accrue in-process as the run spends, and the fire path binds a FRESH per-fire key
+    before the first call — so a pre-fire gate would read 0.0 every time and be inert by
+    construction. The AMBIENT ceiling wins when the run bound one: a per-trigger
+    ``max_cost_usd_per_run`` is a tighter, run-specific promise than the operator's
+    ``max_tokens_per_run`` default (*run*), and the run seam is the only place that knows it.
+    """
+    run_key = current_run_key()
+    ceiling = current_run_budget()
+    if ceiling.is_unlimited:
+        ceiling = run
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.0, float(wait_secs))
+    while True:
+        verdict = meter.admit(cost, day=day, run=ceiling, run_key=run_key)
+        if isinstance(verdict, BudgetExceededError):
+            raise verdict
+        if not isinstance(verdict, Waiting):
+            return verdict
+        if loop.time() >= deadline:
+            raise verdict.refusal
+        await asyncio.sleep(_ROOM_POLL_SECS)
+
+
+
 class ModelCallGuard(ModelProvider):
     """Wraps ``inner`` with breaker + hard timeout + attempt-level audit."""
 
@@ -160,6 +277,8 @@ class ModelCallGuard(ModelProvider):
         self._provider_name = provider_name
         self._model = model
         self._timeout_secs = max(0.0, float(timeout_secs))
+        if use_case == "background":
+            self._timeout_secs = min(self._timeout_secs or 300.0, 300.0)
         self._breaker = breaker if breaker is not None else get_breaker(provider_name)
         self._budget = budget if budget is not None else Budget()
         self._run_budget = run_budget if run_budget is not None else Budget()
@@ -167,10 +286,31 @@ class ModelCallGuard(ModelProvider):
         self._scan_mode = (
             scan_mode if scan_mode in ("warn", "redact", "block") else "warn"
         )
-        self.supports_tools = getattr(inner, "supports_tools", False)
+        self._scan_setting = self._scan_mode
+        self._refresh_scan_mode()
         self._query_class = ""
         self._routed = bool(routed)
         self._routed_fallback = bool(routed_fallback)
+
+    def _refresh_scan_mode(self, model: str | None = None) -> None:
+        from gideon.integrations.llm.registry import served_on_this_machine
+        called = model or self._model
+        self._scan_mode = "warn" if served_on_this_machine(self._provider_name, called) else self._scan_setting
+
+    def _record_success(self) -> None:
+        if self._breaker.record_success():
+            self._recheck_connection()
+
+    def _record_failure(self) -> None:
+        if self._breaker.record_failure():
+            self._recheck_connection()
+
+    def _recheck_connection(self) -> None:
+        try:
+            from gideon.extensions.providers.connection import recheck
+            recheck(self._provider_name)
+        except Exception:
+            logger.debug("provider connection recheck failed", exc_info=True)
 
     def _stream_deadline(self, now: float, *, startup: bool = False) -> float | None:
         if self._timeout_secs <= 0:
@@ -196,10 +336,11 @@ class ModelCallGuard(ModelProvider):
     async def stream(self, message: str) -> AsyncIterator[LLMEvent]:
         message = self._prescan(message)
         self._classify(message)
-        async for event in self._guarded(
-            self._inner.stream(message), strategy="direct"
-        ):
-            yield event
+        async with closing_stream(self._guarded(
+            self._inner.stream(message), strategy="direct", prompt_chars=len(message)
+        )) as _owned_events:
+            async for event in _owned_events:
+                yield event
 
     async def complete(
         self,
@@ -209,12 +350,41 @@ class ModelCallGuard(ModelProvider):
         model: str | None = None,
         reasoning_effort: str = "",
     ) -> AsyncIterator[LLMEvent]:
+        self._refresh_scan_mode(model)
         self._classify(_joined_content(messages))
         inner = self._inner.complete(
             messages, tools=tools, model=model, reasoning_effort=reasoning_effort
         )
-        async for event in self._guarded(inner, strategy="direct"):
-            yield event
+        async with closing_stream(self._guarded(inner, strategy="direct", prompt_chars=request_chars(messages, tools), model=model)) as _owned_events:
+            async for event in _owned_events:
+                yield event
+
+    @property
+    def supports_tools(self) -> bool:
+        return self._inner.supports_tools
+
+    @property
+    def prompt_cache(self) -> PromptCache:
+        return self._inner.prompt_cache
+
+    @property
+    def served_model_ref(self) -> str:
+        return self._inner.served_model_ref
+
+    @served_model_ref.setter
+    def served_model_ref(self, value: str) -> None:
+        self._inner.served_model_ref = value
+
+    @property
+    def compacts_automatically(self) -> bool:
+        return self._inner.compacts_automatically
+
+    @property
+    def compacts_in_process(self) -> bool:
+        return self._inner.compacts_in_process
+
+    def stage_image_part(self, data_url: str) -> bool:
+        return self._inner.stage_image_part(data_url)
 
     @property
     def supports_native_commands(self) -> bool:
@@ -228,10 +398,11 @@ class ModelCallGuard(ModelProvider):
     async def stream_command(self, command: str) -> AsyncIterator[LLMEvent]:
         command = self._prescan(command)
         self._classify(command)
-        async for event in self._guarded(
-            self._inner.stream_command(command), strategy="direct"
-        ):
-            yield event
+        async with closing_stream(self._guarded(
+            self._inner.stream_command(command), strategy="direct", prompt_chars=len(command)
+        )) as _owned_events:
+            async for event in _owned_events:
+                yield event
 
     def _prescan(self, text: str) -> str:
         """Scan an outbound prompt for secrets/PII and apply the mode ladder.
@@ -246,6 +417,7 @@ class ModelCallGuard(ModelProvider):
         anything. §2.2's taxonomy separates the two deliberately: they are both non-retryable
         for *different* reasons, and an operator reading the audit trail cannot tell a
         credential slip from an attack if both say ``secret_leak``."""
+        self._refresh_scan_mode()
         result = scan_outbound(text, mode=self._scan_mode)
         if result.blocked:
             mode = (
@@ -279,8 +451,27 @@ class ModelCallGuard(ModelProvider):
             raise SecretLeakBlocked(result.findings)
         return result.text
 
-    async def _guarded(
-        self, source: AsyncIterator[LLMEvent], *, strategy: str
+    takes_local_turns = True
+
+    async def _guarded(self, source: AsyncIterator[LLMEvent], *, strategy: str, prompt_chars: int = 0, model: str | None = None) -> AsyncIterator[LLMEvent]:
+        from gideon.security.guardrails.local_inference import turn
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._timeout_secs if self._timeout_secs > 0 else None
+        request_limit = self._inner.first_token_timeout_secs or None
+        remaining = self._timeout_secs if self._timeout_secs > 0 else None
+        if request_limit is not None:
+            remaining = min(remaining, request_limit) if remaining is not None else request_limit
+        try:
+            admission = contextlib.nullcontext() if self._breaker.is_open() else turn(self._provider_name, model or self._model, within=remaining)
+            async with admission:
+                async with closing_stream(self._guarded_call(source, strategy=strategy, prompt_chars=prompt_chars, model=model, admitted_deadline=deadline)) as events:
+                    async for event in events:
+                        yield event
+        finally:
+            await self._aclose(source)
+
+    async def _guarded_call(
+        self, source: AsyncIterator[LLMEvent], *, strategy: str, prompt_chars: int = 0, model: str | None = None, admitted_deadline: float | None = None
     ) -> AsyncIterator[LLMEvent]:
         """Drive ``source`` under the breaker + a cumulative wall-clock deadline,
         recording exactly one attempt row for the whole stream.
@@ -303,47 +494,33 @@ class ModelCallGuard(ModelProvider):
             await self._aclose(source)
             raise CircuitOpenError(self._provider_name, retry_after)
 
-        if not self._budget.is_unlimited:
-            verdict, reason = self._meter.check_day(self._budget)
-            if verdict is BudgetVerdict.EXCEEDED:
-                self._audit(
-                    audit_id, 1, FailureMode.BUDGET_EXCEEDED, 0.0, 0, 0, False, strategy
-                )
-                await self._aclose(source)
-                totals = self._meter.day_totals()
-                dim = "tokens" if "token" in reason else "dollars"
-                limit = (
-                    self._budget.max_tokens
-                    if dim == "tokens"
-                    else self._budget.max_dollars
-                )
-                spent = totals.tokens if dim == "tokens" else totals.dollars
-                raise BudgetExceededError("day", dim, float(limit), float(spent))
-
-        run_key = current_run_key()
-        rb = current_run_budget()
-        if rb.is_unlimited:
-            rb = self._run_budget
-        if run_key and not rb.is_unlimited:
-            verdict, reason = self._meter.check_run(run_key, rb)
-            if verdict is BudgetVerdict.EXCEEDED:
-                self._audit(
-                    audit_id, 1, FailureMode.BUDGET_EXCEEDED, 0.0, 0, 0, False, strategy
-                )
-                await self._aclose(source)
-                totals = self._meter.run_totals(run_key)
-                dim = "tokens" if "token" in reason else "dollars"
-                lim = rb.max_tokens if dim == "tokens" else rb.max_dollars
-                spent = totals.tokens if dim == "tokens" else totals.dollars
-                raise BudgetExceededError("run", dim, float(lim), float(spent))
+        loop = asyncio.get_running_loop()
+        whole_deadline = admitted_deadline if self._use_case == "background" else None
+        called_model = model or self._model
+        cost = call_cost(self._provider_name, called_model, prompt_chars=prompt_chars)
+        run_key = current_run_key() or None
+        try:
+            admission = admit_call(self._meter, cost, self._budget, self._run_budget,
+                                   wait_secs=min(ROOM_WAIT_SECS, max(0, admitted_deadline - loop.time())) if admitted_deadline is not None else ROOM_WAIT_SECS)
+            hold = await asyncio.wait_for(admission, max(0.0, whole_deadline - loop.time())) if whole_deadline is not None else await admission
+        except BaseException as error:
+            if isinstance(error, BudgetExceededError):
+                self._audit(audit_id, 1, FailureMode.BUDGET_EXCEEDED, 0.0, 0, 0, False, strategy, model=called_model)
+            await self._aclose(source)
+            if isinstance(error, TimeoutError):
+                self._audit(audit_id, 1, FailureMode.TIMEOUT, self._timeout_secs * 1000, 0, 0, False, strategy, model=called_model)
+                raise ModelCallTimeout("background admission exceeded its whole-call deadline") from error
+            raise
 
         loop = asyncio.get_running_loop()
         startup_timeout = self._inner.first_token_timeout_secs or 0.0
-        deadline = self._stream_deadline(loop.time(), startup=True)
+        deadline = whole_deadline if whole_deadline is not None else self._stream_deadline(loop.time(), startup=True)
         awaiting_first_token = startup_timeout > 0
         started = now_ms()
         tokens_in = tokens_out = 0
         recorded = False
+        settled = False
+        usage_event = None
         _workflow_stream_observation(
             "start", audit_id, provider=self._provider_name, model=self._model
         )
@@ -368,18 +545,30 @@ class ModelCallGuard(ModelProvider):
                     and (event.text or event.kind in {EVENT_TOOL_CALL, EVENT_COMPLETE})
                 ):
                     awaiting_first_token = False
-                    deadline = self._stream_deadline(loop.time())
+                    if whole_deadline is None:
+                        deadline = self._stream_deadline(loop.time())
+                # Providers may report cumulative usage before a terminal signal. Keep the
+                # latest report, never add repeated/chunk totals as independent calls.
+                if (event.input_tokens or event.output_tokens or event.cost_usd
+                        or event.tool_meta.get("usage_reported")):
+                    usage_event = event
                 if event.kind == EVENT_COMPLETE and not recorded:
                     tokens_in = int(getattr(event, "input_tokens", 0) or 0)
                     tokens_out = int(getattr(event, "output_tokens", 0) or 0)
-                    price = self._estimate_dollars(event, tokens_in, tokens_out)
+                    price = self._estimate_dollars(event, tokens_in, tokens_out, model=called_model)
+                    usage_reported = bool(event.tool_meta.get("usage_reported") or tokens_in or tokens_out or event.cost_usd)
+                    if hold is not None and not usage_reported:
+                        tokens_in = max(0, hold.tokens - hold.answer_tokens)
+                        tokens_out = hold.answer_tokens
+                        price = replace(price, cost_usd=hold.dollars if price.priced else None,
+                                        estimated=True)
                     dollars = float(price.cost_usd or 0.0)
-                    self._breaker.record_success()
-                    self._meter.charge(
-                        tokens_in + tokens_out,
-                        dollars,
-                        run_key=current_run_key() or None,
-                    )
+                    self._record_success()
+                    self._meter.settle(hold, ref=cost.ref, tokens=tokens_in + tokens_out,
+                                       answer_tokens=tokens_out, dollars=dollars,
+                                       priced=price.priced, run_key=run_key,
+                                       usage_reported=usage_reported)
+                    settled = True
                     self._audit(
                         audit_id,
                         1,
@@ -393,6 +582,7 @@ class ModelCallGuard(ModelProvider):
                         priced=price.priced,
                         price_source=price.source,
                         estimated=price.estimated,
+                        model=called_model,
                     )
                     recorded = True
                 if event.kind == EVENT_COMPLETE:
@@ -402,6 +592,10 @@ class ModelCallGuard(ModelProvider):
                         else {}
                     )
                     metadata["audit_id"] = audit_id
+                    metadata["spend_charged"] = True
+                    metadata["priced"] = price.priced
+                    metadata["price_source"] = price.source
+                    metadata["charged_cost_usd"] = price.cost_usd
                     event.tool_meta = metadata
                 _workflow_stream_observation(
                     "event",
@@ -415,8 +609,22 @@ class ModelCallGuard(ModelProvider):
                     ),
                 )
                 yield event
+            if not recorded:
+                raise AnswerCutOff(
+                    adapter=self._provider_name,
+                    missing="a completion event",
+                    model=self._model,
+                )
         except TimeoutError:
-            self._breaker.record_failure()
+            failed_price = None
+            if not settled and usage_event is not None:
+                tokens_in, tokens_out = usage_event.input_tokens, usage_event.output_tokens
+                failed_price = self._estimate_dollars(usage_event, tokens_in, tokens_out, model=called_model)
+                self._meter.settle(hold, ref=cost.ref, tokens=tokens_in + tokens_out,
+                                   answer_tokens=tokens_out, dollars=float(failed_price.cost_usd or 0),
+                                   priced=failed_price.priced, run_key=run_key, usage_reported=True)
+                settled = True
+            self._record_failure()
             await self._aclose(source)
             if not recorded:
                 self._audit(
@@ -424,10 +632,14 @@ class ModelCallGuard(ModelProvider):
                     1,
                     FailureMode.TIMEOUT,
                     now_ms() - started,
-                    0,
-                    0,
+                    tokens_in,
+                    tokens_out,
                     False,
                     strategy,
+                    dollars=float(failed_price.cost_usd or 0) if failed_price else 0,
+                    priced=failed_price.priced if failed_price else None,
+                    price_source=failed_price.source if failed_price else "",
+                    model=called_model,
                 )
             raise ModelCallTimeout(
                 f"model call for use case {self._use_case!r} (provider "
@@ -437,37 +649,45 @@ class ModelCallGuard(ModelProvider):
             await self._aclose(source)
             raise
         except Exception as error:
+            failed_price = None
+            if not settled and usage_event is not None:
+                tokens_in, tokens_out = usage_event.input_tokens, usage_event.output_tokens
+                failed_price = self._estimate_dollars(usage_event, tokens_in, tokens_out, model=called_model)
+                self._meter.settle(hold, ref=cost.ref, tokens=tokens_in + tokens_out,
+                                   answer_tokens=tokens_out, dollars=float(failed_price.cost_usd or 0),
+                                   priced=failed_price.priced, run_key=run_key, usage_reported=True)
+                settled = True
             if not recorded:
-                self._breaker.record_failure()
+                self._record_failure()
                 self._audit(
                     audit_id,
                     1,
-                    error.mode if isinstance(error, FirstTokenTimeout) else FailureMode.PROVIDER_ERROR,
+                    error.mode if isinstance(error, GuardError) else FailureMode.PROVIDER_ERROR,
                     now_ms() - started,
                     tokens_in,
                     tokens_out,
                     False,
                     strategy,
+                    dollars=float(failed_price.cost_usd or 0) if failed_price else 0,
+                    priced=failed_price.priced if failed_price else None,
+                    price_source=failed_price.source if failed_price else "",
+                    model=called_model,
                 )
             raise
         finally:
+            await self._aclose(source)
+            # Timeouts/cancellation can follow a billed usage event too.
+            if not settled and usage_event is not None:
+                failed_price = self._estimate_dollars(usage_event, usage_event.input_tokens, usage_event.output_tokens, model=called_model)
+                self._meter.settle(hold, ref=cost.ref, tokens=usage_event.input_tokens + usage_event.output_tokens,
+                                   answer_tokens=usage_event.output_tokens, dollars=float(failed_price.cost_usd or 0),
+                                   priced=failed_price.priced, run_key=run_key, usage_reported=True)
+            else:
+                self._meter.release(hold)
             _workflow_stream_observation("end", audit_id, completed=recorded)
 
-        if not recorded:
-            self._breaker.record_success()
-            self._audit(
-                audit_id,
-                1,
-                FailureMode.NONE,
-                now_ms() - started,
-                tokens_in,
-                tokens_out,
-                True,
-                strategy,
-            )
-
     def _estimate_dollars(
-        self, event: LLMEvent, tokens_in: int, tokens_out: int
+        self, event: LLMEvent, tokens_in: int, tokens_out: int, *, model: str | None = None
     ):
         """Resolve cost and provenance once for the budget and audit paths."""
         from gideon.engine.routing.rates import resolve_effective_price
@@ -483,7 +703,7 @@ class ModelCallGuard(ModelProvider):
         )
         return resolve_effective_price(
             self._provider_name,
-            self._model,
+            model or self._model,
             input_tokens=tokens_in,
             output_tokens=tokens_out,
             cache_read_tokens=int(getattr(event, "cache_read_tokens", 0) or 0),
@@ -509,6 +729,7 @@ class ModelCallGuard(ModelProvider):
         priced: bool | None = None,
         price_source: str = "",
         estimated: bool = True,
+        model: str | None = None,
     ) -> None:
         requested_temperature = getattr(
             self._inner, "sampling_temperature", None
@@ -541,7 +762,7 @@ class ModelCallGuard(ModelProvider):
             ts=time.time(),
             use_case=self._use_case,
             provider=self._provider_name,
-            model=self._model,
+            model=model or self._model,
             attempt=attempt,
             failure_mode=mode.value,
             latency_ms=round(latency_ms, 1),
@@ -653,7 +874,7 @@ def _is_local_provider(provider: ModelProvider) -> bool:
 
         reference = str(getattr(provider, "served_model_ref", "") or "")
         name = reference.partition(":")[0] if reference else ""
-        return serving_is_local(name, actual_provider=provider)
+        return serving_is_local(name, model=reference.partition(":")[2], actual_provider=provider)
     except Exception:
         return False
 
@@ -681,7 +902,6 @@ def wrap_model_call_guard(
     """
     if isinstance(provider, ModelCallGuard):
         return provider
-    effective_scan = "warn" if _is_local_provider(provider) else scan_mode
     return ModelCallGuard(
         provider,
         use_case=use_case,
@@ -690,7 +910,7 @@ def wrap_model_call_guard(
         budget=budget,
         run_budget=run_budget,
         meter=meter,
-        scan_mode=effective_scan,
+        scan_mode=scan_mode,
         breaker=breaker,
         timeout_secs=timeout_secs,
         routed=routed,

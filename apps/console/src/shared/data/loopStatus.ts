@@ -13,6 +13,7 @@ const LOOP_STATUS: Record<string, LoopStatusLook> = {
   review: { label: 'Review', accent: 'var(--color-info)' },
   ready: { label: 'Ready', accent: 'var(--color-info)' },
   running: { label: 'Running', accent: 'var(--color-primary)' },
+  held: { label: 'Held', accent: 'var(--color-warn)' },
   paused: { label: 'Paused', accent: '' },
   stagnant: { label: 'Stalled', accent: 'var(--color-warn)' },
   blocked: { label: 'Blocked', accent: 'var(--color-warn)' },
@@ -35,7 +36,8 @@ export function loopStatusColor(status: string): string {
   return loopStatusLook(status).accent || NEUTRAL_ACCENT
 }
 
-export function effectiveLoopStatus(status: string, stopReason?: string | null): string {
+export function effectiveLoopStatus(status: string, stopReason?: string | null, held?: string | null): string {
+  if (status === 'running' && held) return 'held'
   return status === 'complete' && stopReason && stopReason !== 'done' ? 'ended_early' : status
 }
 

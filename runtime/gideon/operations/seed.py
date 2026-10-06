@@ -150,9 +150,9 @@ class SeedDestination:
         target = _resolve_target()
         if not target.exists():
             return target
-        if not any(target.iterdir()):
-            if not target.is_symlink():
-                target.rmdir()
+        from gideon.engine.gateway_base import CLAIM_FILE
+        entries = [entry for entry in target.iterdir() if entry.name != CLAIM_FILE]
+        if not entries:
             return target
         if not self.replace:
             raise SeedError(
@@ -164,14 +164,18 @@ class SeedDestination:
                 f"refusing to --seed-replace a symlinked $GIDEON_HOME: {target}. Point it at a real directory.",
                 rail=SeedError.RAIL_SYMLINK_REPLACE,
             )
-        shutil.rmtree(target)
+        for entry in entries:
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
         return target
 
 
 def seed(fixture_name: str, *, replace: bool = False) -> None:
     source = _resolve_fixture(fixture_name)
     destination = SeedDestination(replace).prepare()
-    shutil.copytree(source, destination)
+    shutil.copytree(source, destination, dirs_exist_ok=True)
 
 
 @dataclass(frozen=True)

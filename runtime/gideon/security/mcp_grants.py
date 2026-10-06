@@ -120,14 +120,17 @@ def definition(server: Any) -> dict[str, Any]:
             oauth_fields[key] = {"reference": reference or ""}
         else:
             oauth_fields[key] = {"value": value}
+    from gideon.integrations.mcp_argument_secrets import sealed_arguments, sealed_address, validate_references
+
+    validate_references(name, {"args": list(args), "url": url})
     return {
         "name": name,
         "source": source,
         "transport": _transport(server, url, command),
         "command": command,
-        "args": list(args),
+        "args": sealed_arguments(list(args)),
         "cwd": cwd,
-        "url": url,
+        "url": sealed_address(url),
         "env": _credential_fields(server, "env", name),
         "headers": _credential_fields(server, "headers", name),
         "oauth": oauth_fields,
@@ -148,6 +151,31 @@ def key(server: Any) -> str:
 
 def revision(server: Any) -> str:
     return seal(content(server))
+
+
+def carry_over(before: Any, after: Any) -> bool:
+    """Migrate only the book's exact prior consent to an equivalent masked definition."""
+    if not _owner_managed(before) or not _owner_managed(after):
+        return False
+    try:
+        earlier, later = definition(before), definition(after)
+        if earlier != later:
+            return False
+        legacy = {**earlier, "args": list(_value(before, "args", []) or []),
+                  "url": _value(before, "url", "") or ""}
+        written = json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        with BOOK._locked():
+            grants = BOOK._read(strict=True)
+            entry = grants.get(key(before))
+            if not entry or entry.get("seal") not in {seal(written), seal(content(before))}:
+                return False
+            replacement = {**entry, "seal": seal(content(after))}
+            if entry != replacement:
+                grants[key(after)] = replacement
+                BOOK._write(grants)
+        return True
+    except (McpGrantDefinitionError, OSError, TypeError, ValueError):
+        return False
 
 
 def exempt(server: Any) -> bool:

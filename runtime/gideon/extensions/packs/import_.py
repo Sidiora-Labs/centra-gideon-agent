@@ -823,6 +823,34 @@ def _audit(
         logger.debug("pack import SEL audit failed for %s", operation, exc_info=True)
 
 
+def _landing(home: Path, relative: str) -> Path:
+    from gideon.operations.durability.home_paths import home_path, LinkInTheWay
+    try:
+        return home_path(home, relative)
+    except LinkInTheWay as link:
+        raise PackImportRefused("link", f"pack destination left unchanged: {link}") from link
+    except ValueError as error:
+        raise PackImportRefused("integrity", f"invalid pack destination: {relative}") from error
+
+
+def refuse_links(home: Path, parsed, stage: str, import_id: str) -> None:
+    """Validate every publication destination before a pack starts its journal."""
+    from gideon.extensions.packs.component_paths import component_path
+    from gideon.extensions.packs.installed import LEDGER_FILE
+    for relative in (f"packs/.installing/{import_id}.json", f"packs/{LEDGER_FILE}",
+                     f"packs/{LEDGER_FILE}.lock", f"packs/staged/{stage}/config_subset.json",
+                     f"packs/staged/{stage}/{pack_roster.ROSTER_FILE}"):
+        _landing(home, relative)
+    for component in parsed:
+        path = component_path(component.kind, component.target_id, home, stage)
+        if path is None:
+            raise PackImportRefused("integrity", "invalid component destination")
+        _landing(home, path.relative_to(home).as_posix())
+        if component.kind == "skill":
+            for item in component.skill_files or []:
+                _landing(home, (path.relative_to(home) / str(item.get("path", ""))).as_posix())
+
+
 class _Journal:
     """Records every home write BEFORE it happens so a fault unwinds to pre-import state.
 
@@ -835,8 +863,8 @@ class _Journal:
     """
 
     def __init__(self, home: Path, import_id: str) -> None:
-        self._dir = home / "packs" / ".installing"
-        self._path = self._dir / f"{import_id}.json"
+        self._dir = _landing(home, "packs/.installing")
+        self._path = _landing(home, f"packs/.installing/{import_id}.json")
         self._entries: list[dict[str, str]] = []
         self._created_installing = not self._dir.exists()
         self._created_packs = not (home / "packs").exists()
@@ -844,7 +872,9 @@ class _Journal:
         self._home = home
 
     def _flush(self) -> None:
-        self._path.write_text(json.dumps(self._entries, indent=2), encoding="utf-8")
+        from gideon.core.atomic_write import atomic_write
+        _landing(self._home, self._path.relative_to(self._home).as_posix())
+        atomic_write(self._path, json.dumps(self._entries, indent=2), mode=0o600)
 
     def record_mkdir(self, path: Path) -> None:
         self._entries.append({"op": "mkdir", "path": str(path)})
@@ -903,6 +933,7 @@ class _Journal:
 
 def _mkdir_journaled(journal: _Journal, path: Path) -> None:
     """``mkdir -p`` while journaling each directory level this import newly creates."""
+    _landing(journal._home, path.relative_to(journal._home).as_posix())
     to_create: list[Path] = []
     cur = path
     while not cur.exists():
@@ -920,7 +951,9 @@ def _write_component_file(path: Path, text: str) -> None:
     injects a fault by patching THIS to raise, exercising the real rollback."""
     from gideon.core.atomic_write import atomic_write
 
-    atomic_write(path, text)
+    from gideon.operations.durability.home_paths import guard_path
+    guard_path(path)
+    atomic_write(path, text, mode=0o600)
 
 
 def _staged_dir(home: Path, stage: str) -> Path:
@@ -1159,6 +1192,7 @@ def import_pack(
 
         stage = plan.name or "pack"
         import_id = uuid.uuid4().hex[:16]
+        refuse_links(home, parsed, stage, import_id)
         journal = _Journal(home, import_id)
         registry = get_default_skills_registry()
         mp_name = f"pack-import:{plan.name}:{import_id}"

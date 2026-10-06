@@ -1,6 +1,7 @@
 """Abstract base for action providers."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,6 +23,17 @@ class ActionContext:
     context: str = ""
     payload: dict[str, Any] = field(default_factory=dict)
     execution_cwd: str = ""
+    trigger_id: str = ""
+    # Authenticated host provenance, never read from the action's JSON payload.
+    accepted_origin: Any = field(default=None, repr=False)
+
+
+def run_identity(ctx: Any, key: str) -> str:
+    """Read identity stamped by the native workflow-step dispatcher."""
+    if getattr(ctx, "event", "") != "workflow_node":
+        return ""
+    payload = getattr(ctx, "payload", None)
+    return str((payload if isinstance(payload, dict) else {}).get(key, "") or "")
 
 
 @dataclass
@@ -38,6 +50,10 @@ class ActionResult:
     outcome: str = ""
     agent_error: "AgentError | None" = None
     reversal: str = ""
+    work_id: str = ""
+    completion: Callable[[], Awaitable["ActionResult"]] | None = field(
+        default=None, repr=False
+    )
 
 
 def provider_failure(provider_name: str, exc: BaseException) -> AgentError:

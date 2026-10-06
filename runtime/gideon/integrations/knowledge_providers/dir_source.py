@@ -311,19 +311,46 @@ class DirSourceProvider(KnowledgeSourceProvider):
 
         return canonicalize(str((spec or {}).get("path") or ""))
 
-    def _read(self, spec: dict, rel: str) -> str | None:
-        """File text, or None when it cannot be read (fail-open per file). Read only at
-        EMIT time — never while a change is still settling — so a half-written file is
-        not what gets indexed."""
+    async def _read(self, spec: dict, rel: str) -> str | None:
+        """Read a declared root's settled file once, decode and admit owned bytes."""
+        from gideon.automation.triggers.pathguard import canonicalize, PathScope
+        from gideon.workspace.uploads.content_intake import approve_path, approve_text
+        from gideon.cognition.knowledge.file_items import _owned_io
         root = self._resolved_path(spec)
-        if not root:
-            return None
+        if not root or Path(rel).is_absolute() or '..' in Path(rel).parts:
+            raise PermissionError('Source file is outside its declared root.')
+        path = Path(root) / rel
+        if not PathScope(root).contains(canonicalize(str(path))):
+            raise PermissionError('Source file is outside its declared root.')
+        from gideon.workspace.uploads.content_intake import source_stamp
+        original_stamp = source_stamp(path)
+        snapshot = await approve_path(path, surface='watched_folder', expected_stamp=original_stamp)
         try:
-            with open(Path(root) / rel, "rb") as fh:
-                raw = fh.read(MAX_FILE_BYTES)
-        except OSError:
-            return None
-        return raw.decode("utf-8", errors="replace")
+            def decode():
+                import codecs
+                snapshot.require_approved()
+                raw = os.pread(snapshot._fd, MAX_FILE_BYTES, 0)
+                for mark, codec in ((codecs.BOM_UTF32_LE, 'utf-32'), (codecs.BOM_UTF32_BE, 'utf-32'),
+                                    (codecs.BOM_UTF16_LE, 'utf-16'), (codecs.BOM_UTF16_BE, 'utf-16')):
+                    if raw.startswith(mark):
+                        return raw.decode(codec, errors='replace')
+                if b'\0' in raw[:8192]:
+                    from gideon.workspace.uploads.content_intake import IntakeRefused
+                    raise IntakeRefused('upload_type_unsupported', 'A binary file cannot be indexed as watched text.', 415)
+                return raw.decode('utf-8', errors='replace')
+            text = await _owned_io(decode)
+            text = (await approve_text(text, surface='watched_folder_text')).text
+            if not PathScope(root).contains(canonicalize(str(path))):
+                raise PermissionError('Source file is no longer inside its declared root.')
+            from gideon.workspace.uploads.content_intake import source_stamp
+            # approve_path checked identity through the raw scan; decoding/text
+            # admission can await another child, so also bind the final handoff.
+            if source_stamp(path) != original_stamp:
+                from gideon.workspace.uploads.content_intake import IntakeRefused
+                raise IntakeRefused('upload_content_changed', 'The watched file changed while it was read.', 409)
+            return text
+        finally:
+            snapshot.close()
 
     def diff(self, sigs: dict[str, list], baseline: dict[str, list]) -> dict[str, str]:
         """``{relative_path: change}`` for everything that differs from the baseline."""
@@ -379,7 +406,17 @@ class DirSourceProvider(KnowledgeSourceProvider):
                 elapsed = now - float(observed[0])
                 if 0.0 <= elapsed < window:
                     continue
-            emitted = self._emit(spec, rel, change, now)
+            from gideon.workspace.uploads.content_intake import IntakeRefused
+            try:
+                emitted = await self._emit(spec, rel, change, now)
+            except IntakeRefused as exc:
+                if exc.status in {503, 409}:
+                    from gideon.integrations.knowledge_providers.base import HEALTH_DEGRADED
+                    return SourcePollResult(error=exc.code, cursor=cursor, health_status=HEALTH_DEGRADED)
+                emitted = SourceItem(guid=rel, title='', content='', change=change)
+                emitted._intake_refusal = exc
+            except (OSError, PermissionError):
+                emitted = None
             if emitted is None:
                 read_errors += 1
                 state.sigs[rel] = sigs[rel]
@@ -394,6 +431,8 @@ class DirSourceProvider(KnowledgeSourceProvider):
         state.gone = gone
         result = SourcePollResult(items=items, cursor=state.dump())
         if read_errors:
+            from gideon.integrations.knowledge_providers.base import HEALTH_DEGRADED
+            result.health_status = HEALTH_DEGRADED
             if not items:
                 result.error = f"{read_errors} file(s) could not be read"
             else:
@@ -402,7 +441,7 @@ class DirSourceProvider(KnowledgeSourceProvider):
                 )
         return result
 
-    def _emit(self, spec: dict, rel: str, change: str, now: float) -> SourceItem | None:
+    async def _emit(self, spec: dict, rel: str, change: str, now: float) -> SourceItem | None:
         """Build the sighting for a settled change (content read only for a live file)."""
         from datetime import datetime
 
@@ -413,7 +452,7 @@ class DirSourceProvider(KnowledgeSourceProvider):
                 change=CHANGE_DELETED,
                 metadata={"source_deleted_at": datetime.fromtimestamp(now).isoformat()},
             )
-        content = self._read(spec, rel)
+        content = await self._read(spec, rel)
         if content is None:
             return None
         return SourceItem(

@@ -62,6 +62,7 @@ class ChannelCapabilities:
     rich_text: bool = False
     typing_indicator: bool = False
     max_text_len: int = 0
+    groups: bool = False
     owner_pairing: bool = False
     speaks_as_owner: bool = False
 
@@ -79,6 +80,9 @@ class ChannelTransportProvider(ABC):
     transports declare their own credentials/lifecycle (e.g. Slack tokens from
     the ``slack-channel`` extension instance config).
     """
+
+    def sender_pairing_hint(self) -> str:
+        return ""
 
     @property
     @abstractmethod

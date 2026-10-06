@@ -42,7 +42,7 @@ export function NotificationsPage({ query, setQuery, navigate }: Pick<RouteProps
     options: [
       { key: 'all', label: 'All', count: items?.length ?? 0 },
       { key: 'unread', label: 'Unread', count: unread },
-      ...kinds.map((k) => ({ key: k, label: kindMeta(k).label, count: counts.get(k) ?? 0 })),
+      ...kinds.map((k) => ({ key: k, label: kindMeta(k, items?.find((n) => n.kind === k)?.kind_label).label, count: counts.get(k) ?? 0 })),
     ],
   }), [items, unread, kinds, counts, filter, setFilter])
 
@@ -67,10 +67,10 @@ export function NotificationsPage({ query, setQuery, navigate }: Pick<RouteProps
           </ListControls>
         : undefined}
       panel={open && (
-        <SidePanel key={open.ts} fillHeight storeKey="notif-panel-w" icon={(() => { const km = kindMeta(open.kind); return <km.icon size={18} style={{ color: km.tone }} /> })()} title={open.title} onClose={() => setOpenTs("")}>
+        <SidePanel key={open.ts} fillHeight storeKey="notif-panel-w" icon={(() => { const km = kindMeta(open.kind, open.kind_label); return <km.icon size={18} style={{ color: km.tone }} /> })()} title={open.title} onClose={() => setOpenTs("")}>
           <div className="grid gap-l">
             <div className="flex flex-wrap items-center gap-s text-[0.8125rem]">
-              {(() => { const km = kindMeta(open.kind); return <span className="inline-flex items-center gap-1.5 rounded-pill px-m h-7" style={toneChipSkin(km.tone, 16)}><km.icon size={13} /> {km.label}</span> })()}
+              {(() => { const km = kindMeta(open.kind, open.kind_label); return <span className="inline-flex items-center gap-1.5 rounded-pill px-m h-7" style={toneChipSkin(km.tone, 16)}><km.icon size={13} /> {km.label}</span> })()}
               <span className="text-on-surface-low">{clockTime(open.ts)}</span>
               {open.acked && <span className="text-on-surface-low inline-flex items-center gap-1"><Check size={13} /> read</span>}
             </div>
@@ -162,7 +162,7 @@ export function NotificationsPage({ query, setQuery, navigate }: Pick<RouteProps
 }
 
 function Row({ n, index, now, onOpen, onAck, onUnack, onDelete }: { n: NotificationItem; index: number; now: number; onOpen: () => void; onAck: () => void; onUnack: () => void; onDelete: () => void }) {
-  const km = kindMeta(n.kind)
+  const km = kindMeta(n.kind, n.kind_label)
 
   const subject = rowSubject([n.title, firstLine(n.body ?? '')])
 

@@ -513,11 +513,12 @@ def vault_for(service: "MemoryService") -> MemoryVault | None:
     )
 
 
-def mirror_after_consolidation(service: "MemoryService") -> None:
+async def mirror_after_consolidation(service: "MemoryService") -> None:
     try:
         selected = vault_for(service)
         if selected is None:
             return
-        selected.sync()
+        from gideon.cognition.knowledge.file_items import _owned_io
+        await _owned_io(selected.sync)
     except Exception:
         logger.debug("memory vault: post-consolidation mirror failed", exc_info=True)

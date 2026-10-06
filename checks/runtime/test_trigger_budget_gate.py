@@ -98,7 +98,7 @@ def test_the_production_tick_SUPPLIES_the_budget():
     """
     import inspect
 
-    assert "budget_remaining=" in inspect.getsource(svc.TickPass.context_for)
+    assert "budget_remaining=" in inspect.getsource(svc.fire_context)
 
 
 def test_RUN_COUNT_is_incremented_and_PERSISTED(store, tmp_path):
@@ -361,7 +361,8 @@ def test_the_counter_does_NOT_RESURRECT_a_retired_one_shot(store, tmp_path):
     )
     assert [f.trigger.id for f in result.fires] == ["clock:once"]
     assert result.retired == ["clock:once"]
-    assert store.get("clock:once") is None, "a retired one-shot must stay deleted"
+    retired = store.get("clock:once")
+    assert retired is not None and not retired.trigger.enabled, "a retired one-shot must remain inactive with its history preserved"
 
 
 def test_a_one_shot_that_KEEPS_its_row_is_still_disabled(store, tmp_path):

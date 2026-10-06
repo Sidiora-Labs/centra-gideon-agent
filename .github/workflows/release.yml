@@ -192,8 +192,10 @@ jobs:
     - name: Create .venv for the bundled backend build
       run: |
         uv python install 3.12
-        uv venv .venv --python 3.12
-        uv pip install --python .venv/bin/python '.[anthropic,openai,slack]' pyinstaller
+        npm ci
+        npm run build --workspace=apps/console
+        uv sync --locked --no-editable --python 3.12 --extra anthropic --extra openai --extra slack
+        uv pip install --python .venv/bin/python pyinstaller
     - name: Build unsigned AppImage + deb
       run: make desktop-dist-linux
     - name: Smoke the artifacts (release-blocking)
@@ -247,8 +249,10 @@ jobs:
       run: |
         test "$(uname -m)" = arm64
         uv python install 3.12
-        uv venv .venv --python 3.12
-        uv pip install --python .venv/bin/python '.[anthropic,openai,slack]' pyinstaller
+        npm ci
+        npm run build --workspace=apps/console
+        uv sync --locked --no-editable --python 3.12 --extra anthropic --extra openai --extra slack
+        uv pip install --python .venv/bin/python pyinstaller
     - name: Stage native backend and unpacked desktop
       run: |
         pnpm --dir apps/console run build

@@ -218,14 +218,22 @@ def _revoke_cmd(args) -> int:
         )
         return 2
 
-    from gideon.core.config.loader import _DEFAULT_PORT
-
-    port = int(getattr(args, "port", 0) or _DEFAULT_PORT)
-    if _revoke_via_gateway(port):
+    from gideon.engine.home_gateway import require_home_gateway, NoGatewayRunning, HomeGatewayMismatch
+    try:
+        port = require_home_gateway(getattr(args, "port", None) or None)
+    except NoGatewayRunning:
+        port = None
+    except HomeGatewayMismatch as error:
+        print(f"❌ {error}")
+        return 1
+    if port is not None and _revoke_via_gateway(port):
         print("✅ Revoked every dashboard session (live gateway + on disk).")
         print("   Your password and 2FA enrollment are untouched.")
         return 0
 
+    if port is not None:
+        print("❌ Live gateway revocation failed; refusing an offline store clear.")
+        return 1
     from gideon.interfaces.dashboard.token_auth import revoke_all_sessions
 
     revoke_all_sessions()
@@ -243,8 +251,10 @@ def _revoke_via_gateway(port: int) -> bool:
     import json as _json
     import urllib.error
     import urllib.request
+    from gideon.engine.home_gateway import require_home_gateway, open_loopback
 
     from gideon.core.config.loader import config_dir
+    require_home_gateway(port)
 
     try:
         secret = (config_dir() / ".local_secret").read_text(encoding="utf-8").strip()
@@ -254,13 +264,13 @@ def _revoke_via_gateway(port: int) -> bool:
         return False
 
     req = urllib.request.Request(
-        f"http://localhost:{port}/api/logout",
+        f"http://127.0.0.1:{port}/api/logout",
         method="POST",
         headers={"X-Local-Secret": secret, "Content-Type": "application/json"},
         data=b"{}",
     )
     try:
-        with urllib.request.urlopen(
+        with open_loopback(
             req, timeout=5
         ) as resp:  # nosec B310 - fixed loopback URL
             return bool(_json.loads(resp.read()).get("ok"))

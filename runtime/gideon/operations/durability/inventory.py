@@ -90,16 +90,44 @@ class StateEntry:
     derived: bool = False
     tombstones: bool = False
     db_container: bool = False
+    partitions: tuple[str, ...] = field(default_factory=tuple)
     machine_local: bool = False
     help: str = ""
     derived_within: tuple[str, ...] = field(default_factory=tuple)
     machine_local_fields: tuple[str, ...] = field(default_factory=tuple)
     arrival_defaults: tuple[tuple[str, object], ...] = field(default_factory=tuple)
     records_field: str = ""
+    merged_in: bool = True
+    exported_on_write: bool = False
+
+
+def immutable_consent_spec(entry: StateEntry, row) -> bool:
+    """Only a digest-verified pinned workflow specification bypasses arrival defaults."""
+    if entry.id != "workflows" or not isinstance(row, dict):
+        return False
+    identity = str(row.get("id", ""))
+    if not identity.startswith("consent_specs/"):
+        return False
+    digest = identity.removeprefix("consent_specs/")
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        return False
+    spec = row.get("data")
+    if not isinstance(spec, dict):
+        return False
+    try:
+        from gideon.automation.workflows.automation_versions import digest as spec_digest
+        from gideon.automation.workflows.models import WorkflowDef
+        return WorkflowDef.from_dict(spec).to_dict() == spec and spec_digest(spec) == digest
+    except (TypeError, ValueError, KeyError, AttributeError):
+        return False
 
 
 def shared_value(entry: StateEntry, value):
     """Return the shareable projection of a row, omitting machine-local fields."""
+    if isinstance(value, dict) and ("text" in value or "base64" in value):
+        return value
+    if immutable_consent_spec(entry, value):
+        return value
     if not entry.machine_local_fields:
         return value
     if isinstance(value, dict):
@@ -124,6 +152,10 @@ def shared_value(entry: StateEntry, value):
 
 def apply_machine_local_fields(entry: StateEntry, incoming, local=None):
     """Merge a shared value while retaining this machine's authority and runtime fields."""
+    if isinstance(incoming, dict) and ("text" in incoming or "base64" in incoming):
+        return incoming
+    if immutable_consent_spec(entry, incoming):
+        return incoming
     if not entry.machine_local_fields:
         return incoming
     defaults = dict(entry.arrival_defaults)
@@ -833,6 +865,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         path="triggers.json",
         domain=DOMAIN_AUTOMATION,
         merge=MERGE_UNION_BY_ID,
+        exported_on_write=True,
         help="the one trigger store (automations, event triggers, hooks)",
         machine_local_fields=(
             "enabled", "next_fire_at", "last_run_id", "run_owner_pid", "run_count",
@@ -876,6 +909,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         path="hooks.json",
         domain=DOMAIN_AUTOMATION,
         merge=MERGE_UNION_BY_ID,
+        exported_on_write=True,
         help="lifecycle triggers",
         machine_local_fields=(
             "enabled", "approved", "consent", "run_count", "last_run", "last_run_id",
@@ -963,6 +997,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         path="agents",
         domain=DOMAIN_PLATFORM,
         merge=MERGE_UNION_BY_ID,
+        exported_on_write=True,
         help="agent definitions",
         machine_local_fields=(
             "enabled", "approved", "consent", "execution_grants", "permissions",
@@ -1005,6 +1040,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         domain=DOMAIN_PLATFORM,
         merge=MERGE_UNION_BY_ID,
         help="installed app copies (their data/ holds real state)",
+        partitions=("apps/*/data/*.db", "apps/.*.data/*.db"),
         derived_within=("*/venv",),
     ),
     StateEntry(
@@ -1316,6 +1352,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         path="runners",
         domain=DOMAIN_CONFIG,
         merge=MERGE_UNION_BY_ID,
+        exported_on_write=True,
         help="user runner catalog",
     ),
     StateEntry(
@@ -1388,6 +1425,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         path="config.json",
         domain=DOMAIN_CONFIG,
         merge=MERGE_REPLACE_ONLY,
+        exported_on_write=True,
         help="the main configuration document",
     ),
     StateEntry(
@@ -1462,6 +1500,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         path="mcp.json",
         domain=DOMAIN_CONFIG,
         merge=MERGE_REPLACE_ONLY,
+        exported_on_write=True,
         help="MCP server configuration",
     ),
     StateEntry(
@@ -1480,6 +1519,24 @@ INVENTORY: tuple[StateEntry, ...] = (
         domain=DOMAIN_CONFIG,
         merge=MERGE_REPLACE_ONLY,
         help="the bound project directory pointer",
+    ),
+    StateEntry(
+        id="agent_overrides",
+        kind=KIND_JSON_FILE,
+        path="agent.json",
+        domain=DOMAIN_PLATFORM,
+        merge=MERGE_REPLACE_ONLY,
+        exported_on_write=True,
+        help="local overrides of the agent settings",
+    ),
+    StateEntry(
+        id="connector_catalog",
+        kind=KIND_JSON_FILE,
+        path="connector_catalog.json",
+        domain=DOMAIN_PLATFORM,
+        merge=MERGE_REPLACE_ONLY,
+        exported_on_write=True,
+        help="connector catalog with local additions",
     ),
     StateEntry(
         id="workspace_dir",
@@ -1584,7 +1641,8 @@ INVENTORY: tuple[StateEntry, ...] = (
         kind=KIND_JSON_FILE,
         path="inbound_clients.json",
         domain=DOMAIN_SECURITY,
-        merge=MERGE_LWW,
+        merge=MERGE_REPLACE_ONLY,
+        merged_in=False,
         help="inbound access clients: labels, bindings and token hashes (never tokens)",
     ),
     StateEntry(
@@ -1593,6 +1651,7 @@ INVENTORY: tuple[StateEntry, ...] = (
         path="inbound_tokens.json",
         domain=DOMAIN_SECURITY,
         merge=MERGE_REPLACE_ONLY,
+        merged_in=False,
         secret=True,
         derived=True,
         help="machine-local inbound token lifecycle authority",
@@ -1786,6 +1845,8 @@ IGNORED: tuple[str, ...] = (
     "session_key",
     "sessions.json",
     "machine_id",
+    "keychain_namespace",
+    ".keychain_namespace.*.tmp",
     "browse",
     "update_check.json",
     "update_releases.json",
@@ -1938,7 +1999,7 @@ def audit_home(home: Path) -> AuditResult:
             continue
         result.unclaimed.append(rel + ("/" if child.is_dir() else ""))
 
-    declared = {e.path for e in sqlite_entries()}
+    declared = {e.path for e in sqlite_entries()} | set(partition_paths(home))
     declared_trees = tuple(e.path + "/" for e in INVENTORY if e.db_container)
     for db in sorted(set(home.rglob("*.db")) | set(home.rglob("*.sqlite3"))):
         rel_db = db.relative_to(home).as_posix()
@@ -1946,5 +2007,18 @@ def audit_home(home: Path) -> AuditResult:
             continue
         if rel_db.startswith(declared_trees):
             continue
-        result.undeclared_dbs.append(rel_db)
+        from gideon.operations.durability.sqlite_files import is_database
+
+        if is_database(db):
+            result.undeclared_dbs.append(rel_db)
     return result
+
+
+def partition_paths(home: Path) -> list[str]:
+    """Discover explicitly declared databases within app-owned data trees."""
+    from gideon.operations.durability.sqlite_files import is_database
+
+    return sorted({path.relative_to(home).as_posix()
+                   for entry in INVENTORY if not entry.secret and not entry.derived
+                   for pattern in entry.partitions for path in home.glob(pattern)
+                   if is_database(path) and not is_ignored(path.relative_to(home).as_posix())})

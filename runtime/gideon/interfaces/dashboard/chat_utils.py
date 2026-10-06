@@ -4,6 +4,8 @@ Redaction, model normalization, queue operations, stream chunk building,
 persona injection, and other helpers used across chat_*.py modules.
 """
 
+from gideon.core.turn_streams import closing_stream
+
 import asyncio
 import functools
 import json
@@ -86,7 +88,7 @@ _extract_bash_command = task_modes.extract_bash_command
 
 
 def task_mode_denies(
-    session: "_ChatSession", title: str, tool_kind: str, tool_input: object
+    session: "_ChatSession", title: str, tool_kind: str, tool_input: object, *, declared: object = ""
 ) -> str:
     """Return a deny-reason for the session's TASK mode, or '' to allow the tool.
 
@@ -97,7 +99,7 @@ def task_mode_denies(
     gate too (which now allows read-only inspection in plan, blocking only writes).
     """
     mode = getattr(session, "_task_mode", "agent")
-    return task_modes.task_mode_denies(mode, title, tool_kind, tool_input)
+    return task_modes.task_mode_denies(mode, title, tool_kind, tool_input, declared=declared)
 
 
 def apply_task_mode(state: ConsoleState, session: "_ChatSession", mode: str) -> None:
@@ -289,15 +291,17 @@ async def stream_slash_command(
         notify(
             f"`{command}` isn't a command this agent can run — sent as a plain message."
         )
-        async for event in client.stream(prompt):
-            yield event
+        async with closing_stream(client.stream(prompt)) as _turn_events:
+            async for event in _turn_events:
+                yield event
         return
 
     produced = 0
     try:
-        async for event in client.stream_command(command):
-            produced += 1
-            yield event
+        async with closing_stream(client.stream_command(command)) as _turn_events:
+            async for event in _turn_events:
+                produced += 1
+                yield event
         return
     except (AcpCommandsUnsupported, AcpMethodNotFound) as exc:
         if produced:
@@ -310,8 +314,9 @@ async def stream_slash_command(
         notify(
             f"`{command}` was rejected as an unknown command — re-sent as a plain message."
         )
-    async for event in client.stream(prompt):
-        yield event
+    async with closing_stream(client.stream(prompt)) as _turn_events:
+        async for event in _turn_events:
+            yield event
 
 
 _SLASH_COMMAND_HINTS: dict[str, str] = {
@@ -844,7 +849,10 @@ def _dequeue_next_message(session, merge_enabled: bool) -> tuple:
     """Drain the queue: merge non-cron messages or pop the first one."""
     if merge_enabled and len(session._queue) > 1:
         to_merge: list[dict] = []
+        first_actor = session._queue[0].get("meta", {}).get("ingress", {}).get("principal")
         for item in list(session._queue):
+            if item.get("meta", {}).get("ingress", {}).get("principal") != first_actor:
+                break
             if item["content"].startswith(CRON_NOTIFY_PREFIX) or item[
                 "content"
             ].startswith(SUBAGENT_COMPLETION_PREFIX):

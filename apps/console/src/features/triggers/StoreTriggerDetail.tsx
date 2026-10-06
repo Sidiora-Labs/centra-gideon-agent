@@ -1,3 +1,4 @@
+import { GrantConsent } from './GrantConsent'
 import { Combobox } from '../../shared/ui/Combobox'
 import { ActionConfig, coerceActionConfig, seedActionConfig } from './ActionConfig'
 import { useEffect, useState } from 'react'
@@ -184,6 +185,7 @@ export function StoreTriggerDetail({ trigger, providers = [], editing, onEditing
 
   return (
     <div className="flex flex-col gap-l px-m py-m">
+      <GrantConsent id={trigger.id} question={trigger.grant_question} required={trigger.grant_required} satisfied={trigger.grant_satisfied} readOnly={readOnly} onChanged={onChanged} />
       {broken.length > 0 && (
         <div
           className="flex items-start gap-2 rounded-lg px-3 py-2 text-[0.8125rem]"

@@ -1,11 +1,12 @@
 import { motion } from 'framer-motion'
+import { LocalModelOnRamp } from './LocalModelOnRamp'
 import { Cpu, Search, Mic, MessagesSquare, Download, Check, Loader2, ShieldCheck } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
 import { LoadError, LoadingStatus } from '../../shared/ui/ListScaffold'
 import { TextLink } from '../../shared/ui/TextLink'
 import { listItemEnter, stagger, spring } from '../../shared/theme/motion'
-import { essentialLane, essentialCandidates, setupErrorText, useEssentialSetup, useProviderConfiguration, useChatModelBinding, type EssentialLane, type ModelPhase } from './essentialSetupState'
+import { essentialLane, essentialCandidates, useEssentialSetup, useProviderConfiguration, useChatModelBinding, type EssentialLane, type ModelPhase } from './essentialSetupState'
 import { ConsentModal, PermissionConsent, CronConsentList } from '../apps/installConsent'
 import { SchemaField } from '../settings/ModelBackends'
 import { SchemaFieldDisclosure } from '../tools/schema'
@@ -155,6 +156,7 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
               <Button variant="secondary" size="sm" onClick={() => void verify()}>Retry model check</Button>
             </div>}
 
+            {isModel && phase === 'pick' && <LocalModelOnRamp bindChat onBound={() => void verify()} />}
             {isModel && phase === 'pick' && providerTypes?.filter((type) => type.capabilities?.includes('chat')).map((type) => (
               <Button key={type.type} variant="secondary" size="sm" onClick={() => selectInstalledProvider(type.app)}>
                 Configure installed {type.label}
@@ -186,6 +188,7 @@ export function EssentialsStep({ readiness, onDone, onSkip, onProgress }: {
                 )}
               </motion.div>
             )}
+            {isModel && modelReady && <LocalModelOnRamp bindChat={false} chatModel={boundLabel} />}
           </section>
         )
       })}

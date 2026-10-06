@@ -428,6 +428,7 @@ class EventActionAttempt:
         excerpt = _fenced_excerpt(trigger.id, occurrence.key, occurrence.value)
         return ActionContext(
             event=f"{occurrence.source}.{occurrence.event_type}",
+            trigger_id=trigger.id,
             context=f"{occurrence.key}: {excerpt}",
             payload=payload,
         )
@@ -493,10 +494,10 @@ class EventActionAttempt:
         if refusal is not None:
             return refusal
         result = await provider.execute(self.trigger.action_config, context)
-        if route.records_reversal and getattr(result, "success", False):
-            from gideon.security.guardrails.rungs import record_reversal
+        if getattr(result, "success", False):
+            from gideon.security.guardrails.rungs import record_execution
 
-            record_reversal(
+            record_execution(
                 route,
                 result,
                 label=self.trigger.action_provider,
@@ -760,13 +761,17 @@ class EventTriggerEngine:
                 from gideon.automation.triggers.claims import write_claim, release_claim
                 from gideon.interfaces.dashboard.handlers.triggers import _dispatch_store_action
 
-                write_claim(decision.claim, base_dir=store.base_dir)
+                from gideon.automation.triggers.claims import acquire_claim
+
+                if not acquire_claim(decision.claim, overlap=current.overlap, base_dir=store.base_dir):
+                    self._record_outcome(t.id, status="skipped_overlap", error="another run acquired the event claim")
+                    return
                 try:
                     ran, note = await _dispatch_store_action(
-                        current, payload, event=f"{source}.{event_type}"
+                        current, payload, event=f"{source}.{event_type}", admitted_claim=decision.claim
                     )
                 finally:
-                    release_claim(t.id, base_dir=store.base_dir)
+                    release_claim(t.id, base_dir=store.base_dir, holder=decision.claim.holder)
                 result = FireOutcome(ran, "" if ran else note)
         except Exception as failure:
             from gideon.integrations.action_providers import provider_failure

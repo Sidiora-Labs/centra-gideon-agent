@@ -15,8 +15,8 @@ afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe('memory document drafts', () => {
   it('survives Studio navigation and guards unload until every draft is saved', async () => {
-    vi.spyOn(api, 'memoryDoc').mockImplementation(async (which) => documents[which])
-    const save = vi.spyOn(api, 'saveMemoryDoc').mockResolvedValue({ ok: true })
+    vi.spyOn(api, 'memoryDoc').mockImplementation(async (which) => ({ content: documents[which], revision: `${which}-initial` }))
+    const save = vi.spyOn(api, 'saveMemoryDoc').mockResolvedValue({ ok: true, revision: 'saved-revision' })
     const onSaved = vi.fn()
 
     const preferencesDraft = `${documents.preferences}\n\nUnsaved detail`
@@ -42,7 +42,7 @@ describe('memory document drafts', () => {
     await waitFor(() => expect((restoredPreferences as HTMLTextAreaElement).value).toBe(preferencesDraft))
     fireEvent.click(screen.getByRole('button', { name: /Save/ }))
     await waitFor(() => {
-      expect(save).toHaveBeenCalledWith('preferences', preferencesDraft)
+      expect(save).toHaveBeenCalledWith('preferences', preferencesDraft, 'preferences-initial')
       expect(onSaved).toHaveBeenCalledTimes(1)
     })
     reopenedPreferences.unmount()
@@ -56,7 +56,7 @@ describe('memory document drafts', () => {
     await waitFor(() => expect((restoredProjects as HTMLTextAreaElement).value).toBe(projectsDraft))
     fireEvent.click(screen.getByRole('button', { name: /Save/ }))
     await waitFor(() => {
-      expect(save).toHaveBeenCalledWith('projects', projectsDraft)
+      expect(save).toHaveBeenCalledWith('projects', projectsDraft, 'projects-initial')
       expect(onSaved).toHaveBeenCalledTimes(2)
     })
 

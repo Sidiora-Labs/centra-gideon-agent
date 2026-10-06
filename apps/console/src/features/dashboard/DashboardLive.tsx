@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { reportingWrite } from '../../app/shell/reportingWrite'
+import { refreshKinds } from '../companion/useLiveLane'
 import { useChatSocket, type WsMessage } from '../../shared/data/useChatSocket'
 import { useVisiblePoll } from '../../shared/data/useVisiblePoll'
 import { api, isFeatureOff } from '../../shared/data/api'
@@ -112,7 +113,16 @@ export function DashboardLiveProvider({ children }: { children: ReactNode }) {
     api.workflowRuns({ limit: 200 }).then((d) => { guard(setWorkflows)(d.runs); guard(setWorkflowsErr)(null) })
       .catch((e) => guard(setWorkflowsErr)(e)).finally(() => markRead('workflows'))
   }, [markRead])
-  const loadTasks = useCallback(() => { api.readyTasks().then((d) => { guard(setTasks)(d); guard(setTasksErr)(null) }).catch((e) => guard(setTasksErr)(e)).finally(() => markRead('tasks')) }, [markRead])
+  const taskRead = useRef(0)
+  const loadTasks = useCallback(() => {
+    const revision = ++taskRead.current
+    api.readyTasks().then((data) => {
+      if (revision !== taskRead.current) return
+      guard(setTasks)(data); guard(setTasksErr)(null)
+    }).catch((error) => {
+      if (revision === taskRead.current) guard(setTasksErr)(error)
+    }).finally(() => { if (revision === taskRead.current) markRead('tasks') })
+  }, [markRead])
   const loadSchedule = useCallback(() => {
     api.triggersHistory(12).then((d) => {
       guard(setSchedule)(d.runs ?? [])
@@ -150,6 +160,13 @@ export function DashboardLiveProvider({ children }: { children: ReactNode }) {
     loadTasks(); loadSchedule(); loadStatus(); loadNotifications(); loadSystem(); loadDiscover(); loadDoctor()
   }, [loadApprovals, loadInbox, loadProposals, loadLoops, loadWorkflows, loadTasks, loadSchedule, loadStatus, loadNotifications, loadSystem, loadDiscover, loadDoctor])
 
+  const taskDebounce = useRef<number | undefined>(undefined)
+  const refreshTasksSoon = useCallback(() => {
+    if (taskDebounce.current !== undefined) return
+    taskDebounce.current = window.setTimeout(() => { taskDebounce.current = undefined; loadTasks() }, 150)
+  }, [loadTasks])
+  useEffect(() => () => { if (taskDebounce.current !== undefined) clearTimeout(taskDebounce.current) }, [])
+
   const workDebounce = useRef<number | undefined>(undefined)
   const refreshWork = useCallback(() => {
     if (workDebounce.current) clearTimeout(workDebounce.current)
@@ -162,11 +179,16 @@ export function DashboardLiveProvider({ children }: { children: ReactNode }) {
     if (t === 'approval' || t === 'approval_resolved') loadApprovals()
     else if (t.startsWith('inbox')) loadInbox()
     else if (t.startsWith('notification')) loadNotifications()
+    else if (t === 'refresh') {
+      const kinds = refreshKinds(m)
+      if (kinds.includes('tasks')) refreshTasksSoon()
+      if (kinds.includes('loops') || kinds.includes('workflow_runs')) refreshWork()
+    }
     else if (t === 'workflow_runs') refreshWork()
     else if (t === 'update_progress' || t === 'chat_status' || t === 'sessions' || t.startsWith('subagent')) {
       refreshWork()
     }
-  }, [loadApprovals, loadInbox, loadNotifications, refreshWork])
+  }, [loadApprovals, loadInbox, loadNotifications, refreshTasksSoon, refreshWork])
 
   useChatSocket(
     onMessage,

@@ -8,7 +8,7 @@ import re
 import time
 import traceback
 import uuid
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -19,6 +19,7 @@ from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
 from gideon.core.config.loader import DASHBOARD_PORT
+from gideon.engine.turn_source import DASHBOARD_SOURCE, source_of
 from gideon.engine.task_modes import (
     is_read_only_bash,
     resolve_effective_risk,
@@ -223,7 +224,8 @@ _DEFAULT_PORT = DASHBOARD_PORT
 _SSE_INTERVAL_SECS = 5
 _NOTIFICATIONS_FILE = "notifications.jsonl"
 _MAX_PERSISTED_NOTIFICATIONS = 200
-_AUTO_COMPACT_NOTICE = "🔄 Auto-compacted at {pct:.0f}%."
+_SESSION_RESTART_NOTICE = ("Restarted the agent’s session at {pct:.0f}% of its context window: "
+                           "{reason}. It continues from this chat’s messages, without earlier tool results.")
 _MAX_SESSION_MESSAGES = (
     10000  # Keep all messages — virtual scrolling handles performance
 )
@@ -295,6 +297,7 @@ class _ChatSession:
         "_suppress_autonudge_rearm",
         "_titled",
         "_resumed_count",
+        "_journal_event_ids",
         "_on_message",
         "_has_reader",
         "_stop_state",
@@ -328,6 +331,8 @@ class _ChatSession:
         "_pending_context",
         "_app",
         "_created_by_app",
+        "_initiator",
+        "_pending_steers",
         "_last_turn_errored",
         "_last_turn_outcome",
         "_followups_task",
@@ -404,6 +409,7 @@ class _ChatSession:
         self._suppress_autonudge_rearm: bool = False
         self._titled: bool = False
         self._resumed_count: int = 0
+        self._journal_event_ids: set[str] = set()
         self._on_message: object | None = None
         self._has_reader: bool = False
         self._stop_state: str = "idle"
@@ -447,6 +453,8 @@ class _ChatSession:
         self._pending_context: list[dict[str, Any]] = []
         self._app: str = ""
         self._created_by_app: str = created_by_app if isinstance(created_by_app, str) else ""
+        self._initiator: dict | None = None
+        self._pending_steers: dict[str, dict] = {}
         self._last_turn_errored: bool = False
         self._last_turn_outcome: str | None = None
         self._followups_task: asyncio.Task | None = None  # type: ignore[type-arg]
@@ -487,12 +495,14 @@ class _ChatSession:
         *,
         broadcast: bool = True,
         meta: dict | None = None,
+        source: Mapping[str, str] = DASHBOARD_SOURCE,
     ) -> None:
         msg: dict[str, Any] = {
             "role": role,
             "content": content,
             "cls": cls,
             "ts": ts or datetime.now(timezone.utc).isoformat(),
+            **source_of(source),
         }
         if meta:
             msg["meta"] = meta
@@ -523,10 +533,12 @@ class _ChatSession:
         self.event.clear()
         return out
 
-    def queue_append(self, content: str, *, channel: str = "") -> str:
+    def queue_append(self, content: str, *, channel: str = "", meta: dict | None = None, source: Mapping[str, str] = DASHBOARD_SOURCE) -> str:
         """Append a message to the queue, retaining its channel origin when present."""
         qid = uuid.uuid4().hex[:12]
-        item = {"id": qid, "content": content}
+        item = {"id": qid, "content": content, **source_of(source)}
+        if meta:
+            item["meta"] = dict(meta)
         if channel:
             item["channel"] = channel
         self._queue.append(item)
@@ -535,7 +547,7 @@ class _ChatSession:
     def queue_insert(self, index: int, content: str) -> str:
         """Insert a message at a specific queue position. Returns the queue ID."""
         qid = uuid.uuid4().hex[:12]
-        self._queue.insert(index, {"id": qid, "content": content})
+        self._queue.insert(index, {"id": qid, "content": content, **DASHBOARD_SOURCE})
         return qid
 
     def queue_pop(self, index: int = 0) -> dict[str, str]:
@@ -646,6 +658,10 @@ class _ChatSession:
         return True
 
     def to_dict(self) -> dict:
+        from gideon.security.owner_questions import registry
+        questions = registry()
+        if questions is not None and questions.state.get_session(self.key) is self:
+            questions.expire_orphans(self)
         from gideon.interfaces.dashboard.chat_utils import _prepare_messages
 
         last_ts = self.messages[-1].get("ts", "") if self.messages else ""
@@ -726,7 +742,7 @@ class _ChatSession:
             "pending_approval": pending_approval,
             "pending_approval_info": pending_approval_info,
             "last_activity_ts": last_activity_ts,
-            "waiting_for_input": waiting_for_input,
+            "waiting_for_input": waiting_for_input or any((row.get("meta") or {}).get("owner_question", {}).get("outcome") == "pending" for row in self.messages),
             "stop_state": self._stop_state,
             "created": self.created_at,
             "last_ts": last_ts,
@@ -807,6 +823,12 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         self._retag_task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._notification_log: list[dict[str, Any]] = _load_notifications()
         self._sessions: dict[str, _ChatSession] = {}
+        from gideon.security.owner_questions import OwnerQuestions, install
+        self.owner_questions = OwnerQuestions(self)
+        install(self.owner_questions)
+        register_question_stopper = getattr(self.sessions, "register_approval_stopper", None)
+        if register_question_stopper is not None:
+            register_question_stopper(self.owner_questions.end_turn)
         self._channel_to_session: dict[str, str] = {}
         self._session_counter = 0
         self._folders: list[dict[str, Any]] = []
@@ -834,6 +856,7 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         self._refine_answer_future: asyncio.Future | None = None  # type: ignore[type-arg]
         self._ws_clients: list[web.WebSocketResponse] = []
         self._ws_app: dict[web.WebSocketResponse, str] = {}
+        self._ws_owner: set[web.WebSocketResponse] = set()
         self._ws_log_subscribers: set[web.WebSocketResponse] = set()
         self._ws_subagent_subscribers: set[web.WebSocketResponse] = set()
         self._ws_loop: asyncio.AbstractEventLoop | None = None
@@ -865,7 +888,7 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         self._last_spoken: dict[str, str] = {}
 
     def broadcast_ws(
-        self, msg_type: str, data: object, *, extra: dict[str, Any] | None = None
+        self, msg_type: str, data: object, *, extra: dict[str, Any] | None = None, owner_only: bool = False
     ) -> None:
         if (
             msg_type == "approval"
@@ -874,7 +897,7 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             and not data.get("approval_id")
         ):
             self._register_chat_approval(data)
-        super().broadcast_ws(msg_type, data, extra=extra)
+        super().broadcast_ws(msg_type, data, extra=extra, owner_only=owner_only)
 
     @property
     def channel_delivery(self) -> Any:
@@ -908,43 +931,22 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         return delivery_for(provider)
 
     def channel_provider_for(self, session_key: str) -> str:
-        """Which channel a session's messages came FROM, or "" for a dashboard session.
+        from gideon.interfaces.dashboard.chat_utils import _history_key_for
 
-        Stamped at session creation by the one inbound door
-        (`channel_inbound._route_to_session` → `get_or_create_session(app=provider)`), which is
-        also the code that already knows the provider — it just had nowhere to put it that the
-        outbound side could read.
-        """
-        from gideon.interfaces.dashboard.chat import _history_key_for
-
-        history_key = _history_key_for(session_key)
-        session = (
-            self._sessions.get(session_key)
-            or self._sessions.get(history_key.removeprefix("dashboard:"))
-            or self._sessions.get(history_key)
-        )
-        if session is not None:
-            provider = str(
-                getattr(session, "_channel_provider", "")
-                or getattr(session, "_app", "")
-                or ""
-            )
-            if provider:
-                return provider
         if self.sessions is None:
             return ""
-        thread_ts, channel = self.sessions.get_channel_link(history_key)
-        if not (thread_ts and channel):
+        key = _history_key_for(session_key)
+        thread, channel = self.sessions.get_channel_link(key)
+        if not (thread and channel):
             return ""
-        from gideon.integrations.channel_delivery import delivery_for, registered_providers
-
-        matches = [
-            provider
-            for provider in registered_providers()
-            if (delivery := delivery_for(provider)) is not None
-            and delivery.is_tracked_channel(channel)
-        ]
-        return matches[0] if len(matches) == 1 else ""
+        provider = self.sessions.get_channel_provider(key)
+        if not provider:
+            session = self._sessions.get(key.removeprefix("dashboard:"))
+            resident_provider = getattr(session, "_channel_provider", "") if session else ""
+            if resident_provider and session._channel_thread_ts == thread and session._channel_id == channel:
+                provider = resident_provider
+                self.sessions.set_channel_link(key, thread, channel, channel_provider=provider)
+        return provider
 
     _LAST_SPOKEN_MAX_SESSIONS = 32
     _LAST_SPOKEN_MAX_CHARS = 4000
@@ -965,17 +967,17 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
 
         return self._last_spoken.get(str(session_key or ""), "")
 
-    def wire_session_compact_callback(self) -> None:
+    def wire_session_restart_callback(self) -> None:
         """Register the dashboard's compaction callback on the session manager."""
 
-        async def _on_compacted(session_key: str, pct: float) -> None:
+        async def _on_restarted(session_key: str, pct: float, reason: str) -> None:
             if not session_key.startswith("dashboard:"):
                 return
             session_name = session_key[len("dashboard:") :]
             session = self.get_session(session_name)
             if session is None:
                 return
-            message = _AUTO_COMPACT_NOTICE.format(pct=pct)
+            message = _SESSION_RESTART_NOTICE.format(pct=pct, reason=reason)
             try:
                 session.append("assistant", message, "msg msg-a")
             except Exception:
@@ -1001,7 +1003,7 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
                     "Failed to schedule linked compaction notice", exc_info=True
                 )
 
-        self.sessions.set_compact_callback(_on_compacted)
+        self.sessions.set_restart_callback(_on_restarted)
 
     def trigger_counts(self) -> dict[str, int]:
         """`{total, enabled, broken}` across the unified store (S107).
@@ -1146,6 +1148,9 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         tool_purpose: str = "",
         session: str = "",
         asked_by: str = "",
+        owner_only: bool = False,
+        on_decision: Any = None,
+        approval_timeout_secs: float | None = None,
     ) -> bool:
         """Request interactive approval. Returns True if approved, False if rejected/timeout.
 
@@ -1184,6 +1189,7 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             "id": approval_id,
             "revision": revision,
             "source": source,
+            "owner_only": owner_only,
             "tool": safe_tool,
             "tool_input": safe_input,
             "tool_purpose": safe_purpose,
@@ -1191,6 +1197,11 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             "asked_by": asked_by or self._approval_requester(source, session),
             "ts": time.time(),
         }
+        if on_decision is not None:
+            callbacks = getattr(self, "_approval_decision_callbacks", None)
+            if callbacks is None:
+                callbacks = self._approval_decision_callbacks = {}
+            callbacks[approval_id] = on_decision
         self._hold_approval(pending)
         if raw_call_fingerprint:
             pending["_call_fingerprint"] = raw_call_fingerprint
@@ -1223,6 +1234,8 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             timeout = approval_window_secs(self._APPROVAL_TIMEOUT)
             if any(marker in (source or "").lower() for marker in self._UNATTENDED_SOURCE_MARKERS):
                 timeout = min(timeout, self._UNATTENDED_APPROVAL_TIMEOUT)
+            if approval_timeout_secs is not None:
+                timeout = min(timeout, max(0.0, approval_timeout_secs))
             return await asyncio.wait_for(fut, timeout=timeout)
         except asyncio.TimeoutError:
             self.end_approval(approval_id, outcome="expired")
@@ -1244,6 +1257,7 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         finally:
             if self._pending_approvals.get(approval_id) is pending:
                 self.end_approval(approval_id, outcome="cancelled")
+            getattr(self, "_approval_decision_callbacks", {}).pop(approval_id, None)
             if self._approval_futures.get(approval_id) is fut:
                 self._approval_futures.pop(approval_id, None)
 
@@ -1407,6 +1421,7 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             "withheld_reason",
             "routed_to",
             "created_by_app",
+            "kind_label",
         }
     )
 
@@ -1431,9 +1446,9 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         THE single delivery choke point for every emitter (crons, loops, hooks, inbox
         alerts, heartbeats, app actions). Two layers of policy, in this order:
 
-        1. **The global gate** (`notification_allowed`) — mute-all, minimum severity,
-           quiet hours. Unchanged, and still outermost: mute means mute, whatever a rule
-           says. A suppressed notification is dropped entirely, not logged unread.
+        1. **The global gate** (`notification_posture`) — mute-all and minimum severity
+           are hard limits. Quiet hours constrain interruptions while preserving an
+           explicit badge or digest rule.
         2. **The per-(source, kind) rule** (`notification_rules`) — never / badge /
            immediate / digest, plus conditions that escalate a quieter mode when the text
            matches a keyword or names the operator.
@@ -1444,6 +1459,7 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         """
         from gideon.extensions.providers.entity_routes import notification_posture
         from gideon.workspace import notification_rules as rules
+        from gideon.workspace.notification_kinds import label_for_wire
 
         try:
             posture = notification_posture(kind)
@@ -1473,6 +1489,9 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
                 "ts": datetime.now(tz=timezone.utc).isoformat(),
             }
         )
+        declared_label = label_for_wire(kind)
+        if declared_label:
+            note["kind_label"] = declared_label
         session_name = (
             str(note.get("session") or "")
             .removeprefix("dashboard:")
@@ -1494,21 +1513,12 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             self._append_notification(note)
             return
 
-        try:
-            rule = rules.resolve_rule_for_legacy(kind)
-            reason = rule.conditions.matches(f"{title}\n{body}", self._operator_name())
-            if reason:
-                rule = rule.escalated()
-                note["escalated_by"] = reason
-        except Exception:
-            logger.debug(
-                "notification rule resolution failed; delivering", exc_info=True
-            )
-            rule = None
-
-        mode = rule.mode if rule is not None else "immediate"
-        if posture == "quiet" and mode == "immediate":
-            mode = "quiet"
+        outcome = rules.rule_outcome(kind, f"{title}\n{body}", posture=posture)
+        rule, mode = outcome.rule, outcome.mode
+        if mode == rules.SUPPRESSED:
+            return
+        if outcome.escalated_by:
+            note["escalated_by"] = outcome.escalated_by
         note["mode"] = mode
         if rule is not None:
             note["targets"] = list(rule.targets)
@@ -1894,20 +1904,32 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             logger.debug("conversation creator lookup failed", exc_info=True)
             return ""
 
-    def get_linked_session(self, session_key: str) -> "_ChatSession | None":
-        """Look up a dashboard session linked to a channel thread. Cleans up stale mappings."""
-        session_name = self._channel_to_session.get(session_key)
-        if not session_name:
-            return None
-        session = self._sessions.get(session_name)
-        if (
-            not session
-            or not session._channel_linked
-            or session._channel_thread_ts != session_key
-        ):
-            self._channel_to_session.pop(session_key, None)
-            return None
-        return session
+    def take_channel_turn(self, log: Any, session_key: str) -> None:
+        session = self._sessions.get(session_key.removeprefix("dashboard:"))
+        if session is None or log is not self.conversation_log:
+            return
+        with log.journal_write(session_key):
+            events = log.source_events(session_key)
+            additions = [event for event in events if event.source_event_id not in session._journal_event_ids]
+            insert_at = min(session._resumed_count, len(session.messages))
+            for event in additions:
+                row = dict(event.message)
+                row["source_event_id"] = event.source_event_id
+                row.setdefault("cls", "msg msg-u" if row["role"] == "user" else "msg msg-a")
+                session.messages.insert(insert_at, row)
+                insert_at += 1
+                session.total_messages += 1
+                session._journal_event_ids.add(event.source_event_id)
+                self._broadcast_chat_message(session.key, row)
+            session._resumed_count = insert_at
+            if additions:
+                session._dirty = True
+                session.event.set()
+
+    def get_linked_session(self, session_key: str, provider: str = "") -> "_ChatSession | None":
+        from gideon.interfaces.dashboard.channel_links import linked_chat
+
+        return linked_chat(self, session_key, provider)
 
     def resolve_session(self, name: str) -> _ChatSession | None:
         """Like :meth:`get_session`, but also resolves bare ``chat-N`` labels.
@@ -1943,39 +1965,9 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
     def link_channel(
         self, session_name: str, thread_ts: str, channel_id: str, provider: str = ""
     ) -> None:
-        """Update a session's channel link state and persist to SessionStore."""
-        session = self._sessions.get(session_name)
-        if not session:
-            return
-        old_ts = session._channel_thread_ts
-        if old_ts and old_ts != thread_ts:
-            self._channel_to_session.pop(old_ts, None)
-        old_owner = self._channel_to_session.get(thread_ts)
-        if old_owner and old_owner != session_name:
-            old_session = self._sessions.get(old_owner)
-            if old_session:
-                old_session._channel_linked = False
-                old_session._channel_thread_ts = ""
-                old_session._channel_id = ""
-                old_session._channel_provider = ""
-            if self.sessions:
-                from gideon.interfaces.dashboard.chat import _history_key_for
+        from gideon.interfaces.dashboard.channel_links import link
 
-                self.sessions.set_channel_link(_history_key_for(old_owner), "", "")
-        session._channel_linked = True
-        session._channel_id = channel_id
-        session._channel_thread_ts = thread_ts
-        if provider:
-            session._channel_provider = provider
-            session._app = provider
-        self._channel_to_session[thread_ts] = session_name
-        if self.sessions:
-            from gideon.interfaces.dashboard.chat import _history_key_for
-
-            self.sessions.set_channel_link(
-                _history_key_for(session_name), thread_ts, channel_id
-            )
-        self.push_sessions_update()
+        link(self, session_name, thread_ts, channel_id, provider)
 
     def get_or_create_session(
         self,
@@ -2038,7 +2030,8 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
                 if _ts and _ch:
                     session._channel_id = _ch
                     session._channel_thread_ts = _ts
-                    self._channel_to_session[_ts] = name
+                    session._channel_provider = self.sessions.get_channel_provider(_history_key_for(name))
+                    self._channel_to_session[(session._channel_provider, _ts)] = name
         except Exception:
             pass
         self._sessions[name] = session
@@ -2208,7 +2201,7 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         polling — the server tells the client *when* to refresh, not the
         client guessing on a timer.
 
-        Supported kinds: ``crons``, ``lessons``, ``agents``, ``history``.
+        Supported kinds include ``crons``, ``lessons``, ``agents``, ``history``, ``tasks``.
         """
         self._broadcast({"_type": "refresh", "kinds": ",".join(kinds)})
 

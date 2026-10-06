@@ -58,9 +58,9 @@ const KINDS: Record<string, KindMeta> = {
   info: { label: 'Notice', icon: Info, tone: 'var(--color-on-surface-low)' },
   generic: { label: 'Uncategorized', icon: Bell, tone: 'var(--color-on-surface-low)' },
 }
-export function kindMeta(kind: string): KindMeta {
+export function kindMeta(kind: string, declaredLabel?: string): KindMeta {
   const known = Object.prototype.hasOwnProperty.call(KINDS, kind) ? KINDS[kind] : undefined
-  return known || { label: kind || 'Notification', icon: Bell, tone: 'var(--color-primary)' }
+  return known || { label: declaredLabel?.trim() || kind || 'Notification', icon: Bell, tone: 'var(--color-primary)' }
 }
 
 function routeIdentity(raw: string): string {

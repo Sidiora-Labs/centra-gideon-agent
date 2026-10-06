@@ -133,11 +133,11 @@ export function InboxPage({ query, setQuery, navigate }: Pick<RouteProps, 'query
             <SidePanel key={open.id} fillHeight storeKey="inbox-panel-w" urlKey={{ key: 'open', setQuery }}
               icon={(() => {
                 const channelBacked = !NON_CHANNEL_ITEM_KINDS.includes(open.item_kind || 'message')
-                const m = channelBacked ? classMeta(open.classification) : kindMeta(open.item_kind)
+                const m = channelBacked ? classMeta(open.classification, open.classify_error) : kindMeta(open.item_kind)
                 return <m.icon size={18} style={{ color: m.tone }} />
               })()}
               title={!NON_CHANNEL_ITEM_KINDS.includes(open.item_kind || 'message')
-                ? (open.sender_name || open.sender_id || 'Item')
+                ? (open.sender_name || 'Unknown sender')
                 : kindMeta(open.item_kind).label}
               onClose={() => setOpenId("")}>
               <InboxDetail item={open} onChanged={load} navigate={navigate} />
@@ -173,6 +173,10 @@ export function InboxPage({ query, setQuery, navigate }: Pick<RouteProps, 'query
             </EntranceRegion>
           )
         })()}
+
+        {health?.sorting?.held && <EntranceRegion className="mx-auto w-full px-l" style={{ maxWidth: 'var(--content-width)' }}>
+          <InboxSortHold held={health.sorting.held} waiting={health.sorting.waiting} />
+        </EntranceRegion>}
 
         <EntranceRegion>
         <div data-tour="inbox" className="mx-auto px-l py-xl" style={{ maxWidth: 'var(--content-width)' }}>
@@ -250,16 +254,16 @@ export function InboxPage({ query, setQuery, navigate }: Pick<RouteProps, 'query
   )
 }
 
-function InboxQueueRow({ item, index, onOpen, navigate, owner }: {
+export function InboxQueueRow({ item, index, onOpen, navigate, owner }: {
   item: InboxItem; index: number; onOpen: () => void; navigate: (path: string) => void; owner: string
 }) {
   const channel = !NON_CHANNEL_ITEM_KINDS.includes(item.item_kind || 'message')
   const kind = kindMeta(item.item_kind)
-  const classification = classMeta(item.classification)
+  const classification = classMeta(item.classification, item.classify_error)
   const confidence = confMeta(item.confidence)
   const status = statusMeta(item.status)
   const visual = channel ? classification : kind
-  const title = channel ? item.sender_name || item.sender_id || 'Unknown' : kind.label
+  const title = channel ? item.sender_name || 'Unknown sender' : kind.label
   const target = refTarget(item)
   const pending = item.status === 'pending'
   const unresolved = isOpen(item.status)
@@ -287,13 +291,21 @@ function InboxQueueRow({ item, index, onOpen, navigate, owner }: {
           {ownerLabel && <span data-type="caption" className="inline-flex shrink-0 items-center gap-1 text-on-surface-low" title={`Owned by ${ownerLabel}`}><UserRound size={11} /> {ownerLabel}</span>}
         </div>
         <p data-type="body-s" className="mt-1 truncate text-on-surface-low">{preview}</p>
+        {channel && !item.classification && <p data-type="caption" className="text-on-surface-var">{classification.label}</p>}
       </div>
       <div className="hidden shrink-0 items-center gap-m sm:flex">
-        {channel && <span data-type="caption" title={confidence.label} style={{ color: confidence.tone }}><confidence.icon size={12} /></span>}
+        {channel && item.confidence && <span data-type="caption" title={confidence.label} style={{ color: confidence.tone }}><confidence.icon size={12} /></span>}
         {!unresolved ? <span data-type="caption" className="inline-flex items-center gap-1 text-on-surface-low"><status.icon size={12} style={{ color: status.tone }} /> {status.label}</span>
           : item.created_at && <span data-type="caption" className="text-on-surface-low">{relPast(item.created_at)}</span>}
         {pending && <Circle size={7} fill={visual.tone} stroke="none" />}
       </div>
     </ListRow>
   </ContextMenu>
+}
+
+export function InboxSortHold({ held, waiting }: { held: string; waiting: number }) {
+  if (!held) return null
+  return <p data-type="body-s" className="rounded-xl border border-outline/25 bg-surface-container p-m text-on-surface-var" role="status">
+    {held}{waiting ? ` ${waiting} message${waiting === 1 ? '' : 's'} waiting.` : ''}
+  </p>
 }

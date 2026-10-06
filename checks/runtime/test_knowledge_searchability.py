@@ -52,7 +52,7 @@ def test_dedup_phase_reports_skipped_and_done_from_real_ingests(store, embedder)
         )
     )
 
-    assert _phases(store, skipped)["dedup"] == "skipped"
+    assert _phases(store, skipped)["dedup"]["status"] == "skipped"
     assert any(
         event == "node"
         and data.get("node") == "dedup"
@@ -73,7 +73,7 @@ def test_dedup_phase_reports_skipped_and_done_from_real_ingests(store, embedder)
         )
     )
 
-    assert _phases(store, done)["dedup"] == "done"
+    assert _phases(store, done)["dedup"]["status"] == "done"
     assert any(
         event == "node" and data.get("node") == "dedup" and data.get("phase") == "done"
         for event, data in done_events
@@ -112,7 +112,7 @@ def test_dedup_failure_is_nonfatal_but_persisted_and_emitted(store, embedder):
 
     assert status in ("done", "partial")
     assert store.get_item(duplicate)["is_archived"] is False
-    assert _phases(store, duplicate)["dedup"] == "failed"
+    assert _phases(store, duplicate)["dedup"]["status"] == "failed"
     assert any(
         event == "node"
         and data.get("node") == "dedup"

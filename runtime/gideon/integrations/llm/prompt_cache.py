@@ -12,8 +12,27 @@ class PromptCache(str, Enum):
 
 
 CACHE_HINT_KEY = "_cache_hint"
-_VOLATILE_HINT_KEY = "_volatile"
+VOLATILE_KEY = "_volatile"
+_VOLATILE_HINT_KEY = VOLATILE_KEY
+_NOTE_TAG = re.compile(r"<(?=\s*/?\s*system-note\b)", re.IGNORECASE)
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
+
+
+
+def system_note_text(note: str) -> str:
+    """Fence runtime instructions and keep embedded fence tags inside the note."""
+    text = _NOTE_TAG.sub("&lt;", note)
+    return ("<system-note>\nThe runtime added this note; the user did not write it. "
+            "Apply the instructions and reply to the user without mentioning the note.\n\n"
+            + text + "\n</system-note>")
+
+
+def turn_note_message(note: str) -> dict:
+    """Inline-system wires retain this role; out-of-band wires append a last-user block.
+
+    The block follows that turn's own text, tool results and cache checkpoints.
+    """
+    return {"role": "system", "content": system_note_text(note), VOLATILE_KEY: True}
 
 
 @dataclass(frozen=True, slots=True)

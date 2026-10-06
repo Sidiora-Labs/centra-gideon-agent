@@ -5,6 +5,7 @@ scoring assertions. Each scenario gets a fresh memory directory with
 optional profile seeding.
 """
 
+from gideon.core.turn_streams import closing_stream
 import json
 import logging
 import os
@@ -411,34 +412,28 @@ class EvalRunner:
         chunks: list[str] = []
         tool_calls: list[str] = []
 
-        async for event in provider.stream(turn_def.user):
-            if event.kind == EVENT_TEXT_CHUNK:
-                chunks.append(event.text)
-            elif event.kind == EVENT_TOOL_CALL:
-                tool_calls.append(event.text)
-                sel().log_tool_invocation(
-                    session_key=session_key,
-                    tool_name=event.text,
-                    outcome="invoked",
-                    source="eval_runner",
-                )
-            elif event.kind == EVENT_PERMISSION_REQUEST:
-                from gideon.security.security import is_sensitive_path
-
-                safety = self._classify_safe_tool(event)
-                if safety == "exact":
+        async with closing_stream(provider.stream(turn_def.user)) as _turn_events:
+            async for event in _turn_events:
+                if event.kind == EVENT_TEXT_CHUNK:
+                    chunks.append(event.text)
+                elif event.kind == EVENT_TOOL_CALL:
+                    tool_calls.append(event.text)
                     sel().log_tool_invocation(
                         session_key=session_key,
-                        tool_name=event.title,
-                        outcome="approved",
+                        tool_name=event.text,
+                        outcome="invoked",
                         source="eval_runner",
                     )
-                    await provider.approve_tool(event.request_id)
-                elif safety == "prefix_fs":
-                    target = self._extract_path_from_input(event.tool_input or "")
-                    if target:
-                        target = str(Path(target).expanduser().resolve())
-                    if target and not is_sensitive_path(target):
+                elif event.kind == EVENT_PERMISSION_REQUEST:
+                    from gideon.security.security import is_sensitive_path
+
+                    from gideon.security.protected_folders import call_protected_delete, provider_working_folder
+                    if call_protected_delete(getattr(event, "risk_level", ""), event.title, event.tool_kind, event.tool_input, cwd=provider_working_folder(provider)):
+                        await provider.reject_tool(event.request_id)
+                        sel().log_tool_invocation(session_key=session_key, tool_name=event.title, outcome="denied", source="eval_runner", metadata={"reason": "protected_delete"})
+                        continue
+                    safety = self._classify_safe_tool(event)
+                    if safety == "exact":
                         sel().log_tool_invocation(
                             session_key=session_key,
                             tool_name=event.title,
@@ -446,29 +441,41 @@ class EvalRunner:
                             source="eval_runner",
                         )
                         await provider.approve_tool(event.request_id)
+                    elif safety == "prefix_fs":
+                        target = self._extract_path_from_input(event.tool_input or "")
+                        if target:
+                            target = str(Path(target).expanduser().resolve())
+                        if target and not is_sensitive_path(target):
+                            sel().log_tool_invocation(
+                                session_key=session_key,
+                                tool_name=event.title,
+                                outcome="approved",
+                                source="eval_runner",
+                            )
+                            await provider.approve_tool(event.request_id)
+                        else:
+                            outcome = "rejected_sensitive" if target else "rejected_no_path"
+                            logger.warning(
+                                "Rejected tool (path check failed): %s", event.title
+                            )
+                            sel().log_tool_invocation(
+                                session_key=session_key,
+                                tool_name=event.title,
+                                outcome=outcome,
+                                source="eval_runner",
+                            )
+                            await provider.reject_tool(event.request_id)
                     else:
-                        outcome = "rejected_sensitive" if target else "rejected_no_path"
-                        logger.warning(
-                            "Rejected tool (path check failed): %s", event.title
-                        )
+                        logger.warning("Rejected unsafe tool in eval: %s", event.title)
                         sel().log_tool_invocation(
                             session_key=session_key,
                             tool_name=event.title,
-                            outcome=outcome,
+                            outcome="rejected",
                             source="eval_runner",
                         )
                         await provider.reject_tool(event.request_id)
-                else:
-                    logger.warning("Rejected unsafe tool in eval: %s", event.title)
-                    sel().log_tool_invocation(
-                        session_key=session_key,
-                        tool_name=event.title,
-                        outcome="rejected",
-                        source="eval_runner",
-                    )
-                    await provider.reject_tool(event.request_id)
-            elif event.kind == EVENT_COMPLETE:
-                break
+                elif event.kind == EVENT_COMPLETE:
+                    break
 
         response = "".join(chunks).strip()
         elapsed = time.monotonic() - t0

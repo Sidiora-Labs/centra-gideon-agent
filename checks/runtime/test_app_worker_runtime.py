@@ -540,11 +540,11 @@ def _breach(monkeypatch: pytest.MonkeyPatch, *, exceeded: bool) -> None:
     from gideon.security.guardrails import budgets
 
     monkeypatch.setattr(
-        budgets, "budget_from_config", lambda: budgets.Budget(max_dollars=1.0)
+        budgets, "budget_from_config", lambda: budgets.Budget(max_tokens=1000)
     )
     verdict = budgets.BudgetVerdict.EXCEEDED if exceeded else budgets.BudgetVerdict.OK
-    reason = "day dollar budget exceeded ($2.5/$1)" if exceeded else ""
-    meter = types.SimpleNamespace(check_day=lambda budget: (verdict, reason))
+    reason = "day token budget exceeded (2500/1000)" if exceeded else ""
+    meter = types.SimpleNamespace(check_day_before_work=lambda budget: (verdict, reason))
     monkeypatch.setattr(budgets, "get_meter", lambda: meter)
 
 

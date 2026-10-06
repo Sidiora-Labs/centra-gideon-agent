@@ -1,3 +1,4 @@
+import { DailyBudgetStatus } from './UsagePanel'
 import { useEffect, useMemo, useState } from 'react'
 import { api, type AutonomyLadder, type AutonomyReversal, type AutonomyType, type CallerHealth, type ProviderHealth } from '../../shared/data/api'
 import { notify } from '../../app/shell/appSdk'
@@ -41,13 +42,8 @@ export function GuardrailsPanel() {
 
       <IncidentSection />
 
-      <Section title="Daily budget" hint="Cap what your automations spend in a day. At the ceiling, further unattended runs are skipped (a cron fire is paused, a subagent spawn refused) and resume automatically the next day. 0 = unlimited.">
-        {dailySpend && <div role="status" data-type="body-s" className="mb-m rounded-lg bg-surface-container px-m py-3 text-on-surface-var">
-          {dailySpend.paused ? 'Paused by daily budget' : dailySpend.status === 'warn' ? 'Approaching daily budget' : 'Daily automation budget available'}
-          {' · '}{dailySpend.tokens.toLocaleString()} tokens and ${dailySpend.dollars.toFixed(4)} recorded today.
-          {dailySpend.paused && <> Resumes automatically {new Date(dailySpend.resumes_at).toLocaleString()}.</>}
-          <Button variant="ghost" size="xs" onClick={refreshDailySpend}>Refresh spend</Button>
-        </div>}
+      <Section title="Daily budget" hint="Cap what your automations spend in a day. A token cap pauses unattended work. A dollar cap refuses paid model calls; free work continues. Budgets reset at the next daily boundary. 0 = unlimited.">
+        {dailySpend && <div className="mb-m"><DailyBudgetStatus spend={dailySpend} /><Button variant="ghost" size="xs" onClick={refreshDailySpend}>Refresh spend</Button></div>}
         <RowGroup>
           <NumberRow label="Max tokens / day" hint="Across every trigger. 0 = unlimited."
             value={cfg.budgets?.max_tokens_per_day ?? 0} min={0} step={1000}
@@ -192,15 +188,23 @@ function AutonomyLadderSection() {
   )
 }
 
-function UndoList({ ladder, onChange }: { ladder: AutonomyLadder; onChange: () => void }) {
+export function UndoList({ ladder, onChange }: { ladder: AutonomyLadder; onChange: () => void }) {
   const [busy, setBusy] = useState('')
   const pending = ladder.reversals.filter((r) => !r.reversed_at)
+  const backTo = (r: AutonomyReversal): string => {
+    const type = ladder.types.find((item) => item.key === r.action_type)
+    const floor = type ? ladder.rungs.indexOf(type.floor) : -1
+    const granted = type ? ladder.rungs.indexOf(type.granted_rung) : -1
+    return type && floor >= 0 && granted > floor ? type.floor : ''
+  }
 
   const undo = async (r: AutonomyReversal) => {
     setBusy(r.id)
     try {
-      await api.autonomyUndo(r.id)
-      notify(`Undone. ${r.action_type} will ask again from now on.`, 'success')
+      const result = await api.autonomyUndo(r.id)
+      if (!result.ok) throw new Error(result.detail || 'The action could not be undone.')
+      const floor = backTo(r)
+      notify(floor ? `Undone. ${r.action_type} is back at ${rungMeta(floor, ladder).label}.` : 'Undone.', 'success')
     } catch (e) {
       notify(`Couldn't undo: ${String((e as Error)?.message || e)}`, 'error')
     } finally { setBusy(''); onChange() }
@@ -211,10 +215,10 @@ function UndoList({ ladder, onChange }: { ladder: AutonomyLadder; onChange: () =
       <div data-type="caption" className="mb-s text-on-surface-low uppercase tracking-wide">Automatic actions you can still undo</div>
       <RowGroup>
         {pending.length === 0 ? (
-          <div data-type="body-s" className="py-3 text-on-surface-low">Nothing is waiting to be undone — no action has run at the “runs with undo” rung yet.</div>
+          <div data-type="body-s" className="py-3 text-on-surface-low">Nothing is waiting to be undone.</div>
         ) : pending.map((r) => (
           <Row key={r.id} label={r.label || r.action_type}
-            hint={`Ran ${r.created_at.slice(0, 16).replace('T', ' ')}. Undoing it also stops ${r.action_type} from doing this on its own.`}>
+            hint={`Ran ${r.created_at.slice(0, 16).replace('T', ' ')}.${backTo(r) ? ` Undoing it also puts ${r.action_type} back so it ${rungMeta(backTo(r), ladder).label}.` : ''}`}>
             <Button size="xs" variant="secondary" loading={busy === r.id} onClick={() => undo(r)}>Undo</Button>
           </Row>
         ))}

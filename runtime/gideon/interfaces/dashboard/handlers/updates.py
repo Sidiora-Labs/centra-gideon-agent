@@ -23,6 +23,7 @@ from gideon.core.http_request import read_json_body
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.operations import self_update
 from gideon.operations.frontend import build_frontend_async
+from gideon.operations._installer import checkout_install_argv
 
 
 def config_path() -> Path:
@@ -177,7 +178,18 @@ async def _do_update_check() -> None:
 
         changes = ""
         if available:
-            diff_base = f"v{_local_version}" if local_sha == remote_sha else local_sha
+            diff_base = local_sha
+            if local_sha == remote_sha:
+                tags = await asyncio.create_subprocess_exec(
+                    "git", "tag", "--list", cwd=proj,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                )
+                tags_out, _ = await run_with_timeout(tags, 10)
+                diff_base = next(
+                    (tag for tag in tags_out.decode(errors="replace").splitlines()
+                     if self_update.same_version(tag, _local_version)),
+                    local_sha,
+                )
             diff = await asyncio.create_subprocess_exec(
                 "git",
                 "diff",
@@ -284,6 +296,29 @@ async def api_changelog(request: web.Request) -> web.Response:
 
 
 _apply_in_flight = False
+_update_operation = None
+
+
+def _start_update(work, state, project=""):
+    global _update_operation
+    _update_operation = self_update.UpdateOperation(work, state.push_update_progress, project)
+    task = _update_operation.task
+    def release(completed):
+        global _apply_in_flight
+        if _update_operation.task is completed:
+            _apply_in_flight = False
+    task.add_done_callback(release)
+    return task
+
+
+def _installer_preflight():
+    from gideon.operations._installer import NoInstallerError, require_own_installer
+
+    try:
+        require_own_installer()
+    except NoInstallerError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+    return None
 
 
 async def _apply_pip_update(request: web.Request, state: ConsoleState) -> web.Response:
@@ -312,6 +347,11 @@ async def _apply_pip_update(request: web.Request, state: ConsoleState) -> web.Re
         _apply_in_flight = False
         return web.json_response({"ok": True, "status": "up_to_date", "kind": "pip"})
     spec = self_update.upgrade_spec(latest)
+    refusal = _installer_preflight()
+    if refusal is not None:
+        _apply_in_flight = False
+        return refusal
+
     try:
         self_update.begin_update("pip", _local_version, str(status.get("latest") or ""))
     except Exception:
@@ -338,7 +378,7 @@ async def _apply_pip_update(request: web.Request, state: ConsoleState) -> web.Re
                 return
 
             state.push_update_progress("installing", f"Upgrading {spec}…")
-            pip_up = await asyncio.create_subprocess_exec(
+            pip_up = await self_update.launch_update_process(
                 *argv,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -362,6 +402,7 @@ async def _apply_pip_update(request: web.Request, state: ConsoleState) -> web.Re
                     f"Upgrade failed: {summary}" if summary else "Upgrade failed",
                 )
                 return
+            _update_operation.cancellable = False
             self_update.complete_update()
             state.push_update_progress("restarting", "Restarting server…")
             await _graceful_reexec(state, auth_mode=auth_mode)
@@ -371,9 +412,10 @@ async def _apply_pip_update(request: web.Request, state: ConsoleState) -> web.Re
             state.push_update_progress("failed", "Update failed — check logs")
             state.push_refresh("update_failed")
         finally:
-            _apply_in_flight = False
+            # The operation owner holds the guard through recovery and retirement.
+            pass
 
-    task = asyncio.create_task(_apply())
+    task = _start_update(_apply(), state)
     state._background_tasks.add(task)
     task.add_done_callback(state._background_tasks.discard)
     return web.json_response({"ok": True, "status": "updating", "kind": "pip"})
@@ -432,6 +474,11 @@ async def _run_rollback(request: web.Request, state: ConsoleState) -> web.Respon
                 status=409,
             )
 
+    refusal = _installer_preflight()
+    if refusal is not None:
+        _apply_in_flight = False
+        return refusal
+
     try:
         self_update.begin_rollback()
     except Exception:
@@ -458,7 +505,7 @@ async def _run_rollback(request: web.Request, state: ConsoleState) -> web.Respon
                 state.push_update_progress(
                     "rolling_back", f"Reinstalling {snapshot['version']}…"
                 )
-                install = await asyncio.create_subprocess_exec(
+                install = await self_update.launch_update_process(
                     *argv,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -477,20 +524,17 @@ async def _run_rollback(request: web.Request, state: ConsoleState) -> web.Respon
                 state.push_update_progress(
                     "rolling_back", "Restoring the previous source revision…"
                 )
-                reset = await asyncio.to_thread(
-                    self_update.git_reset_to, proj, snapshot["ref"]
+                reset = await self_update.launch_update_process(
+                    "git", "reset", "--hard", snapshot["ref"], cwd=proj,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,
                 )
+                _, reset_error = await run_with_timeout(reset, 10)
                 if reset.returncode:
-                    raise RuntimeError(reset.stderr.strip() or "git rollback failed")
+                    raise RuntimeError(reset_error.decode(errors="replace").strip() or "git rollback failed")
                 pkg_root = self_update.package_root(proj)
-                install = await asyncio.create_subprocess_exec(
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "-e",
-                    ".",
-                    "--quiet",
+                install = await self_update.launch_update_process(
+                    *checkout_install_argv(pkg_root),
                     cwd=pkg_root,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -505,11 +549,13 @@ async def _run_rollback(request: web.Request, state: ConsoleState) -> web.Respon
                         (install_err or b"").decode(errors="replace")
                     )
                     raise RuntimeError(detail or "Rollback install failed")
+                _update_operation.cancellable = False
                 state.push_update_progress("building", "Building frontend…")
                 await build_frontend_async(
                     pkg_root, push_progress=state.push_update_progress
                 )
 
+            _update_operation.cancellable = False
             self_update.complete_rollback()
             state.push_update_progress("restarting", "Rollback complete — restarting…")
             await _graceful_reexec(state, auth_mode=auth_mode)
@@ -519,9 +565,10 @@ async def _run_rollback(request: web.Request, state: ConsoleState) -> web.Respon
             state.push_update_progress("error", f"Rollback failed: {exc}")
             state.push_refresh("update_failed")
         finally:
-            _apply_in_flight = False
+            # The operation owner holds the guard through recovery and retirement.
+            pass
 
-    task = asyncio.create_task(_rollback())
+    task = _start_update(_rollback(), state, proj if kind == "git" else "")
     state._background_tasks.add(task)
     task.add_done_callback(state._background_tasks.discard)
     return web.json_response({"ok": True, "status": "rolling_back", "kind": kind})
@@ -643,7 +690,7 @@ async def api_update_apply(request: web.Request) -> web.Response:
         task.add_done_callback(state._background_tasks.discard)
         return web.json_response({"ok": True, "status": "restarting", "detail": note})
 
-    dirty = await asyncio.create_subprocess_exec(
+    dirty = await self_update.launch_update_process(
         "git",
         "status",
         "--porcelain",
@@ -677,6 +724,11 @@ async def api_update_apply(request: web.Request) -> web.Response:
         update_status = await self_update.build_update_status(_local_version)
     except Exception:
         update_status = {}
+    refusal = _installer_preflight()
+    if refusal is not None:
+        _apply_in_flight = False
+        return refusal
+
     try:
         self_update.begin_update(
             "git",
@@ -696,7 +748,7 @@ async def api_update_apply(request: web.Request) -> web.Response:
         global _apply_in_flight
         try:
             state.push_update_progress("pulling", "Pulling latest changes…")
-            pull = await asyncio.create_subprocess_exec(
+            pull = await self_update.launch_update_process(
                 "git",
                 "pull",
                 cwd=proj,
@@ -717,14 +769,8 @@ async def api_update_apply(request: web.Request) -> web.Response:
 
             pkg_root = self_update.package_root(proj)
             state.push_update_progress("installing", "Installing package…")
-            pip_install = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "-e",
-                ".",
-                "--quiet",
+            pip_install = await self_update.launch_update_process(
+                *checkout_install_argv(pkg_root),
                 cwd=pkg_root,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -746,6 +792,7 @@ async def api_update_apply(request: web.Request) -> web.Response:
                 state.push_update_progress("error", "pip install failed")
                 return
 
+            _update_operation.cancellable = False
             state.push_update_progress("building", "Building frontend…")
             await build_frontend_async(
                 pkg_root, push_progress=state.push_update_progress
@@ -755,6 +802,7 @@ async def api_update_apply(request: web.Request) -> web.Response:
             logger.info(
                 "Update complete — saving history and cleaning up before restart"
             )
+            _update_operation.cancellable = False
             self_update.complete_update()
             await _graceful_reexec(state, auth_mode=_live_auth_mode(request))
         except Exception:
@@ -763,9 +811,10 @@ async def api_update_apply(request: web.Request) -> web.Response:
             state.push_update_progress("failed", "Update failed — check logs")
             state.push_refresh("update_failed")
         finally:
-            _apply_in_flight = False
+            # The operation owner holds the guard through recovery and retirement.
+            pass
 
-    task = asyncio.create_task(_apply())
+    task = _start_update(_apply(), state, proj)
     state._background_tasks.add(task)
     task.add_done_callback(state._background_tasks.discard)
     return web.json_response({"ok": True, "status": "updating"})
@@ -849,12 +898,25 @@ async def api_restart(request: web.Request) -> web.Response:
 
 
 async def api_update_cancel(request: web.Request) -> web.Response:
-    """POST /api/update/cancel — dismiss a stuck/failed update overlay."""
-    state: ConsoleState = request.app["state"]
-    state.clear_update_progress()
-    state.push_update_progress("failed", "Update cancelled by user")
-    await asyncio.sleep(0.2)
-    state.clear_update_progress()
+    """Stop the owned update and report only confirmed process retirement."""
+    operation = _update_operation
+    if operation is None:
+        return web.json_response({"ok": True, "status": "not_running"})
+    try:
+        status = await operation.cancel()
+    except Exception:
+        logger.exception("Update cancellation cleanup failed")
+        return web.json_response({"error": "Could not confirm update cleanup; check logs"}, status=500)
+    if status == "too_late":
+        return web.json_response({"error": "Installation completed; cancellation is no longer available"}, status=409)
+    return web.json_response({"ok": True, "status": status})
+
+
+async def api_update_dismiss(request: web.Request) -> web.Response:
+    """Clear terminal progress without pretending to stop an active operation."""
+    if _apply_in_flight:
+        return web.json_response({"error": "An update is still running"}, status=409)
+    request.app["state"].clear_update_progress()
     return web.json_response({"ok": True})
 
 
@@ -924,14 +986,9 @@ def apply_log_level(level_name: str) -> bool:
     name = (level_name or "").upper()
     if name not in _LOG_LEVELS:
         return False
-    from gideon.extensions.apps.catalog import installed_logger_roots
+    from gideon.core import log_sinks
 
-    for _lname in ("gideon", *installed_logger_roots()):
-        _lg = logging.getLogger(_lname)
-        _lg.setLevel(_LOG_LEVELS[name])
-        for _h in _lg.handlers:
-            if isinstance(_h, RotatingFileHandler):
-                _h.setLevel(_LOG_LEVELS[name])
+    log_sinks.set_level(_LOG_LEVELS[name])
     return True
 
 
@@ -969,8 +1026,9 @@ async def api_log_level(request: web.Request) -> web.Response:
 
 async def api_log_level_get(request: web.Request) -> web.Response:
     """GET /api/logs/level — current backend logger level."""
-    root = logging.getLogger("gideon")
-    return web.json_response({"level": logging.getLevelName(root.level)})
+    from gideon.core import log_sinks
+
+    return web.json_response({"level": logging.getLevelName(log_sinks.level())})
 
 
 class _QueueLogHandler(logging.Handler):
@@ -979,12 +1037,33 @@ class _QueueLogHandler(logging.Handler):
     def __init__(self, queue: asyncio.Queue) -> None:  # type: ignore[type-arg]
         super().__init__()
         self._queue: asyncio.Queue[str] = queue  # type: ignore[type-arg]
+        self._loop = asyncio.get_running_loop()
+        import threading
+
+        self._lock = threading.Lock()
+        self._pending = 0
+
+    def _offer(self, data: str) -> None:
+        with self._lock:
+            self._pending -= 1
+        try:
+            self._queue.put_nowait(data)
+        except asyncio.QueueFull:
+            pass
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
             msg = _redact_log_text(self.format(record))
             data = json.dumps({"level": record.levelname, "msg": msg})
-            self._queue.put_nowait(data)
+            with self._lock:
+                if self._pending >= (self._queue.maxsize or 500):
+                    return
+                self._pending += 1
+            try:
+                self._loop.call_soon_threadsafe(self._offer, data)
+            except RuntimeError:
+                with self._lock:
+                    self._pending -= 1
         except Exception:
             pass
 
@@ -1061,7 +1140,9 @@ def install_log_ring_handler() -> _RingLogHandler | None:
     handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     )
-    logging.getLogger("gideon").addHandler(handler)
+    from gideon.core import log_sinks
+
+    log_sinks.attach(handler)
     _log_ring_handler = handler
     return handler
 
@@ -1105,8 +1186,9 @@ async def api_logs(request: web.Request) -> web.StreamResponse:
     handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     )
-    root = logging.getLogger("gideon")
-    root.addHandler(handler)
+    from gideon.core import log_sinks
+
+    log_sinks.attach(handler)
     try:
         while not shutdown_event.is_set():
             while not log_queue.empty():
@@ -1124,5 +1206,5 @@ async def api_logs(request: web.Request) -> web.StreamResponse:
     except (ConnectionResetError, ClientConnectionResetError, asyncio.CancelledError):
         pass
     finally:
-        root.removeHandler(handler)
+        log_sinks.detach(handler)
     return resp

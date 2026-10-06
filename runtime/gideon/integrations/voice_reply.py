@@ -140,7 +140,18 @@ async def _synthesize_chunk(
     provider: TtsProvider, text: str, *, voice: str, speed: float, speech_voice: str
 ) -> str | None:
     style = _SpeechStyle(voice, speed, speech_voice)
-    return await provider.synthesize(text, **style.options())
+    from gideon.security.guardrails.media_call import MediaCall, metered_media_call
+    from gideon.security.guardrails.failure import BudgetExceededError
+
+    try:
+        return await metered_media_call(
+            MediaCall(provider.name, voice, "character", len(text)),
+            lambda: provider.synthesize(text, **style.options()),
+            billed=lambda path: len(text) if path else None,
+        )
+    except BudgetExceededError as exc:
+        logger.warning("Speech was not synthesized: %s", exc.sentence())
+        return None
 
 
 async def synthesize_speech(

@@ -114,19 +114,19 @@ def _resolve_source_kind(declared: str, source_name: str) -> str:
     return ItemKind.MESSAGE.value
 
 
-def _fence_message(item: InboxItem) -> str:
+def _fence_message(item: InboxItem, *, max_chars: int = _MAX_MESSAGE_CHARS, max_turns: int = _MAX_THREAD_TURNS, heading: str = "") -> str:
     """Render an item's external text (body + thread context) as ONE fenced block.
 
     Everything the sender controlled is inside a single ``<untrusted_content>`` fence
     so the model can't be steered by injected instructions. Thread context is
     included oldest-first with attributions the model can quote."""
-    parts: list[str] = []
-    for turn in (item.thread_context or [])[-_MAX_THREAD_TURNS:]:
+    parts: list[str] = [heading] if heading else []
+    for turn in (item.thread_context or [])[-max_turns:] if max_turns > 0 else []:
         who = str(turn.get("sender") or turn.get("sender_name") or "someone")
         txt = str(turn.get("text") or "")
         if txt.strip():
             parts.append(f"{who}: {txt}")
-    body = (item.message or "")[:_MAX_MESSAGE_CHARS]
+    body = (item.message or "")[:max_chars]
     parts.append(f"{item.sender_name or 'sender'}: {body}")
     return fence_untrusted("\n".join(parts), source="inbox-message")
 
@@ -154,6 +154,8 @@ class InboxService:
         self._poll_count = 0
         self._last_maintenance_at = 0.0
         self._source_health: dict[str, dict] = {}
+        from gideon.integrations.inbox_sorting import InboxSorter
+        self.sorter = InboxSorter(self.inbox)
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
 
     def health(self) -> dict:
@@ -165,6 +167,7 @@ class InboxService:
             "last_error": self._last_error,
             "poll_count": self._poll_count,
             "stale": stale,
+            "sorting": self.sorter.health(),
             "sources": self.source_statuses(),
         }
 
@@ -201,10 +204,14 @@ class InboxService:
                 self._provider.source_name if self._provider else "none",
             )
 
+        self.sorter.start()
+
     def stop(self) -> None:
         if self._task is not None:
             self._task.cancel()
             self._task = None
+
+        self.sorter.stop()
 
     def _poll_interval(self) -> float:
         try:
@@ -223,6 +230,7 @@ class InboxService:
                 return
             except asyncio.TimeoutError:
                 pass
+            self.sorter.wake()
             now = time.time()
             if now - self._last_maintenance_at >= _MAINTENANCE_EVERY_SECS:
                 try:
@@ -431,6 +439,7 @@ class InboxService:
                     logger.debug("inbox ingest broadcast failed", exc_info=True)
         if count:
             self.inbox.flush()
+            self.sorter.wake()
         return count
 
     def run_maintenance(self) -> int:
@@ -465,49 +474,12 @@ class InboxService:
         except Exception:
             return ""
 
-    async def classify(self, item_id: str) -> InboxItem | None:
-        """Triage a stored item into needs_reply/fyi/noise + confidence, persist, return it."""
-        from gideon.security.guardrails.rungs import ensure_core_action_types
-
-        ensure_core_action_types()
-        item = self.inbox.items.get(item_id)
-        if item is None:
-            return None
-        from gideon.integrations.llm_helpers import one_shot_completion
-        from gideon.integrations.prompt_providers.runtime import render_use_case_prompt
-
-        prompt = (
-            render_use_case_prompt(
-                "inbox_classify",
-                {
-                    "channel": item.channel_name or item.channel,
-                    "sender": item.sender_name or "unknown",
-                    "message": _fence_message(item),
-                },
-            )
-            or ""
-        )
-        from gideon.security.guardrails.failure import OutputContractError
-
-        try:
-            with caller_scope("inbox_triage"):
-                raw = await one_shot_completion(
-                    prompt, use_case="background", output_type=dict
-                )
-        except OutputContractError as exc:
-            raw = exc.raw
-        except Exception:
-            logger.warning("inbox classify failed for %s", item_id, exc_info=True)
-            return None
-        cls, conf = _parse_classification(raw)
-        return self.inbox.update(item_id, classification=cls, confidence=conf)
-
-    async def draft_reply(self, item_id: str) -> InboxItem | None:
+    async def draft_reply(self, item_id: str, *, instructions: str = "", evidence=None) -> InboxItem | None:
         """Draft a reply to a stored item in the user's voice; persist + return the item.
 
-        Returns None if the item is unknown or the model call fails. A model that
-        judges no reply is warranted returns the SKIP sentinel → we store an empty
-        draft and leave the item pending (the human decides)."""
+        Returns None if the item is unknown or the model call fails. Questions,
+        unavailable evidence, SKIP and concurrent edits preserve the existing draft.
+        The caller receives the separate evidence report for human review."""
         from gideon.security.guardrails.rungs import ensure_core_action_types
 
         ensure_core_action_types()
@@ -517,6 +489,15 @@ class InboxService:
         from gideon.integrations.llm_helpers import one_shot_completion
         from gideon.integrations.prompt_providers.runtime import render_use_case_prompt
 
+        from gideon.integrations.reply_grounding import grounding, drafting_rules, note_prompt, DRAFT_INSTRUCTIONS_MAX_CHARS
+        if not isinstance(instructions, str) or len(instructions) > DRAFT_INSTRUCTIONS_MAX_CHARS:
+            raise ValueError("Reply instructions must be text of at most 2000 characters")
+        evidence = evidence if evidence is not None else grounding(instructions)
+        if any(not note["available"] for note in evidence.named_notes):
+            return item
+        from gideon.extensions.providers.prompt_use_cases import active_prompt_ref
+        producer = active_prompt_ref("inbox_draft")
+        baseline = (item.draft, item.message, repr(item.thread_context), item.status, item.classification)
         style = (
             f"Match this voice/style when replying:\n{self._style_rules}"
             if self._style_rules
@@ -538,15 +519,29 @@ class InboxService:
         try:
             with caller_scope("inbox_triage"):
                 raw = (
-                    await one_shot_completion(prompt, use_case="background") or ""
+                    await one_shot_completion(prompt + note_prompt(evidence) + drafting_rules(instructions), use_case="background") or ""
                 ).strip()
         except Exception:
             logger.warning("inbox draft failed for %s", item_id, exc_info=True)
             return None
-        draft = "" if raw.upper() == "SKIP" else raw
-        updates: dict = {"draft": draft, "context_summary": "AI-drafted reply"}
-        if draft and item.classification == Classification.NOISE:
-            updates["classification"] = Classification.NEEDS_REPLY
+        if raw.upper().startswith("ASK:"):
+            evidence.question = " ".join(raw[4:].split())[:300] or "What should this reply say?"
+            return item
+        if not raw or raw.upper() == "SKIP":
+            evidence.skipped = True
+            return item
+        evidence.words = len(raw.split())
+        if evidence.word_limit is not None and evidence.words > evidence.word_limit:
+            evidence.warnings.append("The generated reply exceeded your word limit. Your existing draft is unchanged.")
+            return item
+        current = self.inbox.items.get(item_id)
+        if current is None:
+            return None
+        if baseline != (current.draft, current.message, repr(current.thread_context), current.status, current.classification):
+            evidence.warnings.append("This item changed during generation. Your existing draft is unchanged.")
+            return current
+        updates: dict = {"draft": raw, "drafted_by": producer, "context_summary": ("Drafted from " + ", ".join(note["name"] for note in evidence.named_notes) + ", as you asked." if evidence.named_notes else "Draft based on the quoted conversation")}
+        evidence.wrote = True
         return self.inbox.update(item_id, **updates)
 
     async def generate_digest(
@@ -560,6 +555,8 @@ class InboxService:
         messages = await self._recent_messages(channel_id, hours)
         if not messages:
             return None
+        from gideon.extensions.providers.prompt_use_cases import active_prompt_ref
+        digest_producer = active_prompt_ref("inbox_digest")
         from gideon.integrations.llm_helpers import one_shot_completion
         from gideon.integrations.prompt_providers.runtime import render_use_case_prompt
 
@@ -604,6 +601,7 @@ class InboxService:
             created_at=ts,
             context_summary=f"AI digest of {len(messages)} messages",
             source="digest",
+            classified_by=digest_producer,
             can_reply=False,
             owner=owner_username(),
         )

@@ -123,6 +123,7 @@ def _client_rows() -> list[dict]:
                 "scope": dict(client.scope),
                 "upstream": client.upstream,
                 "rate_overrides": dict(client.rate_overrides),
+                "persistent_sessions": client.persistent_sessions,
                 "disabled": bool(client.disabled),
                 "created_at": client.created_at,
                 "expires_at": float(client.expires_at or 0.0),
@@ -246,6 +247,11 @@ async def api_external_access_client(request: web.Request) -> web.Response:
             ),
             status=400,
         )
+    persistent = body.get("persistent_sessions", False)
+    if type(persistent) is not bool:
+        return json_error("invalid_request", message="persistent_sessions must be a JSON boolean", status=400)
+    if persistent and "openai" not in requested:
+        return _no_conversation_to_keep()
     tools = body.get("tools")
     scope = body.get("scope")
     rate_overrides = body.get("rate_overrides")
@@ -266,6 +272,10 @@ async def api_external_access_client(request: web.Request) -> web.Response:
         return json_error(
             "invalid_request", message="ttl must be a positive duration no longer than 90d", status=400
         )
+    from gideon.interfaces.dashboard.owner_presence import ACTION_INTEGRATION_TOKEN, require_owner_presence
+    refused = require_owner_presence(request, ACTION_INTEGRATION_TOKEN)
+    if refused is not None:
+        return refused
     try:
         client, token = clients_mod.create_client(
         label,
@@ -276,6 +286,7 @@ async def api_external_access_client(request: web.Request) -> web.Response:
         upstream=upstream,
         rate_overrides=rate_overrides if isinstance(rate_overrides, dict) else None,
         ttl=ttl,
+        persistent_sessions=persistent,
         )
     except ValueError as exc:
         return json_error("invalid_request", message=str(exc), status=400)
@@ -285,6 +296,7 @@ async def api_external_access_client(request: web.Request) -> web.Response:
             "client_id": client.client_id,
             "label": client.label,
             "surfaces": list(client.surfaces),
+            "persistent_sessions": client.persistent_sessions,
             "expires_at": client.expires_at,
             "token": token,
             "token_notice": (
@@ -298,6 +310,35 @@ def clients_mod_ttl_invalid(ttl: str) -> bool:
     from gideon.integrations.inbound import tokens
 
     return tokens.parse_ttl(ttl) is None
+
+
+def _no_conversation_to_keep() -> web.Response:
+    return json_error("invalid_request", message="Only an OpenAI-compatible client has a conversation to keep.", status=400)
+
+
+async def api_external_access_client_persistent_sessions(request: web.Request) -> web.Response:
+    from gideon.integrations.inbound import clients as clients_mod
+    from gideon.interfaces.dashboard.owner_presence import require_owner_presence
+    refused = require_owner_presence(request, "change an integration's conversation setting")
+    if refused is not None:
+        return refused
+    try:
+        body = await read_json_body(request)
+    except Exception:
+        body = None
+    if not isinstance(body, dict) or type(body.get("persistent_sessions")) is not bool:
+        return json_error("invalid_request", message="persistent_sessions must be a JSON boolean", status=400)
+    persistent = body["persistent_sessions"]
+    client_id = str(request.match_info.get("client_id", "") or "")
+    current = clients_mod.load_clients().get(client_id)
+    if current is None:
+        return json_error("not_found", message="Unknown client", status=404)
+    if persistent and not current.may_use("openai"):
+        return _no_conversation_to_keep()
+    client = clients_mod.set_persistent_sessions(client_id, persistent, actor=str(request.get("user") or "owner"))
+    if client is None:
+        return json_error("not_found", message="Unknown client", status=404)
+    return web.json_response({"ok": True, "client_id": client_id, "persistent_sessions": client.persistent_sessions})
 
 
 async def api_external_access_client_toggle(request: web.Request) -> web.Response:

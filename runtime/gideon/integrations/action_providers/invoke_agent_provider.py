@@ -59,6 +59,7 @@ class _Invocation:
         return cls(
             dict(
                 task=task,
+                parent_run=("workflow:" + str(ctx.payload["run_id"])) if ctx.event == "workflow_node" and ctx.payload.get("run_id") else "",
                 parent_session_key=str(
                     (ctx.payload or {}).get("session_key", "") or ""
                 ),
@@ -77,36 +78,6 @@ class _Invocation:
                 **({"cwd": config["cwd"]} if config.get("cwd") else {}),
             )
         )
-
-
-@dataclass
-class _SpawnReservation:
-    semaphore: asyncio.Semaphore
-    released: bool = False
-
-    def release(self, completed: Any = None) -> None:
-        if not self.released:
-            self.released = True
-            self.semaphore.release()
-
-    async def run(self, services: Any, invocation: _Invocation) -> None:
-        try:
-            services.subagents.spawn(**invocation.arguments)
-        except Exception:
-            logger.warning("invoke-agent: spawn failed", exc_info=True)
-        finally:
-            self.release()
-
-    def schedule(self, services: Any, invocation: _Invocation) -> None:
-        pending = self.run(services, invocation)
-        try:
-            scheduled = services.spawn_background(pending)
-        except BaseException:
-            pending.close()
-            self.release()
-            raise
-        if isinstance(scheduled, asyncio.Future):
-            scheduled.add_done_callback(self.release)
 
 
 class InvokeAgentActionProvider(ActionProvider):
@@ -144,7 +115,7 @@ class InvokeAgentActionProvider(ActionProvider):
                 error=f"invoke-agent capacity reached ({_HOOK_INVOKE_MAX_CONCURRENT} in flight)",
             )
         payload = ctx.payload if isinstance(ctx.payload, dict) else {}
-        trigger_id = str(payload.get("trigger_id") or "").strip()
+        trigger_id = str(ctx.trigger_id or payload.get("trigger_id") or "").strip()
         trigger_start_approval = None
         if trigger_id:
             from gideon.automation.triggers.grants import agent_start_approval
@@ -155,17 +126,53 @@ class InvokeAgentActionProvider(ActionProvider):
                     False,
                     error="invoke-agent: the current trigger action has no matching owner Allow",
                 )
+        if trigger_start_approval is not None:
+            from gideon.security.durable_work import accepted_trigger_origin
+            accepted_origin = getattr(ctx, "accepted_origin", None)
+            if accepted_origin is None:
+                # Direct native invocation still derives provenance from the actual sealed row.
+                accepted_origin = accepted_trigger_origin(trigger_id)
+            if accepted_origin is None:
+                return ActionResult(False, error="invoke-agent: no current authenticated trigger origin")
+        else:
+            accepted_origin = None
         invocation = _Invocation.prepare(
             action_config,
             ctx,
             task,
             trigger_start_approval=trigger_start_approval,
         )
+        if accepted_origin is not None:
+            invocation.arguments["accepted_origin"] = accepted_origin
+        from gideon.extensions.apps.app_work import for_job, held, of_session
+        from gideon.extensions.apps.agent_tiers import capability_class
+        inherited = held() or of_session(invocation.arguments.get("parent_session_key", ""))
+        job_work = for_job(trigger_id) if trigger_start_approval is not None else None
+        work = inherited or job_work
+        if inherited is not None and job_work is not None:
+            work = inherited.child(job_work.tier) if inherited.app == job_work.app else inherited.child("")
+        if work is not None:
+            work = work.child()
+            if not work.tier:
+                return ActionResult(False, error="invoke-agent: app may run no agent work now")
+            invocation.arguments["app_work"] = work
+            invocation.arguments["capability_class"] = capability_class(work.tier)
+            invocation.arguments["approval_mode"] = ""
+            if job_work is not None:
+                invocation.arguments["parent_session_key"] = f"app:{work.app}"
+                invocation.arguments["silent"] = True
+                if work.tier == "text":
+                    invocation.arguments["agent"] = ""
         await semaphore.acquire()
-        _SpawnReservation(semaphore).schedule(services, invocation)
-        return ActionResult(
-            True, stdout=f"spawned agent for: {task[:80]}", outcome="launched"
-        )
+        from gideon.integrations.action_providers.completion import agent_launch
+
+        try:
+            info = services.subagents.spawn(**invocation.arguments)
+            return agent_launch(services.subagents, info, f"spawned agent for: {task[:80]}")
+        except Exception as error:
+            return ActionResult(False, error=f"invoke-agent: spawn failed: {error}")
+        finally:
+            semaphore.release()
 
 
 def create_provider(config: dict[str, Any] | None = None) -> InvokeAgentActionProvider:

@@ -147,7 +147,8 @@ def test_executor_conditional_branch_taken():
     )
     res = _run(PipelineExecutor(g).run(NodeContext(item_id="i", item_type="t")))
     assert "vision" in res.ran
-    assert "ocr" in res.skipped
+    assert "ocr" in res.not_taken
+    assert res.outcomes["ocr"].status == "not_applicable"
 
 
 def test_executor_disabled_node_skipped():
@@ -463,9 +464,9 @@ def test_runner_persists_node_phases(store):
     iid = store.create_typed_item(item_type="note", title="N", content="hi there")
     _run(ingest_item(store, iid))
     phases = (store.get_item(iid).get("file_metadata") or {}).get("node_phases") or {}
-    assert phases.get("passthrough") == "done"
-    assert phases.get("insights") in ("done", "failed")
-    assert phases.get("embed") == "skipped"
+    assert phases.get("passthrough", {}).get("status") == "done"
+    assert phases.get("insights", {}).get("status") == "skipped"
+    assert phases.get("embed", {}).get("status") == "skipped"
 
 
 class _VectorEmbedder:
@@ -492,7 +493,7 @@ def test_embed_phase_is_skipped_when_no_vector_is_written(store):
     off = store.create_typed_item(item_type="note", title="Off", content="body text")
     _run(ingest_item(store, off, embedder=None))
     phases = (store.get_item(off).get("file_metadata") or {}).get("node_phases") or {}
-    assert phases.get("embed") == "skipped"
+    assert phases.get("embed", {}).get("status") == "skipped"
     assert not store.get_item(off).get("has_embedding")
 
     class _NoVector(_VectorEmbedder):
@@ -506,13 +507,13 @@ def test_embed_phase_is_skipped_when_no_vector_is_written(store):
     phases = (store.get_item(none_vec).get("file_metadata") or {}).get(
         "node_phases"
     ) or {}
-    assert phases.get("embed") == "skipped"
+    assert phases.get("embed", {}).get("status") == "skipped"
     assert not store.get_item(none_vec).get("has_embedding")
 
     on = store.create_typed_item(item_type="note", title="On", content="body text")
     _run(ingest_item(store, on, embedder=_VectorEmbedder()))
     phases = (store.get_item(on).get("file_metadata") or {}).get("node_phases") or {}
-    assert phases.get("embed") == "done"
+    assert phases.get("embed", {}).get("status") == "done"
     assert store.get_item(on).get("has_embedding")
 
 
@@ -527,8 +528,8 @@ def test_terminal_stage_phases_reflect_each_stage_outcome(store):
     )
     _run(ingest_item(store, iid, insights_pool=None))
     phases = (store.get_item(iid).get("file_metadata") or {}).get("node_phases") or {}
-    assert phases.get("intents") == "skipped"
-    assert phases.get("entities") == "done"
+    assert phases.get("intents", {}).get("status") == "not_applicable"
+    assert phases.get("entities", {}).get("status") == "done"
 
     from gideon.cognition.knowledge import extractor as extractor_mod
 
@@ -542,7 +543,7 @@ def test_terminal_stage_phases_reflect_each_stage_outcome(store):
         mp.setattr(extractor_mod.EntityExtractor, "extract", _boom)
         _run(ingest_item(store, other, insights_pool=object()))
     phases = (store.get_item(other).get("file_metadata") or {}).get("node_phases") or {}
-    assert phases.get("entities") == "failed"
+    assert phases.get("entities", {}).get("status") == "failed"
 
 
 def test_runner_document_reads_file(store, tmp_path):
@@ -880,7 +881,9 @@ def test_runner_marks_partial_when_insights_model_unavailable(store, monkeypatch
     import gideon.cognition.knowledge.pipeline.runner as runner_mod
 
     async def _insights_unavailable(*a, **k):
-        return False
+        from gideon.cognition.knowledge.pipeline.outcomes import failed
+
+        return failed("The insights model is unavailable.")
 
     monkeypatch.setattr(runner_mod, "_run_insights", _insights_unavailable)
 
@@ -921,7 +924,7 @@ def test_a_failing_model_really_does_downgrade_the_item_to_partial(store, monkey
     assert status == "partial"
     item = store.get_item(iid)
     assert item["processing_status"] == "partial"
-    assert "model unavailable" in (item.get("processing_error") or "").lower()
+    assert "no model bound" in (item.get("processing_error") or "").lower()
 
 
 def test_a_model_that_returns_nothing_still_leaves_the_item_done(store):
@@ -957,7 +960,9 @@ def test_runner_insights_failure_not_masked_by_optional_skips(
     import gideon.cognition.knowledge.pipeline.runner as runner_mod
 
     async def _insights_unavailable(*a, **k):
-        return False
+        from gideon.cognition.knowledge.pipeline.outcomes import failed
+
+        return failed("The insights model is unavailable.")
 
     monkeypatch.setattr(runner_mod, "_run_insights", _insights_unavailable)
 
@@ -1413,11 +1418,11 @@ def test_runner_records_skip_reason_on_partial(store, tmp_path, monkeypatch):
     ensure_nodes_registered()
     import gideon.cognition.knowledge.pipeline.executor as _ex
 
-    _orig_can = _ex.can_resolve_use_case
+    _orig_reason = _ex.unserved_reason_sync
     monkeypatch.setattr(
         _ex,
-        "can_resolve_use_case",
-        lambda uc: False if uc == "image_modality" else _orig_can(uc),
+        "unserved_reason_sync",
+        lambda uc: "No Image · Modality model is set up." if uc == "image_modality" else _orig_reason(uc),
     )
     img = tmp_path / "px.png"
     Image.new("RGB", (4, 4), "white").save(img)
@@ -1427,9 +1432,11 @@ def test_runner_records_skip_reason_on_partial(store, tmp_path, monkeypatch):
     status = _run(ingest_item(store, iid, insights_pool=None))
     item = store.get_item(iid)
     assert status == "partial"
-    err = item.get("processing_error") or ""
-    assert err.startswith("Skipped (optional steps unavailable):")
-    assert "vision" in err or "ocr" in err
+    assert not item.get("processing_error")
+    phases = item["file_metadata"]["node_phases"]
+    assert phases["ocr"]["status"] == "skipped"
+    assert phases["ocr"]["reason"] == "No Image · Modality model is set up."
+    assert phases["ocr"]["needs"] == ["image_modality"]
 
 
 def test_graph_for_known_types():

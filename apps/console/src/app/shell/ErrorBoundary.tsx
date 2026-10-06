@@ -5,9 +5,19 @@ import { treatmentPaint } from '../../shared/theme/errorTreatments'
 import { readableErrText } from '../../shared/data/errText'
 import { useErrorTreatment } from './personality'
 import { canReloadChunk, isChunkLoadError, RELOAD_GUARD_KEY } from './errorRecovery'
+import { InlineError } from '../../shared/ui/InlineError'
 
 interface Props { children: ReactNode; resetKey?: string }
 interface State { error: unknown | null }
+function recoverChunk(error: unknown) {
+  if (!isChunkLoadError(error)) return
+  let previous: string | null = null
+  try { previous = sessionStorage.getItem(RELOAD_GUARD_KEY) } catch { /* Recovery also works without storage. */ }
+  const now = Date.now()
+  if (!canReloadChunk(now, previous)) return
+  try { sessionStorage.setItem(RELOAD_GUARD_KEY, String(now)) } catch { /* Manual recovery remains available. */ }
+  window.location.reload()
+}
 function ErrorFallback({ error, retry }: { error: unknown; retry: () => void }) {
   const treatment = useErrorTreatment(), chunk = isChunkLoadError(error)
   const message = chunk ? 'The app was updated while this tab was open. Reload to load the latest version.' : readableErrText(error) || 'Something went wrong rendering this view.'
@@ -31,13 +41,32 @@ export class ErrorBoundary extends Component<Props, State> {
     if (previous.resetKey !== this.props.resetKey && this.state.error !== null) this.setState({ error: null })
   }
   componentDidCatch(error: unknown) {
-    if (!isChunkLoadError(error)) return
-    let previous: string | null = null
-    try { previous = sessionStorage.getItem(RELOAD_GUARD_KEY) } catch { /* Recovery also works without storage. */ }
-    const now = Date.now()
-    if (!canReloadChunk(now, previous)) return
-    try { sessionStorage.setItem(RELOAD_GUARD_KEY, String(now)) } catch { /* Manual recovery remains available. */ }
-    window.location.reload()
+    recoverChunk(error)
   }
   render() { return this.state.error === null ? this.props.children : <ErrorFallback error={this.state.error} retry={this.retry} /> }
+}
+
+interface WidgetBoundaryProps {
+  children: ReactNode
+  what: string
+  compact?: boolean
+  className?: string
+}
+
+export class WidgetBoundary extends Component<WidgetBoundaryProps, State> {
+  state: State = { error: null }
+  static getDerivedStateFromError(error: unknown): State { return { error } }
+  componentDidCatch(error: unknown) { recoverChunk(error) }
+  private retry = () => {
+    if (isChunkLoadError(this.state.error)) window.location.reload()
+    else this.setState({ error: null })
+  }
+  render() {
+    if (this.state.error === null) return this.props.children
+    const sentence = `Couldn't show ${this.props.what}.`
+    return this.props.compact
+      ? <button type="button" onClick={this.retry} title={`${sentence} Retry`} aria-label={`${sentence} Retry`}
+          className="grid size-7 place-items-center rounded-pill text-danger"><AlertTriangle size={14} aria-hidden /></button>
+      : <InlineError icon onRetry={this.retry} className={this.props.className}>{sentence}</InlineError>
+  }
 }

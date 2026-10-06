@@ -58,6 +58,8 @@ from gideon.integrations.voice.duplex import (
 )
 from gideon.hypermid.config import ContextConfig
 
+from gideon.core.config.pricing import ModelPricesConfig, price_overrides
+
 logger = logging.getLogger(__name__)
 
 CONFIG_DIR_NAME = ".gideon"
@@ -2351,6 +2353,10 @@ class InboxConfig:
             "Style Rules", "Initial communication style rules for drafting."
         ),
     )
+    sort_messages: bool = field(
+        default=True,
+        metadata=_meta("Sort New Messages", "Sort new inbox messages with the background model in bounded batches. Off leaves them unsorted."),
+    )
     test_mode: bool = field(
         default=False,
         metadata=_meta("Test Mode", "Include own messages in inbox (for testing)."),
@@ -2854,6 +2860,10 @@ class ConfigPreserveError(RuntimeError):
 class AppConfig:
     _loaded_values: dict | None = field(default=None, init=False, repr=False, compare=False)
     _loaded_missing: bool = field(default=False, init=False, repr=False, compare=False)
+    model_prices: "ModelPricesConfig" = field(
+        default_factory=lambda: ModelPricesConfig(),
+        metadata=_meta("Model Prices", "Overrides for model prices in the unit each model bills."),
+    )
     agent: AgentConfig = field(
         default_factory=AgentConfig,
         metadata=_meta("Agent", "Agent runtime configuration."),
@@ -3076,7 +3086,7 @@ class AppConfig:
         metadata=_meta(
             "Timezone",
             "IANA timezone name (e.g. 'America/Los_Angeles'). "
-            "Used to display cron schedules in local time.",
+            "Used for schedules, usage days and daily spend-budget resets.",
         ),
     )
     snapshot_dir: str = field(
@@ -3139,6 +3149,7 @@ class AppConfig:
         values = resolve_config_secrets(values)
         _validate_config_data(values)
         configuration = decode_configuration(values, cls)
+        configuration.model_prices = ModelPricesConfig(price_overrides(values.get("model_prices")))
         stored_hypermid = values.get("hypermid")
         if isinstance(stored_hypermid, dict) and stored_hypermid:
             try:

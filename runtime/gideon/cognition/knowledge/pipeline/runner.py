@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import logging
 
+from gideon.cognition.knowledge.pipeline import outcomes as oc
+from gideon.cognition.knowledge.pipeline.outcomes import PhaseOutcome
+
 from gideon.cognition.knowledge.pipeline import (
     TERMINAL_STAGES,
     ensure_nodes_registered,
@@ -133,6 +136,9 @@ async def ingest_item(
         _persist_extracted_contents(store, item_id, result)
 
         _persist_structural_metadata(store, item_id, item, result)
+        _merge_file_metadata(store, item_id, {
+            "node_phases": {name: outcome.to_dict() for name, outcome in result.outcomes.items()}
+        })
 
         pooled = result.pooled_outputs()
         consolidated = ""
@@ -156,43 +162,34 @@ async def ingest_item(
                 store.db.commit()
 
         if raw_mode:
-            insights_phase = entities_phase = intents_phase = "skipped"
-            insights_ok = True
+            insights_phase = entities_phase = intents_phase = oc.not_applicable("This source is set to no AI enrichment.")
             for stage in ("insights", "entities", "intents"):
-                _emit("node", node=stage, phase="skipped")
+                _emit("node", node=stage, phase=oc.NOT_APPLICABLE, outcome=insights_phase.to_dict())
         else:
             _emit("node", node="insights", phase="running")
-            insights_ok = await _run_insights(
-                store, item_id, consolidated, insights_pool
-            )
-            insights_phase = "done" if insights_ok else "failed"
-            _emit("node", node="insights", phase=insights_phase)
-            if insights_ok:
-                from gideon.integrations.action_providers.knowledge_persist_provider import (
-                    run_ingest_conflict_pass,
-                )
-
+            insights_phase = await _run_insights(store, item_id, consolidated, insights_pool)
+            _emit("node", node="insights", phase=insights_phase.status, outcome=insights_phase.to_dict())
+            if insights_phase.status == oc.DONE:
+                from gideon.integrations.action_providers.knowledge_persist_provider import run_ingest_conflict_pass
                 run_ingest_conflict_pass(store, item_id)
 
             _emit("node", node="entities", phase="running")
-            entities_phase = await _run_entities_stage(
-                store, item_id, consolidated, insights_pool
-            )
-            _emit("node", node="entities", phase=entities_phase)
+            entities_phase = await _run_entities_stage(store, item_id, consolidated, insights_pool)
+            _emit("node", node="entities", phase=entities_phase.status, outcome=entities_phase.to_dict())
 
             _emit("node", node="intents", phase="running")
-            intents_phase = await _run_intents_stage(
-                store, item_id, item_type, consolidated, insights_pool
-            )
-            _emit("node", node="intents", phase=intents_phase)
+            intents_phase = await _run_intents_stage(store, item_id, item_type, consolidated, insights_pool)
+            _emit("node", node="intents", phase=intents_phase.status, outcome=intents_phase.to_dict())
 
         _emit("node", node="embed", phase="running")
         embed_phase = _embed(store, item_id, embedder)
-        _emit("node", node="embed", phase=embed_phase)
+        _emit("node", node="embed", phase=embed_phase.status, outcome=embed_phase.to_dict())
 
         _emit("node", node="dedup", phase="running")
         dedup_phase, dedup_result = _run_dedup_stage(store, item_id, embedder)
-        _emit("node", node="dedup", phase=dedup_phase)
+        if dedup_phase.status == oc.SKIPPED and embed_phase.status in (oc.SKIPPED, oc.FAILED):
+            dedup_phase = oc.waited_on([("Embedding", embed_phase)])
+        _emit("node", node="dedup", phase=dedup_phase.status, outcome=dedup_phase.to_dict())
         if dedup_result:
             _emit("dedup", **dedup_result)
     except Exception as exc:
@@ -200,6 +197,13 @@ async def ingest_item(
             _cleanup_orphaned_artifacts(item_id)
             return "deleted"
         logger.exception("knowledge ingest failed mid-pipeline for %s", item_id)
+        reached = {name.removesuffix("_phase"): value.to_dict() for name, value in list(locals().items()) if name.endswith("_phase") and isinstance(value, PhaseOutcome)}
+        previous = (store.get_item(item_id) or {}).get("file_metadata") or {}
+        reached = {**(previous.get("node_phases") or {}), **reached}
+        try:
+            _merge_file_metadata(store, item_id, {"node_phases": reached})
+        except Exception:
+            logger.warning("Could not save reached ingestion outcomes", exc_info=True)
         store.update_item(
             item_id,
             processing_status="failed",
@@ -211,33 +215,21 @@ async def ingest_item(
         return "failed"
 
     status, proc_error = _processing_outcome(result)
-    if not insights_ok:
-        if status == "done":
-            status = "partial"
-        insights_msg = (
-            "insights: model unavailable (insights not refreshed — try regenerating)"
-        )
-        if not proc_error:
-            proc_error = insights_msg
-        elif not proc_error.startswith(insights_msg):
-            proc_error = f"{insights_msg}; {proc_error}"
-    node_phases: dict[str, str] = {}
-    for nt in result.ran:
-        node_phases[nt] = "done"
-    for nt in result.failed:
-        node_phases[nt] = "failed"
-    for nt in result.skipped:
-        node_phases[nt] = "skipped"
-    for nt in getattr(graph, "nodes", {}):
-        node_phases.setdefault(nt, "skipped")
     terminal_phases = {
-        "insights": insights_phase,
-        "entities": entities_phase,
-        "intents": intents_phase,
-        "embed": embed_phase,
-        "dedup": dedup_phase,
+        "insights": insights_phase, "entities": entities_phase,
+        "intents": intents_phase, "embed": embed_phase, "dedup": dedup_phase,
     }
-    node_phases.update({stage: terminal_phases[stage] for stage in TERMINAL_STAGES})
+    actual_failures = [(name, phase) for name, phase in terminal_phases.items() if phase.status == oc.FAILED]
+    if status == "done" and actual_failures:
+        status = "partial"
+    if actual_failures:
+        detail = "; ".join(f"{name}: {phase.reason}" for name, phase in actual_failures)
+        proc_error = f"{detail}; {proc_error}"[:500] if proc_error else detail[:500]
+    node_phases = {
+        name: result.outcomes.get(name, oc.skipped("It never became ready to run.")).to_dict()
+        for name in graph.nodes
+    }
+    node_phases.update({stage: phase.to_dict() for stage, phase in terminal_phases.items() if stage in TERMINAL_STAGES})
     _merge_file_metadata(store, item_id, {"node_phases": node_phases})
 
     store.update_item(
@@ -250,6 +242,7 @@ async def ingest_item(
         ran=result.ran,
         skipped=result.skipped,
         failed=result.failed,
+        node_phases=node_phases,
     )
     from gideon.extensions.apps.app_events import KNOWLEDGE_INGESTED
     from gideon.extensions.apps.app_events import emit as emit_platform_event
@@ -300,10 +293,6 @@ def _processing_outcome(result: ExecutionResult) -> tuple[str, str | None]:
             only_scrape_failed = result.failed == ["bookmark_scrape"]
             if only_scrape_failed and scrape_meta.get("error_kind") == "unreachable":
                 status = "unreachable"
-    elif status == "partial" and result.skipped:
-        proc_error = "Skipped (optional steps unavailable): " + ", ".join(
-            result.skipped[:12]
-        )
     return status, proc_error
 
 
@@ -471,7 +460,7 @@ def _write_extracted_entity(store, ent: dict) -> tuple[str, str] | None:
     return name, eid
 
 
-async def _run_entities_stage(store, item_id: str, content: str, pool) -> str:
+async def _run_entities_stage(store, item_id: str, content: str, pool) -> PhaseOutcome:
     """Link + extract entities for the item, writing to the entity graph.
 
     Two passes, deliberately in this order:
@@ -491,13 +480,13 @@ async def _run_entities_stage(store, item_id: str, content: str, pool) -> str:
     a re-ingest doesn't dup — and the pre-pass is re-applied after that clear, so its links
     survive the very stage that wipes them.
 
-    Returns the phase to report. Unlike the intents stage, this one is NOT wholly
+    Returns the outcome to report. Unlike the intents stage, this one is NOT wholly
     model-dependent: pass 1 is the deliberate model-free guarantee, so with no pool the stage
-    still ran and linked — ``done``, not ``skipped``. Only a contentless item skips outright;
+    still ran and linked — ``done``, not ``skipped``. A contentless item is not applicable;
     an errored extraction reports ``failed`` (pass 1's links stand regardless).
     """
     if not content.strip():
-        return "skipped"
+        return oc.not_applicable("There is no text to read.")
 
     try:
         from gideon.cognition.knowledge.alias_prepass import link_known_entities
@@ -507,18 +496,18 @@ async def _run_entities_stage(store, item_id: str, content: str, pool) -> str:
         logger.debug("alias pre-pass failed for %s", item_id, exc_info=True)
 
     if pool is None:
-        return "done"
+        return oc.done()
     try:
         from gideon.cognition.knowledge.extractor import EntityExtractor
 
         extraction = await EntityExtractor(pool=pool).extract(content)
-    except Exception:
+    except Exception as error:
         logger.debug("entity extraction failed for %s", item_id, exc_info=True)
-        return "failed"
+        return oc.failed(f"Entity extraction did not finish: {error}")
     entities = extraction.get("entities") or []
     relations = extraction.get("relations") or []
     if not entities:
-        return "done"
+        return oc.done()
     try:
         prepass_links: list[tuple[str, str, str]] = []
         try:
@@ -572,30 +561,29 @@ async def _run_entities_stage(store, item_id: str, content: str, pool) -> str:
                 )
         store.db.commit()
         store._load_graph()
-        return "done"
-    except Exception:
+        return oc.done()
+    except Exception as error:
         logger.debug("entity graph write failed for %s", item_id, exc_info=True)
-        return "failed"
+        return oc.failed(f"Entity results could not be saved: {error}")
 
 
-async def _run_insights(store, item_id: str, content: str, pool) -> bool:
-    """Extract + persist insights for the item. Returns False when the model call
-    errored (e.g. cold/unavailable pool) so the caller can mark the item ``partial``
-    instead of silently leaving it ``done`` with stale/empty insights. Returns True on
-    success or when there's legitimately nothing to do (no content / empty result)."""
+async def _run_insights(store, item_id: str, content: str, pool) -> PhaseOutcome:
+    """Record whether insight extraction ran, lacked a model, or failed."""
     if not content.strip():
-        return True
+        return oc.not_applicable("There is no text to read.")
+    if pool is None:
+        return oc.no_model("background", "No model was available to produce insights.")
     try:
         from gideon.cognition.knowledge.insights import InsightsExtractor
 
         insights = await InsightsExtractor(pool=pool).extract(
             content, raise_on_error=True
         )
-    except Exception:
+    except Exception as error:
         logger.debug("insights extraction failed for %s", item_id, exc_info=True)
-        return False
+        return oc.failed(f"Insights extraction did not finish: {error}")
     if not insights:
-        return True
+        return oc.done()
     item = store.get_item(item_id)
     ai_title = str(insights.pop("title", "") or "").strip()
     prev_insights = dict((item or {}).get("insights") or {})
@@ -637,7 +625,7 @@ async def _run_insights(store, item_id: str, content: str, pool) -> bool:
         fields["tag_source"] = "ai"
     store.update_item(item_id, touch=False, **fields)
     store.db.commit()
-    return True
+    return oc.done()
 
 
 def _intents_path(store):
@@ -650,32 +638,30 @@ def _intents_path(store):
 
 async def _run_intents_stage(
     store, item_id: str, item_type: str, content: str, pool
-) -> str:
+) -> PhaseOutcome:
     """Run Tier-3 user intents over the consolidated content. Each relevant match is
     persisted as an outcome BY VALUE in the intent_outcomes table, with only a soft
     back-reference to this item — so the gathered insight survives item deletion.
 
-    Returns the phase to report: ``skipped`` when the stage had nothing to run (no
-    content, no user intents defined, or no model to match with — matching is the whole
-    stage, so without a pool nothing happened), ``failed`` when the run errored,
-    ``done`` when intents were actually matched against the content."""
+    Returns ``not_applicable`` for no text or intents, ``skipped`` for a missing
+    model, ``failed`` for an error, and ``done`` after an actual comparison."""
     if not content.strip():
-        return "skipped"
+        return oc.not_applicable("There is no text to read.")
     try:
         from gideon.cognition.knowledge.intents import IntentStore, run_intents
 
         intents = IntentStore(_intents_path(store)).load()
         if not intents:
-            return "skipped"
+            return oc.not_applicable("You have no intents for it to look for.")
         if not pool:
-            return "skipped"
+            return oc.no_model("background", "No model was available to match your intents.")
         matches = await run_intents(intents, item_type, content, pool=pool)
-    except Exception:
+    except Exception as error:
         logger.debug("intent stage failed for %s", item_id, exc_info=True)
-        return "failed"
+        return oc.failed(f"Intent matching did not finish: {error}")
     store.clear_item_intent_outcomes(item_id)
     if not matches:
-        return "done"
+        return oc.done()
     item = store.get_item(item_id)
     item_title = (item or {}).get("title") or (item or {}).get("ai_title") or ""
     by_id = {i.id: i for i in intents}
@@ -693,11 +679,11 @@ async def _run_intents_stage(
             logger.debug(
                 "recording outcome for intent %s failed", m.intent_id, exc_info=True
             )
-    return "done"
+    return oc.done()
 
 
-def _embed(store, item_id: str, embedder) -> str:
-    """Embed the item and return the phase to report: ``done`` only when a vector was
+def _embed(store, item_id: str, embedder) -> PhaseOutcome:
+    """Embed the item and return an outcome: ``done`` only when a vector was
     actually written, ``skipped`` when there was no embedder / no vector to write (the
     common case — no embedding model bound), ``failed`` when the attempt errored.
 
@@ -710,20 +696,20 @@ def _embed(store, item_id: str, embedder) -> str:
     Chunks are ADDITIVE — the item row keeps its own vector; the chunk index is what
     gives retrieval reach into content deep in a long document."""
     if not embedder:
-        return "skipped"
+        return oc.no_model("embedding", "No embedding model was available to index this item.")
     try:
         from gideon.cognition.knowledge.embedder import floats_to_bytes
 
         item = store.get_item(item_id)
         if not item:
-            return "skipped"
+            return oc.not_applicable("The item was removed before embedding.")
         vec = embedder.embed_for_item(
             item.get("title") or "",
             item.get("summary"),
             item.get("content"),
         )
         if not vec:
-            return "skipped"
+            return oc.skipped("The embedding model returned no vector.")
         provider, model = embedding_space_fingerprint(embedder)
         store.db.execute(
             "UPDATE items SET embedding = ?, embedding_provider = ?, embedding_model = ? WHERE id = ?",
@@ -731,10 +717,10 @@ def _embed(store, item_id: str, embedder) -> str:
         )
         store.db.commit()
         embed_item_chunks(store, item_id, item.get("content") or "", embedder)
-        return "done"
-    except Exception:
+        return oc.done()
+    except Exception as error:
         logger.debug("knowledge embed failed for %s", item_id, exc_info=True)
-        return "failed"
+        return oc.failed(f"Embedding did not finish: {error}")
 
 
 def embedding_space_fingerprint(embedder) -> tuple[str, str]:
@@ -890,7 +876,7 @@ def embed_item_chunks(store, item_id: str, content: str, embedder) -> None:
         logger.debug("knowledge chunk-embed failed for %s", item_id, exc_info=True)
 
 
-def _run_dedup_stage(store, item_id: str, embedder) -> tuple[str, dict | None]:
+def _run_dedup_stage(store, item_id: str, embedder) -> tuple[PhaseOutcome, dict | None]:
     """P12 TIER-2 semantic dedup — runs AFTER `_embed` (the vector must exist; it doesn't at
     create time in the create-fast/enrich-async model). Fetches same-type candidates carrying
     an embedding and asks the pure `dedup.resolve_duplicate` (filename + cosine + date-gate) if
@@ -905,15 +891,15 @@ def _run_dedup_stage(store, item_id: str, embedder) -> tuple[str, dict | None]:
     TIER-1 exact dedup (URL/byte-hash, create-time in store.py) is unaffected.
     """
     if not embedder:
-        return "skipped", None
+        return oc.no_model("embedding", "No embedding model was available for duplicate comparison."), None
     try:
         if not getattr(embedder, "is_available", lambda: True)():
-            return "skipped", None
+            return oc.no_model("embedding", "The embedding model is not ready for duplicate comparison."), None
         from gideon.cognition.knowledge import dedup as dedup_mod
 
         item = store.get_item(item_id)
         if not item:
-            return "skipped", None
+            return oc.not_applicable("The item was removed before duplicate comparison."), None
         from gideon.cognition.knowledge.embedder import bytes_to_floats
 
         row = store.db.execute(
@@ -926,7 +912,7 @@ def _run_dedup_stage(store, item_id: str, embedder) -> tuple[str, dict | None]:
         )
         vec = bytes_to_floats(raw or b"")
         if not vec:
-            return "skipped", None
+            return oc.skipped("The item has no vector to compare."), None
         candidate = {
             "id": item_id,
             "title": item.get("title") or "",
@@ -957,18 +943,18 @@ def _run_dedup_stage(store, item_id: str, embedder) -> tuple[str, dict | None]:
                 verdict.filename_sim,
                 loser_id,
             )
-            return "done", {
+            return oc.done(), {
                 "winner_id": winner_id,
                 "loser_id": loser_id,
                 "cosine": round(verdict.cosine, 3),
                 "filename_sim": round(verdict.filename_sim, 3),
             }
-        return "done", None
-    except Exception:
+        return oc.done(), None
+    except Exception as error:
         logger.debug(
             "knowledge dedup failed for %s (non-fatal)", item_id, exc_info=True
         )
-        return "failed", None
+        return oc.failed(f"Duplicate comparison did not finish: {error}"), None
 
 
 def _dedup(store, item_id: str, embedder) -> dict | None:

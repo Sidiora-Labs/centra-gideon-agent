@@ -151,6 +151,7 @@ from gideon.interfaces.dashboard.handlers.external_access import (
     api_external_access,
     api_external_access_client,
     api_external_access_client_toggle,
+    api_external_access_client_persistent_sessions,
 )
 from gideon.interfaces.dashboard.handlers.files import (
     _validate_dashboard_path,
@@ -364,6 +365,7 @@ from gideon.interfaces.dashboard.handlers.updates import (
     api_update_apply,
     api_update_auto,
     api_update_cancel,
+    api_update_dismiss,
     api_update_check,
     api_update_dev_mode,
     api_update_simulate,

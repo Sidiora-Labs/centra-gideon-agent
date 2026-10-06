@@ -52,8 +52,11 @@ def manifest(repository: Path, *, include_console: bool = True) -> dict:
         for path in (root / "gideon/sdk").glob("*.py")
         if path.name != "__init__.py"
     )
+    from gideon.core.frozen_child import CHILD_MODULES
+
     return {
         "version": 1,
+        "child_modules": list(CHILD_MODULES),
         "console": include_console,
         "sdk_modules": sdk,
         "files": [

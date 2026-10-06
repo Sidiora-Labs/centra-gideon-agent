@@ -18,6 +18,7 @@ gateway without a restart.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -115,6 +116,23 @@ def resume() -> IncidentState:
     _audit("incident_resumed")
     logger.warning("Incident mode resumed (unattended work re-enabled)")
     return state
+
+
+async def watch(on_change, *, interval: float = 2.0) -> None:
+    """Publish observed switch changes, including changes made by another process."""
+    from gideon import shutdown_event
+
+    last = get_incident()
+    while not shutdown_event.is_set():
+        await asyncio.sleep(interval)
+        current = get_incident()
+        if (current.active, current.reason) == (last.active, last.reason):
+            continue
+        last = current
+        try:
+            on_change(current)
+        except Exception:
+            logger.debug("incident watch callback failed", exc_info=True)
 
 
 def _write(state: IncidentState) -> None:

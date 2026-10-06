@@ -131,44 +131,67 @@ async def _list_marketplace_skills() -> list[dict[str, Any]]:
     return result
 
 
-def _is_restricted_session(state: ConsoleState, request: "Any") -> bool:
-    """Check if request comes from an ephemeral (incognito) or temporary (guest) session.
-
-    Reads X-Session-Key header (set by browser and MCP subprocesses).
-    Returns True if the session should be blocked from memory operations.
-    """
-    sk = request.headers.get("X-Session-Key", "")
-    if not sk:
-        return False
-    if sk == "dashboard:ui":
-        return False
-    if sk in state._restricted_keys:
-        return True
-    session_name = sk.split(":", 1)[-1] if ":" in sk else sk
-    session = state._sessions.get(session_name)
-    if session and session.is_restricted:
-        return True
+def _resolved_memory_mode(state: ConsoleState, request: Any) -> str | None:
+    """Resolve established live or durable state; absence is not persistent scope."""
+    from gideon.security.approval_answer import OWNER, UNKNOWN, work_principal_of_request, principal_from_record
     from gideon.engine import session_restrictions
-
-    if session_restrictions.is_restricted(sk):
-        return True
-    return False
-
-
-def _blocks_reads_session(state: ConsoleState, request: "Any") -> bool:
-    """Check if request comes from a temporary session that blocks memory reads."""
+    actor = work_principal_of_request(request)
+    if actor.kind == UNKNOWN:
+        return None
     sk = request.headers.get("X-Session-Key", "")
     if not sk or sk == "dashboard:ui":
-        return False
-    session_name = sk.split(":", 1)[-1] if ":" in sk else sk
-    session = state._sessions.get(session_name)
-    if session and session.blocks_reads:
-        return True
-    from gideon.engine import session_restrictions
-
+        return "persistent" if actor.kind == OWNER else None
     if session_restrictions.is_temporary(sk):
-        return True
-    return False
+        return "temporary"
+    from gideon.security.session_credentials import work_of_request
+    proof = work_of_request(request)
+    from gideon.security.session_credentials import admitted_memory_tool
+    if proof is not None and admitted_memory_tool(proof):
+        return proof.memory_mode
+    lookup_key = proof.origin_session_key if proof is not None else sk
+    name = lookup_key.removeprefix("dashboard:")
+    session = state.get_session(name)
+    if session is not None:
+        if session.lifecycle != "active":
+            return None
+        initiator = principal_from_record(session._initiator)
+        mode = session.memory_mode
+    else:
+        if state.conversation_log is None:
+            return None
+        try:
+            from gideon.interfaces.dashboard.chat_utils import resolve_history_key
+            key = resolve_history_key(state.conversation_log, name)
+            if not key:
+                return None
+            meta = state.conversation_log.get_metadata(key)
+            if meta.get("closed") or meta.get("lifecycle", "active") != "active":
+                return None
+            initiator = principal_from_record(meta.get("initiator"))
+            mode = meta.get("memory_mode")
+        except Exception:
+            logger.warning("session memory scope lookup failed", exc_info=True)
+            return None
+    # Provenance is only an extra constraint; it does not mint native scope authority.
+    source_actor = proof.initiator if proof is not None else actor
+    if initiator.kind == UNKNOWN or initiator != source_actor:
+        return None
+    if proof is not None:
+        if proof.memory_mode == "temporary":
+            mode = "temporary"
+        elif proof.memory_mode == "incognito" and mode == "persistent":
+            mode = "incognito"
+    if session_restrictions.is_incognito(sk) and mode == "persistent":
+        mode = "incognito"
+    return mode if mode in {"persistent", "incognito", "temporary"} else None
+
+
+def _is_restricted_session(state: ConsoleState, request: Any) -> bool:
+    return _resolved_memory_mode(state, request) != "persistent"
+
+
+def _blocks_reads_session(state: ConsoleState, request: Any) -> bool:
+    return _resolved_memory_mode(state, request) not in {"persistent", "incognito"}
 
 
 def _path_home_gideon():
@@ -184,28 +207,7 @@ def _path_home_gideon():
 
 
 def _session_has_persisted_history(session_name: str) -> bool:
-    """Return True iff the session has a JSONL file in ~/.gideon/sessions/.
-
-    This is a positive signal that the session was previously established
-    as non-ephemeral: ephemeral (incognito/temporary) sessions never write
-    to disk, so a persisted JSONL can only come from a real user session.
-
-    Used by ``api_lessons_create`` to distinguish between:
-
-    * A legitimate MCP subprocess whose in-memory session was evicted by the
-      idle-sweep loop (``session.py``'s 30-minute timeout). The subprocess
-      still holds the original ``GIDEON_SESSION_KEY`` env var, so it
-      keeps sending the same ``X-Session-Key``, but ``state._sessions`` has
-      moved on. Without this check such calls return HTTP 400 ``unknown
-      session`` even though the user is actively typing in the thread.
-
-    * A forged or stale key from a context that never had a real session
-      backing it — which should continue to be rejected.
-
-    Only checks existence, not contents. Authentication of the caller is
-    still enforced by the ``X-Internal-Secret`` middleware upstream; this
-    check only governs the *ephemeral vs non-ephemeral* distinction.
-    """
+    """Validate a readable active persistent metadata header; existence proves nothing."""
     if (
         not session_name
         or "/" in session_name
@@ -217,11 +219,22 @@ def _session_has_persisted_history(session_name: str) -> bool:
     sess_dir = _path_home_gideon() / "sessions"
     if not sess_dir.exists():
         return False
-    if (sess_dir / f"{session_name}.jsonl").exists():
+    def established(path: Path) -> bool:
+        try:
+            import json
+            from gideon.security.approval_answer import UNKNOWN, principal_from_record
+            with path.open(encoding="utf-8") as stream:
+                meta = json.loads(stream.readline())
+            return (meta.get("_type") == "metadata" and not meta.get("closed")
+                    and meta.get("memory_mode") == "persistent"
+                    and principal_from_record(meta.get("initiator")).kind != UNKNOWN)
+        except (OSError, ValueError, TypeError, AttributeError):
+            return False
+    if established(sess_dir / f"{session_name}.jsonl"):
         return True
     if (
         not session_name.startswith("dashboard_")
-        and (sess_dir / f"dashboard_{session_name}.jsonl").exists()
+        and established(sess_dir / f"dashboard_{session_name}.jsonl")
     ):
         return True
     return False

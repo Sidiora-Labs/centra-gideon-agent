@@ -80,6 +80,8 @@ pub struct PrimaryProjectRequest {
     #[serde(default)]
     pub reclaim_candidates: Vec<ReclaimCandidate>,
     pub summary_access: Option<SummaryAccessRequest>,
+    #[serde(default)]
+    pub summary_sources: Vec<SummaryAccessRequest>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -262,10 +264,23 @@ impl ContextRoutes {
             ));
         }
 
-        let summary_page = match request.summary_access.as_ref() {
+        if request.summary_sources.len() > 1 || (!request.summary_sources.is_empty()
+            && request.summary_access.as_ref().is_none_or(|access| access.request.target_scope == session.bound_scope)) {
+            return Err(RouteFailure::authorization("summary union requires an app primary source"));
+        }
+        let mut summary_page = match request.summary_access.as_ref() {
             Some(access) => self.read_summaries(session, trace, access, now_ms)?,
             None => SummaryPage::default(),
         };
+        for access in &request.summary_sources {
+            if access.request.target_scope != session.bound_scope {
+                return Err(RouteFailure::authorization("additional summary source must be the bound owner scope"));
+            }
+            let additional = self.read_summaries(session, trace, access, now_ms)?;
+            summary_page.authorized_records += additional.authorized_records;
+            summary_page.records.extend(additional.records);
+            summary_page.source_cursors.extend(additional.source_cursors);
+        }
         let summary_candidates = eligible_summaries(
             &journal,
             scope,
@@ -471,6 +486,7 @@ impl ContextRoutes {
             "writer_journal_digest": validated.journal_digest,
             "summary": {
                 "memory_cursor": summary_page.cursor,
+                "source_cursors": summary_page.source_cursors,
                 "authorized_records": summary_page.authorized_records,
                 "selected_records": projection.baseline.summary_ids.len()
                     + projection.delta.summary_ids.len()
@@ -491,7 +507,6 @@ impl ContextRoutes {
             || access.limit > 1_000
             || access.request.operation != GrantOperation::Read
             || access.request.actor_scope != session.bound_scope
-            || access.request.target_scope != session.bound_scope
             || access.request.resource_id.as_str() != "memory-list"
             || access.request.category.as_deref() != Some("context_summary")
             || &access.request.trace != trace
@@ -517,6 +532,19 @@ impl ContextRoutes {
             .memory_api
             .lock()
             .map_err(|_| RouteFailure::internal("memory service lock is poisoned"))?;
+        if access.request.target_scope != session.bound_scope {
+            if access.request.target_scope.owner_id != session.bound_scope.owner_id
+                || access.request.target_scope.project_id != session.bound_scope.project_id {
+                return Err(RouteFailure::authorization("summary app scope binding is invalid"));
+            }
+            let scope_id = access.request.target_scope.workspace_id.clone()
+                .ok_or_else(|| RouteFailure::authorization("summary app scope binding is invalid"))?;
+            let mut resolve_context = context.clone();
+            resolve_context.request.resource_id = Id::new("memory-records")
+                .map_err(|_| RouteFailure::internal("summary resource is invalid"))?;
+            api.resolve_app_scope(&resolve_context, scope_id)
+                .map_err(|_| RouteFailure::authorization("summary app scope is inactive"))?;
+        }
         match api.list_records(
             &context,
             &access.request,
@@ -528,6 +556,7 @@ impl ContextRoutes {
                 authorized_records: page.records.len(),
                 records: page.records,
                 cursor: Some(page.cursor),
+                source_cursors: vec![json!({"scope": access.request.target_scope, "cursor": page.cursor})],
             }),
             Err(error) if error.code == "SCOPE_NOT_FOUND" => Ok(SummaryPage::default()),
             Err(error) if error.code == "AUTHORIZATION_DENIED" => {
@@ -602,6 +631,7 @@ fn cached_region(region: &hypermid_core::projection::ProjectionRegion) -> Cached
 
 #[derive(Default)]
 struct SummaryPage {
+    source_cursors: Vec<Value>,
     records: Vec<MemoryRecord>,
     cursor: Option<Cursor>,
     authorized_records: usize,

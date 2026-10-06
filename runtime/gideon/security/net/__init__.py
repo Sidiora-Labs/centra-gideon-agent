@@ -8,7 +8,7 @@ caps bytes/timeout. :func:`gideon.security.net.guard.classify_host` is the autho
 "is this IP safe to reach" answer consulted by both outbound and inbound checks.
 """
 
-from gideon.security.net.client import EgressBlocked, FetchResponse, fetch
+from gideon.security.net.client import EgressBlocked, FetchResponse, fetch, open_url
 from gideon.security.net.guard import GuardDecision, IpVerdict, classify_host, evaluate
 from gideon.security.net.policy import (
     CONNECTOR,
@@ -27,6 +27,7 @@ __all__ = [
     "EgressBlocked",
     "FetchResponse",
     "fetch",
+    "open_url",
     "GuardDecision",
     "IpVerdict",
     "classify_host",

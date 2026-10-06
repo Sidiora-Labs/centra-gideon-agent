@@ -89,15 +89,17 @@ class CircuitBreaker:
         t = time.monotonic() if now is None else now
         return max(0.0, self.recovery_secs - (t - self._opened_at))
 
-    def record_success(self) -> None:
+    def record_success(self) -> bool:
         """A call succeeded — reset failures and close the breaker."""
-        if self._state is not BreakerState.CLOSED:
+        recovered = self._state is not BreakerState.CLOSED
+        if recovered:
             logger.info("circuit breaker %r → CLOSED (recovered)", self.name)
         self._state = BreakerState.CLOSED
         self._consecutive_failures = 0
         self._opened_at = 0.0
+        return recovered
 
-    def record_failure(self, *, now: float | None = None) -> None:
+    def record_failure(self, *, now: float | None = None) -> bool:
         """A call failed — count it and open the breaker at the threshold.
 
         A failure in HALF_OPEN (the probe failed) re-opens immediately and resets
@@ -111,10 +113,11 @@ class CircuitBreaker:
             logger.warning(
                 "circuit breaker %r → OPEN (half-open probe failed)", self.name
             )
-            return
+            return False
         self._consecutive_failures += 1
         if self._consecutive_failures >= self.threshold:
-            if self._state is not BreakerState.OPEN:
+            tripped = self._state is not BreakerState.OPEN
+            if tripped:
                 logger.warning(
                     "circuit breaker %r → OPEN (%d consecutive failures)",
                     self.name,
@@ -122,6 +125,8 @@ class CircuitBreaker:
                 )
             self._state = BreakerState.OPEN
             self._opened_at = t
+            return tripped
+        return False
 
 
 _BREAKERS: dict[str, CircuitBreaker] = {}

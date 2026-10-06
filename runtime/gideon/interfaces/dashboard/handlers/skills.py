@@ -9,6 +9,8 @@ Routes:
 """
 
 import fnmatch
+import hashlib
+import json
 import logging
 import shutil
 from pathlib import Path
@@ -163,12 +165,13 @@ async def api_skills_list(request: web.Request) -> web.Response:
         # is what `ProcedureLibrary` calls it, what the delete route takes, and what
         for name, skill_md in iter_skill_files(base):
             entry = skill_md.parent
-            if name in seen:
+            identity = f"{base.resolve()}::{name}"
+            if identity in seen:
                 continue
-            seen.add(name)
+            seen.add(identity)
             rep = verify_skill_integrity(entry)
             integrity = (
-                "unverified" if rep.unlocked else ("intact" if rep.ok else "tampered")
+                rep.state
             )
             always, provenance = _skill_listing_metadata(skill_md)
             skills.append(
@@ -208,9 +211,7 @@ async def api_skills_list(request: web.Request) -> web.Response:
                 entry = skill_md.parent
                 rep = verify_skill_integrity(entry)
                 integrity = (
-                    "unverified"
-                    if rep.unlocked
-                    else ("intact" if rep.ok else "tampered")
+                    rep.state
                 )
                 always, provenance = _skill_listing_metadata(skill_md)
                 skills.append(
@@ -230,6 +231,15 @@ async def api_skills_list(request: web.Request) -> web.Response:
                 )
     except Exception:
         logger.debug("agent-local skill listing failed", exc_info=True)
+    for item in skills:
+        root = Path(item["path"]).parent
+        for _ in item["name"].split("/"):
+            root = root.parent
+        item["copy"] = _skill_copy_token(root, item["name"], item.get("agent", ""))
+        item["key"] = item["copy"]
+        item["read_only"] = _skill_root_read_only(root)
+        from gideon.extensions.skills.shipped import Offers
+        item["bundled_update"] = None if item["read_only"] else Offers(root)(item["name"])
     return web.json_response(skills)
 
 
@@ -444,19 +454,66 @@ def _safe_skill_name(name: str) -> bool:
     )
 
 
-def _resolve_skill_root(name: str) -> Path | None:
-    """Return the discovery dir that owns ``<name>/SKILL.md``, or None.
+def _skill_copy_token(root: Path, name: str, agent: str = "") -> str:
+    return hashlib.sha256(json.dumps([str(root.resolve()), name, agent], separators=(",", ":")).encode()).hexdigest()
 
-    Mirrors ``api_skills_list``/``api_skills_delete`` — first match across
-    ``_all_skill_paths()`` wins (project > user > agents > bundled).
-    """
+
+def _skill_root_read_only(root: Path) -> bool:
+    from gideon.extensions.skills.loader import _outside_skill_dirs
+    from gideon.extensions.skills.native import _bundled_root
+    return root.resolve() in {p.resolve() for p in [*_outside_skill_dirs(), _bundled_root()]}
+
+
+def _selected_skill_root(name: str, copy: str = "") -> Path | None:
     from gideon.engine.agent import _all_skill_paths
-
-    for base_str in _all_skill_paths():
-        base = Path(base_str)
-        if (base / name / "SKILL.md").is_file():
-            return base
+    from gideon.extensions.skills.loader import agent_skills_dir
+    from gideon.core.config.loader import AppConfig
+    from gideon.engine.agents.defaults import DEFAULT_NATIVE_AGENT_NAME
+    candidates = [(Path(base), "") for base in _all_skill_paths()]
+    candidates += [(agent_skills_dir(agent), agent) for agent in [DEFAULT_NATIVE_AGENT_NAME, *AppConfig.load().agents.keys()]]
+    if not _safe_skill_name(name):
+        return None
+    for root, agent in candidates:
+        if copy and copy != _skill_copy_token(root, name, agent):
+            continue
+        target = root / name / "SKILL.md"
+        try:
+            target.resolve().relative_to(root.resolve())
+        except ValueError:
+            continue
+        if target.is_file() and not (root / name).is_symlink():
+            return root
     return None
+
+
+def _resolve_skill_root(name: str) -> Path | None:
+    return _selected_skill_root(name)
+
+
+def _request_skill_root(request: web.Request, name: str) -> Path | None:
+    return _selected_skill_root(name, request.query.get("copy", ""))
+
+
+async def api_skill_bundled_choice(request: web.Request) -> web.Response:
+    from gideon.extensions.skills import shipped
+    name = request.match_info["name"]
+    root = _request_skill_root(request, name)
+    if root is None:
+        return web.json_response({"error": "Selected skill copy not found"}, status=404)
+    if _skill_root_read_only(root):
+        return web.json_response({"error": "This skill copy is read-only"}, status=403)
+    body = await read_json_body(request)
+    digest = body.get("digest") if isinstance(body, dict) else None
+    try:
+        if request.match_info["choice"] == "update":
+            shipped.use_shipped(root, name, digest)
+        else:
+            shipped.keep_own(name, digest, base=root)
+    except (shipped.NotShipped, shipped.VersionChanged):
+        return web.json_response({"error": "The offered version changed. Refresh this skill."}, status=409)
+    except shipped.NotInstalled:
+        return web.json_response({"error": "The update could not be installed; your copy was preserved"}, status=422)
+    return web.json_response({"ok": True})
 
 
 async def api_skill_files(request: web.Request) -> web.Response:
@@ -481,7 +538,7 @@ async def api_skill_files(request: web.Request) -> web.Response:
         _sel_log("skills.files", "denied", f"unsafe:{name}:{rel}", request)
         return web.json_response({"error": "invalid skill or path"}, status=400)
 
-    root = _resolve_skill_root(name)
+    root = _request_skill_root(request, name)
     if root is None:
         _sel_log("skills.files", "denied", f"notfound:{name}", request)
         return web.json_response({"error": f"Skill '{name}' not found"}, status=404)
@@ -604,15 +661,17 @@ async def api_skills_delete(request: web.Request) -> web.Response:
     if not _safe_skill_name(name):
         _sel_log("skills.delete", "denied", f"unsafe:{name}", request)
         return web.json_response({"error": "invalid skill name"}, status=400)
-    from gideon.engine.agent import _all_skill_paths
+    from gideon.extensions.skills.loader import hold_library
 
-    removed: str | None = None
-    for base_str in _all_skill_paths():
-        skill_dir = Path(base_str) / name
-        if skill_dir.is_dir():
+    removed = None
+    with hold_library():
+        root = _request_skill_root(request, name)
+        if root is not None:
+            if _skill_root_read_only(root):
+                return web.json_response({"error": "This skill copy is read-only"}, status=403)
+            skill_dir = root / name
             shutil.rmtree(skill_dir)
             removed = str(skill_dir)
-            break
 
     if removed is None:
         return web.json_response({"error": f"Skill '{name}' not found"}, status=404)
@@ -633,7 +692,7 @@ async def api_skill_verify(request: web.Request) -> web.Response:
         _sel_log("skills.verify", "denied", f"unsafe:{name}", request)
         return web.json_response({"error": "invalid skill name"}, status=400)
 
-    root = _resolve_skill_root(name)
+    root = _request_skill_root(request, name)
     if root is None:
         _sel_log("skills.verify", "denied", f"notfound:{name}", request)
         return web.json_response({"error": f"Skill '{name}' not found"}, status=404)
@@ -641,7 +700,7 @@ async def api_skill_verify(request: web.Request) -> web.Response:
     from gideon.extensions.skills.marketplace import verify_skill_integrity
 
     rep = verify_skill_integrity(root / name)
-    status = "unverified" if rep.unlocked else ("intact" if rep.ok else "tampered")
+    status = rep.state
     _sel_log(
         "skills.verify",
         "ok" if rep.ok or rep.unlocked else "tampered",
@@ -678,10 +737,33 @@ async def api_skill_overlay_revert(request: web.Request) -> web.Response:
         return web.json_response({"error": "name is required"}, status=400)
 
     from gideon.extensions.skills import overlays
-
-    removed = overlays.revert_overlay(name)
+    from gideon.extensions.skills.loader import hold_library, overlay_identity
+    from gideon.core.atomic_write import atomic_write
+    with hold_library():
+        root = _selected_skill_root(name, body.get("copy", ""))
+        if root is None:
+            return web.json_response({"error": "Selected skill copy not found"}, status=404)
+        if _skill_root_read_only(root):
+            return web.json_response({"error": "This skill copy is read-only"}, status=403)
+        identity = overlay_identity(root, name)
+        active = overlays.applied(identity)
+        chosen = body.get("refinement", "")
+        removed = [a for a in active if not chosen or a.id == chosen]
+        if chosen and not removed:
+            return web.json_response({"error": "This refinement is no longer applied"}, status=409)
+        path = root / name / "SKILL.md"
+        content = path.read_text(encoding="utf-8")
+        own = overlays.without_copies(content, [a.block for a in active])
+        if own != content:
+            atomic_write(path, own)
+        remaining = [a.record for a in active if a not in removed]
+        overlay_path = overlays.overlay_path(identity)
+        if remaining:
+            overlays._store(identity, overlay_path, remaining)
+        elif overlay_path is not None:
+            overlay_path.unlink(missing_ok=True)
     _sel_log("skills.overlay_revert", "ok" if removed else "noop", name, request)
-    return web.json_response({"ok": True, "name": name, "reverted": removed})
+    return web.json_response({"ok": True, "name": name, "reverted": len(removed)})
 
 
 async def api_ephemeral_skills_list(request: web.Request) -> web.Response:
@@ -789,8 +871,17 @@ async def api_skill_proposal_detail(request: web.Request) -> web.Response:
     if prop.kind == "refine" and prop.refine_target:
         from gideon.extensions.skills import overlays
 
+        from gideon.extensions.skills.loader import ProcedureLibrary, overlay_identity
+        library = ProcedureLibrary(install_builtins=False)
+        path = library.skill_file(prop.refine_target)
         payload["diff"] = refine.proposal_diff(prop)
-        payload["version"] = overlays.next_version(prop.refine_target)
+        if path is not None:
+            root = path.parent
+            for _ in prop.refine_target.split("/"):
+                root = root.parent
+            payload["version"] = overlays.next_version(overlay_identity(root, prop.refine_target))
+        else:
+            payload["version"] = 0
     return web.json_response(payload)
 
 

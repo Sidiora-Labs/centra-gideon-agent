@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from gideon.security.safety_flags import yes_or_no
+
 import fnmatch
 import hashlib
 import logging
@@ -152,7 +154,7 @@ def judge_session_key(run_id: str, node_path: str, *, epoch: int = 0) -> str:
 
 def requires_fresh_judge(node_config: dict[str, Any]) -> bool:
     """True unless the author explicitly opted into self-judging."""
-    return not bool((node_config or {}).get("self_judge", False))
+    return yes_or_no((node_config or {}).get("self_judge")) is not True
 
 
 async def run_verify_block(
@@ -189,7 +191,7 @@ class _LadderPass:
                 name = str(criterion.get("name", "") or "criterion")
                 observed = outcomes.get(name)
                 threshold = criterion.get("threshold")
-                hard = bool(criterion.get("hard", True))
+                hard = yes_or_no(criterion.get("hard", True)) is not False
                 passed, score = _score(observed, threshold)
                 item = CriterionResult(
                     name,

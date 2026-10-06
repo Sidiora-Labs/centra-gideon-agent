@@ -55,6 +55,8 @@ class UnifiedEmbedder:
     def __init__(self, embed_fn, dim_hint: int | None = None):
         self._embed_fn = embed_fn
         self._dim = dim_hint
+        key = getattr(embed_fn, "binding_key", None)
+        self._dimension_binding = key() if callable(key) else None
 
     def is_available(self) -> bool:
         return self._embed_fn is not None
@@ -95,6 +97,12 @@ class UnifiedEmbedder:
     def dim(self) -> int | None:
         """The active model's embedding dimension (probe once, cached), or None if
         unavailable. Lets callers detect stored vectors from a different model."""
+        key = getattr(self._embed_fn, "binding_key", None)
+        if callable(key):
+            current = key()
+            if current != self._dimension_binding:
+                self._dim = None
+                self._dimension_binding = current
         if self._dim is None:
             vec = self.embed("dimension probe")
             self._dim = len(vec) if vec else None

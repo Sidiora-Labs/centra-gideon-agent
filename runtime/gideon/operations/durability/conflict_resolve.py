@@ -94,7 +94,7 @@ def chosen_row(rec: conflicts_mod.ConflictRecord, choice: str) -> dict | None:
     if choice == CHOICE_TAKE_REMOTE:
         return rec.remote_row or None
     if choice == CHOICE_ACCEPT_PROPOSAL:
-        return rec.proposal or None
+        return None if rec.deleted else rec.proposal or None
     return None
 
 
@@ -164,6 +164,10 @@ def resolve_conflict(
     dest = Path(home) / entry.path
     try:
         applied = _write_chosen_row(entry, dest, rec.entity_id, row)
+        if applied.linked:
+            return _refuse("link_in_the_way", "Linked local files were left unchanged: " + "; ".join(applied.linked.values()), choice=choice, record_id=record_id)
+        if applied.moved:
+            return _refuse("changed_since_read", "A newer local edit was left unchanged; review this conflict again.", choice=choice, record_id=record_id)
     except Exception as exc:  # noqa: BLE001 — a failed write must leave the review open
         logger.warning(
             "conflict resolve: write failed for %s", record_id, exc_info=True
@@ -209,6 +213,8 @@ def _write_chosen_row(
     Reading through :func:`reconcile.read_local_rows` keeps the row shape identical to the
     one the conflict was detected in, so a resolution cannot reshape the store.
     """
+    from gideon.operations.durability.home_paths import guard_path
+    dest = guard_path(dest)
     rows = reconcile.read_local_rows(entry, dest)
     existing = next((r for r in rows if conflicts_mod.row_id(r) == entity_id), None)
     shared_row = inv.shared_value(entry, row)
@@ -216,5 +222,5 @@ def _write_chosen_row(
     out = [r for r in rows if conflicts_mod.row_id(r) != entity_id]
     out.append(preserved)
     return writeback.apply_rows(
-        entry.kind, dest, reconcile.rows_for_store(entry, dest, out)
+        entry.kind, dest, reconcile.rows_for_store(entry, dest, out), entry=entry, read_rows=rows
     )

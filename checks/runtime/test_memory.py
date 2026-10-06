@@ -153,8 +153,8 @@ class TestMemoryStore:
         store.append_history("today entry")
         assert store.read_recent_history(days=0) == ""
 
-    def test_fts_self_healing(self, tmp_path):
-        """Corrupted DB should be auto-deleted and rebuilt."""
+    def test_unreadable_fts_database_preserved(self, tmp_path):
+        """Whole-file damage stays degraded with the original database preserved."""
         store = MemoryJournal(workspace=tmp_path)
         store.init()
         store.write_preferences("# Prefs\n\n- likes Python\n")
@@ -163,7 +163,9 @@ class TestMemoryStore:
         if db_path.exists():
             db_path.write_bytes(b"corrupted data")
         count = store.rebuild_index()
-        assert count >= 1
+        assert count == 0
+        assert db_path.read_bytes() == b"corrupted data"
+        assert store.search_degraded()
 
     def test_add_preference_empty_string(self, tmp_path):
         store = MemoryJournal(workspace=tmp_path)

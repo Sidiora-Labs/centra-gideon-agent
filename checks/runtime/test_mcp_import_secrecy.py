@@ -102,7 +102,10 @@ async def test_selected_import_is_opaque_and_safe_projection_never_returns_value
         after_edit = json.loads((home / "mcp.json").read_text(encoding="utf-8"))
         assert after_edit["mcpServers"]["remote-fixture"]["env"]["SERVICE_TOKEN"] == env_ref
         assert after_edit["mcpServers"]["remote-fixture"]["headers"]["Authorization"] == header_ref
-        assert after_edit["mcpServers"]["remote-fixture"]["args"] == source["args"]
+        from gideon.extensions.providers.mcp_instances import resolve_server_credentials
+        stored_spec = after_edit["mcpServers"]["remote-fixture"]
+        assert resolve_server_credentials("remote-fixture", stored_spec)["args"] == source["args"]
+        assert "argument-secret-value" not in json.dumps(stored_spec)
 
         deleted = await client.delete("/api/mcp/servers/remote-fixture", headers=headers)
         assert deleted.status == 200

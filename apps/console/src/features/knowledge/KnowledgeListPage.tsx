@@ -16,7 +16,7 @@ import { ListControls } from '../../shared/ui/ListControls'
 import { HeaderActions, HeaderControl, HeaderSegmented } from '../../shared/ui/HeaderActions'
 import { ContextMenu, type ContextMenuItem } from '../../shared/ui/motion'
 import { api, type KnowledgeIntent, type IntentOutcome, type KnowledgeItem, type KnowledgeCollection, type KnowledgeBulkOp } from '../../shared/data/api'
-import { resolveType, relTime, fmtBytes, typeLabel, isArtifactItem } from './knowledgeMeta'
+import { resolveType, relTime, fmtBytes, typeLabel, isArtifactItem, failedEnrichment } from './knowledgeMeta'
 import { listKnowledge, knowledgeStats, getKnowledge } from './knowledgeStore'
 import { KnowledgeDetail, OutcomeFieldValue } from './KnowledgeDetail'
 import { KnowledgeGraph } from './KnowledgeGraph'
@@ -637,7 +637,10 @@ export function KnowledgeListPage({ onCreate, onOpenItem, onOpenReader, onOpenSo
                               )}
                               {
 }
-                              {it.processing_status === 'partial' && !(it.processing_error || '').startsWith('Skipped (optional steps unavailable):') && (
+                              {failedEnrichment(it) && (
+                                <span data-type="caption" className="shrink-0 inline-flex items-center gap-1 rounded-pill bg-surface-high px-1.5 text-danger" title={`${failedEnrichment(it)!.reason} — open to run again`}><CircleAlert size={10} /> Enrichment failed</span>
+                              )}
+                              {!failedEnrichment(it) && it.processing_status === 'partial' && !!it.processing_error && (
                                 <span data-type="caption" className="shrink-0 inline-flex items-center gap-1 rounded-pill bg-surface-high px-1.5" style={{ color: 'var(--color-warning)' }} title={`${it.processing_error || 'Enrichment incomplete'} — open to regenerate`}><CircleAlert size={10} /> Incomplete</span>
                               )}
                               {it.is_archived && <span data-type="caption" className="shrink-0 rounded-pill bg-surface-high px-1.5 text-on-surface-low">Archived</span>}

@@ -17,7 +17,7 @@ const STEPS = [
 ] as const
 
 type StepId = (typeof STEPS)[number]['id']
-type Phase = StepId | 'done' | 'error'
+type Phase = StepId | 'rolling_back' | 'stopping' | 'done' | 'error' | 'cancelled'
 const STEP_IDS = new Set<string>(STEPS.map((s) => s.id))
 const PRE_RESTART_STEPS = new Set(['pulling', 'installing', 'building'])
 
@@ -30,13 +30,16 @@ export interface UpdateProgress {
 export function useUpdateProgress() {
   const [state, setState] = useState<UpdateProgress | null>(null)
   const seenPreRestartStep = useRef(false)
-  const suppressUntil = useRef(0)
+  const [busy, setBusy] = useState(false)
 
   const apply = useCallback((step: string, detail: string) => {
-    if (Date.now() < suppressUntil.current) return
     if (step === 'done') {
       seenPreRestartStep.current = false
       setState({ phase: 'done', detail: detail || 'Update complete', restartOnly: false })
+    } else if (step === 'cancelled') {
+      setState({ phase: 'cancelled', detail, restartOnly: false })
+    } else if (step === 'rolling_back') {
+      setState({ phase: 'rolling_back', detail, restartOnly: false })
     } else if (step === 'error' || step === 'failed') {
       setState((prev) => ({ phase: 'error', detail: detail || 'Update failed', restartOnly: prev?.restartOnly ?? false }))
     }
@@ -78,14 +81,36 @@ export function useUpdateProgress() {
     return () => window.clearTimeout(t)
   }, [state?.phase])
 
-  const cancel = useCallback(() => {
-    suppressUntil.current = Date.now() + 2500
-    seenPreRestartStep.current = false
-    setState(null)
-    api.cancelUpdate().catch(() => {})
+  const cancel = useCallback(async () => {
+    setBusy(true)
+    try {
+      const result = await api.cancelUpdate()
+      if (result.status === 'stopped') {
+        setState((prev) => prev?.phase === 'cancelled' ? prev : { phase: 'cancelled', detail: 'Update stopped. Review update recovery before restarting.', restartOnly: false })
+      } else if (result.status === 'stopping') {
+        setState((prev) => prev ? { ...prev, phase: 'stopping', detail: 'Stopping update processes…' } : prev)
+      } else {
+        setState((prev) => prev ? { ...prev, phase: 'error', detail: 'No update operation is running. Check update recovery or dismiss this message.' } : prev)
+      }
+    } catch (error) {
+      setState((prev) => prev ? { ...prev, detail: String(error) } : prev)
+    } finally { setBusy(false) }
   }, [])
 
-  return { progress: state, cancel }
+  const dismiss = useCallback(async () => {
+    setBusy(true)
+    try {
+      await api.dismissUpdate()
+      seenPreRestartStep.current = false
+      setState(null)
+    } catch (error) {
+      setState((prev) => prev ? { ...prev, detail: String(error) } : prev)
+    } finally { setBusy(false) }
+  }, [])
+
+  const hide = useCallback(() => setState(null), [])
+  return { progress: state, cancel, dismiss, hide, busy }
+
 }
 
 function restartOnlyDetail(detail: string): string {
@@ -113,23 +138,25 @@ function StepRow({ label, status }: { label: string; status: 'done' | 'active' |
 }
 
 export function UpdateProgressOverlay() {
-  const { progress, cancel } = useUpdateProgress()
+  const { progress, cancel, dismiss, hide, busy } = useUpdateProgress()
   return createPortal(
     <AnimatePresence>
-      {progress && <UpdateSheet progress={progress} cancel={cancel} />}
+      {progress && <UpdateSheet progress={progress} cancel={cancel} dismiss={dismiss} hide={hide} busy={busy} />}
     </AnimatePresence>,
     document.body,
   )
 }
 
-function UpdateSheet({ progress, cancel }: { progress: UpdateProgress; cancel: () => void }) {
+function UpdateSheet({ progress, cancel, dismiss, hide, busy }: { progress: UpdateProgress; cancel: () => void; dismiss: () => void; hide: () => void; busy: boolean }) {
   const trapRef = useFocusTrap<HTMLDivElement>()
   const stepIdx = STEPS.findIndex((s) => s.id === progress.phase)
+  const isCancelled = progress.phase === 'cancelled'
   const isError = progress?.phase === 'error'
+  const canCancel = ['pulling', 'installing', 'rolling_back'].includes(progress.phase) && !progress.restartOnly
   const isDone = progress?.phase === 'done'
   const isRestartOnly = progress?.restartOnly ?? false
 
-  const title = isError
+  const title = progress.phase === 'stopping' ? 'Stopping update' : isCancelled ? 'Update stopped' : isError
     ? (isRestartOnly ? 'Restart failed' : 'Update failed')
     : isDone
       ? (isRestartOnly ? 'Restart complete' : 'Update complete')
@@ -152,7 +179,7 @@ function UpdateSheet({ progress, cancel }: { progress: UpdateProgress; cancel: (
                   : isRestartOnly ? <RefreshCw size={18} className="animate-spin" />
                   : <DownloadCloud size={18} />}
               </span>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1" aria-live="polite" aria-atomic="true">
                 <div data-type="title-l" className="text-on-surface">{title}</div>
                 {progress.detail && (
                   <div data-type="body-s" className="mt-1" style={{ color: isError ? 'var(--color-danger)' : 'var(--color-on-surface-var)' }}>
@@ -163,7 +190,7 @@ function UpdateSheet({ progress, cancel }: { progress: UpdateProgress; cancel: (
             </div>
 
             { }
-            {!isError && !isRestartOnly && (
+            {!isError && !isCancelled && !isRestartOnly && (
               <div className="mt-4 flex flex-col gap-2.5 px-l">
                 {STEPS.map((s, i) => (
                   <StepRow key={s.id} label={s.label}
@@ -174,9 +201,9 @@ function UpdateSheet({ progress, cancel }: { progress: UpdateProgress; cancel: (
 
             <div className="flex justify-end px-l py-l">
               {!isDone && (
-                <button type="button" onClick={cancel} data-type="body-s"
+                <button type="button" onClick={isError || isCancelled ? dismiss : canCancel ? cancel : hide} disabled={busy} data-type="body-s"
                   className="rounded-pill px-4 h-9 text-on-surface-var bg-surface-high hover:bg-surface-highest transition-colors">
-                  {isError ? 'Dismiss' : 'Cancel'}
+                  {busy ? 'Please wait…' : isError || isCancelled ? 'Dismiss' : canCancel ? 'Cancel update' : 'Hide'}
                 </button>
               )}
             </div>

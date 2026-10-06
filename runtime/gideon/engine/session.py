@@ -253,7 +253,7 @@ class ConversationDirectory:
         self._cleanup_task: asyncio.Task | None = None
         self._compacting: set[str] = set()
         self._background_tasks: set[asyncio.Task] = set()
-        self._on_compacted: Callable[[str, float], Awaitable[None]] | None = None
+        self._on_restarted: Callable[[str, float, str], Awaitable[None]] | None = None
         self._on_session_expire: Callable[[str], Awaitable[object]] | None = None
         self._stop_children: Callable[[str], Awaitable[int]] | None = None
         self._approval_stopper: Callable[[str], object] | None = None
@@ -562,6 +562,8 @@ class ConversationDirectory:
                 channel_id=channel_id,
                 model=model or "",
                 agent_name=agent or "",
+                session_meta=options.get("session_meta"),
+                compacts_itself=options.get("compacts_itself", False),
             )
             if provider is not None:
                 await self._specialize_acp(provider, agent, model, extra_factory_kwargs)
@@ -830,6 +832,14 @@ class ConversationDirectory:
         **extra_factory_kwargs: Any,
     ) -> tuple[ModelProvider, bool, bool]:
         """Acquire a turn lease; its owner must call ``release`` when the turn ends."""
+        from gideon.extensions.apps import app_work as app_scopes
+        work = extra_factory_kwargs.get("app_work") or app_scopes.of_session(key)
+        if work is not None:
+            app_scopes.bind_session(key, work)
+            extra_factory_kwargs["app_work"] = work
+            existing = self._sessions.get(key)
+            if existing is not None and getattr(existing.provider, "_app_work", None) != work:
+                raise RuntimeError("session runtime cannot acquire a different app execution scope")
         if key == BACKGROUND_KEY:
             extra_factory_kwargs.setdefault("model_axis", "background")
         reuse = None
@@ -942,6 +952,10 @@ class ConversationDirectory:
         )
         from gideon.engine.agents.provider import AgentProvider
 
+        spend_setter = getattr(provider, "set_spend_axis", None)
+        if callable(spend_setter):
+            spend_setter(str(getattr(factory, "spend_axis", "") or ""))
+
         try:
             resumed = provider.resumed if isinstance(provider, AgentProvider) else False
             async with self._lock:
@@ -1005,6 +1019,7 @@ class ConversationDirectory:
             if (
                 usage >= live_autocompact_pct(self._cfg.session.autocompact_pct)
                 and not bool(getattr(provider, "compacts_in_process", False))
+                and not provider.compacts_automatically
             ):
                 self._trigger_compaction(key, f"context at {usage:.0f}%", usage)
             else:
@@ -1012,14 +1027,16 @@ class ConversationDirectory:
                 log("Session %s context at %.0f%%", key, usage)
         return usage
 
-    def set_compact_callback(
-        self, callback: Callable[[str, float], Awaitable[None]] | None
+    def set_restart_callback(
+        self, callback: Callable[[str, float, str], Awaitable[None]] | None
     ) -> None:
-        if callback is not None and self._on_compacted is not None:
-            logger.warning(
-                "Compact callback already registered; replacing existing handler"
-            )
-        self._on_compacted = callback
+        self._on_restarted = callback
+
+    def set_compact_callback(self, callback) -> None:
+        """Compatibility adapter for integrations with the former callback."""
+        async def restarted(key: str, pct: float, reason: str) -> None:
+            await callback(key, pct)
+        self.set_restart_callback(restarted if callback is not None else None)
 
     def set_session_expire_callback(
         self, callback: Callable[[str], Awaitable[object]] | None
@@ -1035,19 +1052,22 @@ class ConversationDirectory:
 
     async def _compact_session(self, key: str, pct: float) -> None:
         try:
-            async with self._lock:
-                entry = self._sessions.pop(key, None)
+            entry = self._sessions.get(key)
             if entry is None:
                 return
-            self._session_map.forget_session_id(key)
-            await entry.provider.shutdown()
-            if self._on_compacted is not None:
-                try:
-                    await self._on_compacted(key, pct)
-                except Exception:
-                    logger.exception("Compact callback failed for %s", key)
+            async with entry.semaphore:
+                async with self._lock:
+                    if self._sessions.get(key) is not entry:
+                        return
+                    self._sessions.pop(key)
+                self._session_map.forget_session_id(key)
+                await entry.provider.shutdown()
+                if self._on_restarted is not None:
+                    await self._on_restarted(
+                        key, pct, "Gideon cannot compact this agent's context"
+                    )
         except Exception:
-            logger.exception("Session recycle failed for %s", key)
+            logger.exception("Session restart failed for %s", key)
         finally:
             self._compacting.discard(key)
 
@@ -1158,9 +1178,15 @@ class ConversationDirectory:
         entry = self._sessions.get(key)
         return entry.next_message() if entry is not None else None
 
+    def has_queued(self, key: str) -> bool:
+        entry = self._sessions.get(key)
+        return bool(entry.queue) if entry is not None else False
+
     def add_steer(self, key: str, text: str) -> bool:
         entry = self._sessions.get(key)
-        text = text.strip()
+        from gideon.engine.steering import SteeringText
+
+        text = SteeringText(text.strip(), meta=text.meta) if isinstance(text, SteeringText) else text.strip()
         if (
             not text
             or entry is None
@@ -1238,19 +1264,22 @@ class ConversationDirectory:
             apply(mode or "agent")
 
     def set_channel_link(
-        self, key: str, thread_ts: str, channel_id: str | None
+        self, key: str, thread_ts: str, channel_id: str | None, channel_provider: str = ""
     ) -> None:
-        self._session_map.set_channel_link(key, thread_ts, channel_id)
+        self._session_map.set_channel_link(key, thread_ts, channel_id, channel_provider)
 
     def get_channel_link(self, key: str) -> tuple[str | None, str | None]:
         return self._session_map.get_channel_link(key)
 
-    def get_session_for_thread(self, thread_ts: str) -> str | None:
-        return self._session_map.get_session_for_thread(thread_ts)
+    def get_channel_provider(self, key: str) -> str:
+        return self._session_map.get_channel_provider(key)
+
+    def get_session_for_thread(self, thread_ts: str, provider: str | None = None) -> str | None:
+        return self._session_map.get_session_for_thread(thread_ts, provider)
 
     async def set_channel(self, key: str, channel_id: str) -> None:
         thread, _ = self.get_channel_link(key)
-        self.set_channel_link(key, thread or "", channel_id)
+        self.set_channel_link(key, thread or "", channel_id, self.get_channel_provider(key))
 
     def get_channel(self, key: str) -> str | None:
         return self.get_channel_link(key)[1]
@@ -1262,7 +1291,7 @@ class ConversationDirectory:
         self._session_map.delete(key)
 
     async def set_thread(self, key: str, thread_ts: str) -> None:
-        self.set_channel_link(key, thread_ts, self.get_channel_link(key)[1])
+        self.set_channel_link(key, thread_ts, self.get_channel_link(key)[1], self.get_channel_provider(key))
 
     def get_thread(self, key: str) -> str | None:
         return self.get_channel_link(key)[0]

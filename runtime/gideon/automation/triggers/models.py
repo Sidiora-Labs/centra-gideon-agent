@@ -457,7 +457,9 @@ class _RecordInput:
         return {name: self.text(name) for name in names}
 
     def flags(self, names):
-        return {name: self.data.get(name) is True for name in names}
+        from gideon.security.safety_flags import yes_or_no
+
+        return {name: yes_or_no(self.data.get(name)) is True for name in names}
 
     def mapping(self, name):
         value = self.data.get(name)
@@ -896,7 +898,7 @@ class _TriggerDecoder:
             overlap=overlap,
             state=state,
             author=source.text("author").strip().lower(),
-            enabled=bool(source.data.get("enabled", True)) and not self.report.fatal,
+            enabled=source.flags(("enabled",))["enabled"] if "enabled" in source.data and not self.report.fatal else not self.report.fatal,
             resource_slots=list(map(str, source.data.get("resource_slots") or [])),
             run_count=_int(source.data.get("run_count"), 0),
             run_owner_pid=_int(source.data.get("run_owner_pid"), 0),

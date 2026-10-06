@@ -17,7 +17,9 @@ import socket
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-from gideon.security.net.policy import METADATA_SERVICE_HOSTS, EgressPolicy
+from gideon.security.net.policy import (
+    METADATA_SERVICE_HOSTS, EgressPolicy, egress_policy_for_run,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,57 @@ class GuardDecision:
     recovery_hints: list[str] = field(default_factory=list)
     category: str = ""
     address: str = ""
+
+
+EGRESS_SETTINGS = "Settings → Security → Network egress"
+EGRESS_OFF_REASON = "egress is off for this run (safety profile egress tier 'off')"
+EGRESS_OFF_NOTHING_SENT = "This run's safety settings give it no network access, so nothing was sent."
+
+
+def allow_host_step(host: str) -> str:
+    return f"add {host} to Allowed hosts in {EGRESS_SETTINGS}"
+
+
+def where_egress_is_off() -> str:
+    try:
+        from gideon.security.guardrails.ceiling import active_ceiling, ceiling_path
+
+        ceiling = active_ceiling()
+        if ceiling.control("egress").value == "off":
+            return f"The operator ceiling ({ceiling.source or ceiling_path()}) sets egress off for every run."
+    except Exception:
+        logger.debug("could not read egress ceiling hint", exc_info=True)
+    return "This run's own safety profile allows it no network access."
+
+
+def where_egress_is_narrowed() -> str:
+    try:
+        from gideon.security.guardrails.ceiling import active_ceiling, ceiling_path
+
+        ceiling = active_ceiling()
+        tier = getattr(ceiling.control("egress"), "value", "")
+        if tier and tier != "all":
+            return f"The operator ceiling ({ceiling.source or ceiling_path()}) sets egress to {tier!r} for every run."
+    except Exception:
+        logger.debug("could not read command egress ceiling hint", exc_info=True)
+    return "This run's own safety profile sets its egress tier."
+
+
+def egress_refusal(url: str, decision: GuardDecision) -> str:
+    return refusal_for(url, decision, then="then test again")
+
+
+def refusal_for(url: str, decision: GuardDecision, *, then: str) -> str:
+    host = decision.host or "its host"
+    if decision.category == "unresolvable":
+        return f"{host} could not be found, so {url} was not reached; check the address and network connection."
+    if decision.category == "deny_list":
+        return f"{url} was not reached: {host} is on Denied hosts in {EGRESS_SETTINGS}."
+    if decision.category == "egress_off":
+        return f"{url} was not reached: {decision.reason}. {where_egress_is_off()}"
+    if decision.category in {"not_listed", "loopback", "private", "unspecified"}:
+        return f"Gideon's network settings refused {url}: {decision.reason}. If this endpoint is yours, {allow_host_step(host)}, {then}."
+    return f"Gideon's network settings refused {url}: {decision.reason}."
 
 
 def classify_host(ip_str: str) -> IpVerdict:
@@ -169,13 +222,22 @@ def evaluate(
             recovery_hints=["Include a host in the URL."],
         )
 
+    narrowed = egress_policy_for_run(policy)
+    if narrowed is None:
+        return GuardDecision(
+            allow=False, url=url, host=host, reason=EGRESS_OFF_REASON,
+            category="egress_off", risk_level="destructive",
+            recovery_hints=[EGRESS_OFF_NOTHING_SENT, where_egress_is_off()],
+        )
+    policy = narrowed
+
     if host_matches(host, policy.deny_hosts):
         return GuardDecision(
             allow=False,
             url=url,
             host=host,
             reason=f"host {host!r} is on the egress deny list",
-            category="deny_list",
+            category="metadata" if host_matches(host, METADATA_SERVICE_HOSTS) else "deny_list",
             risk_level="destructive",
         )
     operator_allowed = host_matches(host, policy.allow_hosts)
@@ -190,6 +252,7 @@ def evaluate(
                 f"({len(policy.allow_hosts)} host(s) allowed)"
             ),
             risk_level="destructive",
+            category="not_listed",
             recovery_hints=[
                 "This run's safety profile limits egress to an allow-list.",
                 "An operator can add the host via security.egress allow_hosts, or widen the "

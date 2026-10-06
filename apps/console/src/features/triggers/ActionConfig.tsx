@@ -148,7 +148,12 @@ export function coerceActionConfig(
   const selected = providers.find((p) => p.name === provider)
   if (!selected) return { config }
   const { args, error } = buildArgs(selected.settingsSchema, config)
-  return error ? { config, error } : { config: args }
+  if (error) return { config, error }
+  const { props } = schemaProps(selected.settingsSchema)
+  const cleared = Object.fromEntries(props
+    .filter(([key]) => key in config && (config[key] === '' || config[key] === null || (Array.isArray(config[key]) && (config[key] as unknown[]).length === 0)))
+    .map(([key]) => [key, null]))
+  return { config: { ...cleared, ...args } }
 }
 
 export { actionIcon }

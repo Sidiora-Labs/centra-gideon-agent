@@ -59,6 +59,7 @@ OWNER = "core/timezones.py"
 MACHINE_ZONE_PATHS = frozenset({"/etc/localtime", "/etc/timezone"})
 
 DERIVED_CONSUMERS = (
+    "core/spend_day.py",
     "automation/triggers/arm.py",
     "automation/schedule.py",
     "automation/triggers/calendar.py",

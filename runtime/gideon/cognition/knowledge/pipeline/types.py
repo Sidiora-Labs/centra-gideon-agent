@@ -73,6 +73,8 @@ class NodeContext:
     content: str = ""
     url: str = ""
     work_dir: str = ""
+    # Internal extraction may carry an owned approved snapshot here. It conveys
+    # content identity only; workspace and source grants remain the caller's duty.
     params: dict[str, Any] = field(default_factory=dict)
 
 
@@ -82,7 +84,10 @@ class ProcessingNode(Protocol):
     ``NODE_REGISTRY[(node_type, backend)]``.
 
     ``uses_use_case`` (when set) names a Settings>Models use-case the node resolves
-    its model through at run-time; pure-python nodes leave it None. ``run`` receives
+    its model through at run-time; pure-python nodes leave it None. A concrete node
+    may declare a live ``available()`` dependency probe and
+    ``unavailable_outcome() -> PhaseOutcome`` for its missing dependency.
+    ``run`` receives
     the outputs of this node's direct predecessors (keyed by their ``node_type``)
     plus the :class:`NodeContext`, and returns a :class:`NodeOutput`.
     """

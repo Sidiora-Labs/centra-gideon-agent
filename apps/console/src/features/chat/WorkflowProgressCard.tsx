@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowUpRight, ChevronDown, Workflow } from 'lucide-react'
-import { api, ApiError, type NodeInspect } from '../../shared/data/api'
+import { api, ApiError, type NodeInspect, type WorkflowBatchState, type PendingApproval } from '../../shared/data/api'
 import { messageEnter } from '../../shared/theme/motion'
 import { fvs } from '../../shared/theme/fontWeight'
 import { Meter } from '../../shared/ui/Meter'
@@ -15,21 +15,67 @@ import { isEscalationRecord } from '../workflows/EscalationPanel'
 import { DagView } from '../tasks/DagView'
 import { layoutRunDag } from '../workflows/runDag'
 
-const WORKFLOW_TOOLS = new Set(['workflow_start', 'workflow_status', 'workflow_observe'])
+const WORKFLOW_TOOLS = new Set(['workflow_start', 'workflow_status', 'workflow_observe', 'subagent_run'])
 
-export interface WorkflowRunRef { runId: string; created: boolean }
+export interface WorkflowRunRef { runId: string; created: boolean; batchName?: string }
 
 export function workflowRefFromTool(
   toolName: string | undefined,
   output: string | undefined,
 ): WorkflowRunRef | null {
   if (!toolName || !WORKFLOW_TOOLS.has(toolName) || !output) return null
+  const consentBatch = output.match(/"batch_start_consent"\s*:\s*\{\s*"name"\s*:\s*"([a-zA-Z0-9_-]+)"/)
+  if (consentBatch) return { runId: '', created: false, batchName: consentBatch[1] }
+  if (toolName === 'subagent_run') {
+    const batch = output.match(/"batch"\s*:\s*"([a-zA-Z0-9_-]+)"/)
+    if (batch) return { runId: '', created: true, batchName: batch[1] }
+  }
   const m = output.match(/"run_id"\s*:\s*"([0-9a-f]{6,})"/i)
   if (!m) return null
   return { runId: m[1], created: toolName === 'workflow_start' }
 }
 
 export function WorkflowProgressCard({ refObj }: { refObj: WorkflowRunRef }) {
+  return refObj.batchName ? <BatchProgressCard name={refObj.batchName} /> : <RunProgressCard refObj={refObj} />
+}
+
+function BatchProgressCard({ name }: { name: string }) {
+  const [batch, setBatch] = useState<WorkflowBatchState | null>(null)
+  const [question, setQuestion] = useState<PendingApproval | null>(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const load = useCallback(async () => {
+    try {
+      const row = await api.workflowBatch(name)
+      setBatch(row)
+      if (row.status === 'awaiting_approval') {
+        const pending = await api.approvals()
+        setQuestion(pending.find((ask) => ask.id === row.approval) ?? null)
+      } else setQuestion(null)
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not load this batch.') }
+  }, [name])
+  useEffect(() => { if (batch?.run_id || batch?.status === 'not_started') return; void load(); const timer = window.setInterval(() => void load(), 3000); return () => window.clearInterval(timer) }, [load, batch?.run_id, batch?.status])
+  const answer = async (action: 'approve' | 'reject') => {
+    if (!question) return
+    setBusy(true); setError('')
+    try { await api.resolveApproval(question.id, action, question.revision); await load() }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not answer this batch.'); await load() }
+    finally { setBusy(false) }
+  }
+  if (batch?.run_id && batch.status !== 'not_started') return <RunProgressCard refObj={{ runId: batch.run_id, created: true }} />
+  return <motion.div {...messageEnter} className="my-s flex flex-col gap-s rounded-xl border border-outline-variant p-m">
+    <div className="flex items-center gap-s"><Workflow size={15} /><span data-type="label-s">Batch of this conversation</span></div>
+    <p data-type="body-s">{batch?.status === 'not_started' ? 'Did not start' : batch?.status === 'starting' ? 'Starting' : `Waiting for your Allow${batch ? ` · ${batch.tasks} tasks` : ''}`}</p>
+    {question && <><p data-type="body-s">{question.tool_purpose}</p><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-on-surface-var">{typeof question.tool_input === 'string' ? question.tool_input : JSON.stringify(question.tool_input)}</pre>
+      <div className="flex gap-s"><Button size="xs" disabled={busy} onClick={() => void answer('approve')}>Allow these tasks</Button><Button variant="ghost-accent" size="xs" disabled={busy} onClick={() => void answer('reject')}>Deny</Button></div></>}
+    {batch?.error && <p role="alert" data-type="caption" className="text-danger">{batch.error}</p>}
+    {batch?.run_id && batch.status === 'not_started' && <TextLink href={`#/workflows/runs/${encodeURIComponent(batch.run_id)}`} size="xs">Inspect the failed start</TextLink>}
+    {error && <p role="alert" data-type="caption" className="text-danger">{error}</p>}
+    {batch?.status === 'awaiting_approval' && <TextLink href="#/inbox" size="xs">View the waiting approval in Inbox</TextLink>}
+  </motion.div>
+}
+
+function RunProgressCard({ refObj }: { refObj: WorkflowRunRef }) {
   const [vm, setVm] = useState<WorkflowViewModel | null>(null)
   const [gone, setGone] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
@@ -163,6 +209,11 @@ export function WorkflowProgressCard({ refObj }: { refObj: WorkflowRunRef }) {
       )}
 
       {vm?.error && <p role="alert" data-type="caption" className="text-danger">{vm.error}</p>}
+      {vm?.nodes.filter((node) => node.state === 'waiting' || node.state === 'failed').map((node) => (
+        <TextLink key={node.instance_path} size="xs" href={`#/workflows/runs/${encodeURIComponent(refObj.runId)}?node=${encodeURIComponent(node.node_id || node.instance_path)}`}>
+          {node.node_id || node.instance_path}: {node.state === 'waiting' ? 'Waiting for an answer' : 'Failed'}
+        </TextLink>
+      ))}
 
       {
 }

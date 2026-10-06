@@ -34,7 +34,8 @@ export function useTriageDigest() {
         ? ['Already answered — nothing ran again.', 'info']
         : answer?.rule_error ? [`Answered, but the rule wasn't saved: ${answer.rule_error}`, 'error']
           : answer?.recorded === false ? ["Answered, but it wasn't recorded — the next tap would act again.", 'error']
-            : [answer?.executed ? 'Done.' : 'Noted.', 'success']
+            : answer?.not_done ? [answer.not_done, 'error']
+              : [answer?.executed ? 'Done.' : 'Noted.', 'success']
       notify(...feedback)
       refresh()
     } catch (failure) {

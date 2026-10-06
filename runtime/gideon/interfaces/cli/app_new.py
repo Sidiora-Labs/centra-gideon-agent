@@ -1076,6 +1076,11 @@ def _read_capped(stream: Any, limit: int, what: str) -> bytes:
 def fetch_template_archive(url: str) -> bytes:
     """GET ``url`` and return the tarball bytes. https + allowlist + no redirects + 200."""
     _validate_template_url(url)
+    from gideon.security.net.client import EgressBlocked, check
+    try:
+        check(url, then="then run the command again")
+    except EgressBlocked as error:
+        raise ScaffoldError(str(error)) from error
     opener = urllib.request.build_opener(_NoRedirect)
     request = urllib.request.Request(
         url, method="GET", headers={"Accept": "application/gzip"}

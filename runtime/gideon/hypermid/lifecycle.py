@@ -180,6 +180,73 @@ class HypermidLifecycle:
             log.warning("Hypermid runtime start failed closed: %s", error)
             return self.adapter.status()
 
+    async def reviewed_enrollment_restart(self, enrollment: LocalEnrollment, *, verify_current, finalize):
+        """Drain an owned daemon, verify its reviewed grant, then publish it."""
+        async with self._boundary_lock:
+            process = self.process
+            previous = self.enrollment
+            if process is None or process.returncode is not None or previous is None:
+                raise PermissionError("reviewed enrollment refresh requires an owned running daemon")
+            if (enrollment.scope, enrollment.credential_id, enrollment.capability_id) != (previous.scope, previous.credential_id, previous.capability_id):
+                raise PermissionError("reviewed enrollment refresh cannot change runtime identity")
+            desired = self._configured_mode()
+            if _value(desired) == "off":
+                raise PermissionError("reviewed enrollment refresh requires an active runtime")
+            verify_current()
+            await self._deactivate_writer()
+            try:
+                await self._disconnect()
+                self.enrollment = enrollment
+                status = await self._apply_mode(desired, activate_primary=False)
+                if not self._reviewed_restart_ready(status):
+                    raise RuntimeError("reviewed Hypermid enrollment did not become ready")
+                await self._validate_enrollment_grants()
+                return finalize()
+            except BaseException as original:
+                try:
+                    await self._deactivate_writer()
+                    await self._disconnect()
+                    self.enrollment = previous
+                    status = await self._apply_mode(desired, activate_primary=False)
+                    if not self._reviewed_restart_ready(status):
+                        raise RuntimeError("previous Hypermid enrollment did not become ready")
+                except BaseException as rollback:
+                    self.enrollment = previous
+                    raise BaseExceptionGroup("reviewed enrollment failed and runtime rollback is unresolved", [original, rollback])
+                raise
+
+    def _reviewed_restart_ready(self, status: HypermidStatus) -> bool:
+        # Primary activation remains a turn-boundary operation after restart.
+        return (status.available and status.scope_bound and status.digest_health == "healthy"
+                and (status.healthy or (status.mode == "primary" and self.writer is not None
+                     and status.writer == "gideon" and status.lease_state == "none")))
+
+    async def _validate_enrollment_grants(self) -> None:
+        from .contracts import AccessRequest, GrantOperation
+        from .memory import _trace
+        from .memory_client import MemoryClient
+        import secrets
+        client = self.adapter.client
+        enrollment = self.enrollment
+        if client is None or enrollment is None or not client.connected:
+            raise PermissionError("reviewed enrollment has no authenticated daemon")
+        memory = MemoryClient(client, capability_id=enrollment.capability_id)
+        for resource in ("memory-records", "memory-embedding"):
+            if Id(resource) not in enrollment.resources:
+                continue
+            request = AccessRequest(GrantOperation.READ, client.scope, client.scope, Id(resource), _trace())
+            if resource == "memory-embedding":
+                await memory.embedding_active(request)
+            else:
+                try:
+                    await memory.list(request, limit=1)
+                except Exception as error:
+                    if getattr(getattr(error, "error", None), "code", None) != "SCOPE_NOT_FOUND":
+                        raise
+        if "administer" in enrollment.operations and Id("memory-service") in enrollment.resources:
+            # A fresh origin has no derived scope; retirement checks administration without issuing one.
+            await memory._call("memory.private-scope.retire", {"origin_session_key": "enrollment-check:" + secrets.token_hex(24)}, trace=_trace(), durable=True)
+
     async def stop(self) -> None:
         from gideon.cognition.context_engine import set_turn_boundary_hook
 

@@ -7,6 +7,8 @@ import json
 import os
 import re
 import shutil
+
+from gideon.operations.durability import sqlite_files
 import socket
 import tarfile
 import tempfile
@@ -14,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from gideon.core.atomic_write import atomic_write
-from gideon.core.sqlite_compat import sqlite3
+from gideon.core.sqlite_compat import connect, sqlite3
 
 VALID_COMPONENTS = (
     "memory",
@@ -137,8 +139,8 @@ def _safe_copy_db(src: Path, dst: Path) -> bool:
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
         with (
-            closing(sqlite3.connect(str(src))) as src_conn,
-            closing(sqlite3.connect(str(dst))) as dst_conn,
+            closing(connect(str(src))) as src_conn,
+            closing(connect(str(dst))) as dst_conn,
         ):
             src_conn.backup(dst_conn)
         return True
@@ -147,18 +149,15 @@ def _safe_copy_db(src: Path, dst: Path) -> bool:
         return False
 
 
-def _tree_ignore_dbs(db_names: set[str]):
-    """A copytree `ignore` that skips database files, so a tree copy never
-    raw-copies a live DB — the safe backup-API pass handles those separately."""
-
+def _tree_ignore_dbs(db_names: set[str], *, home: Path | None = None):
+    """Skip only the declared copies already staged through SQLite backup."""
     def _ignore(directory: str, contents: list[str]) -> set[str]:
-        return {
-            n
-            for n in contents
-            if n in db_names
-            or any(n == db + suffix for db in db_names for suffix in ("-wal", "-shm"))
-        }
-
+        if home is None:
+            captured = {name for name in contents if name in db_names}
+        else:
+            captured = {name for name in contents if
+                        (Path(directory) / name).relative_to(home).as_posix() in db_names}
+        return captured | sqlite_files.sidecars_in(directory, contents)
     return _ignore
 
 
@@ -440,8 +439,12 @@ def _list_components() -> None:
     print("\nCombine with commas: --components memory,crons,skills")
 
 
+
 def _copytree_safe(src: Path, dst: Path, **kwargs) -> None:
     """copytree that skips symlinks to prevent sensitive file leakage."""
+    from gideon.operations.durability.home_paths import guard_path
+
+    src, dst = guard_path(src, read=True), guard_path(dst)
     outer_ignore = kwargs.pop("ignore", None)
 
     def _ignore_symlinks(directory, contents):
@@ -452,33 +455,23 @@ def _copytree_safe(src: Path, dst: Path, **kwargs) -> None:
             print(
                 f"⚠️  Skipping symlink in source tree: {os.path.join(directory, name)}"
             )
+        skipped |= sqlite_files.sidecars_in(directory, contents)
         if outer_ignore:
             skipped |= set(outer_ignore(directory, contents))
         return skipped
 
+    kwargs.setdefault("copy_function", sqlite_files.copy_file)
     shutil.copytree(str(src), str(dst), ignore=_ignore_symlinks, **kwargs)
 
 
-def _copy_tree_no_overwrite(
-    src: Path, dst: Path, *, entry_path: str = ""
-) -> None:
-    for item in src.rglob("*"):
-        if item.is_symlink():
-            continue
-        rel = item.relative_to(src)
-        if entry_path and _left_out_of_restore(entry_path, rel.as_posix()):
-            continue
-        target = dst / rel
-        if item.is_dir():
-            target.mkdir(parents=True, exist_ok=True)
-        elif item.is_file() and not target.exists():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if entry_path and item.suffix == ".json":
-                _copy_json_with_arrival_policy(
-                    item, target, f"{entry_path}/{rel.as_posix()}"
-                )
-            else:
-                shutil.copy2(str(item), str(target))
+def _copy_tree_no_overwrite(src: Path, dst: Path, *, entry_path: str = "", left: list[str] | None = None) -> None:
+    from gideon.operations.durability.restore_items import copy_tree_no_overwrite
+    from gideon.operations.durability.home_paths import guard_path
+
+    dst = guard_path(dst)
+    if left is None:
+        left = []
+    copy_tree_no_overwrite(src, dst.parent, dst.name, left, entry_path=entry_path)
 
 
 def _arrival_policy(entry_path: str, incoming, local=None):
@@ -504,6 +497,8 @@ def _read_optional_json(path: Path):
 def _copy_json_with_arrival_policy(
     src: Path, dst: Path, entry_path: str, *, local_path: Path | None = None
 ) -> None:
+    from gideon.operations.durability.home_paths import guard_path
+    src, dst = guard_path(src, read=True), guard_path(dst)
     incoming = _read_optional_json(src)
     local = _read_optional_json(local_path) if local_path is not None else None
     restored = _arrival_policy(entry_path, incoming, local)
@@ -525,6 +520,25 @@ def _apply_arrival_policy_to_tree(root: Path, entry_path: str, local_root: Path)
         restored = _arrival_policy(f"{entry_path}/{rel.as_posix()}", incoming, local)
         if restored is not None:
             atomic_write(path, json.dumps(restored, indent=2))
+
+
+def _write_archive(stage: Path, outfile: Path) -> Path:
+    """Publish a whole snapshot with private permissions from its first byte."""
+    from gideon.operations.durability.home_paths import guard_path, private_file
+    from gideon.operations.durability.archive import sidecar_path
+    guard_path(outfile)
+    guard_path(sidecar_path(outfile))
+    missing = []
+    parent = outfile.parent
+    while not parent.exists():
+        missing.append(parent)
+        parent = parent.parent
+    for directory in reversed(missing):
+        directory.mkdir(mode=0o700)
+    with private_file(outfile, fsync=True) as stream:
+        with tarfile.open(name=str(outfile), mode="w:gz", fileobj=stream) as tar:
+            tar.add(str(stage), arcname=stage.name, filter=_data_filter)
+    return outfile
 
 
 def snapshot_main(
@@ -583,7 +597,7 @@ def snapshot_main(
             try:
                 from contextlib import closing
 
-                with closing(sqlite3.connect(str(pc / _db))) as c:
+                with closing(connect(str(pc / _db))) as c:
                     c.execute("PRAGMA wal_checkpoint(TRUNCATE);")
             except Exception:
                 print(
@@ -607,15 +621,15 @@ def snapshot_main(
                         from contextlib import closing
 
                         with (
-                            closing(sqlite3.connect(str(src))) as src_conn,
-                            closing(sqlite3.connect(str(stage / f))) as dst_conn,
+                            closing(connect(str(src))) as src_conn,
+                            closing(connect(str(stage / f))) as dst_conn,
                         ):
                             src_conn.backup(dst_conn)
                     else:
-                        shutil.copy2(str(src), str(stage / f))
+                        sqlite_files.copy_file(str(src), str(stage / f))
 
         _db_paths = _declared_db_paths()
-        _db_names = {PurePosixPath(p).name for p in _db_paths}
+        _db_names = set(_db_paths)
         for _db in _db_paths:
             _src_db = pc / _db
             if not _src_db.is_file() or os.path.islink(_src_db):
@@ -628,7 +642,7 @@ def snapshot_main(
 
             def _ws_ignore(directory: str, contents: list[str]) -> set[str]:
                 return set(_pattern_ignore(directory, contents)) | _tree_ignore_dbs(
-                    _db_names
+                    _db_names, home=pc
                 )(directory, contents)
 
             _copytree_safe(
@@ -656,7 +670,7 @@ def snapshot_main(
                 def _ignore(
                     directory: str, contents: list[str], _d=_derived
                 ) -> set[str]:
-                    return set(_tree_ignore_dbs(_db_names)(directory, contents)) | _d(
+                    return set(_tree_ignore_dbs(_db_names, home=pc)(directory, contents)) | _d(
                         directory, contents
                     )
 
@@ -664,7 +678,7 @@ def snapshot_main(
                 staged_extra.append(rel)
             elif src.is_file():
                 (stage / rel).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(src), str(stage / rel))
+                sqlite_files.copy_file(str(src), str(stage / rel))
                 staged_extra.append(rel)
 
         ws_files = sum(1 for _ in (stage / "workspace").rglob("*") if _.is_file())
@@ -692,16 +706,8 @@ def snapshot_main(
         }
         (stage / "MANIFEST.json").write_text(json.dumps(manifest, indent=2))
 
-        out.mkdir(parents=True, exist_ok=True)
         outfile = out / f"{name}.tar.gz"
-        tmp_tar = outfile.with_suffix(".tar.gz.tmp")
-        try:
-            with tarfile.open(str(tmp_tar), "w:gz") as tar:
-                tar.add(str(stage), arcname=name, filter=_data_filter)
-            tmp_tar.rename(outfile)
-        except BaseException:
-            tmp_tar.unlink(missing_ok=True)
-            raise
+        _write_archive(stage, outfile)
 
         from gideon.operations.durability.archive import write_sidecar
 
@@ -710,7 +716,6 @@ def snapshot_main(
         has_hmac_key = (stage / "sel_hmac.key").exists()
 
     sz = outfile.stat().st_size
-    os.chmod(str(outfile), 0o600)
     human = f"{sz // 1024}K" if sz < 1024 * 1024 else f"{sz / 1024 / 1024:.1f}M"
     print(f"✅ Snapshot created: {outfile} ({human})")
     if has_hmac_key:
@@ -721,15 +726,15 @@ def snapshot_main(
 
     _audit("snapshot_created", f"{outfile} ({human})")
 
-    snaps = sorted(
-        out.glob("gideon-snapshot-*.tar.gz"),
-        key=lambda x: x.stat().st_mtime,
-        reverse=True,
-    )
-    for old in snaps[args.keep :]:
-        old.unlink()
-        old.with_name(old.name + ".manifest.json").unlink(missing_ok=True)
-        print(f"🗑  Pruned: {old.name}")
+    from gideon.operations.durability import retention
+    from gideon.operations.durability.service import last_verified
+
+    plan = retention.plan_newest(retention.list_snapshots(out), keep=args.keep,
+                                 verified=last_verified()["archive"])
+    for name in retention.remove(plan.prune)[0]:
+        print(f"🗑  Pruned: {name} ({plan.reasons[name]})")
+    if plan.held is not None:
+        print(f"🛡  Kept {plan.held.name} as well: {retention.HELD}.")
 
     remaining = len(list(out.glob("gideon-snapshot-*.tar.gz")))
     print(f"📦 Snapshots in {out}: {remaining} (keep={args.keep})")
@@ -806,11 +811,11 @@ def _sqlite_row_total(db: Path) -> int:
     correct here (and only here): the staged file came through the backup API, so it is
     fully checkpointed and has no WAL to miss.
     """
-    from gideon.core.sqlite_compat import sqlite3 as _sqlite3
+    from gideon.core.sqlite_compat import connect, sqlite3 as _sqlite3
 
     total = 0
     try:
-        conn = _sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True)
+        conn = _connect(f"file:{db}?mode=ro&immutable=1", uri=True)
     except Exception:  # noqa: BLE001
         return 0
     try:
@@ -897,10 +902,12 @@ def _validate_identifier(name: str) -> str:
 
 
 def _merge_memory(src_db: Path, dst_db: Path) -> None:
+    from gideon.operations.durability.home_paths import guard_path
+    src_db, dst_db = guard_path(src_db, read=True), guard_path(dst_db)
     try:
         from contextlib import closing
 
-        with closing(sqlite3.connect(str(src_db))) as check_conn:
+        with closing(connect(str(src_db))) as check_conn:
             result = check_conn.execute("PRAGMA integrity_check;").fetchone()[0]
         if result != "ok":
             print(f"  ⚠️  Source DB integrity check failed: {result} — skipping merge")
@@ -909,7 +916,7 @@ def _merge_memory(src_db: Path, dst_db: Path) -> None:
         print(f"  ⚠️  Source DB unreadable: {e} — skipping merge")
         return
 
-    conn = sqlite3.connect(str(dst_db))
+    conn = connect(str(dst_db))
     conn.execute("BEGIN")
     attached = False
     try:
@@ -983,6 +990,8 @@ def _merge_memory(src_db: Path, dst_db: Path) -> None:
 
 
 def _merge_crons(src_path: Path, dst_path: Path) -> None:
+    from gideon.operations.durability.home_paths import guard_path
+    src_path, dst_path = guard_path(src_path, read=True), guard_path(dst_path)
     src = json.loads(src_path.read_text())
     dst = json.loads(dst_path.read_text())
     existing = {j.get("name") for j in dst.get("jobs", [])}
@@ -1021,6 +1030,8 @@ def _merge_triggers(src_path: Path, dst_path: Path) -> None:
     never performed. An imported trigger arrives UNARMED and the boot sweep arms it here — which is
     also why importing cannot resurrect a fire that should have happened during the move.
     """
+    from gideon.operations.durability.home_paths import guard_path
+    src_path, dst_path = guard_path(src_path, read=True), guard_path(dst_path)
     src = json.loads(src_path.read_text())
     dst = json.loads(dst_path.read_text())
     existing_names = {str(t.get("name") or "") for t in dst.get("triggers", [])}
@@ -1058,6 +1069,8 @@ def _merge_event_triggers(src_path: Path, dst_path: Path) -> None:
     ("today snapshot covers crons.json/hooks.json but NOT event_triggers.json"). An event trigger
     has no name field, so the pattern is its identity.
     """
+    from gideon.operations.durability.home_paths import guard_path
+    src_path, dst_path = guard_path(src_path, read=True), guard_path(dst_path)
     src = json.loads(src_path.read_text())
     dst = json.loads(dst_path.read_text())
     src_rows = src if isinstance(src, list) else src.get("triggers", [])
@@ -1082,6 +1095,8 @@ def _merge_event_triggers(src_path: Path, dst_path: Path) -> None:
 
 
 def _merge_notifications(src_path: Path, dst_path: Path) -> None:
+    from gideon.operations.durability.home_paths import guard_path
+    src_path, dst_path = guard_path(src_path, read=True), guard_path(dst_path)
     existing: set[str] = set()
     with open(dst_path) as f:
         for line in f:
@@ -1117,6 +1132,8 @@ def _merge_json_collection(
     `{"items": [...]}`) and is None for a bare top-level list (`tags.json`). Live rows win because
     merge mode's contract is that local state wins — the snapshot only fills gaps.
     """
+    from gideon.operations.durability.home_paths import guard_path
+    src, dst = guard_path(src, read=True), guard_path(dst)
     if not src.is_file() or not dst.is_file():
         return 0
     try:
@@ -1167,6 +1184,8 @@ def _merge_json_map(src: Path, dst: Path, *, wrapper: str | None = None) -> int:
     decision on the basis of spend that already happened on another machine or in another month. A
     key the live home does not have is pure recovery; a key it has is authoritative.
     """
+    from gideon.operations.durability.home_paths import guard_path
+    src, dst = guard_path(src, read=True), guard_path(dst)
     if not src.is_file() or not dst.is_file():
         return 0
     try:
@@ -1229,8 +1248,10 @@ def _merge_sqlite_attach(src_db: Path, dst_db: Path, label: str) -> int:
     the
     allowlist exists, not an accident of it.
     """
+    from gideon.operations.durability.home_paths import guard_path
+    src_db, dst_db = guard_path(src_db, read=True), guard_path(dst_db)
     try:
-        check = sqlite3.connect(f"file:{src_db}?mode=ro", uri=True)
+        check = connect(f"file:{src_db}?mode=ro", uri=True)
         try:
             if check.execute("PRAGMA integrity_check;").fetchone()[0] != "ok":
                 print(f"  ⚠️  {label}: source integrity check failed — skipping merge")
@@ -1243,7 +1264,7 @@ def _merge_sqlite_attach(src_db: Path, dst_db: Path, label: str) -> int:
         print(f"  ⚠️  {label}: source unreadable ({exc}) — skipping merge")
         return 0
 
-    conn = sqlite3.connect(str(dst_db))
+    conn = connect(str(dst_db))
     imported = 0
     try:
         # BEGIN IMMEDIATE, not a deferred BEGIN: acquire the destination's write lock UP FRONT.
@@ -1319,6 +1340,8 @@ def _merge_keyed_jsonl(src: Path, dst: Path, key_field: str, label: str) -> int:
     and folding a security gate into a generic helper is how the gate gets dropped by a later caller
     who only wanted the dedup.
     """
+    from gideon.operations.durability.home_paths import guard_path
+    src, dst = guard_path(src, read=True), guard_path(dst)
     if not src.is_file() or (dst.exists() and not dst.is_file()):
         return 0
     existing: set[str] = set()
@@ -1358,6 +1381,8 @@ def _merge_feedback(src: Path, dst: Path) -> None:
     at 2x cap") and re-implementing the bound here is the duplication S175 deleted from the run
     store after finding one copy had silently reverted the other.
     """
+    from gideon.operations.durability.home_paths import guard_path
+    src, dst = guard_path(src, read=True), guard_path(dst)
     _merge_keyed_jsonl(src, dst, "id", "Feedback")
 
 
@@ -1428,7 +1453,7 @@ def _merge_security_events(snap: Path, pc: Path) -> None:
     print(f"  Security events imported: {imported}")
 
 
-def _merge_run_history(src_dir: Path, dst_dir: Path) -> None:
+def _merge_run_history(src_dir: Path, dst_dir: Path) -> list[str]:
     """Merge `cron-history/` shard-by-shard, deduping on `run_id` (S176).
 
     🔴 WHY THIS EXISTS. `inventory.py` declares `cron_history` with `merge=append_dedup`, and
@@ -1449,35 +1474,44 @@ def _merge_run_history(src_dir: Path, dst_dir: Path) -> None:
     (S175) and owns that policy; trimming here would apply retention twice with a second copy of the
     rule — the duplication S175 just removed.
     """
+    from gideon.operations.durability.home_paths import guard_path, LinkInTheWay
+    src_dir, dst_dir = guard_path(src_dir, read=True), guard_path(dst_dir)
+    left: list[str] = []
     if not src_dir.is_dir():
-        return
+        return left
     dst_dir.mkdir(parents=True, exist_ok=True)
     shards = imported = 0
     for src in sorted(src_dir.glob("*.jsonl")):
-        dst = dst_dir / src.name
-        if not dst.is_file():
-            shutil.copy2(str(src), str(dst))
+        try:
+            src = guard_path(src, read=True)
+            dst = guard_path(dst_dir / src.name)
+            if not dst.is_file():
+                sqlite_files.copy_file(str(src), str(dst))
+                shards += 1
+                continue
+            existing: set[str] = set()
+            with open(dst) as f:
+                for line in f:
+                    try:
+                        existing.add(str(json.loads(line).get("run_id") or line.strip()))
+                    except (ValueError, TypeError):
+                        pass
+            with open(dst, "a") as out, open(src) as f:
+                for line in f:
+                    try:
+                        key = str(json.loads(line).get("run_id") or line.strip())
+                    except (ValueError, TypeError):
+                        continue
+                    if key not in existing:
+                        out.write(line)
+                        existing.add(key)
+                        imported += 1
             shards += 1
-            continue
-        existing: set[str] = set()
-        with open(dst) as f:
-            for line in f:
-                try:
-                    existing.add(str(json.loads(line).get("run_id") or line.strip()))
-                except (ValueError, TypeError):
-                    pass
-        with open(dst, "a") as out, open(src) as f:
-            for line in f:
-                try:
-                    key = str(json.loads(line).get("run_id") or line.strip())
-                except (ValueError, TypeError):
-                    continue
-                if key not in existing:
-                    out.write(line)
-                    existing.add(key)
-                    imported += 1
-        shards += 1
+        except LinkInTheWay as link:
+            link.put_on(left)
     print(f"  Run history: {shards} shard(s), {imported} row(s) imported")
+
+    return left
 
 
 def _snapshot_config_document(path: Path) -> dict:
@@ -1491,6 +1525,8 @@ def _snapshot_config_document(path: Path) -> dict:
 
 
 def _replace_config_from_snapshot(src: Path, live: Path, backup: Path) -> None:
+    from gideon.operations.durability.home_paths import guard_path
+    src, live = guard_path(src, read=True), guard_path(live)
     incoming = _snapshot_config_document(src)
 
     from gideon.core.config.transactions import mutate_config
@@ -1499,7 +1535,7 @@ def _replace_config_from_snapshot(src: Path, live: Path, backup: Path) -> None:
         if live.is_symlink():
             raise ValueError(f"Refusing to restore symlinked config: {live}")
         if live.is_file():
-            shutil.copy2(str(live), str(backup))
+            sqlite_files.copy_file(str(live), str(backup))
         document.clear()
         document.update(incoming)
 
@@ -1507,6 +1543,8 @@ def _replace_config_from_snapshot(src: Path, live: Path, backup: Path) -> None:
 
 
 def _copy_config_if_missing(src: Path, live: Path) -> bool:
+    from gideon.operations.durability.home_paths import guard_path
+    src, live = guard_path(src, read=True), guard_path(live)
     incoming = _snapshot_config_document(src)
 
     from gideon.core.config.transactions import mutate_config
@@ -1531,13 +1569,14 @@ def _backup_and_copy(pc: Path, backup: Path, snap: Path, component: str) -> None
             elif src.is_file():
                 _replace_config_from_snapshot(src, pc / f, backup / f)
             continue
-        local_path = pc / f
+        from gideon.operations.durability.home_paths import home_path
+        local_path = home_path(pc, f)
         local = _read_optional_json(local_path) if f.endswith(".json") else None
         if local_path.is_file():
             if os.path.islink(pc / f):
                 print(f"⚠️  Skipping symlinked core file during backup: {pc / f}")
                 continue
-            shutil.move(str(pc / f), str(backup / f))
+            sqlite_files.move_aside(pc / f, backup / f)
         if (snap / f).is_file():
             if os.path.islink(snap / f):
                 print(f"⚠️  Skipping symlinked file from snapshot: {snap / f}")
@@ -1548,77 +1587,112 @@ def _backup_and_copy(pc: Path, backup: Path, snap: Path, component: str) -> None
                 if restored is not None:
                     atomic_write(pc / f, json.dumps(restored, indent=2))
             else:
-                shutil.copy2(str(snap / f), str(pc / f))
+                sqlite_files.copy_file(str(snap / f), str(pc / f))
             if component == "security":
                 if (pc / f).is_file():
                     os.chmod(str(pc / f), 0o600)
 
 
-def _do_replace(snap: Path, pc: Path, components: list[str] | None) -> None:
+def _do_replace(snap: Path, pc: Path, components: list[str] | None) -> list[str]:
+    from gideon.operations.durability.home_paths import LinkInTheWay
+    from gideon.operations.durability.restore_items import left_unchanged_line
+    left: list[str] = []
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup = pc / f"pre-restore-{ts}"
+    from gideon.operations.durability.home_paths import guard_path
+    backup = guard_path(backup)
     backup.mkdir(exist_ok=True)
     print("🔄 Replace mode — backing up current state...")
 
     for comp in ("memory", "crons", "config", "notifications", "security"):
-        if _want(components, comp):
-            _backup_and_copy(pc, backup, snap, comp)
-            print(f"  ✅ {comp}")
+        try:
+            if _want(components, comp):
+                _backup_and_copy(pc, backup, snap, comp)
+                print(f"  {comp}: processed")
+        except LinkInTheWay as link:
+            link.put_on(left)
+            print(f"  ⚠️  Left unchanged: {link}")
 
-    if _want(components, "workspace"):
-        d = pc / "workspace"
-        if d.is_dir():
-            _copytree_safe(d, backup / "workspace", dirs_exist_ok=True)
-        sd = snap / "workspace"
-        if sd.is_dir():
+    try:
+        if _want(components, "workspace"):
+            d = pc / "workspace"
+            sd = snap / "workspace"
             if d.is_dir():
-                shutil.rmtree(str(d))
-            _copytree_safe(sd, d)
-        print("  ✅ workspace")
-
-    if _want(components, "skills"):
-        sk = pc / "skills"
-        if sk.is_dir():
-            _copytree_safe(sk, backup / "skills", dirs_exist_ok=True)
-        snap_sk = snap / "skills"
-        if snap_sk.is_dir():
-            if sk.is_dir():
-                shutil.rmtree(str(sk))
-            _copytree_safe(snap_sk, sk)
-        print("  ✅ skills")
-
-    if _want(components, "everything") or any(
-        _store_selected(components, rel) for rel in _extra_restore_paths(snap)
-    ):
-        for rel in _extra_restore_paths(snap):
-            if not _store_selected(components, rel):
-                continue
-            src, live = snap / rel, pc / rel
-            local = _read_optional_json(live) if src.is_file() and rel.endswith(".json") else None
-            if live.exists() and not live.is_symlink():
-                (backup / rel).parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(live), str(backup / rel))
-            if src.is_dir():
-                _copytree_safe(src, live, ignore=_restore_ignore(rel, src))
-                _apply_arrival_policy_to_tree(live, rel, backup / rel)
-            elif src.is_file():
-                live.parent.mkdir(parents=True, exist_ok=True)
-                if rel.endswith(".json"):
-                    _copy_json_with_arrival_policy(
-                        src,
-                        live,
-                        rel,
-                        local_path=backup / rel if local is not None else None,
-                    )
+                if sd.is_dir():
+                    sqlite_files.move_aside(d, backup / "workspace")
                 else:
-                    shutil.copy2(str(src), str(live))
-        print("  ✅ stores")
+                    _copytree_safe(d, backup / "workspace", dirs_exist_ok=True)
+            if sd.is_dir():
+                if d.is_dir():
+                    shutil.rmtree(str(d))
+                _copytree_safe(sd, d)
+            print("  Processed workspace")
+    except LinkInTheWay as link:
+        link.put_on(left)
+        print(f"  ⚠️  Left unchanged: {link}")
+
+    try:
+        if _want(components, "skills"):
+            sk = pc / "skills"
+            snap_sk = snap / "skills"
+            if sk.is_dir():
+                if snap_sk.is_dir():
+                    sqlite_files.move_aside(sk, backup / "skills")
+                else:
+                    _copytree_safe(sk, backup / "skills", dirs_exist_ok=True)
+            if snap_sk.is_dir():
+                if sk.is_dir():
+                    shutil.rmtree(str(sk))
+                _copytree_safe(snap_sk, sk)
+            print("  Processed skills")
+    except LinkInTheWay as link:
+        link.put_on(left)
+        print(f"  ⚠️  Left unchanged: {link}")
+
+    try:
+        if _want(components, "everything") or any(
+            _store_selected(components, rel) for rel in _extra_restore_paths(snap)
+        ):
+            for rel in _extra_restore_paths(snap):
+                try:
+                    if not _store_selected(components, rel):
+                        continue
+                    from gideon.operations.durability.home_paths import home_path
+                    src, live = snap / rel, home_path(pc, rel)
+                    local = _read_optional_json(live) if src.is_file() and rel.endswith(".json") else None
+                    if live.exists() and not live.is_symlink():
+                        (backup / rel).parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(live), str(backup / rel))
+                    if src.is_dir():
+                        _copytree_safe(src, live, ignore=_restore_ignore(rel, src))
+                        _apply_arrival_policy_to_tree(live, rel, backup / rel)
+                    elif src.is_file():
+                        live.parent.mkdir(parents=True, exist_ok=True)
+                        if rel.endswith(".json"):
+                            _copy_json_with_arrival_policy(
+                                src,
+                                live,
+                                rel,
+                                local_path=backup / rel if local is not None else None,
+                            )
+                        else:
+                            sqlite_files.copy_file(str(src), str(live))
+                except LinkInTheWay as link:
+                    link.put_on(left)
+                    print(f"  ⚠️  Left unchanged: {link}")
+            print("  Processed stores")
+    except LinkInTheWay as link:
+        link.put_on(left)
+        print(f"  ⚠️  Left unchanged: {link}")
 
     try:
         backup.rmdir()
     except OSError:
         print(f"  Previous state saved to: {backup}/")
-    print("✅ Replace complete.")
+    print("✅ Replace complete." if not left else "Replace finished with unchanged parts.")
+    if left:
+        print(left_unchanged_line(left, "Replace"))
+    return left
 
 
 def home_is_populated(pc: Path) -> list[str]:
@@ -1731,6 +1805,8 @@ def merge_plan(snap: Path, pc: Path, components: list[str] | None) -> list[dict]
         if not _store_selected(components, path):
             continue
         entry = by_path.get(path)
+        if entry is not None and not entry.merged_in:
+            continue
         strategy = entry.merge if entry else inv.MERGE_UNION_BY_ID
         _add(path, strategy, "per-file union" if entry and entry.kind else "")
     return rows
@@ -1779,160 +1855,241 @@ def print_merge_plan(rows: list[dict]) -> None:
     print("  " + ", ".join(f"{n} {a}" for a, n in sorted(counts.items())))
 
 
-def _do_merge(snap: Path, pc: Path, components: list[str] | None) -> None:
+def _do_merge(snap: Path, pc: Path, components: list[str] | None) -> list[str]:
+    from gideon.operations.durability.home_paths import LinkInTheWay
+    from gideon.operations.durability.restore_items import left_unchanged_line
+    left: list[str] = []
     print("🔀 Merge mode — importing...")
 
-    if _want(components, "memory") and (snap / "memory.db").is_file():
-        if not (pc / "memory.db").is_file():
-            shutil.copy2(str(snap / "memory.db"), str(pc / "memory.db"))
-            if (snap / "memory_index.db").is_file():
-                shutil.copy2(str(snap / "memory_index.db"), str(pc / "memory_index.db"))
-            print("  Memory: copied (no existing memory.db)")
-        else:
-            _merge_memory(snap / "memory.db", pc / "memory.db")
-        print("  ✅ memory")
-
-    if _want(components, "crons"):
-        st, dt = snap / "triggers.json", pc / "triggers.json"
-        if st.is_file():
-            if dt.is_file():
-                _merge_triggers(st, dt)
+    try:
+        if _want(components, "memory") and (snap / "memory.db").is_file():
+            if not (pc / "memory.db").is_file():
+                sqlite_files.copy_file(str(snap / "memory.db"), str(pc / "memory.db"))
+                if (snap / "memory_index.db").is_file():
+                    sqlite_files.copy_file(str(snap / "memory_index.db"), str(pc / "memory_index.db"))
+                print("  Memory: copied (no existing memory.db)")
             else:
-                _copy_json_with_arrival_policy(st, dt, "triggers.json")
-                print("  Automations: copied (no existing store)")
-        se, de = snap / "event_triggers.json", pc / "event_triggers.json"
-        if se.is_file():
-            if de.is_file():
-                _merge_event_triggers(se, de)
-            else:
-                _copy_json_with_arrival_policy(se, de, "event_triggers.json")
-                print("  Event triggers: copied (none existing)")
-        sc, dc = snap / "crons.json", pc / "crons.json"
-        if sc.is_file():
-            if dc.is_file():
-                _merge_crons(sc, dc)
-            else:
-                _copy_json_with_arrival_policy(sc, dc, "crons.json")
-                print("  Legacy crons: copied (no existing crons)")
-        print("  ✅ automations")
+                _merge_memory(snap / "memory.db", pc / "memory.db")
+            print("  Processed memory")
+    except LinkInTheWay as link:
+        link.put_on(left)
+        print(f"  ⚠️  Left unchanged: {link}")
 
-    if _want(components, "config"):
-        for f in CORE_FILES["config"]:
-            s, d = snap / f, pc / f
-            if f == "config.json":
-                if s.is_symlink():
-                    print(f"⚠️  Skipping symlinked file from snapshot: {s}")
-                elif s.is_file() and _copy_config_if_missing(s, d):
-                    print(f"  {f}: restored (was missing)")
-                continue
-            if s.is_file() and not d.is_file():
-                shutil.copy2(str(s), str(d))
-                print(f"  {f}: restored (was missing)")
-        print("  ✅ config")
-
-    if _want(components, "crons"):
-        _merge_run_history(snap / "cron-history", pc / "cron-history")
-
-    if _want(components, "notifications"):
-        sn, dn = snap / "notifications.jsonl", pc / "notifications.jsonl"
-        if sn.is_file():
-            if dn.is_file():
-                _merge_notifications(sn, dn)
-            else:
-                shutil.copy2(str(sn), str(dn))
-                print("  Notifications: copied")
-        _merge_keyed_jsonl(
-            snap / "digest_queue.jsonl", pc / "digest_queue.jsonl", "ts", "Digest queue"
-        )
-        _merge_feedback(snap / "feedback.jsonl", pc / "feedback.jsonl")
-        _merge_keyed_jsonl(
-            snap / "model_calls.jsonl",
-            pc / "model_calls.jsonl",
-            "audit_id",
-            "Model calls",
-        )
-        print("  ✅ notifications")
-
-    if _want(components, "security"):
-        for f in CORE_FILES["security"]:
-            s, d = snap / f, pc / f
-            if s.is_file() and not d.is_file():
-                shutil.copy2(str(s), str(d))
-                os.chmod(str(d), 0o600)
-                print(f"  {f}: restored (was missing)")
-        _merge_security_events(snap, pc)
-        print("  ✅ security")
-
-    if _want(components, "workspace"):
-        sd = snap / "workspace"
-        if sd.is_dir():
-            dd = pc / "workspace"
-            dd.mkdir(parents=True, exist_ok=True)
-            _copy_tree_no_overwrite(sd, dd)
-        print("  ✅ workspace")
-
-    if _want(components, "skills"):
-        if (snap / "skills").is_dir():
-            (pc / "skills").mkdir(parents=True, exist_ok=True)
-            _copy_tree_no_overwrite(snap / "skills", pc / "skills")
-        print("  ✅ skills")
-
-    if _want(components, "everything"):
-        for rel in _attach_merge_paths():
-            s_db, d_db = snap / rel, pc / rel
-            if s_db.is_file() and d_db.is_file():
-                _merge_sqlite_attach(s_db, d_db, rel)
-
-    if _want(components, "everything"):
-        for rel, wrapper, key in (
-            ("hooks.json", "hooks", "id"),
-            ("inbox.json", "items", "id"),
-            ("tags.json", None, "id"),
-        ):
-            n = _merge_json_collection(
-                snap / rel,
-                pc / rel,
-                wrapper=wrapper,
-                key=key,
-                entry_path=rel,
-            )
-            if n:
-                print(f"  {rel}: {n} imported")
-        for rel, wrapper in (
-            ("spend.json", None),
-            ("tool_usage.json", None),
-            ("tokenjuice_savings.json", "rows"),
-            ("autonudge.json", "loops"),
-        ):
-            n = _merge_json_map(snap / rel, pc / rel, wrapper=wrapper)
-            if n:
-                print(f"  {rel}: {n} imported")
-
-    if any(_store_selected(components, rel) for rel in _extra_restore_paths(snap)):
-        restored = []
-        for rel in _extra_restore_paths(snap):
-            if not _store_selected(components, rel):
-                continue
-            src = snap / rel
-            dst = pc / rel
-            if src.is_dir():
-                dst.mkdir(parents=True, exist_ok=True)
-                _copy_tree_no_overwrite(src, dst, entry_path=rel)
-                restored.append(rel)
-            elif src.is_file() and not dst.exists():
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                if rel.endswith(".json"):
-                    _copy_json_with_arrival_policy(src, dst, rel)
+    try:
+        if _want(components, "crons"):
+            st, dt = snap / "triggers.json", pc / "triggers.json"
+            if st.is_file():
+                if dt.is_file():
+                    _merge_triggers(st, dt)
                 else:
-                    shutil.copy2(str(src), str(dst))
-                restored.append(rel)
-        if restored:
-            print(
-                f"  Stores: recovered {len(restored)} ({', '.join(sorted(restored)[:6])}…)"
-            )
-        print("  ✅ stores")
+                    _copy_json_with_arrival_policy(st, dt, "triggers.json")
+                    print("  Automations: copied (no existing store)")
+            se, de = snap / "event_triggers.json", pc / "event_triggers.json"
+            if se.is_file():
+                if de.is_file():
+                    _merge_event_triggers(se, de)
+                else:
+                    _copy_json_with_arrival_policy(se, de, "event_triggers.json")
+                    print("  Event triggers: copied (none existing)")
+            sc, dc = snap / "crons.json", pc / "crons.json"
+            if sc.is_file():
+                if dc.is_file():
+                    _merge_crons(sc, dc)
+                else:
+                    _copy_json_with_arrival_policy(sc, dc, "crons.json")
+                    print("  Legacy crons: copied (no existing crons)")
+            print("  Processed automations")
+    except LinkInTheWay as link:
+        link.put_on(left)
+        print(f"  ⚠️  Left unchanged: {link}")
 
-    print("✅ Merge complete.")
+    try:
+        if _want(components, "config"):
+            for f in CORE_FILES["config"]:
+                try:
+                    s, d = snap / f, pc / f
+                    if f == "config.json":
+                        if s.is_symlink():
+                            print(f"⚠️  Skipping symlinked file from snapshot: {s}")
+                        elif s.is_file() and _copy_config_if_missing(s, d):
+                            print(f"  {f}: restored (was missing)")
+                        continue
+                    if s.is_file() and not d.is_file():
+                        sqlite_files.copy_file(str(s), str(d))
+                        print(f"  {f}: restored (was missing)")
+                except LinkInTheWay as link:
+                    link.put_on(left)
+                    print(f"  ⚠️  Left unchanged: {link}")
+            print("  Processed config")
+    except LinkInTheWay as link:
+        link.put_on(left)
+        print(f"  ⚠️  Left unchanged: {link}")
+
+    try:
+        if _want(components, "crons"):
+            left.extend(_merge_run_history(snap / "cron-history", pc / "cron-history"))
+    except LinkInTheWay as link:
+        link.put_on(left)
+        print(f"  ⚠️  Left unchanged: {link}")
+
+    try:
+        if _want(components, "notifications"):
+            sn, dn = snap / "notifications.jsonl", pc / "notifications.jsonl"
+            if sn.is_file():
+                if dn.is_file():
+                    _merge_notifications(sn, dn)
+                else:
+                    sqlite_files.copy_file(str(sn), str(dn))
+                    print("  Notifications: copied")
+            _merge_keyed_jsonl(
+                snap / "digest_queue.jsonl", pc / "digest_queue.jsonl", "ts", "Digest queue"
+            )
+            _merge_feedback(snap / "feedback.jsonl", pc / "feedback.jsonl")
+            _merge_keyed_jsonl(
+                snap / "model_calls.jsonl",
+                pc / "model_calls.jsonl",
+                "audit_id",
+                "Model calls",
+            )
+            print("  Processed notifications")
+    except LinkInTheWay as link:
+        link.put_on(left)
+        print(f"  ⚠️  Left unchanged: {link}")
+
+    try:
+        if _want(components, "security"):
+            for f in CORE_FILES["security"]:
+                try:
+                    s, d = snap / f, pc / f
+                    if s.is_file() and not d.is_file():
+                        sqlite_files.copy_file(str(s), str(d))
+                        os.chmod(str(d), 0o600)
+                        print(f"  {f}: restored (was missing)")
+                except LinkInTheWay as link:
+                    link.put_on(left)
+                    print(f"  ⚠️  Left unchanged: {link}")
+            _merge_security_events(snap, pc)
+            print("  Processed security")
+    except LinkInTheWay as link:
+        link.put_on(left)
+        print(f"  ⚠️  Left unchanged: {link}")
+
+    try:
+        if _want(components, "workspace"):
+            sd = snap / "workspace"
+            if sd.is_dir():
+                from gideon.operations.durability.home_paths import home_path
+                dd = home_path(pc, "workspace")
+                dd.mkdir(parents=True, exist_ok=True)
+                _copy_tree_no_overwrite(sd, dd, left=left)
+            print("  Processed workspace")
+    except LinkInTheWay as link:
+        link.put_on(left)
+        print(f"  ⚠️  Left unchanged: {link}")
+
+    try:
+        if _want(components, "skills"):
+            if (snap / "skills").is_dir():
+                from gideon.operations.durability.home_paths import home_path
+                home_path(pc, "skills").mkdir(parents=True, exist_ok=True)
+                _copy_tree_no_overwrite(snap / "skills", pc / "skills", left=left)
+            print("  Processed skills")
+    except LinkInTheWay as link:
+        link.put_on(left)
+        print(f"  ⚠️  Left unchanged: {link}")
+
+    try:
+        if _want(components, "everything"):
+            for rel in _attach_merge_paths():
+                try:
+                    s_db, d_db = snap / rel, pc / rel
+                    if s_db.is_file() and d_db.is_file():
+                        _merge_sqlite_attach(s_db, d_db, rel)
+                except LinkInTheWay as link:
+                    link.put_on(left)
+                    print(f"  ⚠️  Left unchanged: {link}")
+    except LinkInTheWay as link:
+        link.put_on(left)
+        print(f"  ⚠️  Left unchanged: {link}")
+
+    try:
+        if _want(components, "everything"):
+            for rel, wrapper, key in (
+                ("hooks.json", "hooks", "id"),
+                ("inbox.json", "items", "id"),
+                ("tags.json", None, "id"),
+            ):
+                try:
+                    n = _merge_json_collection(
+                        snap / rel,
+                        pc / rel,
+                        wrapper=wrapper,
+                        key=key,
+                        entry_path=rel,
+                    )
+                    if n:
+                        print(f"  {rel}: {n} imported")
+                except LinkInTheWay as link:
+                    link.put_on(left)
+                    print(f"  ⚠️  Left unchanged: {link}")
+            for rel, wrapper in (
+                ("spend.json", None),
+                ("tool_usage.json", None),
+                ("tokenjuice_savings.json", "rows"),
+                ("autonudge.json", "loops"),
+            ):
+                try:
+                    n = _merge_json_map(snap / rel, pc / rel, wrapper=wrapper)
+                    if n:
+                        print(f"  {rel}: {n} imported")
+                except LinkInTheWay as link:
+                    link.put_on(left)
+                    print(f"  ⚠️  Left unchanged: {link}")
+    except LinkInTheWay as link:
+        link.put_on(left)
+        print(f"  ⚠️  Left unchanged: {link}")
+
+    try:
+        if any(_store_selected(components, rel) for rel in _extra_restore_paths(snap)):
+            restored = []
+            for rel in _extra_restore_paths(snap):
+                try:
+                    if not _store_selected(components, rel):
+                        continue
+                    from gideon.operations.durability import inventory as inv
+                    entry = inv.claim_for(rel)
+                    if entry is not None and not entry.merged_in:
+                        continue
+                    src = snap / rel
+                    from gideon.operations.durability.home_paths import home_path
+                    dst = home_path(pc, rel)
+                    if src.is_dir():
+                        dst.mkdir(parents=True, exist_ok=True)
+                        _copy_tree_no_overwrite(src, dst, entry_path=rel, left=left)
+                        restored.append(rel)
+                    elif src.is_file() and not dst.exists():
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        if rel.endswith(".json"):
+                            _copy_json_with_arrival_policy(src, dst, rel)
+                        else:
+                            sqlite_files.copy_file(str(src), str(dst))
+                        restored.append(rel)
+                except LinkInTheWay as link:
+                    link.put_on(left)
+                    print(f"  ⚠️  Left unchanged: {link}")
+            if restored:
+                print(
+                    f"  Stores: recovered {len(restored)} ({', '.join(sorted(restored)[:6])}…)"
+                )
+            print("  Processed stores")
+    except LinkInTheWay as link:
+        link.put_on(left)
+        print(f"  ⚠️  Left unchanged: {link}")
+
+    print("✅ Merge complete." if not left else "Merge finished with unchanged parts.")
+    if left:
+        print(left_unchanged_line(left, "Merge"))
+    return left
 
 
 def _is_gateway_running() -> bool:
@@ -2007,11 +2164,11 @@ def restore_apply(archive: Path, mode: str, components: list[str] | None) -> dic
         pc = _pc_dir()
         pc.mkdir(parents=True, exist_ok=True)
         if mode == "replace":
-            _do_replace(roots[0], pc, components)
+            left = _do_replace(roots[0], pc, components)
         else:
-            _do_merge(roots[0], pc, components)
-    _audit("state_restored", f"mode={mode} snapshot={archive.name}")
-    return {"ok": True, "mode": mode, "snapshot": archive.name}
+            left = _do_merge(roots[0], pc, components)
+    _audit("state_restored", f"mode={mode} partial={bool(left)} snapshot={archive.name}")
+    return {"ok": True, "partial": bool(left), "left_unchanged": left, "mode": mode, "snapshot": archive.name}
 
 
 def restore_main(
@@ -2114,16 +2271,18 @@ def restore_main(
 
         pc.mkdir(parents=True, exist_ok=True)
         if mode == "replace":
-            _do_replace(snap, pc, components)
+            left = _do_replace(snap, pc, components)
         else:
-            _do_merge(snap, pc, components)
+            left = _do_merge(snap, pc, components)
+        if left:
+            return 1
         missing_engine_apps = _apps_missing_engines(snap, components)
 
     if _want(components, "memory") and (pc / "memory.db").is_file():
         try:
             from contextlib import closing
 
-            with closing(sqlite3.connect(str(pc / "memory.db"))) as conn:
+            with closing(connect(str(pc / "memory.db"))) as conn:
                 result = conn.execute("PRAGMA integrity_check;").fetchone()[0]
         except Exception as e:
             result = str(e)

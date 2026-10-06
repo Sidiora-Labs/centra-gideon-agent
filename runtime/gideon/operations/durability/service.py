@@ -91,9 +91,19 @@ def load_state() -> dict:
     import json
 
     try:
-        return json.loads(_state_path().read_text(encoding="utf-8"))
+        state = json.loads(_state_path().read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, json.JSONDecodeError, TypeError):
         return {}
+
+    if not isinstance(state, dict):
+        return {}
+    if "last_verified_archive" not in state and state.get("last_drill_ok") is True:
+        state.update(_verified_fields(state.get("last_drill_archive"), state))
+    for job in ("export", "snapshot"):
+        stamp = state.get(f"last_{job}")
+        if stamp and f"last_{job}_run" not in state:
+            state.update({f"last_{job}_run": stamp, f"last_{job}_ok": True, f"last_{job}_success": stamp})
+    return state
 
 
 def save_state(state: dict) -> None:
@@ -119,7 +129,7 @@ def drill_fields(result: JobResult, *, at: float) -> dict:
     (which owns its own `save_state`) and the on-demand `POST /api/durability/run`.
     """
     extra = result.extra or {}
-    return {
+    fields = {
         "last_drill": at,
         "last_drill_ok": bool(result.ok),
         "last_drill_detail": result.detail,
@@ -127,30 +137,67 @@ def drill_fields(result: JobResult, *, at: float) -> dict:
         "last_drill_databases": int(extra.get("databases_checked", 0) or 0),
     }
 
+    if result.ok and fields["last_drill_archive"]:
+        fields.update(_verified_fields(fields["last_drill_archive"], fields))
+    return fields
 
-def job_stamp_fields(result: JobResult, *, at: float) -> dict:
-    """Return the state fields a completed durability job is allowed to stamp."""
+
+def _verified_fields(archive, drill: dict) -> dict:
+    return {"last_verified_archive": str(archive or ""),
+            "last_verified_at": float(drill.get("last_drill", 0) or 0),
+            "last_verified_detail": str(drill.get("last_drill_detail", "") or ""),
+            "last_verified_databases": int(drill.get("last_drill_databases", 0) or 0)}
+
+
+def last_verified() -> dict:
+    state = load_state()
+    return {"archive": str(state.get("last_verified_archive", "") or ""),
+            "at": float(state.get("last_verified_at", 0) or 0),
+            "detail": str(state.get("last_verified_detail", "") or ""),
+            "databases_checked": int(state.get("last_verified_databases", 0) or 0)}
+
+
+def job_stamp_fields(result: JobResult, *, at: float, previous: dict | None = None) -> dict:
+    """Keep schedule stamps separate from the latest actual outcome."""
+    previous = previous or {}
+    job = {"incremental_export": "export", "nightly_snapshot": "snapshot",
+           "restore_drill": "drill"}.get(result.job, result.job)
+    if job == "sync":
+        fields = {"last_sync": at, "last_sync_skipped": result.skipped}
+        if not result.skipped:
+            fields.update(_outcome_fields(job, result, at=at, previous=previous))
+            fields["sync_removal_failed"] = _quoted(str((result.extra or {}).get("removal_failed", "") or ""))
+        return fields
     if result.skipped:
         return {}
-    if result.job == "incremental_export":
-        return {"last_export": at} if result.ok else {}
-    if result.job == "nightly_snapshot":
-        return {"last_snapshot": at} if result.ok else {}
-    if result.job == "reclaim":
-        return {"last_reclaim": at} if result.ok else {}
-    if result.job == "restore_drill":
+    if job == "drill":
         return drill_fields(result, at=at)
-    return {}
+    if job == "reclaim":
+        return {"last_reclaim": at} if result.ok else {}
+    if job not in ("export", "snapshot"):
+        return {}
+    fields = _outcome_fields(job, result, at=at, previous=previous)
+    if result.ok or (result.extra or {}).get("failure") == "left_out":
+        fields[f"last_{job}"] = at
+    if job == "snapshot" and result.ok:
+        fields["last_snapshot_detail"] = _quoted(result.detail)
+    return fields
 
 
-def persist_job_result(result: JobResult, *, at: float | None = None) -> None:
-    """Persist the state fields earned by one completed on-demand durability job."""
-    fields = job_stamp_fields(result, at=at if at is not None else time.time())
-    if not fields:
-        return
+def persist_job_result(result: JobResult, *, at: float | None = None, notifier=None) -> None:
+    """Record and announce the result from either a manual or scheduled run."""
     state = load_state()
-    state.update(fields)
+    record_job(result, state, at=time.time() if at is None else at, notifier=notifier)
     save_state(state)
+
+
+def record_job(result: JobResult, state: dict, *, at: float, notifier=None) -> None:
+    fields = job_stamp_fields(result, at=at, previous=state)
+    job = {"incremental_export":"export", "nightly_snapshot":"snapshot",
+           "restore_drill":"drill"}.get(result.job, result.job)
+    previous = dict(state)
+    state.update(fields)
+    _notify(job, previous, fields, notifier)
 
 
 def persist_drill_result(result: JobResult, *, at: float | None = None) -> None:
@@ -184,10 +231,21 @@ def _due(state: dict, key: str, interval: float, *, now: float | None = None) ->
     return (now or time.time()) - stamp >= interval
 
 
-def _audit(event: str, resources: str, *, outcome: str = "allowed") -> None:
+def _audit(event: str, resources: str, *, outcome: str = "allowed", metadata: dict | None = None) -> None:
     try:
-        from gideon.security.sel import sel
+        from gideon.security.sel import SecurityEvent, sel
 
+        if metadata is not None:
+            from datetime import datetime, timezone
+            from uuid import uuid4
+
+            sel().log(SecurityEvent(
+                event_id=uuid4().hex[:16], timestamp=datetime.now(timezone.utc).isoformat(),
+                event_type="api_access", caller_identity="durability:service", agent="",
+                source="dashboard", operation=event, outcome=outcome,
+                resources=resources[:400], metadata=metadata,
+            ))
+            return
         sel().log_api_access(
             caller="durability:service",
             operation=event,
@@ -217,6 +275,7 @@ def run_incremental_export() -> JobResult:
                 default_shard_dir,
                 dirty_entries,
                 export_shards,
+                mark_exported,
             )
 
             home = active_home()
@@ -231,6 +290,7 @@ def run_incremental_export() -> JobResult:
                     extra={"entries_exported": 0, "manifest_shards": 0},
                 )
             result = export_shards(home, out_dir, entries=dirty)
+            mark_exported(state_path, dirty, skipped=result.skipped)
         except (
             Exception
         ) as exc:  # noqa: BLE001 — a failed backup must not kill the loop
@@ -239,17 +299,20 @@ def run_incremental_export() -> JobResult:
             return JobResult(
                 "incremental_export",
                 ok=False,
-                detail=str(exc),
+                detail=_quoted(str(exc)),
                 duration_secs=time.monotonic() - started,
+                extra={"failure": "disk_full" if getattr(exc, "errno", None) == 28 else "unwritable" if getattr(exc, "errno", None) in (1,13) else "error", "reason": _quoted(str(exc)), "folder": str(locals().get("out_dir", ""))},
             )
     exported = int(getattr(result, "entries", 0) or 0)
     manifest_shards = len(getattr(result, "shards", ()) or ())
     _audit("durability_export", f"entries={exported} manifest_shards={manifest_shards}")
     return JobResult(
         "incremental_export",
-        detail=f"{exported} store(s) re-exported",
+        ok=not result.skipped,
+        detail=f"{exported} store(s) re-exported" + (f"; {len(result.skipped)} unreadable store(s) left out" if result.skipped else ""),
         duration_secs=time.monotonic() - started,
-        extra={"entries_exported": exported, "manifest_shards": manifest_shards},
+        extra={"entries_exported": exported, "manifest_shards": manifest_shards,
+               "failure": "left_out" if result.skipped else "", "reason": str(result.skipped)},
     )
 
 
@@ -297,7 +360,7 @@ def run_history_commit() -> JobResult:
 
 
 def run_nightly_snapshot(
-    *, daily: int = 0, weekly: int = 0, monthly: int = 0
+    *, daily: int | None = None, weekly: int | None = None, monthly: int | None = None
 ) -> JobResult:
     """Nightly: a full tar snapshot, then tiered retention.
 
@@ -319,6 +382,7 @@ def run_nightly_snapshot(
             from gideon.workspace.snapshot import _default_snapshot_dir, snapshot_main
 
             out_dir = _default_snapshot_dir()
+            before = {s.name for s in retention.list_snapshots(Path(out_dir))}
             code = snapshot_main(
                 parsed=argparse.Namespace(
                     output_dir=out_dir, keep=10_000, list_snapshots=False
@@ -330,8 +394,9 @@ def run_nightly_snapshot(
             return JobResult(
                 "nightly_snapshot",
                 ok=False,
-                detail=str(exc),
+                detail=_quoted(str(exc)),
                 duration_secs=time.monotonic() - started,
+                extra={"failure": "disk_full" if getattr(exc, "errno", None) == 28 else "unwritable" if getattr(exc, "errno", None) in (1,13) else "error", "reason": _quoted(str(exc)), "folder": str(locals().get("out_dir", ""))},
             )
         if code != 0:
             _audit("durability_snapshot", f"exit={code}", outcome="denied")
@@ -344,17 +409,25 @@ def run_nightly_snapshot(
         cfg = _cfg()
         plan = retention.apply_retention(
             Path(out_dir),
-            daily=daily or cfg.keep_daily or retention.DEFAULT_DAILY,
-            weekly=weekly or cfg.keep_weekly or retention.DEFAULT_WEEKLY,
-            monthly=monthly or cfg.keep_monthly or retention.DEFAULT_MONTHLY,
+            verified=last_verified()["archive"],
+            daily=cfg.keep_daily if daily is None else daily,
+            weekly=cfg.keep_weekly if weekly is None else weekly,
+            monthly=cfg.keep_monthly if monthly is None else monthly,
         )
+    plan["taken"] = next((s.name for s in retention.list_snapshots(Path(out_dir)) if s.name not in before), "")
+    detail = f"Created {plan['taken'] or 'a snapshot'}. Kept {len(plan['kept'])}; removed {len(plan['pruned'])}."
+    if plan["held"]:
+        detail += f" Kept {plan['held']} as well: {retention.HELD}."
+    for name, reason in plan["reasons"].items():
+        detail += f" Removed {name}: {reason}."
     _audit(
         "durability_snapshot",
-        f"kept={len(plan['kept'])} pruned={len(plan['pruned'])}",
+        detail,
+        metadata={key: plan[key] for key in ("taken", "held", "reasons", "bytes_freed", "tiers")},
     )
     return JobResult(
         "nightly_snapshot",
-        detail=f"kept {len(plan['kept'])}, pruned {len(plan['pruned'])}",
+        detail=detail,
         duration_secs=time.monotonic() - started,
         extra=plan,
     )
@@ -406,7 +479,9 @@ def run_restore_drill(*, notifier=None) -> JobResult:
             if not files:
                 problems.append("archive extracted to nothing")
 
-            for db_path in scratch.rglob("*.db"):
+            from gideon.operations.durability.sqlite_files import databases_in
+
+            for db_path in databases_in(scratch):
                 checked_dbs += 1
                 try:
                     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -430,7 +505,6 @@ def run_restore_drill(*, notifier=None) -> JobResult:
         else f"{newest.name}: " + "; ".join(problems[:4])
     )
     _audit("durability_drill", detail, outcome="allowed" if ok else "denied")
-    _notify_drill(ok, detail, notifier)
     return JobResult(
         "restore_drill",
         ok=ok,
@@ -485,10 +559,6 @@ def run_sync_job() -> JobResult:
                 self_id=machine_id(home),
                 encrypt=str(getattr(cfg, "sync_encrypt", "auto") or "auto"),
             )
-            if report.ok:
-                _prune_tombstones(
-                    home, float(getattr(cfg, "sync_stale_after_secs", 900) or 900)
-                )
             if report.conflicts:
                 _draft_conflict_proposals(home)
         except Exception as exc:  # noqa: BLE001 — a failed sync must not kill the loop
@@ -497,8 +567,9 @@ def run_sync_job() -> JobResult:
             return JobResult(
                 "sync",
                 ok=False,
-                detail=str(exc),
+                detail=_quoted(str(exc)),
                 duration_secs=time.monotonic() - started,
+                extra={"failure": "disk_full" if getattr(exc, "errno", None) == 28 else "unwritable" if getattr(exc, "errno", None) in (1,13) else "error", "reason": _quoted(str(exc)), "folder": str(locals().get("out_dir", ""))},
             )
     outcome = "allowed" if report.ok else "denied"
     _audit("durability_sync", report.detail, outcome=outcome)
@@ -511,8 +582,330 @@ def run_sync_job() -> JobResult:
             "rows_added": report.rows_added,
             "rows_removed": report.rows_removed,
             "seq_published": report.seq_published,
+            "failure": report.failure or "error",
+            "reason": report.error,
+            "removal_failed": report.removal_failed,
+            "unchanged_since": report.unchanged_since,
+            "copies_removed": report.copies_removed,
         },
     )
+
+
+def _outcome_fields(job: str, result: JobResult, *, at: float, previous: dict) -> dict:
+    """What one run of *job* did: when, whether it worked, and, when it did not, the failure's code,
+    the system's or the transport's own words, the folder it was writing to, and how long the
+    streak has lasted (read against *previous*). Written only by a run that happened."""
+    fields: dict = {f"last_{job}_run": at, f"last_{job}_ok": bool(result.ok)}
+    if result.ok:
+        fields.update(
+            {
+                f"last_{job}_success": at,
+                f"{job}_failure": "",
+                f"{job}_failure_reason": "",
+                f"{job}_failure_folder": "",
+                f"{job}_failing_since": 0.0,
+                f"{job}_failures": 0,
+            }
+        )
+        return fields
+    extra = result.extra or {}
+    streak = previous.get(f"last_{job}_ok") is False
+    fields.update(
+        {
+            # The code and the system's own words, not a finished sentence: `PROBLEMS` stays the
+            # one source of the wording, including for a record written before it changed.
+            f"{job}_failure": str(extra.get("failure", "") or "error"),
+            f"{job}_failure_reason": _quoted(str(extra.get("reason", "") or result.detail)),
+            f"{job}_failure_folder": _quoted(str(extra.get("folder", "") or "")),
+            f"{job}_failing_since": (
+                float(previous.get(f"{job}_failing_since", 0) or 0) if streak else at
+            ),
+            f"{job}_failures": (int(previous.get(f"{job}_failures", 0) or 0) if streak else 0) + 1,
+        }
+    )
+    return fields
+
+
+BACKUPS_URL = "#/settings/durability"
+
+
+PROBLEMS: dict[str, dict[str, tuple[str, str]]] = {
+    "sync": {
+        "passphrase": (
+            "Nothing was synced: shards are encrypted for this transport, and no sync passphrase "
+            "was saved on this machine.",
+            "Save a sync passphrase under Settings → Backups → Sync, and use the same one on every "
+            "machine that syncs with this one.",
+        ),
+        "salt": (
+            "Nothing was synced: the shared store's encryption salt could not be read or written.",
+            "Check that this machine can write to the transport's storage; the next sync tries "
+            "again.",
+        ),
+        "pull": (
+            "Nothing was synced: reading the shared store failed ({reason}).",
+            "Check the transport's settings under Settings → Providers and that its storage is "
+            "reachable; the next sync tries again.",
+        ),
+        "push": (
+            "This machine's changes were not sent: writing to the shared store failed ({reason}).",
+            "Check the transport's settings under Settings → Providers and that its storage is "
+            "writable; the next sync tries again.",
+        ),
+        "refused": (
+            "The sync ran, and {reason}.",
+            "Nothing was written for those paths. Check what the other machine is sending.",
+        ),
+        "error": (
+            "The sync stopped with an error ({reason}).",
+            "The gateway log has the details; the next sync tries again.",
+        ),
+    },
+    "export": {
+        "unwritable": (
+            "The export was not written: Gideon may not write to {folder} ({reason}).",
+            "Make that folder writable for the account Gideon runs as.",
+        ),
+        "disk_full": (
+            "The export was not written: the disk that holds {folder} is full.",
+            "Free some space on that disk.",
+        ),
+        "left_out": (
+            "The export ran, but {reason}.",
+            "Mend or remove those files and the next export is whole; a snapshot holds them as "
+            "they are.",
+        ),
+        "error": (
+            "The export stopped with an error ({reason}).",
+            "The gateway log has the details.",
+        ),
+    },
+    "snapshot": {
+        "unwritable": (
+            "The snapshot was not taken: Gideon may not write to {folder} ({reason}).",
+            "Make that folder writable for the account Gideon runs as, or choose another "
+            "with gideon config set snapshot_dir <folder>.",
+        ),
+        "disk_full": (
+            "The snapshot was not taken: the disk that holds {folder} is full.",
+            "Free some space on that disk.",
+        ),
+        "error": (
+            "The snapshot was not taken: it stopped with an error ({reason}).",
+            "The gateway log has the details.",
+        ),
+    },
+}
+
+
+_REASON_CHARS = 240
+
+
+def job_problem(job: str, code: str, reason: str = "", folder: str = "") -> tuple[str, str]:
+    """The sentence and the remedy for one way *job* failed (:data:`PROBLEMS`).
+
+    The one place a system's or a transport's error enters words a person reads, so it is masked
+    here: an error that quotes a storage address can carry the login in it, and the Backups page,
+    the Doctor and the note must not show it.
+    """
+    table = PROBLEMS[job]
+    sentence, remedy = table.get(code, table["error"])
+    return (
+        sentence.format(
+            reason=_quoted(reason) or "no reason given", folder=_quoted(folder) or "its folder"
+        ),
+        remedy,
+    )
+
+
+def _quoted(text: str) -> str:
+    """*text* masked, on one line, and capped at :data:`_REASON_CHARS`."""
+    from gideon.security.security import redact_for_display, redact_url_userinfo
+
+    masked, _ = redact_url_userinfo(str(text or ""))
+    words = " ".join(redact_for_display(masked).split())
+    return words if len(words) <= _REASON_CHARS else words[: _REASON_CHARS - 1] + "…"
+
+
+def _snapshots_now() -> dict:
+    """The snapshot folder, and the newest snapshot in it: what a restore can bring back now.
+
+    Read from the folder, not from the last run's record: a snapshot taken from the command line
+    is one too, and a snapshot removed by hand is not.
+    """
+    from gideon.operations.durability import retention
+    from gideon.workspace.snapshot import _default_snapshot_dir
+
+    folder = _default_snapshot_dir()
+    snapshots = retention.list_snapshots(Path(folder))
+    newest = (
+        {"name": snapshots[0].name, "taken_at": snapshots[0].taken_at.timestamp()}
+        if snapshots
+        else None
+    )
+    return {"folder": folder, "newest": newest}
+
+
+def restorable(snapshot: dict) -> str:
+    """What a restore can still bring back, from a status's ``snapshot`` entry (or
+    :func:`_snapshots_now`): in the words the failure note, the Doctor and the CLI use."""
+    newest = snapshot.get("newest") or {}
+    if newest.get("name"):
+        return f"The newest snapshot a restore can bring back is {newest['name']}."
+    folder = snapshot.get("folder") or "the snapshot folder"
+    return f"There is no snapshot in {folder} to restore from."
+
+
+@dataclass(frozen=True)
+class _Notes:
+    """The notes one job raises: the title of a failed run's, and the title and body of a run that
+    worked. ``every_run`` says each verdict is news, not only a failure that starts and one that
+    ends."""
+
+    failed: str
+    working: str
+    #: The body of a note about a run that worked; ``""`` takes the run's own report.
+    working_body: str = ""
+    every_run: bool = False
+
+
+NOTES: dict[str, _Notes] = {
+    "export": _Notes("Export failed", "Export is working again", "The last export went through."),
+    "snapshot": _Notes("Snapshot failed", "Snapshots are working again"),
+    "drill": _Notes("Backup restore drill FAILED", "Backup restore drill passed", every_run=True),
+    "sync": _Notes("Sync failed", "Sync is working again", "The last sync went through."),
+}
+
+
+def _note(job: str, previous: dict, fields: dict) -> tuple[str, str, str] | None:
+    """The note one finished run of *job* raises, as ``(kind, title, body)``, or ``None``.
+
+    A failure is a ``warning``: a backup that is not being taken is what a minimum-severity or
+    quiet-hours filter must not hide. A run that fails the way the last one did says nothing new,
+    so it raises nothing — the Backups page and the Doctor keep saying it for as long as it lasts —
+    while a NEW reason is news, and so is the first run that works again. Every drill verdict is
+    news: the drill runs once a month, and it is the proof a snapshot restores.
+    """
+    notes = NOTES.get(job)
+    ok_key = f"last_{job}_ok"
+    if notes is None or ok_key not in fields:
+        return None
+    was_failing = previous.get(ok_key) is False
+    if fields[ok_key] is False:
+        code = fields.get(f"{job}_failure", "")
+        if not notes.every_run and was_failing and previous.get(f"{job}_failure") == code and previous.get(f"{job}_failure_reason") == fields.get(f"{job}_failure_reason"):
+            return None
+        return "warning", notes.failed, _failure_body(job, fields)
+    if notes.every_run or was_failing:
+        report = str(fields.get(f"last_{job}_detail", "") or "")
+        return "info", notes.working, notes.working_body or report
+    return None
+
+
+def _failure_body(job: str, fields: dict) -> str:
+    """What a failure note says: the sentence and the remedy, and for a snapshot what a restore can
+    still bring back. The drill says its own report."""
+    if job == "drill":
+        return str(fields.get("last_drill_detail", "") or "")
+    sentence, remedy = job_problem(
+        job,
+        fields[f"{job}_failure"],
+        fields[f"{job}_failure_reason"],
+        fields[f"{job}_failure_folder"],
+    )
+    body = f"{sentence} {remedy}"
+    return f"{body} {restorable(_snapshots_now())}" if job == "snapshot" else body
+
+
+def _notify(job: str, previous: dict, fields: dict, notifier=None) -> None:
+    """Deliver :func:`_note`'s note for one run, through the dashboard's notification gate.
+
+    Delivery goes through `DashboardState.notify`, so the entity-settings gate stays the one gate;
+    with no dashboard bound (CLI use) the run is still recorded and audited — it just has nobody to
+    tell. Every note links to the Backups page.
+    """
+    if notifier is None:
+        return
+    try:
+        note = _note(job, previous, fields)
+        if note is not None:
+            kind, title, body = note
+            notifier(kind, title, body, meta={"statusUrl": BACKUPS_URL})
+    except Exception:  # noqa: BLE001
+        logger.debug("durability: %s notification skipped", job, exc_info=True)
+
+
+def _schedule(state: dict, key: str, interval: float, now: float) -> dict:
+    """When the schedule stamp *key* was last written, and whether the job is due again."""
+    last = float(state.get(key, 0) or 0)
+    return {
+        "last_run": last,
+        "due_in_secs": max(0.0, interval - (now - last)) if last else 0.0,
+        "due": _due(state, key, interval, now=now),
+    }
+
+
+def backup_status(state: dict | None = None, *, now: float | None = None) -> dict:
+    """Whether automatic backups are on, and the export's and the snapshot's last runs.
+
+    The half of :func:`status` the Doctor's backups check reads, and nothing of sync's: it asks no
+    transport and no credential store. For each job `due` runs on the schedule stamp and
+    `last_run` is the last run that HAPPENED, so a failed snapshot is never read as the success
+    before it, and a skip (another run held the lock) never reads as a run.
+    """
+    state = load_state() if state is None else state
+    now = time.time() if now is None else now
+    return {
+        "enabled": enabled(),
+        "export": {
+            **_schedule(state, "last_export", HOURLY_SECS, now),
+            **_outcome(state, "export"),
+        },
+        "snapshot": {
+            **_schedule(state, "last_snapshot", NIGHTLY_SECS, now),
+            **_outcome(state, "snapshot"),
+            # What the last snapshot that worked removed and kept: a nightly pass has no Run now
+            # answer, so this line is the only place a person sees what it deleted.
+            "detail": str(state.get("last_snapshot_detail", "") or ""),
+            # The snapshot folder and the newest snapshot in it, which a restore can bring back
+            # whatever the last run did.
+            **_snapshots_now(),
+        },
+    }
+
+
+def _outcome(state: dict, job: str) -> dict:
+    """What the last run of *job* did, from :func:`_outcome_fields`' record.
+
+    ``ok`` is ``None`` until a run has happened: "never ran" is neither a pass nor a failure.
+    ``problem`` carries the plain sentence and its remedy (:data:`PROBLEMS`) and how long it has
+    lasted, so a job that keeps failing reads as one that keeps failing; ``last_success`` is the
+    last run that worked, which stays beside a failure.
+    """
+    ran = float(state.get(f"last_{job}_run", 0) or 0)
+    failed = bool(ran) and state.get(f"last_{job}_ok") is False
+    problem = None
+    if failed:
+        code = str(state.get(f"{job}_failure", "") or "error")
+        message, remedy = job_problem(
+            job,
+            code,
+            str(state.get(f"{job}_failure_reason", "") or ""),
+            str(state.get(f"{job}_failure_folder", "") or ""),
+        )
+        problem = {
+            "code": code,
+            "message": message,
+            "remedy": remedy,
+            "since": float(state.get(f"{job}_failing_since", 0) or ran),
+            "failures": int(state.get(f"{job}_failures", 0) or 1),
+        }
+    return {
+        "last_run": ran,
+        "ok": (not failed) if ran else None,
+        "last_success": float(state.get(f"last_{job}_success", 0) or 0),
+        "problem": problem,
+    }
 
 
 def _draft_conflict_proposals(home: Path) -> None:
@@ -540,46 +933,6 @@ def _draft_conflict_proposals(home: Path) -> None:
         logger.warning("durability: conflict merge pass failed", exc_info=True)
 
 
-def _prune_tombstones(home: Path, stale_after_secs: float) -> None:
-    """GC each tombstone-bearing entry's sync-only delete side-log (DAS-6c-iii).
-
-    Horizon = now − stale_after_secs × a safety factor, so a marker is only dropped well
-    after every peer that syncs within the window has had a chance to observe the delete.
-    Best-effort — a prune failure never affects the sync outcome."""
-    try:
-        from datetime import datetime, timedelta, timezone
-
-        from gideon.operations.durability import inventory as inv
-        from gideon.operations.durability.tombstones import prune
-
-        horizon = datetime.now(timezone.utc) - timedelta(seconds=stale_after_secs * 4)
-        keep_after = horizon.isoformat()
-        for entry in inv.all_entries():
-            if entry.tombstones and entry.kind == inv.KIND_JSON_ENTITY_DIR:
-                prune(home / entry.path, keep_after=keep_after)
-    except Exception:  # noqa: BLE001
-        logger.debug("durability: tombstone prune skipped", exc_info=True)
-
-
-def _notify_drill(ok: bool, detail: str, notifier=None) -> None:
-    """Surface a drill outcome through the dashboard's notification gate.
-
-    A FAILED drill is a `warning`, not `info`: it means the backups are not
-    known-good, which is exactly what a minimum-severity or quiet-hours filter must
-    not hide. Delivery goes through `ConsoleState.notify` so the entity-settings
-    gate stays the one gate; with no dashboard bound (CLI use) the drill still runs
-    and still audits — it just has nobody to tell.
-    """
-    if notifier is None:
-        return
-    try:
-        notifier(
-            "info" if ok else "warning",
-            "Backup restore drill passed" if ok else "Backup restore drill FAILED",
-            detail,
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("durability: drill notification skipped", exc_info=True)
 
 
 def _tick_graph_maintenance() -> None:
@@ -721,7 +1074,7 @@ def run_due_jobs(
     if force == "export" or _due(state, "last_export", HOURLY_SECS, now=stamp):
         result = run_incremental_export()
         results.append(result)
-        state.update(job_stamp_fields(result, at=stamp))
+        record_job(result, state, at=stamp, notifier=notifier)
 
     if force == "history" or _due(state, "last_history", HOURLY_SECS, now=stamp):
         result = run_history_commit()
@@ -732,15 +1085,15 @@ def run_due_jobs(
     if force == "snapshot" or _due(state, "last_snapshot", NIGHTLY_SECS, now=stamp):
         result = run_nightly_snapshot()
         results.append(result)
-        state.update(job_stamp_fields(result, at=stamp))
+        record_job(result, state, at=stamp, notifier=notifier)
 
     drills_on = _cfg().restore_drills
     if force == "drill" or (
         drills_on and _due(state, "last_drill", DRILL_SECS, now=stamp)
     ):
-        result = run_restore_drill(notifier=notifier)
+        result = run_restore_drill()
         results.append(result)
-        state.update(job_stamp_fields(result, at=stamp))
+        record_job(result, state, at=stamp, notifier=notifier)
 
     cfg = _cfg()
     if getattr(cfg, "sync_enabled", False):
@@ -748,7 +1101,7 @@ def run_due_jobs(
         if force == "sync" or _due(state, "last_sync", stale, now=stamp):
             result = run_sync_job()
             results.append(result)
-            state["last_sync"] = stamp
+            record_job(result, state, at=stamp, notifier=notifier)
 
     if results:
         save_state(state)
@@ -787,14 +1140,23 @@ def status() -> dict:
 
     cfg = _cfg()
     stale = float(getattr(cfg, "sync_stale_after_secs", 900) or 900)
+    from gideon.operations.durability.crypto import PASSPHRASE_CREDENTIAL, passphrase_stored
     return {
         "enabled": enabled(),
-        "export": _entry("last_export", HOURLY_SECS),
-        "snapshot": _entry("last_snapshot", NIGHTLY_SECS),
+        "export": {**_entry("last_export", HOURLY_SECS), **_outcome(state, "export")},
+        "snapshot": {**_entry("last_snapshot", NIGHTLY_SECS), **_outcome(state, "snapshot"),
+                     "detail": str(state.get("last_snapshot_detail", "") or ""), **_snapshots_now()},
         "drill": _entry("last_drill", DRILL_SECS),
         "reclaim": _entry("last_reclaim", NIGHTLY_SECS),
         "sync": {
             **_entry("last_sync", stale),
+            **_outcome(state, "sync"),
+            "skipped": str(state.get("last_sync_skipped", "") or ""),
+            "passphrase_credential": PASSPHRASE_CREDENTIAL,
+            "passphrase_stored": passphrase_stored(),
+            "removal_failed": str(state.get("sync_removal_failed", "") or ""),
+            "removes_old_copies": _transport_removes_old_copies(cfg),
+            "keeps_previous_secs": 900,
             "enabled": bool(getattr(cfg, "sync_enabled", False)),
             "transport": getattr(cfg, "sync_transport", "") or "",
             "encrypt": str(getattr(cfg, "sync_encrypt", "auto") or "auto"),
@@ -947,9 +1309,8 @@ class DurabilityService:
                     pass
             first = False
             try:
-                await asyncio.get_running_loop().run_in_executor(
-                    None, _tick_graph_maintenance
-                )
+                from gideon.cognition.knowledge.file_items import _owned_io
+                await _owned_io(_tick_graph_maintenance)
             except asyncio.CancelledError:
                 raise
             except (
@@ -993,3 +1354,9 @@ class DurabilityService:
                 raise
             except Exception:  # noqa: BLE001
                 logger.warning("durability tick failed", exc_info=True)
+
+
+def _transport_removes_old_copies(cfg):
+    from gideon.integrations.sync_transports.registry import get_transport
+    chosen = get_transport(str(getattr(cfg, "sync_transport", "") or ""))
+    return None if chosen is None else bool(chosen.removes_old_copies)

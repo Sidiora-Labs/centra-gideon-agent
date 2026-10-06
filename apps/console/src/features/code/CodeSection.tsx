@@ -94,7 +94,7 @@ const projectKind = (p: Loop): string => String(p.kind_config?.project_kind ?? '
 const stagePlan = (p: Loop): LoopPhase[] => (p.plan ?? []) as LoopPhase[]
 const stageStatus = (p: Loop): Record<string, string> => (p.phase_status ?? {}) as Record<string, string>
 
-const effectiveStatus = (p: Loop): string => effectiveLoopStatus(p.status, p.stop_reason)
+const effectiveStatus = (p: Loop): string => effectiveLoopStatus(p.status, p.stop_reason, p.held)
 
 const statusPill = (status: string): React.CSSProperties => loopStatusTone(status, 18)
 
@@ -246,7 +246,7 @@ function CodeListPage({ onCreate, onOpen }: { onCreate: () => void; onOpen: (id:
                       <FolderOpen size={11} /> needs workspace
                     </button>
                   )}
-                  {(p.status === 'running' || p.status === 'planning' || p.status === 'intake') && <Loader2 size={12} className="shrink-0 animate-spin text-primary" />}
+                  {!p.held && (p.status === 'running' || p.status === 'planning' || p.status === 'intake') && <Loader2 size={12} className="shrink-0 animate-spin text-primary" />}
                   {(() => { const es = effectiveStatus(p); return (
                     <span data-type="caption" className="shrink-0 rounded-pill px-2 py-0.5" style={statusPill(es)}
                       title={p.error_message || undefined}>{loopStatusLabel(es)}</span>

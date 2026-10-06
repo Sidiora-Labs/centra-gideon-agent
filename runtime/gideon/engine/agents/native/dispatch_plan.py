@@ -102,6 +102,7 @@ _RULE_GROUPS = (
         ),
     ),
     (_ResourceRule(WRITE, KIND_NAMESPACE, default=NS_INBOX), ("post_to_inbox",)),
+    (_ResourceRule(READ, KIND_NAMESPACE, default=NS_INBOX), ("inbox_list",)),
     (
         _ResourceRule(READ, KIND_NAMESPACE, default=NS_TOOL_RESULTS),
         ("tool_result_get",),

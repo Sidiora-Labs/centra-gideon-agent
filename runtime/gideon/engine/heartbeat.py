@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING, Callable, Coroutine, Iterator
 
 from gideon import shutdown_event
 from gideon.cognition.memory import workspace_dir
-from gideon.core.atomic_write import atomic_write
+from gideon.core.atomic_write import atomic_write, atomic_write_bytes
+from gideon.engine.heartbeat_store import queue_lock
 from gideon.security.owner_grants import GrantBook, seal
 from gideon.security.approval_answer import OWNER, Principal
 
@@ -50,28 +51,34 @@ class _TaskLine:
         return f"- {self.text}{address}\n"
 
 
-def _task_lines(content: str) -> Iterator[_TaskLine]:
+def _task_rows(content: str) -> Iterator[tuple[str, _TaskLine | None]]:
+    """Parse queue tasks while retaining every original line and ending."""
     hidden = False
-    for raw in content.splitlines():
+    for raw in content.splitlines(keepends=True):
         line = raw.strip()
+        task = None
         if not line:
-            continue
-        opens = "<!--" in line
-        closes = "-->" in line
-        if opens and not closes:
+            pass
+        elif "<!--" in line and "-->" not in line:
             hidden = True
-            continue
-        if hidden:
-            hidden = not closes
-            continue
-        if line.startswith("#") or (line.startswith("<!--") and line.endswith("-->")):
-            continue
-        address = _DELIVER_RE.search(line)
-        destination = address[1] if address else ""
-        visible = line[: address.start()].rstrip() if address else line
-        text = _LIST_MARKER.sub("", visible, count=1).strip()
-        if text and text != "-":
-            yield _TaskLine(text, destination)
+        elif hidden:
+            hidden = "-->" not in line
+        elif line.startswith("#") or (line.startswith("<!--") and line.endswith("-->")):
+            pass
+        else:
+            address = _DELIVER_RE.search(line)
+            destination = address[1] if address else ""
+            visible = line[: address.start()].rstrip() if address else line
+            text = _LIST_MARKER.sub("", visible, count=1).strip()
+            if text and text != "-":
+                task = _TaskLine(text, destination)
+        yield raw, task
+
+
+def _task_lines(content: str) -> Iterator[_TaskLine]:
+    for _raw, task in _task_rows(content):
+        if task is not None:
+            yield task
 
 
 def _task_content(entry: _TaskLine) -> str:
@@ -161,23 +168,24 @@ def allow_heartbeat_task(
     task_id: str, *, seen: str, principal: str
 ) -> bool:
     """Allow one current task occurrence only if it still matches the reviewed revision."""
-    try:
-        content = heartbeat_path().read_text(encoding="utf-8")
-    except OSError:
-        return False
-    entries = tuple(_task_lines(content))
-    for entry, key in zip(entries, _task_keys(entries)):
-        task_content = _task_content(entry)
-        if key == task_id and seal(task_content) == seen:
-            try:
-                _HEARTBEAT_GRANTS.give(
-                    key, task_content, principal=principal
-                )
-                return True
-            except OSError:
-                logger.warning("heartbeat grant could not be recorded; task remains waiting")
+    with queue_lock(heartbeat_path()):
+        try:
+            content = heartbeat_path().read_text(encoding="utf-8")
+        except OSError:
             return False
-    return False
+        entries = tuple(_task_lines(content))
+        for entry, key in zip(entries, _task_keys(entries)):
+            task_content = _task_content(entry)
+            if key == task_id and seal(task_content) == seen:
+                try:
+                    _HEARTBEAT_GRANTS.give(
+                        key, task_content, principal=principal
+                    )
+                    return True
+                except OSError:
+                    logger.warning("heartbeat grant could not be recorded; task remains waiting")
+                return False
+        return False
 
 
 @dataclass
@@ -187,22 +195,38 @@ class _TaskDocument:
 
     @classmethod
     def open(cls, path: Path) -> "_TaskDocument":
-        content = path.read_text(encoding="utf-8").strip() if path.exists() else ""
+        with queue_lock(path):
+            content = path.read_bytes().decode("utf-8") if path.exists() else ""
         return cls(path, tuple(_task_lines(content)))
 
-    def settle(self, outcomes) -> None:
-        retained = []
-        for entry, outcome in zip(self.entries, outcomes):
-            if isinstance(outcome, BaseException):
-                logger.warning(
-                    "Heartbeat task failed: %s", entry.text[:80], exc_info=outcome
-                )
-            elif _should_keep(outcome):
-                logger.info("Heartbeat task incomplete, keeping: %s", entry.text[:80])
-            else:
-                continue
-            retained.append(entry.markdown())
-        atomic_write(self.path, _HEADER + "".join(retained))
+    def settle(self, completed_keys: set[str]) -> None:
+        """Remove only completed occurrences from the current file, preserving other bytes."""
+        if not completed_keys:
+            return
+        with queue_lock(self.path):
+            try:
+                current = self.path.read_bytes().decode("utf-8")
+            except FileNotFoundError:
+                return
+            except (OSError, UnicodeDecodeError):
+                logger.warning("heartbeat queue unreadable during settlement", exc_info=True)
+                return
+            occurrences: Counter[str] = Counter()
+            kept = []
+            removed = set()
+            for raw, task in _task_rows(current):
+                if task is not None:
+                    content = _task_content(task)
+                    occurrences[content] += 1
+                    key = f"heartbeat:{seal(content)}:{occurrences[content]}"
+                    if key in completed_keys:
+                        removed.add(key)
+                        continue
+                kept.append(raw)
+            if removed:
+                atomic_write_bytes(self.path, "".join(kept).encode("utf-8"))
+        if completed_keys - removed:
+            logger.info("heartbeat completed occurrences edited or removed before settlement: %d", len(completed_keys - removed))
 
 
 @dataclass(frozen=True)
@@ -247,8 +271,9 @@ class HeartbeatService:
 
     async def start(self) -> None:
         location = heartbeat_path()
-        if not location.exists():
-            atomic_write(location, _HEADER)
+        with queue_lock(location):
+            if not location.exists():
+                atomic_write(location, _HEADER)
         self._task = asyncio.create_task(self._loop())
         logger.info("Heartbeat started (interval=%ds)", self._interval)
 
@@ -380,6 +405,7 @@ class HeartbeatService:
                 return_exceptions=True,
             )
             completed = 0
+            completed_keys: set[str] = set()
             for entry, key, outcome in zip(document.entries, keys, outcomes):
                 if (
                     not isinstance(outcome, BaseException)
@@ -389,9 +415,10 @@ class HeartbeatService:
                     try:
                         _HEARTBEAT_GRANTS.revoke(key)
                         completed += 1
+                        completed_keys.add(key)
                     except OSError:
                         logger.warning("completed heartbeat grant could not be cleared")
-            document.settle(outcomes)
+            document.settle(completed_keys)
             return {
                 "processed": processed,
                 "completed": completed,

@@ -15,8 +15,7 @@ Scope note (verified against code 2026-08-24): the three floors this module used
 call "future infrastructure" now EXIST, so they are declared rather than deferred
 (PR2-9). LEARN-R19's staging log is real (``learning.staging.StagingStore``:
 ``flush_records`` + unconsumed-entry backlog), the no-model knowledge-ingest tier is
-real (the raw/LLM-free ingest graph, which lands an item ``partial`` with
-"insights: model unavailable" — the stamp KNOW-R17 describes), and synthesis
+real (the LLM-free ingest graph records which enrichment steps lacked a model), and synthesis
 watchers are real (``mode: append_evidence`` persists evidence with no model while
 ``knowledge.staleness`` counts what the compiled section has not caught up with).
 
@@ -35,6 +34,8 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
+
+from gideon.extensions.providers.use_cases import USE_CASE_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,6 @@ def get_contract(surface: str) -> Optional[DegradedContract]:
 
 _last_available: dict[str, bool] = {}
 _announced_down: dict[str, bool] = {}
-USE_CASE_NAMES = {"chat": "Chat", "background": "Background", "reasoning": "Reasoning", "embedding": "Embedding", "stt": "Speech-to-text"}
 
 
 def reset_transition_state() -> None:
@@ -339,15 +339,23 @@ async def _memory_staging_drain(state: Optional[object] = None) -> int:
     return len(ids)
 
 
+_INSIGHTS_OUTCOME_SQL = "CASE WHEN json_valid(file_metadata) THEN file_metadata ELSE '{}' END"
 _HEURISTIC_ITEMS_SQL = (
-    "SELECT id FROM items WHERE processing_status = 'partial' "
-    "AND COALESCE(processing_error, '') LIKE '%model unavailable%' "
+    "SELECT id FROM items WHERE processing_status NOT IN ('queued', 'processing') "
+    "AND (COALESCE(processing_error, '') LIKE '%model unavailable%' OR "
+    f"(json_extract({_INSIGHTS_OUTCOME_SQL}, '$.node_phases.insights.status') = 'skipped' "
+    f"AND json_type({_INSIGHTS_OUTCOME_SQL}, '$.node_phases.insights.needs') = 'array' "
+    f"AND EXISTS (SELECT 1 FROM json_each({_INSIGHTS_OUTCOME_SQL}, "
+    "'$.node_phases.insights.needs') WHERE value = 'background')) OR "
+    f"(json_extract({_INSIGHTS_OUTCOME_SQL}, '$.node_phases.insights.status') = 'failed' "
+    f"AND lower(COALESCE(json_extract({_INSIGHTS_OUTCOME_SQL}, "
+    "'$.node_phases.insights.reason'), '')) LIKE '%model request failed%')) "
     "AND status = 'active' AND COALESCE(is_archived, 0) = 0"
 )
 
 
 def _knowledge_heuristic_backlog() -> int:
-    """Items the heuristic tier filed: captured, indexed, embedded — un-extracted."""
+    """Recorded model-dependent enrichment waiting for recovery."""
     from gideon.cognition.knowledge import get_knowledge_store
 
     store = get_knowledge_store()
@@ -362,9 +370,8 @@ async def _knowledge_heuristic_drain(state: Optional[object] = None) -> int:
 
     Re-enqueues onto the live ingest queue rather than calling the graph directly: that
     queue owns the LLM pool and the embedder factory, and it serialises against the store's
-    single-threaded connection. Calling ``ingest_item`` from here with no pool would re-run
-    the same LLM-free graph and re-file the item ``partial`` — a drain that provably
-    changes nothing.
+    single-threaded connection. Calling ``ingest_item`` from here with no pool would record the same skipped
+    model steps without enriching the item.
 
     Without a live queue (a Doctor run outside the gateway) this reports 0 and moves
     nothing. Claiming a re-enrichment that has no worker would be worse than saying no.
@@ -508,11 +515,10 @@ def _register_builtin_contracts() -> None:
     register_contract(
         DegradedContract(
             surface="knowledge_ingest",
-            use_cases=("chat",),
-            floor="Documents are still captured, indexed and embedded locally without a model "
-            "through the LLM-free ingest graph; entity and insight extraction is skipped and the "
-            "item is marked partial ('insights: model unavailable') until a model returns, when "
-            "it is re-extracted in place.",
+            use_cases=("background",),
+            floor="Documents remain captured with their available keyword index. "
+            "Enrichment steps waiting for a model keep their recorded reason and are "
+            "queued again when a provider recovers.",
             backlog_probe=_knowledge_heuristic_backlog,
             drain=_knowledge_heuristic_drain,
         )

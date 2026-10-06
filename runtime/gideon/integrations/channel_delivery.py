@@ -18,6 +18,39 @@ ChannelTaskStatus = Literal[
 ]
 
 
+@dataclass(frozen=True)
+class ApprovalAnswer:
+    """One answer offered by an owner approval prompt."""
+    key: str
+    label: str
+    ends: str
+    word: str
+    promise: str = ""
+
+    def as_dict(self) -> dict[str, str]:
+        return {field: getattr(self, field) for field in self.__dataclass_fields__}
+
+
+ALLOW_ONCE = ApprovalAnswer("approved", "Allow once", "approved", "APPROVE")
+ALLOW_FOR_THIS_CHAT = ApprovalAnswer(
+    "trust", "Allow for this chat", "approved", "TRUST",
+    "Every tool in this chat runs without asking, until you change it back.",
+)
+DENY = ApprovalAnswer("rejected", "Deny", "rejected", "DENY")
+ONE_CALL_ANSWERS = (ALLOW_ONCE, DENY)
+APPROVAL_ANSWERS = (ALLOW_ONCE, ALLOW_FOR_THIS_CHAT, DENY)
+
+
+def offered_answers(value: object) -> tuple[ApprovalAnswer, ...] | None:
+    """Validate the exact vocabulary and order of a stamped offer."""
+    if not isinstance(value, list):
+        return None
+    for answers in (ONE_CALL_ANSWERS, APPROVAL_ANSWERS):
+        if value == [answer.as_dict() for answer in answers]:
+            return answers
+    return None
+
+
 @runtime_checkable
 class ChannelDelivery(Protocol):
     """Outbound delivery a channel provides to the gateway. All text is PLAIN

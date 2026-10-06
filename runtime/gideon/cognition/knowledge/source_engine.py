@@ -27,9 +27,46 @@ here would bypass host classification, private-IP denial and the redirect-hop re
 from __future__ import annotations
 
 import logging
+import json
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
+
+_SIGHTING_SEAL = object()
+
+
+@dataclass(frozen=True)
+class _ApprovedSighting:
+    payload: str
+    _seal: object = field(default=None, init=False, repr=False)
+
+
+def _snapshot_sighting(item) -> str:
+    fields = ('guid', 'title', 'content', 'url', 'published_at', 'metadata', 'also_seen_in', 'change')
+    return json.dumps({name: getattr(item, name) for name in fields}, ensure_ascii=False)
+
+
+async def _approve_sighting(payload: str) -> _ApprovedSighting:
+    from gideon.workspace.uploads.content_intake import approve_text
+    data = json.loads(payload)
+    # Decode strings before scanning: JSON escaping must not hide a script's
+    # line boundaries or an invisible character in a nested metadata value.
+    def strings(value):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                yield str(key)
+                yield from strings(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from strings(child)
+    await approve_text('\n'.join(strings(data)), surface='watched_source')
+    approved = _ApprovedSighting(payload)
+    object.__setattr__(approved, '_seal', _SIGHTING_SEAL)
+    return approved
+
 
 POLL_CEILING_SECS = 30.0
 
@@ -335,18 +372,41 @@ class SourceEngine:
             return 0
         max_items = int(cfg.max_items_per_poll)
         new_count = 0
+        refused_codes = []
+        retry = False
+        from gideon.workspace.uploads.content_intake import IntakeRefused
         for item in result.items[:max_items]:
+            payload = None
             try:
-                new_count += self._persist(source, item)
-            except Exception:  # noqa: BLE001 — one bad item must not abandon the rest
-                logger.warning(
-                    "source %s item %r persist failed", sid, item.guid, exc_info=True
-                )
+                prior_refusal = getattr(item, '_intake_refusal', None)
+                if isinstance(prior_refusal, IntakeRefused):
+                    raise prior_refusal
+                payload = _snapshot_sighting(item)
+                approved = await _approve_sighting(payload)
+                new_count += self._persist(source, approved)
+            except IntakeRefused as exc:
+                refused_codes.append(exc.code)
+                if exc.status == 503 or exc.status == 409:
+                    retry = True
+                else:
+                    try:
+                        self._record_refusal(source, json.loads(payload) if payload is not None else
+                                             {'guid': item.guid, 'change': item.change}, exc.code)
+                    except Exception:
+                        retry = True
+                        refused_codes.append('source_receipt_unavailable')
+                        logger.warning('source %s refusal receipt could not be stored', sid, exc_info=True)
+            except Exception:
+                retry = True
+                refused_codes.append('source_item_unavailable')
+                logger.warning('source %s sighting could not be admitted', sid, exc_info=True)
+        health = HEALTH_DEGRADED if refused_codes else (getattr(result, 'health_status', '') or HEALTH_OK)
         self._store.record_poll(
             sid,
-            cursor=result.cursor or cursor,
+            cursor=cursor if retry else (result.cursor or cursor),
             new_count=new_count,
-            health_status=HEALTH_OK,
+            health_status=health,
+            error_summary=', '.join(sorted(set(refused_codes))),
             next_poll_at=next_at,
             escalations=escalations,
         )
@@ -375,6 +435,10 @@ class SourceEngine:
         refused rather than falling through to a create, so a future kind cannot be
         silently mis-persisted as an ingestion.
         """
+        if not isinstance(item, _ApprovedSighting) or item._seal is not _SIGHTING_SEAL:
+            raise PermissionError('Source content has not passed intake.')
+        from gideon.integrations.knowledge_providers.base import SourceItem
+        item = SourceItem(**json.loads(item.payload))
         from gideon.integrations.knowledge_providers.base import (
             CHANGE_CREATED,
             CHANGE_DELETED,
@@ -395,6 +459,19 @@ class SourceEngine:
             )
             return 0
         return self._create_new(source, item)
+
+    def _record_refusal(self, source: dict, sighting: dict, code: str) -> None:
+        """A rejected first sighting has an honest failed receipt and no source text.
+
+        Accepted edits/deletions retain the existing row byte-for-byte.
+        """
+        from gideon.integrations.knowledge_providers.base import CHANGE_DELETED
+        if sighting.get('change') == CHANGE_DELETED or self._store.find_source_item(source['id'], sighting['guid']):
+            return
+        self._store.create_typed_item(item_type=source.get('item_type') or 'bookmark',
+            title='Source content refused', content='', url='', provider=source['provider'],
+            source_id=source['id'], guid=sighting['guid'],
+            extra={'processing_status':'failed', 'file_metadata':{'content_refusal':code}})
 
     @staticmethod
     def _declared_attributions(item: Any) -> list[str]:

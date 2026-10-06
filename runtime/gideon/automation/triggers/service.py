@@ -32,6 +32,7 @@ class DueFire:
             kind=self.trigger.kind,
             scheduled_for=self.scheduled_for,
             reason=self.reason,
+            claim_holder=str(getattr(self.claim, "holder", "") or ""),
         )
 
 
@@ -210,20 +211,14 @@ class TickPass:
         future = next_after_completion(
             trigger, completed_at=self.now, now=self.now, base_dir=self.base_dir
         )
-        if not self.persist:
-            return
         if future > 0:
             trigger.next_fire_at = to_iso(future)
-            self.store.upsert(trigger)
+            if self.persist:
+                self.store.upsert(trigger)
             self.result.rescheduled.append(trigger.id)
             return
-        spec = trigger.spec if isinstance(trigger.spec, dict) else {}
-        if bool(spec.get("delete_after_run", False)):
-            self.store.delete(trigger.id)
-        else:
-            trigger.next_fire_at = ""
-            trigger.enabled = False
-            self.store.upsert(trigger)
+        trigger.next_fire_at = ""
+        trigger.enabled = False
         self.result.retired.append(trigger.id)
 
     async def context_for(self, trigger: Trigger, slot_map: dict[str, str]) -> Any:
@@ -236,22 +231,24 @@ class TickPass:
             holder=f"tick:{int(self.now)}",
         )
 
-    def grant(self, trigger: Trigger, decision: Any, scheduled_for: float) -> None:
+    def grant(self, trigger: Trigger, decision: Any, scheduled_for: float) -> bool:
         from gideon.automation.triggers import claims
 
         if self.persist and decision.claim is not None:
-            claims.write_claim(decision.claim, base_dir=self.base_dir)
+            if not claims.acquire_claim(decision.claim, overlap=trigger.overlap, base_dir=self.base_dir):
+                return False
         trigger.run_count = int(getattr(trigger, "run_count", 0) or 0) + 1
         trigger.last_fired_at = to_iso(self.now)
-        if self.persist and trigger.id not in self.result.retired:
+        if self.persist:
             self.store.upsert(trigger)
         self.result.fires.append(DueFire(trigger, decision.claim, scheduled_for, "due"))
+        return True
 
     async def consider(self, trigger: Trigger, slot_map: dict[str, str]) -> None:
         from gideon.automation.triggers import firepath
         from gideon.automation.triggers.missed import late_outcome
 
-        scheduled_for = to_epoch(trigger.next_fire_at)
+        scheduled_for = _own_time(trigger) or to_epoch(trigger.next_fire_at)
         self.advance(trigger)
         context = await self.context_for(trigger, slot_map)
         decision = await firepath.evaluate(context)
@@ -263,9 +260,12 @@ class TickPass:
         if reason:
             row["reason"] = reason
         self.result.ledger_rows.append(row)
-        if decision.allowed:
-            self.grant(trigger, decision, scheduled_for)
-        elif self.persist:
+        granted = decision.allowed and self.grant(trigger, decision, scheduled_for)
+        if decision.allowed and not granted:
+            row.update(outcome=Outcome.SKIPPED_OVERLAP.value, reason="another run acquired the claim before dispatch")
+        if not granted and self.persist:
+            if trigger.id in self.result.retired:
+                self.store.upsert(trigger)
             await _persist_suppression(row, now=self.now, base_dir=self.base_dir)
 
     async def run(self) -> TickResult:
@@ -301,6 +301,40 @@ async def tick(
     current = routed(store)
     root = getattr(current, "base_dir", None) if base_dir is None else base_dir
     return await TickPass(current, now or time.time(), persist, user_active, root).run()
+
+
+def _own_time(trigger: Any) -> float:
+    spec = getattr(trigger, "spec", None)
+    if not isinstance(spec, dict) or spec.get("kind") != "at":
+        return 0.0
+    return to_epoch(spec.get("at"))
+
+
+def retire_after_run(
+    store: Any, trigger: Any, *, status: str, from_review: bool = False, settled_holder: str = ""
+) -> bool:
+    if status not in {"success", "ran_late", "degraded", "skipped_noop"}:
+        return False
+    row = store.get(str(getattr(trigger, "id", "") or ""))
+    if row is None:
+        return False
+    from gideon.automation.triggers import claims
+
+    if any(claim.holder != settled_holder and not claim.expired(time.time())
+           for claim in claims.read_claims(trigger.id, base_dir=getattr(store, "base_dir", None))):
+        return False
+    current = row.trigger
+    spec = current.spec if isinstance(current.spec, dict) else {}
+    at = _own_time(current)
+    if (
+        not spec.get("delete_after_run", False)
+        or current.enabled
+        or current.next_fire_at
+        or at <= 0
+        or (to_epoch(current.last_fired_at) < at and not from_review)
+    ):
+        return False
+    return bool(store.delete(current.id))
 
 
 def _run_store(base_dir: Any) -> Any:

@@ -237,6 +237,7 @@ class VaultCycle:
             rejected=edits["rejected"],
             conflicts=len(conflicts),
             raw_ingested=swept["ingested"],
+            raw_failed=swept["failed"],
             seeded=seeded["written"],
         )
         self.api.logger.info("memory vault synced: %s", result)
@@ -293,6 +294,11 @@ class VaultEdits:
             current = self.vault._svc.get_semantic(identity) or {}
             version = str(current.get("updated_at") or "")
             stale = bool(version) and version != projected
+        from gideon.workspace.uploads.content_intake import approve_text, IntakeRefused, run_owned_sync
+        try:
+            value = run_owned_sync(lambda: approve_text(value, surface='memory_vault_edit')).text
+        except IntakeRefused as exc:
+            return False, exc.message
         accepted, detail = self.vault._svc.apply_vault_edit(identity, value)
         if accepted and stale:
             self.api.logger.info(
@@ -330,58 +336,56 @@ class VaultCapture:
         self.vault, self.api = vault, contract()
 
     def sweep(self, knowledge, enqueue):
+        from gideon.workspace.uploads.content_intake import run_owned_sync
+        return run_owned_sync(lambda: self._sweep(knowledge, enqueue))
+
+    async def _sweep(self, knowledge, enqueue):
+        from uuid import uuid4
+        from gideon.workspace.uploads.content_intake import approve_path, source_stamp
+        from gideon.cognition.knowledge.file_items import store_approved_file
         result = dict(ingested=0, failed=0)
         raw = self.vault._dir / self.api._RAW_DIR
         if not raw.is_dir():
             return result
-        candidates = [
-            path
-            for path in sorted(raw.iterdir())
-            if path.is_file()
-            and not path.is_symlink()
-            and not path.name.startswith(".")
-        ]
+        candidates = [path for path in sorted(raw.iterdir())
+                      if path.is_file() and not path.is_symlink() and not path.name.startswith('.')]
         if not candidates:
             return result
         if knowledge is None:
             from gideon.cognition.knowledge import get_knowledge_store
-
             knowledge = get_knowledge_store()
         destination = self.vault._dir / self.api._RAW_DONE_DIR
         for path in candidates:
+            snapshot = None
             try:
-                body = ""
-                if path.suffix.lower() in (".md", ".markdown", ".txt", ".text", ""):
-                    body = path.read_text(encoding="utf-8", errors="replace")[
-                        : self.api._MAX_BODY
-                    ]
+                if path.stat().st_size == 0:
+                    continue  # A writer has only created the entry: it is still raw.
+                stamp = source_stamp(path)
+                snapshot = await approve_path(path, surface='memory_vault_raw', expected_stamp=stamp)
+                item, fresh = await store_approved_file(knowledge, snapshot, tags=['vault-raw'])
+                if not item:
+                    raise RuntimeError('The native file item was not stored.')
+                if fresh and callable(enqueue):
+                    enqueue(item['id'])
                 destination.mkdir(parents=True, exist_ok=True)
                 target = destination / path.name
-                path.replace(target)
-                identity = knowledge.create_typed_item(
-                    item_type="note",
-                    title=path.stem or path.name,
-                    content=body,
-                    provider="native",
-                    tags=["vault-raw"],
-                    extra={"file_path": str(target)},
-                )
-                if not identity:
-                    result["failed"] += 1
-                    continue
-                knowledge.update_item(identity, processing_status="queued", touch=False)
-                if callable(enqueue):
-                    enqueue(identity)
-                result["ingested"] += 1
+                while True:
+                    try:
+                        await snapshot.persist(target)
+                        break
+                    except FileExistsError:
+                        target = destination / (path.stem + '-' + uuid4().hex + path.suffix)
+                # The parking copy is approved bytes, not a reopened mutable source.
+                # A newer drop remains raw for the next sweep.
+                if source_stamp(path) == stamp:
+                    path.unlink()
+                result['ingested'] += 1
             except Exception:
-                self.api.logger.debug(
-                    "vault: raw sweep failed for %s", path, exc_info=True
-                )
-                result["failed"] += 1
-        if result["ingested"]:
-            self.api.logger.info(
-                "memory vault raw sweep: %d file(s) → knowledge", result["ingested"]
-            )
+                self.api.logger.debug('vault: raw intake failed', exc_info=True)
+                result['failed'] += 1
+            finally:
+                if snapshot is not None:
+                    snapshot.close()
         return result
 
     def seed(self, seeds):

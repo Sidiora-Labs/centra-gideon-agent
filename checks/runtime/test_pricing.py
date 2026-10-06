@@ -103,6 +103,10 @@ def test_pricing_rows_well_formed():
         if key.startswith("_"):
             continue
         assert isinstance(row, dict), f"{key} row is not an object"
+        if row.get("unit", "token") != "token":
+            from gideon.engine.routing.rates import UnitRate
+            assert UnitRate.from_obj(row, unit=row["unit"]) is not None, key
+            continue
         assert isinstance(row.get("in"), (int, float)), f"{key} missing numeric 'in'"
         assert isinstance(row.get("out"), (int, float)), f"{key} missing numeric 'out'"
 
@@ -119,6 +123,6 @@ def test_pricing_keys_subset_of_token_table():
         for k in json.loads(tokens_file.read_text(encoding="utf-8"))
         if not k.startswith("_")
     }
-    priced = {k for k in pricing._PRICES}
+    priced = {k for k, row in pricing._PRICES.items() if row.get("unit", "token") == "token"}
     orphans = priced - tokens
     assert not orphans, f"priced models absent from model_tokens.json: {orphans}"

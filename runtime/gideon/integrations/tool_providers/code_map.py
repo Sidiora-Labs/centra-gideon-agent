@@ -179,7 +179,9 @@ def _open_index(arguments: dict):
     from gideon.assurance.codegraph import CodeGraphIndex
 
     index = CodeGraphIndex(workspace)
-    refresh = bool(arguments.get("refresh"))
+    from gideon.security.safety_flags import yes_or_no
+
+    refresh = yes_or_no(arguments.get("refresh")) is True
     if refresh or index.is_empty():
         stats = index.index()
         if index.is_empty():

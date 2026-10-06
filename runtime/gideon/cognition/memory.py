@@ -1,8 +1,9 @@
-"""Markdown memory journals with a disposable full-text projection."""
+"""Markdown memory journals with a safely repairable full-text projection."""
 
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -26,6 +27,42 @@ PROJECTS_FILE = "projects.md"
 _DEFAULT_PREFERENCES = "# User Preferences\n\n<!-- Learned from conversations -->\n"
 _DEFAULT_PROJECTS = "# Active Projects\n\n<!-- Current work context -->\n"
 _PROJECT_HEADING = "# Active Projects"
+_INDEX_FAILURES: dict[str, str] = {}
+_INDEX_FAILURES_LOCK = threading.Lock()
+_INDEX_REPAIR_LOCK = threading.Lock()
+_INDEX_SQL = "CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(path, content, tokenize='porter unicode61')"
+
+
+def degraded_keyword_indexes() -> dict[str, str]:
+    with _INDEX_FAILURES_LOCK:
+        return dict(_INDEX_FAILURES)
+
+
+def _index_failure_reason(error: BaseException) -> str:
+    name = str(getattr(error, "sqlite_errorname", "") or "")
+    reasons = {
+        "SQLITE_BUSY": "another connection holds the database locked",
+        "SQLITE_LOCKED": "another connection holds the database locked",
+        "SQLITE_READONLY": "the database is read-only",
+        "SQLITE_FULL": "the disk is full",
+        "SQLITE_CANTOPEN": "the database could not be opened",
+        "SQLITE_IOERR": "the disk could not read or write the database",
+        "SQLITE_PERM": "permission to the database was denied",
+        "SQLITE_CORRUPT": "SQLite reported damaged database or index pages",
+        "SQLITE_NOTADB": "the file is not a readable SQLite database",
+    }
+    for code, reason in reasons.items():
+        if name == code or name.startswith(code + "_"):
+            return reason
+    text = str(error)
+    if "no such module: fts5" in text:
+        return FTS5_REMEDY
+    if "locked" in text:
+        return reasons["SQLITE_BUSY"]
+    if "readonly" in text:
+        return reasons["SQLITE_READONLY"]
+    return "the keyword search projection could not be used"
+
 
 
 def config_dir() -> Path:
@@ -263,29 +300,95 @@ class MemoryJournal:
             rendered.append(f"## {title}\n_[source: {source}]_\n{clipped}")
         return rendered
 
+    def _record_index_failure(self, error: BaseException) -> None:
+        reason = _index_failure_reason(error)
+        with _INDEX_FAILURES_LOCK:
+            _INDEX_FAILURES[str(self._index_db.resolve())] = reason
+        logger.warning("Memory keyword search degraded: %s", reason)
+
+    def search_degraded(self) -> str:
+        if not self._fts_available:
+            return FTS5_REMEDY
+        with _INDEX_FAILURES_LOCK:
+            return _INDEX_FAILURES.get(str(self._index_db.resolve()), "")
+
+    def keyword_index_status(self) -> dict:
+        reason = self.search_degraded()
+        if not reason:
+            try:
+                with self._database() as database:
+                    database.execute("SELECT COUNT(*) FROM memory_fts").fetchone()
+            except (sqlite3.Error, OSError) as error:
+                self._record_index_failure(error)
+                reason = self.search_degraded()
+        if not reason:
+            try:
+                missing = self.fts_desync_count()
+                reason = self.search_degraded()
+                if missing and not reason:
+                    reason = f"Keyword search differs from {missing} current memory file(s). Rebuild its index to restore coverage."
+            except OSError as error:
+                self._record_index_failure(error)
+                reason = self.search_degraded()
+        return {
+            "state": "degraded" if reason else "available",
+            "detail": reason or "Keyword search can read its index over the memory files.",
+            "repair_id": "memory.rebuild-fts" if reason and self._fts_available else None,
+        }
+
+    def _check_database_header(self) -> None:
+        # Opening malformed bytes can make SQLite discard WAL/SHM itself.
+        # Inspect without connecting so all original recovery material survives.
+        if not self._index_db.exists():
+            return
+        with self._index_db.open("rb") as source:
+            header = source.read(16)
+        sidecars = any(Path(str(self._index_db) + suffix).exists() for suffix in ("-wal", "-shm"))
+        if header != b"SQLite format 3\x00" and (header or sidecars):
+            raise sqlite3.DatabaseError("file is not a database")
+
     def _try_create_db(self) -> sqlite3.Connection:
-        database = sqlite3.connect(str(self._index_db))
+        self._check_database_header()
+        database = sqlite3.connect(str(self._index_db), timeout=2.0)
         try:
-            database.execute(
-                "CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING "
-                "fts5(path, content, tokenize='porter unicode61')"
-            )
+            database.execute(_INDEX_SQL)
         except Exception:
             database.close()
             raise
         return database
 
     def _get_db(self) -> sqlite3.Connection:
-        for attempt in range(2):
+        try:
+            return self._try_create_db()
+        except (sqlite3.Error, OSError) as error:
+            self._record_index_failure(error)
+            raise
+
+    def _repair_index(self, files: list[tuple[str, str]]) -> None:
+        with _INDEX_REPAIR_LOCK:
+            self._check_database_header()
+            database = sqlite3.connect(str(self._index_db), timeout=2.0)
             try:
-                return self._try_create_db()
-            except Exception as error:
-                if attempt:
-                    raise
-                logger.warning("Recreating unreadable memory search index: %s", error)
-                for ending in ("", "-wal", "-shm"):
-                    Path(f"{self._index_db}{ending}").unlink(missing_ok=True)
-        raise AssertionError("unreachable")
+                tables = database.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND sql NOT LIKE 'CREATE VIRTUAL TABLE%'"
+                ).fetchall()
+                for (table,) in tables:
+                    if table == "memory_fts" or table.startswith("memory_fts_"):
+                        continue
+                    quoted = '"' + table.replace('"', '""') + '"'
+                    checks = database.execute(f"PRAGMA quick_check({quoted})").fetchall()
+                    if any(str(row[0]) != "ok" for row in checks):
+                        raise sqlite3.DatabaseError("Non-index database pages failed integrity checks")
+                with database:
+                    database.execute("BEGIN IMMEDIATE")
+                    database.execute("DROP TABLE IF EXISTS memory_fts")
+                    database.execute(_INDEX_SQL)
+                    database.executemany(
+                        "INSERT INTO memory_fts (path, content) VALUES (?, ?)", files
+                    )
+            finally:
+                database.close()
 
     @contextmanager
     def _database(self) -> Iterator[sqlite3.Connection]:
@@ -307,8 +410,8 @@ class MemoryJournal:
                         "INSERT INTO memory_fts (path, content) VALUES (?, ?)",
                         (str(path), content),
                     )
-        except Exception:
-            logger.debug("Memory search projection update failed", exc_info=True)
+        except (sqlite3.Error, OSError) as error:
+            self._record_index_failure(error)
 
     def _index_file(self, path: Path, content: str) -> None:
         self._replace_index_entry(path, content)
@@ -333,9 +436,9 @@ class MemoryJournal:
                         "SELECT path, content FROM memory_fts"
                     )
                 }
-        except Exception:
-            logger.debug("Could not compare memory search projection", exc_info=True)
-            return 0
+        except (sqlite3.Error, OSError) as error:
+            self._record_index_failure(error)
+            return 1
         missing = object()
         return sum(
             files.get(path, missing) != indexed.get(path, missing)
@@ -345,15 +448,27 @@ class MemoryJournal:
     def rebuild_index(self) -> int:
         if not self._fts_available:
             return 0
-        files = self._indexable_files()
         try:
-            with self._database() as database:
-                database.execute("DELETE FROM memory_fts")
-                database.executemany(
-                    "INSERT INTO memory_fts (path, content) VALUES (?, ?)", files
-                )
-        except Exception:
-            logger.warning("Could not rebuild memory search projection", exc_info=True)
+            files = self._indexable_files()
+            try:
+                with self._database() as database:
+                    database.execute("DELETE FROM memory_fts")
+                    database.executemany(
+                        "INSERT INTO memory_fts (path, content) VALUES (?, ?)", files
+                    )
+            except sqlite3.Error as error:
+                code = str(getattr(error, "sqlite_errorname", "") or "")
+                if any(code.startswith(name) for name in (
+                    "SQLITE_BUSY", "SQLITE_LOCKED", "SQLITE_READONLY", "SQLITE_FULL",
+                    "SQLITE_CANTOPEN", "SQLITE_IOERR", "SQLITE_PERM", "SQLITE_NOTADB",
+                )):
+                    raise
+                self._repair_index(files)
+        except (sqlite3.Error, OSError) as error:
+            self._record_index_failure(error)
+            return 0
+        with _INDEX_FAILURES_LOCK:
+            _INDEX_FAILURES.pop(str(self._index_db.resolve()), None)
         return len(files)
 
     def search(self, query: str, limit: int = 5) -> list[dict]:
@@ -369,6 +484,7 @@ class MemoryJournal:
                 return [
                     dict(zip(("path", "snippet", "rank"), match)) for match in matches
                 ]
-        except Exception:
-            logger.debug("Memory search unavailable", exc_info=True)
+        except (sqlite3.Error, OSError) as error:
+            if "syntax error" not in str(error) and "unterminated string" not in str(error):
+                self._record_index_failure(error)
             return []

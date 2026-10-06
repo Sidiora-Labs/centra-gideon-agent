@@ -174,6 +174,8 @@ class AcpConnectionPool:
         model: str = "",
         agent_name: str = "",
         mcp_servers: list | None = None,
+        session_meta: dict | None = None,
+        compacts_itself: bool = False,
     ) -> ModelProvider | None:
         if self._closed:
             return None
@@ -191,6 +193,7 @@ class AcpConnectionPool:
                 extra_env=extra_env,
                 session_key=session_key,
                 channel_id=channel_id,
+                session_meta=session_meta,
             )
             if connection is None or self._closed:
                 return None
@@ -203,6 +206,7 @@ class AcpConnectionPool:
                 agent_name=agent_name,
                 session_key=session_key,
                 mcp_servers=mcp_servers,
+                compacts_itself=compacts_itself,
             )
         except Exception:
             logger.warning(
@@ -221,6 +225,7 @@ class AcpConnectionPool:
         extra_env,
         session_key,
         channel_id,
+        session_meta,
     ):
         from gideon.integrations.acp.client import CLIENT_NAME, CLIENT_VERSION
         from gideon.integrations.acp.dialect import get_dialect
@@ -249,6 +254,7 @@ class AcpConnectionPool:
                         extra_env=extra_env,
                         session_key=session_key,
                         channel_id=channel_id,
+                session_meta=session_meta,
                     )
                     await candidate.initialize(
                         {

@@ -132,6 +132,7 @@ class _Child:
 
     proc: subprocess.Popen
     generation: int
+    output: ChildOutput | None = None
     replies: queue.Queue = field(default_factory=queue.Queue)
     reader: threading.Thread | None = None
 
@@ -177,6 +178,7 @@ class SidecarRunner:
         self._last_stat: dict[str, Any] = {}
         self._last_reason = ""
         self._log: list[str] = []
+        self._output: ChildOutput | None = None
         self._process_lock = threading.Lock()
         self._install_process: subprocess.Popen[str] | None = None
         self._cancel_requested = threading.Event()
@@ -205,7 +207,17 @@ class SidecarRunner:
     @property
     def log_tail(self) -> list[str]:
         """The last :data:`_LOG_TAIL_MAX` non-frame lines the child wrote."""
-        return list(self._log)
+        return self._output.lines() if self._output is not None else list(self._log)
+
+    def last_exit(self) -> dict | None:
+        child = self._child
+        if child is not None and child.is_alive():
+            return None
+        if child is not None and child.output is not None:
+            code = child.proc.poll()
+            if code is not None:
+                child.output.ended(code)
+        return self._output.report() if self._output is not None else None
 
     def is_alive(self) -> bool:
         return self._child is not None and self._child.is_alive()
@@ -305,7 +317,9 @@ class SidecarRunner:
             raise SidecarCrashed(
                 "spawn_failed", generation=generation, detail=str(exc)
             ) from exc
-        child = _Child(proc=proc, generation=generation)
+        output = ChildOutput(app=self.app, process="engine", pid=proc.pid, env=env)
+        self._output = output
+        child = _Child(proc=proc, generation=generation, output=output)
         child.reader = threading.Thread(
             target=self._read_frames,
             args=(child,),
@@ -313,12 +327,7 @@ class SidecarRunner:
             daemon=True,
         )
         child.reader.start()
-        threading.Thread(
-            target=self._read_logs,
-            args=(child,),
-            name=f"sidecar-{self.app}-g{generation}-log",
-            daemon=True,
-        ).start()
+        relay(proc, output, streams=(STDERR,))
         logger.info(
             "sidecar %s started: pid=%s generation=%s python=%s",
             self.app,
@@ -346,7 +355,8 @@ class SidecarRunner:
             if raw == "":
                 break
             if not raw.endswith("\n"):
-                self._note_log(f"[truncated frame discarded] {raw[:120]}")
+                if child.output is not None:
+                    child.output.line(STDOUT, f"[truncated frame discarded] {raw}")
                 break
             line = raw.strip()
             if not line:
@@ -354,7 +364,8 @@ class SidecarRunner:
             try:
                 frame = json.loads(line)
             except ValueError:
-                self._note_log(line[:200])
+                if child.output is not None:
+                    child.output.line(STDOUT, line)
                 continue
             if not isinstance(frame, dict):
                 continue
@@ -410,6 +421,8 @@ class SidecarRunner:
             return
         proc = child.proc
         if proc.poll() is None:
+            if child.output is not None:
+                child.output.stopping()
             try:
                 proc.terminate()
                 try:
@@ -679,6 +692,9 @@ class SidecarInstall:
         self.reason = ""
         self.remediation = ""
         self._log: list[str] = []
+        self._process_lock = threading.Lock()
+        self._install_process: subprocess.Popen[str] | None = None
+        self._cancel_requested = threading.Event()
 
     @classmethod
     def for_app(cls, app: str) -> "SidecarInstall | None":
@@ -762,9 +778,12 @@ class SidecarInstall:
         except (
             Exception
         ) as exc:  # noqa: BLE001 — a step failure is reported, not raised
+            from gideon.operations._installer import NoInstallerError
+
             step.status = "error"
-            step.detail = str(exc)[:200]
-            self.error = str(exc)[:200]
+            detail = exc.problem if isinstance(exc, NoInstallerError) and exc.problem else str(exc)
+            step.detail = detail[:200]
+            self.error = detail[:200]
             self.reason, self.remediation = _classify_install_failure(exc, step.name)
             logger.warning("sidecar install %s: step %s failed", self.app, step.name)
             return False
@@ -775,7 +794,7 @@ class SidecarInstall:
         if python.is_file():
             return "skipped", "venv already present"
         self.venv.parent.mkdir(parents=True, exist_ok=True)
-        self._run([sys.executable, "-m", "venv", str(self.venv)], timeout=300)
+        self._run([sys.executable, "-m", "venv", "--without-pip", str(self.venv)], timeout=300)
         if not python.is_file():
             raise RuntimeError(f"venv creation produced no interpreter at {python}")
         (self.venv / _MARKER).write_text(
@@ -788,17 +807,13 @@ class SidecarInstall:
             return "skipped", "no sidecar engine packages declared"
         if self._receipt_matches():
             return "skipped", "requirements already installed"
-        python = venv_python(self.venv)
+        from gideon.operations._installer import env_install_argv
+
         self._run(
-            [
-                str(python),
-                "-m",
-                "pip",
-                "install",
-                "--disable-pip-version-check",
-                "--",
-                *self.requirements,
-            ],
+            env_install_argv(
+                venv_python(self.venv),
+                ["--disable-pip-version-check", "--no-input", "--", *self.requirements],
+            ),
             timeout=1800,
         )
         self._receipt_path().write_text(json.dumps(self.requirements) + "\n", "utf-8")
@@ -932,6 +947,10 @@ def _classify_install_failure(exc: Exception, step: str) -> tuple[str, str]:
     the remediation says what the user should DO about it — the one field that turns a
     dead end into a next action.
     """
+    from gideon.operations._installer import NoInstallerError
+
+    if isinstance(exc, NoInstallerError) and exc.fix:
+        return "pip_failed", f"{exc.fix[0].upper()}{exc.fix[1:]}, then re-run the install."
     text = str(exc).lower()
     if isinstance(exc, subprocess.TimeoutExpired) or "timed out" in text:
         return (
@@ -958,3 +977,4 @@ def _classify_install_failure(exc: Exception, step: str) -> tuple[str, str]:
             "Check that python -m venv works, then re-run the install.",
         )
     return "install_failed", "Re-run the install; it resumes from the failed step."
+from gideon.operations.child_output import ChildOutput, STDERR, STDOUT, relay

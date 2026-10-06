@@ -15,6 +15,7 @@ from gideon.core.config import AppConfig
 from gideon.core.config import loader as config_loader
 from gideon.core.config.loader import env_path
 from gideon.core.layout import package_path
+from gideon.core.python_support import python_support, rebuild_command
 from gideon.engine.agent import AGENT_FILENAME, AGENTS_DIR
 from gideon.integrations.transcribe import ensure_ffmpeg_in_path
 from gideon.interfaces.dashboard.origin import (
@@ -203,6 +204,8 @@ def _doctor_credentials() -> list[str]:
         )
     else:
         print(f"  credentials: 🔐 .env {state['env_mode']} — {env_path()}")
+    if state["keychain_namespace"]:
+        print(f"  keychain namespace: {state['keychain_namespace']}")
     warning = state["warning"]
     if not warning:
         return []
@@ -312,7 +315,7 @@ def _doctor_stt_dependency() -> list[str]:
         print("  faster_whisper: ✅ installed (runtime not loaded)")
         return []
     print("  faster_whisper: ❌ missing")
-    print("               Fix: pip install faster-whisper")
+    print('               Fix: pip install "gideon-agent-harness[stt]"')
     return ["faster_whisper missing"]
 
 
@@ -331,7 +334,87 @@ def _doctor_external_vector_store() -> list[str]:
     return [] if result.ok else ["external vector store"]
 
 
+def _doctor_backups() -> None:
+    import asyncio
+    from gideon.operations.resilience.doctor import (
+        DoctorContext,
+        _probe_backups,
+        _probe_sync,
+    )
+
+    print("\nBackups and sync")
+    for name, probe in (("backups", _probe_backups), ("sync", _probe_sync)):
+        try:
+            result = asyncio.run(probe(DoctorContext()))
+            print(f"  {name}: {'✅' if result.ok else '❌'} {result.detail}")
+            if result.remedy:
+                print(f"    {result.remedy}")
+        except Exception as exc:
+            print(f"  {name}: status unreadable ({str(exc)[:120]})")
+
+
+def _interpreter_row(
+    label: str, interpreter: object, version: str, issues: list[str]
+) -> None:
+    support = python_support(version)
+    head = f"  {label + ':':<13}"
+    if support.supported is None:
+        print(f"{head}⏹ {interpreter} ({support.version}; {support.unknown})")
+        return
+    if support.supported:
+        print(
+            f"{head}✅ {interpreter} ({support.version}; supported: {support.requires})"
+        )
+        return
+    print(f"{head}❌ {interpreter} ({support.version}; supported: {support.requires})")
+    fix = rebuild_command(support.requires) or (
+        f"recreate this environment on Python {support.requires}, then reinstall Gideon"
+    )
+    print(f"               Fix: {fix}")
+    issues.append(f"{label} version")
+
+
+def _doctor_pip() -> list[str]:
+    from gideon.operations._installer import missing_pip
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        problem, fix = missing_pip()
+        if importlib.util.find_spec("pip") is not None:
+            problem = f"pip could not run under {sys.executable}"
+        print(f"  pip:         ❌ {problem}")
+        print(f"               Fix: {fix}")
+        return ["pip missing"]
+    print(f"  pip:         ✅ {result.stdout.strip()}")
+    return []
+
+
+def _doctor_core_server() -> list[str]:
+    from gideon.operations.resilience.core_server import (
+        agent_config_path, read_core_server, core_server_detail,
+    )
+
+    reading = read_core_server(agent_config_path())
+    detail = core_server_detail(reading)
+    print("\nMCP Tools")
+    print(f"  @gideon-core: {'❌' if reading.unreadable or reading.needs_setting_up else '—' if not reading.found else '✅'} {detail}")
+    if reading.found and not reading.unreadable:
+        print(f"  offered: {reading.in_tools}; runs without asking: {reading.in_allowed} (owner settings)")
+    if reading.unreadable or reading.needs_setting_up:
+        print("  Repair the server entry explicitly in Settings → Doctor → Tools; tool permissions remain yours.")
+        return [detail]
+    return []
+
+
 def _doctor() -> None:
+    _doctor_backups()
     """Verify Gideon setup — check dependencies, config, credentials, connectivity."""
 
     print("Gideon Doctor\n")
@@ -473,67 +556,12 @@ def _doctor() -> None:
     else:
         print("  remote:      local-only — see docs/guides/REMOTE_ACCESS.md")
 
-    print("\nMCP Tools")
-    if agent_path.exists():
-
-        try:
-            agent_data = json.loads(agent_path.read_text(encoding="utf-8"))
-        except Exception:
-            agent_data = {}
-        tools = agent_data.get("tools", [])
-        allowed = agent_data.get("allowedTools", [])
-        mcps = agent_data.get("mcpServers", {})
-        mcp_fixed = False
-        mcp_cmd_fixed = False
-        for ref in ("@gideon-core",):
-            name = ref[1:]
-            in_tools = ref in tools
-            in_allowed = ref in allowed
-            in_servers = name in mcps
-            if in_tools and in_allowed and in_servers:
-                cmd = mcps[name].get("command", "")
-                exists = Path(cmd).is_file() if cmd else False
-                if exists:
-                    print(f"  {ref}: ✅")
-                else:
-                    resolved = shutil.which("gideon")
-                    if resolved:
-                        mcps[name]["command"] = resolved
-                        mcp_cmd_fixed = True
-                        print(f"  {ref}: 🔧 fixed stale path: {cmd} → {resolved}")
-                    else:
-                        print(f"  {ref}: ❌ binary not found: {cmd}")
-                        issues.append(f"{ref} binary")
-            else:
-                missing: list[str] = []
-                if not in_servers:
-                    missing.append("mcpServers")
-                if not in_tools:
-                    missing.append("tools")
-                if not in_allowed:
-                    missing.append("allowedTools")
-                print(f"  {ref}: ❌ missing from {', '.join(missing)}")
-                issues.append(f"{ref} config")
-                if not in_tools:
-                    tools.append(ref)
-                if not in_allowed:
-                    allowed.append(ref)
-                mcp_fixed = True
-        if mcp_fixed or mcp_cmd_fixed:
-            agent_data["tools"] = tools
-            agent_data["allowedTools"] = allowed
-            agent_path.write_text(
-                json.dumps(agent_data, indent=2) + "\n", encoding="utf-8"
-            )
-            if mcp_fixed:
-                print("  → Auto-fixed tools/allowedTools in gideon.json")
-                issues = [i for i in issues if "config" not in i]
-            if mcp_cmd_fixed:
-                print("  → Auto-fixed stale binary path(s) in gideon.json")
+    issues.extend(_doctor_core_server())
 
     print("\nRuntime")
-    print(f"  python:      ✅ {sys.executable} ({sys.version.split()[0]})")
+    _interpreter_row("python", sys.executable, sys.version.split()[0], issues)
     print(f"  backend:     ✅ {_pc_version}")
+    issues.extend(_doctor_pip())
     if is_venv_install:
         try:
             py_result = subprocess.run(
@@ -541,7 +569,7 @@ def _doctor() -> None:
             )
             py_result.check_returncode()
             ver = py_result.stdout.strip().removeprefix("Python ").strip()
-            print(f"  venv python: ✅ {venv_py} ({ver})")
+            _interpreter_row("venv python", venv_py, ver, issues)
         except Exception as exc:
             print(f"  venv python: ❌ broken: {exc}")
             issues.append("venv python")
@@ -566,7 +594,7 @@ def _doctor() -> None:
                 timeout=5,
             )
             ver = py_result.stdout.strip()
-            print(f"  fallback:    ⚠️  {sys_py} ({ver})")
+            _interpreter_row("fallback", sys_py, ver.removeprefix("Python "), issues)
             try:
                 subprocess.run(
                     [sys_py, "-c", "import websockets, aiohttp"],
@@ -669,8 +697,11 @@ def _doctor() -> None:
 
     if _port:
         try:
+            from gideon.engine.home_gateway import require_home_gateway, open_loopback
+
+            require_home_gateway(_port, timeout=2)
             req = urllib.request.Request(f"http://127.0.0.1:{_port}/api/status")
-            with urllib.request.urlopen(req, timeout=2) as resp:
+            with open_loopback(req, timeout=2) as resp:
                 data = json.loads(resp.read())
             print(f"  gateway:     ✅ running (uptime {data.get('uptime', '?')})")
         except urllib.error.HTTPError as he:
@@ -680,8 +711,8 @@ def _doctor() -> None:
                 print(f"  gateway:     ⚠️  HTTP {he.code}")
         except (urllib.error.URLError, OSError):
             print("  gateway:     ⏹  not running")
-        except Exception:
-            print("  gateway:     ⚠️  running but returned unexpected response")
+        except Exception as error:
+            print(f"  gateway:     ⚠️  home identity could not be verified ({error})")
 
         if is_remote:
             mh = machine_hostname() or "this-host"

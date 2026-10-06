@@ -29,6 +29,7 @@ addition to the contract is evidence: `_observe_ground_truth` is unchanged, and
 
 from __future__ import annotations
 
+from gideon.core.turn_streams import closing_stream
 import json
 import logging
 import re
@@ -421,14 +422,15 @@ async def _stream(judge, prompt: str) -> str:
     if provider is None:
         raise RuntimeError("judge provider not started")
     chunks: list[str] = []
-    async for event in provider.stream(prompt):
-        if event.kind == EVENT_TEXT_CHUNK:
-            chunks.append(event.text)
-        elif event.kind == EVENT_PERMISSION_REQUEST:
-            if event.request_id:
-                await provider.reject_tool(event.request_id)
-        elif event.kind == EVENT_COMPLETE:
-            break
+    async with closing_stream(provider.stream(prompt)) as _turn_events:
+        async for event in _turn_events:
+            if event.kind == EVENT_TEXT_CHUNK:
+                chunks.append(event.text)
+            elif event.kind == EVENT_PERMISSION_REQUEST:
+                if event.request_id:
+                    await provider.reject_tool(event.request_id)
+            elif event.kind == EVENT_COMPLETE:
+                break
     return "".join(chunks)
 
 
@@ -455,8 +457,10 @@ def _parse_verdict(
         return None
     if not isinstance(data, dict):
         return None
-    done = bool(data.get("done") is True)
-    regressed = bool(data.get("regressed") is True)
+    from gideon.security.safety_flags import yes_or_no
+
+    done = yes_or_no(data.get("done")) is True
+    regressed = yes_or_no(data.get("regressed")) is True
     return JudgeVerdict(
         verdict=verdict_for_cycle(done, regressed),
         done_reason=str(data.get("done_reason", "")).strip()[:500],

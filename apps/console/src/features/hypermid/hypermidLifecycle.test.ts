@@ -61,6 +61,8 @@ describe('Hypermid lifecycle review and recovery state', () => {
       binary_digest: 'b'.repeat(64),
       operator_identity: { username: 'gideon', uid: 10001 },
       params: {
+        current_enrollment: { digest: 'c'.repeat(64), operations: ['read'], resources: ['memory-records'], expires_ms: 1_790_960_000_000 },
+        permission_additions: { operations: ['administer'], resources: ['memory-service', 'memory-embedding'] },
         local_enrollment: {
           operations: ['read', 'append'],
           resources: ['memory-records', 'memory-maintenance'],
@@ -79,6 +81,9 @@ describe('Hypermid lifecycle review and recovery state', () => {
       resources: ['memory-records', 'memory-maintenance'],
       expiresMs: 1_790_960_000_000,
       packagedBinaryVerified: true,
+      currentEnrollmentDigest: 'c'.repeat(64),
+      addedOperations: ['administer'],
+      addedResources: ['memory-service', 'memory-embedding'],
     })
     expect(JSON.stringify(evidence)).not.toContain('must-not-render')
   })

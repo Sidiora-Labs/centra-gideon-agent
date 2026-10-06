@@ -8,6 +8,8 @@ import { spring, stagger, listItemEnter } from '../theme/motion'
 import { fvs } from '../theme/fontWeight'
 import { Meter } from './Meter'
 import { reportingWrite } from '../../app/shell/reportingWrite'
+import { WidgetBoundary } from '../../app/shell/ErrorBoundary'
+import { NO_READING, fixedReading, isReading, percentReading } from '../data/readings'
 
 type ConnStatus = 'connected' | 'connecting' | 'disconnected'
 
@@ -42,8 +44,6 @@ export function SystemWidget() {
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
 
-  const cpu = sys?.cpu_pct ?? 0
-  const memPct = sys ? (sys.mem_used_gb / sys.mem_total_gb) * 100 : 0
 
   const dotColor = status === 'connected'
     ? 'var(--color-success)'
@@ -77,38 +77,15 @@ export function SystemWidget() {
               transition={spring.spatialFast}
               className="fixed z-[var(--z-modal)] w-72 rounded-2xl border border-outline/40 bg-surface-container p-4"
               style={{ top: pos.top, right: pos.right, borderRadius: 'var(--radius-xl)', boxShadow: 'var(--shadow-lift)' }}>
-            {sys ? (
-              <>
-                <div className="mb-3 flex items-center gap-2">
-                  <Server size={14} className="text-on-surface-low" />
-                  <span data-type="label-s" className="flex-1 truncate text-on-surface" style={fvs(600)}>{sys.hostname}</span>
-                  {
-}
-                  <span data-type="caption" className="text-on-surface-low">{sys.os.split(' ')[0]} · {sys.arch?.split(' ')[0]}{sys.version ? ` · v${sys.version}` : ''}</span>
+            <WidgetBoundary what="the system readings">
+              {sys ? <SystemReadings sys={sys} /> : (
+                <div className="flex items-center gap-2">
+                  <span className="size-2 shrink-0 rounded-full" style={{ background: dotColor }} />
+                  <span data-type="label-s" className="text-on-surface" style={fvs(600)}>{statusLabel}</span>
                 </div>
-
-                <Bar icon={Cpu} label="CPU" pct={cpu} detail={`${sys.cpu_count} cores · load ${sys.load_1m.toFixed(1)}`} />
-                <Bar icon={MemoryStick} label="Memory" pct={memPct} detail={`${sys.mem_used_gb.toFixed(1)} / ${sys.mem_total_gb.toFixed(0)} GB`} />
-                {sys.disk_total_gb != null && sys.disk_free_gb != null && (
-                  <Bar icon={HardDrive} label="Disk" pct={((sys.disk_total_gb - sys.disk_free_gb) / sys.disk_total_gb) * 100} detail={`${sys.disk_free_gb.toFixed(0)} GB free`} />
-                )}
-
-                <div data-type="caption" className="mt-3 flex flex-col gap-1.5">
-                  {sys.gpu_present && sys.gpu_model && <Kv icon={Zap} label="GPU" value={sys.gpu_model} />}
-                  {(sys.net_rx_kbs != null || sys.net_tx_kbs != null) && <Kv icon={Network} label="Network" value={`↓${fmtKbs(sys.net_rx_kbs)}  ↑${fmtKbs(sys.net_tx_kbs)}`} />}
-                  <Kv icon={Boxes} label="Processes" value={`${sys.child_processes ?? 0} child · ${sys.mcp_total ?? 0} MCP`} />
-                  <Kv icon={Activity} label="This process"
-                    value={`${sys.proc_mem_mb.toFixed(0)} MB${sys.proc_cpu_pct != null ? ` · ${sys.proc_cpu_pct.toFixed(1)}% CPU` : ''}${sys.thread_count != null ? ` · ${sys.thread_count} thr` : ''}`} />
-                </div>
-              </>
-            ) : (
-              <div className="flex items-center gap-2">
-                <span className="size-2 shrink-0 rounded-full" style={{ background: dotColor }} />
-                <span data-type="label-s" className="text-on-surface" style={fvs(600)}>{statusLabel}</span>
-              </div>
-            )}
-
-            <RunningAgents open={open} />
+              )}
+            </WidgetBoundary>
+            <WidgetBoundary what="the background agents"><RunningAgents open={open} /></WidgetBoundary>
 
             <RestartControls onFired={() => setOpen(false)} />
 
@@ -126,6 +103,30 @@ export function SystemWidget() {
       )}
     </div>
   )
+}
+
+export function SystemReadings({ sys }: { sys: SystemInfo }) {
+  return <>
+    <div className="mb-3 flex items-center gap-2">
+      <Server size={14} className="text-on-surface-low" />
+      <span data-type="label-s" className="flex-1 truncate text-on-surface" style={fvs(600)}>{sys.hostname}</span>
+      <span data-type="caption" className="text-on-surface-low">{sys.os.split(' ')[0]} · {sys.arch?.split(' ')[0]}{sys.version ? ` · v${sys.version}` : ''}</span>
+    </div>
+    <Bar icon={Cpu} label="CPU" pct={isReading(sys.cpu_pct) ? sys.cpu_pct : null}
+      detail={`${fixedReading(sys.cpu_count, 0)} cores · load ${fixedReading(sys.load_1m, 1)}`} />
+    <Bar icon={MemoryStick} label="Memory" pct={percentReading(sys.mem_used_gb, sys.mem_total_gb)}
+      detail={`${fixedReading(sys.mem_used_gb, 1)} / ${fixedReading(sys.mem_total_gb, 0)} GB`} />
+    {isReading(sys.disk_total_gb) && isReading(sys.disk_free_gb) && sys.disk_total_gb > 0 &&
+      <Bar icon={HardDrive} label="Disk" pct={percentReading(sys.disk_total_gb - sys.disk_free_gb, sys.disk_total_gb)}
+        detail={`${fixedReading(sys.disk_free_gb, 0)} GB free`} />}
+    <div data-type="caption" className="mt-3 flex flex-col gap-1.5">
+      {sys.gpu_present && sys.gpu_model && <Kv icon={Zap} label="GPU" value={sys.gpu_model} />}
+      {(sys.net_rx_kbs != null || sys.net_tx_kbs != null) && <Kv icon={Network} label="Network" value={`↓${fmtKbs(sys.net_rx_kbs)}  ↑${fmtKbs(sys.net_tx_kbs)}`} />}
+      <Kv icon={Boxes} label="Processes" value={`${fixedReading(sys.child_processes, 0)} child · ${fixedReading(sys.mcp_total, 0)} MCP`} />
+      <Kv icon={Activity} label="This process"
+        value={`${fixedReading(sys.proc_mem_mb, 0)} MB${isReading(sys.proc_cpu_pct) ? ` · ${sys.proc_cpu_pct.toFixed(1)}% CPU` : ''}${isReading(sys.thread_count) ? ` · ${sys.thread_count} thr` : ''}`} />
+    </div>
+  </>
 }
 
 function RunningAgents({ open }: { open: boolean }) {
@@ -285,15 +286,15 @@ function firstLine(task: string): string {
   return line.length > 60 ? line.slice(0, 60) + '…' : line
 }
 
-function Bar({ icon: Icon, label, pct, detail }: { icon: typeof Cpu; label: string; pct: number; detail: string }) {
-  const p = Math.min(100, Math.max(0, pct))
-  const tone = p > 90 ? 'var(--color-error)' : p > 70 ? 'var(--color-warning)' : 'var(--color-primary)'
+function Bar({ icon: Icon, label, pct, detail }: { icon: typeof Cpu; label: string; pct: number | null; detail: string }) {
+  const p = isReading(pct) ? Math.min(100, Math.max(0, pct)) : null
+  const tone = p !== null && p > 90 ? 'var(--color-error)' : p !== null && p > 70 ? 'var(--color-warning)' : 'var(--color-primary)'
   return (
     <div className="mb-2">
       <div data-type="caption" className="flex items-center gap-1.5">
         <Icon size={11} className="text-on-surface-low" />
         <span className="text-on-surface-var">{label}</span>
-        <span className="ml-auto text-on-surface-low tabular-nums">{Math.round(p)}%</span>
+        <span className="ml-auto text-on-surface-low tabular-nums">{p === null ? NO_READING : `${Math.round(p)}%`}</span>
       </div>
       {
 }
@@ -316,7 +317,7 @@ function Kv({ icon: Icon, label, value }: { icon: typeof Cpu; label: string; val
 }
 
 function fmtKbs(kbs?: number): string {
-  if (kbs == null) return '0'
+  if (!isReading(kbs)) return NO_READING
   if (kbs >= 1024) return `${(kbs / 1024).toFixed(1)}MB/s`
   return `${Math.round(kbs)}KB/s`
 }

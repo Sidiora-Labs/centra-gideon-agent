@@ -50,6 +50,9 @@ class DenyDecision:
     reason: str = ""
     matched: str = ""
 
+    def refusal(self) -> str:
+        return f"action refused by the denylist: {self.reason or self.matched or self.verdict}"
+
     @property
     def allowed(self) -> bool:
         return not self.blocked
@@ -208,6 +211,12 @@ def check_action(
                 )
 
     commands = _config_commands(action_config)
+    baseline = baseline_denied_command_patterns()
+    from gideon.security.protected_folders import protected_delete, refusal
+    for command in commands:
+        protected = protected_delete(command, cwd=str(action_config.get("cwd") or action_config.get("working_dir") or ""))
+        if protected:
+            return DenyDecision(blocked=True, verdict="needs_human", reason=refusal(protected, where="an unattended action"), matched="protected_delete")
 
     # `.*gideon restart.*` for the one spelling both catch — and so the shapes that
     for cmd in commands:
@@ -223,7 +232,6 @@ def check_action(
             )
 
     if commands:
-        baseline = baseline_denied_command_patterns()
         all_patterns = list(baseline) + [
             p for p in denied_cmd_patterns if p not in set(baseline)
         ]

@@ -10,6 +10,7 @@ import { Bell, Compass, Loader2, Radar, Settings, Sparkles, Terminal } from 'luc
 import { NavRail, type NavItem } from '../../shared/ui/NavRail'
 import { ShellCornerLeft, ShellCornerRight } from '../../shared/ui/ShellCorners'
 import { IncidentBanner } from './IncidentBanner'
+import { LocalInferenceWaitRegion } from './LocalInferenceWaitRegion'
 import { ChatPage } from '../../features/ChatPage'
 import { useIdentity } from './identity'
 import { Onboarding } from './Onboarding'
@@ -347,6 +348,7 @@ function AppInner() {
         {
 }
         <IncidentBanner />
+        <LocalInferenceWaitRegion />
         <ErrorBoundary resetKey={rendered}>
           <Suspense fallback={<PageFallback />}>
             {

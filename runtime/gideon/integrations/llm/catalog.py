@@ -2,14 +2,48 @@
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+class ModelDiscoveryFailure(RuntimeError):
+    def __init__(self, detail: str, *, rejected_credential: bool = False):
+        super().__init__(detail)
+        self.rejected_credential = rejected_credential
+
+
+_DISCOVERY_FAILURES = contextvars.ContextVar("gideon_discovery_failures", default=None)
+
+
+@contextlib.contextmanager
+def capture_discovery_failures():
+    """Observe a fail-soft catalog on this request without sharing errors across tasks."""
+    failures = []
+    token = _DISCOVERY_FAILURES.set(failures)
+    try:
+        yield failures
+    finally:
+        _DISCOVERY_FAILURES.reset(token)
+
+
+def _discovery_failed(endpoint: str, *, status: int = 0) -> None:
+    from urllib.parse import urlsplit
+    host = urlsplit(endpoint).hostname or "The provider"
+    rejected = status in {401, 403}
+    detail = (f"{host} rejected its credential (HTTP {status}). Check the key in Settings → Providers."
+              if rejected else f"{host} did not return its models" + (f" (HTTP {status})." if status else ". Check its connection in Settings → Providers."))
+    failures = _DISCOVERY_FAILURES.get()
+    if failures is not None:
+        failures.append(ModelDiscoveryFailure(detail, rejected_credential=rejected))
 
 
 def _present_fields(
@@ -46,9 +80,9 @@ class ModelInfo:
         payload.update(
             _present_fields(
                 self,
-                required=("id", "name"),
+                required=("id", "name", "capabilities"),
                 nonnull=("size", "downloaded"),
-                nonempty=("capabilities", "description"),
+                nonempty=("description",),
             )
         )
         return payload
@@ -84,6 +118,24 @@ class PullProgress:
             nonempty=("digest",),
         )
 
+
+_NOT_BOUND_MARKERS = (
+    "rerank",
+    "moderation",
+    "llama-guard",
+    "prompt-guard",
+    "shieldgemma",
+    "guardian",
+    "babbage-",
+    "davinci-",
+    "gpt-3.5-turbo-instruct",
+    "realtime",
+    "codex",
+    "deep-research",
+    "computer-use",
+)
+# The Responses-only reasoning tiers (``o1-pro``, ``o3-pro``, ``gpt-5-pro``, ``gpt-5.2-pro``).
+_RESPONSES_ONLY_TIER = re.compile(r"(?:^|/)(?:o\d+|gpt-5(?:\.\d+)?)-pro(?:$|[-:])")
 
 _EMBEDDING_MARKERS = (
     "embed",
@@ -169,9 +221,9 @@ _VIDEO_MODALITY_MARKERS = (
     "video-llava",
 )
 
-_STT_MARKERS = ("whisper", "stt-", "transcribe")
+_STT_MARKERS = ("whisper", "stt-", "transcribe", "-asr", "paraformer", "sensevoice")
 
-_TTS_MARKERS = ("tts-", "-tts", "piper", "elevenlabs", "polly", "kokoro")
+_TTS_MARKERS = ("tts-", "-tts", "piper", "elevenlabs", "polly", "kokoro", "orpheus", "cosyvoice", "sambert", "cartesia")
 
 _MODEL_FAMILY_PROVIDER_TYPES: tuple[tuple[tuple[str, ...], frozenset[str]], ...] = (
     (
@@ -277,6 +329,8 @@ def _app_declared_types(markers: tuple[str, ...]) -> frozenset[str]:
 def infer_capabilities(model_id: str, families: list[str] | None = None) -> list[str]:
     family_text = " ".join(families or []).lower()
     searchable = f"{model_id or ''} {family_text}".lower()
+    if any(marker in searchable for marker in _NOT_BOUND_MARKERS) or _RESPONSES_ONLY_TIER.search(str(model_id or "").lower()):
+        return []
     for tag, markers in _EXCLUSIVE_TAGS:
         if any(marker in searchable for marker in markers):
             return [tag]
@@ -288,11 +342,43 @@ def infer_capabilities(model_id: str, families: list[str] | None = None) -> list
     return tags
 
 
-def _decode_model_rows(document: object) -> list[ModelInfo]:
-    if not isinstance(document, dict) or not isinstance(document.get("data", []), list):
+def _capabilities_by_id(record: dict[str, Any]) -> list[str]:
+    """What a model record says with nothing but the OpenAI models object: its ``id``, and its
+    ``root`` — the model an alias serves, which that object has always carried and a self-hosted
+    server (vLLM) fills in, so an alias of a reranker is read as the reranker it serves."""
+    model_id = str(record.get("id") or "")
+    root = record.get("root")
+    families = [root] if isinstance(root, str) and root and root != model_id else None
+    return infer_capabilities(model_id, families)
+
+def _record_capabilities(
+    record: dict[str, Any], capabilities_of: Callable[[dict[str, Any]], list[str]] | None
+) -> list[str]:
+    """``record``'s tags by the vendor's own reading of its records, else by its id and root.
+
+    A reading that raises lists that one model for no job, and says so: one record of a shape
+    the reading did not expect must not cost the rest of the list, and a model nothing has
+    described is not offered for chat by default.
+    """
+    if capabilities_of is None:
+        return _capabilities_by_id(record)
+    try:
+        return [str(c) for c in capabilities_of(record)]
+    except Exception:  # noqa: BLE001 — one record the vendor reading cannot read
+        logger.warning(
+            "Model discovery could not read what %r does; it is offered for nothing",
+            record.get("id"),
+            exc_info=True,
+        )
+        return []
+
+
+def _decode_model_rows(document: object, capabilities_of=None) -> list[ModelInfo]:
+    rows = document if isinstance(document, list) else document.get("data", []) if isinstance(document, dict) else None
+    if not isinstance(rows, list):
         return []
     models = []
-    for row in document.get("data", []):
+    for row in rows:
         if not isinstance(row, dict):
             continue
         identifier = row.get("id")
@@ -303,7 +389,7 @@ def _decode_model_rows(document: object) -> list[ModelInfo]:
             ModelInfo(
                 id=identifier,
                 name=identifier,
-                capabilities=infer_capabilities(identifier),
+                capabilities=_record_capabilities(row, capabilities_of),
                 extra={
                     key: value for key, value in row.items()
                     if key in {"owned_by", "context_length", "context_window", "max_model_len", "n_ctx", "max_input_tokens"}
@@ -318,6 +404,7 @@ async def openai_compatible_list_models(
     api_key: str | None,
     *,
     default_base: str = "https://api.openai.com/v1",
+    capabilities_of: Callable[[dict[str, Any]], list[str]] | None = None,
 ) -> list[ModelInfo]:
     if not (endpoint or api_key):
         return []
@@ -333,12 +420,12 @@ async def openai_compatible_list_models(
             method="GET",
             headers=authorization,
         )
-        return (
-            _decode_model_rows(json.loads(response.text))
-            if response.status == 200
-            else []
-        )
+        if response.status != 200:
+            _discovery_failed(address, status=int(response.status))
+            return []
+        return _decode_model_rows(json.loads(response.text), capabilities_of)
     except Exception:
+        _discovery_failed(address)
         return []
 
 

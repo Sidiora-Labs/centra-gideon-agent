@@ -1,10 +1,12 @@
 """Skills loader — markdown skill files for agent capabilities."""
 
+import copy
 import hashlib
 import logging
 import os
 import re
 import shutil
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -180,37 +182,33 @@ def iter_skill_files(base: Path) -> list[tuple[str, Path]]:
 
 
 def _ensure_builtin_skills(base: Path) -> None:
-    """Sync built-in skills: copy new/updated, remove stale.
+    """Refresh shipped copies whose files still match their recorded baseline."""
+    from gideon.extensions.skills.shipped import sync
 
-    Supports nested directories (e.g. ``utils/tiny-url/SKILL.md``).
-    Copies the entire skill directory (scripts, assets, etc.), not just SKILL.md.
-    Removes skills from *base* that no longer exist in any source.
-    """
-    source_names: set[str] = set()
-    for src_root in (_project_skills_dir(), _BUILTIN_SKILLS_DIR):
-        if not src_root or not src_root.exists():
-            continue
-        for name, src_file in iter_skill_files(src_root):
-            source_names.add(name)
-            src_dir = src_file.parent
-            dest_dir = base / name
-            dest_file = dest_dir / "SKILL.md"
-            if (
-                not dest_file.exists()
-                or src_file.stat().st_mtime > dest_file.stat().st_mtime
-            ):
-                if dest_dir.exists():
-                    shutil.rmtree(dest_dir)
-                shutil.copytree(src_dir, dest_dir)
-                logger.info("Synced skill: %s", name)
+    sync(base)
 
-    stale_builtins = {"learn", "subagent", "cron", "gideon-core"}
-    if base.exists():
-        for name in stale_builtins:
-            stale = base / name
-            if stale.is_dir():
-                shutil.rmtree(stale)
-                logger.info("Removed stale builtin skill: %s", name)
+
+@contextmanager
+def hold_library():
+    """Serialize skill and refinement mutations across threads and processes."""
+    import fcntl
+    from gideon.core.concurrency import lock_path
+
+    descriptor = os.open(lock_path("skills-library"), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "a+b") as stream:
+        fcntl.flock(stream, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(stream, fcntl.LOCK_UN)
+
+
+def overlay_identity(root: Path, name: str) -> str:
+    """Keep each physical skill copy's accepted refinements separate."""
+    if root.resolve() == skills_dir().resolve():
+        return name
+    identity = hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:24]
+    return f"copies/{identity}/{name}"
 
 
 def skills_dir() -> Path:
@@ -457,6 +455,7 @@ class ProcedureLibrary:
         *,
         agent: str | None = None,
     ):
+        self._allows = None
         self._scoped = skills_path is not None
         self._dir = skills_path or skills_dir()
         self._agent_dir: Path | None = None
@@ -465,6 +464,9 @@ class ProcedureLibrary:
         if install_builtins:
             _ensure_builtin_skills(self._dir)
         self._fm_cache: dict[str, tuple[float, dict[str, str]]] = {}
+
+    def _sees(self, name: str) -> bool:
+        return self._allows is None or self._allows(name)
 
     def _iter(self) -> list[tuple[str, Path]]:
         """Return all ``(name, skill_file)`` pairs from this loader's directories.
@@ -475,7 +477,7 @@ class ProcedureLibrary:
         results: list[tuple[str, Path]] = []
         if self._agent_dir is not None and self._agent_dir.is_dir():
             results.extend(iter_skill_files(self._agent_dir))
-        results.extend(iter_skill_files(self._dir))
+        results.extend((name, path) for name, path in iter_skill_files(self._dir) if self._sees(name))
         if self._scoped:
             return results
         from gideon.extensions.skills.marketplace import _skill_discovery_paths
@@ -484,12 +486,12 @@ class ProcedureLibrary:
         for extra_dir in _skill_discovery_paths():
             if extra_dir.is_dir() and extra_dir != self._dir:
                 for name, path in iter_skill_files(extra_dir):
-                    if name not in seen:
+                    if name not in seen and self._sees(name):
                         results.append((name, path))
                         seen.add(name)
         for root in _outside_skill_dirs():
             for name, path in iter_skill_files(root):
-                if not path.resolve().is_relative_to(root) or name in seen:
+                if not path.resolve().is_relative_to(root) or name in seen or not self._sees(name):
                     continue
                 results.append((name, path))
                 seen.add(name)
@@ -590,6 +592,8 @@ class ProcedureLibrary:
         if not self._safe_name(name):
             return None
         for search_dir in self._search_dirs():
+            if search_dir != self._agent_dir and not self._sees(name):
+                continue
             skill_file = search_dir / name / "SKILL.md"
             if skill_file.exists():
                 return skill_file
@@ -612,10 +616,18 @@ class ProcedureLibrary:
         skill_file = self.skill_file(name)
         if skill_file is None:
             return None
-        content = skill_file.read_text(encoding="utf-8")
         from gideon.extensions.skills import overlays
-
-        return overlays.render_with_overlay(name, content)
+        from gideon.core.atomic_write import atomic_write
+        root = skill_file.parent
+        for _ in name.split("/"):
+            root = root.parent
+        identity = overlay_identity(root, name)
+        with hold_library():
+            content = skill_file.read_text(encoding="utf-8")
+            own = overlays.own_text(identity, content)
+            if own != content and root.resolve() not in {p.resolve() for p in _outside_skill_dirs()} and root.resolve() != _BUILTIN_SKILLS_DIR.resolve():
+                atomic_write(skill_file, own)
+            return overlays.render_with_overlay(identity, own)
 
     def resources_for(self, name: str) -> list[SkillResource]:
         """The resources *name* DECLARED — the allowlist, and the L0 catalog's input.
@@ -711,41 +723,47 @@ class ProcedureLibrary:
 
         Writes into the loader's write tier (agent-local when agent-scoped, else
         the base skills dir) — matching where the same loader would resolve it."""
-        if not self._safe_name(name) or validate_skill_md(content):
-            return False
-        skill_dir = self._write_dir / name
-        if skill_dir.exists():
-            return False
-        skill_dir.mkdir(parents=True, exist_ok=True)
-        (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
-        logger.info("Created skill: %s", name)
-        return True
+        with hold_library():
+            if not self._safe_name(name) or validate_skill_md(content):
+                return False
+            skill_dir = self._write_dir / name
+            if skill_dir.exists():
+                return False
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
+            logger.info("Created skill: %s", name)
+            return True
 
     def update_skill(self, name: str, content: str) -> bool:
         """Overwrite an existing skill's SKILL.md.  Returns True if found."""
-        if not self._safe_name(name) or validate_skill_md(content):
-            return False
-        skill_file = self._dir / name / "SKILL.md"
-        if not skill_file.exists():
-            return False
-        skill_file.write_text(content, encoding="utf-8")
-        logger.info("Updated skill: %s", name)
-        return True
+        with hold_library():
+            if not self._safe_name(name) or validate_skill_md(content):
+                return False
+            skill_file = self._dir / name / "SKILL.md"
+            if not skill_file.exists():
+                return False
+            from gideon.extensions.skills import overlays
+            from gideon.core.atomic_write import atomic_write
+            content = overlays.own_text(overlay_identity(self._dir, name), content)
+            atomic_write(skill_file, content)
+            logger.info("Updated skill: %s", name)
+            return True
 
     def delete_skill(self, name: str) -> bool:
         """Delete a skill directory from any discovery path.  Returns True if found and removed."""
-        if not self._safe_name(name):
+        with hold_library():
+            if not self._safe_name(name):
+                return False
+            read_only_dirs = {path.resolve() for path in _outside_skill_dirs()}
+            for search_dir in self._search_dirs():
+                if search_dir.resolve() in read_only_dirs:
+                    continue
+                skill_dir = search_dir / name
+                if skill_dir.is_dir() and (skill_dir / "SKILL.md").is_file():
+                    shutil.rmtree(skill_dir)
+                    logger.info("Deleted skill: %s (from %s)", name, search_dir)
+                    return True
             return False
-        read_only_dirs = {path.resolve() for path in _outside_skill_dirs()}
-        for search_dir in self._search_dirs():
-            if search_dir.resolve() in read_only_dirs:
-                continue
-            skill_dir = search_dir / name
-            if skill_dir.is_dir():
-                shutil.rmtree(skill_dir)
-                logger.info("Deleted skill: %s (from %s)", name, search_dir)
-                return True
-        return False
 
     def is_auto_generated(self, name: str) -> bool:
         """Return True if *name* refers to a skill in the auto namespace.
@@ -1062,7 +1080,8 @@ class ProcedureLibrary:
         if agent is not None and not self._scoped and not self._agent_dir:
             adir = agent_skills_dir(agent)
             if adir.is_dir() and any(adir.iterdir()):
-                scoped = ProcedureLibrary(install_builtins=False, agent=agent)
+                scoped = copy.copy(self)
+                scoped._agent_dir = adir
                 return scoped.get_context()
         always = self.get_always_skills()
         all_skills = self.list_skills()
@@ -1179,3 +1198,10 @@ class ProcedureLibrary:
             if match:
                 return content[match.end() :].strip()
         return content
+
+
+def narrowed(loader: ProcedureLibrary, allows) -> ProcedureLibrary:
+    view = copy.copy(loader)
+    inherited = loader._allows
+    view._allows = (lambda name: inherited(name) and allows(name)) if inherited is not None else allows
+    return view

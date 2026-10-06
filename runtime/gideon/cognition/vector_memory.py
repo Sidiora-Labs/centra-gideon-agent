@@ -190,6 +190,7 @@ class HybridRecallHit:
     source: str
     kind: str
     scores: dict[str, float]
+    scope: object | None = None
 
     def inspection(self) -> dict[str, object]:
         return {
@@ -197,6 +198,7 @@ class HybridRecallHit:
             "kind": self.kind,
             "content_digest": self.content_digest,
             "scores": dict(self.scores),
+            **({"scope": self.scope} if self.scope is not None else {}),
         }
 
 
@@ -208,10 +210,12 @@ class HybridRecallResult:
     degraded: bool
     degradation_reason: str | None
     suppressed: object
+    scope_cursors: tuple[dict[str, object], ...] = ()
 
     def inspection(self) -> dict[str, object]:
         return {
             "cursor": self.cursor.to_wire(),
+            **({"cursor_scope": self.scope_cursors[0]["scope"], "scope_cursors": list(self.scope_cursors)} if self.scope_cursors else {}),
             "arms": [arm.to_dict() for arm in self.arms],
             "degraded": self.degraded,
             "degradation_reason": self.degradation_reason,

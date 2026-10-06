@@ -13,6 +13,7 @@ export function InboxSettingsPanel() {
   const [s, setS] = useState<InboxSettings | null>(null)
   const [saved, setSaved] = useState(false)
   const [engagementOn, setEngagementOn] = useState<boolean | null>(null)
+  const [sortingOn, setSortingOn] = useState<boolean | null>(null)
   const [sourcesOn, setSourcesOn] = useState<boolean | null>(null)
   const [triageOn, setTriageOn] = useState<boolean | null>(null)
   const [autoExecOn, setAutoExecOn] = useState<boolean | null>(null)
@@ -30,6 +31,7 @@ export function InboxSettingsPanel() {
     } else if (config) {
       setEngagementOn(Boolean(config?.inbox?.engagement_ranking_enabled))
       setSourcesOn(Boolean(config?.inbox?.enabled))
+      setSortingOn(typeof config?.inbox?.sort_messages === "boolean" ? config.inbox.sort_messages : null)
       setTriageOn(Boolean(config?.proactive?.triage_enabled))
       setAutoExecOn(Boolean(config?.proactive?.auto_execute_enabled))
       setCfgErr('')
@@ -55,6 +57,14 @@ export function InboxSettingsPanel() {
       .then(() => api.restartInbox())
       .then(() => { refreshConfig(); flash() })
       .catch(() => setSourcesOn(!v))
+  }
+
+  const setSorting = (value: boolean) => {
+    const previous = sortingOn
+    setSortingOn(value)
+    api.patchConfig('inbox.sort_messages', value)
+      .then(() => { refreshConfig(); flash() })
+      .catch(failure => { setSortingOn(previous); notify(`Couldn't change sorting: ${String((failure as Error)?.message || failure)}`, 'error') })
   }
 
   const setTriage = (v: boolean) => {
@@ -101,6 +111,9 @@ export function InboxSettingsPanel() {
         <Row label="Poll message sources"
           hint="Collect messages from connected poll sources (filesystem drops; channel apps). Agents can always post here directly.">
           <Toggle on={!!sourcesOn} onChange={setSources} label="Poll message sources" disabled={sourcesOn === null} />
+        </Row>
+        <Row label="Sort new messages" hint="The background model sorts new messages in small batches. Off leaves messages unsorted and sends nothing to a model for sorting.">
+          <Toggle on={!!sortingOn} onChange={setSorting} label="Sort new messages" disabled={sortingOn === null} />
         </Row>
         <Row label="Engagement ranking"
           hint="Rank the inbox by how much you engage with each channel/sender (favorites, opens, replies boost; dismisses lower) on top of recency. Off = pure newest-first.">

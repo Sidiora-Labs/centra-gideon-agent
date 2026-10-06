@@ -53,6 +53,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from gideon.security.guardrails.autonomy import (
+    action_type,
     RUNG_AUTO_WITH_UNDO,
     RUNG_AUTONOMOUS,
     RUNG_DRAFT_ONLY,
@@ -108,6 +109,10 @@ RUNG_HINTS: dict[str, str] = {
 }
 
 
+NARROWED_BY_POSTURE = "posture"
+NARROWED_BY_NO_UNDO = "no_undo"
+
+
 @dataclass(frozen=True)
 class RungRoute:
     """One routing decision: the rung that applies and what the seam should do with it."""
@@ -116,6 +121,7 @@ class RungRoute:
     key: str = ""
     rung: str = ""
     reason: str = ""
+    narrowed_by: str = ""
 
     @property
     def governed(self) -> bool:
@@ -178,7 +184,13 @@ _PROVIDER_SPECS: tuple[ActionTypeSpec, ...] = (
         key="action.create_task",
         floor=RUNG_AUTONOMOUS,
         ceiling=RUNG_AUTONOMOUS,
-        providers=("create-task", "selfqa-file-finding"),
+        providers=("create-task",),
+    ),
+    ActionTypeSpec(
+        key="action.selfqa_finding",
+        floor=RUNG_AUTONOMOUS,
+        ceiling=RUNG_AUTONOMOUS,
+        providers=("selfqa-file-finding",),
     ),
     ActionTypeSpec(
         key="action.knowledge_write",
@@ -252,6 +264,7 @@ _PROVIDER_SPECS: tuple[ActionTypeSpec, ...] = (
         ceiling=RUNG_AUTONOMOUS,
         leaves_machine=True,
         providers=("bash", "run-script"),
+        runs_code=True,
     ),
     ActionTypeSpec(
         key="action.send_message",
@@ -318,33 +331,102 @@ def ensure_core_action_types() -> None:
         register_action_type(spec)
 
 
+def can_be_undone(key: str) -> bool:
+    """Whether an action of type ``key`` can be taken back after it ran.
+
+    True when EVERY provider its declaration governs is registered and names the reversal
+    handles it can reverse (``ActionProvider.reversal_kinds``). That is the provider's own word,
+    the one the undo executor resolves a handle with
+    (:func:`~gideon.security.guardrails.ladder.reverse_action`), so the rung and the undo cannot
+    disagree about it. Every provider, not any: the rung is the type's, and one provider that
+    cannot be taken back makes "runs with undo" untrue for every fire of it. A type with no
+    providers (a tool surface, an AI affordance) has nothing that could undo it.
+    """
+    spec = action_type(key)
+    if spec is None or not spec.providers:
+        return False
+    from gideon.integrations.action_providers.registry import (
+        _ensure_default_providers_registered,
+        get_action_provider,
+    )
+
+    # Self-sufficient for `ladder._reverser_for`'s reason: a process that never dispatched an
+    # action has an empty registry, and an empty registry would read as "nothing can undo it".
+    _ensure_default_providers_registered()
+    for name in spec.providers:
+        provider = get_action_provider(name)
+        if provider is None or not tuple(getattr(provider, "reversal_kinds", ()) or ()):
+            return False
+    return True
+
+
 def route_action_type(key: str, *, session_key: str = "") -> RungRoute:
     """The route for a declared action type, composed with the run's SafetyProfile.
 
     ``resolve_rung`` gives the type's own answer (floor + accepted grant, clamped to its
     ceiling, clamped again to ``one_tap`` during an incident). The profile then NARROWS it
     and can never widen it — the lower of the two wins.
+
+    The profile's ``auto_with_undo`` bound (a run nobody watches) binds only an action that
+    :func:`can_be_undone`. That rung keeps a handle so the user can take the action back; an
+    action with none to keep would run exactly as it does at ``autonomous`` while its audit row
+    said "runs with undo", and the ladder panel, which lists every undo, would honestly show
+    none. So such an action keeps its own rung, and the audit row its run writes is the record
+    (:func:`record_execution`). The ``one_tap`` bound of an operator ceiling binds every action.
+
+    And such an action never RUNS at ``auto_with_undo``. Where its own rung puts it there — a
+    declaration, a grant, or the untrusted-ceiling clamp that lands a manifest's ``autonomous``
+    claim on that rung (``autonomy.clamp_untrusted_ceiling``) — running it would keep no undo,
+    which is ``autonomous``: above the rung it was given, and silent. So it asks first, and the
+    reason the held row shows says that what it does cannot be taken back.
     """
     from gideon.security.guardrails.policy import (
+        is_unattended_session,
         profile_for_session,
         rung_ceiling_for_profile,
     )
 
     rung = resolve_rung(key)
     profile = profile_for_session(session_key)
-    ceiling = rung_ceiling_for_profile(profile)
+    ceiling = rung_ceiling_for_profile(profile, unattended=is_unattended_session(session_key))
+    # Asked only when the undo rung is in play: the composed rung is one of these two.
+    undoable = RUNG_AUTO_WITH_UNDO not in (rung, ceiling) or can_be_undone(key)
+    if ceiling == RUNG_AUTO_WITH_UNDO and not undoable:
+        ceiling = RUNG_AUTONOMOUS
     effective = RUNGS[min(max(rung_rank(rung), 0), max(rung_rank(ceiling), 0))]
+    narrowed_by = NARROWED_BY_POSTURE if effective != rung else ""
+    if effective == RUNG_AUTO_WITH_UNDO and not undoable:
+        effective, narrowed_by = RUNG_ONE_TAP, NARROWED_BY_NO_UNDO
+    # 🪤 THIS SENTENCE IS USER COPY, AND IT IS ALWAYS EMBEDDED. `announce_withheld` puts it in the
+    # body of the inbox row a held action raises, the seams put it in a hook/trigger error, and
+    # `triggers/executor` puts it in a run summary — six call sites, and every one of them has
+    # ALREADY named the action:
+    #
+    #     The 'acme-file-task' action on trigger t-acme did not run: {reason}.
+    #     held for your approval: {reason}
+    #
+    # So naming the action type here said it twice, the second time as a code identifier the user
+    # has never seen — `app:acme.acme-file-task`, or worse a DIFFERENT name for the thing the
+    # sentence just called `'bash'` (`action.execute_code`). The key stays where it belongs: on the
+    # row's `refs["action_type"]`, in the dedup key, and on `RungRoute.key` for any caller that
+    # wants it. "This action" is the subject `_authority_sentence` already uses for the same job.
     reason = f"this action {rung_label(rung)}"
-    if effective != rung:
+    if narrowed_by == NARROWED_BY_POSTURE:
         reason = (
             f"this action {rung_label(rung)}, narrowed so it {rung_label(effective)} "
             f"by the {profile.name} profile"
+        )
+    elif narrowed_by == NARROWED_BY_NO_UNDO:
+        reason = (
+            f"this action {rung_label(rung)}, narrowed so it {rung_label(effective)} "
+            "because what it does cannot be taken back"
         )
     return RungRoute(
         route=_ROUTE_BY_RUNG.get(effective, ROUTE_DRAFT),
         key=key,
         rung=effective,
         reason=reason,
+        narrowed_by=narrowed_by,
     )
 
 
@@ -429,28 +511,82 @@ def announce_withheld(
         return ""
 
 
-def record_reversal(
-    route: RungRoute, result: Any, *, label: str, refs: dict | None = None
-) -> str:
-    """Persist the reversal handle an ``auto_with_undo`` action came back with.
+def _did_nothing(route: RungRoute, result: Any) -> bool:
+    """Whether ``result`` says its action ran and had nothing to do — the outcome the run history
+    records as ``skipped_noop`` (``triggers.executor.STATUS_TO_OUTCOME``) — for a type whose
+    effect that answer can speak for. A type that ``runs_code`` ran the code before the code
+    answered, so its answer never means the run did not happen."""
+    from gideon.automation.triggers.executor import Outcome, classify
 
-    The handle itself is the PROVIDER's: only it knows what "undo" means for its own
-    effect (``ActionResult.reversal``, e.g. the task row a ``create-task`` filed). This
-    persists it in the three places the undo click needs — the SEL row (audit), the
-    reversal record store (``guardrails.ladder``, which is what
-    :func:`~gideon.security.guardrails.ladder.reverse_action` resolves an id against) and the
-    notification's ``meta`` (which carries the record id, so the affordance is rendered
-    from persisted state rather than from a handle sitting in a page) — and returns the
-    handle it recorded.
+    outcome, _reason = classify(str(getattr(result, "outcome", "") or ""))
+    if outcome != Outcome.SKIPPED_NOOP.value:
+        return False
+    spec = action_type(route.key)
+    return not (spec is not None and spec.runs_code)
 
-    **No handle, no notification.** A provider that cannot reverse itself leaves
-    ``reversal`` empty, and then the passive notify is skipped entirely: an "undo
-    available" notice for an action that cannot be undone is a promise the product cannot
-    keep, and it would also mean every unattended fire in the tree grew a notification
-    overnight. The SEL row is still written, so the execution is auditable either way.
+
+def record_execution(route: RungRoute, result: Any, *, label: str, refs: dict | None = None) -> str:
+    """Record one governed action that ran, and keep the undo its rung promises.
+
+    Called by both dispatch seams for every action that SUCCEEDED, whatever rung it ran at, so
+    the security log holds one ``guardrails.autonomy_executed`` row per run, at the rung the run
+    actually took and naming the automation that ran it (``refs``: its trigger or hook, and its
+    provider). That row is the whole record ``autonomous`` promises ("the audit log is the
+    record") and the audit half of ``auto_with_undo``.
+
+    **A run that did nothing is not an execution.** A result that says it had nothing to do (no
+    task in the queue, a workflow already running, nothing new to write) writes NO row: the
+    automation's run history already holds it as the no-op it was, and an "executed" row would
+    claim an action that never happened. A queue read every minute made that claim 1,440 times
+    a day and buried the runs that did something. A type that ``runs_code`` is the exception
+    (:func:`_did_nothing`).
+
+    **The undo.** At ``auto_with_undo`` the handle the action came back with is the PROVIDER's:
+    only it knows what "undo" means for its own effect (``ActionResult.reversal``, e.g. the task
+    row a ``create-task`` filed). It is persisted where the undo click needs it — the reversal
+    record store (``guardrails.ladder``, which is what
+    :func:`~gideon.security.guardrails.ladder.reverse_action` resolves an id against), the audit row
+    (which names the record, ``undo=<id>``) and the notification's ``meta`` (which carries the
+    record id, so the affordance is rendered from persisted state rather than from a handle
+    sitting in a page). The record is written FIRST because the row's rung depends on it: a run
+    that kept no record — it came back with no handle, or one the store refused — did exactly
+    what an ``autonomous`` run does, so its row says ``autonomous``. A row reading "runs with
+    undo" with no undo behind it is the claim the panel's undo list would contradict.
+
+    **No handle, no undo offer.** A run that came back with no handle is still recorded, and
+    nothing offers to undo it: an "undo available" notice for an action that cannot be undone is
+    a promise the product cannot keep. At ``autonomous`` no handle is kept at all — the rung that
+    keeps none is the one the run took. Returns the handle an undo was kept for, or ``""``.
     """
-    handle = str(getattr(result, "reversal", "") or "")
-    meta = {"action_type": route.key, "rung": route.rung, **dict(refs or {})}
+    from gideon.automation.triggers.executor import classify
+    from gideon.automation.triggers.models import Outcome
+    reported = str(getattr(result, "outcome", "") or "")
+    outcome, _ = classify(reported)
+    definite = outcome in {Outcome.RAN.value, Outcome.SKIPPED_NOOP.value}
+    if (getattr(result, "success", False) is not True
+            or getattr(result, "blocked", False)
+            or getattr(result, "exit_code", 0) not in (0, None)
+            or not definite):
+        return ""
+    if not route.governed or not route.executes or _did_nothing(route, result):
+        return ""
+    handle = str(getattr(result, "reversal", "") or "") if route.records_reversal else ""
+    record_id = ""
+    if handle:
+        try:
+            from gideon.security.guardrails.ladder import record_reversal_handle
+
+            record_id = record_reversal_handle(
+                action_type=route.key, rung=route.rung, handle=handle, label=label
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("could not record a reversal handle for %s", route.key, exc_info=True)
+    ran_at = route.rung
+    if route.records_reversal and not record_id:
+        ran_at = RUNG_AUTONOMOUS
+        logger.warning("%s kept no undo for this run, so it ran on its own", route.key)
+    undo = f"undo={record_id} reversal={handle}" if record_id else "reversal=none"
+    named = " ".join(f"{name}={value}" for name, value in (refs or {}).items() if value)
     try:
         from gideon.security.sel import sel
 
@@ -459,26 +595,19 @@ def record_reversal(
             operation="guardrails.autonomy_executed",
             outcome="ok",
             source="guardrails",
-            resources=f"rung={route.rung} reversal={handle or 'none'}"[:200],
+            resources=f"rung={ran_at} {undo} {named}".strip()[:200],
         )
     except Exception:  # noqa: BLE001
-        logger.debug("reversal SEL audit failed", exc_info=True)
+        logger.debug("execution SEL audit failed", exc_info=True)
     if not handle:
         return ""
-    record_id = ""
+    # A refused handle yields no record id, and then the notification says the action ran
+    # WITHOUT offering an undo — the same "never promise a reversal that cannot happen" rule as
+    # the no-handle case, applied one level down to a handle the store could not accept. Its
+    # words never borrow another rung's label: "ran on its own" is what `autonomous` is called.
     try:
-        from gideon.security.guardrails.ladder import record_reversal_handle
-
-        record_id = record_reversal_handle(
-            action_type=route.key, rung=route.rung, handle=handle, label=label
-        )
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "could not record a reversal handle for %s", route.key, exc_info=True
-        )
-    try:
-        from gideon.integrations.action_providers.services import get_action_services
         from gideon.workspace import notification_kinds
+        from gideon.integrations.action_providers.services import get_action_services
 
         services = get_action_services()
         state = getattr(services, "state", None) if services is not None else None
@@ -487,12 +616,23 @@ def record_reversal(
                 notification_kinds.INFO,
                 "An automatic action ran",
                 (
-                    f"{label} ran on its own. You can still undo it."
+                    f"{label} ran without asking. You can still undo it."
                     if record_id
-                    else f"{label} ran on its own."
+                    else f"{label} ran without asking, and kept nothing you can undo."
                 ),
-                meta={**meta, "reversal": handle, "reversal_id": record_id},
+                meta={
+                    "action_type": route.key,
+                    "rung": ran_at,
+                    **dict(refs or {}),
+                    "reversal": handle,
+                    "reversal_id": record_id,
+                },
             )
     except Exception:  # noqa: BLE001
         logger.debug("reversal notify failed", exc_info=True)
-    return handle
+    return handle if record_id else ""
+
+
+def record_reversal(route: RungRoute, result: Any, *, label: str, refs: dict | None = None) -> str:
+    """Compatibility entry point using the same definitive execution and undo contract."""
+    return record_execution(route, result, label=label, refs=refs)

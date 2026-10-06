@@ -72,6 +72,7 @@ class InboundClient:
     upstream: str = ""
     rate_overrides: dict[str, Any] = field(default_factory=dict)
     persistent_sessions: bool = False
+    conversation_round: int = 0
     disabled: bool = False
     created_at: str = ""
     last_seen_at: str = ""
@@ -111,6 +112,10 @@ def _read_raw() -> dict[str, dict]:
     return {str(k): v for k, v in data.items() if isinstance(v, dict)}
 
 
+def _round_of(stored: Any) -> int:
+    return stored if type(stored) is int and stored >= 0 else 0
+
+
 def load_clients() -> dict[str, InboundClient]:
     """Every registered client, keyed by ``client_id``."""
     out: dict[str, InboundClient] = {}
@@ -129,6 +134,7 @@ def load_clients() -> dict[str, InboundClient]:
                 upstream=str(row.get("upstream", "") or ""),
                 rate_overrides=dict(row.get("rate_overrides") or {}),
                 persistent_sessions=row.get("persistent_sessions") is True,
+                conversation_round=_round_of(row.get("conversation_round")),
                 disabled=bool(row.get("disabled", False)),
                 created_at=str(row.get("created_at", "") or ""),
                 last_seen_at=str(row.get("last_seen_at", "") or ""),
@@ -170,6 +176,7 @@ def create_client(
     scope: dict[str, Any] | None = None,
     upstream: str = "",
     rate_overrides: dict[str, Any] | None = None,
+    persistent_sessions: bool = False,
     ttl: str = "90d",
 ) -> tuple[InboundClient, str]:
     """Register a client and return ``(record, token)``.
@@ -202,6 +209,7 @@ def create_client(
         scope=dict(scope or {}),
         upstream=upstream,
         rate_overrides=dict(rate_overrides or {}),
+        persistent_sessions=persistent_sessions is True,
         disabled=False,
         created_at=created_at,
         expires_at=expires_at,
@@ -248,6 +256,40 @@ def set_disabled(client_id: str, disabled: bool, *, reason: str = "") -> bool:
         reason or "operator action",
     )
     return True
+
+
+def set_persistent_sessions(
+    client_id: str, persistent: bool, *, actor: str = "owner"
+) -> InboundClient | None:
+    """Choose whether a client keeps its conversation. The record as it now stands, or None when
+    the client is unknown.
+
+    A change starts the client's next round of conversations (``conversation_round``): a turn
+    running now finishes in the session it began in, and every request after the change is
+    answered in a session of the new round, so none continues a conversation from before it,
+    whichever way the choice went. Setting the choice the client already has changes nothing,
+    and its conversations go on.
+    """
+    clients = load_clients()
+    client = clients.get(client_id)
+    if client is None:
+        return None
+    if client.persistent_sessions == persistent:
+        return client
+    client.persistent_sessions = persistent
+    client.conversation_round += 1
+    save_clients(clients)
+    _sel_event(
+        (
+            "inbound_client_keeps_conversation"
+            if persistent
+            else "inbound_client_keeps_no_conversation"
+        ),
+        client_id,
+        f"by {actor}; its conversations start over (round {client.conversation_round})",
+    )
+    return client
+
 
 
 def lookup_by_token(token: str, surface: str) -> tuple[InboundClient | None, str]:

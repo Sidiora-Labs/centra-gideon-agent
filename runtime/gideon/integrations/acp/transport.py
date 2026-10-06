@@ -23,7 +23,8 @@ _STDOUT_BUFFER_LIMIT = 10 * 1024 * 1024
 
 def _acp_trace(direction: str, text: str) -> None:
     if _ACP_TRACE:
-        logger.info("ACP-TRACE %s %s", direction, text[:600])
+        from gideon.security.security import redact_credentials
+        logger.info("ACP-TRACE %s %s", direction, redact_credentials(text)[0][:600])
 
 
 def _resolve_ssh_auth_sock(env: dict[str, str]) -> None:
@@ -246,6 +247,10 @@ class AcpProcess:
         extra = dict(self._extra_env or {})
         if self._session_key:
             extra["GIDEON_SESSION_KEY"] = self._session_key
+            from gideon.security.session_credentials import credential_for
+            proof = credential_for(self._session_key)
+            if proof:
+                extra["GIDEON_SESSION_PROOF"] = proof
         if self._channel_id:
             extra["GIDEON_CHANNEL_ID"] = self._channel_id
         environment = build_child_env(
@@ -390,6 +395,9 @@ class AcpProcess:
         if self._stderr_task is not None and not self._stderr_task.done():
             self._stderr_task.cancel()
         self._stderr_task = None
+        if self._pid:
+            from gideon.security.session_credentials import forget_pid
+            forget_pid(self._pid)
         identifiers = (
             ("_untrack_child_pids", self._child_pids),
             ("_untrack_pid", self._pid),

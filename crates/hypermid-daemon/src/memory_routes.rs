@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use hypermid_contracts::{Cursor, EffectState, Error, Id, Scope, Trace};
 use hypermid_core::capability::{AuthorizationRequest, CapabilityOperation};
 use hypermid_memory::api::MaintenanceClaimKey;
-use hypermid_memory::embedding::EmbeddingRegistration;
+use hypermid_memory::embedding::{EmbeddingRegistration, PublicationGuard, ProviderEmbedding};
 use hypermid_memory::maintenance::{
     KnowledgePublication, KnowledgePublicationAuthorities, KnowledgePublicationAuthority,
 };
@@ -26,6 +26,13 @@ use crate::dispatch::Dispatcher;
 
 pub const MEMORY_OPERATIONS: &[&str] = &[
     "memory.health",
+    "memory.app-scope.lookup",
+    "memory.app-scope.issue",
+    "memory.app-scope.resolve",
+    "memory.app-scope.revoke",
+    "memory.private-scope.issue",
+    "memory.private-scope.resolve",
+    "memory.private-scope.retire",
     "memory.drain",
     "memory.record.create",
     "memory.record.update",
@@ -54,6 +61,8 @@ pub const MEMORY_OPERATIONS: &[&str] = &[
     "memory.maintenance.failed",
     "memory.maintenance.abandoned",
     "memory.embedding.register",
+    "memory.embedding.rebind",
+    "memory.embedding.publish",
     "memory.embedding.retire",
     "memory.embedding.active",
     "memory.index.enqueue",
@@ -151,6 +160,43 @@ fn dispatch_operation(
     now_ms: u64,
 ) -> Result<Value, Error> {
     match operation {
+        "memory.app-scope.lookup" => {
+            let p:AppRevokePayload=parse(payload)?;
+            let ctx=context(session,session.bound_scope.clone(),CapabilityOperation::Read,static_id("memory-records"),p.capability_id,now_ms)?;
+            Ok(json!({"receipt":api.lookup_app_scope(&ctx,p.app_name)?}))
+        }
+
+        "memory.app-scope.issue" => {
+            let p: AppIssuePayload=parse(payload)?;
+            let ctx=context(session,session.bound_scope.clone(),CapabilityOperation::Administer,static_id("memory-service"),p.capability_id,now_ms)?;
+            encode(api.issue_app_scope(&ctx,p.app_name,p.manifest_digest,p.ttl_ms)?)
+        }
+        "memory.app-scope.resolve" => {
+            let p: PrivateResolvePayload=parse(payload)?;
+            let ctx=context(session,p.target_scope,CapabilityOperation::Read,static_id("memory-records"),p.capability_id,now_ms)?;
+            encode(api.resolve_app_scope(&ctx,p.scope_id)?)
+        }
+        "memory.app-scope.revoke" => {
+            let p: AppRevokePayload=parse(payload)?;
+            let ctx=context(session,session.bound_scope.clone(),CapabilityOperation::Administer,static_id("memory-service"),p.capability_id,now_ms)?;
+            Ok(json!({"receipt":api.revoke_app_scope(&ctx,p.app_name,p.expected_capability_id)?}))
+        }
+
+        "memory.private-scope.issue" => {
+            let p: PrivateIssuePayload = parse(payload)?;
+            let ctx = context(session, session.bound_scope.clone(), CapabilityOperation::Administer, static_id("memory-service"), p.capability_id, now_ms)?;
+            encode(api.issue_private_scope(&ctx, p.origin_session_key, p.original_actor, p.memory_mode, p.ttl_ms)?)
+        }
+        "memory.private-scope.retire" => {
+            let p: PrivateRetirePayload = parse(payload)?;
+            let ctx = context(session, session.bound_scope.clone(), CapabilityOperation::Administer, static_id("memory-service"), p.capability_id, now_ms)?;
+            Ok(json!({"receipt": api.retire_private_scope(&ctx, p.origin_session_key)?}))
+        }
+        "memory.private-scope.resolve" => {
+            let p: PrivateResolvePayload = parse(payload)?;
+            let ctx = context(session, p.target_scope, CapabilityOperation::Read, static_id("private-work"), p.capability_id, now_ms)?;
+            encode(api.resolve_private_scope(&ctx, p.scope_id)?)
+        }
         "memory.health" => {
             parse::<EmptyPayload>(payload)?;
             encode(api.health())
@@ -447,13 +493,16 @@ fn dispatch_operation(
             let payload: ListPayload = parse(payload)?;
             require_access(trace, session, &payload.request, GrantOperation::Read)?;
             let context = access_context(session, &payload.request, payload.capability_id, now_ms)?;
-            let page = api.list_records(
+            let page = if payload.ordered_by_id { api.list_records_after(
+                &context, &payload.request, payload.category.as_deref(), payload.status,
+                payload.after_id.as_ref(), payload.limit,
+            )? } else { api.list_records(
                 &context,
                 &payload.request,
                 payload.category.as_deref(),
                 payload.status,
                 payload.limit,
-            )?;
+            )? };
             if payload.cursor.is_some_and(|cursor| cursor != page.cursor) {
                 return Err(route_error(
                     "STALE_CURSOR",
@@ -953,7 +1002,7 @@ fn dispatch_operation(
             )?;
             encode(json!({"job_id": payload.claim.job_id, "state": state}))
         }
-        "memory.embedding.register" => {
+        "memory.embedding.register" | "memory.embedding.rebind" => {
             let payload: RegisterEmbeddingPayload = parse(payload)?;
             require_trace_scope(
                 trace,
@@ -967,11 +1016,17 @@ fn dispatch_operation(
                     "embedding registration scope does not match the target scope",
                 ));
             }
+            if payload.request.record_id.as_ref() != Some(&payload.registration.registration_id)
+                || payload.request.revision != hypermid_memory::RevisionPrecondition::MustNotExist
+            {
+                return Err(denied("embedding registration requires its exact new identity"));
+            }
             let context = mutation_context(
                 session,
                 &payload.request,
                 payload.capability_id,
-                payload.registration.registration_id.clone(),
+                if operation == "memory.embedding.rebind" { static_id("memory-embedding") }
+                else { payload.registration.registration_id.clone() },
                 now_ms,
             )?;
             encode(json!({"cursor": api.register_embedding(
@@ -980,6 +1035,15 @@ fn dispatch_operation(
                 &payload.registration,
                 now_ms,
             )?}))
+        }
+        "memory.embedding.publish" => {
+            let payload: PublishEmbeddingPayload = parse(payload)?;
+            require_trace_scope(trace, session, &payload.request.actor_scope, &payload.request.trace)?;
+            require_operation(&payload.request, Operation::Embed)?;
+            let context = mutation_context(session, &payload.request, payload.capability_id,
+                static_id("memory-embedding"), now_ms)?;
+            encode(json!({"cursor": api.publish_embedding(&context, &payload.request,
+                &payload.guard, payload.response, now_ms)?}))
         }
         "memory.embedding.retire" => {
             let payload: RetireEmbeddingPayload = parse(payload)?;
@@ -1187,6 +1251,9 @@ struct SharedAccessPayload {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ListPayload {
+    #[serde(default)]
+    ordered_by_id: bool,
+    after_id: Option<Id>,
     capability_id: Id,
     request: AccessRequest,
     cursor: Option<Cursor>,
@@ -1389,6 +1456,17 @@ struct RegisterEmbeddingPayload {
     capability_id: Id,
     request: MutationRequest,
     registration: EmbeddingRegistration,
+    #[serde(rename = "now_ms")]
+    _now_ms: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PublishEmbeddingPayload {
+    capability_id: Id,
+    request: MutationRequest,
+    guard: PublicationGuard,
+    response: ProviderEmbedding,
     #[serde(rename = "now_ms")]
     _now_ms: u64,
 }
@@ -1712,3 +1790,20 @@ fn failure(error: Error) -> MemoryRouteResponse {
         error: Some(error),
     }
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PrivateIssuePayload { capability_id: Id, origin_session_key: Id, original_actor: Id, memory_mode: String, ttl_ms: u64 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PrivateRetirePayload { capability_id: Id, origin_session_key: Id }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PrivateResolvePayload { capability_id: Id, scope_id: Id, target_scope: Scope }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppIssuePayload {capability_id:Id,app_name:String,manifest_digest:Digest,ttl_ms:u64}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppRevokePayload {capability_id:Id,app_name:String,expected_capability_id:Option<Id>}

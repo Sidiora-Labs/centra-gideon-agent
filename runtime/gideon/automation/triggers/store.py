@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import fcntl
 import json
+import hashlib
+from datetime import datetime, timezone
 import logging
 import os
 import time
@@ -18,6 +20,8 @@ from gideon.automation.triggers.provider import TriggerStoreProvider
 from gideon.operations.durability import record_files
 
 logger = logging.getLogger(__name__)
+_REPORTED_UNREADABLE: set[tuple[str, str]] = set()
+
 STORE_VERSION = 1
 STORE_FILENAME = "triggers.json"
 LOCK_FILENAME = ".triggers.lock"
@@ -80,27 +84,56 @@ class TriggerDocument:
         except OSError:
             return 0.0
 
+    def unreadable_status(self) -> list[dict[str, str]]:
+        try:
+            self.read(strict=True)
+        except (OSError, ValueError):
+            return [self.unreadable] if self.unreadable else []
+        return []
+
     def read(self, *, strict: bool = False) -> list[dict[str, Any]]:
+        self.unreadable: dict[str, str] | None = None
         if not self.path.exists():
             self.observed_mtime = 0.0
             return []
+        content = None
         try:
             self.observed_mtime = self.path.stat().st_mtime
-            envelope = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            content = self.path.read_bytes()
+            envelope = json.loads(content.decode("utf-8"))
+            records = envelope.get("triggers") if isinstance(envelope, dict) else envelope
+            if not isinstance(records, list) or any(not isinstance(item, dict) for item in records):
+                raise ValueError("triggers.json has an invalid record envelope")
+            return records
+        except (OSError, ValueError) as exc:
+            digest = hashlib.sha256(content or str(exc).encode()).hexdigest()[:16]
+            copied = None
+            if content is not None:
+                try:
+                    copied = next(self.path.parent.glob(f"{self.path.name}.broken-*-{digest}"), None)
+                    if copied is None:
+                        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+                        copied = self.path.with_name(f"{self.path.name}.broken-{stamp}-{digest}")
+                        fd = os.open(copied, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                        with os.fdopen(fd, "wb") as stream:
+                            stream.write(content)
+                            stream.flush()
+                            os.fsync(stream.fileno())
+                except OSError:
+                    copied = None
+            kept = f" A copy is kept at {copied}." if copied else " Its contents have not been changed."
+            self.unreadable = {
+                "file": str(self.path),
+                "said": f"{self.path} could not be read, so its automations cannot be listed or changed." + kept,
+                "remedy": "Repair the file or restore a readable copy, then reload this page.",
+            }
+            identity = (str(self.path), digest)
+            if identity not in _REPORTED_UNREADABLE:
+                _REPORTED_UNREADABLE.add(identity)
+                logger.warning("%s %s", self.unreadable["said"], self.unreadable["remedy"])
             if strict:
-                raise ValueError("triggers.json is unreadable or malformed")
-            logger.warning(
-                "triggers.json is unreadable or malformed; treating as empty"
-            )
+                raise ValueError("triggers.json is unreadable or malformed") from exc
             return []
-        records = envelope.get("triggers") if isinstance(envelope, dict) else envelope
-        if strict and (
-            not isinstance(records, list)
-            or any(not isinstance(item, dict) for item in records)
-        ):
-            raise ValueError("triggers.json has an invalid record envelope")
-        return list(filter(lambda item: isinstance(item, dict), records or []))
 
     def publish(self, rows: list[dict[str, Any]]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -148,6 +181,11 @@ class RecordMutation:
                 logger.info("refusing to enable %s: it has parse errors", identity)
                 return None
             loaded.trigger.enabled = enabled
+            if enabled:
+                from gideon.automation.triggers.arm import arm, needs_arming
+
+                if needs_arming(loaded.trigger):
+                    loaded.trigger.next_fire_at = arm(loaded.trigger)
             self.rows[position] = loaded.trigger.to_dict()
             self.changed = True
             return loaded.trigger
@@ -199,6 +237,9 @@ class TriggerStore(TriggerStoreProvider):
 
     def changed_on_disk(self) -> bool:
         return self._document.timestamp() > self._last_mtime
+
+    def unreadable_status(self) -> list[dict[str, str]]:
+        return self._document.unreadable_status()
 
     def _read_rows(self) -> list[dict[str, Any]]:
         return self._document.read()
@@ -253,11 +294,18 @@ class TriggerStore(TriggerStoreProvider):
                 ),
                 None,
             )
+            existing = previous is not None
             if previous is None:
                 from gideon.automation.triggers.models import Trigger
 
                 previous = Trigger(id=trigger.id, name=trigger.name, kind=trigger.kind)
             narrow(trigger, previous)
+            if existing:
+                from gideon.automation.triggers.arm import next_fire_after_edit
+
+                rearmed = next_fire_after_edit(previous, trigger)
+                if rearmed is not None:
+                    trigger.next_fire_at = rearmed
             changes.replace(trigger)
         return trigger
 

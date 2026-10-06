@@ -161,6 +161,10 @@ async def api_devices_pair_start(request: web.Request) -> web.Response:
         _audit("device_pair_started", "denied", error="origin rejected")
         return json_error(ERR_ORIGIN, status=403)
 
+    from gideon.interfaces.dashboard.owner_presence import ACTION_PAIR_DEVICE, require_owner_presence
+    refused = require_owner_presence(request, ACTION_PAIR_DEVICE)
+    if refused is not None:
+        return refused
     from gideon.security.auth import pairing
 
     body = await _body(request)

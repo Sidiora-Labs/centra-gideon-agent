@@ -40,6 +40,7 @@ class DelegationHost:
             on_tool_approval=self.approval,
             on_spawn_approval=self.approve_spawn,
             validate_trigger_start_approval=self.validate_trigger_start_approval,
+            validate_batch_start_approval=__import__("gideon.automation.workflows.batch_start", fromlist=["validate_start_approval"]).validate_start_approval,
             is_yolo=self.yolo,
             on_event=self.event,
         )
@@ -114,6 +115,8 @@ class DelegationHost:
         state = self.runtime.dashboard_state
         if not state:
             return
+        from gideon.automation.workflows.batch_start import relay_event
+        relay_event(state, kind, agent, extra)
         name = agent.parent_session_key.removeprefix("dashboard:")
         if kind == "subagent_done":
             state.cancel_subagent_approvals(

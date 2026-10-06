@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 import secrets
-import sqlite3
+from gideon.core.sqlite_compat import connect, sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -110,7 +110,7 @@ def _ensure_columns(conn: sqlite3.Connection, cols: dict[str, str]) -> None:
 
 def _connect() -> sqlite3.Connection:
     _db_path().parent.mkdir(parents=True, exist_ok=True)
-    database = sqlite3.connect(str(_db_path()), timeout=5.0)
+    database = connect(str(_db_path()), timeout=5.0)
     database.row_factory = sqlite3.Row
     try:
         for pragma in ("journal_mode=WAL", "busy_timeout=5000"):

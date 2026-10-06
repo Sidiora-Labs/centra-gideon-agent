@@ -201,6 +201,16 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
         _rehydrate_session_from_history(state, session_name, include_archived=True)
     session = state.get_or_create_session(session_name, app=request.get("app", ""))
 
+    from gideon.security.approval_answer import of_request, ingress_record, UNKNOWN
+
+    authenticated_actor = of_request(request)
+    if authenticated_actor.kind == UNKNOWN:
+        return web.json_response({"error": "authenticated initiator is required"}, status=403)
+    # Reserve provenance fields: client metadata cannot impersonate another initiator.
+    user_meta = {k: v for k, v in (user_meta or {}).items()
+                 if k not in {"ingress", "source_user", "source_thread", "source_event_id", "source_digest", "principal"}}
+    accepted_ingress = ingress_record(authenticated_actor, f"dashboard:{session.key}", raw_message.strip())
+    user_meta["ingress"] = accepted_ingress
     request_app = request.get("app", "")
     if request_app:
         if not session._app:
@@ -255,6 +265,9 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
 
         session.natural_voice = normalize_conversation_choice(body.get("natural_voice"))
 
+    if message and session._initiator is None:
+        session._initiator = accepted_ingress["principal"]
+
     if session.running:
         if retry_note_id:
             return web.json_response(
@@ -262,15 +275,20 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
                 status=409,
             )
         if message:
-            _cr = await _maybe_cancel_and_replace(state, session, message)
+            _cr = await _maybe_cancel_and_replace(state, session, message, meta=user_meta)
             if _cr is not None:
                 return _cr
+        from gideon.engine.steering import SteeringText
+
+        steer_text = SteeringText(message, meta=user_meta)
         mode = str(body.get("queue_mode") or _default_mid_turn_mode()).strip().lower()
         if (
             message
             and mode == "steer"
-            and state.sessions.add_steer(_history_key_for(session.key), message)
+            and state.sessions.add_steer(_history_key_for(session.key), steer_text)
         ):
+            session._pending_steers[accepted_ingress["source_event_id"]] = {"id": accepted_ingress["source_event_id"], "content": message, "meta": user_meta}
+            save_session_to_history(state, session, force=True)
             _c, _ = redact_exfiltration_urls(message)
             _c, _ = redact_credentials(_c)
             state.broadcast_ws(
@@ -283,7 +301,8 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
             )
             return web.json_response({"ok": True, "steered": True})
         if message:
-            qid = session.queue_append(message)
+            qid = session.queue_append(message, meta=user_meta)
+            save_session_to_history(state, session, force=True)
             _c, _ = redact_exfiltration_urls(message)
             _c, _ = redact_credentials(_c)
             _redacted = _redact_for_display(_c)
@@ -439,7 +458,7 @@ def _default_mid_turn_mode() -> str:
 
 
 async def _maybe_cancel_and_replace(
-    state: "ConsoleState", session: "_ChatSession", message: str
+    state: "ConsoleState", session: "_ChatSession", message: str, *, meta: dict | None = None
 ) -> "web.Response | None":
     """Cancel-and-replace decision for a follow-up sent mid-turn (PLATFORM-RESILIENCE
     §6.3). Returns a JSON response when it HANDLED the message (cancelled the in-flight
@@ -480,7 +499,8 @@ async def _maybe_cancel_and_replace(
         outcome = await state.sessions.stop_turn(
             _history_key_for(session.key), force=False, preserve_queue=True
         )
-        qid = session.queue_append(message)
+        qid = session.queue_append(message, meta=meta)
+        save_session_to_history(state, session, force=True)
         state.broadcast_ws(
             "chat_done",
             {"session": session.key, **session.stream_cursor(), "superseded": True,
@@ -632,11 +652,11 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
         d.update(_app_origin_fields(getattr(s, "created_by_app", ""), app_destinations))
         link_thread = link_channel = None
         try:
-            link_thread, link_channel = state.sessions.get_channel_link(s.key)
+            link_thread, link_channel = state.sessions.get_channel_link(_history_key_for(s.key))
         except Exception:
             link_thread = link_channel = None
         if link_thread:
-            origin, sid = "channel", (link_channel or "")
+            origin, sid = "channel", state.channel_provider_for(s.key)
         else:
             origin, sid = _origin_of(s.key, getattr(s, "_app", "") or "")
         d["origin"] = origin
@@ -663,7 +683,7 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
             else:
                 name = raw_key
             try:
-                link_thread, link_channel = state.sessions.get_channel_link(name)
+                link_thread, link_channel = state.sessions.get_channel_link(_history_key_for(name))
             except Exception:
                 link_thread = link_channel = None
             if (
@@ -683,7 +703,7 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
                 continue
             seen.add(name)
             if link_thread:
-                origin, sid = "channel", (link_channel or "")
+                origin, sid = "channel", state.channel_provider_for(name)
             else:
                 origin, sid = _origin_of(name, meta.get("app", "") or "")
             row = {
@@ -1571,8 +1591,20 @@ async def api_chat_screen_frame_pin(request: web.Request) -> web.Response:
     _upload_dir().mkdir(parents=True, exist_ok=True)
     safe = re.sub(r"[^\w.\-]", "_", filename)
     dest = _upload_dir() / f"{_uuid.uuid4().hex}_{safe}"
-    dest.write_bytes(raw)
-    os.chmod(dest, 0o600)
+    from gideon.workspace.uploads.content_intake import approve_stream, IntakeRefused
+    async def chunks():
+        yield raw
+    snapshot = None
+    try:
+        snapshot = await approve_stream(chunks(), filename, frame.media_type, surface='screen_frame_pin')
+        await snapshot.persist(dest)
+    except IntakeRefused as exc:
+        sel().log_api_access(caller='dashboard', operation='chat.screen_frame_pin',
+            outcome='denied', source='screen_share', resources=f'session={session.key}', error=exc.code)
+        return exc.response()
+    finally:
+        if snapshot is not None:
+            snapshot.close()
     try:
         get_extractor().start(
             str(dest), frame.media_type or _mt.guess_type(str(dest))[0]
@@ -2626,12 +2658,14 @@ async def api_chat_mode(request: web.Request) -> web.Response:
     if mode in ("trust", "yolo"):
         for session in state._sessions.values():
             for aid, fut in list(session._approval_futures.items()):
-                if not fut.done():
+                pending = state._pending_approvals.get(f"{session.key}:{aid}", {})
+                if not fut.done() and not pending.get("protected_delete"):
                     state.resolve_session_approval(
                         session, aid, "approved", by=principal
                     )
         for aid in list(state._approval_futures):
-            state.resolve_approval(aid, True, by=principal)
+            if not state._pending_approvals.get(aid, {}).get("protected_delete") and not state._pending_approvals.get(aid, {}).get("owner_only"):
+                state.resolve_approval(aid, True, by=principal)
     for session in state._sessions.values():
         policy = "auto" if session._trust or state.is_yolo_active() else ""
         state.sessions.set_approval_policy(f"dashboard:{session.key}", policy)
@@ -2838,6 +2872,9 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
         from gideon.security.guardrails.ladder import approval_screening_verdict
 
         screening = approval_screening_verdict(requested_mode)
+    pending = state._pending_approvals.get(f"{session.key}:{request_id}", {})
+    if requested_mode and pending.get("protected_delete"):
+        return web.json_response({"error": "This protected deletion must be answered for this call only."}, status=403)
     grant_allowed = screening is None or screening.allowed
     if requested_mode:
         from gideon.security.approval_grants import stands
@@ -2849,9 +2886,7 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
             level="hook_based" if requested_mode == "trust_reads" else "auto",
         )
     if action == "trust" and grant_allowed:
-        session._trust = True
-        session._agent_floor_seeded = False
-        state.sessions.set_approval_policy(f"dashboard:{name}", "auto")
+        grant_allowed = state.grant_chat_trust(session, request_id, by=principal)
         action = "approved"
     elif action == "trust_agent" and grant_allowed:
         session._trust = True

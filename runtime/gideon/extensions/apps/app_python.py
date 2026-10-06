@@ -183,8 +183,7 @@ def child_env() -> dict[str, str]:
 
 def child_argv(entry: Path) -> list[str]:
     """How to start an app's Python entry script so it sees the app packages after its own."""
-    child = Path(__file__).resolve().parents[2] / "_app_python_child.py"
-    return [sys.executable, str(child), str(entry)]
+    return [sys.executable, "-m", "gideon._app_python_child", str(entry)]
 
 
 def app_packages_env() -> dict[str, str]:
@@ -564,7 +563,7 @@ def _parseable(declared: Declared) -> list[str]:
 
 
 def _pip_install(target: Declared, others: list[Declared], env: _Env) -> None:
-    from gideon.operations._installer import NoInstallerError, install_argv
+    from gideon.operations._installer import NoInstallerError, prefix_install_argv
 
     requirements = sorted({spec for d in (target, *others) for spec in _parseable(d)})
     here = root()
@@ -575,7 +574,7 @@ def _pip_install(target: Declared, others: list[Declared], env: _Env) -> None:
         constraints = Path(scratch) / "constraints.txt"
         constraints.write_text("\n".join(env.pins()) + "\n", encoding="utf-8")
         try:
-            argv = install_argv(
+            argv = prefix_install_argv(
                 [
                     "--prefix",
                     str(here),

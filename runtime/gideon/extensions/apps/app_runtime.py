@@ -178,6 +178,9 @@ def unload(name: str, manifest: AppManifest | None, *, forget: bool = False) -> 
         get_connection_board().forget(name)
     except ImportError:
         pass
+    from gideon.extensions.apps.code_provenance import release
+
+    release(name)
     root = _app_root(name)
     residue = _evict_modules(name)
     if root is not None:
@@ -235,6 +238,10 @@ def _evict_modules(name: str) -> list[str]:
                 pass
         if not owned:
             continue
+        from gideon.extensions.providers.media_scanners import unregister_module_scanners
+        unregister_module_scanners(module_name)
+        from gideon.integrations.llm.registry import unregister_app_module_types
+        unregister_app_module_types(name, module_name, module)
         sys.modules.pop(module_name, None)
         if path.endswith((".so", ".pyd", ".dll", ".dylib")):
             removed.append(f"a compiled extension from the previous version remains loaded ({Path(path).name})")

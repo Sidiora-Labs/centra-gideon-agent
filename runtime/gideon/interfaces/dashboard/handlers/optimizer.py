@@ -1,5 +1,6 @@
 """Prompt optimizer endpoint — rewrites vague prompts before sending to agent."""
 
+from gideon.core.turn_streams import closing_stream
 import asyncio
 import logging
 
@@ -108,13 +109,14 @@ async def handle_optimize(request: web.Request) -> web.Response:
             logger.debug("Optimizer: session acquired, streaming")
             try:
                 text = ""
-                async for event in client.stream(full_prompt):
-                    if event.kind == EVENT_TEXT_CHUNK:
-                        text += event.text
-                    elif event.kind == EVENT_PERMISSION_REQUEST:
-                        await client.reject_tool(event.request_id)
-                    elif event.kind == EVENT_COMPLETE:
-                        break
+                async with closing_stream(client.stream(full_prompt)) as _turn_events:
+                    async for event in _turn_events:
+                        if event.kind == EVENT_TEXT_CHUNK:
+                            text += event.text
+                        elif event.kind == EVENT_PERMISSION_REQUEST:
+                            await client.reject_tool(event.request_id)
+                        elif event.kind == EVENT_COMPLETE:
+                            break
                 return text
             finally:
                 logger.debug("Optimizer: releasing dedicated session")

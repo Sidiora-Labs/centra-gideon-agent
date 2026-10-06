@@ -1,5 +1,7 @@
 """Core LLM runner — run_chat, segment flushing, prompt expansion."""
 
+from gideon.engine.turn_source import shared_source
+
 import asyncio
 import json
 import logging
@@ -125,6 +127,7 @@ from gideon.security.security import (
     redact_exfiltration_urls,
 )
 from gideon.security.sel import sel
+from gideon.security.guardrails.failure import answer_cut_off
 
 
 def config_dir() -> Path:
@@ -587,7 +590,7 @@ def _emit_question_card(
             opt["description"] = _redact_text(opt["description"])
     state.broadcast_ws(
         "question_card",
-        {"session": session_key, "tool_call_id": tool_call_id, "questions": questions},
+        {"session": session_key, "tool_call_id": tool_call_id, "questions": questions, "answerable": False, "outcome": "unanswerable", "reason": "This runtime did not provide an owner-answer channel."},
     )
 
 
@@ -761,7 +764,7 @@ def _permission_policy_denial(session: _ChatSession, event: Any) -> tuple[str, s
     )
     if reason:
         return reason, "owner_only"
-    reason = task_mode_denies(session, event.title, event.tool_kind, event.tool_input)
+    reason = task_mode_denies(session, event.title, event.tool_kind, event.tool_input, declared=getattr(event, "risk_level", ""))
     return reason, f"task_mode:{getattr(session, '_task_mode', 'agent')}"
 
 
@@ -1872,6 +1875,21 @@ def _tool_result_payload(session_key: str, event: Any, output: str) -> dict[str,
     }
 
 
+def commit_consumed_steering(state: ConsoleState, session: _ChatSession, text, turn_id: str) -> None:
+    """Commit the canonical receipt only after native insertion or ACP acceptance."""
+    meta = dict(text.meta)
+    meta.update({"turn_id": turn_id, "turn_origin": "user", "steering": True})
+    event_id = meta.get("ingress", {}).get("source_event_id", "")
+    if any(row.get("meta", {}).get("ingress", {}).get("source_event_id") == event_id
+           for row in session.messages if event_id):
+        return
+    session.append("user", str(text), "msg msg-u", meta=meta)
+    session._pending_steers.pop(event_id, None)
+    save_session_to_history(state, session, force=True)
+    state.broadcast_ws("chat_user_message", {"session": session.key, "content": str(text),
+                                             "ts": session.messages[-1]["ts"], "meta": meta})
+
+
 async def run_chat(
     state: ConsoleState,
     session: _ChatSession,
@@ -2202,6 +2220,7 @@ async def run_chat(
         return
 
     _acquired = False
+    _work_credential = None
     _mirror_stream_ts: str = ""
     _mirror_chan: str | None = ""
     _mirror_tasks: dict[str, tuple[str, str]] = {}
@@ -2209,6 +2228,7 @@ async def run_chat(
     _mirror_task_counter = 0
     _mirror_delivery: Any = None
     _turn_tool_call_count = 0
+    _turn_had_calls = False
 
     async def _update_mirrored_task(
         call_id: str, status: ChannelTaskStatus
@@ -2231,6 +2251,16 @@ async def run_chat(
             _mirror_tasks.pop(call_id, None)
 
     try:
+        from gideon.security.session_credentials import begin_turn, publish_pid
+        from gideon.security.approval_answer import principal_from_record
+        _work_ingress = _origin_meta.get("replay_ingress") or _origin_meta.get("ingress") or {}
+        _work_credential = begin_turn(
+            session_key, principal_from_record(_work_ingress.get("principal")),
+            turn_id=_turn_id, created_by_app=session.created_by_app,
+            memory_mode=session.memory_mode,
+            ingress_event_id=str(_work_ingress.get("source_event_id") or ""),
+            ingress_digest=str(_work_ingress.get("source_digest") or ""),
+        )
         provider_agent: str | None = None
         memory_store: str | None = None
         agent_system_prompt: str = ""
@@ -2295,20 +2325,24 @@ async def run_chat(
             {"session": session.key, "kind": "status", "text": "Creating session…"},
         )
         session.model = _normalize_model(session.model or "") or ""
-        client, is_new, resumed = await state.sessions.get_or_create(
-            session_key,
-            agent=provider_agent or session.agent or None,
-            model=session.model or None,
-            cwd=session.workspace_dir or None,
-            reasoning_effort_override=session.reasoning_effort or None,
-            provider_kind=provider_kind or None,
-            acp_mode=acp_mode or None,
-            extra_tool_roots=list(getattr(session, "_extra_tool_roots", []) or [])
-            or None,
-            unattended=_unattended_turn,
-            project_id=getattr(session, "project_id", "") or "",
-            model_axis="loops" if getattr(session, "_app", "") == "loop" else "",
-        )
+        from gideon.security.execution_lineage import host_runtime_admission
+        from gideon.security.session_credentials import bind_execution
+        with host_runtime_admission(_work_credential):
+            client, is_new, resumed = await state.sessions.get_or_create(
+                session_key,
+                agent=provider_agent or session.agent or None,
+                model=session.model or None,
+                cwd=session.workspace_dir or None,
+                reasoning_effort_override=session.reasoning_effort or None,
+                provider_kind=provider_kind or None,
+                acp_mode=acp_mode or None,
+                extra_tool_roots=list(getattr(session, "_extra_tool_roots", []) or [])
+                or None,
+                unattended=_unattended_turn,
+                project_id=getattr(session, "project_id", "") or "",
+                model_axis="loops" if getattr(session, "_app", "") == "loop" else "",
+            )
+        bind_execution(_work_credential, client)
         _acquired = True
         try:
             from gideon.operations.resilience.active_jobs import get_tracker
@@ -2376,6 +2410,7 @@ async def run_chat(
         try:
             pid = state.sessions.get_pid(session_key)
             if isinstance(pid, int):
+                publish_pid(session_key, pid)
                 (config_dir() / f"session_pid_{pid}.txt").write_text(
                     session_key, encoding="utf-8"
                 )
@@ -2714,13 +2749,24 @@ async def run_chat(
         if regenerate_hint:
             full_message = f"[System: {regenerate_hint}]\n\n{full_message}"
 
+        def _consume_steering(text):
+            commit_consumed_steering(state, session, text, _turn_id)
+
+        def _pull_steering():
+            from gideon.engine.steering import SteeringText
+            pending = state.sessions.drain_steers(session_key)
+            for text in pending:
+                if isinstance(text, SteeringText):
+                    text.on_consumed = _consume_steering
+            return pending
+
         # NOTE the key: ConversationDirectory registers under the NAMESPACED `session_key`
         _steerable = False
         if hasattr(client, "set_steer_source"):
             try:
                 _steerable = bool(
                     client.set_steer_source(
-                        lambda: state.sessions.drain_steers(session_key)
+                        _pull_steering
                     )
                 )
             except Exception:
@@ -2827,6 +2873,11 @@ async def run_chat(
         if _prov_id.startswith("acp:"):
             _acp_cli = _prov_id[4:]
         async for event in event_stream:
+            if event.kind in {"tool_call", "tool_result"}:
+                _turn_had_calls = True
+            if event.kind == "carried_on":
+                session.append("system", event.text, "msg msg-system", meta={"turn_id": _turn_id})
+                continue
             if time.time() - last_heartbeat > 5:
                 state.broadcast_ws(
                     "heartbeat", {"session": session.key, "ts": time.time()}
@@ -3464,6 +3515,8 @@ async def run_chat(
                         continue
                     _pre_tool_hooks_fired = True
                 cmd = shell_command(event.title, event.tool_kind, event.tool_input)
+                from gideon.security.protected_folders import call_protected_delete, provider_working_folder, sentence as protected_sentence
+                protected = call_protected_delete(getattr(event, "risk_level", ""), event.title, event.tool_kind, event.tool_input, cwd=provider_working_folder(client))
                 app_origin = bool(getattr(session, "created_by_app", ""))
                 yolo_active = state.is_yolo_active() and not app_origin
                 from gideon.security import approval_grants
@@ -3491,11 +3544,13 @@ async def run_chat(
                 yolo_active = yolo_active and approval_grants.stands(
                     approval_grants.YOLO, caller=session_key, subject=event.title
                 )
+                if protected:
+                    agent_auto = agent_reads = trust_reads = trusted = yolo_active = False
                 posture = profile_for_session(
                     session_key, unattended=_unattended_turn
                 )
                 tool_denial = tool_grant_denial(
-                    event.title, posture.tool_grants, posture.tool_allowlist
+                    event.title, posture.tool_grants, posture.tool_allowlist, declared=getattr(event, "risk_level", ""), tool_kind=event.tool_kind, tool_input=event.tool_input
                 )
                 if tool_denial:
                     await client.reject_tool(event.request_id)
@@ -3507,6 +3562,15 @@ async def run_chat(
                         metadata={"decided_by": "tool_grant"},
                     )
                     continue
+                from gideon.integrations.acp.mcp_servers import core_tool_work_asks
+                if not protected and core_tool_work_asks(event.title, event.tool_kind, event.tool_input):
+                    await client.approve_tool(event.request_id)
+                    sel().log_tool_invocation(
+                        session_key=session_key, agent=_agent_label(session), source="dashboard",
+                        tool_name=event.title, tool_kind=event.tool_kind, outcome="auto_approved",
+                        request_id=event.request_id, metadata={"decided_by": "work_asks"},
+                    )
+                    continue
                 effective_risk = resolve_effective_risk(
                     getattr(event, "risk_level", "") or "",
                     event.title,
@@ -3514,7 +3578,8 @@ async def run_chat(
                     event.tool_input,
                 )
                 if (
-                    (trust_reads or agent_reads)
+                    not protected
+                    and (trust_reads or agent_reads)
                     and not trusted
                     and not agent_auto
                     and not yolo_active
@@ -3731,7 +3796,12 @@ async def run_chat(
                         },
                     )
                     continue
+                from gideon.security.approval_brief import compose_approval_brief
+                approval_brief = compose_approval_brief(event) or {}
                 perm_meta = {
+                    "blast_radius": approval_brief.get("blastRadius"),
+                    "deny_consequence": approval_brief.get("denyConsequence"),
+                    "protected_delete": protected_sentence(protected),
                     "request_id": str(event.request_id),
                     "tool_call_id": event.tool_call_id or "",
                     "turn_id": _turn_id,
@@ -3748,17 +3818,15 @@ async def run_chat(
                         or ""
                     ),
                 ).label
-                if event.tool_input:
-                    input_text = tool_input_to_str(event.tool_input)
-                    sanitized, _ = redact_exfiltration_urls(input_text)
-                    sanitized, _ = redact_credentials(sanitized)
-                    perm_meta["tool_input"] = sanitized
+                if approval_brief.get("input"):
+                    perm_meta["tool_input"] = approval_brief["input"]
+                perm_meta["purpose"] = approval_brief.get("purpose", "")
                 if cmd:
                     perm_meta["is_read_only"] = "1" if is_read_only_bash(cmd) else ""
                 perm_meta["risk"] = effective_risk
                 session.append(
                     "permission",
-                    event.title,
+                    approval_brief.get("tool", event.title),
                     json.dumps(perm_meta),
                 )
                 state.broadcast_ws(
@@ -3766,12 +3834,14 @@ async def run_chat(
                     {
                         "session": session.key,
                         "id": str(event.request_id),
-                        "tool": event.title,
+                        "tool": approval_brief.get("tool", event.title),
                         "tool_input": perm_meta.get("tool_input", ""),
-                        "tool_purpose": event.tool_purpose or "",
+                        "tool_purpose": approval_brief.get("purpose", ""),
                         "tool_kind": event.tool_kind or "",
                         "turn_id": _turn_id,
                         "risk": effective_risk,
+                        "blast_radius": perm_meta.get("blast_radius"),
+                        "protected_delete": perm_meta.get("protected_delete", ""),
                         "can_revise": perm_meta["can_revise"],
                         "_call_fingerprint": _call_fingerprint,
                         "_auto_denied_note_id": _retry_note_id,
@@ -4166,7 +4236,7 @@ async def run_chat(
                     {"session": session.key, "role": "error", "content": msg},
                 )
 
-            if _prompt_depth == 0:
+            if _prompt_depth == 0 and not _turn_had_calls:
                 if session._acp_pipe_death_retries < 3:
                     session._acp_pipe_death_retries += 1
                     session.queue_insert(0, message)
@@ -4413,7 +4483,7 @@ async def run_chat(
             {"session": session.key, "role": "error", "content": reset_notice},
         )
         session._last_turn_errored = True
-        if _prompt_depth == 0:
+        if _prompt_depth == 0 and not _turn_had_calls:
             session._acp_pipe_death_retries += 1
             if session._acp_pipe_death_retries <= 3:
                 session.queue_insert(0, message)
@@ -4455,7 +4525,7 @@ async def run_chat(
             or "process exited" in _msg
             or "not running" in _msg
         )
-        if _retry_eligible and _prompt_depth == 0:
+        if _retry_eligible and _prompt_depth == 0 and not _turn_had_calls:
             logger.info(
                 "ACP transient (%s) in session %s — resetting session and re-queuing",
                 _msg[:80],
@@ -4496,14 +4566,41 @@ async def run_chat(
         logger.exception("Dashboard chat error in session %s", session.key)
         from gideon.engine.agents.native.failover import NoModelAnswered
 
-        error_text = str(exc) if isinstance(exc, NoModelAnswered) else humanize_provider_error(exc)
+        cut_off = answer_cut_off(exc)
+        if cut_off is not None and assistant_text:
+            _flush_segment(state, session, assistant_text, broadcast=False, turn_id=_turn_id)
+        if cut_off is not None:
+            for row in session.messages:
+                if row.get("role") == "assistant" and (row.get("meta") or {}).get("turn_id") == _turn_id:
+                    row["meta"]["finish_reason"] = "cut_off"
+        error_text = (
+            cut_off.sentence() if cut_off is not None
+            else str(exc) if isinstance(exc, NoModelAnswered)
+            else humanize_provider_error(exc)
+        )
         _err_text, _ = redact_exfiltration_urls(error_text)
         _err_text, _ = redact_credentials(_err_text)
-        session.append("error", _err_text, "msg msg-err")
+        error_meta = {"turn_id": _turn_id, **cut_off.chat_meta()} if cut_off is not None else None
+        session.append("error", _err_text, "msg msg-err", meta=error_meta, broadcast=cut_off is None)
+        if cut_off is not None:
+            state.broadcast_ws(
+                "chat_message",
+                {"session": session.key, "role": "error", "content": _err_text, "turn_id": _turn_id, "meta": error_meta},
+            )
         session._last_turn_errored = True
         await _fire(HOOK_EVENT_ERROR, _err_text)
         await state.sessions.record_failure(session_key)
     finally:
+        _owned_stream = locals().get("event_stream")
+        if _owned_stream is not None:
+            _close = getattr(_owned_stream, "aclose", None)
+            if callable(_close):
+                await _close()
+        from gideon.security.session_credentials import end_turn
+        try:
+            state.owner_questions.end_turn(session.key)
+        finally:
+            end_turn(_work_credential)
         session._batch_rejected = False
         try:
             from gideon.operations.resilience.active_jobs import get_tracker
@@ -4552,7 +4649,10 @@ async def run_chat(
                     logger.debug("undelivered steer read failed", exc_info=True)
             for _text in _stranded:
                 try:
-                    _qid = session.queue_append(_text)
+                    _meta = getattr(_text, "meta", None)
+                    if _meta:
+                        session._pending_steers.pop(_meta.get("ingress", {}).get("source_event_id", ""), None)
+                    _qid = session.queue_append(str(_text), meta=_meta)
                 except Exception:
                     logger.warning(
                         "failed to requeue an undelivered steer", exc_info=True
@@ -4625,6 +4725,9 @@ async def run_chat(
                 "subagent" if is_subagent else "inject" if is_cron else "user",
                 next_msg,
                 json.dumps({"cronLabel": cron_label}) if is_cron else "msg msg-u",
+                meta={**(consumed[0].get("meta") or {}),
+                      **({"merged_ingress": [item.get("meta", {}).get("ingress") for item in consumed]} if len(consumed) > 1 else {})},
+                source=shared_source(consumed),
             )
             if not is_cron and not is_subagent:
                 _disp, _ = redact_exfiltration_urls(next_msg)

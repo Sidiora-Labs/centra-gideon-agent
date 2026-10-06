@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Bookmark, Download, ExternalLink, Maximize2, Minimize2, Pin, SlidersHorizontal } from 'lucide-react'
 import { useMode } from '../../../app/shell/theme'

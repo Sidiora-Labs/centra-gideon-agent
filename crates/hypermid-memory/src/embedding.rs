@@ -120,7 +120,8 @@ pub fn registration_fingerprint(
     Digest::from_bytes(Sha256::digest(material.as_bytes()).into())
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderEmbedding {
     pub provider_identity: String,
     pub model_id: String,
@@ -195,7 +196,8 @@ pub fn validate_provider_embedding(
     })
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PublicationGuard {
     pub record_id: Id,
     pub revision_digest: Digest,

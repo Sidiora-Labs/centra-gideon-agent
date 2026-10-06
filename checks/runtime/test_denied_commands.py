@@ -44,7 +44,7 @@ class TestBuiltinDenylist:
 
     def test_reason_is_the_matched_pattern(self):
         reason = security.denied_command_reason("rm -rf /")
-        assert reason and "rm -rf" in reason
+        assert reason and "protected_delete" in reason
 
     def test_builtins_are_nonempty_and_valid_regexes(self):
         import re

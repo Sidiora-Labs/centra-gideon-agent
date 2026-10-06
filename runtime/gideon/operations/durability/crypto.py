@@ -420,6 +420,13 @@ def encryption_enabled_for(transport_name: str, setting: str) -> bool:
     return DEFAULT_ENCRYPT_UNKNOWN_TRANSPORT
 
 
+def passphrase_stored() -> bool:
+    """Report credential presence without loading or exposing its value."""
+    from gideon.core.config.credentials import credential_names
+
+    return PASSPHRASE_CREDENTIAL in credential_names()
+
+
 def load_passphrase() -> str:
     """The sync passphrase from the credential store. ``""`` when none is stored.
 

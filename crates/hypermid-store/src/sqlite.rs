@@ -41,6 +41,7 @@ impl SQLiteStore {
             return Err(StoreError::StaleFence);
         }
         let path = path.as_ref().to_path_buf();
+        guard_store_paths(&path)?;
         prepare_parent(&path)?;
         if let Ok(metadata) = fs::symlink_metadata(&path) {
             if !metadata.file_type().is_file() {
@@ -49,6 +50,8 @@ impl SQLiteStore {
         }
         let lease_path = lease_path(&path);
         let lease = LocalLease::acquire(&lease_path, lease_key)?;
+        prepare_store_file(&path)?;
+        tighten_store_files(&path)?;
         let mut connection = Connection::open(&path)?;
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -232,6 +235,41 @@ fn lease_path(path: &Path) -> PathBuf {
     PathBuf::from(value)
 }
 
+fn store_paths(path: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![path.to_path_buf(), lease_path(path)];
+    for suffix in ["-journal", "-wal", "-shm"] {
+        let mut value = path.as_os_str().to_os_string();
+        value.push(suffix);
+        paths.push(PathBuf::from(value));
+    }
+    paths
+}
+
+fn guard_store_paths(path: &Path) -> Result<(), StoreError> {
+    for ancestor in path.ancestors().skip(1) {
+        match fs::symlink_metadata(ancestor) {
+            Ok(info) if !info.is_dir() => return Err(StoreError::NotRegular(ancestor.into())),
+            Ok(_) => {},
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            Err(error) => return Err(error.into()),
+        }
+    }
+    for candidate in store_paths(path) {
+        match fs::symlink_metadata(&candidate) {
+            Ok(info) => {
+                if !info.is_file() { return Err(StoreError::NotRegular(candidate)); }
+                #[cfg(unix)] {
+                    use std::os::unix::fs::MetadataExt;
+                    if info.nlink() != 1 { return Err(StoreError::NotRegular(candidate)); }
+                }
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
 fn prepare_parent(path: &Path) -> Result<(), StoreError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -244,18 +282,44 @@ fn prepare_parent(path: &Path) -> Result<(), StoreError> {
     Ok(())
 }
 
-fn tighten_store_files(path: &Path) -> Result<(), StoreError> {
+fn prepare_store_file(path: &Path) -> Result<(), StoreError> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        for candidate in [
-            path.to_path_buf(),
-            PathBuf::from(format!("{}-wal", path.display())),
-            PathBuf::from(format!("{}-shm", path.display())),
-        ] {
-            if candidate.exists() {
-                fs::set_permissions(candidate, fs::Permissions::from_mode(0o600))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    match options.open(path) {
+        Ok(file) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                file.set_permissions(fs::Permissions::from_mode(0o600))?;
             }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
+}
+
+fn tighten_store_files(path: &Path) -> Result<(), StoreError> {
+    guard_store_paths(path)?;
+    #[cfg(unix)] {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        for candidate in store_paths(path).into_iter().filter(|candidate| *candidate != lease_path(path)) {
+            let before = match fs::symlink_metadata(&candidate) {
+                Ok(info) => info,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            let file = fs::File::open(&candidate)?;
+            let opened = file.metadata()?;
+            if !opened.is_file() || opened.nlink() != 1 || opened.dev() != before.dev() || opened.ino() != before.ino() {
+                return Err(StoreError::NotRegular(candidate));
+            }
+            file.set_permissions(fs::Permissions::from_mode(0o600))?;
         }
     }
     Ok(())
@@ -264,6 +328,53 @@ fn tighten_store_files(path: &Path) -> Result<(), StoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn linked_store_paths_are_refused_before_mode_changes() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        for suffix in ["", "-journal", "-wal", "-shm", ".lease"] {
+            let folder = tempfile::tempdir().unwrap();
+            let outside = folder.path().join("outside");
+            fs::write(&outside, b"unchanged").unwrap();
+            fs::set_permissions(&outside, fs::Permissions::from_mode(0o644)).unwrap();
+            let parent = folder.path().join("home");
+            fs::create_dir(&parent).unwrap();
+            fs::set_permissions(&parent, fs::Permissions::from_mode(0o755)).unwrap();
+            let path = parent.join("store.db");
+            fs::hard_link(&outside, PathBuf::from(format!("{}{suffix}", path.display()))).unwrap();
+            assert!(SQLiteStore::open(&path, key(), 2, &migrations()).is_err());
+            assert_eq!(fs::read(&outside).unwrap(), b"unchanged");
+            assert_eq!(fs::metadata(&outside).unwrap().permissions().mode() & 0o777, 0o644);
+            assert_eq!(fs::metadata(&parent).unwrap().permissions().mode() & 0o777, 0o755);
+        }
+        let folder = tempfile::tempdir().unwrap();
+        let outside = folder.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        symlink(&outside, folder.path().join("linked")).unwrap();
+        assert!(SQLiteStore::open(folder.path().join("linked/new/store.db"), key(), 2, &migrations()).is_err());
+        assert!(!outside.join("new").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn database_is_private_before_sqlite_writes() {
+        use std::os::unix::fs::PermissionsExt;
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("private").join("store.db");
+        prepare_parent(&path).unwrap();
+        prepare_store_file(&path).unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().len(), 0);
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        let store = SQLiteStore::open(&path, key(), 2, &migrations()).unwrap();
+        assert!(store.status().is_writable());
+        for suffix in ["", "-wal", "-shm"] {
+            let file = PathBuf::from(format!("{}{suffix}", path.display()));
+            if file.exists() {
+                assert_eq!(fs::metadata(file).unwrap().permissions().mode() & 0o777, 0o600);
+            }
+        }
+    }
 
     fn key() -> LeaseKey {
         LeaseKey {

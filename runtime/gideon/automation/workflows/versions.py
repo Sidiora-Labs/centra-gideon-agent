@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from gideon.security.safety_flags import yes_or_no
+
 import json
 import logging
 from dataclasses import dataclass, field
@@ -41,6 +43,7 @@ class VersionRecord:
     ops: list[dict[str, Any]] = field(default_factory=list)
     run_ids: list[str] = field(default_factory=list)
     note: str = ""
+    owner_calls: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -53,6 +56,7 @@ class VersionRecord:
                 "ops",
                 "run_ids",
                 "note",
+                "owner_calls",
             )
         }
 
@@ -74,6 +78,7 @@ class VersionRecord:
             if isinstance(operation, dict)
         ]
         fields["run_ids"] = list(map(str, d.get("run_ids") or []))
+        fields["owner_calls"] = d.get("owner_calls") if isinstance(d.get("owner_calls"), dict) else None
         return cls(**fields)
 
 
@@ -114,7 +119,7 @@ class VersionJournal:
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write(path, json.dumps(document, indent=2, ensure_ascii=False))
 
-    def append(self, spec, source, ops, run_ids, note) -> int:
+    def append(self, spec, source, ops, run_ids, note, owner_calls=None) -> int:
         if not valid_name(self.name):
             raise ValueError(f"{self.name!r} is not a valid definition name")
         requested = int(spec.get("version", 0) or 0)
@@ -133,6 +138,7 @@ class VersionJournal:
                 ],
                 run_ids=list(map(str, run_ids or [])),
                 note=note,
+                owner_calls=owner_calls,
             )
             self.write(target, record.to_dict())
         _write_pin(self.name, number)
@@ -168,8 +174,9 @@ def record_version(
     ops: list[dict[str, Any]] | None = None,
     run_ids: list[str] | None = None,
     note: str = "",
+    owner_calls: dict[str, Any] | None = None,
 ) -> int:
-    return VersionJournal(name).append(spec, source, ops, run_ids, note)
+    return VersionJournal(name).append(spec, source, ops, run_ids, note, owner_calls)
 
 
 def get_version(name: str, version: int) -> VersionRecord | None:
@@ -296,7 +303,7 @@ def _static_signals(spec: dict[str, Any]) -> dict[str, bool]:
     signals = {
         "has_gate_or_judge": any(
             node["kind"] in ("gate", "judge")
-            or bool((node["config"] or {}).get("judge_contract"))
+            or yes_or_no((node["config"] or {}).get("judge_contract")) is True
             for node in nodes.values()
         )
     }

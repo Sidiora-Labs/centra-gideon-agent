@@ -211,6 +211,29 @@ def needs_arming(trigger: Any) -> bool:
     return not str(getattr(trigger, "next_fire_at", "") or "").strip()
 
 
+def cadence_fingerprint(spec: dict[str, Any]) -> dict[str, Any]:
+    """Normalize absent optional cadence fields without hiding schedule changes."""
+    result = {key: value for key, value in spec.items()
+              if value is not None and value != "" and value != []}
+    # Native arming applies jitter here, so strict changes the slot only with jitter.
+    if _positive(spec.get("jitter_secs")) <= 0:
+        result.pop("strict", None)
+    elif not bool(result.get("strict")):
+        result.pop("strict", None)
+    return result
+
+
+def next_fire_after_edit(before: Any, after: Any) -> str | None:
+    """Rearm changed schedules or resumed inert clocks; keep existing slots otherwise."""
+    if getattr(before, "kind", "") != getattr(after, "kind", "") or cadence_fingerprint(
+        _mapping(before, "spec")
+    ) != cadence_fingerprint(_mapping(after, "spec")):
+        return arm(after)
+    if needs_arming(after):
+        return arm(after)
+    return None
+
+
 def _min_cron_gap_secs(expr: str) -> float:
     from croniter import croniter
 

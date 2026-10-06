@@ -28,6 +28,8 @@ and re-run the expensive half of the graph for nothing.
 
 from __future__ import annotations
 
+from gideon.security.safety_flags import yes_or_no
+
 import copy
 import logging
 from dataclasses import dataclass, field
@@ -170,8 +172,8 @@ class Op:
             fields=normalize_fields(raw.get("fields") or {}),
             node=raw.get("node") if isinstance(raw.get("node"), dict) else None,
             overrides=dict(raw.get("overrides") or raw.get("inputs") or {}),
-            redo_effects=bool(raw.get("redo_effects", False)),
-            force=bool(raw.get("force", False)),
+            redo_effects=yes_or_no(raw.get("redo_effects")) is True,
+            force=yes_or_no(raw.get("force")) is True,
             note=str(raw.get("note", "") or ""),
             checkpoint_id=str(raw.get("checkpoint_id", "") or ""),
             raw=raw,

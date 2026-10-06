@@ -488,14 +488,37 @@ class RunController:
         """Cancel the loop and every in-flight node. Does NOT write a terminal status:
         a stop is a process-lifecycle event, and a gateway shutdown must leave the run
         resumable rather than falsely marked failed."""
-        for entry in list(self._inflight.values()):
+        if self._task is not None:
+            home = self._task.get_loop()
+            if home.is_running() and home is not asyncio.get_running_loop():
+                await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self.stop(), home))
+                return
+        entries = list(self._inflight.values())
+        for entry in entries:
             entry.task.cancel()
+        if entries:
+            await asyncio.gather(*(entry.task for entry in entries), return_exceptions=True)
         self._inflight.clear()
         if self._task and not self._task.done():
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
         self._task = None
+
+    @property
+    def dead(self) -> bool:
+        task = self._task
+        if task is None:
+            return False
+        return task.get_loop().is_closed() or (task.cancelled() and self.run.status == RunStatus.RUNNING)
+
+    def let_go(self) -> None:
+        """Withdraw task ownership before another controller adopts the durable run."""
+        for entry in list(self._inflight.values()):
+            loop = entry.task.get_loop()
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(entry.task.cancel)
+        self._inflight.clear()
 
     def request_cancel(self) -> None:
         """Record a STICKY cancel intent. Sticky because a cancel issued while the
@@ -557,10 +580,26 @@ class RunController:
         terminal status. The tick loop stops rather than scheduling into a workspace that could
         not be honored.
         """
+        from gideon.automation.workflows import private_work
+        try:
+            await private_work.validate_run(getattr(self.services, "supervisor", None), self.run)
+        except Exception as error:
+            await self._finish(RunStatus.CANCELLED, error=str(error)[:500])
+            return False
         resumed = bool(self.run.started_at)
         totals = journal_mod.run_totals(self.run.id)
         self._restore_recorded_tokens(totals)
         self._rehydrate_context()
+        if resumed:
+            lost = []
+            for path, inst in self.instances.items():
+                if inst.state == InstanceState.RUNNING and not inst.subagent_id and path not in self._inflight:
+                    inst.state = InstanceState.PENDING
+                    inst.started_at = None
+                    inst.attempt = max(0, inst.attempt - 1)
+                    lost.append(path)
+            if lost:
+                self._persist_state()
         if resumed and self._round_configs():
             from gideon.automation.workflows.round_protocol import completed_iterations
 
@@ -2978,6 +3017,12 @@ class RunController:
         is all the check needs.
         """
         if self._worker_model_cache is None:
+            from gideon.security.execution_lineage import run_model
+            original_model = run_model(self.run)
+            from gideon.automation.workflows import ownership
+            if ownership.run_mode(self.run) is not ownership.MemoryMode.NORMAL:
+                self._worker_model_cache = original_model
+                return original_model
             worker_uc = self.services.model_tiers.get(
                 "standard", DEFAULT_MODEL_TIERS["standard"]
             )
@@ -4763,7 +4808,28 @@ class RunController:
 
     async def _cancel_inflight(self) -> None:
         self._reconcile_dispatched_stages()
+        for path, entry in list(self._inflight.items()):
+            if entry.task.done() and not entry.task.cancelled():
+                self._inflight.pop(path, None)
+                try:
+                    self._apply(entry, entry.task.result())
+                except Exception:
+                    logger.debug("completed node could not settle before cancellation", exc_info=True)
+        self._reconcile_dispatched_stages()
         await self._stop_run_workers("workflow workers could not be stopped")
+        captured = {snapshot.path for snapshot in self._cancel_usage_snapshot}
+        nodes = dict(_walk(self.root))
+        manager_get = getattr(self.services.subagents, "get", None)
+        for path, inst in self.instances.items():
+            if path in captured or inst.state != InstanceState.RUNNING or not inst.subagent_id:
+                continue
+            try:
+                info = manager_get(inst.subagent_id) if callable(manager_get) else None
+            except Exception:
+                info = None
+            usage = subagent_usage(info) if info is not None and getattr(info, "done", False) else NOT_RECORDED
+            node = nodes.get(spec_path(path))
+            self._cancel_usage_snapshot.append(_CancelledAttemptSnapshot(path, node.id if node else "", inst.epoch, inst.attempt, usage))
         entries = list(self._inflight.values())
         for entry in entries:
             entry.task.cancel()
@@ -4780,6 +4846,22 @@ class RunController:
                 inst.completed_at = _now()
                 inst.subagent_id = ""
         self._inflight.clear()
+        snapshots = {snapshot.path: snapshot for snapshot in self._cancel_usage_snapshot}
+        for entry in entries:
+            path = entry.ready.path
+            inst = self._instance(path)
+            if inst.state != InstanceState.CANCELLED:
+                continue
+            snapshot = snapshots.pop(path, None)
+            usage = snapshot.usage if snapshot is not None else measured(entry.calls)
+            self.journal.step_cancelled(path, entry.ready.node.id, epoch=inst.epoch, attempt=inst.attempt, usage=usage)
+            inst.tokens = usage.billable()
+        for snapshot in snapshots.values():
+            inst = self.instances.get(snapshot.path)
+            if inst is not None and inst.state == InstanceState.CANCELLED:
+                self.journal.step_cancelled(snapshot.path, snapshot.node_id, epoch=snapshot.epoch, attempt=snapshot.attempt, usage=snapshot.usage)
+                inst.tokens = snapshot.usage.billable()
+        self._cancel_usage_snapshot.clear()
         self._persist_state()
 
     async def _pause_inflight(self) -> None:

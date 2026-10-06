@@ -10,6 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import tempfile
+import csv
+import re
+from urllib.parse import quote
+from pathlib import Path
+
+from gideon.core.atomic_write import atomic_write_bytes
 from typing import Any
 
 from aiohttp import web
@@ -35,6 +42,7 @@ from gideon.workspace.artifacts.build import (
 from gideon.workspace.artifacts.deploy import (
     DEPLOYABLE_KINDS,
     SERVE_HEADERS,
+    SERVED_FILE_HEADERS,
     SERVE_URL_PREFIX,
     ArtifactDeployStore,
     content_type_for,
@@ -483,9 +491,41 @@ async def api_artifact_delete(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid slug"}, status=400)
     if not deleted:
         return web.json_response({"error": "not found"}, status=404)
-    _deploy_store(prov).teardown(slug)
     _audit(request, "artifact.delete", "ok", f"slug={slug}")
     return web.json_response({"ok": True})
+
+
+async def api_artifact_csv_export(request: web.Request) -> web.Response:
+    """Authenticated derived CSV download, including untouched historical/source text."""
+    from gideon.workspace.documents.writers.csv_writer import render_csv_text
+    prov = _provider(request)
+    if prov is None:
+        return web.json_response({"error": "unknown provider"}, status=400)
+    version = None
+    try:
+        if "version" in request.query:
+            version = int(request.query["version"])
+            if version < 1:
+                raise ValueError("invalid version")
+        art = prov.get(request.match_info["slug"], version=version)
+    except ValueError:
+        return web.json_response({"error": "invalid slug or version"}, status=400)
+    if art is None:
+        return web.json_response({"error": "not found"}, status=404)
+    if art.kind != "csv":
+        return web.json_response({"error": "this export is only for CSV artifacts"}, status=400)
+    try:
+        text = render_csv_text(_redact(art.content or ""))
+    except csv.Error as exc:
+        return web.json_response({"error": f"could not read the csv text: {exc}"}, status=422)
+    filename = re.sub(r'[\s/\\:*?"<>|\x00-\x1f]+', '-', art.name.strip()).strip('-') or art.slug
+    suffix = "" if version is None else f"-v{version}"
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename + suffix + '.csv', safe='')}",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    return web.Response(body=text.encode("utf-8"), content_type="text/csv", charset="utf-8", headers=headers)
 
 
 async def api_artifact_raw(request: web.Request) -> web.Response:
@@ -634,7 +674,7 @@ def _writable_provider(request: web.Request) -> tuple[Any, web.Response | None]:
     return prov, None
 
 
-def _store_binary(
+async def _store_binary(
     request: web.Request,
     prov: Any,
     art: Artifact,
@@ -650,6 +690,22 @@ def _store_binary(
     state to hold back: there is no silent-save mode to offer, and the version it bumps
     is what makes a lossy edit revertible (§C5) rather than destructive.
     """
+    if operation == 'artifact.raw_write':
+        from gideon.workspace.uploads.content_intake import approve_stream, IntakeRefused
+        async def chunks():
+            yield data
+        snapshot = None
+        try:
+            snapshot = await approve_stream(chunks(), art.slug + '.bin', mime,
+                                            surface='artifact_binary')
+            from gideon.cognition.knowledge.file_items import _owned_io
+            data = await _owned_io(snapshot.read_bytes)
+        except IntakeRefused as exc:
+            _audit(request, operation, 'denied', f'slug={art.slug} {exc.code}')
+            return exc.response()
+        finally:
+            if snapshot is not None:
+                snapshot.close()
     try:
         updated = prov.update_binary(
             art.slug,
@@ -745,7 +801,7 @@ async def api_artifact_raw_write(request: web.Request) -> web.Response:
             status=413,
             error_extra={"cap_bytes": MAX_BINARY_CONTENT_BYTES},
         )
-    return _store_binary(
+    return await _store_binary(
         request,
         prov,
         art,
@@ -997,7 +1053,7 @@ async def api_artifact_model_write(request: web.Request) -> web.Response:
             status=413,
             error_extra={"cap_bytes": MAX_BINARY_CONTENT_BYTES},
         )
-    return _store_binary(
+    return await _store_binary(
         request,
         prov,
         art,
@@ -1464,7 +1520,7 @@ async def api_artifacts_deployed(request: web.Request) -> web.Response:
     if prov is None:
         return web.json_response({"error": "unknown provider"}, status=400)
     return web.json_response(
-        {"deployments": [d.to_dict() for d in _deploy_store(prov).list()]}
+        {"deployments": [d.to_public() for d in _deploy_store(prov).list()]}
     )
 
 
@@ -1506,16 +1562,19 @@ async def api_artifact_deploy(request: web.Request) -> web.Response:
     if not isinstance(body, dict):
         body = {}
     store = _deploy_store(prov)
+    observed = (art.created_at, art.version, art.updated_at, art.content, art.source_path)
     entry = str(body.get("entry") or "")
     build: BuildResult | None = None
+    built_files: dict[str, bytes] = {}
     if needs_build(art.kind):
         try:
-            build = await build_react_artifact(
-                slug=slug,
-                source=art.content or "",
-                files_root=store.files_root(slug),
-                title=art.name or slug,
-            )
+            with tempfile.TemporaryDirectory(prefix="gideon-artifact-build-") as directory:
+                staging = Path(directory)
+                build = await build_react_artifact(
+                    slug=slug, source=art.content or "", files_root=staging,
+                    title=art.name or slug,
+                )
+                built_files = {name: (staging / name).read_bytes() for name in build.files}
         except ArtifactBuildError as exc:
             _audit(request, "artifact.deploy", "denied", f"slug={slug} build_failed")
             return json_error("artifact_build_failed", message=str(exc), status=422)
@@ -1524,12 +1583,29 @@ async def api_artifact_deploy(request: web.Request) -> web.Response:
             return json_error("artifact_slug_invalid", message=str(exc), status=400)
         entry = build.entry
     try:
-        dep = store.deploy(slug, entry=entry)
+        with prov.mutation_lock:
+            current = prov.get(slug)
+            if current is None or (current.created_at, current.version, current.updated_at, current.content, current.source_path) != observed:
+                return web.json_response({"error": "artifact changed; reload before deploying"}, status=409)
+            if build is not None:
+                destination = store.files_root(slug)
+                if destination.is_symlink() or not destination.resolve().is_relative_to(prov.root.resolve()):
+                    raise ValueError("unsafe build destination")
+                destination.mkdir(parents=True, exist_ok=True)
+                for name, data in built_files.items():
+                    # New outputs must be simple files from the trusted bundler.
+                    if rejects_path(name) or "/" in name or (destination / name).is_symlink():
+                        raise ValueError("unsafe build output")
+                    atomic_write_bytes(destination / name, data)
+                stale_css = destination / "bundle.css"
+                if "bundle.css" not in built_files and stale_css.is_file():
+                    stale_css.unlink()
+            dep = store.deploy(slug, entry=entry)
     except (ValueError, PermissionError) as exc:
         _audit(request, "artifact.deploy", "denied", f"slug={slug}: {exc}")
         return web.json_response({"error": str(exc)}, status=400)
     _audit(request, "artifact.deploy", "ok", f"slug={slug}")
-    payload: dict[str, Any] = {"ok": True, "deployment": dep.to_dict()}
+    payload: dict[str, Any] = {"ok": True, "deployment": dep.to_public()}
     if build is not None:
         payload["build"] = {
             "files": build.files,
@@ -1564,36 +1640,34 @@ def _refuse_serve(
     """One exit for every refusal on the serve path — audited, and never echoing the
     requested path back into the response (that body would render in a browser)."""
     _audit(request, "artifact.serve", "denied", f"slug={slug} {reason}")
-    return web.Response(status=status, text="refused", content_type="text/plain")
+    return web.Response(status=status, text="refused", content_type="text/plain", headers=dict(SERVE_HEADERS))
 
 
-async def serve_artifact_redirect(request: web.Request) -> web.StreamResponse:
-    """GET /artifacts/serve/{slug} → 308 to the canonical trailing-slash URL.
-
-    Relative asset URLs inside the served document resolve against the directory, so
-    serving the entry from the slash-less path would break every one of them.
-    """
-    slug = request.match_info.get("slug", "")
-    raise web.HTTPPermanentRedirect(f"{SERVE_URL_PREFIX}/{slug}/")
+def _served(body: bytes, content_type: str, *, charset: str | None = None, redirect: str = "") -> web.Response:
+    if redirect:
+        return web.Response(status=308, headers={**SERVE_HEADERS, "Location": redirect})
+    return web.Response(body=body, content_type=content_type, charset=charset, headers=dict(SERVED_FILE_HEADERS))
 
 
 async def serve_deployed_artifact(request: web.Request) -> web.StreamResponse:
-    """GET /artifacts/serve/{slug}/{path:.*} — serve a deployed artifact's own bytes.
+    """GET /artifacts/serve/{slug}/{capability}/{path} — the deployment's own bytes.
 
-    Behind session auth like every non-bypassed gateway path, fenced by
+    Authorized by the rotating deployment capability, fenced by
     ``SERVE_HEADERS`` (``connect-src 'none'`` — the page cannot call ``/api``), and
     contained by ``resolve_served_file``. Serves ONLY the artifact's own files: a
     directory never yields an index, and an undeployed or deleted slug 404s.
     """
     prov = registry.get_provider("native")
     if prov is None:  # pragma: no cover - the native provider always registers
-        return web.Response(status=404, text="not found", content_type="text/plain")
+        return _refuse_serve(request, "", "no_store", 404)
     slug = request.match_info.get("slug", "")
-    rel = request.match_info.get("path", "") or ""
+    capability, slash, rel = (request.match_info.get("path", "") or "").partition("/")
     store = _deploy_store(prov)
-    dep = store.get(slug)
+    dep = store.authorize(slug, capability)
     if dep is None:
         return _refuse_serve(request, slug, "not_deployed", 404)
+    if not slash:
+        return _served(b"", "", redirect=dep.url)
     try:
         art = prov.get(slug)
     except ValueError:
@@ -1617,21 +1691,12 @@ async def serve_deployed_artifact(request: web.Request) -> web.StreamResponse:
             return _refuse_serve(request, slug, "not_built", 404)
         if art.content is None:
             return _refuse_serve(request, slug, "empty_body", 404)
-        return web.Response(
-            body=art.content.encode("utf-8"),
-            content_type="text/html",
-            charset="utf-8",
-            headers=dict(SERVE_HEADERS),
-        )
+        return _served(art.content.encode("utf-8"), "text/html", charset="utf-8")
     try:
         data = resolved.read_bytes()
     except OSError:
         return _refuse_serve(request, slug, "unreadable", 404)
-    return web.Response(
-        body=data,
-        content_type=content_type_for(resolved),
-        headers=dict(SERVE_HEADERS),
-    )
+    return _served(data, content_type_for(resolved))
 
 
 def register_artifact_routes(app: web.Application) -> None:
@@ -1651,6 +1716,7 @@ def register_artifact_routes(app: web.Application) -> None:
     app.router.add_get("/api/artifacts/{slug}", api_artifact_detail)
     app.router.add_patch("/api/artifacts/{slug}", api_artifact_update)
     app.router.add_delete("/api/artifacts/{slug}", api_artifact_delete)
+    app.router.add_get("/api/artifacts/{slug}/export.csv", api_artifact_csv_export)
     app.router.add_get("/api/artifacts/{slug}/raw", api_artifact_raw)
     app.router.add_put("/api/artifacts/{slug}/raw", api_artifact_raw_write)
     app.router.add_get("/api/artifacts/{slug}/extract", api_artifact_extract)
@@ -1668,7 +1734,7 @@ def register_artifact_routes(app: web.Application) -> None:
     app.router.add_patch("/api/artifacts/{slug}/folder", api_artifact_set_folder)
     app.router.add_post("/api/artifacts/{slug}/deploy", api_artifact_deploy)
     app.router.add_delete("/api/artifacts/{slug}/deploy", api_artifact_teardown)
-    app.router.add_get(f"{SERVE_URL_PREFIX}/{{slug}}", serve_artifact_redirect)
+    app.router.add_get(f"{SERVE_URL_PREFIX}/{{slug}}", serve_deployed_artifact)
     app.router.add_get(
         f"{SERVE_URL_PREFIX}/{{slug}}/{{path:.*}}", serve_deployed_artifact
     )

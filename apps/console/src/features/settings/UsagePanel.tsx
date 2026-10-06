@@ -1,7 +1,6 @@
 import { LoadError, FormSkeleton } from '../../shared/ui/ListScaffold'
-import { useMemo } from 'react'
-import { Coins } from 'lucide-react'
-import { api, type UsageAgg, type UsageFold } from '../../shared/data/api'
+import { TextLink } from '../../shared/ui/TextLink'
+import { api, type UsageAgg, type DailySpend, type UsageFold } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
 import { useQueryParam, type RouteProps } from '../../app/shell/useQueryState'
 import { Segmented } from '../../shared/ui/Segmented'
@@ -9,6 +8,7 @@ import { Table, THead, Th, Td } from '../../shared/ui/Table'
 import { Meter } from '../../shared/ui/Meter'
 import { PanelHeader, Section } from './settingsUI'
 import { BigStat, KVList } from './bento'
+import { ModelPricesSection } from './ModelPricesSection'
 
 const PERIODS = [
   { id: 'today', label: 'Today', days: 1 },
@@ -20,14 +20,6 @@ const FOLD_WINDOW: Record<string, 'day' | 'week' | 'month'> = {
   today: 'day', '7d': 'week', '30d': 'month',
 }
 
-function _sinceIso(days: number): string {
-  const now = Date.now()
-  if (days === 1) {
-    const d = new Date(now)
-    return `${d.toISOString().slice(0, 10)}T00:00:00+00:00`
-  }
-  return new Date(now - days * 24 * 60 * 60 * 1000).toISOString()
-}
 
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
@@ -55,32 +47,25 @@ function fmtDuration(ms: number): string {
 export function UsagePanel({ query, setQuery }: Pick<RouteProps, 'query' | 'setQuery'>) {
   const [period, setPeriod] = useQueryParam(query, setQuery, 'period', 'today', { replace: true })
   const days = (PERIODS.find((p) => p.id === period) ?? PERIODS[0]).days
-  const since = useMemo(() => _sinceIso(days), [days])
+  const window = FOLD_WINDOW[period] ?? 'day'
 
   const { data: totals, error: totalsErr, refresh: refreshTotals } = useQuery(
     `settings:usage-totals:${period}`,
-    () => api.usageTotals({ since }).then((d) => d.totals),
+    () => api.usageTotals({ window }).then((d) => d.totals),
     { persist: false },
   )
   const { data: byModel, error: byModelErr, refresh: refreshByModel } = useQuery(
     `settings:usage-rollup:model:${period}`,
-    () => api.usageRollup({ group_by: 'model', since }).then((d) => d.rows),
+    () => api.usageRollup({ group_by: 'model', window }).then((d) => d.rows),
     { persist: false },
   )
   const { data: bySource, error: bySourceErr, refresh: refreshBySource } = useQuery(
     `settings:usage-rollup:source:${period}`,
-    () => api.usageRollup({ group_by: 'source', since }).then((d) => d.rows),
+    () => api.usageRollup({ group_by: 'source', window }).then((d) => d.rows),
     { persist: false },
   )
-  const { data: cfg, error: cfgErr, refresh: refreshCfg } = useQuery(
-    'settings:guardrails-config',
-    () => api.gideonConfig().then((c) => c?.guardrails?.budgets ?? null),
-    { persist: false },
-  )
-  const { data: todayTotals, error: todayTotalsErr, refresh: refreshTodayTotals } = useQuery(
-    'settings:usage-totals:today',
-    () => api.usageTotals({ since: _sinceIso(1) }).then((d) => d.totals),
-    { persist: false },
+  const { data: dailySpend, error: dailySpendErr, refresh: refreshDailySpend } = useQuery(
+    'triggers:budget', () => api.triggerBudget(), { persist: false },
   )
   const { data: sys, error: sysErr, refresh: refreshSys } = useQuery(
     'settings:usage-system-stats',
@@ -93,13 +78,13 @@ export function UsagePanel({ query, setQuery }: Pick<RouteProps, 'query' | 'setQ
     { persist: false },
   )
 
-  const loadErr = totalsErr || byModelErr || bySourceErr || cfgErr || todayTotalsErr || sysErr || foldErr
+  const loadErr = totalsErr || byModelErr || bySourceErr || dailySpendErr || sysErr || foldErr
   const refresh = () => {
-    refreshTotals(); refreshByModel(); refreshBySource(); refreshCfg()
-    refreshTodayTotals(); refreshSys(); refreshFold()
+    refreshTotals(); refreshByModel(); refreshBySource(); refreshDailySpend()
+    refreshSys(); refreshFold()
   }
   if (loadErr) return <LoadError what="usage" error={loadErr} onRetry={refresh} />
-  if ([totals, byModel, bySource, cfg, todayTotals, sys, fold].some((value) => value === undefined)) return <FormSkeleton sections={3} what="usage" />
+  if ([totals, byModel, bySource, dailySpend, sys, fold].some((value) => value === undefined)) return <FormSkeleton sections={3} what="usage" />
 
   const t: UsageAgg | null = totals ?? null
   const cacheTokens = (t?.cache_read_tokens ?? 0) + (t?.cache_creation_tokens ?? 0)
@@ -109,12 +94,11 @@ export function UsagePanel({ query, setQuery }: Pick<RouteProps, 'query' | 'setQ
     || sys.sessions_created > 0 || sys.subagents_spawned > 0 || cacheLive > 0
   )
   const unpricedModels = (byModel ?? []).filter((r) => !r.priced)
-  const dayCap = Number(cfg?.max_dollars_per_day ?? 0) || 0
 
   return (
     <div className="flex flex-col" style={{ minHeight: 0 }}>
       <PanelHeader title="Usage"
-        hint="What you've spent — real tokens and real USD from a per-turn ledger over every streamed turn (chat, subagents, loops, automations). When a configured fallback answers, usage is attributed to the model that actually replied. Unattended model calls are recorded in a separate log that cannot be merged with these without double-counting; the 'By day and purpose' section states how much is excluded. Observation only: nothing here caps or throttles a turn (that's Guardrails). A model with no price row is shown honestly as 'unpriced', never $0.00." />
+        hint="What you've spent — tokens, unit quantities and USD from the usage ledger (chat, subagents, loops, automations, images, video and speech). When a configured fallback answers, usage is attributed to the model that actually replied. Unattended model calls are recorded in a separate log that cannot be merged with these without double-counting; the 'By day and purpose' section states how much is excluded. Observation only: nothing here caps or throttles a turn (that's Guardrails). A call with unknown price or quantity is shown as incomplete, never assumed free." />
 
       <div className="mb-l">
         <Segmented
@@ -129,7 +113,7 @@ export function UsagePanel({ query, setQuery }: Pick<RouteProps, 'query' | 'setQ
         <div className="mb-l grid grid-cols-2 gap-2 sm:grid-cols-3">
           <BigStat caption="cost" value={headlineCost(t)} />
           <BigStat value={fmtTokens(t.input_tokens + t.output_tokens)} caption="tokens" />
-          <BigStat value={t.turns.toLocaleString()} caption="turns" />
+          <BigStat value={t.turns.toLocaleString()} caption="recorded calls" />
         </div>
       )}
 
@@ -139,26 +123,20 @@ export function UsagePanel({ query, setQuery }: Pick<RouteProps, 'query' | 'setQ
         <div data-type="body-s" className="mb-l rounded-lg bg-surface-container px-3 py-2 text-on-surface-var"
           role="status">
           <span className="text-warning">Partial</span> — {unpricedModels.length} unpriced{' '}
-          {unpricedModels.length === 1 ? 'model' : 'models'} (no price row); their tokens count but
-          their cost is not included in the total.
+          {unpricedModels.length === 1 ? 'model' : 'models'} have calls with unknown price or quantity; known usage counts,
+          but their unknown costs are excluded from the total.
         </div>
       )}
 
       {
 }
+      {t && <UnitUsageSummary units={t.units} />}
       <ByDayAndPurposeSection fold={fold ?? null} days={days} />
 
       { }
-      {dayCap > 0 && (
-        <Section title="Daily budget">
-          <div data-type="body-s" className="rounded-lg bg-surface-container px-3 py-2.5 text-on-surface-var">
-            <Coins size={13} className="mr-1.5 inline text-primary" />
-            Spent <span className="tabular-nums text-on-surface">{fmtUsd(todayTotals?.cost_usd ?? 0)}</span>{' '}
-            of your <span className="tabular-nums text-on-surface">${dayCap.toFixed(2)}</span> daily cap
-            <span className="ml-1 text-on-surface-low">(automations only — interactive chat is uncapped)</span>
-          </div>
-        </Section>
-      )}
+      {dailySpend && <Section title="Daily budget" hint="The spend meter used to admit unattended model calls.">
+        <DailyBudgetStatus spend={dailySpend} />
+      </Section>}
 
       <Section title="By model" hint="Which models this period's cost went to.">
         <UsageTable rows={byModel ?? []} keyField="model" empty="No model usage recorded this period." />
@@ -204,8 +182,36 @@ export function UsagePanel({ query, setQuery }: Pick<RouteProps, 'query' | 'setQ
           </div>
         </Section>
       )}
+      <ModelPricesSection />
     </div>
   )
+}
+
+const UNIT_LABELS = { image: 'images', second: 'video seconds', minute: 'audio minutes', character: 'speech characters' } as const
+
+function unitQuantity(value: number): string {
+  return value.toLocaleString(undefined, { maximumFractionDigits: 4 })
+}
+
+export function UnitUsageSummary({ units }: { units: UsageAgg['units'] }) {
+  const rows = Object.entries(units ?? {})
+  if (rows.length === 0) return null
+  return <Section title="Media usage" hint="Known quantities by billing unit. Different units are counted separately.">
+    <KVList rows={rows.map(([unit, row]) => ({
+      k: UNIT_LABELS[unit as keyof typeof UNIT_LABELS] ?? unit,
+      v: `${unitQuantity(row.quantity)} · ${row.calls} ${row.calls === 1 ? 'call' : 'calls'} · ${row.unpriced_calls ? '≥' : ''}${fmtUsd(row.cost_usd)}`,
+    }))} />
+    {rows.some(([, row]) => row.unknown_quantity_calls > 0) &&
+      <p data-type="body-s" className="mt-2 text-on-surface-low">Some calls have unknown quantities. Those quantities are excluded.</p>}
+    {rows.some(([, row]) => row.unpriced_calls > 0) &&
+      <p data-type="body-s" className="mt-2 text-on-surface-low">Cost is incomplete for calls with unknown price or quantity.</p>}
+  </Section>
+}
+
+function rowUnits(units: UsageAgg['units']): string {
+  return Object.entries(units ?? {}).map(([unit, row]) =>
+    `${unitQuantity(row.quantity)} ${UNIT_LABELS[unit as keyof typeof UNIT_LABELS] ?? unit}${row.unknown_quantity_calls ? ' + unknown' : ''}`
+  ).join(' · ') || '—'
 }
 
 export function UsageTable({ rows, keyField, empty }: {
@@ -221,11 +227,12 @@ export function UsageTable({ rows, keyField, empty }: {
     <Table
       sized={false}
       data-type="body-s" className="border-collapse"
-      caption={`Token usage and cost per ${keyField === 'model' ? 'model' : 'source'}`}>
+      caption={`Token and media usage and cost per ${keyField === 'model' ? 'model' : 'source'}`}>
       <THead>
         <tr>
           <Th pad={false} className="border-b border-outline-variant/40 px-2 py-1.5 font-normal">{keyField === 'model' ? 'Model' : 'Source'}</Th>
           <Th align="right" pad={false} className="border-b border-outline-variant/40 px-2 py-1.5 font-normal">Tokens</Th>
+          <Th align="right" pad={false} className="border-b border-outline-variant/40 px-2 py-1.5 font-normal">Media</Th>
           <Th align="right" pad={false} className="border-b border-outline-variant/40 px-2 py-1.5 font-normal">Cost</Th>
           <Th align="right" pad={false} className="border-b border-outline-variant/40 px-2 py-1.5 font-normal">Share</Th>
         </tr>
@@ -238,7 +245,8 @@ export function UsageTable({ rows, keyField, empty }: {
             <tr key={label} className="text-on-surface-var">
               <Td pad={false} className="border-b border-outline-variant/25 px-2 py-1.5 font-mono max-w-64 break-all">{label}</Td>
               <Td align="right" pad={false} className="border-b border-outline-variant/25 px-2 py-1.5 tabular-nums">{fmtTokens((r.input_tokens || 0) + (r.output_tokens || 0))}</Td>
-              <Td align="right" pad={false} className="border-b border-outline-variant/25 px-2 py-1.5 tabular-nums">{r.priced ? fmtUsd(r.cost_usd) : 'unpriced'}</Td>
+              <Td align="right" pad={false} className="border-b border-outline-variant/25 px-2 py-1.5">{rowUnits(r.units)}</Td>
+              <Td align="right" pad={false} className="border-b border-outline-variant/25 px-2 py-1.5 tabular-nums">{headlineCost(r)}</Td>
               <Td align="right" pad={false} className="border-b border-outline-variant/25 px-2 py-1.5 tabular-nums text-on-surface-low">{r.priced ? `${share}%` : '—'}</Td>
             </tr>
           )
@@ -283,10 +291,12 @@ function DailySpendChart({ series }: { series: UsageFold['series'] }) {
   )
 }
 
-function ByDayAndPurposeSection({ fold, days }: { fold: UsageFold | null; days: number }) {
+export function ByDayAndPurposeSection({ fold, days }: { fold: UsageFold | null; days: number }) {
   if (!fold) return null
   const total = fold.total
   const uncounted = fold.uncounted
+  const legacy = fold.legacy_total
+  const legacyNotice = legacy && legacy.calls > 0 ? <p role="status" data-type="body-s" className="text-on-surface-var">Undated history: {legacy.calls.toLocaleString()} calls and {legacy.unpriced_calls > 0 ? 'at least ' : ''}{fmtUsd(legacy.dollars_est)} retained from an earlier calendar. Original timestamps are no longer available for those calls, so dated totals exclude them.</p> : null
   const apps = Object.keys(fold.app_sources ?? {})
   const window = days === 1 ? 'today' : `the last ${days} days`
   const excluded = uncounted?.calls > 0 && (
@@ -304,6 +314,7 @@ function ByDayAndPurposeSection({ fold, days }: { fold: UsageFold | null; days: 
         <div data-type="body-s" className="flex flex-col gap-s rounded-lg bg-surface-container px-3 py-2.5 text-on-surface-low">
           <span>No turns recorded {window}.</span>
           {excluded}
+          {legacyNotice}
         </div>
       </Section>
     )
@@ -312,6 +323,7 @@ function ByDayAndPurposeSection({ fold, days }: { fold: UsageFold | null; days: 
     <Section title="By day and purpose"
       hint={`The same money as above, grouped into the five purposes and shaped across ${window}.`}>
       <div className="flex flex-col gap-l rounded-lg bg-surface-container px-3 py-3">
+        {legacyNotice}
         {
 }
         {total.local_calls > 0 && (
@@ -359,4 +371,21 @@ function ByDayAndPurposeSection({ fold, days }: { fold: UsageFold | null; days: 
       </div>
     </Section>
   )
+}
+
+export function DailyBudgetStatus({ spend }: { spend: DailySpend }) {
+  return <div role="status" data-type="body-s" className="rounded-lg bg-surface-container px-3 py-2.5 text-on-surface-var">
+    <p className="text-on-surface">{spend.paused ? 'Token budget reached — unattended work is paused.'
+      : spend.paid_calls_paused ? 'Dollar budget reached — free work can continue.'
+      : spend.status === 'warn' ? 'Approaching daily budget.' : 'Daily budget available.'}</p>
+    <p>{fmtTokens(spend.tokens)} tokens{spend.max_tokens > 0 ? ` of ${fmtTokens(spend.max_tokens)}` : ' · no token limit'}
+      {' · '}{fmtUsd(spend.dollars)} recorded{spend.max_dollars > 0 ? ` of ${fmtUsd(spend.max_dollars)}` : ' · no dollar limit'}.</p>
+    {spend.unpriced > 0 && <p className="text-warning">Cost is incomplete: {spend.unpriced} {spend.unpriced === 1 ? 'call had' : 'calls had'} no price.
+      {' '}<TextLink href="#/settings/usage">Set model prices</TextLink> to make future calls count against the dollar budget.</p>}
+    {(spend.held_tokens > 0 || spend.held_dollars > 0) && <p>Running calls have set aside {fmtTokens(spend.held_tokens)} tokens and {fmtUsd(spend.held_dollars)}.</p>}
+    {spend.timezone && <p>Spend day: {spend.day} ({spend.timezone}).</p>}
+    <p>A token cap pauses work. A dollar cap refuses paid calls; known free models and work that calls no model continue. Models without a price cannot run under a dollar cap.</p>
+    {(spend.paused || spend.paid_calls_paused) && <p>Resets {new Date(spend.resumes_at).toLocaleString()}.</p>}
+    <TextLink href="#/settings/guardrails">Change budget limits</TextLink>
+  </div>
 }

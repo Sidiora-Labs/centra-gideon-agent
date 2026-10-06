@@ -1717,6 +1717,48 @@ class SearchResponse:
 
 
 @dataclass(frozen=True, slots=True)
+class ScopedSearchResponse:
+    """Presentation union retaining each independently authorized native result."""
+    sources: tuple[tuple[Scope, SearchResponse], ...]
+    limit: int
+
+    def __post_init__(self) -> None:
+        if not 1 <= len(self.sources) <= 2 or len({scope for scope, _ in self.sources}) != len(self.sources):
+            raise MemoryContractError("search sources must be distinct authorized scopes")
+        if any(hit.scope != scope for scope, response in self.sources for hit in response.hits):
+            raise MemoryContractError("search hit does not match its authorized source scope")
+
+    @property
+    def hits(self) -> tuple[SearchHit, ...]:
+        return tuple(sorted((hit for _, response in self.sources for hit in response.hits), key=lambda hit: (-hit.total_score, str(hit.id))))[:self.limit]
+
+    @property
+    def cursor(self) -> Cursor:
+        return self.sources[0][1].cursor
+
+    @property
+    def scope_cursors(self) -> tuple[dict[str, object], ...]:
+        return tuple({"scope": scope.to_wire(), "cursor": response.cursor.to_wire(), "trace": response.trace.to_wire()} for scope, response in self.sources)
+
+    @property
+    def trace(self) -> Trace:
+        return self.sources[0][1].trace
+
+    @property
+    def suppressed(self) -> Mapping[str, int]:
+        return MappingProxyType({name: sum(response.suppressed.get(name, 0) for _, response in self.sources) for name in {name for _, response in self.sources for name in response.suppressed}})
+
+    @property
+    def degraded(self) -> bool:
+        return any(response.degraded for _, response in self.sources)
+
+    @property
+    def degradation_reason(self) -> str | None:
+        reasons = sorted({response.degradation_reason for _, response in self.sources if response.degradation_reason})
+        return "; ".join(reasons) or None
+
+
+@dataclass(frozen=True, slots=True)
 class ServiceResult:
     trace: Trace
     result: Mapping[str, JsonValue]
@@ -1826,3 +1868,60 @@ class MemoryDiagnostics:
             budget_state=str(raw.get("budget_state", "disabled")),
             recovery_state=str(raw.get("recovery_state", "degraded")),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class PrivateScopeReceipt:
+    """Native-issued private execution scope; carries no persistent memory grant."""
+
+    scope_id: Id
+    actor_scope: Scope
+    scope: Scope
+    capability_id: Id
+    origin_session_key: Id
+    original_actor: Id
+    memory_mode: str
+    expires_at_ms: int
+    retired: bool
+
+    @classmethod
+    def from_wire(cls, value: object) -> PrivateScopeReceipt:
+        fields = {"scope_id", "actor_scope", "scope", "capability_id", "origin_session_key", "original_actor", "memory_mode", "expires_at_ms", "retired"}
+        if not isinstance(value, Mapping) or set(value) != fields:
+            raise MemoryContractError("private scope receipt fields are invalid")
+        actor, scope = Scope.from_wire(value["actor_scope"]), Scope.from_wire(value["scope"])
+        expiry = value["expires_at_ms"]
+        if actor.owner_id != scope.owner_id or actor.project_id != scope.project_id or scope.workspace_id != value["scope_id"] or actor == scope:
+            raise MemoryContractError("private scope does not belong to its issuer")
+        if value["memory_mode"] not in {"temporary", "incognito"} or type(expiry) is not int or not 0 < expiry <= 9_007_199_254_740_991 or type(value["retired"]) is not bool:
+            raise MemoryContractError("private scope lifetime is invalid")
+        return cls(Id(value["scope_id"]), actor, scope, Id(value["capability_id"]), Id(value["origin_session_key"]), Id(value["original_actor"]), value["memory_mode"], expiry, value["retired"])
+
+
+@dataclass(frozen=True, slots=True)
+class AppScopeReceipt:
+    """A native app namespace and its current activation grant."""
+    scope_id: Id
+    actor_scope: Scope
+    scope: Scope
+    capability_id: Id
+    app_name: str
+    manifest_digest: Digest
+    epoch: int
+    expires_at_ms: int
+    revoked: bool
+
+    @classmethod
+    def from_wire(cls, value: object) -> AppScopeReceipt:
+        fields = {'scope_id','actor_scope','scope','capability_id','app_name','manifest_digest','epoch','expires_at_ms','revoked'}
+        if not isinstance(value, Mapping) or set(value) != fields:
+            raise MemoryContractError('app namespace receipt fields are invalid')
+        actor, scope = Scope.from_wire(value['actor_scope']), Scope.from_wire(value['scope'])
+        if actor.owner_id != scope.owner_id or actor.project_id != scope.project_id or actor == scope or scope.workspace_id != value['scope_id']:
+            raise MemoryContractError('app namespace owner is invalid')
+        if type(value['epoch']) is not int or not 0 < value['epoch'] <= 9_007_199_254_740_991 or type(value['expires_at_ms']) is not int or not 0 < value['expires_at_ms'] <= 9_007_199_254_740_991 or type(value['revoked']) is not bool:
+            raise MemoryContractError('app namespace activation is invalid')
+        from gideon.extensions.apps.manifest import KEBAB_RE
+        if not isinstance(value['app_name'], str) or not KEBAB_RE.fullmatch(value['app_name']):
+            raise MemoryContractError('app namespace name is invalid')
+        return cls(Id(value['scope_id']),actor,scope,Id(value['capability_id']),value['app_name'],Digest(value['manifest_digest']),value['epoch'],value['expires_at_ms'],value['revoked'])

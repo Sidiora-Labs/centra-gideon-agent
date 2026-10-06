@@ -23,6 +23,8 @@ language for stt) live separately in
 
 import json
 import logging
+import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +54,16 @@ CHAT_SUBCATEGORIES: tuple[str, ...] = (
     "orchestration",
     "loops",
 )
+
+USE_CASE_NAMES: dict[str, str] = {
+    "chat": "Chat", "code_tools": "Code & tools", "reasoning": "Reasoning",
+    "background": "Background", "orchestration": "Orchestration", "loops": "Loops",
+    "embedding": "Embedding", "stt": "Speech-to-text", "tts": "Text-to-speech",
+    "diarization": "Speaker diarization", "image_modality": "Image · Modality",
+    "image_gen": "Image · Generation", "audio_modality": "Audio · Modality",
+    "audio_gen": "Audio · Generation", "video_modality": "Video · Modality",
+    "video_gen": "Video · Generation",
+}
 
 USE_CASES: tuple[str, ...] = CAPABILITIES + CHAT_SUBCATEGORIES
 VALID_USE_CASES = frozenset(USE_CASES)
@@ -313,6 +325,20 @@ def load_use_case_settings(use_case: str) -> dict[str, Any]:
         return {}
 
 
+_settings_listeners: set[Callable[[str], None]] = set()
+_settings_listener_lock = threading.Lock()
+
+
+def add_settings_listener(listener: Callable[[str], None]) -> None:
+    with _settings_listener_lock:
+        _settings_listeners.add(listener)
+
+
+def remove_settings_listener(listener: Callable[[str], None]) -> None:
+    with _settings_listener_lock:
+        _settings_listeners.discard(listener)
+
+
 def save_use_case_settings(use_case: str, settings: dict[str, Any]) -> None:
     """Save provider-agnostic settings for a use case."""
     if use_case not in VALID_USE_CASES:
@@ -320,6 +346,14 @@ def save_use_case_settings(use_case: str, settings: dict[str, Any]) -> None:
     _settings_dir().mkdir(parents=True, exist_ok=True)
     path = _settings_dir() / f"{use_case}.json"
     atomic_write(path, json.dumps(settings, indent=2) + "\n")
+    with _settings_listener_lock:
+        listeners = tuple(_settings_listeners)
+    for listener in listeners:
+        try:
+            listener(use_case)
+        except Exception:
+            logging.getLogger(__name__).warning("Settings change listener failed", exc_info=True)
+
 
 
 def _legacy_bindings_path() -> Path:

@@ -10,6 +10,7 @@ __pycache__/
 *$py.class
 *.egg-info/
 build/
+/target/
 dist/
 dist-client/
 

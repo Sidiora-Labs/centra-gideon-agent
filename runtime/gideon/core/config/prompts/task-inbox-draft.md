@@ -10,3 +10,5 @@ From: {{sender}}
 {{style}}
 
 Write ONLY the reply text {{user_name}} would send — no preamble, no sign-off unless it fits the channel, no quotes around it, no explanation. If the message genuinely needs no reply, respond with the single word: SKIP
+
+Ground the reply in the quoted conversation and explicit owner reply instructions. Do not invent commitments, dates, acceptance or decisions. If a reply needs a missing owner decision or fact, return ASK: followed by one short question instead of writing a reply.

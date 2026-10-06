@@ -1122,6 +1122,20 @@ class TestMediaClassify:
 
 
 class TestMediaItems:
+    @staticmethod
+    def _store_file_item(store, path, filename, mime=None):
+        import asyncio
+        from gideon.workspace.uploads.content_intake import approve_path
+        from gideon.cognition.knowledge.file_items import store_approved_file
+        async def store_source():
+            snapshot = await approve_path(path, mime, filename=filename, surface='knowledge')
+            try:
+                return await store_approved_file(store, snapshot)
+            finally:
+                snapshot.close()
+                Path(path).unlink(missing_ok=True)
+        return asyncio.run(store_source())
+
     def _files_dir(self, tmp_path, monkeypatch):
         d = tmp_path / "kfiles"
         d.mkdir()
@@ -1136,7 +1150,7 @@ class TestMediaItems:
         self._files_dir(tmp_path, monkeypatch)
         src = tmp_path / "in.png"
         src.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 64)
-        item, is_new = H._store_file_item(store, str(src), "in.png")
+        item, is_new = self._store_file_item(store, str(src), "in.png")
         assert is_new
         assert item["type"] == "image"
         assert item["file_path"] and Path(item["file_path"]).is_file()
@@ -1154,7 +1168,7 @@ class TestMediaItems:
         self._files_dir(tmp_path, monkeypatch)
         src = tmp_path / "rec.webm"
         src.write_bytes(b"\x1a\x45\xdf\xa3" + b"x" * 64)
-        item, is_new = H._store_file_item(
+        item, is_new = self._store_file_item(
             store, str(src), "recording.webm", mime="audio/webm"
         )
         assert is_new
@@ -1162,7 +1176,7 @@ class TestMediaItems:
         assert item["mime_type"] == "audio/webm"
         src2 = tmp_path / "clip.webm"
         src2.write_bytes(b"\x1a\x45\xdf\xa3" + b"y" * 64)
-        item2, _ = H._store_file_item(store, str(src2), "clip.webm", mime="video/webm")
+        item2, _ = self._store_file_item(store, str(src2), "clip.webm", mime="video/webm")
         assert item2["type"] == "video" and item2["mime_type"] == "video/webm"
 
     def test_store_file_item_dedups_identical_content(
@@ -1176,11 +1190,11 @@ class TestMediaItems:
         data = b"identical bytes for dedup check"
         a = tmp_path / "a.txt"
         a.write_bytes(data)
-        item1, new1 = H._store_file_item(store, str(a), "a.txt")
+        item1, new1 = self._store_file_item(store, str(a), "a.txt")
         assert new1
         b = tmp_path / "b.txt"
         b.write_bytes(data)
-        item2, new2 = H._store_file_item(store, str(b), "b.txt")
+        item2, new2 = self._store_file_item(store, str(b), "b.txt")
         assert new2 is False and item2["id"] == item1["id"]
         assert store.db.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 1
         assert len([p for p in files_dir.iterdir() if p.is_file()]) == 1
@@ -1195,7 +1209,7 @@ class TestMediaItems:
         self._files_dir(tmp_path, monkeypatch)
         src = tmp_path / "report.pdf"
         src.write_bytes(b"%PDF-1.4 fake")
-        item, _ = H._store_file_item(store, str(src), "report.pdf")
+        item, _ = self._store_file_item(store, str(src), "report.pdf")
         assert item["type"] == "pdf"
         assert item["file_path"] and item["processing_status"] == "queued"
         rows = store.db.execute("SELECT COUNT(*) FROM items").fetchone()[0]
@@ -1213,7 +1227,7 @@ class TestMediaItems:
         code = "def f(x):\n    return x * 2  # double\n"
         src = tmp_path / "algo.py"
         src.write_text(code)
-        item, is_new = H._store_file_item(store, str(src), "algo.py")
+        item, is_new = self._store_file_item(store, str(src), "algo.py")
         assert is_new
         assert item["type"] == "gist"
         assert item["gist_language"] == "python"
@@ -1224,7 +1238,7 @@ class TestMediaItems:
         assert not src.exists()
         src2 = tmp_path / "copy.py"
         src2.write_text(code)
-        item2, new2 = H._store_file_item(store, str(src2), "copy.py")
+        item2, new2 = self._store_file_item(store, str(src2), "copy.py")
         assert new2 is False and item2["id"] == item["id"]
 
     def test_serve_path_guard_rejects_outside_root(self, store, tmp_path, monkeypatch):

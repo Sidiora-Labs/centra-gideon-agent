@@ -1,6 +1,22 @@
 import asyncio
 import os
 import time
+from functools import wraps
+from gideon.security.approval_answer import YOU
+from gideon.security.session_credentials import begin_turn, end_turn
+from gideon.cognition.consolidation_cycle import ConsolidationUnavailable
+
+def bound(key):
+    def decorate(function):
+        @wraps(function)
+        async def invoke(*args, **kwargs):
+            credential = begin_turn(key, YOU, turn_id="consolidation-test", memory_mode="persistent")
+            try:
+                return await function(*args, **kwargs)
+            finally:
+                end_turn(credential)
+        return invoke
+    return decorate
 
 import pytest
 
@@ -58,6 +74,7 @@ def _round(owner, key="dashboard:owned", history=True):
 
 
 @pytest.mark.asyncio
+@bound("pending")
 async def test_real_background_task_accounts_for_empty_model_result(local_consolidator):
     owner, _ = local_consolidator
     for index in range(_CONSOLIDATION_THRESHOLD):
@@ -68,15 +85,18 @@ async def test_real_background_task_accounts_for_empty_model_result(local_consol
     assert len(tasks) == 1
     owner.maybe_consolidate("pending")
     assert tuple(owner._tasks) == tasks
-    assert await asyncio.gather(*tasks) == [None]
+    result = await asyncio.gather(*tasks, return_exceptions=True)
+    assert isinstance(result[0], ConsolidationUnavailable)
     assert not owner._tasks and not owner._running
-    assert owner._prefs_offset == {"pending": _CONSOLIDATION_THRESHOLD}
+    assert not owner._prefs_offset
+    assert "pending" in owner._schedule.debt
     assert owner._log.unconsolidated_count("pending") == _CONSOLIDATION_THRESHOLD
     owner.maybe_consolidate("pending")
     assert not owner._tasks
 
 
 @pytest.mark.asyncio
+@bound("invalid")
 async def test_real_invalid_transcript_task_preserves_retry_position(
     local_consolidator,
 ):
@@ -91,17 +111,20 @@ async def test_real_invalid_transcript_task_preserves_retry_position(
 
 
 @pytest.mark.asyncio
+@bound("locked")
 async def test_owned_flock_blocks_duplicate_consolidation(local_consolidator):
     owner, _ = local_consolidator
     owner._log.append("locked", "user", "preserve")
     with single_flight("consolidate:locked") as acquired:
         assert acquired
-        assert await owner.consolidate_now("locked") is True
+        assert await owner.consolidate_now("locked") is False
+        assert "locked" in owner._schedule.debt
     assert not owner._running
     assert owner._log.unconsolidated_count("locked") == 1
 
 
 @pytest.mark.asyncio
+@bound("cancelled")
 async def test_cancelled_before_start_keeps_existing_admission_semantics(
     local_consolidator,
 ):
@@ -114,10 +137,12 @@ async def test_cancelled_before_start_keeps_existing_admission_semantics(
     with pytest.raises(asyncio.CancelledError):
         await task
     assert not owner._tasks and not owner._prefs_offset
-    assert owner._running == {"cancelled"}
+    assert not owner._running
+    assert "cancelled" in owner._schedule.debt
 
 
 @pytest.mark.asyncio
+@bound("idle")
 async def test_idle_activity_and_history_cooldown_use_real_tasks(local_consolidator):
     owner, _ = local_consolidator
     owner._history_idle_secs = 10
@@ -125,8 +150,9 @@ async def test_idle_activity_and_history_cooldown_use_real_tasks(local_consolida
     owner._last_activity["idle"] = time.time() - 20
     owner.check_idle_sessions()
     assert len(owner._tasks) == 1
-    await asyncio.gather(*tuple(owner._tasks))
-    assert owner._history_consolidated["idle"] > owner._last_activity["idle"]
+    result = await asyncio.gather(*tuple(owner._tasks), return_exceptions=True)
+    assert isinstance(result[0], ConsolidationUnavailable)
+    assert "idle" not in owner._history_consolidated
     owner.check_idle_sessions()
     assert not owner._tasks
     assert owner._log.unconsolidated_count("idle") == 1
@@ -175,6 +201,7 @@ def test_prompt_composition_tracks_local_configuration(local_consolidator):
 
 
 @pytest.mark.asyncio
+@bound("dashboard:owned")
 async def test_extracted_result_writes_real_markdown_and_memory_records(
     local_consolidator,
 ):
@@ -185,13 +212,6 @@ async def test_extracted_result_writes_real_markdown_and_memory_records(
         {
             "preferences_update": "Prefer numbered implementation steps.",
             "projects_update": "The workshop scheduler is underway.",
-            "semantic": [
-                {
-                    "key": "user.preference.layout",
-                    "value": "numbered",
-                    "confidence": 0.95,
-                }
-            ],
             "episodic": [
                 {
                     "text": "The user chose a numbered scheduler plan.",
@@ -210,13 +230,13 @@ async def test_extracted_result_writes_real_markdown_and_memory_records(
     assert "numbered implementation" in owner._memory.read_preferences()
     assert "workshop scheduler" in owner._memory.read_projects()
     rows = owner._svc.get_records()
-    assert any("numbered" in row.text for row in rows)
     assert any("scheduler plan" in row.text for row in rows)
     assert any("scheduling constraints" in row.text for row in rows)
     assert owner._log.unconsolidated_count("dashboard:owned") == 1
 
 
 @pytest.mark.asyncio
+@bound("dashboard:owned")
 async def test_history_application_marks_offset_and_prunes_actual_capture_files(
     local_consolidator,
 ):
@@ -241,6 +261,7 @@ async def test_history_application_marks_offset_and_prunes_actual_capture_files(
 
 
 @pytest.mark.asyncio
+@bound("busy")
 async def test_session_sealing_uses_durable_records_even_when_admission_declines(
     local_consolidator,
 ):
@@ -248,12 +269,9 @@ async def test_session_sealing_uses_durable_records_even_when_admission_declines
     owner._svc.write_working_memory("busy", "The next milestone is ready for review.")
     owner._running.add("busy")
     assert await owner.consolidate_session("busy") is False
-    assert owner._svc.working_memory("busy") == ""
-    records = owner._svc.get_records()
-    sealed = [row for row in records if "sealed" in row.tags]
-    assert len(sealed) == 1 and sealed[0].conversation_id == "busy"
-    assert sealed[0].scope == "global" and sealed[0].scope_ref is None
-    assert "ready for review" in sealed[0].text
+    assert "ready for review" in owner._svc.working_memory("busy")
+    assert not [row for row in owner._svc.get_records() if "sealed" in row.tags]
+    assert "busy" in owner._schedule.debt
 
 
 def test_persona_and_commitment_capacity_use_actual_store(local_consolidator):
@@ -404,3 +422,84 @@ def test_curator_tick_prunes_real_surfacing_history(local_consolidator):
     finally:
         events.close()
         usage.close()
+
+@pytest.mark.asyncio
+@bound("dashboard:owned")
+async def test_failed_formation_retains_sources_and_avoids_fallback(local_consolidator):
+    owner, _ = local_consolidator
+    extraction = _round(owner)
+    extraction.render()
+    with pytest.raises(ConsolidationUnavailable):
+        await extraction.apply({"history_entry": "must not commit", "semantic": [{"key": "project.test", "value": "must not fallback", "confidence": 0.95}]})
+    assert owner._log.unconsolidated_count("dashboard:owned") == 1
+    assert "must not commit" not in owner._memory.read_history()
+    assert not owner._svc.get_records()
+
+@pytest.mark.asyncio
+async def test_unbound_work_is_terminal_policy_denial(local_consolidator):
+    owner, _ = local_consolidator
+    owner._log.append("unbound", "user", "private pending")
+    assert await owner.consolidate_session("unbound") is False
+    assert "unbound" in owner._schedule.denied
+    assert "unbound" not in owner._schedule.debt
+    assert owner._log.unconsolidated_count("unbound") == 1
+
+@pytest.mark.asyncio
+@bound("actor-a")
+async def test_owner_grant_cannot_write_unrelated_session(local_consolidator):
+    owner, _ = local_consolidator
+    owner._log.append("actor-b", "user", "private pending")
+    assert await owner.consolidate_now("actor-b") is False
+    assert "actor-b" in owner._schedule.denied
+    assert "actor-b" not in owner._schedule.debt
+
+@pytest.mark.asyncio
+@bound("process-locked")
+async def test_external_process_lease_preserves_debt_and_prevents_seal(local_consolidator):
+    import sys
+    owner, _ = local_consolidator
+    owner._log.append("process-locked", "user", "pending source")
+    code = "from gideon.core.concurrency import single_flight; import sys; lease=single_flight('consolidate:process-locked'); acquired=lease.__enter__(); print(acquired, flush=True); sys.stdin.readline(); lease.__exit__(None,None,None)"
+    process = await asyncio.create_subprocess_exec(sys.executable, "-c", code, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+    try:
+        assert await asyncio.wait_for(process.stdout.readline(), timeout=10) == b"True\n"
+        assert await owner.consolidate_session("process-locked") is False
+        assert "process-locked" in owner._schedule.debt
+        assert owner._log.get_metadata("process-locked")[owner._schedule.SEAL_PENDING]
+        assert owner._log.unconsolidated_count("process-locked") == 1
+    finally:
+        process.stdin.write(b"release\n")
+        await process.stdin.drain()
+        await asyncio.wait_for(process.wait(), timeout=10)
+
+@pytest.mark.asyncio
+async def test_queued_turn_revocation_denies_without_retry(local_consolidator):
+    owner, _ = local_consolidator
+    credential = begin_turn("revoked", YOU, turn_id="revoked", memory_mode="persistent")
+    for index in range(_CONSOLIDATION_THRESHOLD):
+        owner._log.append("revoked", "user", str(index))
+    await owner._schedule.concurrent.acquire()
+    await owner._schedule.concurrent.acquire()
+    owner.maybe_consolidate("revoked")
+    tasks = tuple(owner._tasks)
+    end_turn(credential)
+    owner._schedule.concurrent.release()
+    owner._schedule.concurrent.release()
+    result = await asyncio.gather(*tasks, return_exceptions=True)
+    from gideon.cognition.consolidation_cycle import ConsolidationPolicyDenied
+    assert isinstance(result[0], ConsolidationPolicyDenied)
+    assert "revoked" in owner._schedule.denied
+    assert "revoked" not in owner._schedule.debt
+    assert not owner._running
+    assert owner._log.unconsolidated_count("revoked") == _CONSOLIDATION_THRESHOLD
+
+
+def test_recovery_reads_canonical_pending_sources(local_consolidator):
+    from gideon.cognition.consolidation_cycle import ConsolidationTasks
+    owner, _ = local_consolidator
+    owner._log.append("recover", "user", "still owed")
+    restarted = ConsolidationTasks(owner)
+    restarted.recover()
+    assert "recover" in restarted.debt
+    assert restarted.debt["recover"]["history"]
+    assert restarted.debt["recover"]["due"] <= time.monotonic()

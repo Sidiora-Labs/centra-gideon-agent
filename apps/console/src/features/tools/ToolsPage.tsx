@@ -1,3 +1,4 @@
+import { ReadOnlyTrustControls } from './ReadOnlyTrustReview'
 import { useEffect, useMemo, useState } from 'react'
 import { withWeight } from '../../shared/theme/fontWeight'
 import { Wrench, ShieldAlert, Server, Cpu, Plug, Circle, RefreshCw, Loader2, Plus, Trash2, Download, ChevronRight } from 'lucide-react'
@@ -18,6 +19,7 @@ import { confirm } from '../../shared/ui/dialog'
 import { reportingWrite } from '../../app/shell/reportingWrite'
 import { notify } from '../../app/shell/appSdk'
 import { useQueryParam, useQueryFlag, type RouteProps } from '../../app/shell/useQueryState'
+import { gatewayEvents } from '../../shared/data/socketTransport'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { api, type ToolItem, type McpServer, type ImportableMcpServer, type ToolLoadFailure, type McpPoolStats, type McpTransport, type McpServerUpdate, type ToolGroupsData } from '../../shared/data/api'
 import { isKnownTrustTier, trustTierHint, trustTierLabel } from '../../shared/data/trustTier'
@@ -44,6 +46,8 @@ interface Group {
 function serverHealth(s: McpServer): { state: string; tone: string; detail?: string } {
   if (!s.enabled) return { state: 'disabled', tone: 'var(--color-on-surface-low)' }
   if (s.status === 'ready') return { state: 'ready', tone: 'var(--color-ok)' }
+  if (connectionHealth(s) === 'stopped') return { state: 'stopped', tone: 'var(--color-danger)', detail: s.error }
+  if (connectionHealth(s) === 'probing') return { state: 'checking', tone: 'var(--color-warn)', detail: s.error }
   if (s.status === 'error') return { state: 'error', tone: 'var(--color-danger)', detail: s.error }
   return { state: s.status || 'unknown', tone: 'var(--color-warn)', detail: s.unservedReason || s.error }
 }
@@ -92,18 +96,29 @@ export function disabledMcpToolItems(server: McpServer, listed: ToolItem[]): Too
 
 export function ToolsPage({ query, setQuery }: Pick<RouteProps, 'query' | 'setQuery'>) {
   const { data, error: loadErr, refresh } = useQuery<ToolsIndexData>('tools:index', async () => {
-    const [idx, servers, importable, poolStats, groups] = await Promise.all([
+    const [idx, importable, poolStats, groups] = await Promise.all([
       api.toolsIndex(),
-      api.mcpServers().catch(() => [] as McpServer[]),
       api.importableMcp().catch(() => [] as ImportableMcpServer[]),
       api.mcpPoolStats().catch(() => ({ available: false } as McpPoolStats)),
       api.toolGroups().catch(() => null),
     ])
-    return { tools: idx.tools, loadFailures: idx.load_failures ?? [], servers, importable, poolStats, groups }
+    return { tools: idx.tools, loadFailures: idx.load_failures ?? [], servers: [], importable, poolStats, groups }
   }, { persist: true })
   const tools = data?.tools ?? null
   const loadFailures = data?.loadFailures ?? []
-  const servers = data?.servers ?? []
+  const { data: serverRows, error: serverError, refresh: refreshServers } = useQuery<McpServer[]>('tools:servers', () => api.mcpServers(), { persist: true })
+  const servers = serverRows ?? []
+  useEffect(() => gatewayEvents().attach({
+    message: message => {
+      if (message.type === 'refresh' && Array.isArray(message.data.sections) && message.data.sections.includes('mcp')) {
+        invalidateKeys('tools:servers')
+        refreshServers()
+        invalidateKeys('tools:index')
+        refresh()
+      }
+    },
+    reconnect: () => { invalidateKeys('tools:servers'); refreshServers() },
+  }), [refresh, refreshServers])
   const importable = data?.importable ?? []
   const poolStats = data?.poolStats ?? null
   const groupsInfo = data?.groups ?? null
@@ -116,7 +131,7 @@ export function ToolsPage({ query, setQuery }: Pick<RouteProps, 'query' | 'setQu
   const [probing, setProbing] = useState(false)
   const [addOpen, setAddOpen] = useQueryFlag(query, setQuery, 'add')
   const [editingServer, setEditingServer] = useState<McpServer | null>(null)
-  const load = () => { invalidateKeys('tools:index'); refresh() }
+  const load = () => { invalidateKeys('tools:index'); invalidateKeys('tools:servers'); refresh(); refreshServers() }
 
   async function reprobe() {
     setProbing(true)
@@ -192,7 +207,7 @@ export function ToolsPage({ query, setQuery }: Pick<RouteProps, 'query' | 'setQu
   }
 
   const groups = useMemo<Group[] | null>(() => {
-    if (!tools) return null
+    if (!tools && !serverRows) return null
     const groupOf = (list: ToolItem[]): string | undefined => {
       if (!groupsEnabled) return undefined
       const counts = new Map<string, number>()
@@ -211,7 +226,7 @@ export function ToolsPage({ query, setQuery }: Pick<RouteProps, 'query' | 'setQu
       (!needle || `${t.name} ${t.description}`.toLowerCase().includes(needle)) &&
       (risk === 'all' || (t.risk_level ?? 'safe') === risk)
     const byProvider = new Map<string, ToolItem[]>()
-    for (const t of tools) { const p = t.provider || 'other'; (byProvider.get(p) ?? byProvider.set(p, []).get(p)!).push(t) }
+    for (const t of tools ?? []) { const p = t.provider || 'other'; (byProvider.get(p) ?? byProvider.set(p, []).get(p)!).push(t) }
     const serverNames = new Set(servers.map((s) => s.name))
 
     const out: Group[] = []
@@ -277,7 +292,8 @@ export function ToolsPage({ query, setQuery }: Pick<RouteProps, 'query' | 'setQu
     >
       <>
         <div className="mx-auto px-l py-l" style={{ maxWidth: 'var(--content-width)' }}>
-          {tools === null && loadErr ? (
+          {!!serverError && <LoadError what="MCP servers" error={serverError} onRetry={refreshServers} />}
+          {tools === null && loadErr && servers.length === 0 ? (
             <LoadError what="tools" error={loadErr} onRetry={load} />
           ) : groups === null ? <ListSkeleton rows={6} what="tools" /> : groups.length === 0 ? (
             <div className="flex flex-col gap-2xl">
@@ -428,6 +444,7 @@ export function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onAllowS
             {!g.server.name.includes(':') && <Button variant="secondary" size="sm" onClick={() => onEditServer(g.server!)}>Edit</Button>}
             {
 }
+            {g.server.status === 'stopped' && <Button variant="secondary" size="sm" loading={reconnecting === g.server.name} onClick={() => onReconnect(g.server!)}>Retry</Button>}
             <SquareIconButton label={`Reconnect ${g.server.name}`} title="Reconnect this server"
               loading={reconnecting === g.server.name} iconSize={13} onClick={() => onReconnect(g.server!)}>
               <RefreshCw size={13} />
@@ -458,9 +475,12 @@ export function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onAllowS
           <span data-type="caption" className="ml-auto text-on-surface-low" title="Required by platform features — can't be disabled">required</span>
         )}
       </div>
+      {g.server && <ReadOnlyTrustControls server={g.server} />}
       {
 }
       {g.kind === 'mcp' && g.server?.url?.startsWith('https://') && (g.server.oauth?.length ?? 0) > 0 && <McpOAuthControls server={g.server} />}
+      {g.kind === 'mcp' && g.server?.error && <p data-type="body-s" className="mb-s text-on-surface-low">{g.server.error}</p>}
+      {g.kind === 'mcp' && g.server?.detail && <details className="mb-s"><summary data-type="caption">Details</summary><pre className="whitespace-pre-wrap break-words text-xs">{g.server.detail}</pre></details>}
       {g.kind === 'mcp' && g.tools.length === 0 ? (
         <div data-type="body-s" className="rounded-lg bg-surface-container px-m py-3 text-on-surface-low flex items-center gap-s">
           <Plug size={14} />
@@ -680,7 +700,7 @@ export function EditToolServerModal({ server, onClose, onSaved }: { server: McpS
       </> : <>
         <p data-type="caption" className="text-on-surface-low">Current command: <span className="font-mono">{server.command || 'not available'}</span>. Enter a replacement to change it.</p>
         <Field label="New command"><TextInput value={command} onChange={setCommand} placeholder="npx" size="md" surface="high" mono /></Field>
-        <Field label="New arguments" hint="Space-separated. Leave blank to retain current arguments."><TextInput value={args} onChange={setArgs} placeholder="-y @modelcontextprotocol/server-filesystem /path" size="md" surface="high" mono /></Field>
+        <Field label="New arguments" hint="Space-separated. Argument credentials are kept in your credential store. Leave blank to retain current arguments."><TextInput value={args} onChange={setArgs} placeholder="-y @modelcontextprotocol/server-filesystem /path" size="md" surface="high" mono /></Field>
         {!!server.args?.length && <label className="flex items-center gap-2 text-on-surface-low"><input type="checkbox" checked={clearArgs} onChange={(e) => setClearArgs(e.target.checked)} /> Clear saved arguments</label>}
       </>}
       <Field label="New environment values" hint="One KEY=value per line. Blank retains current values."><TextArea value={env} onChange={setEnv} rows={2} placeholder="LOG_LEVEL=info" mono size="md" /></Field>
@@ -783,7 +803,7 @@ function AddToolServerModal({ onClose, onAdded }: { onClose: () => void; onAdded
             <Field label="Command" hint="The executable that starts the server over stdio.">
               <TextInput value={command} onChange={setCommand} placeholder="npx" size="md" surface="high" mono />
             </Field>
-            <Field label="Arguments" hint="Space-separated args passed to the command (optional).">
+            <Field label="Arguments" hint="Space-separated args passed to the command (optional). Credential values are kept in your credential store.">
               <TextInput value={args} onChange={setArgs} placeholder="-y @modelcontextprotocol/server-filesystem /path" size="md" surface="high" mono />
             </Field>
             <Field label="Environment" hint="One KEY=value per line. Values are saved server-side.">

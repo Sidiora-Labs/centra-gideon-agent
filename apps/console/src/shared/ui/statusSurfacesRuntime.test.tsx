@@ -28,9 +28,12 @@ describe('progress values', () => {
     expect(progressWave(120)).toBe('M0 4 Q 15 0 30 4 T 60 4 T 90 4 T 120 4')
     expect(progressWave(NaN)).not.toContain('NaN')
   })
-  it('reports finite values for invalid meter, ring and wave inputs', () => {
+  it('reports an unmeasured meter and finite ring and wave inputs', () => {
     render(<><Meter pct={NaN} label="Memory" /><ProgressRing pct={NaN} tone="red" label="Cycles" /><WavyProgress value={NaN} label="Download" /></>)
-    screen.getAllByRole('progressbar').forEach(bar => expect(bar.getAttribute('aria-valuenow')).toBe('0'))
+    const meter = screen.getByRole('progressbar', { name: 'Memory' })
+    expect(meter).not.toHaveAttribute('aria-valuenow')
+    expect(meter).toHaveAttribute('aria-valuetext', 'not measured')
+    screen.getAllByRole('progressbar').filter(bar => bar !== meter).forEach(bar => expect(bar.getAttribute('aria-valuenow')).toBe('0'))
   })
   it('keeps meter size, tone, detail and caller layout separate', () => {
     const view = render(<Meter pct={125} label="Disk" tone="teal" size="thin" detail="40 GB" className="custom-layout" />)

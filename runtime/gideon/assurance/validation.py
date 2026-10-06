@@ -224,6 +224,19 @@ def validate_field(value: Any, spec: FieldSpec) -> Any:
     return value
 
 
+def normalize_tool_booleans(args: dict[str, Any], schema: ToolSchema) -> dict[str, Any]:
+    from gideon.security.safety_flags import yes_or_no
+
+    cleaned = dict(args)
+    for spec in schema.fields:
+        if spec.type is bool and spec.name in cleaned:
+            parsed = yes_or_no(cleaned[spec.name])
+            if parsed is None:
+                raise ValidationError(spec.name, "expected a boolean")
+            cleaned[spec.name] = parsed
+    return cleaned
+
+
 def validate_tool_args(args: dict[str, Any], schema: ToolSchema) -> dict[str, Any]:
     """Validate all tool arguments against a schema. Returns cleaned args dict."""
     if not isinstance(args, dict):
@@ -1119,7 +1132,9 @@ def validate_ask_user_question(tool_input: Any) -> list[dict[str, Any]]:
         if not q_text:
             continue
         header = str(rq.get("header", "")).strip()[:_AUQ_LABEL_CAP]
-        multi = bool(rq.get("multiSelect", False))
+        from gideon.security.safety_flags import yes_or_no
+
+        multi = yes_or_no(rq.get("multiSelect")) is True
         raw_options = rq.get("options")
         options: list[dict[str, str]] = []
         if isinstance(raw_options, list):
@@ -1135,11 +1150,14 @@ def validate_ask_user_question(tool_input: Any) -> list[dict[str, Any]]:
                     options.append({"label": label, "description": desc})
         if not options:
             continue
+        if "free_text" in rq and type(rq["free_text"]) is not bool:
+            raise ValidationError("ask_user_question", "free_text must be a boolean")
         out.append(
             {
                 "question": q_text,
                 "header": header,
                 "multiSelect": multi,
+                **({"free_text": rq["free_text"]} if "free_text" in rq else {}),
                 "options": options,
             }
         )

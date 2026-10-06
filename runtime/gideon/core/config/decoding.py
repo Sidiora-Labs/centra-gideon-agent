@@ -739,6 +739,7 @@ RECORDS = {
                 [],
                 lambda value: [str(r) for r in value if isinstance(r, str)],
             ),
+            "sort_messages": Value(("inbox", "sort_messages"), True, bool),
             "test_mode": Value(("inbox", "test_mode"), False, bool),
             "engagement_ranking_enabled": Value(
                 ("inbox", "engagement_ranking_enabled"), False, bool

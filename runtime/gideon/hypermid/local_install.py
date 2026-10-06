@@ -9,9 +9,10 @@ import os
 import stat
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 from pathlib import Path
 
-from .enrollment_provisioning import stage_enrollment, validate_enrollment_params
+from .enrollment_provisioning import current_enrollment_review, stage_enrollment, validate_enrollment_params
 from .enrollment_source import NativeEnrollmentSource
 from .foundation import Digest
 from .lifecycle import HypermidLifecycle
@@ -68,6 +69,14 @@ class LocalInstallAuthority:
             )
         local_enrollment = self.enrollment_source.issue(scope=self.scope)
         validate_enrollment_params(local_enrollment)
+        current = current_enrollment_review(self.scope)
+        refresh = current is not None
+        if refresh and self.lifecycle.adapter.client.connected and (self.lifecycle.process is None or self.lifecycle.process.returncode is not None):
+            raise LocalInstallError("reviewed enrollment refresh requires the owned daemon")
+        additions = {
+            "operations": [value for value in local_enrollment["operations"] if current is None or value not in current["operations"]],
+            "resources": [value for value in local_enrollment["resources"] if current is None or value not in current["resources"]],
+        }
 
         executable = self._verified_executable()
         binary_digest = _file_digest(executable)
@@ -103,7 +112,7 @@ class LocalInstallAuthority:
             "binary_path": str(executable),
             "binary_digest": binary_digest,
             "operator_identity": identity,
-            "params": {"local_enrollment": dict(local_enrollment)},
+            "params": {"local_enrollment": dict(local_enrollment), "current_enrollment": current, "permission_additions": additions},
             "checks": {
                 "platform_supported": True,
                 "directories_writable": True,
@@ -161,16 +170,20 @@ class LocalInstallAuthority:
             reviewed_plan_digest=plan.plan_digest,
             target_version=plan.target_version,
             params=local_enrollment,
+            expected_current_digest=(raw_params.get("current_enrollment", {}).get("digest") if isinstance(raw_params.get("current_enrollment"), Mapping) else None),
         )
+        refresh = isinstance(raw_params.get("current_enrollment"), Mapping)
         previous_enrollment = self.lifecycle.enrollment
         started_at = datetime.now(timezone.utc)
-        self.lifecycle.enrollment = staged.local_enrollment
         started = False
         try:
-            status = await self.lifecycle.start()
-            if not status.available or not status.healthy:
-                raise LocalInstallError("local Hypermid daemon did not become healthy")
-            started = True
+            if not refresh:
+                self.lifecycle.enrollment = staged.local_enrollment
+                status = await self.lifecycle.start()
+                if not status.available or not status.healthy:
+                    raise LocalInstallError("local Hypermid daemon did not become healthy")
+                started = True
+                await self.lifecycle._validate_enrollment_grants()
             finished_at = datetime.now(timezone.utc)
             receipt = ActionReceipt(
                 job_id=f"local-install-{plan.plan_digest[:24]}",
@@ -199,13 +212,21 @@ class LocalInstallAuthority:
                 artifact_digest=str(raw["binary_digest"]),
                 error=None,
             )
-            enrollment = staged.commit(lifecycle_receipt=receipt)
+            if refresh:
+                def publish():
+                    nonlocal receipt
+                    receipt = replace(receipt, finished_at=_timestamp(datetime.now(timezone.utc)))
+                    return staged.commit(lifecycle_receipt=receipt)
+                enrollment = await self.lifecycle.reviewed_enrollment_restart(staged.local_enrollment, verify_current=staged.verify_current, finalize=publish)
+            else:
+                enrollment = staged.commit(lifecycle_receipt=receipt)
             return LifecycleReceipt(receipt, None, None, enrollment)
         except BaseException:
             staged.abort()
-            if started or self.lifecycle.process is not None:
-                await self.lifecycle.stop()
-            self.lifecycle.enrollment = previous_enrollment
+            if not refresh:
+                if started or self.lifecycle.process is not None:
+                    await self.lifecycle.stop()
+                self.lifecycle.enrollment = previous_enrollment
             raise
 
     def _verified_executable(self) -> Path:
@@ -231,6 +252,10 @@ class LocalInstallAuthority:
             timezone.utc
         ):
             raise LocalInstallError("local install plan expired")
+        params = raw.get("params")
+        expected = params.get("current_enrollment") if isinstance(params, Mapping) else None
+        if current_enrollment_review(self.scope) != expected:
+            raise LocalInstallError("local enrollment changed after review")
         executable = self._verified_executable()
         if raw.get("binary_path") != str(executable):
             raise LocalInstallError("packaged Hypermid daemon path changed after review")

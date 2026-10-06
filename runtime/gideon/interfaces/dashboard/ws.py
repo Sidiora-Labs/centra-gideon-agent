@@ -89,7 +89,8 @@ async def api_ws(request: web.Request) -> web.WebSocketResponse:
     ws = web.WebSocketResponse(heartbeat=30)
     await ws.prepare(request)
 
-    state.register_ws(ws, app=request.get("app", ""))
+    from gideon.security.approval_answer import OWNER, of_request
+    state.register_ws(ws, app=request.get("app", ""), owner=of_request(request).kind == OWNER)
 
     try:
         app = request.get("app", "")

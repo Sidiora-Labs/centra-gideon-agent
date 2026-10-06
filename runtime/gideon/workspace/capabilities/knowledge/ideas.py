@@ -449,7 +449,12 @@ class IdeaLists:
                 **detail["document"],
                 "modified": datetime.now(timezone.utc).isoformat(),
             }
-            self.store.update_item(state["source_id"], content=render(changed))
+            from gideon.workspace.uploads.content_intake import approve_text, IntakeRefused, run_owned_sync
+            try:
+                text = run_owned_sync(lambda: approve_text(render(changed), surface='idea_vault_import')).text
+            except IntakeRefused as exc:
+                raise CaptureError(exc.message, exc.status) from exc
+            self.store.update_item(state["source_id"], content=text)
         outcome = self.vault.sync_batch(max_items=1000)
         ledger = self.store.vault_projection(state["source_id"]) or {}
         if ledger.get("owner_deleted") or ledger.get("conflict"):

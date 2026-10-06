@@ -31,7 +31,7 @@ from gideon.security.sel import SecurityEventLog
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 EXPECTED_BASELINE_SHA256 = (
-    "1cfa1b46d011a0432765456d6bf4c8e104b5f7519c6796dbf9a0a22248423aac"
+    "2ae58f08f3fde85d5406caab396e56976b91bcab3c92c6c093e6cb70e5409045"
 )
 
 
@@ -84,7 +84,7 @@ class TestPackagedSource:
         assert (
             declared == security._baseline_digest(patterns) == EXPECTED_BASELINE_SHA256
         )
-        assert len(patterns) == len(set(patterns)) == 112
+        assert len(patterns) == len(set(patterns)) == 110
 
     def test_the_loaded_list_is_the_packaged_file(self):
         _, _, patterns = security._read_packaged_baseline()
@@ -100,7 +100,7 @@ class TestPackagedSource:
     ):
         """Corruption / a partial write / an edit that forgot the digest — all fail loudly."""
         good = json.dumps(
-            {"version": 1, "sha256": "0" * 64, "patterns": ["rm -rf /.*"]}
+            {"version": 1, "sha256": "0" * 64, "patterns": ["git reset --hard.*"]}
         )
         monkeypatch.setattr(
             security, "_read_packaged_baseline", _reader_returning(good)
@@ -169,7 +169,7 @@ class TestSelfHealing:
 
         effective = security.denied_command_patterns()
 
-        assert len(effective) == 112
+        assert len(effective) == 110
         assert set(effective) == set(security._BASELINE_PATTERNS)
         assert list(security.BUILTIN_DENIED_COMMAND_PATTERNS) == list(
             security._BASELINE_PATTERNS
@@ -177,11 +177,11 @@ class TestSelfHealing:
         events = _sel_events(tmp_path, "baseline_denylist_reasserted")
         assert len(events) == 1
         assert events[0]["outcome"] == "healed"
-        assert events[0]["metadata"]["restored_count"] == 112
+        assert events[0]["metadata"]["restored_count"] == 110
         assert events[0]["metadata"]["expected_sha256"] == EXPECTED_BASELINE_SHA256
 
     def test_removing_one_pattern_is_healed_and_named_in_the_event(self, tmp_path):
-        victim = "rm -rf /.*"
+        victim = "git reset --hard.*"
         assert victim in security.BUILTIN_DENIED_COMMAND_PATTERNS
         security.BUILTIN_DENIED_COMMAND_PATTERNS.remove(victim)
 
@@ -210,7 +210,7 @@ class TestSelfHealing:
 
         effective = security.denied_command_patterns()
 
-        assert len(effective) == 112
+        assert len(effective) == 110
         assert "only-this-one" not in effective
         assert security._BASELINE_PATTERNS == tuple(effective)
 
@@ -218,7 +218,7 @@ class TestSelfHealing:
         """Fail closed. With the live list, the snapshot and the packaged file all
         unusable there is nothing trustworthy to restore from — so the effective set is
         the union of what remains, never a smaller set, and the shrink is logged."""
-        survivor = "rm -rf /.*"
+        survivor = "git reset --hard.*"
         security.BUILTIN_DENIED_COMMAND_PATTERNS[:] = [survivor]
         security._BASELINE_PATTERNS = ("aws s3 cp .* s3://.*",)
 
@@ -272,7 +272,7 @@ class TestPeriodicReverify:
         assert report == {
             "version": 3,
             "sha256": EXPECTED_BASELINE_SHA256,
-            "count": 112,
+            "count": 110,
             "file_verified": True,
             "detail": "",
         }
@@ -298,7 +298,7 @@ class TestPeriodicReverify:
         report = security.verify_baseline_denylist()
 
         assert report["file_verified"] is False
-        assert report["count"] == 112
+        assert report["count"] == 110
         assert security.denied_command_reason("rm -rf /") is not None
         assert len(_sel_events(tmp_path, "baseline_denylist_tamper_attempt")) == 1
 
@@ -314,8 +314,8 @@ class TestPeriodicReverify:
 
         assert report["file_verified"] is False
         assert "unreadable" in report["detail"]
-        assert report["count"] == 112
-        assert len(security.denied_command_patterns()) == 112
+        assert report["count"] == 110
+        assert len(security.denied_command_patterns()) == 110
 
     @pytest.mark.asyncio
     async def test_the_doctor_probe_reports_the_verified_state(self):
@@ -327,7 +327,7 @@ class TestPeriodicReverify:
         res = await probe.run(doctor.DoctorContext())
 
         assert res.ok is True
-        assert res.evidence["patterns"] == 112
+        assert res.evidence["patterns"] == 110
         assert res.evidence["version"] == 3
         assert EXPECTED_BASELINE_SHA256.startswith(res.evidence["sha256"])
 
@@ -350,7 +350,7 @@ class TestPeriodicReverify:
         res = await probe.run(doctor.DoctorContext())
 
         assert res.ok is False
-        assert res.evidence["patterns"] == 112
+        assert res.evidence["patterns"] == 110
 
 
 def _write_config(home: Path, security_section: dict) -> None:
@@ -435,15 +435,15 @@ class TestStrictlyAdditiveUserConfig:
             tmp_path,
             {
                 "denied_commands": [],
-                "removed_denied_commands": ["rm -rf /.*"],
+                "removed_denied_commands": ["git reset --hard.*"],
                 "denied_commands_override": [],
             },
         )
 
         effective = security.denied_command_patterns()
 
-        assert "rm -rf /.*" in effective
-        assert len(effective) == 112
+        assert "git reset --hard.*" in effective
+        assert len(effective) == 110
         assert security.denied_command_reason("rm -rf /") is not None
 
 
@@ -459,8 +459,8 @@ class TestSharedSource:
         decision = denylist.check_action("shell", {"command": "rm -rf /"})
 
         assert decision.blocked is True
-        assert "rm -rf" in decision.reason
-        assert len(security.BUILTIN_DENIED_COMMAND_PATTERNS) == 112
+        assert "protected_delete" == decision.matched
+        assert len(security.BUILTIN_DENIED_COMMAND_PATTERNS) == 110
 
     def test_no_module_keeps_a_second_in_code_copy_of_the_baseline(self):
         """Two copies is how the two paths drift. Only ``security.py`` may name the
@@ -555,11 +555,11 @@ class TestSecurityPanelPayload:
         assert body["baseline"] == {
             "version": 3,
             "sha256": EXPECTED_BASELINE_SHA256,
-            "count": 112,
+            "count": 110,
             "verified": True,
             "detail": "",
         }
-        assert len(body["builtin"]) == 112
+        assert len(body["builtin"]) == 110
         assert body["user"] == []
         assert body["user_additions"] == 0
 
@@ -589,8 +589,8 @@ class TestSecurityPanelPayload:
         )
         assert after["baseline"]["version"] == 3
         assert after["baseline"]["sha256"] == EXPECTED_BASELINE_SHA256
-        assert after["baseline"]["count"] == 112
-        assert len(after["builtin"]) == 112
+        assert after["baseline"]["count"] == 110
+        assert len(after["builtin"]) == 110
 
     @pytest.mark.asyncio
     async def test_a_missing_file_also_flips_the_indicator(self, monkeypatch):
@@ -603,7 +603,7 @@ class TestSecurityPanelPayload:
 
         assert body["baseline"]["verified"] is False
         assert "unreadable" in body["baseline"]["detail"]
-        assert body["baseline"]["count"] == 112
+        assert body["baseline"]["count"] == 110
 
     @pytest.mark.asyncio
     async def test_user_additions_counts_the_patterns_that_widen_the_set(
@@ -641,7 +641,7 @@ class TestSecurityPanelPayload:
 
         assert len(body["user"]) == 3
         assert body["user_additions"] == 1
-        assert len(body["builtin"]) == 112
+        assert len(body["builtin"]) == 110
 
     @pytest.mark.asyncio
     async def test_the_payload_offers_no_write_path_for_the_baseline(self):

@@ -225,6 +225,8 @@ async def _maybe_followups(state: "ConsoleState", session: "_ChatSession") -> No
         return
     if getattr(session, "is_restricted", False):
         return
+    if getattr(session, "_app", "") in ("loop", "loops"):
+        return
     if session._queue:
         return
     if getattr(session, "_last_turn_errored", False):

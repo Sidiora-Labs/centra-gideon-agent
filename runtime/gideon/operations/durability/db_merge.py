@@ -32,6 +32,7 @@ from pathlib import Path
 from gideon.operations.durability import inventory as inv
 from gideon.operations.durability.cursor import CONSUMED, PAYLOAD_BAD, PREREQ_ABSENT
 from gideon.operations.durability.pull_engine import DbMerger
+from gideon.operations.durability.home_paths import LinkInTheWay
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,9 @@ def make_db_merger(home: Path) -> DbMerger:
         dst = Path(home) / entry.path
         try:
             _apply_db_merge(entry.id, src, dst)
+        except LinkInTheWay as exc:
+            logger.warning("db_merge: refused linked path: %s", exc)
+            return PREREQ_ABSENT
         except (
             Exception
         ) as exc:  # noqa: BLE001 — one bad DB must not wedge the whole pull
@@ -76,11 +80,14 @@ def _apply_db_merge(entry_id: str, src: Path, dst: Path) -> None:
     """
     from gideon.workspace import snapshot
 
+    from gideon.operations.durability.home_paths import guard_path
+
+    src, dst = guard_path(src, read=True), guard_path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
     if not dst.exists():
-        import shutil
+        from gideon.operations.durability.sqlite_files import bring_in
 
-        shutil.copy2(src, dst)
+        bring_in(src, dst)
         return
     if entry_id == _MEMORY_DB_ENTRY:
         snapshot._merge_memory(src, dst)

@@ -66,7 +66,9 @@ class GideonEmbeddingProviderAuthority:
             dimensions = await asyncio.to_thread(
                 gideon_registry.get_active_embedding_dim
             )
-        except BaseException as exc:
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
             raise self._classified_failure(exc, trace) from None
         if not isinstance(dimensions, int) or dimensions <= 0:
             raise _failure("EMBEDDING_PROVIDER_UNAVAILABLE", trace, retryable=True)
@@ -75,18 +77,18 @@ class GideonEmbeddingProviderAuthority:
     async def embed(
         self, text: str, expected: ProviderBinding, trace: Trace
     ) -> ProviderEmbedding:
+        generation = gideon_registry.active_binding_key()
         before = gideon_registry.get_active_embedding_fingerprint()
         if before != (expected.provider_identity, expected.model_id):
             raise _failure("EMBEDDING_PROVIDER_CHANGED", trace, retryable=True)
-        operation = gideon_registry.get_active_embed_fn()
-        if operation is None:
-            raise _failure("EMBEDDING_PROVIDER_UNAVAILABLE", trace, retryable=False)
         try:
-            vector = await asyncio.to_thread(operation, text)
-        except BaseException as exc:
+            vector = await gideon_registry.embed_active(text)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
             raise self._classified_failure(exc, trace) from None
         after = gideon_registry.get_active_embedding_fingerprint()
-        if after != before:
+        if after != before or gideon_registry.active_binding_key() != generation:
             raise _failure("EMBEDDING_PROVIDER_CHANGED", trace, retryable=True)
         if vector is None:
             raise _failure("EMBEDDING_PROVIDER_REFUSED", trace, retryable=True)

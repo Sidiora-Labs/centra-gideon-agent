@@ -1,3 +1,4 @@
+import { denyConsequenceText } from './denyConsequence'
 import { useMemo, useState } from 'react'
 import { withWeight } from '../../shared/theme/fontWeight'
 import { ShieldCheck, ShieldAlert, AlertTriangle } from 'lucide-react'
@@ -12,6 +13,7 @@ import type { ApprovalSegment } from './chatTypes'
 const RISK_META = {
   safe: { label: 'Safe', icon: ShieldCheck, color: 'var(--color-ok)' },
   caution: { label: 'Caution', icon: AlertTriangle, color: 'var(--color-warn)' },
+  unchecked: { label: 'Not checked', icon: ShieldAlert, color: 'var(--color-danger)' },
   destructive: { label: 'Destructive', icon: ShieldAlert, color: 'var(--color-danger)' },
 } as const
 
@@ -55,14 +57,17 @@ type RememberScope = (typeof REMEMBER_SCOPES)[number]['key']
 
 export function ApprovalCard({ seg, onAct }: { seg: ApprovalSegment; onAct: (id: string, action: Action, revision?: string) => void }) {
   const [scope, setScope] = useState<RememberScope>('once')
+  const [unlockStanding, setUnlockStanding] = useState(false)
   const [revision, setRevision] = useState('')
   const { ladder } = useAutonomyLadder()
   const rungType = useMemo(() => providerRungIndex(ladder).get(seg.tool), [ladder, seg.tool])
-  const reach = establishedFacets(deriveBlastRadius({ tool: seg.tool, risk: seg.risk })).map((facet) => facet.label)
-  const scopes = seg.toolKind && ['prompt', 'write', 'record'].includes(seg.toolKind)
+  const reach = establishedFacets(deriveBlastRadius({ tool: seg.tool, risk: seg.risk, blastRadius: seg.blastRadius })).map((facet) => facet.label)
+  const dangerous = seg.risk === 'destructive' || seg.risk === 'unchecked'
+  const scopes = seg.protectedDelete || (dangerous && !unlockStanding) ? REMEMBER_SCOPES.slice(0, 1) : seg.toolKind && ['prompt', 'write', 'record'].includes(seg.toolKind)
     ? REMEMBER_SCOPES
     : REMEMBER_SCOPES.slice(0, 2)
   const chosen = scopes.find((s) => s.key === scope) ?? scopes[0]
+  const denial = denyConsequenceText(seg.denyConsequence)
   const resolved = seg.resolved ? approvalOutcome(seg.resolved) : null
   return (
     <PermissionGrant
@@ -74,7 +79,7 @@ export function ApprovalCard({ seg, onAct }: { seg: ApprovalSegment; onAct: (id:
       resultLabel={resolved?.label}
       choices={seg.resolved ? [] : [
         { id: 'allow', label: 'Allow', name: `Allow ${seg.tool} — ${chosen.label.toLowerCase()}: ${chosen.promise}` },
-        { id: 'rejected', label: 'Deny', name: `Deny ${seg.tool} — nothing is remembered`, tone: 'danger' },
+        { id: 'rejected', label: 'Deny', name: `Deny ${seg.tool} — ${denial || "nothing is remembered"}`, tone: 'danger' },
         ...(seg.canRevise ? [{ id: 'revised', label: 'Request change', name: `Request a revised ${seg.tool} action without running this one`, disabled: !revision.trim() }] : []),
       ]}
       onChoice={(choice) => {
@@ -88,11 +93,17 @@ export function ApprovalCard({ seg, onAct }: { seg: ApprovalSegment; onAct: (id:
         {rungType && <RungChip type={rungType} ladder={ladder} />}
         {seg.risk && <RiskChip risk={seg.risk} />}
       </div>}
+      {!seg.resolved && denial && <p data-type="caption">{denial}</p>}
       {seg.input && <pre tabIndex={0} role="group" aria-label="Tool arguments"
         className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-surface-high p-2 font-mono text-xs">{seg.input}</pre>}
+      {seg.protectedDelete && <p role="alert" data-type="caption" className="text-on-surface-low">{seg.protectedDelete} This answer allows this call only.</p>}
       {seg.purpose && <p data-type="caption" className="text-on-surface-low">{seg.purpose}</p>}
       {!seg.resolved && (
         <div className="mt-2 flex flex-col gap-1">
+          {dangerous && !seg.protectedDelete && <label data-type="caption" className="flex items-center gap-2">
+            <input type="checkbox" checked={unlockStanding} onChange={event => { setUnlockStanding(event.target.checked); setScope('once') }} />
+            Show choices that allow future calls without asking
+          </label>}
           <div className="flex flex-wrap items-center gap-2">
             <span data-type="caption" className="text-on-surface-low">Remember this choice</span>
             <Segmented size="sm" ariaLabel="Remember this choice"

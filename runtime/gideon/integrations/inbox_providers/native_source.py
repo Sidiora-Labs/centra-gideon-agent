@@ -11,7 +11,6 @@ from typing import Any
 
 from gideon.integrations.inbox import (
     Classification,
-    Confidence,
     InboxState,
     InboxItem,
     InboxStore,
@@ -118,8 +117,6 @@ def hold_from_someone_new(
         message=f"{title}\n\n{displayed}" if title else displayed,
         sender_id=sender_id,
         sender_name=sender_name or sender_id,
-        classification=Classification.NEEDS_REPLY.value,
-        confidence=Confidence.NEEDS_REVIEW.value,
         status=ItemStatus.PENDING.value,
         created_at=stamp,
         source=source,
@@ -136,6 +133,9 @@ def hold_from_someone_new(
         state.broadcast_ws("inbox_new_item", _redact_item(item.to_dict()))
     except Exception:
         logger.debug("hold_from_someone_new: broadcast failed", exc_info=True)
+    sorter = getattr(getattr(state, "_inbox_svc", None), "sorter", None)
+    if sorter is not None:
+        sorter.wake()
     return item
 
 
@@ -160,7 +160,6 @@ class _NativeMessage:
             sender_id=self.sender,
             sender_name=self.sender,
             classification=classification,
-            confidence=Confidence.HIGH.value,
             status=ItemStatus.PENDING.value,
             created_at=created,
             context_summary=self.context or "",
@@ -213,3 +212,16 @@ def post_to_inbox(
         except Exception:
             logger.debug("post_to_inbox: %s failed", label, exc_info=True)
     return item
+
+
+async def open_inbox_items(reader, *, kind=""):
+    """Read active native rows without changing anyone's seen state."""
+    state = get_dashboard_state()
+    if state is None or not reader.admitted:
+        return None
+    from gideon.integrations.inbox import owner_username
+    store = _store_from_state(state)
+    store.flush()
+    store.load()
+    items = [item for item in store.open_items(owner_username()) if reader.reads(item) and (not kind or item.item_kind == kind)]
+    return sorted(items, key=lambda item: item.created_at, reverse=True)

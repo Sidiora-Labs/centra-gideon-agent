@@ -11,7 +11,7 @@ use crate::model::{
     RevisionPrecondition,
 };
 use crate::provenance::{
-    attach_spans, error as domain_error, put_source, sql_error, ProvenanceSpan, SourceSnapshot,
+    attach_spans, error as domain_error, put_source, ProvenanceSpan, SourceSnapshot,
 };
 use crate::smart_note::SmartPredicate;
 use crate::summary::{put_summary_details, SummaryDetails};
@@ -1339,6 +1339,26 @@ pub(crate) fn list_records_in(
     Ok((cursor, records))
 }
 
+pub(crate) fn list_records_after(
+    transaction: &Transaction<'_>, scope: &Scope, category: Option<&str>,
+    status: Option<RecordStatus>, after_id: Option<&Id>, limit: usize,
+) -> MemoryResult<(Cursor, Vec<MemoryRecord>)> {
+    if limit == 0 || limit > 1_000 {
+        return Err(domain_error("INVALID_ARGUMENT", "record list limit must be within 1..1000"));
+    }
+    let mut statement = transaction.prepare(&format!(
+        "{} AND r.owner_scope_digest=?1 AND (?2 IS NULL OR r.category=?2)
+         AND (?3 IS NULL OR r.status=?3) AND (?4 IS NULL OR r.record_id>?4)
+         ORDER BY r.record_id ASC LIMIT ?5",
+        RECORD_SELECT.replacen("WHERE r.record_id=?1", "WHERE 1=1", 1)
+    )).map_err(sql_error)?;
+    let rows = statement.query_map(params![scope_digest(scope).to_string(), category,
+        status.map(RecordStatus::as_str), after_id.map(Id::as_str), limit], map_record)
+        .map_err(sql_error)?.collect::<Result<Vec<_>, _>>().map_err(sql_error)?;
+    let records = rows.into_iter().collect::<MemoryResult<Vec<_>>>()?;
+    Ok((cursor_in(transaction, scope)?, records))
+}
+
 fn cursor_in(connection: &rusqlite::Connection, scope: &Scope) -> MemoryResult<Cursor> {
     let pair: Option<(u64, u64)> = connection
         .query_row(
@@ -2242,4 +2262,25 @@ mod lineage_record_tests {
             .unwrap_err();
         assert_eq!(purge.code, "RETENTION_NOT_ELAPSED");
     }
+}
+
+fn sql_error(cause: rusqlite::Error) -> crate::Error {
+    let diagnostic = match cause {
+        rusqlite::Error::SqliteFailure(code, _) => format!(
+            "SQLite {:?} (extended code {})",
+            code.code, code.extended_code
+        ),
+        rusqlite::Error::InvalidColumnType(index, _, _) => {
+            format!("SQLite column type mismatch at index {index}")
+        }
+        rusqlite::Error::InvalidColumnIndex(index) => {
+            format!("SQLite missing column at index {index}")
+        }
+        rusqlite::Error::QueryReturnedNoRows => "SQLite expected row is absent".to_owned(),
+        _ => "SQLite record query or conversion failed".to_owned(),
+    };
+    domain_error(
+        "MEMORY_STORE_ERROR",
+        &format!("memory record storage failed: {diagnostic}"),
+    )
 }

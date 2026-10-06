@@ -11,9 +11,53 @@ app-specific fields.
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
+
+from gideon.core.versions import order_key, parse_version
+
+from gideon.extensions.apps.agent_tiers import AGENT_TIERS, declared_agent
+from gideon.extensions.apps.core_features import FEATURE_NAME_RE, core_has
+
+
+def _manifest_list(value: object) -> list:
+    return value if isinstance(value, list) else []
+
+
+def _manifest_bool(value: object, *, field: str = "", default: bool = False) -> bool:
+    return value if isinstance(value, bool) else default
+
+
+def _not_booleans(data: dict[str, Any], *keys: str) -> dict[str, Any]:
+    return {
+        key: data[key]
+        for key in keys
+        if key in data and not isinstance(data[key], bool)
+    }
+
+
+def _refusals(prefix: str, record: dict[str, Any]) -> list[str]:
+    return [
+        f"{prefix}{key} must be true or false, got {json.dumps(value, default=str)[:60]}"
+        for key, value in record.items()
+    ]
+
+
+def _boolean_errors(value: Any, path: str = "") -> list[str]:
+    errors: list[str] = []
+    if hasattr(value, "__dataclass_fields__"):
+        errors.extend(_refusals(path, getattr(value, "not_booleans", {})))
+        for item in fields(value):
+            if item.name == "not_booleans":
+                continue
+            child = getattr(value, item.name)
+            errors.extend(_boolean_errors(child, path + item.name + "."))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            errors.extend(_boolean_errors(child, path + str(index) + "."))
+    return errors
+
 
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+([+-]|$)")
@@ -21,45 +65,14 @@ ROUTE_OP_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 ICON_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 
 
-def version_tuple(v: str) -> tuple[int, ...]:
-    """Parse an app semver string to a numeric tuple for comparison (best-effort).
-
-    Manifests are validated against ``SEMVER_RE`` (``MAJOR.MINOR.PATCH`` with an optional
-    ``+build``/``-pre`` suffix), so the core is the dotted release. The pre-release/build
-    suffix is dropped (SemVer pre-release ordering is out of scope for "is a newer release
-    available"), and a leading ``v`` is tolerated. A value that can't be parsed sorts as
-    ``(0,)`` so a malformed version never falsely reads as an available update.
-
-    This is the ONE app-version comparator (``apps.catalog`` reuses it) — the version
-    field and ``SEMVER_RE`` both live here, so the comparator does too, rather than
-    inverting the apps→dashboard layering to borrow the self-updater's tag comparator.
-    """
-    core = (v or "").strip()
-    core = core[1:] if core[:1] == "v" else core
-    core = core.split("+", 1)[0].split("-", 1)[0]
-    try:
-        return tuple(int(x) for x in core.split("."))
-    except (ValueError, AttributeError):
-        return (0,)
+def version_tuple(v: str):
+    """Compatibility alias for the shared app-version sort key."""
+    return order_key(v)
 
 
-def strict_version_tuple(v: str) -> tuple[int, ...] | None:
-    """``v`` as a comparable tuple, or ``None`` when it is not a valid app semver.
-
-    :func:`version_tuple` is deliberately best-effort — it sorts junk as ``(0,)`` so a
-    malformed version never reads as an available update. That collapse is exactly wrong
-    for a *floor*: a floor of ``(0,)`` is satisfied by every core, so the same helper
-    would turn a typo into a silently-disabled gate. This variant keeps the parse and the
-    verdict separate: ``None`` means "unmeasurable", and the caller decides which way
-    that falls. Shape is ``SEMVER_RE`` (``MAJOR.MINOR.PATCH`` + optional ``-pre``/
-    ``+build``), with the same leading-``v`` tolerance and the same suffix drop, so there
-    is still ONE notion of an app version string in this module.
-    """
-    core = (v or "").strip()
-    core = core[1:] if core[:1] == "v" else core
-    if not SEMVER_RE.match(core):
-        return None
-    return version_tuple(core)
+def strict_version_tuple(v: str):
+    """Compatibility alias for strict PEP 440 parsing of a core floor."""
+    return parse_version(v)
 
 
 CORE_COMPAT_OK = "ok"
@@ -85,11 +98,12 @@ class CoreCompatibility:
     state: str = CORE_COMPAT_OK
     required: str = ""
     host: str = ""
+    missing: tuple[str, ...] = ()
 
     @property
     def admits(self) -> bool:
         """Whether an app carrying this verdict may be installed / enabled / started."""
-        return self.state != CORE_COMPAT_INCOMPATIBLE
+        return self.state == CORE_COMPAT_OK
 
     @property
     def reason(self) -> str:
@@ -98,6 +112,12 @@ class CoreCompatibility:
         Names BOTH versions in every non-``ok`` state, and — where the user can act —
         says what to do next. Prefixed with the app name by the caller, which is the
         layer that knows it."""
+        if self.missing:
+            return (
+                "requires unavailable core features "
+                + ", ".join(repr(name) for name in self.missing)
+                + "; upgrade Gideon, then try again."
+            )
         if self.state == CORE_COMPAT_INCOMPATIBLE:
             return (
                 f"requires Gideon {self.required} or newer, but this core is "
@@ -121,6 +141,7 @@ class CoreCompatibility:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "missing": list(self.missing),
             "state": self.state,
             "required": self.required,
             "host": self.host,
@@ -167,6 +188,10 @@ class CronEntry:
     persistent_session: bool = True
     silent: bool = False
 
+    not_booleans: dict[str, Any] = field(
+        default_factory=dict, init=False, compare=False
+    )
+
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"name": self.name}
         if self.every:
@@ -189,7 +214,7 @@ class CronEntry:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CronEntry":
-        return cls(
+        parsed = cls(
             name=str(data.get("name", "")),
             every=int(data.get("every", 0)),
             cron_expr=str(data.get("cron_expr", "")),
@@ -197,9 +222,13 @@ class CronEntry:
             message=str(data.get("message", "")),
             agent_sequence=[str(a) for a in data.get("agent_sequence", [])],
             env={str(k): str(v) for k, v in data.get("env", {}).items()},
-            persistent_session=bool(data.get("persistent_session", True)),
-            silent=bool(data.get("silent", False)),
+            persistent_session=_manifest_bool(
+                data.get("persistent_session", True), default=True
+            ),
+            silent=_manifest_bool(data.get("silent", False), default=False),
         )
+        parsed.not_booleans = _not_booleans(data, "persistent_session", "silent")
+        return parsed
 
 
 @dataclass
@@ -348,6 +377,11 @@ class RouteEntry:
     params: dict[str, Any] = field(default_factory=dict)
     body: dict[str, Any] = field(default_factory=dict)
     agentCallable: bool = True  # expose as agent tool + call-app-route  # noqa: N815
+    readOnly: bool = False
+
+    not_booleans: dict[str, Any] = field(
+        default_factory=dict, init=False, compare=False
+    )
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"op": self.op, "method": self.method, "path": self.path}
@@ -359,11 +393,14 @@ class RouteEntry:
             d["body"] = self.body
         if not self.agentCallable:
             d["agentCallable"] = False
+        if self.readOnly:
+            d["readOnly"] = True
         return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RouteEntry":
-        return cls(
+        parsed = cls(
+            readOnly=_manifest_bool(data.get("readOnly")),
             op=str(data.get("op", "")),
             method=str(data.get("method", "GET")).upper() or "GET",
             path=str(data.get("path", "")),
@@ -376,8 +413,10 @@ class RouteEntry:
             body=(
                 dict(data.get("body", {})) if isinstance(data.get("body"), dict) else {}
             ),
-            agentCallable=bool(data.get("agentCallable", True)),  # noqa: N815
+            agentCallable=_manifest_bool(data.get("agentCallable", True), default=True),
         )
+        parsed.not_booleans = _not_booleans(data, "agentCallable", "readOnly")
+        return parsed
 
 
 @dataclass
@@ -465,7 +504,8 @@ class Permissions:
     network_declared: bool = False
     memory: str = ""
     cron: bool = False
-    agent: bool = False
+    agent_tier: str = field(default="", kw_only=True)
+    agent_declared_raw: str = ""
     appMessaging: list[str] = field(default_factory=list)  # noqa: N815
     storageShared: bool = False  # noqa: N815
     storageRead: list[str] = field(default_factory=list)  # noqa: N815
@@ -473,6 +513,24 @@ class Permissions:
     proposals: list["ProposalKind"] = field(default_factory=list)
     backgroundTasks: bool = False  # noqa: N815
     eventSubscriptions: list[str] = field(default_factory=list)  # noqa: N815
+
+    not_booleans: dict[str, Any] = field(
+        default_factory=dict, init=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.agent_tier, str):
+            raise TypeError(
+                "Permissions.agent_tier must name text, read, tools or no agent work"
+            )
+        if self.agent_tier and self.agent_tier not in AGENT_TIERS:
+            raise ValueError(
+                "Permissions.agent_tier must name text, read, tools or no agent work"
+            )
+
+    @property
+    def agent(self) -> bool:
+        return self.agent_tier in AGENT_TIERS
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {}
@@ -493,7 +551,7 @@ class Permissions:
         if self.cron:
             d["cron"] = True
         if self.agent:
-            d["agent"] = True
+            d["agent"] = self.agent_tier
         if self.appMessaging:
             d["appMessaging"] = self.appMessaging
         if self.storageShared:
@@ -512,35 +570,41 @@ class Permissions:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Permissions":
-        return cls(
+        tier, raw = declared_agent(data.get("agent"))
+        parsed = cls(
             api=[str(p) for p in data.get("api", []) if p],
             config=[str(p) for p in data.get("config", []) if p],
             events=[str(e) for e in data.get("events", []) if e],
-            mcpTools=[str(t) for t in data.get("mcpTools", []) if t],  # noqa: N815
-            storage=bool(data.get("storage", False)),
-            network=bool(data.get("network", False)),
+            mcpTools=[str(t) for t in data.get("mcpTools", []) if t],
+            storage=_manifest_bool(data.get("storage", False), default=False),
+            network=_manifest_bool(data.get("network", False), default=False),
             network_declared="network" in data,
             memory=str(data.get("memory", "")),
-            cron=bool(data.get("cron", False)),
-            agent=bool(data.get("agent", False)),
-            appMessaging=[
-                str(t) for t in data.get("appMessaging", []) if t
-            ],  # noqa: N815
-            storageShared=bool(data.get("storageShared", False)),  # noqa: N815
-            storageRead=[
-                str(t) for t in data.get("storageRead", []) if t
-            ],  # noqa: N815
+            cron=_manifest_bool(data.get("cron", False), default=False),
+            agent_tier=tier,
+            agent_declared_raw=raw,
+            appMessaging=[str(t) for t in data.get("appMessaging", []) if t],
+            storageShared=_manifest_bool(
+                data.get("storageShared", False), default=False
+            ),
+            storageRead=[str(t) for t in data.get("storageRead", []) if t],
             desktop=[str(c) for c in data.get("desktop", []) if c],
             proposals=[
                 ProposalKind.from_dict(p)
                 for p in data.get("proposals", [])
                 if isinstance(p, dict)
             ],
-            backgroundTasks=bool(data.get("backgroundTasks", False)),  # noqa: N815
-            eventSubscriptions=[  # noqa: N815
+            backgroundTasks=_manifest_bool(
+                data.get("backgroundTasks", False), default=False
+            ),
+            eventSubscriptions=[
                 str(e) for e in data.get("eventSubscriptions", []) if e
             ],
         )
+        parsed.not_booleans = _not_booleans(
+            data, "storage", "network", "cron", "storageShared", "backgroundTasks"
+        )
+        return parsed
 
     def proposal_kind(self, kind_suffix: str) -> "ProposalKind | None":
         """The declared kind for *kind_suffix*, or None — the 403 check reads THIS."""
@@ -676,7 +740,9 @@ class ExternalPrerequisite:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExternalPrerequisite":
-        return cls(name=data.get("name", ""), why=data.get("why", ""), how=data.get("how", ""))
+        return cls(
+            name=data.get("name", ""), why=data.get("why", ""), how=data.get("how", "")
+        )
 
 
 @dataclass
@@ -706,6 +772,7 @@ class Dependencies:
     commands: list[str] = field(default_factory=list)
     pythonDependencies: list[str] = field(default_factory=list)  # noqa: N815
     sidecarDependencies: list[str] = field(default_factory=list)  # noqa: N815
+    npmPackages: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {}
@@ -720,6 +787,8 @@ class Dependencies:
             d["pythonDependencies"] = self.pythonDependencies
         if self.sidecarDependencies:
             d["sidecarDependencies"] = self.sidecarDependencies
+        if self.npmPackages:
+            d["npmPackages"] = list(self.npmPackages)
         return d
 
     @classmethod
@@ -731,6 +800,11 @@ class Dependencies:
             else MarketplaceDependencies()
         )
         return cls(
+            npmPackages=(
+                [str(p) for p in data.get("npmPackages", [])]
+                if isinstance(data.get("npmPackages", []), list)
+                else []
+            ),
             managedBy=str(data.get("managedBy", "gateway")),  # noqa: N815
             marketplace=marketplace,
             commands=[str(c) for c in data.get("commands", [])],
@@ -743,6 +817,216 @@ class Dependencies:
                 else data.get("sidecarDependencies")
             ),  # noqa: N815
         )
+
+    def _validate_npm_packages(self) -> list[str]:
+        errors: list[str] = []
+        if len(self.npmPackages) > _MAX_DECLARATIONS:
+            errors.append(
+                f"dependencies.npmPackages lists {len(self.npmPackages)} packages; at most {_MAX_DECLARATIONS} are shown"
+            )
+        seen: set[str] = set()
+        for name in self.npmPackages:
+            if not _NPM_PACKAGE_RE.fullmatch(name) or len(name) > _MAX_NPM_NAME:
+                errors.append(
+                    f"dependencies.npmPackages entry {name[:80]!r} is not an npm package name (a lowercase name, optionally @scope/name, with no version or option)"
+                )
+            elif name in seen:
+                errors.append(f"dependencies.npmPackages lists {name!r} more than once")
+            seen.add(name)
+        return errors
+
+
+_MAX_DECLARATIONS = 10
+_NPM_PACKAGE_RE = re.compile(r"(?:@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*")
+_MAX_NPM_NAME = 214
+
+LAUNCH_INHERITS = ("sign-in", "settings", "auto-approve-rules", "folder-settings")
+
+_PROGRAM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]*")
+PROGRAM_YOU_NAME = "*"
+NPX = "npx"
+_HOST_RE = re.compile(
+    r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?"
+)
+_LAUNCH_LIMITS = {"program": 80, "why": 300}
+_WRITE_LIMITS = {"path": 200, "why": 300}
+
+
+@dataclass
+class SettingCondition:
+    setting: str = ""
+    value: bool = False
+    not_booleans: dict[str, Any] = field(
+        default_factory=dict, init=False, compare=False
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"setting": self.setting, "value": self.value}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SettingCondition":
+        cond = cls(
+            setting=str(data.get("setting", "")),
+            value=_manifest_bool(
+                data.get("value"), field="launches inheritsWhile.value"
+            ),
+        )
+        cond.not_booleans = _not_booleans(data, "value")
+        return cond
+
+
+@dataclass
+class LaunchedProgram:
+    program: str = ""
+    why: str = ""
+    inherits: list[str] = field(default_factory=list)
+    inheritsWhile: SettingCondition | None = None
+    npmPackage: str = ""
+    hosts: list[str] = field(default_factory=list)
+
+    def validate(self, boolean_settings: set[str]) -> list[str]:
+        errors: list[str] = []
+        label = self.program[:40]
+        for key, limit in _LAUNCH_LIMITS.items():
+            value = getattr(self, key)
+            if not value.strip():
+                errors.append(f"launches entry {label!r} is missing {key!r}")
+            elif len(value) > limit:
+                errors.append(
+                    f"launches entry {label!r}: {key!r} is {len(value)} characters; at most {limit} are shown"
+                )
+        if (
+            self.program.strip()
+            and self.program != PROGRAM_YOU_NAME
+            and (not _PROGRAM_RE.fullmatch(self.program))
+        ):
+            errors.append(
+                f"launches entry {label!r}: 'program' must be a program's name as it is found on this machine (letters, digits, '.', '_', '+', '-'), not a path or a command line, or {PROGRAM_YOU_NAME!r} for the programs you name for it"
+            )
+        errors.extend(self._package_errors(label))
+        errors.extend(self._host_errors(label))
+        unknown = [w for w in self.inherits if w not in LAUNCH_INHERITS]
+        if unknown:
+            errors.append(
+                f"launches entry {label!r}: inherits entries must be among {list(LAUNCH_INHERITS)}, got {unknown}"
+            )
+        if len(set(self.inherits)) != len(self.inherits):
+            errors.append(
+                f"launches entry {label!r} lists an inherits entry more than once"
+            )
+        cond = self.inheritsWhile
+        if cond is not None:
+            if not self.inherits:
+                errors.append(
+                    f"launches entry {label!r} inherits nothing, so an inheritsWhile has nothing to qualify"
+                )
+            if cond.setting not in boolean_settings:
+                errors.append(
+                    f"launches entry {label!r}: inheritsWhile.setting {cond.setting[:40]!r} must name a boolean setting of the app's provider settingsSchema"
+                )
+            errors += _refusals(
+                f"launches entry {label!r}: inheritsWhile.", cond.not_booleans
+            )
+        return errors
+
+    def _package_errors(self, label: str) -> list[str]:
+        if not self.npmPackage:
+            return (
+                [
+                    f"launches entry {label!r}: npx downloads a package and runs it, so name that package in npmPackage"
+                ]
+                if self.program == NPX
+                else []
+            )
+        errors: list[str] = []
+        if self.program != NPX:
+            errors.append(
+                f"launches entry {label!r}: npmPackage names what npx downloads and runs, so 'program' must be {NPX!r}"
+            )
+        if (
+            not _NPM_PACKAGE_RE.fullmatch(self.npmPackage)
+            or len(self.npmPackage) > _MAX_NPM_NAME
+        ):
+            errors.append(
+                f"launches entry {label!r}: npmPackage {self.npmPackage[:80]!r} is not an npm package name (a lowercase name, optionally @scope/name, with no version or option)"
+            )
+        return errors
+
+    def _host_errors(self, label: str) -> list[str]:
+        errors: list[str] = []
+        if len(self.hosts) > _MAX_DECLARATIONS:
+            errors.append(
+                f"launches entry {label!r} lists {len(self.hosts)} hosts; at most {_MAX_DECLARATIONS} are shown"
+            )
+        for host in self.hosts:
+            if not _HOST_RE.fullmatch(host):
+                errors.append(
+                    f"launches entry {label!r}: host {host[:80]!r} is not a host name (lowercase, such as example.com, with no scheme, port or path)"
+                )
+        if len(set(self.hosts)) != len(self.hosts):
+            errors.append(f"launches entry {label!r} lists a host more than once")
+        return errors
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"program": self.program, "why": self.why}
+        if self.inherits:
+            d["inherits"] = list(self.inherits)
+        if self.inheritsWhile is not None:
+            d["inheritsWhile"] = self.inheritsWhile.to_dict()
+        if self.npmPackage:
+            d["npmPackage"] = self.npmPackage
+        if self.hosts:
+            d["hosts"] = list(self.hosts)
+        return d
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LaunchedProgram":
+        cond = data.get("inheritsWhile")
+        return cls(
+            program=str(data.get("program", "")),
+            why=str(data.get("why", "")),
+            inherits=[str(w) for w in _manifest_list(data.get("inherits"))],
+            inheritsWhile=(
+                SettingCondition.from_dict(cond) if isinstance(cond, dict) else None
+            ),
+            npmPackage=str(data.get("npmPackage", "")),
+            hosts=[str(h) for h in _manifest_list(data.get("hosts"))],
+        )
+
+
+@dataclass
+class ExternalWrite:
+    path: str = ""
+    why: str = ""
+
+    def validate(self) -> list[str]:
+        errors: list[str] = []
+        label = self.path[:40]
+        for key, limit in _WRITE_LIMITS.items():
+            value = getattr(self, key)
+            if not value.strip():
+                errors.append(f"writes entry {label!r} is missing {key!r}")
+            elif len(value) > limit:
+                errors.append(
+                    f"writes entry {label!r}: {key!r} is {len(value)} characters; at most {limit} are shown"
+                )
+        rel = self.path[2:] if self.path.startswith("~/") else self.path
+        if self.path.strip() and (
+            rel.startswith(("/", "~")) or "\\" in rel or ":" in rel
+        ):
+            errors.append(
+                f"writes entry {label!r}: 'path' names a place inside your home folder ('~/…') or inside the Gideon folder (a relative path)"
+            )
+        if ".." in rel.split("/"):
+            errors.append(f"writes entry {label!r}: 'path' must not contain '..'")
+        return errors
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"path": self.path, "why": self.why}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ExternalWrite":
+        return cls(path=str(data.get("path", "")), why=str(data.get("why", "")))
 
 
 @dataclass
@@ -1143,6 +1427,10 @@ class ProviderConfig:
     autonomy: AutonomyConfig = field(default_factory=AutonomyConfig)
     execution: str = EXECUTION_IN_PROCESS
 
+    not_booleans: dict[str, Any] = field(
+        default_factory=dict, init=False, compare=False
+    )
+
     def validate(self) -> list[str]:
         errors: list[str] = []
         if self.execution not in EXECUTION_MODES:
@@ -1192,14 +1480,16 @@ class ProviderConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProviderConfig":
         autonomy_raw = data.get("autonomy", {})
-        return cls(
+        parsed = cls(
             type=str(data.get("type", "")),
             implementation=str(data.get("implementation", "")),
-            multiInstance=bool(data.get("multiInstance", False)),  # noqa: N815
-            settingsSchema=dict(data.get("settingsSchema", {})),  # noqa: N815
+            multiInstance=_manifest_bool(
+                data.get("multiInstance", False), default=False
+            ),
+            settingsSchema=dict(data.get("settingsSchema", {})),
             capabilities=[str(c) for c in data.get("capabilities", [])],
             entity=str(data.get("entity", "")),
-            providerType=str(data.get("providerType", "")),  # noqa: N815
+            providerType=str(data.get("providerType", "")),
             autonomy=(
                 AutonomyConfig.from_dict(autonomy_raw)
                 if isinstance(autonomy_raw, dict)
@@ -1209,6 +1499,8 @@ class ProviderConfig:
                 data.get("execution", EXECUTION_IN_PROCESS) or EXECUTION_IN_PROCESS
             ),
         )
+        parsed.not_booleans = _not_booleans(data, "multiInstance")
+        return parsed
 
 
 DESIGN_SYSTEM_LEVELS = frozenset({"v2", "legacy", "n/a"})
@@ -1290,6 +1582,9 @@ class QualityDeclaration:
 
 _KNOWN_FIELDS = frozenset(
     {
+        "launches",
+        "writes",
+        "requiresCoreFeatures",
         "name",
         "version",
         "displayName",
@@ -1370,6 +1665,12 @@ class AppManifest:
     dependencies: Dependencies = field(default_factory=Dependencies)
 
     requires: Any = field(default_factory=list)
+    launches: list[LaunchedProgram] = field(default_factory=list)
+    writes: list[ExternalWrite] = field(default_factory=list)
+    requiresCoreFeatures: list[str] = field(default_factory=list)
+    declaration_errors: list[str] = field(
+        default_factory=list, init=False, compare=False
+    )
 
     platform: PlatformConfig = field(default_factory=PlatformConfig)
 
@@ -1387,6 +1688,10 @@ class AppManifest:
     tags: list[str] = field(default_factory=list)
 
     extra: dict[str, Any] = field(default_factory=dict)
+
+    not_booleans: dict[str, Any] = field(
+        default_factory=dict, init=False, compare=False
+    )
 
     def validate(self) -> list[str]:
         """Return list of validation errors (empty list means valid)."""
@@ -1409,8 +1714,8 @@ class AppManifest:
 
         if not self.version:
             errors.append("missing required field: version")
-        elif not SEMVER_RE.match(self.version):
-            errors.append(f"version must be semver (e.g. 1.0.0), got: {self.version!r}")
+        elif parse_version(self.version) is None:
+            errors.append(f"version must be a valid PEP 440 version (e.g. 1.0.0), got: {self.version!r}")
 
         if not self.displayName:
             errors.append("missing required field: displayName")
@@ -1437,9 +1742,13 @@ class AppManifest:
                 for key, limit in (("name", 80), ("why", 300), ("how", 600)):
                     value = values[key]
                     if not isinstance(value, str) or not value.strip():
-                        errors.append(f"requires[{index}].{key} must be a non-empty string")
+                        errors.append(
+                            f"requires[{index}].{key} must be a non-empty string"
+                        )
                     elif len(value.strip()) > limit:
-                        errors.append(f"requires[{index}].{key} must be at most {limit} characters")
+                        errors.append(
+                            f"requires[{index}].{key} must be at most {limit} characters"
+                        )
                 if isinstance(item.name, str):
                     normalized = item.name.strip().casefold()
                     if normalized in seen_requires:
@@ -1451,7 +1760,9 @@ class AppManifest:
             errors.append("dependencies.sidecarDependencies must be an array")
         else:
             if len(sidecar_dependencies) > 50:
-                errors.append("dependencies.sidecarDependencies may contain at most 50 entries")
+                errors.append(
+                    "dependencies.sidecarDependencies may contain at most 50 entries"
+                )
             try:
                 from packaging.requirements import InvalidRequirement, Requirement
             except ImportError:
@@ -1459,17 +1770,27 @@ class AppManifest:
                 Requirement = None
             for index, spec in enumerate(sidecar_dependencies):
                 if not isinstance(spec, str) or not spec.strip() or len(spec) > 500:
-                    errors.append(f"sidecarDependencies[{index}] must be a requirement of at most 500 characters")
+                    errors.append(
+                        f"sidecarDependencies[{index}] must be a requirement of at most 500 characters"
+                    )
                     continue
                 if Requirement is None:
-                    errors.append("cannot validate sidecarDependencies without packaging")
+                    errors.append(
+                        "cannot validate sidecarDependencies without packaging"
+                    )
                     break
                 try:
                     Requirement(spec)
                 except InvalidRequirement:
-                    errors.append(f"sidecarDependencies[{index}] is not a valid PEP 508 requirement")
-        if sidecar_dependencies and not any(p.execution == EXECUTION_SIDECAR for p in self.all_providers()):
-            errors.append("sidecarDependencies require a provider with execution 'sidecar'")
+                    errors.append(
+                        f"sidecarDependencies[{index}] is not a valid PEP 508 requirement"
+                    )
+        if sidecar_dependencies and not any(
+            p.execution == EXECUTION_SIDECAR for p in self.all_providers()
+        ):
+            errors.append(
+                "sidecarDependencies require a provider with execution 'sidecar'"
+            )
 
         hooks = self.extra.get("hooks", [])
         if not isinstance(hooks, list):
@@ -1491,10 +1812,14 @@ class AppManifest:
                     seen_hooks.add(hook_name)
                 if hook.get("event") not in HOOK_EVENTS:
                     errors.append(f"hook {hook_name!r} has an unsupported event")
-                if not isinstance(hook.get("provider"), str) or not hook.get("provider"):
+                if not isinstance(hook.get("provider"), str) or not hook.get(
+                    "provider"
+                ):
                     errors.append(f"hook {hook_name!r} needs a provider")
                 if not isinstance(hook.get("providerConfig", {}), dict):
-                    errors.append(f"hook {hook_name!r} providerConfig must be an object")
+                    errors.append(
+                        f"hook {hook_name!r} providerConfig must be an object"
+                    )
                 timeout = hook.get("timeout", 30)
                 if type(timeout) is not int or not 1 <= timeout <= 300:
                     errors.append(f"hook {hook_name!r} timeout must be 1–300 seconds")
@@ -1547,7 +1872,11 @@ class AppManifest:
                     f"ui page entryPoint contains path traversal: {page.entryPoint!r}"
                 )
 
+        if (self.crons or self.permissions.cron) and not self.permissions.agent_tier:
+            errors.append("scheduled agent jobs require permissions.agent to declare a tier")
         for cron in self.crons:
+            if self.permissions.agent_tier == "text" and cron.agent:
+                errors.append("a text-tier scheduled job cannot name an agent")
             if not cron.name:
                 errors.append("cron entry missing required field: name")
             if not cron.every and not cron.cron_expr:
@@ -1617,6 +1946,22 @@ class AppManifest:
             )
             errors.append(f"uiCapabilities has duplicate entries: {dupes}")
 
+        errors.extend(self.declaration_errors)
+        errors.extend(_boolean_errors(self))
+        errors.extend(self.dependencies._validate_npm_packages())
+        errors.extend(self._validate_outside())
+        if self.permissions.agent_declared_raw:
+            errors.append(
+                "permissions.agent must name text, read or tools, or be false; got "
+                + self.permissions.agent_declared_raw
+            )
+        for feature in self.requiresCoreFeatures:
+            if not FEATURE_NAME_RE.fullmatch(feature):
+                errors.append(
+                    f"requiresCoreFeatures entry {feature!r} is not a core feature name"
+                )
+        if len(set(self.requiresCoreFeatures)) != len(self.requiresCoreFeatures):
+            errors.append("requiresCoreFeatures has duplicate entries")
         return errors
 
     def _validate_sources(self) -> list[str]:
@@ -1686,13 +2031,59 @@ class AppManifest:
         out.extend(self.providers)
         return out
 
+    def _validate_outside(self) -> list[str]:
+        """Errors in ``launches`` and ``writes``: each entry within what install consent shows,
+        none listed twice, and a setting an inheritance depends on one the app really has.
+        """
+        errors: list[str] = []
+        booleans = {
+            key
+            for p in self.all_providers()
+            for key, spec in ((p.settingsSchema or {}).get("properties") or {}).items()
+            if isinstance(spec, dict) and spec.get("type") == "boolean"
+        }
+        for what, entries, key in (
+            ("launches", self.launches, "program"),
+            ("writes", self.writes, "path"),
+        ):
+            if len(entries) > _MAX_DECLARATIONS:
+                errors.append(
+                    f"{what} lists {len(entries)} entries; at most {_MAX_DECLARATIONS} are shown"
+                )
+            seen: set[str] = set()
+            for entry in entries:
+                errors.extend(
+                    entry.validate(booleans)
+                    if isinstance(entry, LaunchedProgram)
+                    else entry.validate()
+                )
+                name = str(getattr(entry, key)).strip()
+                if name and name in seen:
+                    errors.append(f"{what} lists {name!r} more than once")
+                seen.add(name)
+        return errors
+
     def core_compatibility(self, host: str | None = None) -> CoreCompatibility:
         """Whether the running core satisfies this app's ``minGideonVersion``.
 
         Never raises and never touches the filesystem, so a read surface (the Store
         card) and a write surface (install / update / enable / boot) can both ask.
         See :func:`check_core_version` for which way each unparseable case falls."""
-        return check_core_version(self.minGideonVersion, host)
+        verdict = check_core_version(self.minGideonVersion, host)
+        missing = tuple(
+            sorted(
+                {
+                    feature
+                    for feature in self.requiresCoreFeatures
+                    if not core_has(feature)
+                }
+            )
+        )
+        if missing:
+            return CoreCompatibility(
+                CORE_COMPAT_INCOMPATIBLE, self.minGideonVersion, verdict.host, missing
+            )
+        return verdict
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict, including extra fields."""
@@ -1764,8 +2155,18 @@ class AppManifest:
             d["native"] = True
         if self.tags:
             d["tags"] = self.tags
+        if self.launches:
+            d["launches"] = [entry.to_dict() for entry in self.launches]
+        if self.writes:
+            d["writes"] = [entry.to_dict() for entry in self.writes]
+        if self.requiresCoreFeatures:
+            d["requiresCoreFeatures"] = list(self.requiresCoreFeatures)
         if self.requires:
-            d["requires"] = [item.to_dict() for item in self.requires] if isinstance(self.requires, list) else self.requires
+            d["requires"] = (
+                [item.to_dict() for item in self.requires]
+                if isinstance(self.requires, list)
+                else self.requires
+            )
         d.update(self.extra)
         return d
 
@@ -1777,88 +2178,76 @@ class AppManifest:
     def from_dict(cls, data: dict[str, Any]) -> "AppManifest":
         """Parse from dict, preserving unknown fields in ``extra``."""
         extra = {k: v for k, v in data.items() if k not in _KNOWN_FIELDS}
-
         crons_raw = data.get("crons", [])
         crons = [CronEntry.from_dict(c) for c in crons_raw if isinstance(c, dict)]
-
         ui_raw = data.get("ui", {})
         ui = UIConfig.from_dict(ui_raw) if isinstance(ui_raw, dict) else UIConfig()
-
         backend_raw = data.get("backend", {})
         backend = (
             BackendConfig.from_dict(backend_raw)
             if isinstance(backend_raw, dict)
             else BackendConfig()
         )
-
         perms_raw = data.get("permissions", {})
         permissions = (
             Permissions.from_dict(perms_raw)
             if isinstance(perms_raw, dict)
             else Permissions()
         )
-
         setup_raw = data.get("setup", {})
         setup = (
             SetupConfig.from_dict(setup_raw)
             if isinstance(setup_raw, dict)
             else SetupConfig()
         )
-
         cli_raw = data.get("cli", {})
         cli = CliConfig.from_dict(cli_raw) if isinstance(cli_raw, dict) else CliConfig()
-
         deps_raw = data.get("dependencies", {})
         deps = (
             Dependencies.from_dict(deps_raw)
             if isinstance(deps_raw, dict)
             else Dependencies()
         )
-
         platform_raw = data.get("platform", {})
         platform_cfg = (
             PlatformConfig.from_dict(platform_raw)
             if isinstance(platform_raw, dict)
             else PlatformConfig()
         )
-
         provider_raw = data.get("provider")
         provider_cfg = (
             ProviderConfig.from_dict(provider_raw)
             if isinstance(provider_raw, dict)
             else None
         )
-
         providers_cfg = [
             ProviderConfig.from_dict(p)
             for p in data.get("providers", [])
             if isinstance(p, dict)
         ]
-
         quality_raw = data.get("quality")
         quality_cfg = (
             QualityDeclaration.from_dict(quality_raw)
             if isinstance(quality_raw, dict)
             else None
         )
-
-        return cls(
+        parsed = cls(
             name=str(data.get("name", "")),
             version=str(data.get("version", "")),
-            displayName=str(data.get("displayName", "")),  # noqa: N815
+            displayName=str(data.get("displayName", "")),
             description=str(data.get("description", "")),
             icon=str(data.get("icon", "")),
-            heroImage=str(data.get("heroImage", "")),  # noqa: N815
+            heroImage=str(data.get("heroImage", "")),
             author=str(data.get("author", "")),
             license=str(data.get("license", "")),
-            minGideonVersion=str(data.get("minGideonVersion", "")),  # noqa: N815
+            minGideonVersion=str(data.get("minGideonVersion", "")),
             prompts=[str(p) for p in data.get("prompts", []) if p],
             skills=[
                 AppSkill.from_dict(s)
                 for s in data.get("skills", [])
                 if isinstance(s, dict) and s.get("path")
             ],
-            mcpServers=dict(data.get("mcpServers", {})),  # noqa: N815
+            mcpServers=dict(data.get("mcpServers", {})),
             crons=crons,
             ui=ui,
             backend=backend,
@@ -1868,8 +2257,14 @@ class AppManifest:
             loggerRoots=[str(r) for r in data.get("loggerRoots", []) if r],
             dependencies=deps,
             requires=(
-                [ExternalPrerequisite.from_dict(item) if isinstance(item, dict) else item
-                 for item in data.get("requires", [])]
+                [
+                    (
+                        ExternalPrerequisite.from_dict(item)
+                        if isinstance(item, dict)
+                        else item
+                    )
+                    for item in data.get("requires", [])
+                ]
                 if isinstance(data.get("requires", []), list)
                 else data.get("requires")
             ),
@@ -1881,14 +2276,32 @@ class AppManifest:
                 for s in data.get("sources", [])
                 if isinstance(s, dict) and s.get("name")
             ],
-            native=bool(data.get("native", False)),
+            native=_manifest_bool(data.get("native", False), default=False),
             quality=quality_cfg,
-            uiCapabilities=[
-                str(c) for c in data.get("uiCapabilities", []) if c
-            ],  # noqa: N815
+            uiCapabilities=[str(c) for c in data.get("uiCapabilities", []) if c],
             tags=[str(t) for t in data.get("tags", []) if t],
             extra=extra,
+            launches=[
+                LaunchedProgram.from_dict(e)
+                for e in _manifest_list(data.get("launches", []))
+                if isinstance(e, dict)
+            ],
+            writes=[
+                ExternalWrite.from_dict(e)
+                for e in _manifest_list(data.get("writes", []))
+                if isinstance(e, dict)
+            ],
+            requiresCoreFeatures=[
+                str(e) for e in _manifest_list(data.get("requiresCoreFeatures", []))
+            ],
         )
+        parsed.declaration_errors = [
+            f"{key} must be an array"
+            for key in ("launches", "writes", "requiresCoreFeatures")
+            if key in data and not isinstance(data[key], list)
+        ]
+        parsed.not_booleans = _not_booleans(data, "native")
+        return parsed
 
     @classmethod
     def from_json_file(cls, path: Path) -> "AppManifest":

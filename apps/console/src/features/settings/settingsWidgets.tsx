@@ -49,8 +49,7 @@ const useSecurity = () => useQuery('settings:security', () => api.securityStats(
 const useSecretsVault = () => useQuery('settings:secrets-card', () => api.secrets().catch(() => null as SecretsVaultState | null), { persist: true })
 const useMemoryStats = () => useQuery('settings:memory-stats', () => api.memoryStats().catch(() => null as MemoryStats | null), { persist: true })
 const useUsageToday = () => useQuery('settings:usage-today', () => {
-  const since = `${new Date().toISOString().slice(0, 10)}T00:00:00+00:00`
-  return api.usageTotals({ since }).then((d) => d.totals).catch(() => null)
+  return api.usageTotals({ window: 'day' }).then((d) => d.totals).catch(() => null)
 }, { persist: false })
 const useModelsActive = () => useQuery('settings:models-active', () => api.modelsActive().catch(() => null as Record<string, string[]> | null), { persist: true })
 const useRoutingTelemetry = () => useQuery('settings:routing-telemetry:reasoning:long_reasoning',
@@ -1017,7 +1016,7 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
             : <>
                 <BigStat value={count} caption={count === 1 ? 'snapshot kept' : 'snapshots kept'} />
                 <div data-type="caption" className="mt-1.5 text-on-surface-low">
-                  {s.status?.enabled ? 'Nightly + hourly, automatic' : 'Automatic backups are off'}
+                  {s.status?.snapshot.problem || s.status?.export.problem ? 'A backup job failed — open for details' : s.status?.enabled ? 'Nightly + hourly, automatic' : 'Automatic backups are off'}
                 </div>
               </>)}
         </BentoCard>

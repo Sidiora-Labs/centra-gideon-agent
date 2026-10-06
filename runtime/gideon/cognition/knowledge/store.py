@@ -864,6 +864,7 @@ class KnowledgeStore:
         if "tags" in cols:
             self._migrate_tags_to_rows()
         self._migrate_sources()
+        self._migrate_phase_outcomes()
         self.db.execute("BEGIN")
         try:
             self.db.execute(
@@ -874,6 +875,43 @@ class KnowledgeStore:
                 AND id NOT IN (SELECT source_id FROM entity_relations)
                 AND id NOT IN (SELECT target_id FROM entity_relations)
             """)
+            self.db.execute("COMMIT")
+        except Exception:
+            self.db.execute("ROLLBACK")
+            raise
+
+    _LEGACY_SKIP_LINE = re.compile(r"(?:;\s*|\s+)?Skipped \(optional steps unavailable\):.*$", re.S)
+
+    def _migrate_phase_outcomes(self) -> None:
+        """Upgrade recorded status words without inventing historical reasons."""
+        from gideon.cognition.knowledge.pipeline.outcomes import legacy
+
+        rows = self.db.execute(
+            "SELECT id, file_metadata, processing_error FROM items WHERE "
+            "EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(file_metadata) "
+            "THEN file_metadata ELSE '{}' END, '$.node_phases') WHERE type = 'text') "
+            "OR processing_error LIKE '%Skipped (optional steps unavailable):%'"
+        ).fetchall()
+        if not rows:
+            return
+        self.db.execute("BEGIN")
+        try:
+            for row in rows:
+                try:
+                    metadata = json.loads(row["file_metadata"] or "{}")
+                except (TypeError, ValueError):
+                    metadata = None
+                phases = metadata.get("node_phases") if isinstance(metadata, dict) else None
+                if isinstance(phases, dict):
+                    metadata["node_phases"] = {
+                        step: legacy(value) if isinstance(value, str) else value
+                        for step, value in phases.items()
+                    }
+                error = self._LEGACY_SKIP_LINE.sub("", row["processing_error"] or "").strip()
+                self.db.execute(
+                    "UPDATE items SET file_metadata = ?, processing_error = ? WHERE id = ?",
+                    (json.dumps(metadata) if isinstance(metadata, dict) else row["file_metadata"], error or None, row["id"]),
+                )
             self.db.execute("COMMIT")
         except Exception:
             self.db.execute("ROLLBACK")
@@ -4224,6 +4262,14 @@ class KnowledgeStore:
                             "UPDATE items SET embedding = ?, embedding_provider = ?, embedding_model = ? WHERE id = ?",
                             (floats_to_bytes(vec), *embedding_fingerprint, r["id"]),
                         )
+                    fresh = self.get_item(r["id"]) or {}
+                    metadata = fresh.get("file_metadata") or {}
+                    phases = metadata.get("node_phases") if isinstance(metadata, dict) else None
+                    if isinstance(phases, dict) and "embed" in phases:
+                        from gideon.cognition.knowledge.pipeline.outcomes import done as embedding_done
+
+                        phases["embed"] = embedding_done().to_dict()
+                        self.update_item(r["id"], file_metadata=metadata, touch=False)
                     reembedded += 1
                 else:
                     failed += 1

@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
+from aiohttp.web_log import AccessLogger
+
+from gideon.workspace.artifacts.deploy import SERVE_HEADERS, SERVE_URL_PREFIX
 
 from gideon.cognition.suggestions import api_suggestions
 from gideon.core.cancellation import cancel_task_bounded
@@ -30,7 +33,12 @@ from gideon.interfaces.dashboard.origin import (
     resolve_bind_host,
 )
 from gideon.interfaces.dashboard.state import _DEFAULT_PORT, ConsoleState
-from gideon.interfaces.dashboard.token_auth import token_auth_middleware
+from gideon.interfaces.dashboard.token_auth import (
+    INTERNAL_ROUTES,
+    MIXED_INTERNAL_ROUTES,
+    token_auth_middleware,
+    served_port,
+)
 
 if TYPE_CHECKING:
     from gideon.interfaces.dashboard._types import (
@@ -291,15 +299,16 @@ def _ws_csp_sources() -> str:
         return ""
 
 
-def _dashboard_csp() -> str:
+def _dashboard_csp(port: int = 0) -> str:
     """Return the dashboard policy, including its explicit framing boundary."""
+    local_connections = f" ws://localhost:{port} ws://127.0.0.1:{port} ws://[::1]:{port}" if port else ""
     return (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' blob:; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: blob: https:; "
         "font-src 'self' data:; "
-        f"connect-src 'self' ws://localhost:* ws://127.0.0.1:*{_ws_csp_sources()}; "
+        f"connect-src 'self'{local_connections}{_ws_csp_sources()}; "
         "frame-src 'self' blob:; "
         "frame-ancestors 'self'; "
         "worker-src 'self' blob:; "
@@ -314,11 +323,24 @@ def _append_vary(headers: Any, name: str) -> None:
     headers["Vary"] = ", ".join(values)
 
 
+class _GatewayAccessLogger(AccessLogger):
+    """Retain native access logging without capability URLs or referrers."""
+    def log(self, request, response, time):
+        if request.path.startswith(SERVE_URL_PREFIX + "/") or SERVE_URL_PREFIX + "/" in request.headers.get("Referer", ""):
+            return
+        super().log(request, response, time)
+
+
 def _apply_response_policies(
     request: web.Request, response: web.StreamResponse
 ) -> None:
     """Declare dashboard framing and the Agent Card's browser-origin boundary."""
-    response.headers.setdefault("Content-Security-Policy", _dashboard_csp())
+    resource = request.match_info.route.resource
+    if resource is not None and resource.canonical in (
+        "/artifacts/serve/{slug}", "/artifacts/serve/{slug}/{path}"
+    ):
+        response.headers.update(SERVE_HEADERS)
+    response.headers.setdefault("Content-Security-Policy", _dashboard_csp(served_port(request)))
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
 
     if request.path != "/a2a/agent-card":
@@ -487,10 +509,13 @@ async def start_dashboard(
     if state.subagents is not None:
         state.subagents.hook_store = state._hook_store
 
-    state.wire_session_compact_callback()
+    state.wire_session_restart_callback()
 
     app = web.Application(client_max_size=_single_post_ceiling())
     app["state"] = state
+    from gideon.interfaces.dashboard.voice_settings import register_voice_settings
+
+    register_voice_settings(app)
     app["gateway_id"] = _new_gateway_id()
     state.load_folders()
     state.load_tags()
@@ -534,6 +559,7 @@ async def start_dashboard(
     app.router.add_get("/api/auth/status", _auth_h.api_login_status)
     app.router.add_post("/api/auth/logout", _auth_h.api_auth_logout)
     app.router.add_get("/api/auth/session", _auth_h.api_auth_session)
+    app.router.add_post("/api/auth/confirm", _auth_h.api_auth_confirm)
     app.router.add_post("/api/auth/password", _auth_h.api_auth_set_password)
     app.router.add_post("/api/auth/enroll/start", _auth_h.api_auth_enroll_start)
     app.router.add_post("/api/auth/enroll/complete", _auth_h.api_auth_enroll_complete)
@@ -611,7 +637,9 @@ async def start_dashboard(
         )
         from gideon.interfaces.dashboard.chat_handlers import _run_chat_scoped
 
-        _register_openai(app, turn_runner=_run_chat_scoped)
+        from gideon.interfaces.dashboard.chat_persistence import resolve_session, save_session_to_history
+
+        _register_openai(app, turn_runner=_run_chat_scoped, persist_turn=save_session_to_history, restore_session=resolve_session)
     except Exception:  # noqa: BLE001 — an inbound fault must never block startup
         logging.getLogger(__name__).warning("inbound: /v1 mount failed", exc_info=True)
     try:
@@ -706,6 +734,7 @@ async def start_dashboard(
         api_ephemeral_skill_promote,
         api_ephemeral_skills_list,
         api_skill_files,
+        api_skill_bundled_choice,
         api_skill_overlay_revert,
         api_skill_proposal_accept,
         api_skill_proposal_detail,
@@ -737,9 +766,10 @@ async def start_dashboard(
     app.router.add_post("/api/skills/proposals/{id}/accept", api_skill_proposal_accept)
     app.router.add_delete("/api/skills/proposals/{id}", api_skill_proposal_reject)
     app.router.add_post("/api/skills/overlay/revert", api_skill_overlay_revert)
-    app.router.add_get("/api/skills/{name}/files", api_skill_files)
-    app.router.add_post("/api/skills/{name}/verify", api_skill_verify)
-    app.router.add_delete("/api/skills/{name}", api_skills_delete)
+    app.router.add_post("/api/skills/{name:.+}/bundled/{choice:update|keep}", api_skill_bundled_choice)
+    app.router.add_get("/api/skills/{name:.+}/files", api_skill_files)
+    app.router.add_post("/api/skills/{name:.+}/verify", api_skill_verify)
+    app.router.add_delete("/api/skills/{name:.+}", api_skills_delete)
 
     from gideon.interfaces.dashboard.handlers.apps import register_app_routes
 
@@ -786,6 +816,9 @@ async def start_dashboard(
     )
 
     register_model_registry_routes(app)
+
+    from gideon.interfaces.dashboard.handlers.model_rates import register_model_rates_routes
+    register_model_rates_routes(app)
 
     from gideon.interfaces.dashboard.handlers.search_registry import (
         register_search_registry_routes,
@@ -969,6 +1002,7 @@ async def start_dashboard(
     app.router.add_get("/api/guardrails/project-trust", handlers.api_project_trust)
     app.router.add_post("/api/guardrails/project-trust", handlers.api_project_trust)
     app.router.add_get("/api/external-access", handlers.api_external_access)
+    app.router.add_post("/api/external-access/clients/{client_id}/persistent-sessions", handlers.api_external_access_client_persistent_sessions)
     app.router.add_post(
         "/api/external-access/clients", handlers.api_external_access_client
     )
@@ -1047,11 +1081,17 @@ async def start_dashboard(
     app.router.add_put("/api/mcp/servers/{name}", handlers.api_mcp_server_detail)
     app.router.add_delete("/api/mcp/servers/{name}", handlers.api_mcp_server_detail)
     app.router.add_post("/api/mcp/servers/{name}/allow", handlers.api_mcp_server_allow)
+    from gideon.interfaces.dashboard.handlers.mcp_trust import api_mcp_server_read_only_trust
+    app.router.add_post("/api/mcp/servers/{name}/read-only-trust", api_mcp_server_read_only_trust)
+    app.router.add_delete("/api/mcp/servers/{name}/read-only-trust", api_mcp_server_read_only_trust)
     app.router.add_get("/api/mcp/servers/{name}/oauth", handlers.api_mcp_oauth_status)
     app.router.add_post("/api/mcp/servers/{name}/oauth/start", handlers.api_mcp_oauth_start)
     app.router.add_delete("/api/mcp/servers/{name}/oauth", handlers.api_mcp_oauth_signout)
     app.router.add_get("/api/mcp/oauth/callback", handlers.api_mcp_oauth_callback)
 
+    from gideon.interfaces.dashboard.chat_questions import api_question_answer, api_question_pending
+    app.router.add_post("/api/chat/questions/answer", api_question_answer)
+    app.router.add_get("/api/chat/questions", api_question_pending)
     app.router.add_post("/api/chat", chat.api_chat)
     app.router.add_get("/api/chat/image-input", chat.api_chat_image_input)
     app.router.add_get("/api/chat/sessions", chat.api_chat_sessions)
@@ -1450,6 +1490,18 @@ async def start_dashboard(
 
     register_workflow_routes(app)
 
+    async def _batch_restore(app_):
+        from gideon.automation.workflows.batch_start import restore
+        await restore(state, getattr(state, "workflows", None))
+    async def _batch_shutdown(app_):
+        tasks = list(getattr(state, "_workflow_batch_tasks", {}).values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+    app.on_startup.append(_batch_restore)
+    app.on_cleanup.append(_batch_shutdown)
+
     from gideon.interfaces.dashboard.handlers.experiments import register_experiment_routes
 
     register_experiment_routes(app)
@@ -1486,6 +1538,7 @@ async def start_dashboard(
     app.router.add_post("/api/inbox/{id}/pair", handlers_inbox.api_inbox_pair)
     app.router.add_put("/api/inbox/{id}", handlers_inbox.api_inbox_update)
     app.router.add_post("/api/inbox/{id}/draft", handlers_inbox.api_inbox_draft)
+    app.router.add_post("/api/inbox/{id}/sort", handlers_inbox.api_inbox_sort)
     app.router.add_post("/api/inbox/{id}/open", handlers_inbox.api_inbox_open)
     app.router.add_post("/api/inbox/{id}/favorite", handlers_inbox.api_inbox_favorite)
     app.router.add_get("/api/inbox/digest", handlers_inbox.api_inbox_digest)
@@ -1504,6 +1557,7 @@ async def start_dashboard(
     app.router.add_post("/api/update/auto", handlers.api_update_auto)
     app.router.add_post("/api/update/dev-mode", handlers.api_update_dev_mode)
     app.router.add_post("/api/update/cancel", handlers.api_update_cancel)
+    app.router.add_post("/api/update/dismiss", handlers.api_update_dismiss)
     app.router.add_post("/api/system/restart", handlers.api_restart)
     _truthy = {"1", "true", "yes", "on"}
     if (
@@ -1591,6 +1645,21 @@ async def start_dashboard(
 
     app.on_startup.append(_transports_startup)
 
+    async def _durability_export_startup(app_: web.Application) -> None:
+        from gideon.operations.durability.export_follow import install
+        from gideon.operations.durability.service import active_home
+        app_["durability_export_follower"] = install(home=active_home())
+
+    async def _durability_export_shutdown(app_: web.Application) -> None:
+        from gideon.operations.durability.export_follow import uninstall
+        follower = app_.get("durability_export_follower")
+        if follower is not None:
+            uninstall(follower)
+
+    app.on_startup.append(_durability_export_startup)
+    app.on_cleanup.append(_durability_export_shutdown)
+
+
     async def _control_bridge_startup(app_: web.Application) -> None:
         """Bind the loopback control bridge on its own random port (EXTERNAL-ACCESS §4).
 
@@ -1631,10 +1700,54 @@ async def start_dashboard(
 
         try:
             _migrate_legacy_mcp_json()
+            from gideon.extensions.providers.mcp_instances import _load
+            from gideon.interfaces.dashboard.handlers.mcp import _installed_agent_json
+
+            _load()  # Migrate the canonical store before rebuilding its generated consumer.
+            if _installed_agent_json().is_file():
+                from gideon.engine.agent import rebuild_agent_config
+
+                rebuild_agent_config()
         except Exception:
             logger.exception("Failed to migrate legacy mcp.json")
 
     app.on_startup.append(_mcp_migrate_startup)
+
+    def _relay_mcp_status(_server: str) -> None:
+        app["state"].broadcast_ws("refresh", {"sections": ["mcp"]})
+
+    async def _mcp_status_startup(app_: web.Application) -> None:
+        from gideon.integrations.mcp_status import subscribe
+
+        subscribe(_relay_mcp_status)
+
+    async def _mcp_status_shutdown(app_: web.Application) -> None:
+        from gideon.integrations.mcp_status import unsubscribe
+        from gideon.integrations.mcp_stdio import stop_finishing
+
+        unsubscribe(_relay_mcp_status)
+        await stop_finishing(lambda _server: True)
+
+    app.on_startup.append(_mcp_status_startup)
+    app.on_cleanup.append(_mcp_status_shutdown)
+
+    def _notify_mcp_descriptions(server: str, tools: tuple[str, ...]) -> None:
+        from urllib.parse import quote
+        from gideon.security.mcp_read_only_trust import description_notice
+        title, body = description_notice(server, tools)
+        app["state"].notify("mcp_description_changed", title, body, meta={"statusUrl": f"#/tools?q={quote(server)}", "server": server, "tools": list(tools)})
+
+    async def _mcp_description_startup(app_: web.Application) -> None:
+        from gideon.security.mcp_read_only_trust import subscribe
+        subscribe(_notify_mcp_descriptions)
+
+    async def _mcp_description_shutdown(app_: web.Application) -> None:
+        from gideon.security.mcp_read_only_trust import unsubscribe
+        unsubscribe(_notify_mcp_descriptions)
+
+    app.on_startup.append(_mcp_description_startup)
+    app.on_cleanup.append(_mcp_description_shutdown)
+
 
     async def _action_providers_startup(app_: web.Application) -> None:
         """Register the bundled action providers (bash, webhook, run-script, …)."""
@@ -2159,29 +2272,8 @@ async def start_dashboard(
             else [
                 csrf_middleware,
                 token_auth_middleware(
-                    internal_paths=frozenset(
-                        {
-                            "/api/send-message",
-                            "/api/session-keepalive",
-                            "/api/session-tool-policy",
-                            "/api/hooks/agent",
-                            "/api/outbox/notify",
-                            "/api/channel/upload-file",
-                            "/api/mcp/servers",
-                            "/api/tools/invoke",
-                            "/api/computer-use/dispatch",
-                        }
-                    ),
-                    mixed_internal_paths=frozenset(
-                        {
-                            "/api/spawn",
-                            "/api/lessons",
-                            "/api/triggers",
-                        }
-                    ),
-                    mixed_internal_routes=frozenset(
-                        {("GET", "/api/memory/approval-rules")}
-                    ),
+                    internal_routes=INTERNAL_ROUTES,
+                    mixed_internal_routes=MIXED_INTERNAL_ROUTES,
                     internal_secret=_internal_secret,
                     port=port,
                     local_only=local_only,
@@ -2217,7 +2309,7 @@ async def start_dashboard(
             )
             raise RuntimeError("dashboard_url requires token auth middleware")
 
-    runner = web.AppRunner(app)
+    runner = web.AppRunner(app, access_log_class=_GatewayAccessLogger)
     await runner.setup()
     _bind_host = resolve_bind_host()
     if _bind_host == "127.0.0.1" and not local_only:
@@ -2347,10 +2439,13 @@ async def start_api_server(
     if state.subagents is not None:
         state.subagents.hook_store = state._hook_store
 
-    state.wire_session_compact_callback()
+    state.wire_session_restart_callback()
 
     app = web.Application(client_max_size=_single_post_ceiling())
     app["state"] = state
+    from gideon.interfaces.dashboard.voice_settings import register_voice_settings
+
+    register_voice_settings(app)
     app["gateway_id"] = _new_gateway_id()
     state.load_folders()
     state.load_tags()
@@ -2397,7 +2492,7 @@ async def start_api_server(
     _register_mcp_routes(app)
     app.router.add_get("/api/healthz", handlers.api_healthz)
 
-    runner = web.AppRunner(app)
+    runner = web.AppRunner(app, access_log_class=_GatewayAccessLogger)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", port)
     await _start_site(site, port)

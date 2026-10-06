@@ -42,10 +42,10 @@ def _budget_check() -> tuple[str, str]:
         meter = budgets.get_meter()
 
         def verdicts():
-            yield meter.check_day(budgets.budget_from_config())
+            yield meter.check_day_before_work(budgets.budget_from_config())
             key = budgets.current_run_key()
             if key:
-                yield meter.check_run(key, budgets.current_run_budget())
+                yield meter.check_run_before_work(key, budgets.current_run_budget())
 
         for verdict, detail in verdicts():
             if verdict.value == "exceeded":

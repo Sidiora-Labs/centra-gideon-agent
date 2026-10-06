@@ -20,6 +20,8 @@ path (by design).
 
 from __future__ import annotations
 
+import contextlib
+import re
 import hashlib
 import json
 import logging
@@ -29,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from gideon.core.atomic_write import atomic_write
-from gideon.core.record_ids import record_path
+from gideon.core.record_ids import is_safe_record_id, record_path
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,8 @@ _PROPOSALS_DIRNAME = ".proposals"
 _SOURCE_EXCERPT_MAX = 4_000
 _MAX_PENDING = 100
 _COALESCE_WINDOW_SECONDS = 86_400
+_ID_LABEL_MAX = 48
+_OLD_ID = re.compile(r"(?P<slug>.+)-(?P<digest>[0-9a-f]{12})", re.DOTALL)
 
 
 def _proposals_dir() -> Path:
@@ -159,15 +163,69 @@ class SkillProposal:
         }
 
 
+def _id_label(slug: str) -> str:
+    """The readable half of a proposal id: *slug* in lowercase letters, digits and hyphens.
+
+    Built from that allowlist, never by removing what is unsafe, so no spelling of a name can
+    bring a separator, a parent-folder segment or a drive into the id.
+    """
+    label = re.sub(r"[^a-z0-9]+", "-", slug.lower()).strip("-")[:_ID_LABEL_MAX].rstrip("-")
+    return label or "proposal"
+
 def _make_id(slug: str, session_key: str, created_at: str) -> str:
-    h = hashlib.sha1(f"{slug}|{session_key}|{created_at}".encode("utf-8")).hexdigest()[
-        :12
-    ]
-    return f"{slug}-{h}"
+    """The id of a proposal for *slug*: the name of one file, directly in the proposals folder.
+
+    *slug* is a skill's name, or a model's choice of one, and a skill is named by its folder in
+    the library: ``imported/<source>/<name>`` for an imported skill, ``auto/<name>``, any folder
+    a user made, in any characters. The id was the slug itself with the digest on the end, so a
+    refinement of most skills got an id with slashes in it: the record went into a subfolder the
+    listing never reads, the routes refused the id, and the anti-flood rail, which reads the same
+    listing, filed the next stumble beside it. The name stays on the record (``slug``,
+    ``refine_target``); the id only has to be unique, and to name a file.
+
+    The digest covers the whole slug, so two names that read the same once flattened (``a/b`` and
+    ``a-b``) still get two ids.
+    """
+    h = hashlib.sha1(f"{slug}|{session_key}|{created_at}".encode("utf-8")).hexdigest()[:12]
+    return f"{_id_label(slug)}-{h}"
+
+def _successor(old_id: object) -> str:
+    """The id a proposal the store filed as *old_id* has now, or ``""`` when *old_id* is an id
+    of today's shape, or not one the store ever minted.
+
+    Only an id :func:`_make_id` used to mint and the store can no longer address qualifies: the
+    slug, a hyphen and the twelve-digit digest, unsafe as a record id because of what the slug
+    held. The successor keeps that digest, so it is :func:`_make_id`'s value for the same
+    proposal: a re-filing of it after the move is the same record, not a second one. A function
+    of the old id alone, because that is all an Inbox row holds of its proposal.
+    """
+    if not isinstance(old_id, str) or is_safe_record_id(old_id):
+        return ""
+    old = _OLD_ID.fullmatch(old_id)
+    return f"{_id_label(old['slug'])}-{old['digest']}" if old else ""
+
+def _own_slug(prop: SkillProposal) -> str:
+    """The slug of the ``auto/`` skill *prop* names as the user's own, or ``""`` when its slug
+    holds nothing the auto namespace can spell.
+
+    It is what :func:`accept_target` overlays when no installed skill takes *prop* as a
+    refinement, and what :func:`accept` creates when that skill does not exist either. A
+    refinement's slug is its skill's whole name (``imported/<source>/<name>``, ``auto/<name>``)
+    and a new skill's is a model's choice, while ``create_auto_skill`` takes one lowercase
+    segment, so a refinement whose skill had since been removed — which the review surface says
+    accepting "would add as a new skill instead" — could only fail. This is that new skill's
+    name: the slug in the namespace's alphabet, without the ``auto/`` it may already carry, so a
+    deleted ``auto/`` skill comes back under its own name.
+    """
+    from gideon.extensions.skills.loader import AUTO_SKILL_NAMESPACE, _auto_name_from_title
+
+    return _auto_name_from_title(prop.slug.removeprefix(f"{AUTO_SKILL_NAMESPACE}/"))
 
 
 def accept_target(*, slug: str, kind: str = "new", refine_target: str = "") -> str:
-    return refine_target if kind == "refine" and refine_target else f"auto/{slug}"
+    from gideon.extensions.skills.loader import _auto_name_from_title
+    own = _auto_name_from_title(slug.removeprefix("auto/")) or slug
+    return refine_target if kind == "refine" and refine_target else f"auto/{own}"
 
 
 def _parse_created_at(value: str) -> datetime | None:
@@ -183,7 +241,7 @@ def coalesce_reason(
 ) -> str:
     """Explain why a proposal for this accepted subject must not be enqueued."""
     subject = accept_target(slug=slug, kind=kind, refine_target=refine_target)
-    for pending in list_pending():
+    for pending in list_pending(_surface=False):
         if (
             accept_target(
                 slug=pending.slug,
@@ -199,7 +257,15 @@ def coalesce_reason(
     if kind == "refine":
         from gideon.extensions.skills import overlays
 
-        accepted = overlays.last_refinement(subject)
+        from gideon.extensions.skills.loader import ProcedureLibrary, overlay_identity
+        path = ProcedureLibrary(install_builtins=False).skill_file(subject)
+        identity = subject
+        if path is not None:
+            root = path.parent
+            for _ in subject.split("/"):
+                root = root.parent
+            identity = overlay_identity(root, subject)
+        accepted = overlays.last_refinement(identity)
         stamp = _parse_created_at(str((accepted or {}).get("created_at", "")))
     else:
         from gideon.extensions.skills.loader import ProcedureLibrary
@@ -268,7 +334,7 @@ def enqueue(
         source_excerpt=fenced,
     )
     try:
-        atomic_write(d / f"{pid}.json", json.dumps(prop.to_dict(), indent=2))
+        atomic_write(_path(pid), json.dumps(prop.to_dict(), indent=2))
     except OSError:
         logger.debug("skill proposal write failed", exc_info=True)
         return None
@@ -389,11 +455,12 @@ def _load(pid: str) -> SkillProposal | None:
         return None
 
 
-def list_pending() -> list[SkillProposal]:
+def list_pending(*, _surface: bool = True) -> list[SkillProposal]:
     """All pending proposals, newest-first by created_at."""
     d = _proposals_dir()
     if not d.is_dir():
         return []
+    _move_old_records(d)
     out: list[SkillProposal] = []
     for p in d.glob("*.json"):
         try:
@@ -403,9 +470,118 @@ def list_pending() -> list[SkillProposal]:
         except (OSError, ValueError, TypeError):
             continue
     out.sort(key=lambda r: r.created_at, reverse=True)
-    backfill_inbox_items(out)
+    if _surface:
+        backfill_inbox_items(out)
     return out
 
+
+def _move_old_records(d: Path) -> int:
+    """Move every record filed under an id the store cannot address to its :func:`_successor`,
+    directly in the folder. Returns how many moved.
+
+    An idempotent backfill keyed on what is on disk, run by the read path. Before ids were built
+    for the folder, a proposal about a namespaced skill was written at
+    ``.proposals/<namespace>/…/<name>-<digest>.json``, where no listing looks, and a slug with a
+    backslash or an over-long one gave a top-level record no route would open. Those are
+    proposals still waiting on the user, and nothing expires them, so they are moved rather than
+    left behind: each is rewritten under its successor id, the old file goes, and so do the
+    folders it leaves empty. A record is moved only from where the old store wrote it (the file's
+    path is its id), and a file that does not read as a proposal is left alone.
+
+    The successor is a function of the old id, so two readers moving the same record write the
+    same file, and a record whose old file cannot be removed is not left beside its twin: the
+    twin would outlive the user's decision on it and bring the proposal back.
+    """
+    moved = 0
+    emptied: set[Path] = set()
+    try:
+        found = sorted(d.rglob("*.json"))
+    except OSError:
+        logger.debug("skill proposals: could not walk %s", d, exc_info=True)
+        return 0
+    for old_file in found:
+        if old_file.parent == d and is_safe_record_id(old_file.stem):
+            continue
+        if any(part.is_symlink() for part in (old_file, *old_file.parents) if part != d.parent) or not old_file.resolve().is_relative_to(d.resolve()) or not old_file.is_file():
+            continue
+        try:
+            rec = SkillProposal(**json.loads(old_file.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError):
+            continue
+        new_id = _successor(rec.id)
+        if not new_id or _make_id(rec.slug, rec.session_key, rec.created_at) != new_id or old_file.relative_to(d).as_posix() != f"{rec.id}.json":
+            continue
+        old_id, rec.id = rec.id, new_id
+        target = _path(new_id)
+        if target.exists():
+            try:
+                if json.loads(target.read_text(encoding="utf-8")) != rec.to_dict():
+                    continue
+            except (OSError, ValueError):
+                continue
+        try:
+            atomic_write(target, json.dumps(rec.to_dict(), indent=2))
+        except OSError:
+            logger.debug("skill proposal %r: could not write it as %s", old_id, new_id)
+            continue
+        try:
+            old_file.unlink()
+        except FileNotFoundError:
+            pass  # another reader moved it first
+        except OSError:
+            logger.debug("skill proposal %r: could not remove its old file", old_id)
+            with contextlib.suppress(OSError):
+                target.unlink()
+            continue
+        emptied.update(p for p in old_file.parents if d in p.parents)
+        moved += 1
+    for folder in sorted(emptied, key=lambda p: len(p.parts), reverse=True):
+        try:
+            folder.rmdir()
+        except OSError:
+            pass  # still holds something, which is not this backfill's to remove
+    if moved:
+        logger.info("moved %d skill proposal(s) to ids the store can address", moved)
+    return moved
+
+def _point_rows_at_moved_records(store: Any) -> list[Any]:
+    """Point every Inbox row that names its proposal by an old id at the id the record was moved
+    to (:func:`_successor`), its dedup key with it. Returns the rows it changed.
+
+    The row is the same request, so it keeps its place, its status and its one notification;
+    pointed at the moved record, it opens, accepts and rejects it like any other. Keyed on the
+    rows themselves, not on what :func:`_move_old_records` moved in this pass, so a row whose
+    record an earlier read moved is still found.
+    """
+    changed: list[Any] = []
+    for row in store.items.values():
+        old_id = row.refs.get("skill_proposal")
+        new_id = _successor(old_id)
+        if not new_id:
+            continue
+        record = _load(new_id)
+        match = _OLD_ID.fullmatch(old_id)
+        if record is None or not match or record.slug != match["slug"] or _make_id(record.slug, record.session_key, record.created_at) != new_id:
+            continue
+        row.refs["skill_proposal"] = new_id
+        if row.refs.get("dedup_key") == f"skill_proposal:{old_id}":
+            row.refs["dedup_key"] = f"skill_proposal:{new_id}"
+        changed.append(row)
+    return changed
+
+def _announce_rows(rows: list[Any]) -> None:
+    """Send each changed row to every open surface, as every other writer of a row does."""
+    from gideon.integrations.inbox_providers.native_source import get_dashboard_state
+    state = get_dashboard_state()
+    if state is None:
+        return
+    from gideon.integrations.inbox import redact_item
+
+    for row in rows:
+        try:
+            state.broadcast_ws("inbox_item_updated", redact_item(row.to_dict()))
+        except Exception:  # noqa: BLE001 — a surface missing a frame re-reads; the row is saved
+            logger.debug("proposal row %s: could not announce it", row.id, exc_info=True)
 
 def backfill_inbox_items(pending: "list[SkillProposal] | None" = None) -> int:
     """Give every pending proposal an inbox item if it doesn't have one. Returns how many.
@@ -423,23 +599,16 @@ def backfill_inbox_items(pending: "list[SkillProposal] | None" = None) -> int:
     Runs from `list_pending()` (the read path both the skills page and the API use), so the
     first look at either surface after an upgrade is already correct.
     """
-    props = pending if pending is not None else []
-    if pending is None:
-        d = _proposals_dir()
-        if not d.is_dir():
-            return 0
-        for p in d.glob("*.json"):
-            try:
-                rec = SkillProposal(**json.loads(p.read_text(encoding="utf-8")))
-                if rec.status == "pending":
-                    props.append(rec)
-            except (OSError, ValueError, TypeError):
-                continue
+    props = pending if pending is not None else list_pending(_surface=False)
     if not props:
         return 0
 
     try:
         store = _inbox_store_for_write()
+        changed_rows = _point_rows_at_moved_records(store)
+        if changed_rows:
+            store.save()
+            _announce_rows(changed_rows)
         seen = {
             i.refs.get("skill_proposal")
             for i in store.items.values()
@@ -553,7 +722,7 @@ def accept(
                 pid,
             )
     if not target:
-        implied = f"{AUTO_SKILL_NAMESPACE}/{prop.slug}"
+        implied = f"{AUTO_SKILL_NAMESPACE}/{_own_slug(prop)}"
         if loader.load_skill(implied) is not None:
             logger.info(
                 "proposal %s is labelled %r but %s already exists; overlaying it",
@@ -565,23 +734,34 @@ def accept(
 
     if target:
         try:
-            version = overlays.apply_overlay(
-                target,
-                description=eff_description,
-                procedure_md=eff_procedure,
-                created_at=prop.created_at,
-                trigger=prop.trigger,
-            )
+            from gideon.extensions.skills.loader import hold_library, overlay_identity
+            with hold_library():
+                if _load(pid) is None:
+                    raise ValueError("This proposal was already resolved")
+                path = loader.skill_file(target)
+                if path is None:
+                    raise ValueError("The reviewed skill copy no longer exists")
+                root = path.parent
+                for _ in target.split("/"):
+                    root = root.parent
+                identity = overlay_identity(root, target)
+                records = overlays._records(identity)
+                records.append(overlays.Refinement(eff_description, eff_procedure, prop.created_at, prop.trigger).to_dict())
+                overlay_path = overlays.overlay_path(identity)
+                if overlay_path is None:
+                    raise ValueError("Invalid refinement identity")
+                overlays._store(identity, overlay_path, records)
+                version = len(records)
+                reject(pid, accepted=True)
         except (OSError, ValueError) as exc:
             raise AcceptError(f"could not overlay skill {target!r}: {exc}") from exc
-        reject(pid, accepted=True)
         _resolve_inbox_item(pid, "handled")
         logger.info("Accepted proposal %s → overlaid %s v%d", pid, target, version)
         return AcceptResult(target, version)
 
     prov = AutoSkillProvenance(session_key=prop.session_key, created_at=prop.created_at)
     created = loader.create_auto_skill(
-        prop.slug,
+        _own_slug(prop),
         description=eff_description,
         triggers=prop.triggers,
         procedure_md=eff_procedure,

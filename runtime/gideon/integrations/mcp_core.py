@@ -40,6 +40,7 @@ from typing import Any
 
 from gideon.core.config import loader as config_loader
 from gideon.engine import gateway_base
+from gideon.engine.home_gateway import open_loopback
 
 
 def config_dir() -> Path:
@@ -726,12 +727,57 @@ def _list_tools() -> list[dict[str, Any]]:
     ]
 
 
+class InternalSecretUnavailable(RuntimeError):
+    pass
+
+
 def _internal_secret() -> str:
-    """Read the per-session secret for IPC authentication."""
+    """Read the running gateway's credential without creating a home."""
+    home = config_loader.resolve_config_dir()
     try:
-        return (config_dir() / ".local_secret").read_text().strip()
-    except Exception:
-        return ""
+        secret = (home / ".local_secret").read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        secret = ""
+    except (OSError, UnicodeError) as exc:
+        raise InternalSecretUnavailable(
+            f"The gateway credential in {home} cannot be read."
+        ) from exc
+    if not secret:
+        raise InternalSecretUnavailable(
+            f"No gateway credential exists in {home}. Start the gateway with this home."
+        )
+    return secret
+
+
+def _internal_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
+    headers = {**(extra or {}), "X-Internal-Secret": _internal_secret()}
+    sk = _resolve_session_key()
+    if sk:
+        headers["X-Session-Key"] = sk
+        from gideon.security.session_credentials import credential_for, inherited_proof
+        proof = credential_for(sk) or inherited_proof(sk)
+        if proof:
+            headers["X-Session-Proof"] = proof
+    return headers
+
+
+def _refused(exc: urllib.error.HTTPError) -> dict:
+    try:
+        raw = exc.read()
+    except OSError:
+        raw = b""
+    text = raw.decode("utf-8", "replace").strip()[:4000]
+    try:
+        body = json.loads(raw) if raw else None
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        return {"error": f"HTTP {exc.code}: {text or exc.reason}"}
+    error = body.get("error")
+    if isinstance(error, dict):
+        return {**body, "error": str(error.get("message") or error.get("code")),
+                "error_detail": error}
+    return {**body, "error": str(error) if error else f"HTTP {exc.code}: {text}"}
 
 
 def _get_ppid(pid: int) -> int:
@@ -762,6 +808,14 @@ def _resolve_session_key() -> str:
     immediate parent which has no PID file.  Walk up ancestors
     until we find a matching file or hit init.
     """
+    # Host dispatcher context and a live PID rekey binding outrank inherited env.
+    current = _CURRENT_SESSION_KEY.get()
+    if current:
+        return current
+    from gideon.security.session_credentials import inherited_binding
+    binding = inherited_binding()
+    if binding is not None:
+        return str(binding.get("session_key", ""))
     sk = os.environ.get("GIDEON_SESSION_KEY", "")
     if sk:
         return sk
@@ -785,79 +839,61 @@ def _resolve_session_key() -> str:
 
 def _post(path: str, body: dict | None = None) -> dict:
     data = json.dumps(body or {}).encode()
-    headers = {
-        "Content-Type": "application/json",
-        "X-Internal-Secret": _internal_secret(),
-    }
-    sk = _resolve_session_key()
-    if sk:
-        headers["X-Session-Key"] = sk
     try:
         req = urllib.request.Request(
             f"{_api_base()}{path}",
             data=data,
-            headers=headers,
+            headers=_internal_headers({"Content-Type": "application/json"}),
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with open_loopback(req, timeout=30) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
-        if path == "/api/computer-use/dispatch":
-            try:
-                payload = json.loads(e.read())
-                if isinstance(payload, dict):
-                    return payload
-            except (OSError, ValueError):
-                pass
-        return {"error": str(e)}
+        return _refused(e)
     except Exception as e:
         return {"error": str(e)}
 
 
 def _get(path: str) -> dict:
-    headers = {"X-Internal-Secret": _internal_secret()}
-    sk = _resolve_session_key()
-    if sk:
-        headers["X-Session-Key"] = sk
     try:
         req = urllib.request.Request(
             f"{_api_base()}{path}",
-            headers=headers,
+            headers=_internal_headers(),
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with open_loopback(req, timeout=10) as resp:
             return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        return _refused(e)
     except Exception as e:
         return {"error": str(e)}
 
 
 def _delete(path: str, body: dict | None = None) -> dict:
     data = json.dumps(body or {}).encode() if body else None
-    headers = {"X-Internal-Secret": _internal_secret()}
-    sk = _resolve_session_key()
-    if sk:
-        headers["X-Session-Key"] = sk
-    if data:
-        headers["Content-Type"] = "application/json"
     try:
         req = urllib.request.Request(
             f"{_api_base()}{path}",
             data=data,
-            headers=headers,
+            headers=_internal_headers({"Content-Type": "application/json"} if data else None),
             method="DELETE",
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with open_loopback(req, timeout=10) as resp:
             return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        return _refused(e)
     except Exception as e:
         return {"error": str(e)}
 
 
 def _validate_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    from gideon.assurance.validation import normalize_tool_booleans
+
     """Validate tool arguments against schema. Returns cleaned args."""
     from gideon.assurance.validation import MCP_CORE_SCHEMAS, validate_tool_args
 
     schema = MCP_CORE_SCHEMAS.get(name)
     if schema:
-        return validate_tool_args(args, schema)
+        return validate_tool_args(normalize_tool_booleans(args, schema), schema)
     return args
 
 
@@ -915,6 +951,18 @@ def _render_resource_catalog(skill_name: str, loader: Any) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _skill_library():
+    from gideon.engine.agents import skill_list
+    from gideon.extensions.skills.loader import ProcedureLibrary
+
+    grants = skill_list.held()
+    if grants is not None:
+        from gideon.engine.agents.loop_skills import names
+        grants = grants.beside(names(_CURRENT_SESSION_KEY.get(), grants.agent))
+    library = ProcedureLibrary(agent=grants.agent if grants is not None and grants.agent else None)
+    return grants, grants.library(library) if grants is not None else library
+
+
 def _load_skill_resource(args: dict[str, Any]) -> str:
     """``skill_resource(skill, path)`` — read ONE declared resource of one skill.
 
@@ -935,7 +983,9 @@ def _load_skill_resource(args: dict[str, Any]) -> str:
     rel_path = (args.get("path") or "").strip()
     if not skill_name or not rel_path:
         return "Error: both skill and path are required."
-    loader = ProcedureLibrary()
+    grants, loader = _skill_library()
+    if grants is not None and not grants.allows(skill_name) and loader.skill_file(skill_name) is None:
+        return f"Error: {grants.refusal(skill_name)}"
     try:
         read = loader.read_resource(skill_name, rel_path)
     except SkillResourceRefused as exc:
@@ -968,6 +1018,11 @@ def _load_skill_resource(args: dict[str, Any]) -> str:
     return "\n".join(out)
 
 
+def _preflight_tool(name: str, args: dict[str, Any]) -> str:
+    from gideon.integrations.mcp_shared import preflight_tool
+    return preflight_tool(name, args, _validate_args)
+
+
 def _call_tool(name: str, raw_args: dict[str, Any]) -> str:
     from gideon.integrations.mcp_shared import call_tool_with_logging
 
@@ -988,7 +1043,9 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
             return "Error: name is required."
         from gideon.extensions.skills.loader import ProcedureLibrary
 
-        loader = ProcedureLibrary()
+        grants, loader = _skill_library()
+        if grants is not None and not grants.allows(skill_name) and loader.skill_file(skill_name) is None:
+            return f"Error: {grants.refusal(skill_name)}"
         content = loader.load_skill(skill_name)
         if content is None:
             return f"Error: no skill named '{skill_name}'. Check the skill index for exact names."
@@ -1039,7 +1096,8 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
         from gideon.extensions.skills.loader import ProcedureLibrary
         from gideon.extensions.skills.surfacing import search_skills
 
-        skills = ProcedureLibrary().list_skills(with_usage=True)
+        _, library = _skill_library()
+        skills = library.list_skills(with_usage=True)
         hits = search_skills(query, skills, limit=max(1, limit))
         if not hits:
             return "No skills matched. Try broader terms; or proceed without a skill."

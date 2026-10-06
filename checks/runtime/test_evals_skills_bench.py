@@ -503,3 +503,32 @@ def test_an_unmeasured_arm_is_reported_not_averaged(bench_home, loader):
     assert report.verdict == ablation.INCONCLUSIVE
     assert report.delta is None
     assert report.reason == "an arm produced no scored cell"
+
+
+@pytest.mark.asyncio
+async def test_benchmark_not_run_names_its_actual_home(tmp_path, monkeypatch):
+    import json
+    import shlex
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    from gideon.core.config import loader
+    from gideon.interfaces.dashboard.handlers import evals
+
+    home = tmp_path / "home with owner's space"
+    home.mkdir()
+    monkeypatch.setenv("GIDEON_HOME", str(home))
+    monkeypatch.setattr(loader, "config_dir", lambda: home)
+    (home / "config.json").write_text(json.dumps({"evals": {"enabled": True}}))
+    app = web.Application()
+    app.router.add_get("/api/evals/learning-benchmark", evals.api_evals_learning_benchmark)
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get("/api/evals/learning-benchmark")
+        assert response.status == 200
+        data = await response.json()
+        assert set(data) == {"state", "next_action"}
+        assert data["state"] == "not_run"
+        assert data["next_action"].count(f"GIDEON_HOME={shlex.quote(str(home))}") == 2
+        commands = data["next_action"].split("`")[1::2]
+        assert shlex.split(commands[0])[0] == f"GIDEON_HOME={home}"
+        assert commands[0].endswith(" --preflight")
+        assert commands[1].endswith(" --run")

@@ -140,8 +140,22 @@ async def run_planner_pass(
         )
         dead_polls = 0
         _GRACE_POLLS = 2
+        last = time.time()
+        stopped_for_incident = False
         while time.time() < deadline:
             await asyncio.sleep(PLANNER_POLL_SECS)
+            now = time.time()
+            from gideon.security.guardrails.incident import incident_active
+            if incident_active():
+                deadline += now - last
+                last = now
+                if not stopped_for_incident:
+                    stopped_for_incident = True
+                    from gideon.automation.loop.manager import halt_turn
+                    await halt_turn(state, skey)
+                continue
+            last = now
+            stopped_for_incident = False
             raw = read_sentinel(workspace_dir, files_dir, sentinel)
             if raw:
                 if stop_path:

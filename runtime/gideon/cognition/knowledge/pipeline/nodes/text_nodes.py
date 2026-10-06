@@ -66,7 +66,25 @@ class DocumentReadNode:
             ocr_provider = _model_ocr_provider()
         reader = FileReader(ocr_provider=ocr_provider)
         loop = asyncio.get_running_loop()
-        text, meta = await loop.run_in_executor(None, reader.read, ctx.file_path)
+        from gideon.workspace.uploads.content_intake import approve_path, approve_text, IntakeRefused
+
+        snapshot = ctx.params.get('_approved_source')
+        owned = snapshot is None
+        try:
+            if owned:
+                snapshot = await approve_path(ctx.file_path, surface='document_extraction')
+            read = asyncio.ensure_future(loop.run_in_executor(None, reader.read_approved, snapshot))
+            try:
+                text, meta = await asyncio.shield(read)
+            except asyncio.CancelledError:
+                await read
+                raise
+        except IntakeRefused as refused:
+            return NodeOutput(node_type=self.node_type, backend=self.backend, success=False,
+                              error=refused.message, metadata={'content_refusal': refused.code})
+        finally:
+            if owned and snapshot is not None:
+                snapshot.close()
         if meta.get("format") == "error":
             return NodeOutput(
                 node_type=self.node_type,
@@ -84,10 +102,15 @@ class DocumentReadNode:
                 metadata=meta,
             )
         meta.pop("title", None)
+        try:
+            approved = await approve_text(text or '', surface='document_extraction')
+        except IntakeRefused as refused:
+            return NodeOutput(node_type=self.node_type, backend=self.backend, success=False,
+                              error=refused.message, metadata={'content_refusal': refused.code})
         return NodeOutput(
             node_type=self.node_type,
             backend=self.backend,
-            text=text or "",
+            text=approved.text,
             metadata=meta,
         )
 

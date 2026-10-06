@@ -28,12 +28,17 @@ def status_for_result(
             waiting = False
     if waiting:
         return "waiting"
+    if str(getattr(result, "outcome", "") or "") == "interrupted":
+        return "interrupted"
+    refusal = str(getattr(result, "outcome", "") or "")
+    if refusal in {"skipped_gate", "skipped_overlap", "refused"}:
+        return refusal
     if error is not None or (
         result is not None and not bool(getattr(result, "success", True))
     ):
         return "failure"
     outcome = str(getattr(result, "outcome", "") or "").strip().lower()
-    if outcome in {"launched", "queued", "interrupted", "skipped_noop"}:
+    if outcome in {"launched", "queued", "interrupted", "skipped_noop", "degraded"}:
         return outcome
     if outcome in {"skip", "noop", "no_op"}:
         return "skipped_noop"
@@ -93,12 +98,17 @@ class TriggerPublication:
             if state is None:
                 return
             review = MissedRuns.read(report)
-            if review.total > 0:
-                state.notify(
-                    kind="info",
-                    title="Missed scheduled runs",
-                    body=review.body(),
-                    meta=review.metadata(),
+            from gideon.automation.triggers.review import TriggerReviewStore
+            from gideon.integrations.inbox import emit_attention_item
+
+            for card in TriggerReviewStore().list(pending_only=True):
+                identity = str(card.get("id") or "")
+                emit_attention_item(
+                    state, source="system", kind="agent_request", item_kind="needs_input",
+                    title=f"Review {card.get('trigger_name') or 'automation'}",
+                    body="The previous run was interrupted." if card.get("reason") == "interrupted" else review.body(),
+                    refs={"trigger_review": identity, "trigger": card.get("trigger_id"), "review_id": identity, "statusUrl": "#/triggers"},
+                    dedup_key=f"trigger_review:{identity}",
                 )
         except Exception:
             self.logger.debug("could not surface the missed-fire review", exc_info=True)
@@ -263,37 +273,50 @@ class FireLedger:
         self.runtime, self.journal_type, self.logger = runtime, journal_type, logger
 
     async def record(
-        self, trigger: Any, result: Any, error: BaseException | None
-    ) -> None:
+        self,
+        trigger: Any,
+        result: Any,
+        error: BaseException | None,
+        *,
+        started: float | None = None,
+        finished: float | None = None,
+        late: str = "",
+    ) -> str | None:
         try:
-            from gideon.automation.schedule_history import ExecutionRecord
+            from gideon.automation.schedule_history import ExecutionRecord, action_summary
             from gideon.automation.triggers import autopause
             from gideon.automation.triggers.models import TriggerState
             from gideon.automation.triggers.store import TriggerStore
+            from gideon.automation.triggers.routing import routed
             from gideon.core.config.loader import config_dir
 
             identity = trigger_id(trigger)
             if not identity:
-                return
+                return None
             outcome = FireResult.read(result, error)
             from gideon.automation.triggers import parks
 
             waiting = parks.parked(result)
             status = status_for_result(result, error, waiting=waiting)
             journal = self.journal_type(config_dir())
-            now = time.time()
-            await journal.append(
-                ExecutionRecord(
-                    run_id=f"fire-{int(now * 1000)}",
-                    job_id=identity,
-                    trigger=outcome.exit_type,
-                    started_at=now,
-                    finished_at=now,
-                    status=status,
-                    summary=parks.waiting_line(result) if waiting else "",
-                    error=outcome.exception_text[:200],
-                )
+            ended = time.time() if finished is None else finished
+            began = ended if started is None else started
+            summary = action_summary(status, result, outcome.detail)
+            if late and status == "success":
+                status = "ran_late"
+                summary = f"{late[:1].upper()}{late[1:]}. {summary}".strip()
+            record = ExecutionRecord(
+                job_id=identity,
+                trigger=outcome.exit_type,
+                started_at=began,
+                finished_at=ended,
+                duration_ms=int(max(0.0, ended - began) * 1000),
+                status=status,
+                summary=summary,
+                trace=str(getattr(result, "stdout", "") or ""),
+                error=outcome.detail[:200],
             )
+            await journal.append(record)
             parks.settle(
                 trigger,
                 result,
@@ -310,12 +333,14 @@ class FireLedger:
                 quarantined=str(getattr(trigger, "state", ""))
                 == TriggerState.QUARANTINED.value,
             )
-            store = TriggerStore(base_dir=config_dir())
+            store = routed(TriggerStore(base_dir=config_dir()))
             stored = store.get(identity)
             if stored is None:
-                return
+                return status
             current = stored.trigger
-            outcome.update(current, decision)
+            if status not in {"launched", "queued", "waiting", "interrupted"}:
+                outcome.update(current, decision)
+            current.last_run_id = record.run_id
             if autopause.needs_attention(decision.state):
                 self.logger.warning(
                     "trigger %s autopaused: %s",
@@ -324,10 +349,12 @@ class FireLedger:
                 )
             store.upsert(current)
             self.runtime._surface_attention_card(current, decision)
+            return status
         except Exception:
             self.logger.debug(
                 "could not record the fire outcome for %s", trigger, exc_info=True
             )
+            return None
 
     async def refused(self, trigger: Any, status: str, error: str) -> None:
         if status not in _REFUSAL_STATUSES:

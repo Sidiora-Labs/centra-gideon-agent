@@ -124,33 +124,61 @@ ROUTE_AUTHORITY: dict[str, OwnerOnly | AppMay] = {
     "POST /api/apps/{name}/update": OwnerOnly("replacing app code"),
     "DELETE /api/apps/{name}": OwnerOnly("uninstalling an app"),
     "POST /api/apps/{name}/token": OwnerOnly("minting an app credential"),
-    "GET /api/apps/{name}/config": AppMay("reading its own app settings", OwnedTarget("name")),
-    "PUT /api/apps/{name}/config": AppMay("writing its own app settings", OwnedTarget("name")),
+    "GET /api/apps/{name}/config": AppMay(
+        "reading its own app settings", OwnedTarget("name")
+    ),
+    "PUT /api/apps/{name}/config": AppMay(
+        "writing its own app settings", OwnedTarget("name")
+    ),
     "GET /api/apps/{name}": AppMay("reading its own app metadata", OwnedTarget("name")),
     "POST /api/apps/{name}/agent-run": AppMay("starting agent work", agent_work=True),
-    "GET /api/apps/{name}/agent-run/{run_id}": AppMay("reading its own agent run", OwnedTarget("name")),
+    "GET /api/apps/{name}/agent-run/{run_id}": AppMay(
+        "reading its own agent run", OwnedTarget("name")
+    ),
     "POST /api/apps/message": AppMay("using the declared app messaging grant"),
     "GET /api/apps/message": AppMay("reading messages delivered to this app"),
     "POST /api/chat": AppMay("creating or continuing its own conversation"),
     "GET /api/chat/sessions": AppMay("listing its own conversations"),
     "POST /api/chat/sessions": AppMay("creating its own conversation"),
     "GET /api/chat/sessions/{session}": AppMay("reading its own conversation"),
-    "GET /api/chat/sessions/{session}/tool-result/{rid}": AppMay("reading its own conversation result"),
+    "GET /api/chat/sessions/{session}/tool-result/{rid}": AppMay(
+        "reading its own conversation result"
+    ),
     "POST /api/chat/sessions/{session}/stop": AppMay("stopping its own conversation"),
-    "POST /api/chat/sessions/{session}/interrupt": AppMay("interrupting its own conversation"),
-    "DELETE /api/chat/sessions/{session}/queue/{queue_id}": AppMay("managing its own conversation queue"),
+    "POST /api/chat/sessions/{session}/interrupt": AppMay(
+        "interrupting its own conversation"
+    ),
+    "DELETE /api/chat/sessions/{session}/queue/{queue_id}": AppMay(
+        "managing its own conversation queue"
+    ),
     "DELETE /api/chat/sessions/{session}": AppMay("deleting its own conversation"),
     "POST /api/chat/sessions/{session}/fork": AppMay("forking its own conversation"),
-    "POST /api/chat/sessions/{session}/fork-rewound": AppMay("forking its own conversation"),
+    "POST /api/chat/sessions/{session}/fork-rewound": AppMay(
+        "forking its own conversation"
+    ),
     "POST /api/chat/sessions/{session}/undo": AppMay("rewinding its own conversation"),
-    "POST /api/chat/sessions/{session}/rewind": AppMay("rewinding its own conversation"),
+    "POST /api/chat/sessions/{session}/rewind": AppMay(
+        "rewinding its own conversation"
+    ),
     "POST /api/chat/sessions/{session}/resume": AppMay("resuming its own conversation"),
-    "POST /api/chat/sessions/{session}/regenerate": AppMay("continuing its own conversation"),
-    "POST /api/chat/sessions/{session}/switch-variant": AppMay("continuing its own conversation"),
-    "POST /api/chat/sessions/{session}/edit-resend": AppMay("continuing its own conversation"),
-    "POST /api/chat/sessions/{session}/side/open": AppMay("opening its own conversation side thread"),
-    "POST /api/chat/sessions/{session}/side/turn": AppMay("continuing its own conversation side thread"),
-    "POST /api/chat/sessions/{session}/side/close": AppMay("closing its own conversation side thread"),
+    "POST /api/chat/sessions/{session}/regenerate": AppMay(
+        "continuing its own conversation"
+    ),
+    "POST /api/chat/sessions/{session}/switch-variant": AppMay(
+        "continuing its own conversation"
+    ),
+    "POST /api/chat/sessions/{session}/edit-resend": AppMay(
+        "continuing its own conversation"
+    ),
+    "POST /api/chat/sessions/{session}/side/open": AppMay(
+        "opening its own conversation side thread"
+    ),
+    "POST /api/chat/sessions/{session}/side/turn": AppMay(
+        "continuing its own conversation side thread"
+    ),
+    "POST /api/chat/sessions/{session}/side/close": AppMay(
+        "closing its own conversation side thread"
+    ),
     "GET /api/notifications": AppMay("reading its own notifications"),
     "POST /api/notifications/clear": AppMay("clearing its own notifications"),
     "DELETE /api/notifications": AppMay("deleting its own notifications"),
@@ -158,19 +186,43 @@ ROUTE_AUTHORITY: dict[str, OwnerOnly | AppMay] = {
     "POST /api/notifications/unack": AppMay("unacknowledging its own notifications"),
     "POST /api/notifications/ack-all": AppMay("acknowledging its own notifications"),
     "GET /api/ws": AppMay("receiving its own conversation events"),
-    "PATCH /api/config/gideon": AppMay("writing a specifically declared ordinary config field"),
+    "PATCH /api/config/gideon": AppMay(
+        "writing a specifically declared ordinary config field"
+    ),
     "GET /api/providers": AppMay("listing only its own provider"),
-    "GET /api/providers/{name}": AppMay("reading its own provider", OwnedTarget("name")),
-    "GET /api/providers/{name}/schema": AppMay("reading its own provider schema", OwnedTarget("name")),
-    "GET /api/providers/{name}/config": AppMay("reading its own masked provider settings", OwnedTarget("name")),
-    "PATCH /api/providers/{name}/config": AppMay("writing its own provider settings", OwnedTarget("name")),
-    "GET /api/providers/{name}/instances": AppMay("reading its own masked provider instances", OwnedTarget("name")),
-    "POST /api/providers/{name}/instances": AppMay("writing its own provider instances", OwnedTarget("name")),
-    "GET /api/providers/{name}/instances/{id}": AppMay("reading its own masked provider instance", OwnedTarget("name")),
-    "PUT /api/providers/{name}/instances/{id}": AppMay("writing its own provider instance", OwnedTarget("name")),
-    "DELETE /api/providers/{name}/instances/{id}": AppMay("deleting its own provider instance", OwnedTarget("name")),
-    "POST /api/providers/{name}/instances/{id}/test": AppMay("testing its own provider instance", OwnedTarget("name")),
-    "POST /api/agent-runners/{id}/grant": OwnerOnly("allowing a custom agent runner to execute"),
+    "GET /api/providers/{name}": AppMay(
+        "reading its own provider", OwnedTarget("name")
+    ),
+    "GET /api/providers/{name}/schema": AppMay(
+        "reading its own provider schema", OwnedTarget("name")
+    ),
+    "GET /api/providers/{name}/config": AppMay(
+        "reading its own masked provider settings", OwnedTarget("name")
+    ),
+    "PATCH /api/providers/{name}/config": AppMay(
+        "writing its own provider settings", OwnedTarget("name")
+    ),
+    "GET /api/providers/{name}/instances": AppMay(
+        "reading its own masked provider instances", OwnedTarget("name")
+    ),
+    "POST /api/providers/{name}/instances": AppMay(
+        "writing its own provider instances", OwnedTarget("name")
+    ),
+    "GET /api/providers/{name}/instances/{id}": AppMay(
+        "reading its own masked provider instance", OwnedTarget("name")
+    ),
+    "PUT /api/providers/{name}/instances/{id}": AppMay(
+        "writing its own provider instance", OwnedTarget("name")
+    ),
+    "DELETE /api/providers/{name}/instances/{id}": AppMay(
+        "deleting its own provider instance", OwnedTarget("name")
+    ),
+    "POST /api/providers/{name}/instances/{id}/test": AppMay(
+        "testing its own provider instance", OwnedTarget("name")
+    ),
+    "POST /api/agent-runners/{id}/grant": OwnerOnly(
+        "allowing a custom agent runner to execute"
+    ),
 }
 
 
@@ -178,7 +230,14 @@ def route_authority(method: str, route: str) -> OwnerOnly | AppMay | None:
     if not method or not route:
         return None
     verb = "GET" if method.upper() == "HEAD" else method.upper()
-    if route == "/apps/{name}/api/{tail}" and verb in {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}:
+    if route == "/apps/{name}/api/{tail}" and verb in {
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS",
+    }:
         return AppMay("proxying to its own app backend", OwnedTarget("name"))
     if route == "/apps/{name}/ui/{tail}" and verb == "GET":
         return AppMay("reading its own app UI assets", OwnedTarget("name"))
@@ -319,9 +378,15 @@ class PermissionChecker:
     def can_use_storage(self) -> bool:
         return self.permissions.storage
 
+    def agent_tier(self) -> str:
+        from gideon.extensions.apps.agent_tiers import AGENT_TIERS
+
+        tier = self.permissions.agent_tier
+        return tier if tier in AGENT_TIERS else ""
+
     def can_use_agent(self) -> bool:
         """May the app run background agent tasks (headless subagent runs)?"""
-        return self.permissions.agent
+        return bool(self.agent_tier())
 
 
 def _matches_any(value: str, patterns: list[str]) -> bool:
@@ -462,10 +527,34 @@ def app_request_denial(
                 return "the app's provider is not available"
             if provider.provider_config.type == "model":
                 return "model providers and model bindings are owner-only"
-    if isinstance(authority, AppMay) and authority.agent_work and not checker.can_use_agent():
-        return "agent work requires this app's permissions.agent grant"
+    if (
+        isinstance(authority, AppMay)
+        and authority.agent_work
+        and not checker.can_use_agent()
+    ):
+        return (
+            "agent work requires this app to declare a text, read or tools agent tier"
+        )
     if not checker.can_use_api(path):
         return "api path not in declared permissions"
     if path.startswith("/api/memory") and not checker.can_use_memory("shared"):
         return "memory access not declared (permissions.memory)"
     return ""
+
+
+def agent_tier_shortfall(held: str, needed: str) -> str:
+    from gideon.extensions.apps.agent_tiers import AGENT_TIERS, agent_tier_covers
+
+    if agent_tier_covers(held, needed):
+        return ""
+    if needed not in AGENT_TIERS:
+        return f"agent tier {needed!r} is not text, read or tools"
+    return f"agent work requires {needed!r}; this app declares {held!r}"
+
+
+def agent_tier_now(app_name: str) -> str:
+    """Current installed, enabled app agent tier; unreadable grants permit nothing."""
+    if app_lifecycle_denial(app_name):
+        return ""
+    checker = checker_for(app_name)
+    return checker.agent_tier() if checker is not None else ""

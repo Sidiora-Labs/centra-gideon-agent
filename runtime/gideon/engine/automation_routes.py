@@ -22,7 +22,9 @@ class AutomationRoutes:
         return self._store
 
     async def _runner(self, payload: dict[str, Any]) -> dict[str, str]:
-        selected = self.store.get(str(payload.get("trigger_id") or ""))
+        from gideon.automation.triggers.routing import routed
+
+        selected = routed(self.store).get(str(payload.get("trigger_id") or ""))
         if selected is not None:
             await self.runtime._fire_store_trigger(selected.trigger, payload)
             return {"status": "launched"}
@@ -92,7 +94,7 @@ class DailySpendGate:
             try:
                 self.runtime.dashboard_state.notify(
                     notification_kinds.WARNING,
-                    "Daily automation budget reached",
+                    "Daily token budget reached",
                     f"{context} was skipped — {reason}. Unattended runs resume "
                     "tomorrow, or raise the budget in Settings → Guardrails.",
                 )
@@ -110,7 +112,25 @@ class DailySpendGate:
             limit = budget_from_config()
             if limit.is_unlimited:
                 return False
-            verdict, reason = get_meter().check_day(limit)
+            meter = get_meter()
+            totals = meter.day_totals()
+            if limit.max_dollars <= 0 or totals.dollars < limit.max_dollars:
+                self.runtime._dollars_notified = False
+            elif not getattr(self.runtime, "_dollars_notified", False):
+                self.runtime._dollars_notified = True
+                if self.runtime.dashboard_state is not None:
+                    try:
+                        from gideon.workspace import notification_kinds
+                        self.runtime.dashboard_state.notify(
+                            notification_kinds.WARNING, "Daily dollar budget reached",
+                            f"${totals.dollars:.2f} of ${limit.max_dollars:.2f} spent. "
+                            "Paid model calls are refused until the daily reset; free models "
+                            "and work that calls no model keep running. Raise the budget "
+                            "in Settings → Guardrails.",
+                        )
+                    except Exception:
+                        self.logger.debug("dollar budget notify failed", exc_info=True)
+            verdict, reason = meter.check_day_before_work(limit)
             if verdict is BudgetVerdict.EXCEEDED:
                 self.announce(context, reason)
                 self.logger.info("%s skipped: %s", context, reason)

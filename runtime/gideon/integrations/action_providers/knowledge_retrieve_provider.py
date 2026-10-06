@@ -420,3 +420,62 @@ class KnowledgeRetrieveActionProvider(ActionProvider):
             stdout=json.dumps(payload, ensure_ascii=False),
             duration_ms=int((time.monotonic() - started) * 1000),
         )
+
+
+def named_source_notes(store, name: str) -> list[dict]:
+    """Exact watched-directory documents in an already authorized active library.
+
+    This helper selects evidence only; its caller must establish owner/work read
+    authority before passing the store. It never opens an arbitrary filesystem file.
+    Return at most six records so five-note ambiguity stays bounded.
+    """
+    import os
+    from pathlib import Path
+    from gideon.automation.triggers.pathguard import canonicalize, is_within
+    from gideon.integrations.knowledge_providers.dir_source import DirSourceProvider
+    from gideon.security.security import is_sensitive_path
+
+    relative = name.removeprefix("./")
+    absolute = name.startswith(("/", "~/"))
+    if not relative or ".." in Path(relative).parts:
+        return []
+    real = canonicalize(name) if absolute else ""
+    if absolute and (not real or is_sensitive_path(real)):
+        return []
+    found = []
+    provider = DirSourceProvider(None)
+    for source in store.list_sources():
+        if source.get("provider") != provider.name:
+            continue
+        spec = source.get("spec") or {}
+        admitted, _ = provider.validate_spec(spec)
+        if not admitted:
+            continue
+        root = canonicalize(str(spec.get("path") or ""))
+        if absolute:
+            if real == root or not is_within(real, root):
+                continue
+            note = store.find_source_item(source["id"], Path(os.path.relpath(real, root)).as_posix())
+            candidates = [note] if note else []
+        else:
+            # SQL sees only exact/suffix GUIDs, not user-supplied patterns.
+            rows = store.db.execute(
+                "SELECT id, guid FROM items WHERE source_id = ? "
+                "AND COALESCE(is_archived, 0) = 0 "
+                "AND (guid = ? OR substr(guid, -?) = ?) LIMIT 6",
+                (source["id"], relative, len(relative) + 1, "/" + relative),
+            ).fetchall()
+            candidates = []
+            for row in rows:
+                guid = str(row["guid"] or "")
+                resolved = canonicalize(str(Path(root) / guid))
+                if resolved and is_within(resolved, root) and not is_sensitive_path(resolved):
+                    note = store.get_item(row["id"])
+                    if note:
+                        candidates.append(note)
+        for note in candidates:
+            if not note.get("is_archived"):
+                found.append({**note, "source_name": source.get("name") or "Watched folder"})
+                if len(found) >= 6:
+                    return found
+    return found

@@ -494,6 +494,7 @@ class ScriptHook:
     matcher: str = ""
     provider: str = "bash"
     provider_config: dict = field(default_factory=dict)
+    capabilities: dict = field(default_factory=dict)
     timeout: int = 30
     enabled: bool = True
     last_run: float = 0.0
@@ -508,6 +509,7 @@ class ScriptHook:
         values = _declared_fields(cls, data)
         values["id"] = data.get("id", str(uuid.uuid4())[:8])
         values["provider_config"] = dict(values["provider_config"] or {})
+        values["capabilities"] = dict(values.get("capabilities") or {})
         return cls(**values)
 
 
@@ -559,6 +561,9 @@ class _HookDispatch:
                 "skipped_incident", "skipped: incident mode active"
             )
         hook = self.hook
+        from gideon.automation.triggers import grants
+        if not grants.is_granted(grants.hook_trigger(hook)):
+            return None, self.failure("held_for_owner_confirmation", "the owner must allow this hook action before it can run")
         session = str(
             self.payload.get("parent_session_key", "")
         ) or unattended_dispatch_key(f"hook:{hook.id}")
@@ -586,34 +591,40 @@ class _HookDispatch:
     def status(self, result) -> str:
         if result.blocked:
             return "blocked" if self.enforced else "advisory"
-        if result.success:
-            return result.outcome if result.outcome in ("launched", "queued") else "ok"
-        return "timeout" if result.error and "Timed out" in result.error else "error"
+        if result.success is not True or result.exit_code not in (None, 0):
+            return "timeout" if result.error and "Timed out" in result.error else "error"
+        from gideon.automation.triggers.executor import classify
+        from gideon.automation.triggers.models import Outcome
+
+        observed, _ = classify(result.outcome or "ok")
+        if observed in (Outcome.RAN.value, Outcome.SKIPPED_NOOP.value):
+            return "ok"
+        return result.outcome or "unknown"
 
     def finish(self, result, route) -> ScriptHookResult:
-        from gideon.security.guardrails.rungs import record_reversal
+        from gideon.security.guardrails.rungs import record_execution
 
         hook = self.hook
-        self.record(self.status(result))
-        if route.records_reversal and result.success:
-            record_reversal(
+        status = self.status(result)
+        self.record(status)
+        if result.success:
+            record_execution(
                 route,
                 result,
                 label=hook.name or hook.provider,
                 refs={"hook": hook.id, "provider": hook.provider},
             )
+        error = result.error if result.agent_error is None else result.agent_error.render()
+        if status not in ("ok", "launched", "queued", "waiting", "needs_input") and not error:
+            error = "The provider did not confirm successful completion."
         return ScriptHookResult(
             hook.id,
             hook.name,
             hook.event,
             stdout=result.stdout,
             stderr=result.stderr,
-            exit_code=-1 if result.exit_code is None else result.exit_code,
-            error=(
-                result.error
-                if result.agent_error is None
-                else result.agent_error.render()
-            ),
+            exit_code=(result.exit_code if result.exit_code is not None and (status == "ok" or result.exit_code != 0) else -1),
+            error=error,
             duration_ms=result.duration_ms,
         )
 
@@ -630,15 +641,20 @@ class _HookDispatch:
                 "error", f"Unknown action provider {self.hook.provider!r}"
             )
         context = ActionContext(
-            event=self.hook.event, context=self.context, payload=self.payload
+            event=self.hook.event, context=self.context, payload=self.payload,
+            trigger_id="lifecycle:" + str(self.hook.id),
         )
         route, refusal = self.admit(context)
         if refusal is not None:
             return refusal
+        from gideon.security.net.policy import egress_held_to
+        from gideon.security.guardrails.policy import unattended_dispatch_key
+
         try:
-            result = await provider.execute(
-                self.hook.provider_config, context, timeout=self.hook.timeout
-            )
+            with egress_held_to(unattended_dispatch_key(f"hook:{self.hook.id}")):
+                result = await provider.execute(
+                    self.hook.provider_config, context, timeout=self.hook.timeout
+                )
         except Exception as exc:
             logger.warning(
                 "Action provider %r raised for hook %s",
@@ -687,6 +703,10 @@ async def run_script_hook(
                 "timeout",
                 "launched",
                 "queued",
+                "waiting",
+                "needs_input",
+                "unknown",
+                "refused",
                 "blocked",
                 "advisory",
                 "held_for_rung",
@@ -838,6 +858,8 @@ class ScriptHookStore:
             if record is None:
                 return None, False
             _validate_hook_patch(data)
+            from gideon.automation.triggers import grants
+            before = grants.hook_trigger(record)
             editable = (
                 "name",
                 "event",
@@ -850,6 +872,9 @@ class ScriptHookStore:
             record.__dict__.update(
                 {key: data[key] for key in editable if key in data}
             )
+            after = grants.hook_trigger(record)
+            grants.narrow(after, before)
+            record.capabilities = after.capabilities
             return record, True
 
         return self._mutate(edit)  # type: ignore[return-value]
@@ -857,6 +882,9 @@ class ScriptHookStore:
     def delete(self, hook_id: str) -> bool:
         def remove(hooks: dict[str, ScriptHook]) -> tuple[bool, bool]:
             removed = hooks.pop(hook_id, None) is not None
+            if removed:
+                from gideon.automation.triggers import grants
+                grants.revoke("lifecycle:" + hook_id)
             return removed, removed
 
         return bool(self._mutate(remove))

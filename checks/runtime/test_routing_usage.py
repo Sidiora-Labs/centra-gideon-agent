@@ -99,7 +99,7 @@ _STUB_RATES = {
 
 @pytest.fixture
 def stub_rates(monkeypatch):
-    monkeypatch.setattr(U, "rate_for", lambda p, m, home=None: _STUB_RATES.get((p, m)))
+    monkeypatch.setattr("gideon.engine.routing.rates.rate_for", lambda p, m, home=None: _STUB_RATES.get((p, m)))
 
 
 def _cell(calls, t_in, t_out, dollars, *, unpriced=0, local=0):
@@ -377,8 +377,14 @@ def test_priced_false_wins_over_the_rate_table(tmp_path, stub_rates):
     assert day2["background"]["unpriced_calls"] == 5
 
 
-def test_local_and_unpriced_come_from_the_real_rate_table(tmp_path):
+def test_local_and_unpriced_come_from_the_real_rate_table(tmp_path, monkeypatch):
     """The stubbed fixture proves the arithmetic; this proves the fold actually asks rates.py."""
+    from gideon.integrations.llm import registry as providers
+    from gideon.integrations.llm.capabilities import ProviderCapability
+    registered = providers.ProviderRegistry()
+    registered.register_type(ProviderCapability('test-host', frozenset(), True, True, False, False, 0, hosts_model=True, default_endpoint='http://localhost:11434'), lambda **kw: None)
+    registered.register_entry(providers.ProviderEntry('ollama', 'test-host', model='qwen3:8b'))
+    monkeypatch.setattr(providers, '_default_registry', registered)
     fold = U.empty_fold()
     look = U._rate_lookup(tmp_path)
     base = {

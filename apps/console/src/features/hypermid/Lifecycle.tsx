@@ -110,6 +110,15 @@ function PlanReview({ plan, reviewed, destructiveConfirmed, purgeConfirmed, busy
     {inventory.length > 0 && <div className="mt-m"><h4 className="text-sm text-on-surface">Inventory</h4><div className="mt-s grid gap-s sm:grid-cols-2">
       {inventory.map(([kind, entries]) => <Surface key={kind} tone="container" radius="lg" className="p-m"><p className="text-sm text-on-surface">{kind.replaceAll('_', ' ')}</p>
         <p data-type="caption" className="mt-xs break-words text-on-surface-low">{entries.join(', ') || 'None'}</p></Surface>)}</div></div>}
+    {install.currentEnrollmentDigest && <Surface tone="container" radius="lg" className="mt-m p-m">
+      <h4 className="text-sm text-on-surface">Review runtime permissions</h4>
+      <p className="mt-xs text-sm text-on-surface-low">Applying this plan restarts the local runtime and preserves its identity and saved memory.</p>
+      <p className="mt-s text-sm text-on-surface">New operations: {install.addedOperations.join(', ') || 'None'}</p>
+      <p className="mt-xs text-sm text-on-surface">New resources: {install.addedResources.join(', ') || 'None'}</p>
+      {install.addedOperations.includes('administer') && <p className="mt-s text-sm text-on-surface-low">Memory service administration enables app memory activation and private work lifetimes.</p>}
+      {install.addedResources.includes('memory-embedding') && <p className="mt-xs text-sm text-on-surface-low">Embedding access enables semantic memory lookup and rebuilding its derived index.</p>}
+      <p data-type="caption" className="mt-s break-all font-mono text-on-surface-low">Current enrollment digest {install.currentEnrollmentDigest}</p>
+    </Surface>}
     {plan.exclusions && plan.exclusions.length > 0 && <p className="mt-m text-sm text-on-surface-low">Excluded from artifact: {plan.exclusions.join(', ')}.</p>}
     <ol className="mt-m grid gap-s">{plan.steps.map((step, index) => <li key={step.id} className="rounded-lg bg-surface-container p-m">
       <div className="flex flex-wrap items-center gap-s"><span className="text-xs text-on-surface-low">{index + 1}</span><span className="text-sm text-on-surface">{step.title}</span>

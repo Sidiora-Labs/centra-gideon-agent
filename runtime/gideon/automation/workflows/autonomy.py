@@ -35,6 +35,8 @@ engine's trust plumbing, so this module explains the trade and the engine makes 
 
 from __future__ import annotations
 
+from gideon.automation.workflows.confirmation import requires_hitl
+
 import logging
 import re
 from dataclasses import dataclass, field
@@ -281,7 +283,7 @@ def type_attention(
             continue
         node_id = node.id or path
         cfg = node.config or {}
-        if cfg.get("require_hitl") is True:
+        if requires_hitl(cfg):
             out[node_id] = Attention.HITL
             continue
         if node_id in destructive_nodes:

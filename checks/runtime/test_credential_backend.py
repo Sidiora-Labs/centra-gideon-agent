@@ -32,6 +32,7 @@ from pathlib import Path
 
 import pytest
 
+from gideon.core.config import credentials as cred
 from gideon.core.config import loader
 from gideon.core.config.credentials import (
     CREDENTIAL_BACKEND_ENV,
@@ -39,6 +40,7 @@ from gideon.core.config.credentials import (
     credential_backend_warning,
     get_credential,
     keychain_available,
+    keychain_service,
     requested_credential_backend,
     save_credential,
 )
@@ -104,6 +106,7 @@ def _install_stub_keyring(
     `keyring.backends.null` must be refused). `set_raises` simulates a locked or broken
     secret service so the fail-closed write path can be exercised.
     """
+    monkeypatch.setattr(cred, "_keychain_disabled", False)
     values: dict[str, str] = {} if store is None else store
     module = types.ModuleType("keyring")
 
@@ -127,6 +130,7 @@ def home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """An isolated credential home. Never the real one — these tests write secrets."""
     cfg = tmp_path / "home"
     cfg.mkdir()
+    monkeypatch.setenv("GIDEON_HOME", str(cfg))
     monkeypatch.setattr(loader, "config_dir", lambda: cfg)
     for key in (_KEY, _OTHER):
         monkeypatch.setenv(key, "")
@@ -267,11 +271,11 @@ def test_the_keychain_backend_stores_secrets_in_the_keychain_and_not_in_env(
 
     save_credential(_KEY, "keychain-value")
 
-    assert values[f"gideon\x00{_KEY}"] == "keychain-value"
+    assert values[f"{keychain_service()}\x00{_KEY}"] == "keychain-value"
     assert (
         not loader.env_path().exists()
     ), "a keychain write must not also spill to .env"
-    index = json.loads(values["gideon\x00__gideon_key_index__"])
+    index = json.loads(values[f"{keychain_service()}\x00__gideon_key_index__"])
     assert index == [_KEY], "the keychain must stay enumerable for load_credentials()"
 
 
@@ -285,7 +289,7 @@ def test_the_key_index_accumulates_and_stays_sorted(
     save_credential(_KEY, "a")
     save_credential(_KEY, "a2")
 
-    index = json.loads(values["gideon\x00__gideon_key_index__"])
+    index = json.loads(values[f"{keychain_service()}\x00__gideon_key_index__"])
     assert index == sorted([_KEY, _OTHER])
     assert get_credential(_KEY) == "a2"
 
@@ -297,8 +301,9 @@ def test_the_read_api_gives_the_caller_no_way_to_name_a_backend() -> None:
     which is what "reads are backend-transparent" forbids.
     """
     params = list(inspect.signature(get_credential).parameters)
-    assert params == ["key"]
-    assert list(inspect.signature(save_credential).parameters) == ["key", "value"]
+    assert params == ["key", "home"]
+    assert "backend" not in params
+    assert list(inspect.signature(save_credential).parameters) == ["key", "value", "home"]
 
 
 def test_reads_are_transparent_across_both_stores_in_one_process(

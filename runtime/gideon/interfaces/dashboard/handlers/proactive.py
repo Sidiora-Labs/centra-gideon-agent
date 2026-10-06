@@ -196,7 +196,13 @@ async def api_proactive_digest(request: web.Request) -> web.Response:
             )
         view["schedule"] = state["schedule"]
         view["schedule_drift"] = state["drift"]
-        view["quiet_hours"] = _quiet_hours()
+        view["notice"] = _digest_notice(title=str(view.get("title") or ""), body=str(view.get("body") or ""))
+        notice = view["notice"]
+        view["quiet_hours"] = {
+            "known": notice["known"], "mute_all": notice.get("mute_all", False),
+            "enabled": False, "start": "", "end": "",
+            **notice.get("quiet_hours", {}),
+        }
         from gideon.engine.proactive_decisions import recent
 
         view["commitment_decisions"] = recent()
@@ -218,38 +224,40 @@ async def api_proactive_digest(request: web.Request) -> web.Response:
     return web.json_response({**view})
 
 
-def _quiet_hours() -> dict[str, Any]:
-    """The quiet-hours window, so the card can EXPLAIN an absent notification.
-
-    Criterion 1 wants a digest that lands in quiet hours deferred rather than dropped, and the
-    deferral is invisible from the run alone: `ConsoleState.notify` returns None, so the
-    pipeline's flag says "handed to the gate" and nothing more. Without this the user sees a digest
-    on the page, no notification, and no reason — which reads as a broken notification system.
-
-    Three fields, all already user-set. Never the notification list itself.
-    """
+def _digest_notice(*, title: str, body: str) -> dict[str, Any]:
+    """Explain current settings with the same rule decision used by delivery."""
     try:
         from gideon.extensions.providers.entity_routes import (
-            load_notifications_settings,
+            load_notifications_settings, notification_posture, quiet_window_moments, _load_entity_settings,
         )
+        from gideon.cognition.proactive.rank import DIGEST_NOTIFY_KIND
+        from gideon.workspace import notification_rules as rules
 
+        if _load_entity_settings("notifications") is None:
+            return {"known": False}
         settings = load_notifications_settings()
-    except Exception:  # noqa: BLE001 - an unreadable window is unknown, not "off"
-        logger.debug("proactive: notification settings unreadable", exc_info=True)
+        moments = quiet_window_moments(settings)
+        text = f"{title}\n{body}"
+
+        def mode(now: object | None) -> str:
+            posture = notification_posture(DIGEST_NOTIFY_KIND, now=now)
+            return "dropped" if posture == "blocked" else rules.rule_outcome(DIGEST_NOTIFY_KIND, text, posture=posture).mode
+
+        rule = rules.resolve_rule_for_legacy(DIGEST_NOTIFY_KIND)
         return {
-            "known": False,
-            "enabled": False,
-            "start": "",
-            "end": "",
-            "mute_all": False,
+            "known": True,
+            "mute_all": bool(settings.get("mute_all")),
+            "min_severity": str(settings.get("min_severity", "info")),
+            "quiet_hours": {"enabled": bool(settings.get("quiet_hours_enabled")),
+                            "start": str(settings.get("quiet_hours_start", "") or ""),
+                            "end": str(settings.get("quiet_hours_end", "") or "")},
+            "rule": rule.mode,
+            "inside": mode(moments[0] if moments else None),
+            "outside": mode(moments[1] if moments else None),
         }
-    return {
-        "known": True,
-        "enabled": bool(settings.get("quiet_hours_enabled")),
-        "start": str(settings.get("quiet_hours_start", "") or ""),
-        "end": str(settings.get("quiet_hours_end", "") or ""),
-        "mute_all": bool(settings.get("mute_all")),
-    }
+    except Exception:
+        logger.debug("proactive: notification settings unreadable", exc_info=True)
+        return {"known": False}
 
 
 async def api_proactive_install(request: web.Request) -> web.Response:
@@ -504,19 +512,22 @@ def _run_ledger(run_id: str):
 async def api_proactive_reply(request: web.Request) -> web.Response:
     """POST /api/proactive/digest/reply — one tap or one typed reply. Body ``{run_id, text}``.
 
-    The response always says which of five things happened, because a card that cannot tell them
-    apart will show the wrong one: ``expired`` (the run is not the current digest), ``help`` (the
-    grammar refused and returned a help line — never an interpretation), ``already`` (this
-    ordinal was answered before, so nothing ran again), ``acted``, or an error.
+    The card's door to the one answer path (:func:`gideon.cognition.proactive.answer.answer`), as
+    the owner's signed-in session or whoever else the request proves (`approval_answer`), who is
+    refused before anything is read. The response always says which of five things happened,
+    because a card that cannot tell them apart will show the wrong one: ``expired`` (the run is
+    not the current digest), ``help`` (the grammar refused and returned a help line — never an
+    interpretation), ``already`` (this ordinal was answered before, so nothing ran again),
+    ``acted``, or an error.
     """
-    from gideon.cognition.proactive.approval import HELP_TEXT, ReplyAction, parse_reply
+    from gideon.security import approval_answer
     from gideon.interfaces.dashboard.handlers import _is_restricted_session
+    from gideon.interfaces.dashboard.handlers.memory import _get_service
+    from gideon.cognition.proactive import answer as triage_answer
 
     if _is_restricted_session(request.app["state"], request):
         return json_error(
-            "forbidden",
-            message="Digest replies are not allowed in this session mode.",
-            status=403,
+            "forbidden", message="Digest replies are not allowed in this session mode.", status=403
         )
     body = await _body(request)
     if body.get("commitment_key"):
@@ -526,118 +537,43 @@ async def api_proactive_reply(request: web.Request) -> web.Response:
     if not run_id:
         return json_error("invalid_request", message="run_id is required", status=400)
 
-    from gideon.cognition.proactive.surface import STATE_READY, build_digest_view
-
-    def read() -> dict:
-        state = _install_state()
-        run, output, events = _latest_digest()
-        return build_digest_view(
-            enabled=state["enabled"],
-            installed=state["installed"],
-            run=run,
-            output=output,
-            events=events,
-        )
-
-    try:
-        view = await asyncio.to_thread(read)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("proactive: reply read failed", exc_info=True)
-        return json_error(
-            "triage_digest_unreadable",
-            message=f"{type(exc).__name__}: {exc}",
-            status=500,
-        )
-
-    if view.get("state") != STATE_READY or str(view.get("run_id", "")) != run_id:
+    from gideon.security.session_credentials import work_of_request
+    proof = work_of_request(request)
+    session_key = proof.session_key if proof is not None else ""
+    state = request.app["state"]
+    done = await triage_answer.answer(
+        run_id,
+        text,
+        door=triage_answer.Door(
+            by=approval_answer.of_request(request),
+            caller=session_key,
+            source="dashboard",
+            session_key=session_key,
+            memory=lambda: _get_service(state),
+        ),
+    )
+    if done.outcome == triage_answer.REFUSED:
+        return json_error("approval_owner_only", message=done.error, status=403)
+    if done.outcome == triage_answer.UNREADABLE:
+        return json_error("triage_digest_unreadable", message=done.error, status=500)
+    if done.outcome == triage_answer.EXPIRED:
         return json_error(
             "triage_digest_expired",
             message="that digest expired — open the current one and answer there",
             status=409,
             ok=False,
             outcome="expired",
-            current_run_id=str(view.get("run_id", "") or ""),
+            current_run_id=done.current_run_id,
         )
-
-    ordinals = [str(row.get("ordinal", "")) for row in (view.get("pending") or [])]
-    parsed = parse_reply(text, max_ordinal=view.get("collected") or None)
-    if parsed.action in (ReplyAction.HELP, ReplyAction.UNPARSEABLE):
+    if done.outcome == triage_answer.HELP:
+        # A 200, not an error envelope: the grammar REFUSED and answered with a help line, which
+        # is the documented outcome ("ambiguity gets a help line, not a guess"), not a
+        # failure of the request. `help_text` rather than `error` so the census's flat shape is not
+        # minted for something that is not an error at all.
         return web.json_response(
-            {
-                "ok": False,
-                "outcome": "help",
-                "help": HELP_TEXT,
-                "help_reason": parsed.error or "",
-            }
+            {"ok": False, "outcome": "help", "help": done.help, "help_reason": done.help_reason}
         )
-    targets = ordinals if parsed.applies_to_all else [str(parsed.ordinal)]
-
-    results: list[dict[str, Any]] = []
-    for ordinal in targets:
-        row = _pending_row(view, ordinal)
-        if row is None:
-            results.append(
-                {
-                    "ordinal": ordinal,
-                    "outcome": "unknown",
-                    "detail": "not pending in this digest",
-                }
-            )
-            continue
-        if row.get("answered"):
-            results.append(
-                {
-                    "ordinal": ordinal,
-                    "outcome": "already",
-                    "detail": f"already answered {row.get('answer') or 'earlier'}",
-                }
-            )
-            continue
-        rule_key, rule_error = "", ""
-        if parsed.persists_rule:
-            rule_key, rule_error = await asyncio.to_thread(
-                _persist_rule,
-                request,
-                str(row.get("pattern_key", "") or ""),
-                parsed.approves,
-            )
-        executed, detail = False, ""
-        if parsed.approves:
-            executed, detail = await _dispatch_approved(
-                view,
-                row,
-                session_key=request.headers.get("X-Session-Key", "") or "",
-                run_id=run_id,
-            )
-        verb = _verb(parsed)
-        recorded = await asyncio.to_thread(
-            _write_reply_row,
-            run_id,
-            ordinal,
-            verb=verb,
-            outcome="executed" if executed else "declined",
-            detail=rule_error or detail,
-        )
-        results.append(
-            {
-                "ordinal": ordinal,
-                "outcome": "acted",
-                "verb": verb,
-                "executed": executed,
-                "detail": rule_error or detail,
-                "rule": rule_key,
-                "rule_error": rule_error,
-                "recorded": recorded,
-            }
-        )
-    _sel().log_api_access(
-        caller=request.headers.get("X-Session-Key", ""),
-        operation="triage_reply",
-        outcome="success",
-        source="dashboard",
-        resources=f"run:{run_id}:{_verb(parsed)}:{','.join(targets)}",
-    )
-    return web.json_response({"ok": True, "outcome": "acted", "results": results})
+    return web.json_response({"ok": True, "outcome": "acted", "results": list(done.results)})
 
 
 async def _commitment_reply(request: web.Request, body: dict) -> web.Response:

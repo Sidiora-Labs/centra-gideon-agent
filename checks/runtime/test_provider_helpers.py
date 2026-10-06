@@ -224,15 +224,14 @@ def test_spec_with_pricing_is_still_hashable():
 
 
 def test_registered_spec_and_spec_pricing_resolve_a_named_instance(monkeypatch):
-    """``spec_pricing`` answers for the provider TYPE and for a user-named instance of it, and
-    returns an empty map (never a rate) for an unknown provider."""
+    """Specs belong to exact registered types; an unregistered suffix is not an instance."""
     spec = BrandedProviderSpec(
         type="acme", pricing={"acme-large": {"in_per_mtok": 3.0}}
     )
     monkeypatch.setattr(branded_specs, "_REGISTERED_SPECS", {"acme": spec})
 
     assert branded_specs.registered_spec("acme") is spec
-    assert branded_specs.registered_spec("acme-work") is spec
+    assert branded_specs.registered_spec("acme-work") is None
     assert branded_specs.registered_spec("unknown") is None
     assert branded_specs.spec_pricing("acme") == {"acme-large": {"in_per_mtok": 3.0}}
     assert branded_specs.spec_pricing("unknown") == {}

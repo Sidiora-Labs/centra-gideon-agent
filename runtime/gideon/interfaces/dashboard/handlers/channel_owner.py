@@ -42,6 +42,7 @@ async def api_channel_owner(request: web.Request) -> web.Response:
             "provider": provider,
             "supported": supported,
             "owner_configured": bool(owner_id_for(provider)) if supported else False,
+            **(channel_trust.owner_ref(provider) if supported else {"owner_id": "", "owner_name": "", "owner_source": ""}),
             "pairing": status,
         }
     )
@@ -55,6 +56,10 @@ async def api_channel_owner_pair(request: web.Request) -> web.Response:
     provider = request.match_info["provider"]
     if not _supports_owner_pairing(provider):
         return json_error("channel_owner_pairing_unavailable", status=409)
+    from gideon.interfaces.dashboard.owner_presence import ACTION_CHANNEL_OWNER, require_owner_presence
+    refused = require_owner_presence(request, ACTION_CHANNEL_OWNER)
+    if refused is not None:
+        return refused
     code = channel_trust.create_owner_pairing_code(provider)
     response = web.json_response(
         {"ok": True, "provider": provider, "code": code,

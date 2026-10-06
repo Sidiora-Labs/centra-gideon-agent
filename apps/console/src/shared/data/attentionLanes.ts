@@ -100,6 +100,18 @@ function firstLine(text: unknown): string {
   return nl === -1 ? trimmed : trimmed.slice(0, nl)
 }
 
+/** Display the work named by platform-stored refs; this grants no authority. */
+export function inboxRaisedBy(item: Pick<AttentionInput, 'refs' | 'sender_name' | 'channel_name'>): string {
+  const ref = (key: string) => firstLine(item.refs?.[key])
+  const named = (kind: string, name: string) => name ? `${kind}: ${name}` : kind
+  if (ref('trigger_park')) return named('Trigger', ref('trigger_name') || ref('trigger_park'))
+  if (ref('loop')) return 'Loop'
+  if (ref('workflow')) return named('Workflow', ref('workflow_name'))
+  if (ref('source') === 'control_bridge') return 'Control bridge'
+  if (ref('app')) return ref('app_display_name') || ref('app')
+  return firstLine(item.sender_name) || firstLine(item.channel_name)
+}
+
 function sortLane(lane: Lane, cards: LaneCard[]): LaneCard[] {
   const ascending = OLDEST_FIRST.has(lane)
   return cards.sort((a, b) => {
@@ -159,7 +171,7 @@ export function toLanes(
       origin: 'inbox',
       id,
       title: firstLine(item.message) || firstLine(item.context_summary) || '(no message)',
-      subtitle: firstLine(item.sender_name) || firstLine(item.channel_name) || undefined,
+      subtitle: inboxRaisedBy(item) || undefined,
       at: timeOf(item),
       refs: item.refs,
     })

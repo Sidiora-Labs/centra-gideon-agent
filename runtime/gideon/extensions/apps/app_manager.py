@@ -305,6 +305,10 @@ def _run_hook(cmd: str, *, cwd: Path, timeout: int, env_name: str) -> None:
     """
     if not cmd.strip():
         return
+    from gideon.security.protected_folders import protected_delete, refusal
+    protected = protected_delete(cmd, cwd=str(cwd))
+    if protected:
+        raise AppLifecycleError(refusal(protected, where=f"an app's {env_name} hook"))
     try:
         from gideon.security.sandbox import build_child_env
         from gideon.extensions.apps import app_python
@@ -1075,6 +1079,8 @@ class _LiveTreeChanged(OSError):
 def _copy_live_tree(
     source: Path, destination: Path, *, retries: int = 3, settle_seconds: float = 0.05
 ) -> None:
+    from gideon.operations.durability import sqlite_files
+
     if retries < 1 or settle_seconds < 0:
         raise ValueError(
             "live-tree copy requires positive retries and nonnegative settling"
@@ -1090,7 +1096,8 @@ def _copy_live_tree(
                     raise _LiveTreeChanged("app data/ changed while settling")
                 try:
                     shutil.copytree(
-                        source, destination, symlinks=True, dirs_exist_ok=True
+                        source, destination, symlinks=True, dirs_exist_ok=True,
+                        copy_function=sqlite_files.copy_file, ignore=sqlite_files.sidecars_in
                     )
                 except shutil.Error as exc:
                     failures = exc.args[0] if exc.args else []
@@ -1652,6 +1659,16 @@ def enable(name: str, *, caller: str = "app_manager") -> bool:
     meta.enabled = True
     meta.updatedAt = _now_iso()
     _write_installed(name, meta)
+    try:
+        from gideon.hypermid.app_scopes import activate_app_namespace
+
+        activate_app_namespace(name)
+    except Exception as exc:
+        meta.enabled = False
+        _write_installed(name, meta)
+        _audit("enable", "error", name, caller=caller, error="Native app memory activation requires owner review")
+        logger.warning("app %s: native memory activation failed: %s", name, type(exc).__name__)
+        return False
     if manifest is not None:
         from gideon.extensions.apps import app_runtime
 
@@ -1679,6 +1696,14 @@ def disable(name: str, *, caller: str = "app_manager") -> bool:
         logger.info("app %s is native (locked) — disable refused", name)
         _audit("disable", "refused_native", name, caller=caller)
         return False
+    try:
+        from gideon.hypermid.app_scopes import revoke_app_namespace
+
+        revoke_app_namespace(name)
+    except Exception as exc:
+        _audit("disable", "error", name, caller=caller, error="Native app memory grant could not be revoked")
+        logger.warning("app %s: native memory revocation failed: %s", name, type(exc).__name__)
+        return False
     manifest = _manifest_of(name)
     from gideon.extensions.apps import app_runtime
 
@@ -1696,6 +1721,8 @@ def disable(name: str, *, caller: str = "app_manager") -> bool:
     meta.enabled = False
     meta.updatedAt = _now_iso()
     _write_installed(name, meta)
+    # Fence any issuance that raced the first revocation before disabled state was saved.
+    revoke_app_namespace(name)
     _audit("disable", "ok", name, caller=caller)
     return True
 
@@ -1927,6 +1954,14 @@ def force_uninstall(name: str, *, caller: str = "app_manager") -> bool:
     if _is_native(name):
         logger.info("app %s is native (locked) — force-uninstall refused", name)
         _audit("force_uninstall", "refused_native", name, caller=caller)
+        return False
+    try:
+        from gideon.hypermid.app_scopes import revoke_app_namespace
+
+        revoke_app_namespace(name)
+    except Exception as exc:
+        _audit("force_uninstall", "error", name, caller=caller, error="Native app memory grant could not be revoked")
+        logger.warning("app %s: native memory revocation failed: %s", name, type(exc).__name__)
         return False
     manifest = _manifest_of(name)
     from gideon.extensions.apps import app_runtime

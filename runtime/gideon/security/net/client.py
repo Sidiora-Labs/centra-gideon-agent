@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from gideon.security.net.guard import GuardDecision, evaluate
-from gideon.security.net.policy import STRICT, EgressPolicy
+from gideon.security.net.policy import STRICT, EgressPolicy, egress_policy_for
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +124,9 @@ async def fetch(
     URL (or any redirect hop) is denied. ``resolver`` is injectable for testing the
     guard without real DNS."""
     import aiohttp
+
+    if policy is STRICT:
+        policy = egress_policy_for(STRICT)
 
     if method.upper() not in ("GET", "HEAD"):
         from gideon.security.guardrails.writes import live_writes_disabled
@@ -230,3 +233,47 @@ def _absolutize(base: str, location: str) -> str:
     from urllib.parse import urljoin
 
     return urljoin(base, location)
+
+
+DOWNLOAD_AGAIN = "then start the download again"
+
+
+def _download_address(url: str) -> str:
+    from urllib.parse import urlsplit, urlunsplit
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    if parts.port:
+        host += f":{parts.port}"
+    return urlunsplit((parts.scheme, host, parts.path, "", ""))
+
+
+def check(url: str, *, then: str = DOWNLOAD_AGAIN) -> None:
+    """Guard one library request using current configured and trusted-run policy."""
+    from gideon.security.net.policy import CONNECTOR
+    from gideon.security.net.guard import refusal_for
+    policy = egress_policy_for(CONNECTOR)
+    decision = evaluate(url, policy)
+    address = _download_address(url)
+    if decision.allow:
+        _audit(address, policy, outcome="allowed")
+        return
+    _audit(address, policy, outcome="denied", reason=decision.reason)
+    refused = EgressBlocked(decision)
+    refused.args = (refusal_for(address, decision, then=then),)
+    raise refused
+
+
+def open_url(url: str, *, timeout_s: float, then: str = DOWNLOAD_AGAIN):
+    """Stream a guarded urllib download, checking every redirect before transport.
+
+    Unlike ``fetch``, urllib resolves again when connecting and does not pin the
+    evaluated IP. Environment proxy settings retain urllib's existing behavior.
+    """
+    import urllib.request
+    class AskTheGuardFirst(urllib.request.BaseHandler):
+        def default_open(self, request):
+            check(request.full_url, then=then)
+            return None
+    return urllib.request.build_opener(AskTheGuardFirst()).open(url, timeout=timeout_s)

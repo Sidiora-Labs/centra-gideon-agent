@@ -56,6 +56,19 @@ export function resolveType(it: Pick<KnowledgeItem, 'type' | 'item_type' | 'mime
 }
 export function typeMeta(k: KnowledgeType): TypeMeta { return TYPES.find((t) => t.key === k) ?? TYPES[0] }
 
+export function failedEnrichment(it: Pick<KnowledgeItem, 'processing_status' | 'file_metadata' | 'processing_error'>): { stages: string[]; reason: string } | null {
+  if (it.processing_status === 'queued' || it.processing_status === 'processing') return null
+  const raw = it.file_metadata?.node_phases
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const phases = raw as Record<string, { status?: string; reason?: string } | null>
+  const labels: [string, string][] = [['insights', 'Insights'], ['entities', 'Entity extraction'], ['intents', 'Intent matching']]
+  const failed = labels.filter(([key]) => phases[key]?.status === 'failed')
+  if (!failed.length) return null
+  const stages = failed.map(([, label]) => label)
+  const detail = failed.map(([key, label]) => `${label}: ${phases[key]?.reason || 'The step did not finish.'}`).join(' ')
+  return { stages, reason: detail }
+}
+
 const _LANG_DISPLAY: Record<string, string> = {
   typescript: 'TypeScript', javascript: 'JavaScript', python: 'Python', go: 'Go',
   rust: 'Rust', java: 'Java', c: 'C', cpp: 'C++', html: 'HTML', css: 'CSS',

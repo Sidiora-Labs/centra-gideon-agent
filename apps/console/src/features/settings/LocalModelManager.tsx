@@ -1,3 +1,4 @@
+import { OffMachineChip } from './OffMachineChip'
 import { useEffect, useRef, useState } from 'react'
 import { ResultAnnouncement } from '../../shared/ui/ListControls'
 import { Download, Trash2, Check, HardDrive, AlertTriangle, X, Lock, Wifi, CheckCircle2 } from 'lucide-react'
@@ -159,7 +160,8 @@ export function LocalModelManager({
               <span data-type="caption" className="truncate text-on-surface font-mono">{m.name}</span>
               {m.downloaded && <Check size={11} style={{ color: 'var(--color-success)' }} />}
               {gatedUndownloaded && <Lock size={10} className="shrink-0 text-on-surface-low" aria-label={tokenChecking ? 'Checking Hugging Face token readiness' : tokenMissing ? 'Requires a Hugging Face token' : 'Requires accepted model access'} />}
-              <FitChip model={m} />
+              <OffMachineChip runsHere={m.runs_here} />
+              {m.runs_here !== false && <FitChip model={m} />}
             </div>
             <div data-type="caption" className="truncate text-on-surface-low">
               {downloading

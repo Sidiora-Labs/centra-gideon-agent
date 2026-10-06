@@ -58,6 +58,46 @@ def _ffmpeg_present() -> bool:
     return bool(shutil.which("ffmpeg"))
 
 
+async def audio_seconds(path: str) -> float | None:
+    """Read actual recording length, using WAV frames or a bounded format probe."""
+    import re
+    import wave
+
+    if not os.path.isfile(path):
+        return None
+
+    def wav_seconds():
+        try:
+            with wave.open(path, "rb") as clip:
+                return clip.getnframes() / clip.getframerate() if clip.getframerate() else None
+        except (OSError, EOFError, wave.Error):
+            return None
+
+    duration = await asyncio.to_thread(wav_seconds)
+    if duration is not None:
+        return duration
+    executable = shutil.which("ffmpeg")
+    if not executable:
+        return None
+    proc = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            executable, "-hide_banner", "-nostdin", "-i", path,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        )
+        _, error = await asyncio.wait_for(proc.communicate(), timeout=15)
+        found = re.search(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)", error.decode(errors="replace"))
+        if found:
+            hours, minutes, seconds = found.groups()
+            return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    except (OSError, asyncio.TimeoutError):
+        return None
+    finally:
+        if proc is not None and proc.returncode is None:
+            await terminate_and_reap(proc)
+    return None
+
+
 @dataclass(frozen=True)
 class _TranscriptionRequest:
     provider: Any
@@ -66,19 +106,36 @@ class _TranscriptionRequest:
     audio_path: str = ""
 
     async def invoke(self, path: str, *, detailed: bool = False, bias_terms=None):
+        from gideon.security.guardrails.media_call import MediaCall, metered_media_call
+        from gideon.security.guardrails.failure import BudgetExceededError
+
         arguments = {"model": self.model, "language": self.language}
-        try:
+        seconds = await audio_seconds(path)
+        quantity = seconds / 60 if seconds is not None else None
+
+        async def run():
             if detailed:
                 result = await self.provider.transcribe_detailed(
                     path, **arguments, bias_terms=bias_terms
                 )
             else:
                 result = await self.provider.transcribe(path, **arguments)
+            return _require_transcript(result, detailed=detailed)
+
+        def billed(result):
+            duration = float(getattr(result, "duration", 0) or 0)
+            # For flat transcripts the input's measured frames/header are the actual audio sent.
+            return duration / 60 if duration > 0 else quantity
+
+        try:
+            return await metered_media_call(
+                MediaCall(self.provider.name, self.model, "minute", quantity), run, billed=billed)
+        except BudgetExceededError as exc:
+            raise SttError("budget_exceeded", detail=exc.sentence()) from exc
         except SttError as exc:
-            raise SttError(exc.code) from None
+            raise SttError(exc.code, detail=exc.detail) from None
         except Exception:
             raise SttError("provider_failed") from None
-        return _require_transcript(result, detailed=detailed)
 
     def needs_segments(self) -> bool:
         try:
@@ -176,7 +233,7 @@ async def _transcription(audio_path: str, *, detailed: bool, bias_terms=None):
             result = _redacted_text(result)
         return result
     except SttError as exc:
-        raise SttError(exc.code) from None
+        raise SttError(exc.code, detail=exc.detail) from None
     except Exception:
         raise SttError("provider_failed") from None
 

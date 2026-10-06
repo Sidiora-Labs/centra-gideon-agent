@@ -150,7 +150,7 @@ class WebSocketState:
                 self._remove_ws(ws)
 
     def broadcast_ws(
-        self, msg_type: str, data: object, *, extra: dict[str, Any] | None = None
+        self, msg_type: str, data: object, *, extra: dict[str, Any] | None = None, owner_only: bool = False
     ) -> None:
         """Send a typed message to all WS clients (not SSE). THE one WS producer.
 
@@ -173,13 +173,15 @@ class WebSocketState:
                 {k: v for k, v in extra.items() if k not in ("type", "data")}
             )
         msg = json.dumps(envelope)
-        if not self._ws_app:
+        if not self._ws_app and not owner_only:
             self._send_ws_all(msg)
             return
         dead: list[web.WebSocketResponse] = []
         for ws in list(self._ws_clients):
             if ws.closed:
                 dead.append(ws)
+                continue
+            if owner_only and ws not in getattr(self, "_ws_owner", set()):
                 continue
             app = self._ws_app.get(ws, "")
             if app and not self._app_may_see_event(app, msg_type):
@@ -226,7 +228,7 @@ class WebSocketState:
         session = sessions.get(key) if isinstance(sessions, dict) else None
         return bool(session is not None and getattr(session, "created_by_app", "") == app)
 
-    def register_ws(self, ws: web.WebSocketResponse, *, app: str = "") -> None:
+    def register_ws(self, ws: web.WebSocketResponse, *, app: str = "", owner: bool = False) -> None:
         """Register a new WebSocket client.
 
         ``app`` scopes the connection to an installed app (sandbox P1): its events
@@ -238,6 +240,8 @@ class WebSocketState:
             except RuntimeError:
                 pass
         self._ws_clients.append(ws)
+        if owner:
+            self._ws_owner.add(ws)
         if app:
             self._ws_app[ws] = app
 
@@ -252,6 +256,7 @@ class WebSocketState:
         except ValueError:
             pass
         self._ws_app.pop(ws, None)
+        getattr(self, "_ws_owner", set()).discard(ws)
         self._ws_log_subscribers.discard(ws)
         self._ws_subagent_subscribers.discard(ws)
 

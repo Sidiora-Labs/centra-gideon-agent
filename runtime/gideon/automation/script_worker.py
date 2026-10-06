@@ -13,6 +13,13 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.URLError("gateway callback redirects are forbidden")
+
+
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+
 RESULT_PREFIX = "__GIDEON_SCRIPT_RESULT__"
 
 
@@ -42,7 +49,11 @@ class Report(ScriptNotice):
 
 class GatewayChannel:
     def __init__(self, configuration: dict) -> None:
-        self.address = "http://127.0.0.1:%d" % configuration.get("port", 0)
+        port = configuration.get("port", 0)
+        if isinstance(port, bool) or not isinstance(port, int) or not 0 < port <= 65535:
+            raise ValueError("gateway callback requires a valid loopback port")
+        self.address = "http://127.0.0.1:%d" % port
+        self.secret_unavailable = configuration.get("secret_unavailable", "")
         self.headers = {
             "Content-Type": "application/json",
             "X-Internal-Secret": configuration.get("secret", ""),
@@ -50,6 +61,10 @@ class GatewayChannel:
         }
 
     def send(self, path: str, body: dict):
+        if self.secret_unavailable:
+            return {"ok": False, "status": 0, "error": {
+                "code": "internal_secret_unavailable", "message": self.secret_unavailable,
+            }}
         request = urllib.request.Request(
             url=self.address + path,
             headers=self.headers,
@@ -57,7 +72,7 @@ class GatewayChannel:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as reply:
+            with _LOCAL_OPENER.open(request, timeout=30) as reply:
                 return json.loads(reply.read().decode("utf-8"))
         except urllib.error.HTTPError as failure:
             with failure:

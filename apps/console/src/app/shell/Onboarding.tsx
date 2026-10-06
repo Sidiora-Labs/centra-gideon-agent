@@ -19,6 +19,7 @@ import { reportActionFailure } from './reportingWrite'
 import { api, type OnboardingStatePatch } from '../../shared/data/api'
 import { StepRow, type StepState } from '../../features/onboarding/StepStack'
 import { EssentialsStep } from '../../features/onboarding/EssentialsStep'
+import { ModelProviderRecap } from '../../features/onboarding/LocalModelOnRamp'
 import { ImportStep } from '../../features/onboarding/ImportStep'
 import { TryOneStep } from '../../features/onboarding/TryOneStep'
 import { setOnboardingExit } from '../../features/onboarding/exitTo'
@@ -205,6 +206,7 @@ function ReadyScreen({ readinessUnknown, name, model, tried, showEverything, set
       <span className="grid size-6 place-items-center rounded-lg" style={{ background: ok ? 'var(--color-success)' : 'var(--color-surface-high)', color: ok ? 'var(--color-on-primary)' : 'var(--color-on-surface-low)' }}><Check size={13} /></span>
       <span className="text-on-surface-var">{text}</span>
     </div>)}</div>
+    <ModelProviderRecap />
     <p data-type="label-s" className="text-on-surface-low">Four things to know</p>
     <div className="grid gap-m">{pointers.map(({ icon: Icon, title, body, control }) => <section key={title} className="flex items-start gap-m rounded-xl border border-outline-variant/40 bg-surface-high p-m">
       <Icon size={19} className="mt-1 shrink-0 text-primary" aria-hidden="true" />

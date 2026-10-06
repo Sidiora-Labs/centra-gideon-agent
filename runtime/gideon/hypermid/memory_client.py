@@ -404,6 +404,8 @@ class MemoryClient:
         request: AccessRequest,
         *,
         cursor: Cursor | None = None,
+        after_id: Id | None = None,
+        ordered_by_id: bool = False,
         category: str | None = None,
         status: RecordStatus | None = None,
         limit: int = 100,
@@ -415,6 +417,9 @@ class MemoryClient:
             "request": request.to_wire(),
             "limit": limit,
         }
+        if after_id is not None or ordered_by_id:
+            payload["ordered_by_id"] = True
+            payload["after_id"] = str(after_id) if after_id is not None else None
         if category is not None:
             payload["category"] = category
         if status is not None:
@@ -463,7 +468,7 @@ class MemoryClient:
                 "memory.search",
                 {
                     "request": access.to_wire(),
-                    "search": request.to_wire(self.scope),
+                    "search": request.to_wire(access.target_scope),
                 },
                 trace=request.trace,
             ),
@@ -761,10 +766,11 @@ class MemoryClient:
         registration: EmbeddingRegistration,
         *,
         now_ms: int,
+        rebind: bool = False,
     ) -> ServiceResult:
         self._mutation(request, MemoryOperation.EMBED)
         result = await self._call(
-            "memory.embedding.register",
+            "memory.embedding.rebind" if rebind else "memory.embedding.register",
             {
                 "request": request.to_wire(),
                 "registration": {
@@ -780,6 +786,24 @@ class MemoryClient:
                 },
                 "now_ms": now_ms,
             },
+            trace=request.trace,
+            durable=True,
+        )
+        return ServiceResult(request.trace, result)
+
+    async def embedding_publish(
+        self,
+        request: MutationRequest,
+        *,
+        guard: Mapping[str, JsonValue],
+        response: Mapping[str, JsonValue],
+        now_ms: int,
+    ) -> ServiceResult:
+        self._mutation(request, MemoryOperation.EMBED)
+        result = await self._call(
+            "memory.embedding.publish",
+            {"request": request.to_wire(), "guard": dict(guard),
+             "response": dict(response), "now_ms": now_ms},
             trace=request.trace,
             durable=True,
         )

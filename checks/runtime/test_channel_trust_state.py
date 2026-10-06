@@ -162,14 +162,16 @@ def test_pairing_expiry_boundary_and_wrong_attempt_preserve_ticket():
     )
 
 
-def test_projection_omits_code_digest_and_contact_history(trust_home):
+def test_projection_omits_secrets_and_reports_unpaired_message_counts(trust_home):
     code = trust.create_pairing_code("one")
     trust.note_unknown_sender(None, "one", "unknown-person")
     trust.allow_sender("one", "approved", name="Alice")
     projected = trust.provider_trust("one")
     blob = json.dumps(projected)
     assert trust._hash_code(code) not in blob and "code_hash" not in blob
-    assert "unknown-person" not in blob and "rate" not in projected
+    assert "rate" not in projected
+    assert projected["seen_senders"][0]["sender_id"] == "unknown-person"
+    assert projected["seen_senders"][0]["count"] == 1
     assert [row["sender_id"] for row in projected["allowed_senders"]] == ["approved"]
 
 

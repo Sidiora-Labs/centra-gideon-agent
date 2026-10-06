@@ -98,6 +98,27 @@ def _store(request: web.Request):
     return request.app["state"].knowledge_store
 
 
+def owner_note_store(request: web.Request):
+    """Active library authority for an explicit owner read, intersected with work privacy.
+
+    The library is the runtime's bound KnowledgeStore, not a native memory RPC.
+    Inbound correspondents/app actors do not inherit this dashboard owner grant.
+    """
+    from gideon.interfaces.dashboard.handlers._shared import _blocks_reads_session
+    from gideon.security.approval_answer import OWNER, work_principal_of_request
+    from gideon.security.session_credentials import work_of_request
+
+    proof = work_of_request(request)
+    actor = work_principal_of_request(request)
+    if (actor.kind != OWNER
+            or (request.headers.get("X-Session-Proof") and proof is None)
+            or (proof is not None and (proof.initiator.kind != OWNER
+                                      or proof.memory_mode == "temporary"))
+            or _blocks_reads_session(request.app["state"], request)):
+        raise web.HTTPForbidden(text="This request cannot read owner notes.")
+    return _store(request)
+
+
 def _create_embedder(app):
     """Create embedder from Gideon config. Returns None if disabled/unavailable."""
     from gideon.core.config.loader import config_path
@@ -391,99 +412,6 @@ async def regenerate_intelligence(request: web.Request) -> web.Response:
     _sel_log("knowledge.regenerate_intelligence", scope=scope, queued=n)
     return web.json_response({"queued": n, "scope": scope})
 
-
-def _hash_file(path) -> str:
-    """SHA-256 of a file's bytes (streamed), or '' on error. Used to dedup uploads."""
-    import hashlib
-
-    try:
-        h = hashlib.sha256()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(1 << 16), b""):
-                h.update(chunk)
-        return h.hexdigest()
-    except OSError:
-        return ""
-
-
-def _store_file_item(
-    store, tmp_path: str, filename: str, mime: str | None = None
-) -> tuple[dict | None, bool]:
-    """Persist an uploaded file under the knowledge files dir as ONE logical-doc
-    typed item (image/audio/video/pdf/document/sheet/slides) pointing at it (+ a
-    thumbnail for images), queued for node-graph ingestion. One item = one file —
-    document text extraction + chunking happen inside the graph/embedder, never as
-    separate item rows. ``mime`` (the upload's content-type) disambiguates ambiguous
-    extensions like .webm (a browser audio recording is audio/webm, not video)."""
-    from gideon.cognition.knowledge import knowledge_files_dir
-    from gideon.cognition.knowledge.media import code_language
-
-    item_type = classify(filename, mime) or "image"
-
-    lang = code_language(filename)
-    if item_type == "gist" and lang:
-        try:
-            code = Path(tmp_path).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            code = ""
-        content_hash = _hash_file(tmp_path)
-        Path(tmp_path).unlink(missing_ok=True)
-        if content_hash:
-            existing = store.find_active_by_file_hash(content_hash)
-            if existing:
-                return existing, False
-        new_id = store.create_typed_item(
-            item_type="gist",
-            title=filename,
-            content=code,
-            extra={
-                "gist_language": lang,
-                "file_metadata": {"content_hash": content_hash} if content_hash else {},
-                "processing_status": "queued",
-            },
-        )
-        return store.get_item(new_id), True
-    guessed = guess_mime(filename)
-    mime_type = (
-        mime if (mime and mime.split("/", 1)[0].lower() == item_type) else guessed
-    )
-    item_id = str(uuid4())
-    files_dir = Path(knowledge_files_dir())
-    ext = Path(filename).suffix.lower()
-    dest = files_dir / f"{item_id}{ext}"
-    shutil.move(tmp_path, dest)
-    size = dest.stat().st_size
-
-    content_hash = _hash_file(dest)
-    if content_hash:
-        existing = store.find_active_by_file_hash(content_hash)
-        if existing:
-            dest.unlink(missing_ok=True)
-            return existing, False
-
-    thumb_path = ""
-    if item_type == "image":
-        thumb = files_dir / f"{item_id}.thumb.webp"
-        if make_image_thumbnail(str(dest), str(thumb)):
-            thumb_path = str(thumb)
-
-    new_id = store.create_typed_item(
-        item_type=item_type,
-        title=filename,
-        content="",
-        extra={
-            "file_path": str(dest),
-            "mime_type": mime_type,
-            "file_size": size,
-            "thumbnail_path": thumb_path,
-            "file_metadata": {
-                **({"content_hash": content_hash} if content_hash else {}),
-                "original_filename": filename,
-            },
-            "processing_status": "queued",
-        },
-    )
-    return store.get_item(new_id), True
 
 
 def _serve_item_path(
@@ -1414,6 +1342,36 @@ def _build_graph_payload(store, *, min_weight: float, top_k: int) -> dict:
     )
 
 
+_ENTITIES_PHASE_SQL = (
+    "CASE WHEN json_valid(i.file_metadata) "
+    "THEN json_extract(i.file_metadata, '$.node_phases.entities.status') END"
+)
+
+
+def _entity_extraction_tally(store) -> dict[str, int] | None:
+    """Count recorded outcomes in the visible library; unknown records stay unknown."""
+    where, parameters = _listable_where()
+    in_flight = "COALESCE(i.processing_status, '') IN ('queued', 'processing')"
+    values = {"failed": "failed", "ran": "done", "skipped": "skipped", "not_applicable": "not_applicable"}
+    columns = [
+        f"COALESCE(SUM(CASE WHEN {in_flight} THEN 1 ELSE 0 END), 0) AS running"
+    ]
+    columns.extend(
+        f"COALESCE(SUM(CASE WHEN {in_flight} THEN 0 WHEN {_ENTITIES_PHASE_SQL} = '{status}' THEN 1 ELSE 0 END), 0) AS {key}"
+        for key, status in values.items()
+    )
+    try:
+        row = store.db.execute(
+            f"SELECT {', '.join(columns)}, COUNT(*) AS total FROM items i WHERE {where}", parameters
+        ).fetchone()
+        counts = {key: int(row[key]) for key in ("running", *values, "total")}
+        counts["not_run"] = max(0, counts["total"] - sum(counts[key] for key in ("running", *values)))
+        return counts
+    except Exception:
+        logger.warning("Entity processing outcomes could not be counted", exc_info=True)
+        return None
+
+
 async def get_full_graph(request: web.Request) -> web.Response:
     """GET /api/knowledge/graph -- the whole entity graph, positioned and edge-thinned.
 
@@ -1444,8 +1402,9 @@ async def get_full_graph(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid min_weight or top_k"}, status=400)
     if top_k < 1:
         return web.json_response({"error": "invalid min_weight or top_k"}, status=400)
+    extraction = _entity_extraction_tally(store)
     if not store.graph.nodes:
-        return web.json_response(_graph_payload_shell(min_weight, top_k, stale=False))
+        return web.json_response(_graph_payload_shell(min_weight, top_k, stale=False, extraction=extraction))
 
     key = (str(store.db_path), min_weight, top_k)
     signature = _graph_signature(store)
@@ -1456,11 +1415,11 @@ async def get_full_graph(request: web.Request) -> web.Response:
         or now - entry["computed_at"] < _GRAPH_MEMO_DEBOUNCE_SECS
     ):
         return web.json_response(
-            {**entry["payload"], "stale": entry["signature"] != signature}
+            {**entry["payload"], "stale": entry["signature"] != signature, "extraction": extraction}
         )
     payload = _build_graph_payload(store, min_weight=min_weight, top_k=top_k)
     _graph_memo[key] = {"signature": signature, "payload": payload, "computed_at": now}
-    return web.json_response({**payload, "stale": False})
+    return web.json_response({**payload, "stale": False, "extraction": extraction})
 
 
 def _stale_embedding_count(store, embedder) -> int:
@@ -1504,83 +1463,48 @@ async def get_stats(request: web.Request) -> web.Response:
 
 
 async def ingest_file(request: web.Request) -> web.Response:
-    """POST /api/knowledge/ingest -- multipart file upload. Each file becomes ONE
-    logical-document typed item run through its node-graph."""
+    """POST /api/knowledge/ingest — approve one upload before native storage."""
+    from gideon.workspace.uploads.content_intake import approve_stream, IntakeRefused
+    from gideon.cognition.knowledge.file_items import store_approved_file
+
     try:
         reader = await request.multipart()
         field = await reader.next()
     except Exception:
-        return web.json_response(
-            {"error": "expected a multipart 'file' upload"}, status=400
-        )
-    if not field or not hasattr(field, "read_chunk") or field.name != "file":  # type: ignore[union-attr]  # noqa: E501
+        return web.json_response({"error": "expected a multipart 'file' upload"}, status=400)
+    if not field or not hasattr(field, "read_chunk") or field.name != "file":
         return web.json_response({"error": "missing 'file' field"}, status=400)
+    filename = Path(getattr(field, "filename", None) or "upload").name
+    mime = (getattr(field, "headers", {}) or {}).get("Content-Type") or None
+    if classify(filename, mime) is None:
+        return web.json_response({"error": "unsupported file type"}, status=415)
 
-    filename = getattr(field, "filename", None) or "upload"
-    upload_mime = (getattr(field, "headers", {}) or {}).get("Content-Type") or None
-    suffix = Path(filename).suffix
-    from gideon.workspace.uploads import check_upload
+    async def chunks():
+        while chunk := await field.read_chunk(65536):
+            yield chunk
 
-    _limit = check_upload(filename, upload_mime).limit
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, prefix="kn_")
+    snapshot = None
     try:
-        total_size = 0
-        while True:
-            chunk = await field.read_chunk()  # type: ignore[union-attr]
-            if not chunk:
-                break
-            total_size += len(chunk)
-            if total_size > _limit:
-                tmp.close()
-                Path(tmp.name).unlink(missing_ok=True)
-                return web.json_response(
-                    {
-                        "error": check_upload(
-                            filename, upload_mime, size=total_size
-                        ).reason
-                    },
-                    status=413,
-                )
-            tmp.write(chunk)
-        tmp.close()
-
-        if total_size == 0:
-            Path(tmp.name).unlink(missing_ok=True)
-            return web.json_response({"error": "uploaded file is empty"}, status=400)
-
-        store = _store(request)
-
-        if classify(filename, upload_mime) is None:
-            Path(tmp.name).unlink(missing_ok=True)
-            return web.json_response(
-                {"error": f"unsupported file type: {filename}"}, status=415
-            )
-        item, is_new = _store_file_item(store, tmp.name, filename, mime=upload_mime)
-        Path(tmp.name).unlink(missing_ok=True)
+        snapshot = await approve_stream(chunks(), filename, mime, surface='knowledge')
+        item, is_new = await store_approved_file(_store(request), snapshot)
         if item is None:
             return web.json_response({"error": "failed to store item"}, status=500)
         if is_new:
             try:
-                request.app["state"].knowledge_ingest_queue().enqueue(item["id"])
+                request.app["state"].knowledge_ingest_queue().enqueue(item['id'])
             except Exception:
-                logger.debug("file enqueue failed for %s", item["id"], exc_info=True)
-        _sel_log("ingest", filename=filename, item_id=item["id"], deduped=not is_new)
-        return web.json_response(
-            {
-                "item_id": item["id"],
-                "type": item["type"],
-                "status": (
-                    "processing"
-                    if is_new
-                    else (item.get("processing_status") or "done")
-                ),
-                "deduped": not is_new,
-            }
-        )
+                logger.debug("file enqueue failed", exc_info=True)
+        _sel_log('ingest', filename=filename, item_id=item['id'], deduped=not is_new)
+        return web.json_response({'item_id': item['id'], 'type': item['type'],
+            'status': 'processing' if is_new else item.get('processing_status') or 'done', 'deduped': not is_new})
+    except IntakeRefused as refused:
+        return refused.response()
     except Exception:
-        logger.exception("Ingestion failed for %s", filename)
-        Path(tmp.name).unlink(missing_ok=True)
-        return web.json_response({"error": "internal server error"}, status=500)
+        logger.exception('Knowledge file ingestion failed')
+        return web.json_response({'error': 'internal server error'}, status=500)
+    finally:
+        if snapshot is not None:
+            snapshot.close()
 
 
 async def get_embedding_status(request: web.Request) -> web.Response:
@@ -2143,9 +2067,12 @@ async def get_item_graph(request: web.Request) -> web.Response:
         logger.debug("graph shape lookup failed for %s", item_type, exc_info=True)
         return web.json_response({"item_type": item_type, "nodes": [], "edges": []})
 
+    from gideon.cognition.knowledge.pipeline.outcomes import step_name
+
     nodes = [
         {
             "node_type": ns.node_type,
+            "label": step_name(ns.node_type),
             "backend": ns.backend,
             "model_backed": ns.uses_use_case is not None,
         }
@@ -2171,6 +2098,7 @@ async def get_item_graph(request: web.Request) -> web.Response:
         nodes.append(
             {
                 "node_type": stage,
+                "label": step_name(stage),
                 "backend": "",
                 "model_backed": stage in ("insights", "entities", "intents"),
                 "terminal": True,
@@ -2179,7 +2107,7 @@ async def get_item_graph(request: web.Request) -> web.Response:
         for p in prev_leaves:
             edges.append({"from": p, "to": stage})
         prev_leaves = [stage]
-    node_phases = (item.get("file_metadata") or {}).get("node_phases") or {}
+    node_phases = await _with_readiness((item.get("file_metadata") or {}).get("node_phases") or {})
     return web.json_response(
         {
             "item_type": item_type,
@@ -2189,6 +2117,28 @@ async def get_item_graph(request: web.Request) -> web.Response:
             "node_phases": node_phases,
         }
     )
+
+
+async def _with_readiness(node_phases: dict) -> dict:
+    """Current capability readiness is transient; persisted outcomes stay unchanged."""
+    from gideon.cognition.knowledge.pipeline.outcomes import SKIPPED, capability_ready, legacy
+
+    if not isinstance(node_phases, dict):
+        return {}
+    phases = {step: legacy(value) if isinstance(value, str) else value for step, value in node_phases.items()}
+
+    def needs(outcome) -> list[str]:
+        if not isinstance(outcome, dict) or outcome.get("status") != SKIPPED:
+            return []
+        requirements = outcome.get("needs")
+        return [value for value in requirements if isinstance(value, str)] if isinstance(requirements, list) else []
+
+    requested = {need for outcome in phases.values() for need in needs(outcome)}
+    ready = {need: await capability_ready(need) for need in sorted(requested)}
+    return {
+        step: {**outcome, "ready": any(ready[need] for need in needs(outcome))} if needs(outcome) else outcome
+        for step, outcome in phases.items()
+    }
 
 
 async def stream_item_ingest(request: web.Request) -> web.StreamResponse:

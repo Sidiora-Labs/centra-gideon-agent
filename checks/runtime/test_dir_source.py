@@ -355,14 +355,14 @@ async def test_one_unreadable_file_does_not_abort_the_cycle(
     for name in ("good1.md", "bad.md", "good2.md"):
         _write(watched / name, name, mtime=clock.t)
 
-    real_open = open
+    real_open = os.open
 
     def _boom(path, *a, **kw):
         if str(path).endswith("bad.md"):
             raise PermissionError("nope")
         return real_open(path, *a, **kw)
 
-    monkeypatch.setattr("builtins.open", _boom)
+    monkeypatch.setattr(os, "open", _boom)
     clock.advance(11)
     assert await _poll(engine, store, sid) == 2
     assert {r["guid"] for r in _items(store, sid)} == {"good1.md", "good2.md"}

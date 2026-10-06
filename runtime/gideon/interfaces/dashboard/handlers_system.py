@@ -73,8 +73,12 @@ async def api_healthz(request: web.Request) -> web.Response:
 
     Used by container/compose healthchecks. No secret values returned.
     """
+    from gideon.engine.gateway_base import home_fingerprint, process_facts
+    facts = process_facts(os.getpid())
     return web.json_response(
         {
+            "home_fingerprint": home_fingerprint(),
+            "process_identity": facts.identity if facts else "",
             "status": "ok",
             "version": gideon.__version__,
             "gateway_id": request.app["gateway_id"],
@@ -347,7 +351,7 @@ def _collect_system_metrics() -> dict[str, object]:
         total_cpu = sum(float(x) for x in ps_cpu.strip().splitlines()[1:] if x.strip())
         data["cpu_pct"] = min(100.0, round(total_cpu / cores, 1))
     except Exception:
-        data["cpu_pct"] = 0
+        pass
 
     try:
         import socket
@@ -519,6 +523,21 @@ def _collect_system_metrics() -> dict[str, object]:
 _metrics_cache: dict[str, object] = {}
 _metrics_cache_ts: float = 0.0
 _METRICS_CACHE_TTL = 2.0
+_metrics_inflight: asyncio.Task[dict[str, object]] | None = None
+
+
+async def _refresh_metrics() -> dict[str, object]:
+    global _metrics_cache, _metrics_cache_ts, _metrics_inflight
+    try:
+        data = await asyncio.get_running_loop().run_in_executor(
+            None, _collect_system_metrics
+        )
+        _metrics_cache = data
+        _metrics_cache_ts = time.monotonic()
+        return data
+    finally:
+        if _metrics_inflight is asyncio.current_task():
+            _metrics_inflight = None
 
 
 async def api_system(request: web.Request) -> web.Response:
@@ -527,14 +546,14 @@ async def api_system(request: web.Request) -> web.Response:
     Caches results for 2 seconds to avoid spawning subprocesses on every
     poll when multiple dashboard tabs are open.
     """
-    global _metrics_cache, _metrics_cache_ts
-    now = time.monotonic()
-    if now - _metrics_cache_ts < _METRICS_CACHE_TTL and _metrics_cache:
+    global _metrics_inflight
+    if _metrics_cache and time.monotonic() - _metrics_cache_ts < _METRICS_CACHE_TTL:
         return web.json_response(_metrics_cache)
-    loop = asyncio.get_running_loop()
-    data = await loop.run_in_executor(None, _collect_system_metrics)
-    _metrics_cache = data
-    _metrics_cache_ts = now
+    task = _metrics_inflight
+    if task is None or task.done() or task.get_loop() is not asyncio.get_running_loop():
+        task = asyncio.create_task(_refresh_metrics())
+        _metrics_inflight = task
+    data = await asyncio.shield(task)
     return web.json_response(data)
 
 

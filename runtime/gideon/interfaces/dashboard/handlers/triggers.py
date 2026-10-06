@@ -87,6 +87,14 @@ def _event_editable_projection(t) -> dict[str, Any]:
     }
 
 
+
+def _grant_fields(trigger: Any) -> dict[str, Any]:
+    from gideon.automation.triggers import grants
+    provider = grants.required_provider(trigger)
+    granted = grants.is_granted(trigger)
+    question = grants.question(trigger)
+    return {"action_revision": grants.action_revision(trigger), "grant_required": bool(provider), "grant_satisfied": granted, "grant_question": vars(question) if question else None}
+
 def _serialize_event(t) -> dict[str, Any]:
     from gideon.stale_write import revision_of
 
@@ -98,11 +106,14 @@ def _serialize_event(t) -> dict[str, Any]:
             action_revision,
             is_granted,
             required_provider,
+            question,
         )
 
         provider = required_provider(canonical)
         granted = is_granted(canonical)
+        consent = question(canonical)
         grant_fields = {
+            "grant_question": vars(consent) if consent else None,
             "action_revision": action_revision(canonical),
             "grant_required": bool(provider),
             "grant_satisfied": granted,
@@ -161,7 +172,8 @@ def _event_health(t) -> str:
 
 
 async def api_trigger_budget(request: web.Request) -> web.Response:
-    from datetime import datetime, timedelta
+    from datetime import datetime, timezone
+    from gideon.core import spend_day
 
     from gideon.security.guardrails.budgets import budget_from_config, get_meter
 
@@ -169,8 +181,10 @@ async def api_trigger_budget(request: web.Request) -> web.Response:
     limit = budget_from_config()
     totals = meter.day_totals()
     verdict, reason = meter.check_day(limit)
-    now = datetime.now().astimezone()
-    reset_at = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    token_verdict, _ = meter.check_day_before_work(limit)
+    held_tokens, held_dollars = meter.held()
+    zone = spend_day.zone()
+    reset_at = datetime.fromtimestamp(spend_day.next_day_starts(zone), timezone.utc)
     return web.json_response({
         "tokens": totals.tokens,
         "dollars": totals.dollars,
@@ -178,8 +192,14 @@ async def api_trigger_budget(request: web.Request) -> web.Response:
         "max_dollars": limit.max_dollars,
         "status": verdict.value,
         "reason": reason,
-        "paused": verdict.value == "exceeded",
+        "paused": token_verdict.value == "exceeded",
+        "paid_calls_paused": limit.max_dollars > 0 and totals.dollars >= limit.max_dollars,
+        "unpriced": totals.unpriced,
+        "held_tokens": held_tokens,
+        "held_dollars": held_dollars,
         "resumes_at": reset_at.isoformat(),
+        "day": spend_day.today(zone),
+        "timezone": str(zone),
     })
 
 
@@ -470,11 +490,13 @@ def _serialize_store(
         action_revision,
         is_granted,
         required_provider,
+        question,
     )
 
     required_provider_name = required_provider(trigger)
     revision = action_revision(trigger)
     granted = is_granted(trigger)
+    consent = question(trigger)
     from gideon.stale_write import revision_of
 
     return {
@@ -507,6 +529,7 @@ def _serialize_store(
         "action_revision": revision,
         "grant_required": bool(required_provider_name),
         "grant_satisfied": granted,
+        "grant_question": vars(consent) if consent else None,
         "review_required": bool(required_provider_name and not granted),
         "review_question": (
             f"Allow {required_provider_name} for the displayed action and reach?"
@@ -611,6 +634,7 @@ def _schedule_row_for(
     projected["failure_delivery"] = trigger.failure_delivery
     projected["failure_policy"] = redact_values_for_display(dict(trigger.failure_policy or {}))
     projected.update(_attribution(trigger, owner=owner))
+    projected.update(_grant_fields(trigger))
     from gideon.stale_write import revision_of
 
     projected["document_revision"] = revision_of(_schedule_editable_projection(projected))
@@ -675,8 +699,10 @@ def _serialize_lifecycle(hook, used_by: list[str]) -> dict[str, Any]:
     from gideon.stale_write import revision_of
 
     editable = _lifecycle_editable_projection(hook)
+    from gideon.automation.triggers.grants import hook_trigger
 
     return {
+        **_grant_fields(hook_trigger(hook)),
         "kind": _LIFECYCLE,
         "id": f"{_LIFECYCLE}:{hook.id}",
         "raw_id": hook.id,
@@ -871,7 +897,8 @@ async def api_triggers(request: web.Request) -> web.Response:
 
     tz_name, _ = get_local_tz()
     return web.json_response(
-        {"triggers": triggers, "server_tz": tz_name, "owner": owner_username()}
+        {"triggers": triggers, "server_tz": tz_name, "owner": owner_username(),
+         "unreadable": _trigger_store().unreadable_status()}
     )
 
 
@@ -1223,6 +1250,18 @@ async def api_trigger_detail(request: web.Request) -> web.Response:
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
 
+    from gideon.core.http_request import RequestValidationError, bool_field
+
+    try:
+        for field in ("enabled", "silent", "strict_schedule", "dedupe_hash"):
+            if field in body:
+                body[field] = bool_field(body, field, default=False)
+    except RequestValidationError as exc:
+        return json_error(exc.code, message=exc.message, status=400)
+    from gideon.extensions.apps.app_crons import posture_refusal
+    problem = posture_refusal(raw, body.get("action"))
+    if problem:
+        return json_error("invalid_request", message=problem, status=400)
     if kind == _EVENT:
         return _update_event(raw, body, request)
     if kind == _LIFECYCLE:
@@ -1284,9 +1323,13 @@ def _update_event(raw: str, body: dict, request: web.Request) -> web.Response:
             )
     except MaskConflict:
         return web.json_response({"error": MASK_CONFLICT}, status=409)
-    refusal = _provider_refusal(
-        {"provider": action.get("provider") or trigger.action_provider}
-    )
+    from gideon.automation.triggers.action_edit import edited_action
+
+    try:
+        saving = edited_action({"provider": trigger.action_provider, "config": trigger.action_config}, action)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    refusal = _provider_refusal(saving)
     if refusal is not None:
         return refusal
 
@@ -1337,11 +1380,8 @@ def _update_event(raw: str, body: dict, request: web.Request) -> web.Response:
                 {"error": "debounce_secs must be a number"}, status=400
             )
     if isinstance(body.get("action"), dict):
-        action = body["action"]
-        if action.get("provider"):
-            trigger.action_provider = str(action["provider"])
-        if "config" in action:
-            trigger.action_config = dict(action["config"] or {})
+        trigger.action_provider = saving["provider"]
+        trigger.action_config = saving["config"]
 
     store.upsert(trigger)
     persisted = store._store.get(trigger.id)
@@ -1366,6 +1406,8 @@ async def _update_lifecycle(
         validate_tool_args,
     )
 
+    if "action" in body and (not isinstance(body["action"], dict) or (body["action"].get("config") is not None and not isinstance(body["action"].get("config"), dict))):
+        return web.json_response({"error": "action must contain an object config"}, status=400)
     patch: dict[str, Any] = {}
     for k in ("name", "event", "matcher", "timeout", "enabled"):
         if k in body:
@@ -1399,6 +1441,18 @@ async def _update_lifecycle(
             )
     except MaskConflict:
         return web.json_response({"error": MASK_CONFLICT}, status=409)
+    if "action" in body and isinstance(body["action"], dict):
+        from gideon.automation.triggers.action_edit import edited_action
+
+        edit = dict(body["action"])
+        if "provider_config" in patch and edit.get("config") is not None:
+            edit["config"] = patch["provider_config"]
+        try:
+            saving = edited_action({"provider": current.provider, "config": current.provider_config}, edit)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        patch["provider"] = saving["provider"]
+        patch["provider_config"] = saving["config"]
     refusal = _provider_refusal({"provider": patch.get("provider", current.provider)})
     if refusal is not None:
         return refusal
@@ -1449,7 +1503,9 @@ async def _update_schedule(
         return json_error(
             "invalid_request", message="'dedupe_hash' must be a boolean", status=400
         )
-    if "action" in body and isinstance(body["action"], dict):
+    if "action" in body:
+        if not isinstance(body["action"], dict):
+            return web.json_response({"error": "action must be an object"}, status=400)
         kwargs["action"] = body["action"]
     if "channel" in kwargs:
         ch = (kwargs["channel"] or "").strip() or None
@@ -1499,6 +1555,10 @@ async def _update_schedule(
                 workflow = row.trigger.workflow if isinstance(row.trigger.workflow, dict) else {}
                 stored_action = workflow.get("inline", workflow)
                 kwargs["action"] = keep_masked_values(kwargs["action"], stored_action)
+                from gideon.automation.triggers.action_edit import edited_action
+
+                action_patch = kwargs["action"]
+                kwargs["action"] = edited_action(stored_action, action_patch)
             if "failure_policy" in body:
                 body = {
                     **body,
@@ -1509,10 +1569,20 @@ async def _update_schedule(
                 kwargs["failure_policy"] = body["failure_policy"]
         except MaskConflict:
             return web.json_response({"error": MASK_CONFLICT}, status=409)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
         if "action" in kwargs and isinstance(kwargs["action"], dict):
             action_problem = await _action_config_problem(kwargs["action"])
             if action_problem is not None:
                 return action_problem
+            latest = store.get(raw)
+            if latest is None:
+                return web.json_response({"error": "not found"}, status=404)
+            current = (_store_outcome_projection(latest.trigger) if store_revision else _schedule_editable_projection(_schedule_row_for(state, latest.trigger)))
+            refusal = stale_write_refusal(request, current, what="this automation" if store_revision else "this schedule")
+            if refusal is not None:
+                return refusal
+            row = latest
         from gideon.automation.triggers import tools as _tools
         from gideon.automation.triggers.schedule_view import channel_of
 
@@ -1539,13 +1609,12 @@ async def _update_schedule(
             spec["strict"] = bool(kwargs["strict_schedule"])
         if "skip_dates" in kwargs:
             spec["skip_dates"] = kwargs["skip_dates"]
-        cadence_changed = spec != original_spec
 
         patch: dict[str, Any] = {"spec": spec}
         if "name" in kwargs:
             patch["name"] = str(kwargs["name"])
         if "action" in kwargs and isinstance(kwargs["action"], dict):
-            patch["workflow"] = {"inline": kwargs["action"]}
+            patch["workflow"] = {"inline": action_patch}
             refusal = _provider_refusal(patch["workflow"])
             if refusal is not None:
                 return refusal
@@ -1571,11 +1640,6 @@ async def _update_schedule(
                 "dedupe_hash": kwargs["dedupe_hash"],
             }
             store.upsert(updated)
-        if cadence_changed:
-            updated = store.get(raw).trigger
-            updated.next_fire_at = ""
-            store.upsert(updated)
-            _arm_if_needed(store, raw)
         if "failure_policy" in outcome_patch:
             updated = store.get(raw).trigger
             updated.failure_policy = outcome_patch["failure_policy"]
@@ -1785,7 +1849,7 @@ async def api_trigger_grant(request: web.Request) -> web.Response:
     if principal.kind != OWNER:
         return web.json_response({"error": "owner required"}, status=403)
     kind, raw = _split_id(request.match_info["id"])
-    if kind not in {_STORE, _EVENT}:
+    if kind not in {_STORE, _EVENT, _SCHEDULE, _LIFECYCLE}:
         return web.json_response({"error": "not found"}, status=404)
     try:
         body = await read_json_body(request)
@@ -1793,30 +1857,57 @@ async def api_trigger_grant(request: web.Request) -> web.Response:
         body = None
     if (
         not isinstance(body, dict)
-        or set(body) != {"approved", "expected_revision"}
+        or not {"approved", "expected_revision"}.issubset(body)
+        or set(body) - {"approved", "expected_revision", "shown"}
         or body.get("approved") is not True
         or not isinstance(body.get("expected_revision"), str)
         or not body["expected_revision"]
     ):
         return web.json_response({"error": "explicit approval and expected_revision are required"}, status=400)
+    if kind == _LIFECYCLE:
+        hooks = _hook_store(request.app["state"])
+        def allow(current):
+            hook = current.get(raw)
+            if hook is None:
+                return web.json_response({"error": "not found"}, status=404), False
+            candidate = grants.hook_trigger(hook)
+            if not grants.grant(candidate, confirmed_revision=body["expected_revision"], principal=principal, shown=body.get("shown")):
+                fresh = grants.question(candidate)
+                return web.json_response({"error": "action or workflow versions changed; review the new question", "grant_question": vars(fresh) if fresh else None}, status=409), False
+            hook.capabilities = candidate.capabilities
+            return hook, True
+        try:
+            result = hooks._mutate(allow)
+        except Exception:
+            logger.warning("hook owner grant could not be saved for %s", raw, exc_info=True)
+            return web.json_response({"error": "owner grant could not be saved"}, status=500)
+        if isinstance(result, web.StreamResponse):
+            return result
+        return web.json_response({"ok": True, "trigger": _serialize_lifecycle(result, _used_by_index().get(raw, []))})
     event_store = _event_store() if kind == _EVENT else None
     store = event_store._store if event_store is not None else _trigger_store()
-    row = store.get(raw)
-    if row is None:
-        return web.json_response({"error": "not found"}, status=404)
-    if row.errors:
-        return web.json_response({"error": "trigger action is invalid"}, status=400)
-    if not grants.grant(
-        row.trigger,
-        confirmed_revision=body["expected_revision"],
-        principal=principal,
-    ):
-        return web.json_response(
-            {"error": "action changed or protected owner grant storage is unavailable; reload and review again"},
-            status=409,
-        )
+    from gideon.automation.triggers.store import LoadedTrigger, RecordMutation
+
     try:
-        store.upsert(row.trigger)
+        with store._mutation() as changes:
+            record = next((record for record in changes.rows if RecordMutation.identity(record) == raw), None)
+            if record is None:
+                return web.json_response({"error": "not found"}, status=404)
+            row = LoadedTrigger.parse(record)
+            if row.errors:
+                return web.json_response({"error": "trigger action is invalid"}, status=400)
+            if not grants.grant(
+                row.trigger,
+                confirmed_revision=body["expected_revision"],
+                principal=principal,
+                shown=body.get("shown"),
+            ):
+                fresh = grants.question(row.trigger)
+                return web.json_response(
+                    {"error": "action or workflow versions changed, or owner grant storage is unavailable; review the new question", "grant_question": vars(fresh) if fresh else None},
+                    status=409,
+                )
+            changes.replace(row.trigger)
     except Exception:
         logger.warning("trigger owner grant could not be published for %s", raw, exc_info=True)
         return web.json_response({"error": "owner grant could not be saved"}, status=500)
@@ -1830,6 +1921,8 @@ async def api_trigger_grant(request: web.Request) -> web.Response:
             status=200 if event is not None else 500,
         )
     errors, warnings = _issue_messages(updated)
+    if kind == _SCHEDULE:
+        return web.json_response({"ok": True, "trigger": _schedule_row_for(request.app["state"], updated.trigger, issues=errors, warnings=warnings)})
     from gideon.automation.triggers.ownership import owner_username
 
     return web.json_response({
@@ -1868,10 +1961,12 @@ async def api_trigger_run(request: web.Request) -> web.Response:
     if kind == _EVENT:
         return await _run_event(raw, request)
     store = _trigger_store()
-    if store.get(raw) is not None:
+    stored = store.get(raw)
+    if stored is not None:
         from gideon.automation.triggers import claims as _claims
 
-        if _claims.is_running(raw, base_dir=store.base_dir):
+        if stored.trigger.overlap != "parallel" and _claims.is_running(raw, base_dir=store.base_dir):
+            await _record_manual_refusal(stored.trigger, "another run owns this trigger", outcome="skipped_overlap")
             return web.json_response(
                 {"error": "already running", "running": True}, status=409
             )
@@ -1924,17 +2019,40 @@ async def api_trigger_answer(request: web.Request) -> web.Response:
         refusal = trigger_tools.manual_refusal()
         if refusal:
             return web.json_response({"ok": False, "refused": refusal}, status=409)
-    if not parks.claim(raw, body["resume_token"]):
+    park = parks.load(raw)
+    if body["answer"]:
+        from gideon.automation.triggers.grants import action_revision
+        from gideon.automation.triggers import claims
+
+        if park is None or not park.action_revision or park.action_revision != action_revision(row.trigger):
+            return web.json_response({"error": "the action changed since this question; review the current automation"}, status=409)
+        if row.trigger.overlap != "parallel" and claims.is_running(raw, base_dir=store.base_dir):
+            return web.json_response({"error": "another run owns this trigger"}, status=409)
+    claimed_park = parks.claim(raw, body["resume_token"])
+    if claimed_park is None:
         return web.json_response({"error": "park is stale or already answered"}, status=409)
     parks.close_row(request.app.get("state"), raw)
     if not body["answer"]:
+        from gideon.integrations.action_providers.base import ActionResult
+        import time
+        from gideon.automation.triggers.review import TriggerReviewStore, record_review_outcome
+
+        record = await _record_manual_run(row.trigger, started=time.time(), result=ActionResult(False, outcome="skipped_gate", error="the owner declined the parked action"))
+        if claimed_park.review_id and record is not None:
+            reviews = TriggerReviewStore(store.base_dir)
+            card = reviews.get(claimed_park.review_id)
+            if card is not None and reviews.resolve(claimed_park.review_id, decision="run_now", outcome="declined", allow_running=True):
+                await record_review_outcome(card, "declined", action_record=record, base_dir=store.base_dir)
         return web.json_response({"ok": True, "outcome": "declined"})
 
     ran, note = await _dispatch_store_action(
         row.trigger,
-        {"trigger_id": raw, "manual": True, "answer": True},
+        {"trigger_id": raw, "manual": True, "answer": True, "review_id": claimed_park.review_id},
         event="manual.answer",
+        accepted_origin=_accepted_action_origin(request),
     )
+    if not ran and note.startswith("refused:"):
+        parks.restore(claimed_park)
     return _trigger_answer_response(ran, note)
 
 
@@ -2210,6 +2328,7 @@ async def _run_store(raw: str, request: web.Request) -> web.Response:
             )
 
     if row.errors:
+        await _record_manual_refusal(row.trigger, f"invalid trigger action: {row.errors[0].message}")
         return web.json_response(
             {
                 "error": f"{raw} has a parse error and cannot run ({row.errors[0].message})"
@@ -2219,12 +2338,14 @@ async def _run_store(raw: str, request: web.Request) -> web.Response:
     from gideon.automation.triggers.grants import is_granted, required_provider
 
     if required_provider(row.trigger) and not is_granted(row.trigger):
+        await _record_manual_refusal(row.trigger, "owner review and an exact action grant are required before this trigger can run")
         return web.json_response(
             {"error": "owner review and an exact action grant are required before this trigger can run"},
             status=409,
         )
     refusal = T.manual_refusal()
     if refusal:
+        await _record_manual_refusal(row.trigger, refusal)
         return web.json_response(
             {"ok": False, "name": row.trigger.name, "refused": refusal}
         )
@@ -2236,6 +2357,7 @@ async def _run_store(raw: str, request: web.Request) -> web.Response:
         reentry_note_id=retry_note_id,
         reentry_principal=retry_principal,
         reentry_state=retry_state,
+        accepted_origin=_accepted_action_origin(request),
     )
     runs, _total = await _runs_store().list_for_job(raw, 0, 1)
     recorded = runs[0] if runs and isinstance(runs[0], dict) else {}
@@ -2256,6 +2378,11 @@ async def _run_store(raw: str, request: web.Request) -> web.Response:
     return web.json_response(response)
 
 
+def _accepted_action_origin(request):
+    from gideon.security.durable_work import accepted_origin_of_request
+    return accepted_origin_of_request(request)
+
+
 async def _dispatch_store_action(
     trigger: Any,
     payload: dict[str, Any],
@@ -2264,6 +2391,8 @@ async def _dispatch_store_action(
     reentry_note_id: str = "",
     reentry_principal: Any = None,
     reentry_state: Any = None,
+    admitted_claim: Any = None,
+    accepted_origin: Any = None,
 ) -> tuple[bool, str]:
     """Run a store trigger's declared action through the action-provider registry.
 
@@ -2300,6 +2429,7 @@ async def _dispatch_store_action(
         _ensure_default_providers_registered,
     )
 
+    trigger_id = str(getattr(trigger, "id", "") or "")
     workflow = trigger.workflow or {}
     inline = (
         workflow.get("inline") if isinstance(workflow.get("inline"), dict) else None
@@ -2307,20 +2437,25 @@ async def _dispatch_store_action(
     action = inline or workflow
     provider_name = str(action.get("provider") or "")
     if not provider_name:
-        return False, "no action provider configured"
+        return await _record_manual_refusal(trigger, "no action provider configured")
     _ensure_default_providers_registered()
     provider = get_action_provider(provider_name)
     if provider is None:
-        return False, f"unknown action provider {provider_name!r}"
+        return await _record_manual_refusal(trigger, f"unknown action provider {provider_name!r}")
     # recorded NOTHING — no `ExecutionJournal` row, no `last_run_ts` stamp. So the action ran while
     # `_record_manual_run` reuses the SAME `ExecutionJournal` ledger and the SAME
     trigger_id = str(getattr(trigger, "id", "") or "")
     ctx = ActionContext(
         event=event,
+        trigger_id=trigger_id,
         context=trigger_id if provider_name == "run-workflow" else "",
         payload=payload,
+        accepted_origin=accepted_origin,
     )
     started = time.time()
+    holder = _manual_owner(trigger_id, active=True, admitted_claim=admitted_claim)
+    if not holder:
+        return await _record_manual_refusal(trigger, "another run owns this trigger, or its process ownership is unknown", outcome="skipped_overlap")
     attempt_id = f"manual-{uuid.uuid4().hex}"
     if reentry_note_id:
         from gideon.interfaces.dashboard.auto_denials import owner_reentry_attempt
@@ -2339,27 +2474,171 @@ async def _dispatch_store_action(
         reentry_context = nullcontext(None)
     with reentry_context as reentry:
         if reentry_note_id and reentry is None:
-            return False, "the unanswered call is no longer open for this trigger"
+            _manual_owner(trigger_id, active=False, holder=holder)
+            return await _record_manual_refusal(trigger, "the unanswered call is no longer open for this trigger")
         try:
             from gideon.integrations.action_providers.command_lifecycle import action_timeout
 
-            config = action.get("config") or {}
+            from gideon.automation.triggers.secrets import resolve
+
+            config = resolve(action.get("config") or {})
             timeout = action_timeout(config, {"bash": 300}.get(provider_name, 30))
-            result = await provider.execute(config, ctx, timeout=timeout)
+            from gideon.security.net.policy import egress_held_to
+            from gideon.security.guardrails.policy import unattended_dispatch_key
+
+            with egress_held_to(unattended_dispatch_key(f"trigger:{trigger_id}")):
+                result = await provider.execute(config, ctx, timeout=timeout)
         except (
             Exception
         ) as exc:  # noqa: BLE001 - a failed manual run is RECORDED, not raised (#308)
             await _record_manual_run(
                 trigger, started=started, exc=exc, run_id=attempt_id
             )
+            _manual_owner(trigger_id, active=False, holder=holder)
             return False, f"failed: {type(exc).__name__}: {exc}"
-        await _record_manual_run(
+        recorded = await _record_manual_run(
             trigger, started=started, result=result, run_id=attempt_id
         )
+    from gideon.engine.trigger_outcomes import status_for_result
+    from gideon.integrations.action_providers.services import get_action_services
+
+    status = status_for_result(result)
+    if recorded is None:
+        if status not in {"launched", "queued", "waiting"}:
+            _manual_owner(trigger_id, active=False, holder=holder)
+        return False, "the action ran but its completion could not be recorded"
+    if status in {"launched", "queued", "waiting"} and getattr(result, "completion", None) is not None:
+        services = get_action_services()
+        if services is None:
+            return False, "completion services unavailable"
+        pending = _settle_manual_action(trigger, result.completion, started, payload, holder=holder)
+        try:
+            import asyncio
+
+            scheduled = services.spawn_background(pending)
+            if isinstance(scheduled, asyncio.Future):
+                services.state._background_tasks.add(scheduled)
+                scheduled.add_done_callback(services.state._background_tasks.discard)
+        except BaseException:
+            pending.close()
+            raise
+        return True, status
+    from gideon.automation.triggers import parks
+
+    if status not in {"launched", "queued", "waiting"} or parks.parked(result):
+        _manual_owner(trigger_id, active=False, holder=holder)
+    if parks.parked(result) and payload.get("review_id"):
+        parks.associate_review(trigger, str(payload["review_id"]))
+    if event == "manual.answer" and payload.get("review_id"):
+        await _finish_manual_review(trigger, payload, result, recorded)
+    if status not in {"launched", "queued", "waiting", "interrupted", "failure"}:
+        from gideon.automation.triggers.service import retire_after_run
+        from gideon.automation.triggers.routing import routed
+
+        retire_after_run(routed(_trigger_store()), trigger, status=status, from_review=bool(payload.get("review_id")), settled_holder=holder)
     if result is not None and not bool(getattr(result, "success", True)):
         note = str(getattr(result, "error", "") or "") or "the action reported failure"
         return False, f"failed: {note}"
-    return True, "ran"
+    return True, status if status in {"launched", "queued", "waiting"} else "ran"
+
+
+async def _record_manual_refusal(trigger: Any, reason: str, *, outcome: str = "skipped_gate") -> tuple[bool, str]:
+    import time
+    from gideon.integrations.action_providers.base import ActionResult
+
+    await _record_manual_run(trigger, started=time.time(), result=ActionResult(False, error=reason, outcome=outcome))
+    return False, f"refused: {reason}"
+
+
+def _manual_owner(trigger_id: str, *, active: bool, holder: str = "", admitted_claim: Any = None) -> str:
+    import os
+    import time
+    from uuid import uuid4
+    from gideon.automation.triggers import claims
+    from gideon.automation.triggers.scheduling import Claim
+    from gideon.automation.triggers.routing import routed
+
+    store = routed(_trigger_store())
+    row = store.get(trigger_id)
+    if active:
+        if row is None:
+            return ""
+        if row.trigger.run_owner_pid and not claims.read_claims(trigger_id, base_dir=store.base_dir):
+            return ""  # Legacy ownership must be reconciled before a new effect starts.
+        if admitted_claim is not None and admitted_claim.trigger_id == trigger_id:
+            holder = claims.bind_owner(trigger_id, owner_pid=os.getpid(), base_dir=store.base_dir, expected_holder=admitted_claim.holder)
+        else:
+            claim = Claim(trigger_id, f"manual:{uuid4().hex}", time.time())
+            if not claims.acquire_claim(claim, owner_pid=os.getpid(), overlap=row.trigger.overlap, base_dir=store.base_dir):
+                return ""
+            holder = claim.holder
+        if not holder:
+            return ""
+    elif not claims.release_claim(trigger_id, base_dir=store.base_dir, holder=holder, owner_pid=os.getpid()):
+        return ""
+    if row is None:
+        return holder
+    if active or row.trigger.run_owner_pid == os.getpid():
+        row.trigger.run_owner_pid = os.getpid() if active else next((claim.owner_pid for claim in claims.read_claims(trigger_id, base_dir=store.base_dir)), 0)
+        try:
+            store.upsert(row.trigger)
+        except BaseException:
+            if active:
+                claims.release_claim(trigger_id, base_dir=store.base_dir, holder=holder, owner_pid=os.getpid())
+            raise
+    return holder
+
+
+async def _settle_manual_action(trigger: Any, completion: Any, started: float, payload: dict[str, Any], *, holder: str) -> None:
+    import asyncio
+    from gideon.integrations.action_providers.base import ActionResult
+    from gideon.engine.trigger_outcomes import status_for_result
+    from gideon.automation.triggers.routing import routed
+    from gideon.automation.triggers.service import retire_after_run
+    from gideon.automation.triggers.review import TriggerReviewStore, record_review_outcome
+
+    try:
+        try:
+            from gideon.security.net.policy import egress_held_to
+            from gideon.security.guardrails.policy import unattended_dispatch_key
+
+            with egress_held_to(unattended_dispatch_key(f"trigger:{trigger.id}")):
+                result = await completion()
+        except asyncio.CancelledError:
+            result = ActionResult(False, outcome="interrupted", error="completion observer stopped during shutdown")
+        except Exception as error:
+            result = ActionResult(False, error=f"{type(error).__name__}: {error}")
+        record = await _record_manual_run(trigger, started=started, result=result)
+        status = status_for_result(result)
+        await _finish_manual_review(trigger, payload, result, record)
+        if record is not None and status in {"success", "ran_late", "degraded", "skipped_noop"}:
+            retire_after_run(routed(_trigger_store()), trigger, status=status, from_review=bool(payload.get("review_id")), settled_holder=holder)
+    finally:
+        _manual_owner(trigger.id, active=False, holder=holder)
+
+
+async def _finish_manual_review(trigger: Any, payload: dict[str, Any], result: Any, record: dict[str, Any] | None) -> None:
+    from gideon.automation.triggers import parks
+    from gideon.automation.triggers.review import TriggerReviewStore, record_review_outcome
+    from gideon.engine.trigger_outcomes import status_for_result
+
+    review_id = str(payload.get("review_id") or "")
+    reviews = TriggerReviewStore(_trigger_store().base_dir)
+    card = reviews.get(review_id) if review_id else None
+    if card is None:
+        return
+    status = status_for_result(result)
+    if status == "waiting":
+        parks.associate_review(trigger, review_id)
+        return
+    if record is None:
+        reviews.release_run(review_id, error="completion could not be recorded")
+    elif status in {"success", "ran_late", "degraded", "skipped_noop"}:
+        outcome = "interrupted_retried" if card.get("reason") == "interrupted" else "ran_late"
+        if reviews.resolve(review_id, decision="run_now", outcome=outcome, allow_running=True):
+            await record_review_outcome(card, outcome, action_record=record, base_dir=reviews.base_dir)
+    else:
+        reviews.release_run(review_id, error=str(getattr(result, "error", "") or status))
 
 
 async def _record_manual_run(
@@ -2369,7 +2648,7 @@ async def _record_manual_run(
     result: Any = None,
     exc: BaseException | None = None,
     run_id: str | None = None,
-) -> None:
+) -> dict[str, Any] | None:
     """Append a MANUAL run record and advance the trigger's last-run stamp (#308).
 
     Reuses the SAME ledger the autonomous fire path appends to — `ExecutionJournal`, keyed by the
@@ -2416,7 +2695,7 @@ async def _record_manual_run(
         status = status_for_result(result, exc)
         if exc is not None:
             error = f"{type(exc).__name__}: {exc}"
-        elif status == "failure":
+        elif status in {"failure", "interrupted", "refused", "skipped_gate", "skipped_overlap"}:
             error = (
                 str(getattr(result, "error", "") or "") or "the action reported failure"
             )
@@ -2429,37 +2708,38 @@ async def _record_manual_run(
         trace = str(getattr(result, "stdout", "") or "") if result is not None else ""
 
         run_id = run_id or f"manual-{int(finished * 1000)}"
-        await _runs_store().append(
-            ExecutionRecord(
-                run_id=run_id,
-                job_id=trigger_id,
-                trigger="manual",
-                started_at=started,
-                finished_at=finished,
-                duration_ms=int(max(0.0, finished - started) * 1000),
-                status=status,
-                summary=summary,
-                trace=trace,
-                error=error,
-            )
+        record = ExecutionRecord(
+            run_id=run_id,
+            job_id=trigger_id,
+            trigger="manual",
+            started_at=started,
+            finished_at=finished,
+            duration_ms=int(max(0.0, finished - started) * 1000),
+            status=status,
+            summary=summary,
+            trace=trace,
+            error=error,
         )
+        await _runs_store().append(record)
 
         store = _trigger_store()
         row = store.get(trigger_id)
         if row is None:
-            return
+            return record.to_dict()
         live = row.trigger
-        live.last_run_id = run_id
+        if status not in {"refused", "skipped_gate", "skipped_overlap"}:
+            live.last_run_id = run_id
         stamp = datetime.now(timezone.utc).isoformat()
         if status == "failure":
             live.last_failure_at = stamp
             live.last_error_summary = (error or "manual run failed")[:200]
-        else:
+        elif status in {"success", "ran_late", "degraded", "skipped_noop"}:
             live.last_success_at = stamp
         store.upsert(live)
         from gideon.automation.triggers import parks
 
         parks.settle(trigger, result)
+        return record.to_dict()
     except (
         Exception
     ):  # noqa: BLE001 - see the docstring: recording must never fail the run
@@ -2612,10 +2892,12 @@ async def _run_event(raw: str, request: web.Request) -> web.Response:
                 {"error": "the unanswered call is not open for this trigger"},
                 status=409,
             )
-    from gideon.automation.triggers.claims import release_claim, write_claim
+    from gideon.automation.triggers.claims import release_claim, acquire_claim
     from gideon.interfaces.dashboard.handlers.triggers import _dispatch_store_action
 
-    write_claim(decision.claim, base_dir=event_store._store.base_dir)
+    if not acquire_claim(decision.claim, overlap=canonical.overlap, base_dir=event_store._store.base_dir):
+        await _record_manual_refusal(canonical, "another run acquired the event claim", outcome="skipped_overlap")
+        return web.json_response({"error": "already running", "running": True}, status=409)
     payload = {
         "trigger_id": canonical.id,
         "source": occurrence.source,
@@ -2639,9 +2921,10 @@ async def _run_event(raw: str, request: web.Request) -> web.Response:
             reentry_note_id=retry_note_id,
             reentry_principal=retry_principal,
             reentry_state=retry_state,
+            admitted_claim=decision.claim,
         )
     finally:
-        release_claim(canonical.id, base_dir=event_store._store.base_dir)
+        release_claim(canonical.id, base_dir=event_store._store.base_dir, holder=decision.claim.holder)
     event_store.record_outcome(
         canonical.id,
         status="success" if ran else "failure",
@@ -2862,6 +3145,7 @@ async def api_triggers_week(request: web.Request) -> web.Response:
             "server_tz": tz_name,
             "occurrences": occurrences,
             "truncated": truncated,
+            "unreadable": _trigger_store().unreadable_status(),
         }
     )
 
@@ -2969,7 +3253,7 @@ async def api_trigger_reviews(request: web.Request) -> web.Response:
         return web.json_response({"error": "owner required"}, status=403)
     store = _trigger_store()
     return web.json_response(
-        {"cards": TriggerReviewStore(store.base_dir).list(pending_only=True)}
+        {"cards": [card for card in TriggerReviewStore(store.base_dir).list(pending_only=False) if card.get("status") in {"pending", "running"}]}
     )
 
 
@@ -3089,6 +3373,7 @@ async def api_trigger_review(request: web.Request) -> web.Response:
             "review_reason": str(card.get("reason") or "missed"),
         },
         event="restart.review",
+        accepted_origin=_accepted_action_origin(request),
     )
     action_runs, _total = await _runs_store().list_for_job(raw, 0, 1)
     action_record = (
@@ -3106,6 +3391,8 @@ async def api_trigger_review(request: web.Request) -> web.Response:
         action_record = await _runs_store().get_run(
             raw, str(action_record.get("run_id") or "")
         ) or action_record
+    if ran and action_record.get("status") in {"launched", "queued", "waiting"}:
+        return web.json_response({"ok": True, "outcome": "pending", "status": action_record["status"], "run_id": action_record.get("run_id", "")}, status=202)
     if not ran:
         reviews.release_run(review_id, error=note)
         review_run_id = await record_review_outcome(

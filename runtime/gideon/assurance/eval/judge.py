@@ -1,5 +1,6 @@
 """LLM Judge — scores agent responses via a separate agent session."""
 
+from gideon.core.turn_streams import closing_stream
 import json
 import logging
 from dataclasses import dataclass
@@ -80,25 +81,26 @@ class LLMJudge:
 
             prompt = render_use_case_prompt("eval_judge", values) or ""
         chunks: list[str] = []
-        async for event in self._provider.stream(prompt):
-            if event.kind == EVENT_TEXT_CHUNK:
-                chunks.append(event.text)
-            elif event.kind == EVENT_PERMISSION_REQUEST:
-                if not event.request_id:
-                    logger.warning(
-                        "Judge received permission request with falsy request_id for tool %s",
-                        event.title,
+        async with closing_stream(self._provider.stream(prompt)) as _turn_events:
+            async for event in _turn_events:
+                if event.kind == EVENT_TEXT_CHUNK:
+                    chunks.append(event.text)
+                elif event.kind == EVENT_PERMISSION_REQUEST:
+                    if not event.request_id:
+                        logger.warning(
+                            "Judge received permission request with falsy request_id for tool %s",
+                            event.title,
+                        )
+                    sel().log_tool_invocation(
+                        session_key="eval_judge",
+                        tool_name=event.title,
+                        outcome="rejected",
+                        source="eval_judge",
                     )
-                sel().log_tool_invocation(
-                    session_key="eval_judge",
-                    tool_name=event.title,
-                    outcome="rejected",
-                    source="eval_judge",
-                )
-                if event.request_id:
-                    await self._provider.reject_tool(event.request_id)
-            elif event.kind == EVENT_COMPLETE:
-                break
+                    if event.request_id:
+                        await self._provider.reject_tool(event.request_id)
+                elif event.kind == EVENT_COMPLETE:
+                    break
         raw = "".join(chunks)
         try:
             start = raw.index("{")

@@ -1,3 +1,4 @@
+import { GrantConsent } from '../triggers/GrantConsent'
 import { useEffect, useRef, useState } from 'react'
 import { toneChipSkin } from '../../shared/theme/accent'
 import { FieldError } from '../../shared/ui/forms'
@@ -172,6 +173,7 @@ export function ScheduleDetail({ job, onSaved, onDeleted, onChanged, editing, on
           <Toggle on={job.enabled} onChange={toggle} disabled={busy} label="Toggle enabled" size="sm" />
         </label>
       </div>
+      <GrantConsent id={`schedule:${job.id}`} question={job.grant_question} required={job.grant_required} satisfied={job.grant_satisfied} readOnly={job.read_only} onChanged={onChanged} />
       {err && <FieldError>{err}</FieldError>}
       {runSummary && <p role="status" data-type="body-s" className="text-on-surface-var">{runSummary}</p>}
       {note && !running && <p className="text-ok text-[0.8125rem]">{note}</p>}
@@ -203,6 +205,13 @@ export function ScheduleDetail({ job, onSaved, onDeleted, onChanged, editing, on
           <div className="rounded-md bg-surface-container px-m py-2 text-on-surface-var text-[0.8125rem] leading-relaxed whitespace-pre-wrap break-words font-mono">
             {mm.key === 'agent' ? (job.message || '—') : mm.key === 'script' ? job.script : job.command}
           </div>
+          {mm.key === 'agent' && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5 text-[0.75rem]">
+              {typeof cfg.capability === 'string' && cfg.capability && <Chip>{cfg.capability === 'research' ? 'Research' : cfg.capability === 'mutating' ? 'Change allowed files' : cfg.capability}</Chip>}
+              {Array.isArray(cfg.may_change) && cfg.may_change.filter((path): path is string => typeof path === 'string').map(path => <Chip key={path}>{path}</Chip>)}
+              {cfg.max_turns != null && <Chip>{String(cfg.max_turns)} turns</Chip>}
+            </div>
+          )}
           {mm.key === 'agent' && (job.agent || job.model) && (
             <div className="mt-1.5 flex flex-wrap gap-1.5 text-[0.75rem]">
               {job.agent && <span className="rounded-pill bg-surface-high px-2 h-6 inline-flex items-center text-on-surface-var font-mono">{job.agent}</span>}

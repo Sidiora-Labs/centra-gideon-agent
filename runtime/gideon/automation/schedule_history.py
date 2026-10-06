@@ -50,6 +50,10 @@ def action_summary(status: str, result: Any = None, error: str = "") -> str:
             return "Waiting for you to finish this action."
     if status == "failure":
         return " ".join(str(error or "The action failed.").split())
+    if status == "interrupted":
+        return " ".join(str(error or "The action was interrupted.").split())
+    if status in {"skipped_gate", "skipped_overlap", "refused"}:
+        return " ".join(str(error or "The action was refused.").split())
     raw = str(getattr(result, "stdout", "") or "")
     try:
         payload = json.loads(raw)

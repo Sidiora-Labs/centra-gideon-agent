@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { ModelTest } from './ModelTest'
 import { ResultAnnouncement } from '../../shared/ui/ListControls'
 import {
   Check, MessageSquare, Boxes, Mic, Volume2, Eye, ImagePlus,
@@ -6,7 +7,7 @@ import {
   Moon, Network, RefreshCcw, ArrowUp, ArrowDown, X, AlertTriangle, Wrench,
   Trash2, Gavel, KeyRound, Wifi, CheckCircle2, type LucideIcon,
 } from 'lucide-react'
-import { api, isFeatureOff, isReportNotRun, type AvailableModel, type DownloadJob, type JudgeBenchRecommendation, type LocalModelTokenStatus, type ProviderHealth } from '../../shared/data/api'
+import { api, isFeatureOff, isReportNotRun, type AvailableModel, type DownloadJob, type JudgeBenchRecommendation, type LocalModelTokenStatus, type ProviderHealth, type ModelProvider, type ProviderModels } from '../../shared/data/api'
 import {
   occupantDetail, pressureDetail, pressureTone, reclaimableCount, sortOccupants,
 } from '../../shared/data/residency'
@@ -27,6 +28,8 @@ import { BUSY_REASON } from '../../shared/ui/unavailable'
 import { reportingWrite } from '../../app/shell/reportingWrite'
 import { TextInput } from '../../shared/ui/forms'
 import { MetaChip } from '../../shared/ui/MetaChip'
+import { OffMachineChip } from './OffMachineChip'
+import { modelRunProblem } from './modelRunProblem'
 import { StatusPill } from '../../shared/ui/StatusPill'
 import { useModelDownloads } from './useModelDownloads'
 import { mergeText, type Revisioned } from '../../shared/data/staleWrite'
@@ -98,7 +101,8 @@ export function capableModels(useCase: string, allModels: AvailableModel[], acti
     const sep = ref.indexOf(':')
     const provider = sep >= 0 ? ref.slice(0, sep) : ''
     const id = sep >= 0 ? ref.slice(sep + 1) : ref
-    out.push({ id, name: id, provider, capabilities: [useCase], downloaded: false } as AvailableModel)
+    const listed = allModels.find((model) => model.provider === provider && model.id === id)
+    out.push(listed ?? ({ id, name: id, provider, capabilities: [capability], downloaded: false } as AvailableModel))
   }
   return out
 }
@@ -194,11 +198,12 @@ function ReclaimButton({ onReclaimed }: { onReclaimed: () => void }) {
 export function ModelsPanel() {
   const { data, refresh } = useQuery('settings:models', async () => {
     const [rows, active] = await Promise.all([
-      api.modelsAvailable().catch(() => [] as { name: string; models?: AvailableModel[] }[]),
-      api.activeModels().catch(() => ({ use_cases: {}, revisions: {} })),
+      api.modelsAvailable().catch(() => [] as ProviderModels[]),
+      api.activeModels().catch((): Awaited<ReturnType<typeof api.activeModels>> => ({ use_cases: {}, revisions: {} })),
     ])
-    return { allModels: rows.flatMap((r) => r.models ?? []), active: active.use_cases, revisions: active.revisions }
+    return { catalogErrors: Object.fromEntries(rows.filter((r) => r.error).map((r) => [r.name, r.error ?? ''])), allModels: rows.flatMap((r) => r.models ?? []), active: active.use_cases, revisions: active.revisions }
   }, { persist: true })
+  const { data: providers } = useQuery('settings:model-connections', api.modelProviders, { persist: false })
   const { data: health } = useQuery('settings:models-health', () =>
     api.modelsHealth().then((h) => h.providers).catch(() => [] as ProviderHealth[]), { persist: false })
   const { data: judgeRecs } = useQuery('settings:judge-bench-recs', () =>
@@ -235,7 +240,7 @@ export function ModelsPanel() {
           return (
             <div key={uc}>
               {showGroupHeader && <div data-type="caption" className="mb-1.5 mt-3 px-1 text-on-surface-low uppercase tracking-wide">{meta.group}</div>}
-              <UseCaseRow useCase={uc} activeModels={active[uc] ?? []} revision={revisions[uc]} allModels={allModels} health={health ?? []} downloadJobs={downloadJobs} startDownload={startDownload} cancelDownload={cancelDownload} judgeRec={(judgeRecs ?? []).find((r) => r.verdict === 'recommended' && r.use_case === uc)} onChanged={reloadActive} />
+              <UseCaseRow useCase={uc} activeModels={active[uc] ?? []} revision={revisions[uc]} allModels={allModels} providers={providers ?? []} catalogErrors={data?.catalogErrors ?? {}} health={health ?? []} downloadJobs={downloadJobs} startDownload={startDownload} cancelDownload={cancelDownload} judgeRec={(judgeRecs ?? []).find((r) => r.verdict === 'recommended' && r.use_case === uc)} onChanged={reloadActive} />
             </div>
           )
         })}
@@ -478,12 +483,12 @@ function HealthDot({ provider, health }: { provider: string; health: ProviderHea
     : h.breaker_state === 'half_open' ? 'var(--color-warning)' : 'var(--color-ok)'
   const label = h.breaker_state === 'open'
     ? `${provider}: circuit open (${h.consecutive_failures} consecutive failures) — chain entries on this provider are skipped until it recovers`
-    : h.breaker_state === 'half_open' ? `${provider}: recovering — next call probes it` : `${provider}: healthy`
+    : h.breaker_state === 'half_open' ? `${provider}: failing — next call probes it` : `${provider}: healthy`
   return <span role="img" className="size-2 shrink-0 rounded-pill" style={{ background: color }} title={label} aria-label={label} />
 }
 
-function UseCaseRow({ useCase, activeModels, revision, allModels, health, downloadJobs, startDownload, cancelDownload, judgeRec, onChanged }: {
-  useCase: string; activeModels: string[]; revision?: string; allModels: AvailableModel[]; health: ProviderHealth[]
+function UseCaseRow({ useCase, activeModels, revision, allModels, providers, catalogErrors, health, downloadJobs, startDownload, cancelDownload, judgeRec, onChanged }: {
+  useCase: string; activeModels: string[]; revision?: string; allModels: AvailableModel[]; providers: ModelProvider[]; catalogErrors: Record<string, string>; health: ProviderHealth[]
   downloadJobs: Record<string, DownloadJob>
   startDownload: (model: string, providerOverride?: string) => Promise<void>
   cancelDownload: (model: string, providerOverride?: string) => Promise<void>
@@ -584,6 +589,11 @@ function UseCaseRow({ useCase, activeModels, revision, allModels, health, downlo
   }
   const repair = async (m: AvailableModel) => {
     const ref = `${m.provider}:${m.id}`
+    const provider = providers.find((row) => row.name === m.provider)
+    if (catalogErrors[m.provider] || provider?.connection?.state === 'failed') {
+      setRepairErrors((old) => ({ ...old, [ref]: 'The provider is not answering. Test its connection in Providers before downloading.' }))
+      return
+    }
     setRepairErrors((old) => { const next = { ...old }; delete next[ref]; return next })
     try {
       await startDownload(m.id, m.provider)
@@ -604,6 +614,7 @@ function UseCaseRow({ useCase, activeModels, revision, allModels, health, downlo
       {
 }
       <p data-type="body-s" className="text-on-surface-low">{meta.description}</p>
+      {(useCase === 'chat' || CHAT_SUBCATEGORIES.has(useCase)) && <p data-type="caption" className="text-on-surface-low">Each model’s Test makes one small real call and asks for a one-word reply. It uses this machine’s compute or the provider’s tokens.</p>}
       <StaleWriteNotice guard={stale} what={`The ${meta.label.toLowerCase()} model chain`} />
       <div data-type="caption" className="inline-flex w-fit items-center gap-1.5 rounded-md px-2 py-1"
         style={meta.chain ? accentChip : { background: 'var(--color-surface-high)', color: 'var(--color-on-surface-low)' }}>
@@ -641,6 +652,7 @@ function UseCaseRow({ useCase, activeModels, revision, allModels, health, downlo
             const sep = ref.indexOf(':')
             const provider = sep >= 0 ? ref.slice(0, sep) : ''
             const id = sep >= 0 ? ref.slice(sep + 1) : ref
+            const problem = modelRunProblem(ref, allModels, providers, health, catalogErrors)
             return (
               <div key={ref} className="flex items-center gap-2 rounded-md bg-surface-container px-2.5 py-1.5">
                 <span data-type="caption" className="w-16 shrink-0 text-on-surface-low uppercase tracking-wide">
@@ -649,6 +661,7 @@ function UseCaseRow({ useCase, activeModels, revision, allModels, health, downlo
                 <HealthDot provider={provider} health={health} />
                 <span data-type="body-s" className="min-w-0 flex-1 truncate font-mono text-on-surface">{id}</span>
                 {provider && <MetaChip>{provider}</MetaChip>}
+                {problem && <span data-type="caption" className="text-warning" title={problem}>{problem}</span>}
                 {
 }
                 <IconButton icon={ArrowUp} label={`Move ${id} up`} size={24} iconSize={13}
@@ -720,7 +733,7 @@ function UseCaseRow({ useCase, activeModels, revision, allModels, health, downlo
               {filtered.map((m) => {
             const ref = `${m.provider}:${m.id}`
             const on = activeModels.includes(ref)
-            const notDownloaded = m.downloaded === false
+            const notDownloaded = m.downloaded === false && !catalogErrors[m.provider] && providers.find((p) => p.name === m.provider)?.connection?.state !== 'failed'
             const downloadJob = downloadJobs[ref]
             const repairing = downloadJob != null && ['queued', 'running'].includes(downloadJob.state)
             const showRepairJob = downloadJob != null && (repairing || downloadJob.state === 'error')
@@ -739,8 +752,12 @@ function UseCaseRow({ useCase, activeModels, revision, allModels, health, downlo
                   </span>
                   <span data-type="body-s" className="min-w-0 flex-1 truncate text-on-surface font-mono">{m.name}</span>
                 </button>
+                <OffMachineChip runsHere={m.runs_here} />
+                {on && !m.capabilities.includes(CHAT_SUBCATEGORIES.has(useCase) ? 'chat' : useCase) && (
+                  <StatusPill tone="warn" title={`This model is listed for ${m.capabilities.join(', ') || 'no supported job'}.`}>cannot do this</StatusPill>
+                )}
                 <ModelChips model={m} onRepair={() => repair(m)} repairing={repairing} />
-                {on && notDownloaded && (
+                {on && notDownloaded && m.capabilities.includes(CHAT_SUBCATEGORIES.has(useCase) ? 'chat' : useCase) && (
                   <StatusPill tone="warn" className="gap-1 py-0.5"
                     title="Bound but not downloaded — download it in Providers to activate.">
                     <Download size={9} /> not downloaded
@@ -748,6 +765,7 @@ function UseCaseRow({ useCase, activeModels, revision, allModels, health, downlo
                 )}
                 <MetaChip>{m.provider}</MetaChip>
               </div>
+              <ModelTest useCase={useCase} model={m} />
               {(showRepairJob || repairErrors[ref]) && (
                 <div ref={(el) => { repairRows.current[ref] = el }} data-testid="model-repair" className="ml-9 mt-1 rounded-md bg-surface-high px-3 py-2" aria-live="polite">
                   {downloadJob && repairing && <>

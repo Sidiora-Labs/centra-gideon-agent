@@ -1,3 +1,4 @@
+import { DraftNotices } from './DraftNotices'
 import { LoadError } from '../../shared/ui/ListScaffold'
 import { useInboxDetailActions, useInboxOperation } from './inboxQueueState'
 import { useEffect, useState } from 'react'
@@ -20,8 +21,8 @@ import { TextLink } from '../../shared/ui/TextLink'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 
 export function InboxDetail({ item, onChanged, navigate }: { item: InboxItem; onChanged: () => void; navigate: (path: string) => void }) {
-  const { draft, setDraft, busy, err, patch, generate, send, fav, restore } = useInboxDetailActions(item, onChanged)
-  const cm = classMeta(item.classification)
+  const { draft, setDraft, instructions, setInstructions, drafting, busy, err, patch, generate, send, sortAgain, fav, restore } = useInboxDetailActions(item, onChanged)
+  const cm = classMeta(item.classification, item.classify_error)
   const cf = confMeta(item.confidence)
 
   const dirtyDraft = draft !== (item.draft ?? '')
@@ -43,32 +44,35 @@ export function InboxDetail({ item, onChanged, navigate }: { item: InboxItem; on
         {channelBacked ? (
           <>
             <span data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill px-m h-7" style={{ background: `color-mix(in srgb, ${cm.tone} 16%, transparent)`, color: cm.tone }}><cm.icon size={13} /> {cm.label}</span>
-            <span data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill px-m h-7" style={{ background: `color-mix(in srgb, ${cf.tone} 16%, transparent)`, color: cf.tone }}><cf.icon size={13} /> {cf.label}</span>
+            {item.confidence && <span data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill px-m h-7" style={{ background: `color-mix(in srgb, ${cf.tone} 16%, transparent)`, color: cf.tone }}><cf.icon size={13} /> {cf.label}</span>}
 
-            {item.confidence !== 'user' && (item.source === 'digest' ? (
-              <FeedbackThumbs targetKind="inbox_digest" targetId={item.id}
-                producer={item.feedback_producers?.digest}
-                snapshot={{ classification: item.classification }} />
-            ) : (
+            {item.feedback_producers?.classification && item.source !== 'digest' && (
               <FeedbackThumbs targetKind="inbox_classification" targetId={item.id}
-                producer={item.feedback_producers?.classification}
+                producer={item.feedback_producers.classification}
                 snapshot={{ classification: item.classification, confidence: item.confidence }} />
-            ))}
+            )}
           </>
         ) : (
           <span data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill px-m h-7" style={toneChipSkin(km.tone, 16)}><km.icon size={13} /> {km.label}</span>
         )}
+        {item.source === 'digest' && item.feedback_producers?.digest && <FeedbackThumbs targetKind="inbox_digest" targetId={item.id}
+          producer={item.feedback_producers.digest} snapshot={{ classification: item.classification }} />}
         <span data-type="body-s" className="ml-auto inline-flex items-center gap-1.5 text-on-surface-low">{(() => { const sm = statusMeta(item.status); return <><sm.icon size={13} style={{ color: sm.tone }} /> {sm.label}</> })()}</span>
 
         <InvestigateButton kind="inbox_item" id={item.id} backLink="#/inbox" />
       </div>
 
       <div data-type="body-s" className="flex flex-wrap items-center gap-x-m gap-y-1 text-on-surface-low">
-        {channelBacked && <span className="text-on-surface" style={fvs(600)}>{item.sender_name || item.sender_id}</span>}
+        {channelBacked && <span className="text-on-surface" style={fvs(600)}>{item.sender_name || 'Unknown sender'}</span>}
         {channelBacked && channelLabel(item) && <span>{channelLabel(item)}</span>}
         <span data-type="caption" className="inline-flex items-center rounded-pill bg-surface-high px-2 h-5 text-on-surface-var">via {sourceLabel(item.source)}</span>
         {item.created_at && <span>{relPast(item.created_at)}</span>}
       </div>
+
+      {channelBacked && !item.classification && item.classify_error && <Section label="Sorting">
+        <p data-type="body-s" className="text-on-surface-var">{item.classify_error}</p>
+        {item.source !== 'native' && !replyClosed && <Button size="sm" variant="secondary" onClick={sortAgain} loading={busy === 'sort'}><RotateCcw size={14} /> Sort again</Button>}
+      </Section>}
 
       <div data-type="body-m" className="rounded-xl border border-outline/25 bg-surface-container p-m text-on-surface leading-relaxed"><Markdown>{item.message}</Markdown></div>
 
@@ -150,11 +154,13 @@ export function InboxDetail({ item, onChanged, navigate }: { item: InboxItem; on
             </Section> : null
           ) : canReply ? (
             <Section label="Drafted reply"
-              right={item.draft ? (
+              right={item.draft && item.feedback_producers?.draft ? (
                 <FeedbackThumbs targetKind="inbox_draft" targetId={item.id}
                   producer={item.feedback_producers?.draft}
                   snapshot={{ draft_preview: (item.draft ?? '').slice(0, 200) }} />
               ) : undefined}>
+              <TextArea value={instructions} onChange={value => setInstructions(value.slice(0, 2000))} rows={2} placeholder="Optional instructions: what should your reply say?" ariaLabel="Your reply instructions" />
+              <DraftNotices evidence={drafting} />
               <TextArea value={draft} onChange={setDraft} rows={5} placeholder="No draft yet — generate one or write your own." ariaLabel="Drafted reply" />
               <div className="mt-2 flex flex-wrap items-center gap-s">
                 <Button size="sm" variant="secondary" onClick={generate} loading={busy === 'draft'}><Sparkles size={14} /> {item.draft ? 'Regenerate' : 'Generate draft'}</Button>

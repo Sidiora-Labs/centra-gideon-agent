@@ -14,21 +14,27 @@ DEFAULT_CONTEXT_WINDOW = 200_000
 LOCAL_SERVED_CONTEXT_WINDOW = 4096
 _TOKENS_FILE = Path(__file__).resolve().parent / "model_tokens.json"
 _WINDOWS: dict[str, int] | None = None
-_SERVED_WINDOWS: dict[str, int] = {}
+_SERVED_WINDOWS: dict[tuple[str, str], int] = {}
 
 
-def register_served_context_window(model_id: str, capacity: object) -> bool:
+def register_served_context_window(model_id: str, capacity: object, *, endpoint: str = "") -> bool:
     declared = declared_context_window(capacity)
     if not model_id or declared is None:
         return False
-    _SERVED_WINDOWS[model_id.strip()] = declared
+    _SERVED_WINDOWS[(endpoint.rstrip("/"), model_id.strip())] = declared
     return True
 
 
-def served_context_window(model_id: str | None) -> int | None:
+def served_context_window(model_id: str | None, *, endpoint: str = "") -> int | None:
     if not model_id:
         return None
-    return _resolve_window(model_id.strip(), _SERVED_WINDOWS, 0) or None
+    if ":" in model_id and not endpoint:
+        from gideon.integrations.llm.registry import serving_entry, serving_endpoint
+        entry = serving_entry(model_id.partition(":")[0])
+        if entry is not None:
+            endpoint = serving_endpoint(entry)
+            model_id = model_id.partition(":")[2]
+    return _SERVED_WINDOWS.get((endpoint.rstrip("/"), model_id.strip()))
 
 
 def _read_windows(path: Path) -> dict[str, int]:
@@ -112,12 +118,21 @@ def model_context_window(
     default: int = DEFAULT_CONTEXT_WINDOW,
     *,
     override: object = None,
-    local: bool = False,
+    local: bool | None = None,
+    endpoint: str = "",
 ) -> int:
     declared = declared_context_window(override)
     if declared is not None:
         return declared
-    served = served_context_window(model_id)
+    if model_id and ":" in model_id and not endpoint:
+        from gideon.integrations.llm.registry import serving_entry, serving_endpoint, endpoint_on_this_machine
+        entry = serving_entry(model_id.partition(":")[0])
+        if entry is not None:
+            endpoint = serving_endpoint(entry)
+            if local is None:
+                local = endpoint_on_this_machine(entry)
+            model_id = model_id.partition(":")[2]
+    served = served_context_window(model_id, endpoint=endpoint)
     if served is not None:
         return served
     if local:

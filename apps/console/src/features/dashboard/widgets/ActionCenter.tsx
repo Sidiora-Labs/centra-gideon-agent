@@ -10,6 +10,7 @@ import { InlineError } from '../../../shared/ui/InlineError'
 import { ListSkeleton } from '../../../shared/ui/ListScaffold'
 import type { RouteProps } from '../../../app/shell/useQueryState'
 import { invalidateKeys } from '../../../shared/data/data'
+import { inboxRaisedBy } from '../../../shared/data/attentionLanes'
 
 type Kind = 'approval' | 'inbox' | 'proposal'
 interface Entry { key: string; kind: Kind; title: string; sub: string; id: string; revision?: string; session?: string; inboxItemId?: string }
@@ -46,7 +47,7 @@ export function ActionCenter({ navigate }: RouteProps) {
   )
   const allEntries: Entry[] = [
     ...approvals.map((a) => ({ key: `a:${a.id}`, kind: 'approval' as const, id: a.id, title: `Run ${a.tool}`, sub: a.tool_purpose || a.source || 'Tool approval', session: a.session, revision: a.revision })),
-    ...liveInbox.map((i) => ({ key: `i:${i.id}`, kind: 'inbox' as const, id: i.id, title: i.sender_name || i.channel_name || 'Message', sub: i.message?.slice(0, 90) || '' })),
+    ...liveInbox.map((i) => ({ key: `i:${i.id}`, kind: 'inbox' as const, id: i.id, title: inboxRaisedBy(i) || 'Message', sub: i.message?.slice(0, 90) || '' })),
     ...proposals.map((p) => ({ key: `p:${p.id}`, kind: 'proposal' as const, id: p.id, title: `Skill: ${p.slug}`, sub: p.description?.slice(0, 90) || '', inboxItemId: proposalInbox.get(p.id) })),
   ].filter((e) => !done.has(e.key))
 

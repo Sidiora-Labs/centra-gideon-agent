@@ -24,6 +24,7 @@ import json
 import logging
 import tarfile
 from pathlib import Path
+from gideon.operations.durability.home_paths import guard_path, LinkInTheWay
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +43,11 @@ def write_sidecar(archive: Path, manifest: dict) -> None:
     from gideon.core.atomic_write import atomic_write
 
     try:
+        destination = guard_path(sidecar_path(archive))
         atomic_write(
-            sidecar_path(archive), json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+            destination, json.dumps(manifest, indent=2, sort_keys=True) + "\n", mode=0o600
         )
-    except OSError:
+    except (OSError, LinkInTheWay, ValueError):
         logger.debug("archive: could not write manifest sidecar for %s", archive.name)
 
 
@@ -57,6 +59,10 @@ def read_manifest(archive: Path) -> dict | None:
     browser's job is to list it so the user can see it exists and drill/restore it.
     """
     side = sidecar_path(archive)
+    try:
+        guard_path(side, read=True)
+    except (LinkInTheWay, ValueError):
+        return None
     try:
         return json.loads(side.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, json.JSONDecodeError):
@@ -70,6 +76,7 @@ def read_manifest(archive: Path) -> dict | None:
 def _manifest_from_tar(archive: Path) -> dict | None:
     """Extract ``<prefix>/MANIFEST.json`` from a snapshot tar. One pass, first match."""
     try:
+        guard_path(archive, read=True)
         with tarfile.open(str(archive), "r:gz") as tar:
             for member in tar:
                 if not member.isfile() or not member.name.endswith("/MANIFEST.json"):
@@ -78,7 +85,7 @@ def _manifest_from_tar(archive: Path) -> dict | None:
                 if handle is None:
                     return None
                 return json.loads(handle.read().decode("utf-8"))
-    except (tarfile.TarError, OSError, json.JSONDecodeError, UnicodeDecodeError):
+    except (tarfile.TarError, OSError, json.JSONDecodeError, UnicodeDecodeError, LinkInTheWay, ValueError):
         logger.debug("archive: no readable manifest in %s", archive.name, exc_info=True)
     return None
 

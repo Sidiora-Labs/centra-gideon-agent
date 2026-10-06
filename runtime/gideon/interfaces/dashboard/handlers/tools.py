@@ -195,7 +195,7 @@ async def api_tools_list(request: web.Request) -> web.Response:
         record_failure("gideon-filesystem", str(exc))
 
     try:
-        registry_tools = await list_all_tools()
+        registry_tools = await list_all_tools(skip=("mcp",), skip_configured_mcp=True)
         for t in registry_tools:
             if t.provider == "mcp":
                 continue
@@ -388,17 +388,40 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
             status=403,
         )
 
-    from gideon.engine.task_modes import resolve_effective_risk
+    from gideon.integrations.tool_providers.arguments import argument_refusal, refused_result
+    from gideon.integrations.mcp_core import set_current_session_key, reset_current_session_key
+    reason = argument_refusal(tool_name, arguments, getattr(_tool_def, "parameters", {}))
+    refusal = refused_result(reason) if reason else None
+    if refusal is None:
+        token = set_current_session_key(request.headers.get("X-Session-Key", "") or "internal")
+        try:
+            refusal = await provider.preflight(tool_name, arguments)
+        except Exception:
+            refusal = None
+        finally:
+            reset_current_session_key(token)
+    if refusal is not None:
+        return web.json_response({"ok": False, "error": refusal.error, "metadata": refusal.metadata}, status=400)
+
+    from gideon.engine.task_modes import MAY_DESTROY, resolve_effective_risk
 
     _declared = getattr(_tool_def, "risk_level", "") if _tool_def is not None else ""
     _risk = resolve_effective_risk(_declared, tool_name, "", arguments)
-    if _risk == "destructive" and body.get("confirm_risk") != "destructive":
+    if _risk in MAY_DESTROY and body.get("confirm_risk") != "destructive":
         return json_error(
             "risk_confirmation_required",
             message=f"Confirm destructive risk before invoking {tool_name!r}",
             status=403,
         )
 
+    from gideon.security.protected_folders import call_protected_delete, provider_working_folder, sentence
+    protected = call_protected_delete(_declared, tool_name, "", arguments, cwd=provider_working_folder(provider))
+    if protected:
+        from gideon.security.approval_answer import of_request, OWNER
+        if of_request(request).kind != OWNER:
+            return json_error("approval_required", message=sentence(protected), status=403)
+    from gideon.engine.agents.native import builtin_tools
+    delete_token = builtin_tools._CURRENT_APPROVED_DELETE.set(str(arguments.get("command", "")) if protected else "")
     caller = request.headers.get("X-Session-Key", "") or "internal"
     try:
         if tool_name.startswith("mcp/"):
@@ -409,11 +432,23 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
 
             session_token = set_current_session_key(caller)
             try:
-                result = await provider.invoke(tool_name, arguments)
+                from gideon.integrations.tool_providers.registry import ConfiguredMcpToolProvider
+                if isinstance(provider, ConfiguredMcpToolProvider):
+                    result = await provider.invoke(tool_name, arguments, expected_definition=getattr(_tool_def, "mcp_definition_digest", ""), expected_configuration=getattr(_tool_def, "mcp_configuration_revision", ""))
+                else:
+                    result = await provider.invoke(tool_name, arguments)
             finally:
                 reset_current_session_key(session_token)
         else:
-            result = await provider.invoke(tool_name, arguments)
+            if tool_name == "inbox_list":
+                from gideon.integrations.inbox_reach import _REQUEST_READER, reader_of_request
+                inbox_reader_token = _REQUEST_READER.set(reader_of_request(request, request.app["state"]))
+                try:
+                    result = await provider.invoke(tool_name, arguments)
+                finally:
+                    _REQUEST_READER.reset(inbox_reader_token)
+            else:
+                result = await provider.invoke(tool_name, arguments)
     except Exception as exc:
         _sel().log_tool_invocation(
             session_key=caller,
@@ -428,6 +463,8 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
         return web.json_response(
             {"ok": False, "error": relayed_failure_copy(exc)}, status=500
         )
+    finally:
+        builtin_tools._CURRENT_APPROVED_DELETE.reset(delete_token)
 
     _sel().log_tool_invocation(
         session_key=caller,
@@ -485,7 +522,7 @@ async def api_tools_toggle(request: web.Request) -> web.Response:
             {"ok": False, "error": "MCP tools must use /api/mcp/toggle-tool with server and raw tool name"},
             status=400,
         )
-    if name not in {t.name for t in await list_all_tools()}:
+    if name not in {t.name for t in await list_all_tools(skip=("mcp",), skip_configured_mcp=True)}:
         return web.json_response(
             {"ok": False, "error": f"unknown tool {name!r}"}, status=404
         )
@@ -577,7 +614,7 @@ async def api_tool_groups(request: web.Request) -> web.Response:
 
     defs: list = []
     try:
-        defs = [t for t in await list_all_tools() if t.provider != "mcp"]
+        defs = [t for t in await list_all_tools(skip=("mcp",), skip_configured_mcp=True) if t.provider != "mcp"]
     except Exception:
         logger.warning("Failed to list tools for the group partition", exc_info=True)
     try:

@@ -1,5 +1,7 @@
 """Session persistence — save, restore, history prefix."""
 
+from gideon.engine.turn_source import source_of
+
 import json
 import logging
 import re
@@ -250,7 +252,7 @@ def _redact_snapshot_message(m: dict) -> dict:
     if role not in ("user", "system"):
         content, _ = redact_exfiltration_urls(content)
         content, _ = redact_credentials(content)
-    out: dict = {"role": role, "content": content, "ts": m.get("ts", "")}
+    out: dict = {"role": role, "content": content, "ts": m.get("ts", ""), **source_of(m)}
     if m.get("cls"):
         out["cls"] = m["cls"]
     if m.get("meta"):
@@ -333,6 +335,24 @@ def _restore_runtime_binding(
     _tm = meta.get("task_mode")
     if isinstance(_tm, str) and _tm in VALID_TASK_MODES:
         apply_task_mode(state, session, _tm)
+
+
+def _restore_ingress_queue(session: _ChatSession, meta: dict) -> None:
+    """Restore accepted authenticated queue records, never synthesized owner provenance."""
+    from gideon.security.approval_answer import UNKNOWN, principal_from_record
+    queue = meta.get("ingress_queue", [])
+    pending_steers = meta.get("pending_ingress_steers", [])
+    if isinstance(queue, list) and isinstance(pending_steers, list):
+        queue = [*queue, *pending_steers]
+    if not isinstance(queue, list):
+        return
+    for item in queue:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not isinstance(item.get("content"), str):
+            continue
+        ingress = item.get("meta", {}).get("ingress", {}) if isinstance(item.get("meta"), dict) else {}
+        if not isinstance(ingress, dict) or principal_from_record(ingress.get("principal")).kind == UNKNOWN:
+            continue
+        session._queue.append(item)
 
 
 def _rehydrate_session_from_history(
@@ -420,6 +440,8 @@ def _rehydrate_session_from_history(
     if meta.get("reasoning_effort"):
         session.reasoning_effort = _validate_reasoning_effort(meta["reasoning_effort"])
     _restore_runtime_binding(state, session, meta)
+    session._initiator = meta.get("initiator") if isinstance(meta.get("initiator"), dict) else None
+    _restore_ingress_queue(session, meta)
     created_by_app = meta.get("created_by_app", "")
     if isinstance(created_by_app, str) and created_by_app:
         try:
@@ -472,11 +494,13 @@ def _rehydrate_session_from_history(
             cls,
             ts=m.get("ts", ""),
             meta=_redact_meta(m["meta"]) if m.get("meta") else None,
+            source=source_of(m),
         )
         _attach_variants(session, m)
         _attach_rewound(session, m)
     session.drain()
     session._resumed_count = len(session.messages)
+    session._journal_event_ids = {event.source_event_id for event in state.conversation_log.source_events(history_key)}
     session._dirty = False
     logger.info("Rehydrated session %s (%s) from history", session_name, session.title)
     return session
@@ -614,6 +638,8 @@ def restore_recent_sessions(
                 meta["reasoning_effort"]
             )
         _restore_runtime_binding(state, session, meta)
+        session._initiator = meta.get("initiator") if isinstance(meta.get("initiator"), dict) else None
+        _restore_ingress_queue(session, meta)
         if meta.get("folder_id"):
             session.folder_id = meta["folder_id"]
         if meta.get("pinned"):
@@ -667,11 +693,13 @@ def restore_recent_sessions(
                 cls,
                 ts=m.get("ts", ""),
                 meta=_redact_meta(m["meta"]) if m.get("meta") else None,
+                source=source_of(m),
             )
             _attach_variants(session, m)
             _attach_rewound(session, m)
         session.drain()
         session._resumed_count = len(session.messages)
+        session._journal_event_ids = {event.source_event_id for event in state.conversation_log.source_events(key)}
         session._dirty = False
         restored += 1
         logger.info("Restored session %s (%s)", session_name, session.title)
@@ -679,7 +707,15 @@ def restore_recent_sessions(
     return restored
 
 
-def save_session_to_history(
+def save_session_to_history(state, session, messages=None, *, closed=False, force=False, metadata_only=False):
+    if state.conversation_log is None:
+        return
+    key = persisted_history_key(state.conversation_log, session.key)
+    with state.conversation_log.journal_write(key):
+        return _save_session_to_history_locked(state, session, messages, closed=closed, force=force, metadata_only=metadata_only)
+
+
+def _save_session_to_history_locked(
     state: ConsoleState,
     session: _ChatSession,
     messages: list[dict] | None = None,
@@ -726,6 +762,12 @@ def save_session_to_history(
             return
     try:
         existing_meta = state.conversation_log.get_metadata(history_key)
+        path = state.conversation_log._path(history_key)
+        expected_bytes = path.read_bytes() if path.exists() else None
+        existing_events = state.conversation_log.source_events(history_key)
+        known_events = {event.source_event_id: event for event in existing_events}
+        if session._journal_event_ids and any(event.source_event_id not in session._journal_event_ids for event in existing_events):
+            raise ValueError("conversation changed outside the resident journal view")
 
         path = state.conversation_log._path(history_key)
         preserved_lines: list[str] | None = None
@@ -754,6 +796,12 @@ def save_session_to_history(
         if closed or existing_meta.get("closed"):
             meta_line["closed"] = True
         meta_line["memory_mode"] = session.memory_mode
+        if session._initiator:
+            meta_line["initiator"] = session._initiator
+        if session._pending_steers:
+            meta_line["pending_ingress_steers"] = list(session._pending_steers.values())
+        if session._queue:
+            meta_line["ingress_queue"] = [item for item in session._queue if item.get("meta", {}).get("ingress")]
         if session.title and session.title != session.key:
             meta_line["title"] = session.title
         if session.agent:
@@ -820,8 +868,7 @@ def save_session_to_history(
                 "role": role,
                 "content": content,
                 "ts": m.get("ts", ""),
-                "source_thread": "dashboard",
-                "source_user": "dashboard",
+                **source_of(m),
             }
             if m.get("variants"):
                 redacted_variants: list[dict] = []
@@ -843,11 +890,20 @@ def save_session_to_history(
                 entry["cls"] = cls_val
             if m.get("meta"):
                 entry["meta"] = _redact_meta(m["meta"])
-            lines.append(json.dumps(entry) + "\n")
+            previous = known_events.get(m.get("source_event_id"))
+            fields = ("role", "content", "ts", "source_thread", "source_user", "meta", "variants", "rewound")
+            if previous is not None and all(m.get(field) == previous.message.get(field) for field in fields):
+                lines.append(previous.raw_bytes.decode("utf-8") + "\n")
+            else:
+                lines.append(json.dumps(entry) + "\n")
         if preserved_lines is not None:
             lines.extend(preserved_lines)
 
+        current_bytes = path.read_bytes() if path.exists() else None
+        if current_bytes != expected_bytes:
+            raise ValueError("conversation changed during the history save")
         atomic_write(path, "".join(lines), fsync=True)
+        session._journal_event_ids = {event.source_event_id for event in state.conversation_log.source_events(history_key)}
         state.conversation_log._invalidate_cache(history_key)
         state.conversation_log.invalidate_tab_id_cache()
         try:

@@ -9,6 +9,7 @@ owns the lifecycle decision; these only supply the signal.
 
 from __future__ import annotations
 
+from gideon.core.turn_streams import closing_stream
 import asyncio
 import logging
 
@@ -47,40 +48,48 @@ async def run_verify_command(
     if danger:
         logger.warning("loop gate: refusing to run %s command — %s", label, danger)
         return None
+    from gideon.security.sandbox import egress_bound_argv, remove_wrap
+    from gideon.security.guardrails.policy import unattended_dispatch_key
     try:
-        from gideon.security.sandbox import PROFILE_TOOL, create_subprocess_limited
+        argv, cleanup = egress_bound_argv(["/bin/sh", "-c", cmd], run=unattended_dispatch_key("loop_gate"))
+    except PermissionError as error:
+        logger.warning("loop gate: %s", error)
+        return None
+    try:
+        try:
+            from gideon.security.sandbox import PROFILE_TOOL, create_subprocess_limited
 
-        proc = await create_subprocess_limited(
-            "/bin/sh",
-            "-c",
-            cmd,
-            profile=PROFILE_TOOL,
-            cwd=cwd or None,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
-        )
-    except Exception:
-        logger.warning(
-            "loop gate: could not spawn %s command `%s`", label, cmd, exc_info=True
-        )
-        return None
-    try:
-        _out, err = await run_with_timeout(proc, VERIFY_TIMEOUT_SECS)
-    except asyncio.TimeoutError:
-        logger.warning("loop gate: %s command timed out — `%s`", label, cmd)
-        return None
-    rc = proc.returncode
-    if rc == 127:
-        detail = (err or b"").decode("utf-8", "replace").strip()[:200]
-        logger.warning(
-            "loop gate: %s command not runnable (exit 127 — tool missing?) `%s`%s",
-            label,
-            cmd,
-            f" — {detail}" if detail else "",
-        )
-        return None
-    return rc == 0
+            proc = await create_subprocess_limited(
+                *argv,
+                profile=PROFILE_TOOL,
+                cwd=cwd or None,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
+            )
+        except Exception:
+            logger.warning(
+                "loop gate: could not spawn %s command `%s`", label, cmd, exc_info=True
+            )
+            return None
+        try:
+            _out, err = await run_with_timeout(proc, VERIFY_TIMEOUT_SECS)
+        except asyncio.TimeoutError:
+            logger.warning("loop gate: %s command timed out — `%s`", label, cmd)
+            return None
+        rc = proc.returncode
+        if rc == 127:
+            detail = (err or b"").decode("utf-8", "replace").strip()[:200]
+            logger.warning(
+                "loop gate: %s command not runnable (exit 127 — tool missing?) `%s`%s",
+                label,
+                cmd,
+                f" — {detail}" if detail else "",
+            )
+            return None
+        return rc == 0
+    finally:
+        remove_wrap(cleanup)
 
 
 def verdict_is_pass(raw: str | None) -> bool:
@@ -129,16 +138,17 @@ async def judge_verdict(prompt: str) -> str:
         chunks: list[str] = []
         try:
             await provider.start()
-            async for event in provider.stream(prompt):
-                if event.kind == EVENT_TEXT_CHUNK:
-                    chunks.append(event.text)
-                elif event.kind == EVENT_PERMISSION_REQUEST:
-                    try:
-                        await provider.respond_permission(event, allow=False)  # type: ignore[attr-defined]  # noqa: E501
-                    except Exception:
-                        pass
-                elif event.kind == EVENT_COMPLETE:
-                    break
+            async with closing_stream(provider.stream(prompt)) as _turn_events:
+                async for event in _turn_events:
+                    if event.kind == EVENT_TEXT_CHUNK:
+                        chunks.append(event.text)
+                    elif event.kind == EVENT_PERMISSION_REQUEST:
+                        try:
+                            await provider.respond_permission(event, allow=False)  # type: ignore[attr-defined]  # noqa: E501
+                        except Exception:
+                            pass
+                    elif event.kind == EVENT_COMPLETE:
+                        break
         finally:
             try:
                 await provider.shutdown()

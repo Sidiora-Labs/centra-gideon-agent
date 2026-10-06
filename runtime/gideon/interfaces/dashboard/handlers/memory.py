@@ -744,6 +744,10 @@ async def api_memory_episodic_search(request: web.Request) -> web.Response:
     return web.json_response({"results": results})
 
 
+from gideon.security.session_credentials import memory_tool_endpoint
+
+
+@memory_tool_endpoint('memory_recall')
 async def api_memory_recall(request: web.Request) -> web.Response:
     """GET /api/memory/recall?q=... — deep on-demand recall for the agent.
 
@@ -972,7 +976,8 @@ async def api_memory_vault_sync(request: web.Request) -> web.Response:
         enqueue = state.knowledge_ingest_queue().enqueue
     except Exception:
         logger.debug("vault sync: knowledge ingest unavailable", exc_info=True)
-    summary = await asyncio.to_thread(
+    from gideon.cognition.knowledge.file_items import _owned_io
+    summary = await _owned_io(
         functools.partial(vault.sync, knowledge=knowledge, enqueue=enqueue)
     )
     summary["path"] = str(vdir)
@@ -1091,20 +1096,75 @@ async def api_memory_consolidate(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "key": key})
 
 
-async def api_memory_observability(request: web.Request) -> web.Response:
-    """GET /api/memory/observability — memory health metrics and context preview."""
-    store = _get_provider(request.app["state"])
-    query = request.query.get("q", "")[:500]
-    stats = store.memory_stats()
-    rejections = store.get_rejection_stats()
-    preview = store.get_context_preview(query_text=query)
-    return web.json_response(
-        {
-            "stats": stats,
-            "rejections": rejections,
-            "context_preview": _redact_memory_field(preview),
+def _memory_observability(state: ConsoleState, query: str) -> dict:
+    from gideon.cognition import memory_service
+    from gideon.hypermid.memory import HypermidMemoryProvider, _trace
+
+    # Observe the installed native authority before creating any legacy stores.
+    authority = memory_service._authoritative_service
+    provider = authority.provider if authority is not None else None
+    if isinstance(provider, HypermidMemoryProvider):
+        from gideon.hypermid.contracts import GrantOperation
+
+        request = provider._access(GrantOperation.READ, "memory-records")
+
+        async def inspect(client):
+            health = await client.health(trace=_trace())
+            diagnostics = await client.diagnostics(request)
+            return health, diagnostics
+
+        try:
+            health, diagnostics = provider._loop.call(inspect, timeout=8.0)
+            ready = health.state == "ready" and health.durable and health.lexical_available and diagnostics.recovery_state == "ready"
+            search_index = {
+                "authority": "hypermid",
+                "state": "available" if ready else "degraded",
+                "detail": "Native memory storage and keyword search are available." if ready else "Native memory reports that storage or keyword search is not ready.",
+                "record_count": diagnostics.record_count,
+                "embedding_count": diagnostics.embedding_count,
+                "memory_fts_count": diagnostics.memory_fts_count,
+                "repair_id": None,
+            }
+            stats = {
+                "records": diagnostics.record_count,
+                "embeddings": diagnostics.embedding_count,
+                "stale_records": diagnostics.stale_record_count,
+            }
+        except Exception as error:
+            logger.warning("Native memory diagnostics unavailable: %s", type(error).__name__)
+            search_index = {
+                "authority": "hypermid", "state": "unavailable",
+                "detail": "Native memory diagnostics could not be read. Search health is unknown.",
+                "repair_id": None,
+            }
+            stats = {}
+        return {
+            "stats": stats, "rejections": {}, "search_index": search_index,
+            "context_preview_available": False,
+            "context_preview": {"semantic_chars": 0, "episodic_chars": 0, "lessons_chars": 0, "total_chars": 0},
         }
-    )
+    journal = _get_memory(state)
+    store = _get_provider(state)
+    stats = store.memory_stats()
+    keyword = journal.keyword_index_status()
+    indexed, embedded = stats.get("faiss_index_size"), stats.get("embedded_count")
+    consistent = indexed == embedded if isinstance(indexed, int) and isinstance(embedded, int) else None
+    return {
+        "stats": stats,
+        "rejections": store.get_rejection_stats(),
+        "context_preview": _redact_memory_field(store.get_context_preview(query_text=query)),
+        "search_index": {
+            "authority": "journal", **keyword,
+            "semantic_state": "available" if consistent is True else "degraded" if consistent is False else "unknown",
+            "semantic_detail": f"Semantic search indexes {indexed} of {embedded} embedded memories." if consistent is not None else "Semantic index coverage could not be measured.",
+        },
+    }
+
+
+async def api_memory_observability(request: web.Request) -> web.Response:
+    query = request.query.get("q", "")[:500]
+    data = await asyncio.to_thread(_memory_observability, request.app["state"], query)
+    return web.json_response(data)
 
 
 async def api_memory_promote(request: web.Request) -> web.Response:

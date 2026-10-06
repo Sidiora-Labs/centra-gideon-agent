@@ -33,6 +33,8 @@ import json
 import logging
 import os
 import shutil
+
+from gideon.operations.durability import sqlite_files
 import socket
 import tempfile
 import zipfile
@@ -41,7 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from gideon.core.config import loader as config_loader
-from gideon.core.sqlite_compat import sqlite3
+from gideon.core.sqlite_compat import connect, sqlite3
 from gideon.security.security import is_sensitive_path
 from gideon.workspace.snapshot import (
     _copy_json_with_arrival_policy,
@@ -167,6 +169,10 @@ def _is_excluded(rel_path: PurePosixPath) -> bool:
     greps this module for entry paths to decide snapshot coverage, so an example path in a
     comment here silently marks that entry "covered" (measured: it did, for two of them).
     """
+    from gideon.operations.durability import inventory as inv
+
+    if inv.is_ignored(rel_path.as_posix()):
+        return True
     if rel_path.name in EXPORT_EXCLUDE:
         return True
     if rel_path.name.endswith(".pid"):
@@ -227,10 +233,21 @@ def domain_of(rel: str) -> str:
     return best or _UNDECLARED_LITERAL_DOMAINS.get(rel, "platform")
 
 
+def _write_archive_file(zf, path: Path, member: str) -> None:
+    if sqlite_files.is_sidecar(path.parent, path.name):
+        return
+    if sqlite_files.is_database(path):
+        buffer = io.BytesIO()
+        _backup_sqlite(path, buffer)
+        zf.writestr(member, buffer.getvalue())
+    else:
+        zf.write(str(path), member)
+
+
 def _wal_checkpoint(db_path: Path) -> None:
     if db_path.is_file():
         try:
-            conn = sqlite3.connect(str(db_path))
+            conn = connect(str(db_path))
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
             conn.close()
         except Exception:
@@ -239,14 +256,14 @@ def _wal_checkpoint(db_path: Path) -> None:
 
 def _backup_sqlite(src: Path, dst_buffer: io.BytesIO) -> None:
     """Use SQLite backup API for a consistent copy."""
-    src_conn = sqlite3.connect(str(src))
-    mem_conn = sqlite3.connect(":memory:")
+    src_conn = connect(str(src))
+    mem_conn = connect(":memory:")
     try:
         src_conn.backup(mem_conn)
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
         tmp.close()
         try:
-            disk_conn = sqlite3.connect(tmp.name)
+            disk_conn = connect(tmp.name)
             try:
                 mem_conn.backup(disk_conn)
             finally:
@@ -512,7 +529,7 @@ def create_export_zip(domains: Sequence[str] | None = None) -> tuple[bytes, dict
                     if _is_projected_db(rel.as_posix()):
                         continue
                     if fpath.is_file():
-                        zf.write(str(fpath), f"{prefix}/{rel}")
+                        _write_archive_file(zf, fpath, f"{prefix}/{rel}")
                         count += 1
             dir_counts[dirname] = count
         contents_summary["workspace_files"] = dir_counts.get("workspace", 0)
@@ -527,7 +544,7 @@ def create_export_zip(domains: Sequence[str] | None = None) -> tuple[bytes, dict
             if src.is_symlink() or is_sensitive_path(str(src)):
                 continue
             if src.is_file():
-                zf.write(str(src), f"{prefix}/{entry}")
+                _write_archive_file(zf, src, f"{prefix}/{entry}")
                 contents_summary[entry] = src.stat().st_size
             elif src.is_dir():
                 count = 0
@@ -539,11 +556,9 @@ def create_export_zip(domains: Sequence[str] | None = None) -> tuple[bytes, dict
                         continue
                     if _is_derived_within(entry, fpath.relative_to(src).as_posix()):
                         continue
-                    if fpath.suffix in _DB_SUFFIXES or fpath.name.endswith(
-                        _DB_SIDECARS
-                    ):
+                    if sqlite_files.is_sidecar(fpath.parent, fpath.name):
                         continue
-                    zf.write(str(fpath), f"{prefix}/{rel}")
+                    _write_archive_file(zf, fpath, f"{prefix}/{rel}")
                     count += 1
                 if count:
                     extra_counts[entry] = count
@@ -728,7 +743,10 @@ def _strip_excluded_from_staged(snap: Path) -> list[str]:
     copy/merge passes physically cannot see a credential — no per-branch skip to forget.
     """
     removed: list[str] = []
-    excluded = _excluded_entry_paths()
+    from gideon.operations.durability import inventory as inv
+    excluded = _excluded_entry_paths() | frozenset(
+        entry.path for entry in inv.INVENTORY if not entry.merged_in
+    )
     for rel in sorted(excluded):
         target = snap / rel
         if not target.exists():
@@ -801,6 +819,8 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
     """
     pc = _pc_dir()
     summary: dict = {"mode": mode, "items": []}
+    from gideon.operations.durability.home_paths import LinkInTheWay, home_path
+    left: list[str] = []
 
     with tempfile.TemporaryDirectory() as work_str:
         work = Path(work_str)
@@ -828,10 +848,11 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
             )
             summary["refused"] = stripped
 
+
         if mode == "replace":
             before = {p.name for p in pc.glob("pre-restore-*") if p.is_dir()}
             try:
-                _do_replace(snap, pc, None)
+                left.extend(_do_replace(snap, pc, None))
             finally:
                 new = sorted(
                     p.name
@@ -840,111 +861,152 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
                 )
                 if new:
                     summary["pre_restore"] = new[-1]
-            summary["items"].append("full replace")
+            summary["items"].append("replace applied" if not left else "replace partially applied")
         else:
-            if (snap / "memory.db").is_file():
-                if not (pc / "memory.db").is_file():
-                    shutil.copy2(str(snap / "memory.db"), str(pc / "memory.db"))
-                    summary["items"].append("memory (copied)")
-                else:
-                    _merge_memory(snap / "memory.db", pc / "memory.db")
-                    summary["items"].append("memory (merged)")
+            try:
+                if (snap / "memory.db").is_file():
+                    if not (pc / "memory.db").is_file():
+                        sqlite_files.copy_file(str(snap / "memory.db"), str(pc / "memory.db"))
+                        summary["items"].append("memory (copied)")
+                    else:
+                        _merge_memory(snap / "memory.db", pc / "memory.db")
+                        summary["items"].append("memory (merged)")
+            except LinkInTheWay as link:
+                link.put_on(left)
 
-            if (snap / "learning.db").is_file() and not (pc / "learning.db").is_file():
-                shutil.copy2(str(snap / "learning.db"), str(pc / "learning.db"))
-                summary["items"].append("learning staging (copied)")
+            try:
+                if (snap / "learning.db").is_file() and not (pc / "learning.db").is_file():
+                    sqlite_files.copy_file(str(snap / "learning.db"), str(pc / "learning.db"))
+                    summary["items"].append("learning staging (copied)")
+            except LinkInTheWay as link:
+                link.put_on(left)
 
-            if (snap / "triggers.json").is_file():
-                if (pc / "triggers.json").is_file():
-                    _merge_triggers(snap / "triggers.json", pc / "triggers.json")
-                    summary["items"].append("automations (merged)")
-                else:
-                    _copy_json_with_arrival_policy(
-                        snap / "triggers.json", pc / "triggers.json", "triggers.json"
-                    )
-                    summary["items"].append("automations (copied)")
+            try:
+                if (snap / "triggers.json").is_file():
+                    if (pc / "triggers.json").is_file():
+                        _merge_triggers(snap / "triggers.json", pc / "triggers.json")
+                        summary["items"].append("automations (merged)")
+                    else:
+                        _copy_json_with_arrival_policy(
+                            snap / "triggers.json", pc / "triggers.json", "triggers.json"
+                        )
+                        summary["items"].append("automations (copied)")
+            except LinkInTheWay as link:
+                link.put_on(left)
 
-            if (snap / "event_triggers.json").is_file():
-                if (pc / "event_triggers.json").is_file():
-                    _merge_event_triggers(
-                        snap / "event_triggers.json", pc / "event_triggers.json"
-                    )
-                    summary["items"].append("event triggers (merged)")
-                else:
-                    _copy_json_with_arrival_policy(
-                        snap / "event_triggers.json",
-                        pc / "event_triggers.json",
-                        "event_triggers.json",
-                    )
-                    summary["items"].append("event triggers (copied)")
+            try:
+                if (snap / "event_triggers.json").is_file():
+                    if (pc / "event_triggers.json").is_file():
+                        _merge_event_triggers(
+                            snap / "event_triggers.json", pc / "event_triggers.json"
+                        )
+                        summary["items"].append("event triggers (merged)")
+                    else:
+                        _copy_json_with_arrival_policy(
+                            snap / "event_triggers.json",
+                            pc / "event_triggers.json",
+                            "event_triggers.json",
+                        )
+                        summary["items"].append("event triggers (copied)")
+            except LinkInTheWay as link:
+                link.put_on(left)
 
-            if (snap / "crons.json").is_file():
-                if (pc / "crons.json").is_file():
-                    _merge_crons(snap / "crons.json", pc / "crons.json")
-                    summary["items"].append("crons (merged)")
-                else:
-                    _copy_json_with_arrival_policy(
-                        snap / "crons.json", pc / "crons.json", "crons.json"
-                    )
-                    summary["items"].append("crons (copied)")
+            try:
+                if (snap / "crons.json").is_file():
+                    if (pc / "crons.json").is_file():
+                        _merge_crons(snap / "crons.json", pc / "crons.json")
+                        summary["items"].append("crons (merged)")
+                    else:
+                        _copy_json_with_arrival_policy(
+                            snap / "crons.json", pc / "crons.json", "crons.json"
+                        )
+                        summary["items"].append("crons (copied)")
+            except LinkInTheWay as link:
+                link.put_on(left)
 
-            if (snap / "hooks.json").is_file():
-                if not (pc / "hooks.json").is_file():
-                    _copy_json_with_arrival_policy(
-                        snap / "hooks.json", pc / "hooks.json", "hooks.json"
-                    )
-                    summary["items"].append("hooks (copied)")
-                else:
-                    summary["items"].append("hooks (skipped, already exists)")
+            try:
+                if (snap / "hooks.json").is_file():
+                    if not (pc / "hooks.json").is_file():
+                        _copy_json_with_arrival_policy(
+                            snap / "hooks.json", pc / "hooks.json", "hooks.json"
+                        )
+                        summary["items"].append("hooks (copied)")
+                    else:
+                        summary["items"].append("hooks (skipped, already exists)")
+            except LinkInTheWay as link:
+                link.put_on(left)
 
-            if (snap / "config.json").is_file() and not (pc / "config.json").is_file():
-                shutil.copy2(str(snap / "config.json"), str(pc / "config.json"))
-                summary["items"].append("config (restored)")
+            try:
+                if (snap / "config.json").is_file() and not (pc / "config.json").is_file():
+                    sqlite_files.copy_file(str(snap / "config.json"), str(pc / "config.json"))
+                    summary["items"].append("config (restored)")
+            except LinkInTheWay as link:
+                link.put_on(left)
 
-            if (snap / "notifications.jsonl").is_file():
-                if (pc / "notifications.jsonl").is_file():
-                    _merge_notifications(
-                        snap / "notifications.jsonl", pc / "notifications.jsonl"
-                    )
-                    summary["items"].append("notifications (merged)")
-                else:
-                    shutil.copy2(
-                        str(snap / "notifications.jsonl"),
-                        str(pc / "notifications.jsonl"),
-                    )
-                    summary["items"].append("notifications (copied)")
+            try:
+                if (snap / "notifications.jsonl").is_file():
+                    if (pc / "notifications.jsonl").is_file():
+                        _merge_notifications(
+                            snap / "notifications.jsonl", pc / "notifications.jsonl"
+                        )
+                        summary["items"].append("notifications (merged)")
+                    else:
+                        sqlite_files.copy_file(
+                            str(snap / "notifications.jsonl"),
+                            str(pc / "notifications.jsonl"),
+                        )
+                        summary["items"].append("notifications (copied)")
+            except LinkInTheWay as link:
+                link.put_on(left)
 
-            if (snap / "feedback.jsonl").is_file() and not (
-                pc / "feedback.jsonl"
-            ).is_file():
-                shutil.copy2(str(snap / "feedback.jsonl"), str(pc / "feedback.jsonl"))
-                summary["items"].append("feedback (restored)")
+            try:
+                if (snap / "feedback.jsonl").is_file() and not (
+                    pc / "feedback.jsonl"
+                ).is_file():
+                    sqlite_files.copy_file(str(snap / "feedback.jsonl"), str(pc / "feedback.jsonl"))
+                    summary["items"].append("feedback (restored)")
+            except LinkInTheWay as link:
+                link.put_on(left)
 
             for dirname in ("workspace", "cron-history"):
-                sd = snap / dirname
-                if sd.is_dir():
-                    dd = pc / dirname
-                    dd.mkdir(parents=True, exist_ok=True)
-                    _copy_tree_no_overwrite(sd, dd)
-                    summary["items"].append(f"{dirname} (merged)")
+                try:
+                    sd = snap / dirname
+                    if sd.is_dir():
+                        dd = home_path(pc, dirname)
+                        dd.mkdir(parents=True, exist_ok=True)
+                        _copy_tree_no_overwrite(sd, dd, left=left)
+                        summary["items"].append(f"{dirname} (merged)")
+                except LinkInTheWay as link:
+                    link.put_on(left)
 
-            if (snap / "skills").is_dir():
-                (pc / "skills").mkdir(parents=True, exist_ok=True)
-                _copy_tree_no_overwrite(snap / "skills", pc / "skills")
-                summary["items"].append("skills (merged)")
+            try:
+                if (snap / "skills").is_dir():
+                    home_path(pc, "skills").mkdir(parents=True, exist_ok=True)
+                    _copy_tree_no_overwrite(snap / "skills", pc / "skills", left=left)
+                    summary["items"].append("skills (merged)")
+            except LinkInTheWay as link:
+                link.put_on(left)
 
             imported_stores = 0
             for entry in _remaining_export_paths(snap):
-                sp, dp = snap / entry, pc / entry
-                if sp.is_dir():
-                    dp.mkdir(parents=True, exist_ok=True)
-                    _copy_tree_no_overwrite(sp, dp, entry_path=entry)
-                    imported_stores += 1
-                elif sp.is_file() and not dp.exists():
-                    dp.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(str(sp), str(dp))
-                    imported_stores += 1
-            if imported_stores:
-                summary["items"].append(f"{imported_stores} stores (merged)")
+                try:
+                    sp, dp = snap / entry, home_path(pc, entry)
+                    if sp.is_dir():
+                        dp.mkdir(parents=True, exist_ok=True)
+                        _copy_tree_no_overwrite(sp, dp, entry_path=entry, left=left)
+                        imported_stores += 1
+                    elif sp.is_file() and not dp.exists():
+                        dp.parent.mkdir(parents=True, exist_ok=True)
+                        sqlite_files.bring_in(sp, dp)
+                        imported_stores += 1
+                except LinkInTheWay as link:
+                    link.put_on(left)
+            try:
+                if imported_stores:
+                    summary["items"].append(f"{imported_stores} stores (merged)")
+            except LinkInTheWay as link:
+                link.put_on(left)
 
+    summary["left_unchanged"] = left
+    summary["partial"] = bool(left)
     return summary

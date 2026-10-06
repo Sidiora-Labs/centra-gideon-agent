@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from gideon.core.turn_streams import closing_stream
+
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
@@ -55,7 +57,8 @@ _ACP_TRACE = os.environ.get("GIDEON_ACP_TRACE") == "1"
 
 def _acp_trace(direction: str, text: str) -> None:
     if _ACP_TRACE:
-        logger.info("ACP-TRACE %s %s", direction, text[:600])
+        from gideon.security.security import redact_credentials
+        logger.info("ACP-TRACE %s %s", direction, redact_credentials(text)[0][:600])
 
 
 def _make_unified_diff(old: str, new: str, path: str, max_len: int = 6000) -> str:
@@ -107,6 +110,7 @@ class AcpClient:
         mode: str | None = None,
         reasoning_effort: str | None = None,
         unattended: bool = False,
+        session_meta: dict | None = None,
     ):
         from gideon.core.config.loader import workspace_root
         from gideon.integrations.acp.dialect import DefaultDialect
@@ -114,10 +118,15 @@ class AcpClient:
         self._dialect = dialect or DefaultDialect()
         self._model, self._agent = model or DEFAULT_MODEL, agent
         self._unattended = bool(unattended)
+        self._question_handler = None
+        self._question_handler_set = False
         self._session_key, self._channel_id = session_key, channel_id
         self._mode = self._authority_mode(mode)
         self._reasoning_effort = reasoning_effort or ""
         self._sandbox_mode, self._sandbox = sandbox_mode, sandbox or "none"
+        from gideon.integrations.acp.options import session_metadata
+
+        self._session_meta = session_metadata(session_meta)
         self._extra_env = dict(extra_env or {})
         self._command = list(command) if command else None
         self._session_files_dir = Path(session_files_dir) if session_files_dir else None
@@ -215,7 +224,15 @@ class AcpClient:
         self._resume_session_id = sid
 
     def rekey(self, session_key: str, channel_id: str | None = None) -> None:
+        from gideon.security.session_credentials import forget_pid, publish_pid
+        if self._pid:
+            forget_pid(self._pid)
+            publish_pid(session_key, self._pid)
         self._session_key = self._transport._session_key = session_key
+        if self._connection is not None:
+            self._connection._session_key = session_key
+        if self._session is not None:
+            self._session._session_key = session_key
         self._channel_id = self._transport._channel_id = channel_id
         self.touch_activity()
 
@@ -364,7 +381,7 @@ class AcpClient:
         await self._transport.spawn()
         router = FrameRouter(self._transport.readline)
         self._connection = AcpConnection(
-            None, router, dialect=self._dialect, transport=self._transport
+            None, router, dialect=self._dialect, transport=self._transport, session_meta=self._session_meta, session_key=self._session_key
         )
         router.start()
 
@@ -429,8 +446,11 @@ class AcpClient:
 
     async def _initialize_session(self) -> None:
         assert self._connection is not None
+        from .elicitation import attended_owner
         await self._connection.initialize(
             {
+                "clientCapabilities": self._dialect.client_capabilities(
+                    attended=not self._unattended and attended_owner(self._session_key)),
                 "protocolVersion": self._dialect.protocol_version(),
                 "clientInfo": self._dialect.client_info(
                     client_name=CLIENT_NAME, client_version=CLIENT_VERSION
@@ -491,33 +511,48 @@ class AcpClient:
 
     async def _events(self, value: str, timeout: float, *, command: bool):
         await self.ensure_ready()
+        if self._session is not None and not await self._session.settle_owed_answer():
+            await self._teardown()
+            await self.ensure_ready()
         if command and not self._can_execute_commands:
             raise AcpCommandsUnsupported(value)
         session = self._session
         assert session is not None
+        session._questions_permitted = not self._unattended
+        if self._question_handler_set:
+            session.set_question_handler(self._question_handler)
         if not command:
             session.set_steer_source(self._steer_pull)
         stream = session.stream_command if command else session.stream_events
-        async for event in stream(value, timeout=timeout):
-            self._stamp_turn_telemetry(event)
-            self.last_prompt_stats = session.last_prompt_stats
-            self._last_stop_reason = session._last_stop_reason
-            yield event
+        async with closing_stream(stream(value, timeout=timeout)) as events:
+            async for event in events:
+                self._stamp_turn_telemetry(event)
+                self.last_prompt_stats = session.last_prompt_stats
+                self._last_stop_reason = session._last_stop_reason
+                yield event
 
     async def stream_events(
         self, message: str, timeout: float = _DEFAULT_PROMPT_TIMEOUT
     ) -> AsyncIterator[AcpEvent]:
-        async for event in self._events(message, timeout, command=False):
-            yield event
+        async with closing_stream(self._events(message, timeout, command=False)) as events:
+            async for event in events:
+                yield event
 
     async def stream_command(
         self, command: str, timeout: float = _DEFAULT_PROMPT_TIMEOUT
     ) -> AsyncIterator[AcpEvent]:
-        async for event in self._events(command, timeout, command=True):
-            yield event
+        async with closing_stream(self._events(command, timeout, command=True)) as events:
+            async for event in events:
+                yield event
 
     def steer_capable(self) -> bool:
         return bool(self._dialect.supports_mid_turn_prompt)
+
+    def set_question_handler(self, handler) -> None:
+        self._question_handler = handler
+        self._question_handler_set = True
+        if self._session is not None:
+            self._session.set_question_handler(handler)
 
     def set_steer_source(self, pull: Callable[[], list[str]] | None) -> bool:
         self._steer_pull = pull
@@ -562,6 +597,15 @@ class AcpClient:
         if self._session is None:
             raise AcpError("Cannot approve tool before session is initialized")
         await self._session.approve_tool(request_id, option_id)
+
+    def deny_outcome(self, request_id: str | int) -> dict:
+        return self._session.deny_outcome(request_id) if self._session else {"ends_turn": True, "offered": []}
+
+    def permission_answer(self, request_id: str | int) -> dict | None:
+        return self._session.permission_answer(request_id) if self._session else None
+
+    def refusal_answer(self, request_id: str | int) -> dict | None:
+        return self._session.refusal_answer(request_id) if self._session else None
 
     async def reject_tool(self, request_id: str | int) -> None:
         if self._session is None:

@@ -175,7 +175,7 @@ function safeHref(href: unknown): string | undefined {
   return h
 }
 
-const FILE_PATH_RE = /^(?:~|\.{0,2}\/)?[\w.\-]+(?:\/[\w.\-]+)*\.\w{1,8}\/?$/
+const FILE_PATH_RE = /^(?:~\/|\.{0,2}\/)?[\w.\-]+(?:\/[\w.\-]+)*\.\w{1,8}\/?$/
 function looksLikeFile(s: string): boolean {
   const t = s.trim()
   return t.length <= 200 && !t.includes(' ') && FILE_PATH_RE.test(t)
@@ -232,7 +232,7 @@ const COMPONENTS: Record<string, React.ComponentType<any>> = {
 const REMARK: PluggableList = [remarkGfm, [remarkMath, { singleDollarTextMath: false }]]
 const REHYPE: PluggableList = [rehypeKatex]
 
-const BARE_FILE_RE = /((?:~|\.{0,2}\/)?[\w.\-]+(?:\/[\w.\-]+)+\.\w{1,8})/g
+const BARE_FILE_RE = /(?<![\w.~/-])((?:~\/|\.{0,2}\/)?[\w.\-]+(?:\/[\w.\-]+)+\.\w{1,8}|~\/[\w.\-]+\.\w{1,8})/g
 
 function linkifyFiles(children: any, onFileClick: (path: string) => void): any {
   return (Array.isArray(children) ? children : [children]).flatMap((child, ci) => {

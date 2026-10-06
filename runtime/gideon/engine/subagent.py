@@ -1,5 +1,6 @@
 """Admission, execution, retirement, and delivery of delegated work."""
 
+from gideon.core.turn_streams import closing_stream
 import asyncio
 import io
 import logging
@@ -218,13 +219,16 @@ class SubagentInfo:
     cwd: str = ""
     sandbox: str = "none"
     extra_env: dict[str, str] = field(default_factory=dict)
+    app_work: Any = field(default=None, kw_only=True)
     _pid: int | None = None
     parent_run: str = ""
+    work_scope: Any = field(default=None, repr=False)
     queued: bool = False
     cancelled: bool = False
     _outcome_noted: bool = False
     memory_receipt: dict = field(default_factory=lambda: {"status": "pending", "count": 0})
     trigger_start_approval: Any = None
+    batch_start_approval: Any = None
     hypermid_snapshot: dict[str, Any] = field(default_factory=dict)
     hypermid_contribution: dict[str, Any] = field(default_factory=dict)
     _hypermid_registry: Any = field(default=None, repr=False)
@@ -277,6 +281,7 @@ class DelegationSupervisor:
         run_lane_cap: int = 0,
         delivery_coalesce_secs: float = 0.05,
         validate_trigger_start_approval: Callable[[Any], bool] | None = None,
+        validate_batch_start_approval: Callable[[Any, SubagentInfo], bool] | None = None,
     ):
         self._sessions, self._ctx_builder = sessions, ctx_builder
         self._on_done, self._on_event = on_done, on_event
@@ -292,6 +297,8 @@ class DelegationSupervisor:
         self._on_spawn_approval, self._is_yolo = on_spawn_approval, is_yolo
         self._validate_trigger_start_approval = validate_trigger_start_approval
         self._consumed_trigger_start_approvals: set[str] = set()
+        self._validate_batch_start_approval = validate_batch_start_approval
+        self._consumed_batch_start_approvals: set[str] = set()
         self._running_count = 0
         self._running_by_fanout: dict[str, int] = {}
         self._fanout_failures: dict[str, int] = {}
@@ -415,7 +422,7 @@ class DelegationSupervisor:
 
             budget = budget_from_config()
             if not budget.is_unlimited:
-                verdict, reason = get_meter().check_day(budget)
+                verdict, reason = get_meter().check_day_before_work(budget)
                 if verdict is BudgetVerdict.EXCEEDED:
                     self._spawn_audit(
                         parent,
@@ -449,10 +456,30 @@ class DelegationSupervisor:
         parent_run: str = "",
         sandbox: str = "none",
         extra_env: dict[str, str] | None = None,
+        app_work: Any = None,
         trigger_start_approval: Any = None,
+        accepted_origin: Any = None,
+        batch_start_approval: Any = None,
         hypermid_registry: Any = None,
         hypermid_snapshot: Any = None,
     ) -> SubagentInfo | None:
+        from gideon.extensions.apps import app_work as scopes
+        inherited = scopes.held() or scopes.of_session(parent_session_key)
+        if app_work is None:
+            app_work = inherited
+        elif inherited is not None:
+            app_work = inherited.child(app_work.tier) if inherited.app == app_work.app else inherited.child("")
+        if app_work is not None:
+            app_work = app_work.child()
+            if not app_work.tier:
+                return self._refused(_redact(task), agent, "app may run no agent work now")
+            from gideon.extensions.apps.agent_tiers import capability_class as tier_class
+            requested = {"text": "text", "research": "read", "mutating": "tools"}.get(capability_class or "", app_work.tier)
+            if requested not in {"text", "read", "tools"} or scopes.intersect(app_work.tier, requested) != requested:
+                return self._refused(_redact(task), agent, "requested child exceeds the app agent tier")
+            app_work = app_work.child(requested)
+            capability_class = tier_class(app_work.tier)
+            approval_mode = ""
         public_task = _redact(task)
         rejected = self._host_admission(public_task, agent, parent_session_key)
         if rejected is not None:
@@ -477,8 +504,31 @@ class DelegationSupervisor:
             agent, error = _validate_agent(agent)
             if error:
                 return self._refused(public_task, "", error)
+        _spawn_id = uuid.uuid4().hex[:8]
+        from gideon.security.session_credentials import current_work
+        _parent_work = current_work()
+        if _parent_work is not None and _parent_work.session_key != parent_session_key:
+            _parent_work = None
+        if accepted_origin is not None:
+            from gideon.security.durable_work import bound_for_trigger_origin
+            _parent_work = bound_for_trigger_origin(
+                accepted_origin, str(getattr(trigger_start_approval, "trigger_id", "")),
+                f"subagent:{_spawn_id}", app_work)
+            if _parent_work is None:
+                return self._refused(public_task, agent, "scheduled work origin is no longer authorized")
+        if app_work is not None:
+            from dataclasses import replace
+            from gideon.security.session_credentials import BoundWork
+            from gideon.security.approval_answer import APP, Principal
+            app_actor = Principal(APP,app_work.app)
+            if _parent_work is not None:
+                _parent_work = replace(_parent_work,work_actor=app_actor,created_by_app=app_work.app)
+            else:
+                # Installed host AppWork provides app identity, never owner memory scope.
+                _parent_work = BoundWork(f"subagent:{_spawn_id}",f"subagent:{_spawn_id}","app-start",
+                                         app_actor,app_work.app,"temporary",time.monotonic()+7200,app_actor)
         info = SubagentInfo(
-            id=uuid.uuid4().hex[:8],
+            id=_spawn_id,
             task=public_task,
             parent_session_key=parent_session_key,
             agent=agent,
@@ -487,13 +537,16 @@ class DelegationSupervisor:
             cwd=directory,
             approval_mode=approval_mode or "",
             trigger_start_approval=trigger_start_approval,
+            batch_start_approval=batch_start_approval,
             capability_class=capability_class or "",
             silent=silent,
             dry_run=dry_run,
             parent_run=parent_run,
+            work_scope=_parent_work,
             sandbox=sandbox or "none",
             extra_env=dict(extra_env or {}),
             _raw_task=task,
+            app_work=app_work,
         )
         if (hypermid_registry is None) != (hypermid_snapshot is None):
             return self._refused(
@@ -537,6 +590,8 @@ class DelegationSupervisor:
         )
 
     def _spawn_permission(self, info: SubagentInfo) -> str | None:
+        if info.app_work is not None:
+            return "app_permission" if info.app_work.current_tier() else None
         trusted = bool(
             info.parent_session_key
             and self._sessions.get_approval_policy(info.parent_session_key) == "auto"
@@ -589,7 +644,23 @@ class DelegationSupervisor:
                 self._drain_queue()
                 return
             self._consumed_trigger_start_approvals.add(nonce)
+        batch_start_approved = False
+        if info.batch_start_approval is not None:
+            nonce = str(getattr(info.batch_start_approval, "nonce", "") or "")
+            try:
+                batch_start_approved = bool(nonce and nonce not in self._consumed_batch_start_approvals and self._validate_batch_start_approval and self._validate_batch_start_approval(info.batch_start_approval, info))
+            except Exception:
+                logger.warning("Batch start Allow revalidation failed for %s", info.id, exc_info=True)
+            if not batch_start_approved:
+                info.done, info.error = True, "spawn refused: batch start Allow is stale, invalid, or already used"
+                self._spawn_audit(info.parent_session_key, "refused_batch_action_allow_changed", subagent_id=info.id)
+                self._dec_running(info)
+                self._drain_queue()
+                return
+            self._consumed_batch_start_approvals.add(nonce)
         reason = self._spawn_permission(info)
+        if batch_start_approved and reason is None:
+            reason = "batch_action_allow"
         if trigger_start_approved and reason is None:
             reason = "trigger_action_allow"
         if reason is not None:
@@ -756,9 +827,7 @@ class DelegationSupervisor:
             if budget.is_unlimited:
                 return
             lane, meter = _fanout_key(info), get_meter()
-            meter.charge(
-                info.input_tokens + info.output_tokens, info.cost_usd, run_key=lane
-            )
+            meter.charge_run(lane, info.input_tokens + info.output_tokens, info.cost_usd)
             verdict, reason = meter.check_run(lane, budget)
             if verdict is not BudgetVerdict.EXCEEDED or lane in self._fanout_stops:
                 return
@@ -905,6 +974,8 @@ class DelegationSupervisor:
         return summaries
 
     def _execution_policy(self, info: SubagentInfo) -> str:
+        if info.app_work is not None:
+            return "ask"
         policy = self._sessions.get_approval_policy(info.parent_session_key)
         operation = ""
         caller = info.parent_session_key or f"subagent:{info.id}"
@@ -965,12 +1036,17 @@ class DelegationSupervisor:
             options["dry_run"] = True
         if info.extra_env:
             options["extra_env"] = dict(info.extra_env)
+        if info.app_work is not None:
+            options["app_work"] = info.app_work
+            options["unattended"] = False
         return options
 
     def _record_execution_identity(self, info: SubagentInfo, client, key: str) -> None:
         try:
             pid = self._sessions.get_pid(key)
             if pid:
+                from gideon.security.session_credentials import publish_pid
+                publish_pid(key,pid)
                 info._pid = pid
                 update_state(info.id, pid=pid, pid_recorded_at=time.time())
         except Exception:
@@ -982,7 +1058,7 @@ class DelegationSupervisor:
         except Exception:
             logger.debug("Failed to record session_id for %s", info.id, exc_info=True)
 
-    async def _run_inner(self, info: SubagentInfo, session_key: str) -> None:
+    async def _run_inner(self, info: SubagentInfo, session_key: str, *, _work_credential=None) -> None:
         policy = self._execution_policy(info)
         agent = info.agent or self._sessions.get_agent(info.parent_session_key)
         if not info.agent and agent:
@@ -993,12 +1069,23 @@ class DelegationSupervisor:
                 source="subagent",
                 resources=f"subagent_id={info.id},inherited_agent={agent}",
             )
-        client, initial, _ = await self._sessions.get_or_create(
-            session_key,
-            agent=agent or None,
-            approval_policy=policy,
-            **self._runner_arguments(info, policy),
-        )
+        from gideon.extensions.apps import app_work as scopes
+        if info.app_work is not None:
+            scopes.bind_session(session_key, info.app_work)
+        from contextlib import nullcontext
+        from gideon.security.execution_lineage import host_runtime_admission
+        from gideon.security.session_credentials import bind_execution
+
+        admission = host_runtime_admission(_work_credential) if _work_credential is not None else nullcontext()
+        with admission:
+            client, initial, _ = await self._sessions.get_or_create(
+                session_key,
+                agent=agent or None,
+                approval_policy=policy,
+                **self._runner_arguments(info, policy),
+            )
+        if _work_credential is not None:
+            bind_execution(_work_credential, client)
         message = info._raw_task or info.task
         if not (info.agent and _AGENT_NAME_RE.fullmatch(info.agent)):
             from gideon.integrations.prompt_providers.runtime import (
@@ -1007,7 +1094,10 @@ class DelegationSupervisor:
 
             prefix = render_snippet_block("subagent-system-prefix")
             message = (prefix + "\n\n" if prefix else _SYSTEM_PREFIX) + message
-        prompt, _ = self._ctx_builder.build_message(message, initial, session_key)
+        if info.app_work is not None and info.app_work.tier == "text":
+            prompt = info._raw_task or info.task
+        else:
+            prompt, _ = self._ctx_builder.build_message(message, initial, session_key)
         await self._fire_event(
             "subagent_spawn", info, {"task": _redact(info.task), "agent": agent or ""}
         )
@@ -1034,10 +1124,11 @@ class DelegationSupervisor:
         announce_failover = getattr(client, "announce_failover", None)
         if callable(announce_failover):
             announce_failover()
-        async for event in client.stream(prompt):
-            consume = handlers.get(event.kind)
-            if consume is not None and not await consume(run, event):
-                break
+        async with closing_stream(client.stream(prompt)) as _turn_events:
+            async for event in _turn_events:
+                consume = handlers.get(event.kind)
+                if consume is not None and not await consume(run, event):
+                    break
         if not info.done:
             self._finish_output(run)
 
@@ -1118,6 +1209,15 @@ class DelegationSupervisor:
         self, run: _ExecutionPass, event: LLMEvent
     ) -> tuple[bool, str | None, dict | None]:
         info = run.info
+        if info.app_work is not None:
+            refusal = info.app_work.refusal(event.title or "", declared=getattr(event, "risk_level", ""), kind=event.tool_kind, arguments=event.tool_input)
+            if refusal:
+                return False, refusal, {"app": info.app_work.app, "reason": "app_agent_tier"}
+            if self._on_tool_approval_factory:
+                return bool(await self._on_tool_approval_factory(info)(event)), None, {"app": info.app_work.app}
+            if self._on_tool_approval:
+                return bool(await self._on_tool_approval(event, info.parent_session_key)), None, {"app": info.app_work.app}
+            return False, "app work requires the owner's approval", {"app": info.app_work.app}
         from gideon.security.guardrails.policy import (
             TOOL_READ_WRITE,
             profile_for_session,
@@ -1129,7 +1229,7 @@ class DelegationSupervisor:
         if info.capability_class == CAPABILITY_MUTATING and not run.research:
             profile = tool_grant_posture(TOOL_READ_WRITE)
         grant_denial = tool_grant_denial(
-            event.title or "", profile.tool_grants, profile.tool_allowlist
+            event.title or "", profile.tool_grants, profile.tool_allowlist, declared=getattr(event, "risk_level", ""), tool_kind=event.tool_kind, tool_input=event.tool_input
         )
         if grant_denial:
             return (
@@ -1153,6 +1253,11 @@ class DelegationSupervisor:
         hook = self._ctx_builder.hooks.on_tool_call(event.title)
         if hook.action == TOOL_DENY:
             return False, "hook_deny", None
+        from gideon.integrations.acp.mcp_servers import core_tool_work_asks
+        from gideon.security.protected_folders import call_protected_delete
+        if (core_tool_work_asks(event.title, event.tool_kind, event.tool_input)
+                and not call_protected_delete(getattr(event, "risk_level", ""), event.title, event.tool_kind, event.tool_input, cwd=info.cwd)):
+            return True, None, {"subagent_id": info.id, "reason": "work_asks"}
         if hook.action == TOOL_AUTO_APPROVE:
             return True, None, {"subagent_id": info.id, "reason": "hook_auto_approve"}
         if run.policy == "auto":
@@ -1335,9 +1440,11 @@ class DelegationSupervisor:
 
     async def _run(self, info: SubagentInfo) -> None:
         key = f"subagent:{info.id}"
+        from gideon.security.session_credentials import begin_child_turn, end_turn
+        _work_credential = begin_child_turn(key,info.work_scope,turn_id=info.id)
         try:
             await asyncio.wait_for(
-                self._run_inner(info, key), timeout=self._default_timeout
+                self._run_inner(info, key, _work_credential=_work_credential), timeout=self._default_timeout
             )
         except asyncio.TimeoutError:
             self._abnormal_exit(
@@ -1351,6 +1458,7 @@ class DelegationSupervisor:
             self._abnormal_exit(info, "error", str(error))
             logger.exception("Subagent %s failed", info.id)
         finally:
+            end_turn(_work_credential)
             if not info.reaped:
                 info.elapsed = time.time() - info.started
                 self._schedule_memory_receipt(info)

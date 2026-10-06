@@ -27,8 +27,10 @@ def library_environment(*, source: Mapping[str, str] | None = None) -> dict[str,
         "HF_XET_CACHE": str(hf_home / "xet"),
         "HF_ASSETS_CACHE": str(hf_home / "assets"),
         "HF_HUB_DISABLE_IMPLICIT_TOKEN": "1",
+        "HF_HUB_DISABLE_XET": "1",
         "HF_HUB_DISABLE_TELEMETRY": "1",
         "DO_NOT_TRACK": "1",
+        "TREE_SITTER_LANGUAGE_PACK_MANIFEST_URL": (cache / "tree-sitter-language-pack" / "parsers.json").as_uri(),
         "TREE_SITTER_LANGUAGE_PACK_CACHE_DIR": str(
             cache / "tree-sitter-language-pack"
         ),

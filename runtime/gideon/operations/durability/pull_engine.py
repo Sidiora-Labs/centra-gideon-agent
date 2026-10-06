@@ -28,6 +28,7 @@ it), else ``consumed``. A prefix the remote can't actually serve yet (a partial 
 from __future__ import annotations
 
 import logging
+import json
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,7 +46,9 @@ from gideon.operations.durability.cursor import (
     Cursor,
 )
 from gideon.operations.durability.registry import Registry, shard_prefix
-from gideon.operations.durability.shards import import_shards
+from gideon.operations.durability.shards import import_shards, declared_paths
+from gideon.operations.durability.home_paths import home_path, LinkInTheWay
+from gideon.core.record_ids import is_safe_record_id
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +70,7 @@ class SeqOutcome:
     deferred_db: list[str] = field(default_factory=list)
     conflicts: int = 0
     detail: str = ""
+    refused: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -101,19 +105,17 @@ def _materialize(objs, prefix: str, dest: Path) -> int:
     from each key so paths are shard-dir-relative (``manifest.json``, ``tasks/entities.jsonl``).
     Returns how many objects landed. Objects outside ``prefix`` are ignored defensively.
     """
-    written = 0
+    selected = []
     for obj in objs:
-        key = obj.key
-        if not key.startswith(prefix):
-            continue
-        rel = key[len(prefix) :].lstrip("/")
-        if not rel:
-            continue
-        target = dest / rel
+        if not isinstance(obj.key, str) or not obj.key.startswith(prefix):
+            raise ValueError("object key does not belong to the selected export")
+        rel = obj.key[len(prefix):]
+        target = home_path(dest, rel)
+        selected.append((target, obj.data))
+    for target, data in selected:
         target.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_bytes(target, obj.data)
-        written += 1
-    return written
+        atomic_write_bytes(target, data, mode=0o600)
+    return len(selected)
 
 
 def _pull_one_seq(
@@ -126,15 +128,26 @@ def _pull_one_seq(
     queue: Optional[ConflictQueue] = None,
     now: str = "",
     codec=None,
+    ancestors=None,
+    self_id="",
 ) -> SeqOutcome:
-    prefix = shard_prefix(peer_id, seq)
     out = SeqOutcome(peer_id=peer_id, seq=seq)
+    if not is_safe_record_id(peer_id):
+        out.verdict = PAYLOAD_BAD
+        out.detail = "machine id is not one plain name"
+        out.refused[peer_id] = out.detail
+        return out
+    prefix = shard_prefix(peer_id, seq)
     refs = transport.list_remote(prefix)
     if not refs:
         out.verdict = PREREQ_ABSENT
         out.detail = "no objects under prefix (partial push?)"
         return out
     objs = transport.pull(refs)
+    if {ref.key for ref in refs} - {obj.key for obj in objs}:
+        out.verdict = PREREQ_ABSENT
+        out.detail = "listed objects disappeared before download"
+        return out
     if codec is not None:
         objs, refused = codec.decrypt_after_pull(objs)
         if refused.keys:
@@ -150,13 +163,30 @@ def _pull_one_seq(
             return out
     with tempfile.TemporaryDirectory() as tmp:
         shard_dir = Path(tmp)
-        if _materialize(objs, prefix, shard_dir) == 0:
+        try:
+            materialized = _materialize(objs, prefix, shard_dir)
+        except (ValueError, LinkInTheWay) as exc:
+            out.verdict = PAYLOAD_BAD
+            out.detail = f"refused export object path: {exc}"
+            return out
+        if materialized == 0:
             out.verdict = PREREQ_ABSENT
             out.detail = "prefix listed but no bytes pulled"
             return out
+        manifest_path = shard_dir / "manifest.json"
+        if not manifest_path.is_file():
+            out.verdict = PREREQ_ABSENT
+            out.detail = "complete-copy manifest is unavailable"
+            return out
         try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            declarations = declared_paths(manifest)
+            if any(not (shard_dir / rel).is_file() for rel in declarations):
+                out.verdict = PREREQ_ABSENT
+                out.detail = "declared objects are missing from the complete copy"
+                return out
             imported = import_shards(shard_dir)
-        except (ValueError, OSError) as exc:
+        except (ValueError, OSError, TypeError, AttributeError) as exc:
             out.verdict = PAYLOAD_BAD
             out.detail = f"import failed: {exc}"
             return out
@@ -180,7 +210,12 @@ def _pull_one_seq(
                     home,
                     entry,
                     rows,
-                    ancestors=registry.ancestors_for(entry.id) if registry else {},
+                    ancestors=ancestors.of(peer_id, entry.id) if ancestors is not None else {},
+                    published=ancestors.published(entry.id) if ancestors is not None else {},
+                    history=ancestors.held(entry.id) if ancestors is not None else {},
+                    deleted=ancestors.deleted(entry.id) if ancestors is not None else {},
+                    peer_id=peer_id,
+                    agreed_there=imported.agreements.get(self_id, {}).get(entry.id, {}),
                     queue=queue,
                     now=now,
                 )
@@ -188,10 +223,16 @@ def _pull_one_seq(
                 out.updated += res.updated
                 out.removed += res.removed
                 out.conflicts += res.conflicts
-                if registry is not None:
-                    registry.record_ancestors(entry.id, res.new_ancestors)
-                if res.verdict == PAYLOAD_BAD:
+                if ancestors is not None:
+                    ancestors.record(peer_id, entry.id, res.new_ancestors)
+                    ancestors.took_deletion(entry.id, res.deleted_there)
+                if res.verdict == PREREQ_ABSENT:
+                    held = True
+                    out.detail = res.detail or "a local landing prerequisite is unavailable"
+                    out.refused[entry.path] = out.detail
+                elif res.verdict == PAYLOAD_BAD:
                     poison = True
+                    out.detail = res.detail or "entry payload is unusable"
             elif db_merger is not None:
                 verdict = db_merger(entry, shard_dir)
                 if verdict == PREREQ_ABSENT:
@@ -220,6 +261,7 @@ def pull_from_peers(
     queue: Optional[ConflictQueue] = None,
     now: str = "",
     codec=None,
+    ancestors=None,
 ) -> PullReport:
     """Pull and merge every peer shard set the cursor hasn't consumed, oldest seq first.
 
@@ -233,7 +275,7 @@ def pull_from_peers(
     seen = cursor.seen()
     for peer in registry.peers(self_id):
         already = int(seen.get(peer.machine_id, 0) or 0)
-        for seq in range(already + 1, peer.seq + 1):
+        for seq in ([peer.seq] if peer.seq > already else []):
             outcome = _pull_one_seq(
                 transport,
                 home,
@@ -244,7 +286,11 @@ def pull_from_peers(
                 queue=queue,
                 now=now,
                 codec=codec,
+                ancestors=ancestors,
+                self_id=self_id,
             )
+            if ancestors is not None:
+                ancestors.save()
             outcome.advanced = cursor.record(peer.machine_id, seq, outcome.verdict)
             report.outcomes.append(outcome)
             if not outcome.advanced:

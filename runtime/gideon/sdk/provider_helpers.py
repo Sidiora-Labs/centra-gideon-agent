@@ -71,8 +71,10 @@ class BrandedCatalog(ModelCatalog):
         endpoint: str = "",
         api_key: str = "",
         default_model: str = "",
+        capabilities_of: Callable[[dict[str, Any]], list[str]] | None = None,
     ) -> None:
         self._spec = spec
+        self._capabilities_of = capabilities_of
         self._endpoint = endpoint or spec.default_base_url
         self._explicit_api_key = api_key
         self._default_model = default_model
@@ -137,6 +139,7 @@ class BrandedCatalog(ModelCatalog):
             self._endpoint,
             api_key,
             default_base=self._spec.default_base_url,
+            capabilities_of=self._capabilities_of,
         )
         return live if live else self._fallback()
 
@@ -209,6 +212,7 @@ class BrandedCatalog(ModelCatalog):
 
 def register_branded_app(
     spec: BrandedProviderSpec,
+    *, capabilities_of: Callable[[dict[str, Any]], list[str]] | None = None,
 ) -> tuple[Callable, Callable, Callable]:
     """Wire a branded/generic protocol provider app into the default registry and
     return its ``(_factory, create_provider, create_catalog)`` trio.
@@ -297,6 +301,7 @@ def register_branded_app(
             spec,
             endpoint=str(opts.get("endpoint") or opts.get("base_url") or ""),
             api_key=str(opts.get("api_key") or ""),
+            capabilities_of=capabilities_of,
             default_model=str(
                 model or opts.get("default_model") or opts.get("model") or ""
             ),

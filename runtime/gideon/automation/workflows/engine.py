@@ -27,11 +27,29 @@ keeps a template portable across a user's provider setup.
 
 from __future__ import annotations
 
+from gideon.security.safety_flags import yes_or_no
+
 import asyncio
 import json
 import logging
 import os
 import time
+from functools import wraps
+
+
+def _with_workflow_identity(function):
+    @wraps(function)
+    async def invoke(node, ctx, **kwargs):
+        run_id = str(kwargs.get("run_id") or "")
+        if not run_id:
+            return await function(node, ctx, **kwargs)
+        from gideon.security.durable_work import workflow_work
+        try:
+            with workflow_work(run_id, node.id or "node"):
+                return await function(node, ctx, **kwargs)
+        except PermissionError as error:
+            return _fail(FailureClass.PERMISSION, str(error), "review and resume the run from an authenticated owner session")
+    return invoke
 from enum import Enum
 from typing import Any
 
@@ -375,6 +393,7 @@ def leaf_spawn_env(
     return leaf_env(dict(os.environ), lineage)
 
 
+@_with_workflow_identity
 async def dispatch_stage(
     node: Node,
     ctx: BindingContext,
@@ -427,6 +446,12 @@ async def dispatch_stage(
             "the gateway did not initialize the subagent service",
         )
 
+    from gideon.extensions.apps import app_work as app_scopes
+    work = app_scopes.of_run_id(run_id)
+    capability = str(cfg.get("capability", "") or "research").strip().lower()
+    refusal = app_scopes.run_refusal(work, capability=capability)
+    if refusal:
+        return _fail(FailureClass.PERMISSION, refusal, "choose work within the app's declared agent tier")
     claim_target = claim_key(run_id, node.id or "")
     holder = claim_holder(run_id, node.id or "")
     if claim_target:
@@ -441,7 +466,14 @@ async def dispatch_stage(
                 resolved_prompt=prompt,
             )
 
+    from gideon.automation.workflows.batch_start import issue_for_stage
+    try:
+        batch_permit = issue_for_stage(run_id, node.id or "", task=prompt, agent=str(cfg.get("agent", "") or ""), cwd=cwd)
+    except PermissionError as error:
+        return _fail(FailureClass.PERMISSION, str(error), "Ask the owner to review the batch again")
     info = subagents.spawn(
+        batch_start_approval=batch_permit,
+        app_work=work,
         task=prompt,
         parent_session_key=ownership.owned_key(run_id, node.id or "node"),
         parent_run=(f"{ownership.OWNED_PREFIX}{run_id}" if run_id else ""),
@@ -618,6 +650,13 @@ async def dispatch_subworkflow(
         )
 
     spec = definition if isinstance(definition, dict) else definition.to_dict()
+    from gideon.automation.workflows import automation_versions as consent
+    try:
+        bounds = consent.run_bounds(run_id) if run_id else None
+        if bounds is not None:
+            spec, bounds = consent.selection(name, bounds)
+    except consent.VersionConsentError as error:
+        return _fail(FailureClass.USER, str(error), "ask the owner to review the workflow versions")
 
     raw_inputs = cfg.get("inputs") if isinstance(cfg.get("inputs"), dict) else {}
     child_inputs: dict[str, Any] = {}
@@ -631,7 +670,22 @@ async def dispatch_subworkflow(
                 exc.remediation or "check the referenced node id and field exist",
             )
 
+    from gideon.extensions.apps import app_work as app_scopes
+    work = app_scopes.of_run_id(run_id)
+    refusal = app_scopes.run_refusal(work)
+    if refusal:
+        return _fail(FailureClass.PERMISSION, refusal, "the child must remain within its app scope")
     parent = store.get(run_id) if run_id else None
+    from gideon.security.durable_work import bind_run_origin, verified_run_origin
+    origin_values = verified_run_origin(parent)
+    if parent is not None and origin_values is None:
+        return _fail(FailureClass.PERMISSION, "parent work source proof is unavailable", "review and resume the parent from an authenticated owner session")
+    if parent is not None:
+        from gideon.automation.workflows import private_work
+        try:
+            await private_work.validate_run(supervisor, parent)
+        except RuntimeError as error:
+            return _fail(FailureClass.PERMISSION, str(error), "the original private scope must remain live")
     child = store.create(
         WorkflowRun(
             id="",
@@ -643,8 +697,20 @@ async def dispatch_subworkflow(
             root_run_id=(parent.root_run_id if parent else "") or run_id or "",
             project_id=parent.project_id if parent else "",
             origin=RunOrigin(kind=OriginKind.SUBAGENT_TOOL, trigger_id=node.id),
+            extra=app_scopes.stamp({
+                **(ownership.inherited_extra(parent) if parent is not None else {}),
+                **({consent.BOUNDS_KEY: bounds} if bounds is not None else {}),
+            }, work),
         )
     )
+    if origin_values is not None:
+        # The host dispatcher has verified the parent; mint a child-specific
+        # receipt from that provenance, preserving source and privacy constraints.
+        from gideon.security.durable_work import _seal_origin
+        origin_values["run_id"] = ""
+        if not bind_run_origin(child, _seal_origin(origin_values)):
+            return _fail(FailureClass.PERMISSION, "child work origin does not fit its run scope", "review the parent run's app and privacy scope")
+        store.save(child)
     store.write_spec(child.id, spec)
 
     try:
@@ -704,6 +770,7 @@ async def dispatch_subworkflow(
     )
 
 
+@_with_workflow_identity
 async def dispatch_action(
     node: Node,
     ctx: BindingContext,
@@ -739,6 +806,16 @@ async def dispatch_action(
         from gideon.integrations.action_providers.registry import get_action_provider
 
         getter = get_action_provider
+    from gideon.extensions.apps import app_work as app_scopes
+    work = app_scopes.of_run_id(run_id)
+    if work is not None:
+        if name in app_scopes.STARTS_AGENTS:
+            return _fail(FailureClass.PERMISSION, "app workflow agents must start as scoped stage steps", "use a stage or subworkflow node")
+        from gideon.automation.triggers.screen import provider_is_read_only
+        capability = "research" if provider_is_read_only(name) and name not in {"create-task", "call-app-route", "notify", "send-message"} else "mutating"
+        refusal = app_scopes.run_refusal(work, capability=capability)
+        if refusal:
+            return _fail(FailureClass.PERMISSION, refusal, "choose an action within the app tier")
     provider = getter(name)
     if provider is None:
         return _fail(
@@ -753,7 +830,7 @@ async def dispatch_action(
     payload = dict(cfg.get("payload") or {})
     payload.setdefault("node_id", getattr(node, "id", "") or "")
     if run_id:
-        payload.setdefault("run_id", run_id)
+        payload["run_id"] = run_id
     if instance_path:
         payload.setdefault("instance_path", instance_path)
     if project_id:
@@ -768,8 +845,22 @@ async def dispatch_action(
         payload=payload,
         execution_cwd=action_cwd,
     )
+    from gideon.security.guardrails.policy import unattended_dispatch_key
+    from gideon.security.net.policy import egress_held_to
+
+    key = unattended_dispatch_key(f"workflow:{run_id}")
+    from gideon.security.guardrails.denylist import enforce_action
+    denied = enforce_action(name, action_config, context, session_key=key)
+    if denied.blocked:
+        return _fail(FailureClass.PERMISSION, denied.refusal(),
+                     "change what this step runs, then run the workflow again")
     try:
-        result = await provider.execute(action_config, context, timeout=timeout)
+        token = app_scopes.hold(work)
+        try:
+            with egress_held_to(key):
+                result = await provider.execute(action_config, context, timeout=timeout)
+        finally:
+            app_scopes.let_go(token)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -1457,7 +1548,7 @@ def apply_judge_contract(
     the contract does not model (`marginal_value`), and a loop's `progress_field` may point at
     any key in the body's output, so dropping them would break a reader this seam never saw.
     """
-    if not bool((node.config or {}).get("judge_contract", False)):
+    if yes_or_no((node.config or {}).get("judge_contract", False)) is not True:
         return result
     if result.state not in (InstanceState.DONE, InstanceState.DEGRADED):
         return result
@@ -1978,6 +2069,7 @@ def _estimate_tokens(prompt: str, response: str) -> int:
     return max(1, (len(prompt) + len(response)) // NOMINAL_CHARS_PER_TOKEN)
 
 
+@_with_workflow_identity
 async def dispatch(
     node: Node,
     ctx: BindingContext,

@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from gideon.extensions.providers.instances import ExtensionInstance
+from gideon.integrations.mcp_argument_secrets import credential_values, store_command_line, resolve_command_line
 
 MCP_TOOLS_EXTENSION = "mcp-tools"
 
@@ -141,24 +142,21 @@ def _load() -> dict[str, Any]:
             if changed:
                 data["mcpServers"] = prepared
                 _save(data)
+                from gideon.security.mcp_grants import carry_over
+                for name, old in servers.items():
+                    if isinstance(old, dict) and isinstance(prepared.get(name), dict):
+                        carry_over({**old, "name": name, "source": "mcp.json"},
+                                   {**prepared[name], "name": name, "source": "mcp.json"})
         except Exception:
             for name, spec in servers.items():
                 if isinstance(spec, dict):
-                    old = {
-                        **(spec.get("env") if isinstance(spec.get("env"), dict) else {}),
-                        **(spec.get("headers") if isinstance(spec.get("headers"), dict) else {}),
-                        **(spec.get("oauth") if isinstance(spec.get("oauth"), dict) else {}),
-                    }
+                    old = credential_values(spec)
                     purge_unused(mcp_owner(name), old)
             raise
         if changed:
             for name, spec in prepared.items():
                 if isinstance(spec, dict):
-                    retained = {
-                        **(spec.get("env") if isinstance(spec.get("env"), dict) else {}),
-                        **(spec.get("headers") if isinstance(spec.get("headers"), dict) else {}),
-                        **(spec.get("oauth") if isinstance(spec.get("oauth"), dict) else {}),
-                    }
+                    retained = credential_values(spec)
                     purge_unused(mcp_owner(name), retained)
         return data
     except (json.JSONDecodeError, OSError):
@@ -206,11 +204,7 @@ def store_server_credentials(
     previous = previous or {}
     owner = mcp_owner(name)
     prepared = dict(spec)
-    prior_values = {
-        **(previous.get("env") if isinstance(previous.get("env"), dict) else {}),
-        **(previous.get("headers") if isinstance(previous.get("headers"), dict) else {}),
-        **(previous.get("oauth") if isinstance(previous.get("oauth"), dict) else {}),
-    }
+    prior_values = credential_values(previous)
     try:
         secret_env = {key for key in env if credential_field(key)}
         if env:
@@ -241,7 +235,7 @@ def store_server_credentials(
             )
         elif "oauth" in spec:
             prepared["oauth"] = {}
-        return prepared
+        return store_command_line(name, prepared, previous)
     except Exception:
         from gideon.core.config.secret_refs import purge_unused
 
@@ -267,7 +261,7 @@ def resolve_server_credentials(name: str, spec: dict[str, Any]) -> dict[str, Any
         ):
             raise ValueError("MCP references are allowed only for credential-shaped env names")
         resolved[field] = resolve(values, owner=owner)
-    return resolved
+    return resolve_command_line(name, resolved)
 
 
 def _save(data: dict[str, Any]) -> None:
@@ -275,7 +269,21 @@ def _save(data: dict[str, Any]) -> None:
 
     path = _mcp_json_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    before = {}
+    try:
+        before = json.loads(path.read_text(encoding="utf-8")).get("mcpServers", {})
+    except (OSError, ValueError, AttributeError):
+        pass
     _atomic_json_write(path, data)
+    after = data.get("mcpServers", {})
+    from gideon.integrations import mcp_client, mcp_discovery, mcp_stdio
+
+    for name in set(before) | set(after):
+        if before.get(name) != after.get(name):
+            mcp_stdio.stop_finishing_soon(lambda server, changed=name: server == changed)
+            mcp_discovery.forget_probe(name)
+            if mcp_client._registry is not None:
+                mcp_client._registry.invalidate_server(name)
 
 
 def _spec_to_instance(name: str, spec: dict[str, Any]) -> ExtensionInstance:
@@ -419,19 +427,11 @@ def update_instance(
     except OSError:
         from gideon.core.config.secret_refs import purge_unused
 
-        purge_unused(mcp_owner(instance_id), {
-            **(existing.get("env") if isinstance(existing.get("env"), dict) else {}),
-            **(existing.get("headers") if isinstance(existing.get("headers"), dict) else {}),
-            **(existing.get("oauth") if isinstance(existing.get("oauth"), dict) else {}),
-        })
+        purge_unused(mcp_owner(instance_id), credential_values(existing))
         raise
     from gideon.core.config.secret_refs import purge_unused
 
-    purge_unused(mcp_owner(instance_id), {
-        **(spec.get("env") if isinstance(spec.get("env"), dict) else {}),
-        **(spec.get("headers") if isinstance(spec.get("headers"), dict) else {}),
-        **(spec.get("oauth") if isinstance(spec.get("oauth"), dict) else {}),
-    })
+    purge_unused(mcp_owner(instance_id), credential_values(spec))
     return _spec_to_instance(instance_id, spec)
 
 

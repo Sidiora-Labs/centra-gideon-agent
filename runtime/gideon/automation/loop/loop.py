@@ -144,6 +144,20 @@ ACTION_SOURCE_STATES: dict[str, frozenset[LoopStatus]] = {
 }
 
 
+INCIDENT_HOLD = (
+    "Held: incident mode is on, so this loop starts no new cycle and makes no model calls. "
+    "It carries on by itself once incident mode is turned off."
+)
+
+
+def held_reason(status: str) -> str:
+    """Why a running loop is held by the incident switch, otherwise an empty string."""
+    if status != LoopStatus.RUNNING.value:
+        return ""
+    from gideon.security.guardrails.incident import incident_active
+    return INCIDENT_HOLD if incident_active() else ""
+
+
 @dataclass
 class Loop:
     """One autonomous loop of any kind.

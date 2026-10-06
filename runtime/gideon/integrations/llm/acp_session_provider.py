@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+from gideon.core.turn_streams import closing_stream
+from gideon.integrations.acp.spend import AcpTurnMeter
+
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -23,7 +26,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class AcpSessionProvider(AcpToolOutcomesMixin, AgentProvider, ModelProvider):
+class AcpSessionProvider(AcpTurnMeter, AcpToolOutcomesMixin, AgentProvider, ModelProvider):
     supports_tools = True
 
     def __init__(
@@ -36,13 +39,21 @@ class AcpSessionProvider(AcpToolOutcomesMixin, AgentProvider, ModelProvider):
         agent_name: str = "",
         unattended: bool = False,
         session_snapshot: dict | None = None,
+        compacts_itself: bool = False,
     ) -> None:
+        from gideon.integrations.acp.options import compacts_itself as validate_compaction
+
+        self._compacts_itself = validate_compaction(compacts_itself)
         self._conn, self._session = connection, session
         self._runtime_id = runtime_id
         self._model, self._agent_name = model, agent_name
         self._reasoning_effort = ""
         self._session_snapshot = dict(session_snapshot or {})
         self.set_unattended(unattended)
+
+    @property
+    def compacts_automatically(self) -> bool:
+        return self._compacts_itself
 
     @property
     def provider_id(self) -> str:
@@ -126,10 +137,9 @@ class AcpSessionProvider(AcpToolOutcomesMixin, AgentProvider, ModelProvider):
         )
 
     async def stream(self, message: str) -> AsyncIterator[LLMEvent]:
-        async for event in relay_events(
-            self, self._session.stream_events, message, self._stamp_turn_telemetry
-        ):
-            yield event
+        async with closing_stream(self._metered(relay_events(self, self._session.stream_events, message, self._stamp_turn_telemetry), prompt=message)) as events:
+            async for event in events:
+                yield event
 
     @property
     def supports_native_commands(self) -> bool:
@@ -140,19 +150,30 @@ class AcpSessionProvider(AcpToolOutcomesMixin, AgentProvider, ModelProvider):
 
         if not self.supports_native_commands:
             raise AcpCommandsUnsupported(command)
-        async for event in relay_events(
-            self, self._session.stream_command, command, self._stamp_turn_telemetry
-        ):
-            yield event
+        async with closing_stream(self._metered(relay_events(self, self._session.stream_command, command, self._stamp_turn_telemetry), prompt=command)) as events:
+            async for event in events:
+                yield event
 
     async def approve_tool(self, request_id: str | int) -> None:
         await self._session.approve_tool(request_id)
+
+    def deny_outcome(self, request_id: str | int) -> dict:
+        return self._session.deny_outcome(request_id)
+
+    def permission_answer(self, request_id: str | int) -> dict | None:
+        return self._session.permission_answer(request_id)
+
+    def refusal_answer(self, request_id: str | int) -> dict | None:
+        return self._session.refusal_answer(request_id)
 
     async def reject_tool(self, request_id: str | int) -> None:
         await self._session.reject_tool(request_id)
 
     def steer_capable(self) -> bool:
         return self._session.steer_capable()
+
+    def set_question_handler(self, handler) -> None:
+        self._session.set_question_handler(handler)
 
     def set_steer_source(self, pull: Callable[[], list[str]] | None) -> bool:
         return self._session.set_steer_source(pull)
@@ -221,6 +242,7 @@ class AcpSessionProvider(AcpToolOutcomesMixin, AgentProvider, ModelProvider):
 
     def set_unattended(self, unattended: bool) -> None:
         self._unattended = bool(unattended)
+        self._session._questions_permitted = not self._unattended
 
 
 def concurrent_sessions_enabled(dialect_id: str | None) -> bool:
@@ -251,6 +273,7 @@ async def open_acp_session_provider(
     session_key: str | None = "",
     mcp_servers: list | None = None,
     unattended: bool = False,
+    compacts_itself: bool = False,
 ) -> AcpSessionProvider:
     from gideon.integrations.acp.mcp_servers import core_mcp_servers
 
@@ -258,7 +281,7 @@ async def open_acp_session_provider(
     if parameters["mcpServers"] is None:
         parameters["mcpServers"] = core_mcp_servers(session_key=session_key)
     session = await connection.new_session(
-        parameters, session_files_dir=session_files_dir
+        parameters, session_files_dir=session_files_dir, audit_session_key=session_key
     )
     return AcpSessionProvider(
         connection,
@@ -267,5 +290,6 @@ async def open_acp_session_provider(
         model=model,
         agent_name=agent_name,
         unattended=unattended,
+        compacts_itself=compacts_itself,
         session_snapshot=getattr(connection, "last_session_new_snapshot", {}),
     )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TypeVar
@@ -97,14 +98,30 @@ def _validate_declaration(
         )
 
 
+def _app_callable_owner(factory):
+    from gideon.extensions.apps.code_provenance import loaded_app, owner
+    app = owner()
+    module = sys.modules.get(getattr(factory, "__module__", ""))
+    path = getattr(module, "__file__", None)
+    if app is None or module is None or not isinstance(path, str) or loaded_app(path) != app:
+        return None
+    globals_ = getattr(factory, "__globals__", None)
+    if globals_ is not None and globals_ is not vars(module):
+        return None
+    return app, module, factory
+
+
 class ProviderRegistry:
     def __init__(self) -> None:
         self._factories: dict[str, ProviderFactory] = {}
+        self._factory_owners: dict[str, tuple[str, object, object]] = {}
+        self._catalog_owners: dict[str, tuple[str, object, object]] = {}
         self._capabilities: dict[str, ProviderCapability] = {}
         self._entries: dict[str, ProviderEntry] = {}
         self._catalog_factories: dict[str, CatalogFactory] = {}
         self._readiness: dict[str, ReadinessProbe] = {}
         self._in_process_types: set[str] = set()
+        self._passes_on: dict[str, Callable[[ProviderEntry, str], bool]] = {}
 
     def register_type(
         self,
@@ -113,17 +130,23 @@ class ProviderRegistry:
         *,
         readiness: ReadinessProbe | None = None,
         in_process: bool = False,
+        passes_on: Callable[[ProviderEntry, str], bool] | None = None,
     ) -> None:
         if cap.type in self._factories:
             raise ProviderResolutionError(
                 f"provider type {cap.type!r} is already registered"
             )
+        ownership = _app_callable_owner(factory)
+        if ownership is not None:
+            self._factory_owners[cap.type] = ownership
         self._factories.update({cap.type: factory})
         self._capabilities.update({cap.type: cap})
         if readiness is not None:
             self._readiness[cap.type] = readiness
         if in_process:
             self._in_process_types.add(cap.type)
+        if passes_on is not None:
+            self._passes_on[cap.type] = passes_on
 
     def register_entry(self, entry: ProviderEntry) -> None:
         if entry.name not in self._entries:
@@ -186,7 +209,32 @@ class ProviderRegistry:
         return self._factories[selected.type](**invocation)
 
     def register_catalog(self, type_: str, factory: CatalogFactory) -> None:
+        ownership = _app_callable_owner(factory)
+        if ownership is not None:
+            self._catalog_owners[type_] = ownership
+        else:
+            self._catalog_owners.pop(type_, None)
         self._catalog_factories.update({type_: factory})
+
+    def unregister_app_module(self, app: str, module_name: str, module: object) -> int:
+        if sys.modules.get(module_name) is not module:
+            return 0
+        removed = 0
+        for type_, (registered_app, registered_module, factory) in tuple(self._factory_owners.items()):
+            if registered_app != app or registered_module is not module or self._factories.get(type_) is not factory:
+                continue
+            self._factory_owners.pop(type_, None)
+            self._factories.pop(type_, None)
+            self._capabilities.pop(type_, None)
+            self._readiness.pop(type_, None)
+            self._passes_on.pop(type_, None)
+            self._in_process_types.discard(type_)
+            removed += 1
+        for type_, (registered_app, registered_module, factory) in tuple(self._catalog_owners.items()):
+            if registered_app == app and registered_module is module and self._catalog_factories.get(type_) is factory:
+                self._catalog_owners.pop(type_, None)
+                self._catalog_factories.pop(type_, None)
+        return removed
 
     def catalog_of(self, type_: str) -> CatalogFactory | None:
         return self._catalog_factories.get(type_)
@@ -225,6 +273,12 @@ class ProviderRegistry:
 
 _default_registry: ProviderRegistry | None = None
 _CONFIG_TYPE_MAP: dict[str, str] = {}
+
+
+def unregister_app_module_types(app: str, module_name: str, module: object) -> int:
+    if _default_registry is None:
+        return 0
+    return _default_registry.unregister_app_module(app, module_name, module)
 
 
 def get_default_registry() -> ProviderRegistry:
@@ -272,35 +326,52 @@ def serving_endpoint(entry: ProviderEntry) -> str:
         options.get("base_url")
         or options.get("endpoint")
         or (spec.default_base_url if spec is not None else "")
+        or getattr(get_default_registry()._capabilities.get(entry.type), "default_endpoint", "")
     ).strip()
 
 
-def serving_is_local(
-    provider: str | ProviderEntry, *, actual_provider: ModelProvider | None = None
-) -> bool:
-    """Use the selected entry's actual endpoint, or an explicit in-process declaration.
-
-    A concrete endpoint always takes precedence over provider-family and implementation
-    hints. This keeps a local-family entry aimed at a remote service treated as remote.
-    """
-    registry = get_default_registry()
+def endpoint_on_this_machine(provider: str | ProviderEntry, *, actual_provider=None) -> bool:
+    """Endpoint location, independent of where the model is executed."""
     entry = provider if isinstance(provider, ProviderEntry) else serving_entry(provider)
     endpoint = serving_endpoint(entry) if entry is not None else ""
     if actual_provider is not None:
-        endpoint = str(
-            getattr(actual_provider, "endpoint", "")
-            or getattr(actual_provider, "_base_url", "")
-            or endpoint
-        ).strip()
-    if endpoint:
-        from gideon.integrations.model_windows import is_local_endpoint
-
-        return is_local_endpoint(endpoint)
-    if entry is not None and entry.type in registry._in_process_types:
+        endpoint = str(getattr(actual_provider, "endpoint", "") or getattr(actual_provider, "_base_url", "") or endpoint).strip()
+    import ipaddress
+    from urllib.parse import urlsplit
+    host = urlsplit(endpoint).hostname if endpoint else None
+    if host == "localhost" or (host and host.endswith(".localhost")):
         return True
-    return bool(
-        actual_provider is not None and getattr(actual_provider, "is_local", False)
-    )
+    try:
+        return bool(host and ipaddress.ip_address(host).is_loopback)
+    except ValueError:
+        return False
+
+
+def served_on_this_machine(provider: str | ProviderEntry, model: str) -> bool:
+    """Execution authority from a registered type declaration and its model probe."""
+    registry = get_default_registry()
+    entry = provider if isinstance(provider, ProviderEntry) else serving_entry(provider)
+    if entry is None:
+        return False
+    if entry.type in registry._in_process_types:
+        return True
+    descriptor = registry._capabilities.get(entry.type)
+    if descriptor is None or not descriptor.hosts_model or not endpoint_on_this_machine(entry):
+        return False
+    probe = registry._passes_on.get(entry.type)
+    if probe is not None:
+        try:
+            if probe(entry, str(model or "")):
+                return False
+        except Exception:
+            logger.warning("provider pass-on probe failed for %r", entry.type, exc_info=True)
+            return False
+    return True
+
+
+def serving_is_local(provider: str | ProviderEntry, *, model: str = "", actual_provider=None) -> bool:
+    entry = provider if isinstance(provider, ProviderEntry) else serving_entry(provider)
+    return served_on_this_machine(provider, model or (entry.own_model if entry is not None else ""))
 
 
 def serving_type(provider: str) -> str:

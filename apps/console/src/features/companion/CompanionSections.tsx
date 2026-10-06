@@ -14,7 +14,11 @@ import { EmptyState, ListSkeleton, LoadError } from '../../shared/ui/ListScaffol
 import { Button } from '../../shared/ui/Button'
 import { TextArea } from '../../shared/ui/forms'
 import { useCompanionAction } from './useCompanionAction'
+import { FOLLOWS, useLiveLane } from './useLiveLane'
+import { effectiveLoopStatus, loopStatusLabel, shownCycle } from '../../shared/data/loopStatus'
 import { signalPriority } from '../tasks/taskMeta'
+import { kindMeta } from '../notifications/notificationMeta'
+import { inboxRaisedBy } from '../../shared/data/attentionLanes'
 
 
 const LIMIT = 6
@@ -83,6 +87,7 @@ const STEERABLE: readonly UnifiedLoopStatus[] = ['running', 'paused', 'needs_inp
 export function RunningLoopsSection() {
   const query = useQuery<Loop[]>('loops-companion', () =>
     api.uLoops().then((ls) => ls.filter((l) => STEERABLE.includes(l.status))))
+  useLiveLane('loops-companion', FOLLOWS.loops)
   const { act, view, busy } = useCompanionAction<{ status: UnifiedLoopStatus }>(query.data)
   const [nudging, setNudging] = useState<string | null>(null)
   const [text, setText] = useState('')
@@ -106,7 +111,7 @@ export function RunningLoopsSection() {
         return (
           <div key={l.id} className="flex flex-col gap-m">
             <Row title={l.name || l.task} sub={l.name ? l.task : undefined}
-              meta={`${l.status.replace(/_/g, ' ')} · cycle ${l.total_cycles}`}
+              meta={`${loopStatusLabel(effectiveLoopStatus(l.status, l.stop_reason, l.held))} · cycle ${shownCycle(l.total_cycles, l.status)}${l.stop_reason && l.stop_reason !== 'done' ? ` · ${l.stop_reason}` : ''}`}
               actions={<>
                 {l.status === 'running' ? (
                   <Button size="sm" variant="secondary" loading={working}
@@ -159,6 +164,7 @@ export function TasksSection() {
   const query = useQuery<TaskItem[]>('tasks-companion', () =>
     Promise.all(OPEN_STATUSES.map((s) => api.tasks({ status: s, limit: 20 })))
       .then((pages) => pages.flatMap((p) => p.tasks)))
+  useLiveLane('tasks-companion', FOLLOWS.tasks)
   const { act, view, busy } = useCompanionAction<{ status: TaskStatus }>(query.data)
 
   const move = (t: TaskItem, status: TaskStatus, verb: string) =>
@@ -197,6 +203,7 @@ export function TasksSection() {
 
 export function InboxSection() {
   const query = useQuery<InboxItem[]>('inbox-companion', () => api.inboxOpen())
+  useLiveLane('inbox-companion', FOLLOWS.inbox)
   const { act, view, busy } = useCompanionAction<{ status: InboxItem['status'] }>(query.data)
 
   const resolve = (i: InboxItem, status: 'handled' | 'dismissed', verb: string) =>
@@ -208,7 +215,7 @@ export function InboxSection() {
       {(items) => items.map((raw) => {
           const i = view(raw.id, raw)
           const working = busy.has(i.id)
-          const who = i.sender_name || i.channel_name || i.channel || 'Unknown sender'
+          const who = inboxRaisedBy(i) || i.channel || 'Unknown sender'
           return (
             <Row key={i.id} title={who} sub={i.message}
               meta={[i.item_kind?.replace(/_/g, ' '), i.classification.replace(/_/g, ' ')].filter(Boolean).join(' · ')}
@@ -232,6 +239,7 @@ export function InboxSection() {
 export function RecentSection() {
   const query = useQuery<NotificationItem[]>('notifications-companion', () =>
     api.notifications().then((d) => d.notifications))
+  useLiveLane('notifications-companion', FOLLOWS.notifications)
   const { act, view, busy } = useCompanionAction<{ acked: boolean }>(query.data)
 
   return (
@@ -240,7 +248,7 @@ export function RecentSection() {
       {(items) => items.map((raw) => {
         const n = view(raw.ts, raw)
         return (
-          <Row key={n.ts} title={n.title} sub={n.body} meta={n.kind || 'info'}
+          <Row key={n.ts} title={n.title} sub={n.body} meta={kindMeta(n.kind, n.kind_label).label}
             actions={n.acked ? (
               <span data-type="body-m" className="inline-flex items-center gap-xs text-on-surface-low">
                 <Check size={14} aria-hidden /> read

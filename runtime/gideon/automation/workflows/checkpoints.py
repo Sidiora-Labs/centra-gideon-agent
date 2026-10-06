@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+
 import json
 import logging
 import shutil
@@ -134,8 +136,18 @@ def fork_run(
     now: str = "",
 ) -> ForkResult:
     transfer = _ForkTransfer(parent, dict(instances))
+    from gideon.automation.workflows import ownership, private_work
+    admitted_origin = private_work.fork_origin(parent.id)
+    if ownership.run_mode(parent) is not ownership.MemoryMode.NORMAL and admitted_origin is None:
+        raise ValueError("private forks require current authenticated origin and live native scope admission")
     transfer.select(checkpoint_id)
     child, axis = transfer.create(checkpoint_id, note)
+    if admitted_origin is not None:
+        from gideon.security.durable_work import bind_run_origin
+        if not bind_run_origin(child, admitted_origin):
+            store.delete(child.id)
+            raise ValueError("fork source proof does not fit the child scope")
+        store.save(child)
     store.write_spec(child.id, spec)
     store.write_state(child.id, transfer.instances)
     carried = _copy_journal_prefix(parent.id, child.id)
@@ -378,5 +390,6 @@ class _ForkTransfer:
             project_id=source.project_id,
             mode=source.mode,
             budget=source.budget,
+            extra=copy.deepcopy(source.extra),
         )
         return store.create(record), axis

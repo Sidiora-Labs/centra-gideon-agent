@@ -46,6 +46,7 @@ class StagedEnrollment:
     _content: bytes = field(repr=False)
     _destination: Path = field(repr=False)
     _staged_path: Path | None = field(repr=False)
+    _previous_content: bytes | None = field(default=None, repr=False)
     _complete: bool = field(default=False, init=False, repr=False)
 
     @property
@@ -55,6 +56,11 @@ class StagedEnrollment:
         if self._complete:
             raise EnrollmentProvisioningError("enrollment stage is already complete")
         return self._enrollment
+
+    def verify_current(self) -> None:
+        """Refuse a replacement when its reviewed file snapshot has changed."""
+        if self._previous_content is not None and self._destination.read_bytes() != self._previous_content:
+            raise EnrollmentProvisioningError("local enrollment changed before publication")
 
     def commit(self, *, lifecycle_receipt: ActionReceipt) -> EnrollmentReceipt:
         if self._complete:
@@ -74,6 +80,21 @@ class StagedEnrollment:
                 raise EnrollmentProvisioningError(
                     "local enrollment changed before publication"
                 )
+        elif self._previous_content is not None:
+            if self._destination.read_bytes() != self._previous_content:
+                raise EnrollmentProvisioningError("local enrollment changed before publication")
+            previous = _write_stage(self._destination.parent, self._previous_content)
+            try:
+                os.replace(self._staged_path, self._destination)
+                _sync_directory(self._destination.parent)
+            except BaseException:
+                if self._destination.read_bytes() == self._content:
+                    os.replace(previous, self._destination)
+                    _sync_directory(self._destination.parent)
+                raise
+            finally:
+                self._staged_path.unlink(missing_ok=True)
+                previous.unlink(missing_ok=True)
         else:
             created = False
             try:
@@ -114,12 +135,25 @@ class StagedEnrollment:
         self._complete = True
 
 
+def current_enrollment_review(scope: Scope) -> dict[str, JsonValue] | None:
+    """Return non-secret review evidence for the canonical local enrollment."""
+    destination = config_dir() / "hypermid" / "enrollment.json"
+    existing = _load_existing(destination, scope)
+    if existing is None:
+        return None
+    content = destination.read_bytes()
+    if content != _encode(existing):
+        raise EnrollmentProvisioningError("existing local enrollment is not canonically encoded")
+    return {"digest": str(Digest.sha256(content)), "operations": list(existing.operations), "resources": [str(value) for value in existing.resources], "expires_ms": existing.expires_ms}
+
+
 def stage_enrollment(
     *,
     scope: Scope,
     reviewed_plan_digest: str,
     target_version: str,
     params: Mapping[str, JsonValue],
+    expected_current_digest: str | None = None,
 ) -> StagedEnrollment:
     """Stage the exact local grant returned in a reviewed install plan."""
 
@@ -138,6 +172,15 @@ def stage_enrollment(
     _prepare_directory(destination.parent)
 
     existing = _load_existing(destination, scope)
+    if expected_current_digest is not None:
+        if existing is None or str(Digest.sha256(destination.read_bytes())) != expected_current_digest:
+            raise EnrollmentProvisioningError("reviewed local enrollment changed before staging")
+        previous = _encode(existing)
+        if destination.read_bytes() != previous:
+            raise EnrollmentProvisioningError("existing local enrollment is not canonically encoded")
+        enrollment = LocalEnrollment(scope, existing.credential_id, existing.capability_id, operations, resources, expires_ms)
+        content = _encode(enrollment)
+        return StagedEnrollment(scope, digest, target_version.strip(), enrollment, content, destination, _write_stage(destination.parent, content), previous)
     if existing is not None:
         if (
             existing.operations != operations

@@ -135,10 +135,12 @@ class EventRouter:
             from gideon.automation.triggers import claims
             from gideon.automation.triggers.service import to_iso
 
-            claims.write_claim(decision.claim, base_dir=self.store.base_dir)
+            if not claims.acquire_claim(decision.claim, overlap=trigger.overlap, base_dir=self.store.base_dir):
+                await record_suppression(trigger, outcome="skipped_overlap", reason="another run acquired the event claim", now=now, base_dir=self.store.base_dir, event=event)
+                continue
             current = self.store.get(trigger.id)
             if current is None or not current.ok or current.trigger.kind != "event":
-                claims.release_claim(trigger.id, base_dir=self.store.base_dir)
+                claims.release_claim(trigger.id, base_dir=self.store.base_dir, holder=decision.claim.holder)
                 continue
             live = current.trigger
             live.run_count = int(live.run_count or 0) + 1
@@ -148,6 +150,7 @@ class EventRouter:
                 live.enabled = False
             self.store.upsert(live)
             payload = _payload(event, live)
+            payload["claim_holder"] = decision.claim.holder
             try:
                 await self.dispatch(live, payload, event="trigger.event")
             except asyncio.CancelledError:
@@ -155,7 +158,7 @@ class EventRouter:
             except Exception:
                 logger.exception("event trigger %s dispatch failed", live.id)
             finally:
-                claims.release_claim(live.id, base_dir=self.store.base_dir)
+                claims.release_claim(live.id, base_dir=self.store.base_dir, holder=decision.claim.holder)
             fired += 1
             self._record_rate(now)
         return fired

@@ -3,13 +3,60 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, overload
 
 from aiohttp import web
 
 
 class RequestValidationError(ValueError):
     """The request body or field is not admissible."""
+
+    def __init__(self, code: str, message: str | None = None) -> None:
+        self.code = code if message is not None else "bad_request"
+        self.message = code if message is None else message
+        super().__init__(self.message)
+
+
+class _Missing:
+    __slots__ = ()
+
+
+MISSING = _Missing()
+
+
+@overload
+def bool_field(body: dict[str, Any], field: str, *, default: bool) -> bool: ...
+
+
+@overload
+def bool_field(body: dict[str, Any], field: str, *, default: None) -> bool | None: ...
+
+
+def bool_field(body: dict[str, Any], field: str, *, default: bool | None) -> bool | None:
+    if field not in body or (default is None and body[field] is None):
+        return default
+    return _boolean(field, body[field])
+
+
+def require_bool(body: dict[str, Any], field: str) -> bool:
+    if field not in body:
+        raise RequestValidationError("field_required", f"{field} is required (true or false).")
+    return _boolean(field, body[field])
+
+
+def optional_bool(body: dict[str, Any], field: str) -> bool | _Missing:
+    return MISSING if field not in body else require_bool(body, field)
+
+
+def _boolean(field: str, value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    kinds = {type(None): "null", str: "a string", int: "a number", float: "a number",
+             list: "an array", dict: "an object"}
+    raise RequestValidationError(
+        "field_not_a_boolean",
+        f"{field} must be true or false (a JSON boolean), not {kinds.get(type(value), type(value).__name__)}.",
+    )
 
 
 class RequestBodyTypeError(RequestValidationError):

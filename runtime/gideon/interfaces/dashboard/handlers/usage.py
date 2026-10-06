@@ -36,6 +36,21 @@ logger = logging.getLogger(__name__)
 _GROUP_KEYS = ("model", "source", "agent", "provider", "day")
 
 
+def _bounds(request: web.Request):
+    since, until = request.query.get("since", ""), request.query.get("until", "")
+    window = request.query.get("window", "")
+    if not window:
+        return since, until
+    if window not in usage_fold.WINDOW_DAYS:
+        return json_error("bad_request", message="window must be day, week or month", status=400)
+    if since or until:
+        return json_error("bad_request", message="give a window or since/until, not both", status=400)
+    from gideon.core import spend_day
+    zone = spend_day.zone()
+    first = usage_fold.window_dates(window, today=spend_day.today(zone))[0]
+    return spend_day.start_of(first, zone), ""
+
+
 async def api_usage_rollup(request: web.Request) -> web.Response:
     """GET /api/usage/rollup?group_by=&since=&until=&session= — aggregated ledger rows.
 
@@ -49,8 +64,10 @@ async def api_usage_rollup(request: web.Request) -> web.Response:
             message=f"group_by must be one of {list(_GROUP_KEYS)}, got {group_by!r}",
             status=400,
         )
-    since = request.query.get("since", "")
-    until = request.query.get("until", "")
+    bounds = _bounds(request)
+    if isinstance(bounds, web.Response):
+        return bounds
+    since, until = bounds
     session = ul.canonical_session_query_key(request.query.get("session", ""))
     try:
         rows = ul.rollup(
@@ -83,8 +100,10 @@ async def api_usage_totals(request: web.Request) -> web.Response:
 
     ``session`` (when given) restricts to one session key — the session-total surface.
     """
-    since = request.query.get("since", "")
-    until = request.query.get("until", "")
+    bounds = _bounds(request)
+    if isinstance(bounds, web.Response):
+        return bounds
+    since, until = bounds
     session = ul.canonical_session_query_key(request.query.get("session", ""))
     try:
         totals = ul.totals(since=since, until=until, session_key=session)

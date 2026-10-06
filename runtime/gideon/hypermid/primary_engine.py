@@ -122,6 +122,28 @@ class PrimaryContextEngine:
         is_new_session: bool,
         **kwargs: Any,
     ) -> AssembledContext:
+        from gideon.extensions.apps.app_work import active_for
+        work = active_for(str(kwargs.get("session_key") or "default"))
+        if work is not None and work.current_tier() == "text":
+            from gideon.engine.hooks import HookResult
+            return AssembledContext(
+                message=text,
+                hook_result=HookResult.passthrough(),
+                injected_chars=0,
+                metadata={"app_task_only": True, "app": work.app},
+                components=[Component(name="app task", text=text, compressible=False)],
+            )
+        from gideon.security.session_credentials import memory_reach
+        from gideon.cognition.memory_service import service_for
+        provider = service_for(builder.memory).provider
+        app_receipt = provider._app_receipt() if getattr(provider, "scope", None) == self.scope and hasattr(provider, "_app_receipt") else None
+        target_scope = app_receipt.scope if app_receipt is not None else self.scope
+        reach = memory_reach(target_scope, app_receipt=app_receipt)
+        kwargs["blocks_writes"] = bool(kwargs.get("blocks_writes")) or not reach.write_allowed
+        if not reach.read_allowed:
+            restricted = dict(kwargs)
+            restricted.update(blocks_reads=True, blocks_writes=True, active_recall=False)
+            return self._delegate.assemble(builder, text, is_new_session=is_new_session, **restricted)
         lease = self._primary_lease()
         if lease is None or self._context_bridge is None:
             return self._delegate.assemble(
@@ -140,6 +162,8 @@ class PrimaryContextEngine:
         response = self.bridge.request(
             self._request_payload(
                 session_id=session_id,
+                app_receipt=app_receipt,
+                shared_memory=app_receipt is not None and provider._shared_reads(),
                 new_items=bridge_sources,
                 trace=trace,
                 writer_lease={
@@ -160,7 +184,7 @@ class PrimaryContextEngine:
         policy_revision = int(response["projection"]["policy_revision"])
         recall = builder.resolve_scoped_recall(
             text,
-            scope=self.scope,
+            scope=target_scope,
             fallback_cursor=Cursor.from_wire(response["cursor"]),
             policy_revision=policy_revision,
         )
@@ -283,6 +307,8 @@ class PrimaryContextEngine:
         new_items: Sequence[Mapping[str, Any]],
         trace: Trace,
         writer_lease: Mapping[str, Any],
+        app_receipt=None,
+        shared_memory: bool = False,
     ) -> dict[str, Any]:
         capabilities = {
             "profile_id": "gideon-host-serialized",
@@ -335,13 +361,16 @@ class PrimaryContextEngine:
             },
             "reclaim_candidates": [],
         }
-        if self._summary_capability_id is not None:
+        from gideon.security.session_credentials import memory_reach
+        target_scope = app_receipt.scope if app_receipt is not None else self.scope
+        capability_id = app_receipt.capability_id if app_receipt is not None else self._summary_capability_id
+        if capability_id is not None and memory_reach(target_scope, app_receipt=app_receipt).read_allowed:
             payload["summary_access"] = {
-                "capability_id": str(self._summary_capability_id),
+                "capability_id": str(capability_id),
                 "request": {
                     "operation": "read",
                     "actor_scope": self.scope.to_wire(),
-                    "target_scope": self.scope.to_wire(),
+                    "target_scope": target_scope.to_wire(),
                     "resource_id": "memory-list",
                     "category": "context_summary",
                     "trace": trace.to_wire(),
@@ -350,6 +379,14 @@ class PrimaryContextEngine:
             }
         else:
             payload["summary_access"] = None
+        payload["summary_sources"] = []
+        if (shared_memory and app_receipt is not None and self._summary_capability_id is not None
+                and memory_reach(self.scope, app_receipt=app_receipt).read_allowed):
+            payload["summary_sources"].append({
+                "capability_id": str(self._summary_capability_id),
+                "request": {"operation": "read", "actor_scope": self.scope.to_wire(),
+                    "target_scope": self.scope.to_wire(), "resource_id": "memory-list",
+                    "category": "context_summary", "trace": trace.to_wire()}, "limit": 1000})
         return payload
 
     @staticmethod

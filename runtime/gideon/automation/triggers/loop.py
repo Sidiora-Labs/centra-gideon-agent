@@ -184,7 +184,7 @@ class DeliveryExecution:
                 outcome.outcome,
             )
             return [outcome]
-        released = executor.release_claim_for(signal.trigger_id, base_dir=self.base_dir)
+        released = executor.release_claim_for(signal.trigger_id, base_dir=self.base_dir, holder=str(signal.payload.get("claim_holder") or ""))
         logger.debug(
             "clock fire for %s not executed (%s); claim released=%s",
             signal.trigger_id,

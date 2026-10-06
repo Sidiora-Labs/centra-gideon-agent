@@ -57,6 +57,12 @@ class InstalledPackLedgerError(OSError):
 @contextmanager
 def _ledger_lock(path: Path) -> Iterator[None]:
     lock_path = path.with_name(f"{path.name}.lock")
+    from gideon.operations.durability.home_paths import guard_path, LinkInTheWay
+    try:
+        guard_path(path)
+        guard_path(lock_path)
+    except (LinkInTheWay, ValueError) as error:
+        raise InstalledPackLedgerError(str(error)) from error
     key = os.path.realpath(lock_path)
     with _ledger_thread_locks_guard:
         thread_lock = _ledger_thread_locks.setdefault(key, threading.Lock())
@@ -70,8 +76,11 @@ def _ledger_lock(path: Path) -> Iterator[None]:
             os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
             0o600,
         )
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise InstalledPackLedgerError("installed-pack ledger lock is not a regular file")
+        opened = os.fstat(fd)
+        current = lock_path.lstat()
+        if (not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1
+                or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)):
+            raise InstalledPackLedgerError("installed-pack ledger lock is linked or changed")
         os.fchmod(fd, 0o600)
         deadline = time.monotonic() + _LEDGER_LOCK_TIMEOUT
         while True:
@@ -95,6 +104,11 @@ def _ledger_lock(path: Path) -> Iterator[None]:
 
 
 def _read_ledger(path: Path) -> dict[str, Any]:
+    from gideon.operations.durability.home_paths import guard_path, LinkInTheWay
+    try:
+        guard_path(path, read=True)
+    except (LinkInTheWay, ValueError) as error:
+        raise InstalledPackLedgerError(str(error)) from error
     if not os.path.lexists(path):
         return {}
     try:

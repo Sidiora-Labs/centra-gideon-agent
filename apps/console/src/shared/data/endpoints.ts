@@ -16,9 +16,9 @@
  *      (`apps/desktop/src/application/local-gateway.js:49`, resolved from the spawned gateway's READY line) and `activeUrl`, what
  *      the WebView is actually pointed at. Every credential-bearing call is bound to the first;
  *      only the second ever becomes a gateway this shell did not spawn.)
- *   2. The SPA's storage is ALREADY partitioned, for free, by browser origin. `grep -n partition`
- *      over `desktop/main.js` finds nothing, so the default session partition applies and
- *      per-origin isolation holds. Nothing in the SPA reaches across gateways either:
+ *   2. The SPA's storage is isolated by browser origin. The shell uses an in-memory Electron
+ *      session for its owned local gateway and the default session for paired gateways.
+ *      Nothing in the SPA reaches across gateways either:
  *      `useChatSocket.ts:32` opens `${proto}://${location.host}/api/ws` — origin-relative — and
  *      `lib/api.ts` uses relative URLs only (it has no `base_url`/`API_BASE` at all).
  *

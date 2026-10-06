@@ -96,7 +96,7 @@ export function ArtifactDeploy({ slug, kind }: { slug: string; kind: ArtifactKin
         <div className="border-b border-outline/40 bg-surface-high/40 p-m">
           {
 }
-          <iframe key={nonce} src={dep.url} title={`Deployed artifact: ${slug}`}
+          <iframe key={nonce} src={dep.url} sandbox="allow-scripts" title={`Deployed artifact: ${slug}`}
             className="h-[28rem] w-full rounded-md border border-outline/40 bg-surface" />
         </div>
       )}

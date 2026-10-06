@@ -171,11 +171,10 @@ class ReindexRegistry:
                 k_total += knowledge_store.count_chunks_to_reembed(
                     provider, model, dimension
                 )
-            m_total = sum(
-                store.count_episodic_to_reembed()
-                for store in vector_stores
-                if store is not None
-            )
+            from gideon.hypermid.memory import HypermidMemoryProvider
+            native_stores = tuple(store for store in vector_stores if isinstance(store, HypermidMemoryProvider))
+            legacy_stores = tuple(store for store in vector_stores if store is not None and not isinstance(store, HypermidMemoryProvider))
+            m_total = sum(store.count_episodic_to_reembed() for store in legacy_stores)
             job.total = k_total + m_total
             job.phase = "clearing"
             self._publish(job, "progress")
@@ -184,15 +183,33 @@ class ReindexRegistry:
                 self._reindex_sync,
                 run,
                 knowledge_store,
-                vector_stores,
+                legacy_stores,
                 embedder,
                 embed_fn,
             )
+            for store in native_stores:
+                job.phase = "reindexing native memory"
+                self._publish(job, "progress")
+                base_done, base_total = job.done, job.total
+                def progress(done, total):
+                    job.done = base_done + done
+                    job.total = base_total + total
+                    self._publish(job, "progress")
+                result = await store.embedding_reembed_all(on_progress=progress)
+                job.memory += result["reembedded"]
+                job.total = base_total + result["total"]
+                job.done = base_done + result["reembedded"]
+                if result["skipped"]:
+                    raise RuntimeError("Native embedding backfill skipped changed records; retry to complete.")
 
             job.status = "done"
             job.phase = "done"
             self._publish(job, "done")
         except asyncio.CancelledError:
+            job.status = "error"
+            job.phase = "cancelled"
+            job.error = "Embedding re-index was cancelled; existing records and vectors were preserved."
+            self._publish(job, "error")
             raise
         except Exception as exc:  # noqa: BLE001 — surface any failure to the UI
             logger.warning("Embedding re-index failed: %s", exc, exc_info=True)

@@ -67,6 +67,7 @@ class SyncTransportProvider(ABC):
 
     name: str = ""
     display_name: str = ""
+    removes_old_copies: bool = False
 
     @abstractmethod
     def push(self, objects: list[SyncObject]) -> PushResult:
@@ -94,3 +95,8 @@ class SyncTransportProvider(ABC):
     def test(self) -> ConnectionResult:
         """Cheap reachability + auth probe. Never raises — a failure is a ``ConnectionResult``
         with ``ok=False`` and a human ``detail``."""
+
+
+    def remove(self, keys: list[str]) -> int:
+        """Remove explicitly retired objects when this provider supports removal."""
+        raise NotImplementedError("this transport retains historical copies")

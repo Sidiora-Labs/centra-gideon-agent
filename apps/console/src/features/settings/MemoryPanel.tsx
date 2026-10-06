@@ -1110,9 +1110,37 @@ export function RecallRankingDisclosureView({ disclosure }: { disclosure: Recall
   )
 }
 
+type SearchIndexHealth = {
+  authority: 'hypermid' | 'journal'
+  state: 'available' | 'degraded' | 'unavailable'
+  detail: string
+  repair_id?: string | null
+  semantic_state?: 'available' | 'degraded' | 'unknown'
+  semantic_detail?: string
+}
+type SearchObservability = MemoryObservability & {
+  search_index?: SearchIndexHealth
+  context_preview_available?: boolean
+}
+
+export function MemorySearchHealth({ health }: { health?: SearchIndexHealth }) {
+  return (
+    <Section title="Search index" hint="Whether saved memories can be found through their active memory service.">
+      {health ? (
+        <div className="flex flex-col gap-xs">
+          <p data-type="body-s" className={health.state === 'available' ? 'text-on-surface-var' : 'text-warn'}>{health.detail}</p>
+          {health.semantic_detail && <p data-type="caption" className={health.semantic_state === 'degraded' ? 'text-warn' : 'text-on-surface-low'}>{health.semantic_detail}</p>}
+          {health.repair_id && <TextLink href="#/settings/doctor">Open memory diagnostics and repairs</TextLink>}
+          {health.authority === 'hypermid' && health.state !== 'available' && <TextLink href="#/hypermid">Open native memory diagnostics</TextLink>}
+        </div>
+      ) : <p data-type="caption" className="text-on-surface-low">Search index health could not be read.</p>}
+    </Section>
+  )
+}
+
 function HealthTab({ onChanged }: { onChanged: () => void }) {
   const { data: lint, refresh: refreshLint } = useQuery<MemoryLint | null>('settings:memory-lint', () => api.memoryLint().catch(() => null), { persist: false })
-  const { data: obs, refresh: refreshObs } = useQuery<MemoryObservability | null>('settings:memory-obs', () => api.memoryObservability().catch(() => null), { persist: false })
+  const { data: obs, refresh: refreshObs } = useQuery<SearchObservability | null>('settings:memory-obs', () => api.memoryObservability().catch(() => null), { persist: false })
   const [promoting, setPromoting] = useState(false)
   const [dreamResult, setDreamResult] = useState<string | null>(null)
   const promote = async () => {
@@ -1166,6 +1194,8 @@ function HealthTab({ onChanged }: { onChanged: () => void }) {
         </div>
       </Section>
 
+      <MemorySearchHealth health={obs?.search_index} />
+
       <EntityGraphSection onChanged={reload} />
 
       <VolunteerPrecisionSection />
@@ -1193,10 +1223,10 @@ function HealthTab({ onChanged }: { onChanged: () => void }) {
             </div>
           )}
           { }
-          <div className="mt-3 text-on-surface-low text-[0.75rem]">
+          {obs.context_preview_available !== false && <div className="mt-3 text-on-surface-low text-[0.75rem]">
             Injected-context budget: <strong className="text-on-surface-var">{obs.context_preview.total_chars.toLocaleString()} chars</strong>
             {' '}(semantic {obs.context_preview.semantic_chars.toLocaleString()} · episodic {obs.context_preview.episodic_chars.toLocaleString()} · lessons {obs.context_preview.lessons_chars.toLocaleString()})
-          </div>
+          </div>}
         </Section>
       )}
     </div>

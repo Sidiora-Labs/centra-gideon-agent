@@ -330,7 +330,7 @@ export function CodeCockpitPage({ id, onBack, onDeleted, onNewTarget, onOpenProj
   const p = project
   const ws = p.workspace_dir || ''
   const fileRoot = ws || p.files_dir || ''
-  const active = p.status === 'running'
+  const active = p.status === 'running' && !p.held
 
   async function act(action: 'start' | 'pause' | 'resume' | 'stop') {
     if (acting) return
@@ -407,6 +407,9 @@ export function CodeCockpitPage({ id, onBack, onDeleted, onNewTarget, onOpenProj
 }
           {
 }
+          {p.status === 'running' && p.held && (
+            <span data-type="caption" className="shrink-0 text-on-surface-low">Held</span>
+          )}
           {active && (
             <span data-type="caption" className="inline-flex shrink-0 items-center gap-1 text-on-surface-low">
               <span className="inline-block size-1.5 rounded-pill"
@@ -549,7 +552,7 @@ function CodeToast({ kind, text, onDismiss, onRespond }: {
 function StageTrail({ project }: { project: CodeProject }) {
   const plan = project.stage_plan ?? []
   if (!plan.length) return null
-  const running = project.status === 'running'
+  const running = project.status === 'running' && !project.held
   const started = !['ready', 'review', 'intake', 'planning'].includes(project.status)
   const activeIdx = started
     ? plan.findIndex((s) => (project.stage_status?.[stageKey(s)] ?? 'pending') !== 'done')
@@ -557,7 +560,7 @@ function StageTrail({ project }: { project: CodeProject }) {
   const allDone = started && activeIdx < 0
   const cur = allDone || !started ? null : plan[activeIdx]
   const ATTENTION = ['blocked', 'needs_input', 'stagnant', 'failed', 'stopped']
-  const halted = ATTENTION.includes(project.status)
+  const halted = !!project.held || ATTENTION.includes(project.status)
   return (
     <>
       {
@@ -2223,7 +2226,7 @@ function OutcomeBanner({ project: p, findings }: { project: CodeProject; finding
   }
   let meta = TERMINAL[p.status]
   if (!meta) return null
-  const incompleteFinish = effectiveLoopStatus(p.status, p.stop_reason) === 'ended_early'
+  const incompleteFinish = effectiveLoopStatus(p.status, p.stop_reason, p.held) === 'ended_early'
   if (incompleteFinish) {
     meta = { label: 'Project ended before finishing', tone: 'var(--color-warn)', ok: false }
   }

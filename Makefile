@@ -22,14 +22,15 @@ BUILD_OVERLAY := $(BASE_FILE) -f $(COMPOSE_DIR)/compose.build.yaml
 PROD_OVERLAY := $(BASE_FILE) -f $(COMPOSE_DIR)/compose.prod.yaml
 DEV_OVERLAY := $(BUILD_OVERLAY) -f $(COMPOSE_DIR)/compose.dev.yaml
 
-RUN_COMMANDS := serve serve-fresh serve-web
+RUN_COMMANDS := serve serve-lan serve-fresh serve-web
 CHECK_COMMANDS := format lint test test-e2e test-visual harness-validate gates
 PACKAGE_COMMANDS := build web-build pyinstaller backend-build desktop desktop-dist desktop-dist-linux
 CONTAINER_COMMANDS := docker-build docker-up docker-down docker-logs docker-deploy dev-up dev-down
 COMMANDS := help $(RUN_COMMANDS) $(CHECK_COMMANDS) $(PACKAGE_COMMANDS) $(CONTAINER_COMMANDS) clean
 
 help.help := Show workspace commands
-help.serve := Run the gateway and compiled console
+help.serve := Run the gateway and compiled console on this machine
+help.serve-lan := Open the development gateway to the local network
 help.serve-fresh := Compile the console before starting the gateway
 help.serve-web := Start the console development server
 help.format := Format Python runtime and checks
@@ -61,6 +62,14 @@ help:
 	@printf '%-21s %s\n' $(foreach command,$(COMMANDS),'$(command)' '$(help.$(command))')
 
 serve:
+	@echo "Dev gateway for home $(DEV_HOME) at http://127.0.0.1:$(DEV_PORT)/ (this machine only; make serve-lan opens local-network access)"
+	GIDEON_HOME="$(DEV_HOME)" GIDEON_WORKSPACE="$(DEV_HOME)/workspace" \
+		GIDEON_BIND_HOST=127.0.0.1 GIDEON_BYPASS_LOCAL_NETWORKS=1 \
+		"$(VENV)/gideon" gateway --no-open --port "$(DEV_PORT)" --json-ready
+
+
+serve-lan:
+	@echo "Dev gateway for home $(DEV_HOME) on port $(DEV_PORT), OPEN to every device on the local network with no token"
 	GIDEON_HOME="$(DEV_HOME)" GIDEON_WORKSPACE="$(DEV_HOME)/workspace" \
 		GIDEON_BIND_HOST=0.0.0.0 GIDEON_BYPASS_LOCAL_NETWORKS=1 \
 		"$(VENV)/gideon" gateway --no-open --port "$(DEV_PORT)" --json-ready

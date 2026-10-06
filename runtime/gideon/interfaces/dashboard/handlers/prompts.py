@@ -1,6 +1,7 @@
 """Prompts (Agent SOPs) and Skills API handlers."""
 
 import logging
+import json
 import re
 import threading
 from pathlib import Path
@@ -1069,57 +1070,41 @@ async def api_prompt_bindings_save(request: web.Request) -> web.Response:
 async def api_skill_detail(request: web.Request) -> web.Response:
     """GET/PUT /api/skills/{name} — get or update a skill. (Listing is served by
     handlers/skills.py::api_skills_list; deletion by api_skills_delete.)"""
-    state: ConsoleState = request.app["state"]
+    import hashlib
+    from gideon.interfaces.dashboard.handlers.skills import _request_skill_root, _skill_root_read_only
+    from gideon.extensions.skills.loader import hold_library, overlay_identity
+    from gideon.extensions.skills import overlays
+    from gideon.core.atomic_write import atomic_write
     name = request.match_info["name"]
-    skills = _get_skills(state)
-
+    root = _request_skill_root(request, name)
+    if root is None:
+        return web.json_response({"error": "Selected skill copy not found"}, status=404)
+    body = None
     if request.method == "PUT":
-        try:
-            body = await read_json_body(request)
-        except Exception:
-            return web.json_response({"error": "invalid JSON"}, status=400)
-        if not isinstance(body, dict):
-            return web.json_response(
-                {"error": "JSON body must be an object"}, status=400
-            )
-        content = body.get("content", "")
-        if not isinstance(content, str):
+        body = await read_json_body(request)
+        if not isinstance(body, dict) or not isinstance(body.get("content"), str):
             return web.json_response({"error": "content must be a string"}, status=400)
-        if not content:
-            return web.json_response({"error": "content is required"}, status=400)
-        errors = validate_skill_md(content)
+        errors = validate_skill_md(body["content"])
         if errors:
-            return web.json_response(
-                {"error": f"SKILL.md validation failed: {'; '.join(errors)}"},
-                status=400,
-            )
-        ok = skills.update_skill(name, content)
-        if not ok:
-            return web.json_response({"error": "not found"}, status=404)
-        return web.json_response({"ok": True})
-
-    content = skills.load_skill(name)
-    mkt_prefix = name.startswith("marketplace/")
-    if content is None and mkt_prefix:
-        bare_name = name.split("/", 1)[1]
-        for s in await _list_marketplace_skills():
-            if s["name"] == bare_name or s["key"] == name:
-                if s["path"]:
-                    from gideon.engine.hooks import validate_file_path  # noqa: F811
-
-                    resolved = validate_file_path(s["path"])
-                    if resolved is None:
-                        return web.json_response({"error": "access denied"}, status=403)
-                    try:
-                        content = Path(resolved).read_text(
-                            encoding="utf-8", errors="replace"
-                        )
-                    except OSError:
-                        pass
-                break
-    if content is None:
-        return web.json_response({"error": "not found"}, status=404)
-    return web.json_response({"name": name, "content": content})
+            return web.json_response({"error": f"SKILL.md validation failed: {'; '.join(errors)}"}, status=400)
+    with hold_library():
+        root = _request_skill_root(request, name)
+        if root is None:
+            return web.json_response({"error": "Selected skill copy not found"}, status=404)
+        path = root / name / "SKILL.md"
+        content = path.read_text(encoding="utf-8")
+        identity = overlay_identity(root, name)
+        active = overlays.applied(identity)
+        own = overlays.without_copies(content, [a.block for a in active])
+        revision = hashlib.sha256((content + "\0" + json.dumps([a.to_dict() for a in active], sort_keys=True)).encode()).hexdigest()
+        if body is not None:
+            if _skill_root_read_only(root):
+                return web.json_response({"error": "This skill copy is read-only"}, status=403)
+            if (request.headers.get("If-Match") or body.get("revision")) != revision:
+                return web.json_response({"error": "This skill changed. Reload before saving your edits."}, status=409)
+            atomic_write(path, overlays.without_copies(body["content"], [a.block for a in active]))
+            return web.json_response({"ok": True})
+        return web.json_response({"name": name, "content": own, "own_content": own, "loaded_content": overlays.render(own, [a.block for a in active]), "revision": revision, "refinements": [a.to_dict() for a in active], "recognized_copies": own != content})
 
 
 async def api_skills_create(request: web.Request) -> web.Response:

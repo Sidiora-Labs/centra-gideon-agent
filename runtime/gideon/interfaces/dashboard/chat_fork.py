@@ -1,6 +1,9 @@
 """Fork session — copy messages into a new tab."""
 
+from gideon.engine.turn_source import source_of
+
 import logging
+from copy import deepcopy
 
 from aiohttp import web
 
@@ -153,7 +156,11 @@ async def api_chat_session_fork(request: web.Request) -> web.Response:
         model=session.model,
         mode=fork_mode,
         app=request_app,
+        memory_mode=session.memory_mode,
+        project_id=session.project_id,
+        created_by_app=session.created_by_app,
     )
+    new_session._initiator = deepcopy(session._initiator)
     new_session.forked_from = _history_key_for(session.key)
     new_session.reasoning_effort = session.reasoning_effort
     new_session.folder_id = session.folder_id
@@ -171,7 +178,7 @@ async def api_chat_session_fork(request: web.Request) -> web.Response:
                 content, _ = redact_exfiltration_urls(content)
                 content, _ = redact_credentials(content)
             cls = "msg msg-u" if role == "user" else "msg msg-a"
-            new_session.append(role, content, cls, ts=m.get("ts", ""), broadcast=False)
+            new_session.append(role, content, cls, ts=m.get("ts", ""), broadcast=False, meta=deepcopy(m.get("meta")), source=source_of(m))
         new_session.drain()
         save_session_to_history(state, new_session)
         new_session._resumed_count = len(new_session.messages)
@@ -278,7 +285,12 @@ async def api_chat_session_fork_rewound(request: web.Request) -> web.Response:
             workspace_dir=session.workspace_dir,
             model=session.model,
             mode=session.mode,
+            memory_mode=session.memory_mode,
+            project_id=session.project_id,
+            app=session._app,
+            created_by_app=session.created_by_app,
         )
+        new_session._initiator = deepcopy(session._initiator)
         new_session.forked_from = _history_key_for(session.key)
         new_session.reasoning_effort = session.reasoning_effort
         new_session.folder_id = session.folder_id
@@ -296,7 +308,7 @@ async def api_chat_session_fork_rewound(request: web.Request) -> web.Response:
                     content, _ = redact_credentials(content)
                 cls = "msg msg-u" if role == "user" else "msg msg-a"
                 new_session.append(
-                    role, content, cls, ts=m.get("ts", ""), broadcast=False
+                    role, content, cls, ts=m.get("ts", ""), broadcast=False, meta=deepcopy(m.get("meta")), source=source_of(m)
                 )
             new_session.drain()
             save_session_to_history(state, new_session)

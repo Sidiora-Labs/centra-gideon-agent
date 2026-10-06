@@ -12,6 +12,7 @@ set -eu
 GIDEON_PACKAGE="${GIDEON_PACKAGE_SOURCE:-}"
 GIDEON_DISTRIBUTION="gideon-agent-harness"
 GIDEON_MIN_VERSION="0.1.2"
+GIDEON_PYTHON="3.13"
 UV_INSTALLER_URL="https://astral.sh/uv/install.sh"
 GIDEON_SOURCE_CHECKOUT=0
 
@@ -133,13 +134,13 @@ ensure_hypermid_toolchain() {
 }
 
 install_gideon() {
-    step "Installing Gideon from $GIDEON_PACKAGE with uv…"
+    step "Installing Gideon from $GIDEON_PACKAGE with uv on Python $GIDEON_PYTHON…"
     # An explicit source avoids installing an unrelated package with a similar name.
     # Versioned release specifications are supplied by the configured publisher.
     constraints=$(mktemp)
     trap 'rm -f "$constraints"' 0
     printf '%s>=%s\n' "$GIDEON_DISTRIBUTION" "$GIDEON_MIN_VERSION" > "$constraints"
-    uv tool install --upgrade --constraints "$constraints" "$GIDEON_PACKAGE"
+    uv tool install --upgrade --python "$GIDEON_PYTHON" --constraints "$constraints" "$GIDEON_PACKAGE"
     rm -f "$constraints"
     trap - 0
     have gideon || {

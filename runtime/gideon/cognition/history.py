@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import time as _time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -477,6 +478,13 @@ class ConversationLog:
     def has_log(self, key: str) -> bool:
         return self._path(key).exists()
 
+    @contextmanager
+    def journal_write(self, key: str):
+        from gideon.core.config.transactions import _ConfigLock
+
+        with _ConfigLock(self._path(key), timeout=5.0):
+            yield
+
     def append(
         self,
         key: str,
@@ -490,48 +498,51 @@ class ConversationLog:
         speaker: str | None = None,
         meta: dict[str, Any] | None = None,
     ) -> None:
-        path = self._path(key)
-        if not path.exists():
-            self.init()
-            header: dict[str, Any] = dict(
-                _type="metadata",
-                created_at=datetime.now().isoformat(),
-                last_consolidated=0,
+        with self.journal_write(key):
+            path = self._path(key)
+            if not path.exists():
+                self.init()
+                header: dict[str, Any] = dict(
+                    _type="metadata",
+                    created_at=datetime.now().isoformat(),
+                    last_consolidated=0,
+                )
+                header.update(
+                    (name, value)
+                    for name, value in (("agent", agent), ("tab_id", tab_id))
+                    if value
+                )
+                path.write_text(json.dumps(header) + "\n", encoding="utf-8")
+            entry: dict[str, Any] = dict(
+                role=role,
+                content=content,
+                ts=datetime.now().isoformat(),
+                source_event_id=f"event:{secrets.token_hex(16)}",
             )
-            header.update(
+            entry.update(
                 (name, value)
-                for name, value in (("agent", agent), ("tab_id", tab_id))
+                for name, value in (
+                    ("tools", tools),
+                    ("source_thread", source_thread),
+                    ("source_user", source_user),
+                    ("speaker", speaker),
+                    ("meta", meta),
+                )
                 if value
             )
-            path.write_text(json.dumps(header) + "\n", encoding="utf-8")
-        entry: dict[str, Any] = dict(
-            role=role,
-            content=content,
-            ts=datetime.now().isoformat(),
-            source_event_id=f"event:{secrets.token_hex(16)}",
-        )
-        entry.update(
-            (name, value)
-            for name, value in (
-                ("tools", tools),
-                ("source_thread", source_thread),
-                ("source_user", source_user),
-                ("speaker", speaker),
-                ("meta", meta),
-            )
-            if value
-        )
-        with path.open("rb+") as stream:
-            stream.seek(0, 2)
-            if stream.tell():
-                stream.seek(-1, 2)
-                if stream.read(1) != b"\n":
-                    stream.write(b"\n")
-        with path.open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(entry) + "\n")
-        self._invalidate_cache(key)
-        self._maybe_rotate(path)
-        self._notify_search_index(key)
+            with path.open("rb+") as stream:
+                stream.seek(0, 2)
+                if stream.tell():
+                    stream.seek(-1, 2)
+                    if stream.read(1) != b"\n":
+                        stream.write(b"\n")
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(entry) + "\n")
+            self._invalidate_cache(key)
+            self._maybe_rotate(path)
+            self._notify_search_index(key)
+
+            return self._source_event(json.dumps(entry).encode("utf-8"), key)
 
     @staticmethod
     def _source_event(line: bytes, key: str) -> ConversationSourceEvent | None:
@@ -1113,32 +1124,84 @@ class HistoryConsolidator:
             if pending >= _CONSOLIDATION_THRESHOLD:
                 self._schedule.start(key, False, self._prefs_offset, count)
 
+    def _admit_consolidation(self, key: str) -> None:
+        from gideon.cognition.consolidation_cycle import ConsolidationPolicyDenied
+
+        from gideon.security.session_credentials import current_work, memory_reach
+
+        work = current_work()
+        reach = memory_reach()
+        from gideon.security.durable_work import validate_background_work
+        if not validate_background_work(self._log, key, work):
+            raise ConsolidationPolicyDenied("authenticated background source no longer valid")
+        allowed_keys = () if work is None else (work.session_key, work.origin_session_key)
+        if not reach.background_allowed or self._log._canonical_key(key) not in {
+            self._log._canonical_key(value) for value in allowed_keys if value
+        }:
+            raise ConsolidationPolicyDenied("background grant denied: " + reach.reason)
+        metadata = self._log.get_metadata(key)
+        if _live_restricted(key) or metadata.get("memory_mode") in {"temporary", "incognito"}:
+            raise ConsolidationPolicyDenied("session blocks background memory writes")
+
     async def consolidate_now(self, key: str) -> bool:
-        if self._quiesced:
+        if self._quiesced or key in self._running:
             return False
-        admitted = key not in self._running
-        if admitted:
-            self._running.add(key)
-            await self._consolidate(key, include_history=True)
-        return admitted
+        self._running.add(key)
+        try:
+            completed = await self._consolidate(key, include_history=True)
+        except Exception as error:
+            from gideon.cognition.consolidation_cycle import ConsolidationPolicyDenied
+
+            if isinstance(error, ConsolidationPolicyDenied):
+                self._schedule.deny(key)
+            else:
+                self._schedule.owe(key, error)
+            return False
+        if not completed:
+            self._schedule.owe(key)
+        else:
+            self._schedule.debt.pop(key, None)
+            self._schedule.deferred.discard(key)
+        return completed
 
     async def consolidate_session(self, key: str) -> bool:
+        self._log.update_metadata(key, {self._schedule.SEAL_PENDING: True})
         outcome = await self.consolidate_now(key)
+        if outcome:
+            await self._seal_if_complete(key)
+        elif key not in self._schedule.denied and key not in self._schedule.debt:
+            self._schedule.owe(key)
+        return outcome
+
+    async def _seal_if_complete(self, key: str) -> bool:
+        if key in self._running or self._log.unconsolidated_count(key):
+            return False
+        from gideon.security.durable_work import background_work
+        with background_work(self._log, key):
+            return await self._seal_with_background_work(key)
+
+    async def _seal_with_background_work(self, key: str) -> bool:
+        if key in self._running or self._log.unconsolidated_count(key):
+            return False
+        if not self._log.get_metadata(key).get(self._schedule.SEAL_PENDING):
+            return False
         try:
+            self._admit_consolidation(key)
             removed = self._svc.seal_session(key)
             if removed:
-                logger.info(
-                    "Sealed session %s — swept %d unpromoted record(s)", key, removed
-                )
-        except Exception:
-            logger.debug("session seal failed for %s", key, exc_info=True)
-        try:
+                logger.info("Sealed session %s — swept %d unpromoted record(s)", key, removed)
             from gideon.cognition.memory_vault import mirror_after_consolidation
 
-            mirror_after_consolidation(self._svc)
-        except Exception:
-            logger.debug("memory vault mirror failed for %s", key, exc_info=True)
-        return outcome
+            await mirror_after_consolidation(self._svc)
+            self._admit_consolidation(key)
+            self._log.update_metadata(key, {self._schedule.SEAL_PENDING: False})
+            return True
+        except PermissionError:
+            self._schedule.deny(key)
+        except Exception as error:
+            self._schedule.owe(key, error)
+            logger.warning("Session seal remains pending for %s", key, exc_info=True)
+        return False
 
     def check_idle_sessions(self) -> None:
         if self._quiesced:
@@ -1147,22 +1210,25 @@ class HistoryConsolidator:
         for key in self._schedule.idle(now):
             self._schedule.start(key, True, self._history_consolidated, now)
 
-    async def _consolidate(self, key: str, include_history: bool = True) -> None:
+    async def _consolidate(self, key: str, include_history: bool = True) -> bool:
         with single_flight(f"consolidate:{key}") as acquired:
             if acquired:
-                await self._consolidate_locked(key, include_history=include_history)
+                return await self._consolidate_locked(key, include_history=include_history)
             else:
                 self._running.discard(key)
                 logger.info(
                     "Consolidation for %s already running in another process — skipping",
                     key,
                 )
+                return False
 
-    async def _consolidate_locked(self, key: str, include_history: bool = True) -> None:
+    async def _consolidate_locked(self, key: str, include_history: bool = True) -> bool:
         try:
             from gideon.cognition.consolidation_cycle import ConsolidationRound
 
-            await ConsolidationRound(self, key, include_history).run()
+            from gideon.security.durable_work import background_work
+            with background_work(self._log, key):
+                return await ConsolidationRound(self, key, include_history).run()
         except Exception:
             logger.exception("Consolidation failed for %s", key)
             raise
@@ -1322,23 +1388,17 @@ class HistoryConsolidator:
                 if isinstance(refined, dict):
                     extraction.refine(refined)
 
-    async def _call_llm(self, prompt: str) -> dict | None:
-        if self._sessions:
-            from gideon.integrations.llm_helpers import stream_and_collect_json
+    async def _call_llm(self, prompt: str, *, validate=None) -> dict:
+        from gideon.cognition.consolidation_cycle import ConsolidationUnavailable
+        from gideon.extensions.providers.provider_bridge import ProviderResolutionError
+        from gideon.integrations.llm_helpers import one_shot_completion, parse_llm_json
 
-            acquired = False
-            try:
-                client, _, _ = await self._sessions.get_or_create(
-                    BACKGROUND_KEY, agent="gideon-lite"
-                )
-                acquired = True
-                return await stream_and_collect_json(client, prompt)
-            except Exception:
-                logger.warning("LLM consolidation call failed", exc_info=True)
-                return None
-            finally:
-                if acquired:
-                    self._sessions.release(BACKGROUND_KEY)
-                    await self._sessions.recycle_background()
-        logger.warning("LLM consolidation skipped — no session manager")
-        return None
+        try:
+            text = await one_shot_completion(prompt, use_case="background", output_type=dict,
+                                             validate=validate)
+        except ProviderResolutionError as error:
+            raise ConsolidationUnavailable("consolidation model unavailable") from error
+        result = parse_llm_json(text)
+        if not isinstance(result, dict) or not result:
+            raise ConsolidationUnavailable("model returned no extraction object")
+        return result

@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any, Callable
 
 from gideon.core.atomic_write import atomic_write
+from gideon.core import spend_day
 from gideon.engine.routing.rates import resolve_effective_price
 from gideon.engine.routing.stats import ref_of
 
@@ -121,26 +122,22 @@ def _count(bucket: dict[str, Any], key: str) -> None:
         bucket[key] = 1 + int(bucket.get(key, 0))
 
 
-def _day_from_iso(ts: Any) -> str:
-    value = str(ts or "")
-    return value[:10] if len(value) >= 10 else ""
+def _day_from_iso(ts: Any, zone: tzinfo | None = None) -> str:
+    return spend_day.day_of(ts, zone)
 
 
-def _day_from_epoch(ts: Any) -> str:
-    try:
-        stamp = datetime.fromtimestamp(float(ts), timezone.utc)
-        return stamp.strftime("%Y-%m-%d")
-    except (ValueError, TypeError, OSError, OverflowError):
-        return ""
+def _day_from_epoch(ts: Any, zone: tzinfo | None = None) -> str:
+    return spend_day.day_of_epoch(ts, zone)
 
 
 @dataclass
 class TurnAccumulator:
     fold: dict
     look: Callable
+    zone: tzinfo | None = None
 
     def accept(self, row):
-        date = _day_from_iso(row.get("ts"))
+        date = _day_from_iso(row.get("ts"), self.zone)
         provider, model = (str(row.get(key, "") or "") for key in ("provider", "model"))
         if not date or not (provider or model):
             _count(
@@ -152,6 +149,10 @@ class TurnAccumulator:
         if application:
             _count(self.fold.setdefault("app_sources", {}), application)
         absent, local = self.look(provider, model)
+        if isinstance(row.get("local"), bool):
+            local = row["local"]
+        elif row.get("price_source"):
+            local = row["price_source"] == "local"
         declaration = row.get("priced")
         unpriced = not bool(declaration) if declaration is not None else absent
         dollars = float(row.get("cost_usd", 0.0) or 0.0)
@@ -183,13 +184,15 @@ def fold_turn_row(
     row: dict[str, Any],
     *,
     look: Callable[[str, str], tuple[bool, bool]] | None = None,
+    zone: tzinfo | None = None,
 ) -> bool:
-    return TurnAccumulator(fold, look or _rate_lookup(None)).accept(row)
+    return TurnAccumulator(fold, look or _rate_lookup(None), zone).accept(row)
 
 
 def audit_census(
-    rows: list[dict[str, Any]], *, ledgered_audit_ids: set[str] | frozenset[str] = frozenset()
+    rows: list[dict[str, Any]], *, ledgered_audit_ids: set[str] | frozenset[str] = frozenset(), zone: tzinfo | None = None
 ) -> dict[str, Any]:
+    zone = spend_day.zone() if zone is None else zone
     calls = 0
     dollars_est = 0.0
     by_use_case: dict[str, int] = {}
@@ -201,7 +204,7 @@ def audit_census(
         calls += 1
         dollars_est = round(dollars_est + float(row.get("dollars_est", 0.0) or 0.0), 6)
         _count(by_use_case, str(row.get("use_case", "") or "(blank)"))
-        _count(days, _day_from_epoch(row.get("ts")))
+        _count(days, _day_from_epoch(row.get("ts"), zone))
     return dict(
         calls=calls,
         dollars_est=dollars_est,
@@ -242,16 +245,31 @@ def _default_paths(
     return Path(audit_path), Path(ledger_path)
 
 
+def _dedup_ledger(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str]] = set()
+    out = []
+    for row in rows:
+        key = next(((field, str(row[field])) for field in ("audit_id", "import_record_id") if row.get(field)), None)
+        if key is not None and key in seen:
+            continue
+        if key is not None:
+            seen.add(key)
+        out.append(row)
+    return out
+
+
 def fold_files(
     *,
     home: Path | None = None,
     audit_path: Path | None = None,
     ledger_path: Path | None = None,
+    zone: tzinfo | None = None,
 ) -> dict[str, Any]:
+    zone = spend_day.zone() if zone is None else zone
     audit, ledger = _default_paths(audit_path, ledger_path)
     fold = empty_fold()
-    accumulator = TurnAccumulator(fold, _rate_lookup(home))
-    ledger_rows = _iter_json_lines(ledger)
+    accumulator = TurnAccumulator(fold, _rate_lookup(home), zone)
+    ledger_rows = _dedup_ledger(_iter_json_lines(ledger))
     turns = sum(accumulator.accept(row) for row in ledger_rows)
     ledgered_audit_ids = frozenset(
         str(row.get("audit_id", "") or "").strip()
@@ -260,9 +278,10 @@ def fold_files(
     )
     fold.update(
         uncounted=audit_census(
-            _iter_json_lines(audit), ledgered_audit_ids=ledgered_audit_ids
+            _iter_json_lines(audit), ledgered_audit_ids=ledgered_audit_ids, zone=zone
         ),
         sources={"usage_ledger": turns},
+        calendar_timezone=str(zone),
     )
     return fold
 
@@ -313,32 +332,56 @@ def _merge_days(prior: dict[str, Any], fresh: dict[str, Any]) -> dict[str, Any]:
     return RetainedDays.merge(prior, fresh)
 
 
+def _unallocated(prior: dict, reconstructable: dict) -> dict:
+    """Subtract only rows whose original instants are still available, in the old calendar.
+
+    Aggregate-only residuals have no instant to redate. Keep them visible without
+    adding them to a dated window or counting reconstructed rows twice.
+    """
+    out = _agg()
+    for day, models in (prior.get("days") or {}).items():
+        for ref, purposes in models.items():
+            for purpose, cell in purposes.items():
+                raw = (((reconstructable.get("days") or {}).get(day) or {}).get(ref) or {}).get(purpose) or {}
+                residual = {key: max(0, float(cell.get(key, 0) or 0) - float(raw.get(key, 0) or 0)) for key in out}
+                _add(out, residual)
+    return out
+
+
 def refresh(
     home: Path, *, audit_path: Path | None = None, ledger_path: Path | None = None
 ) -> dict[str, Any]:
     prior = load_usage(home)
-    result = fold_files(home=home, audit_path=audit_path, ledger_path=ledger_path)
-    result["days"] = _merge_days(prior.get("days") or {}, result.get("days") or {})
+    zone = spend_day.zone()
+    result = fold_files(home=home, audit_path=audit_path, ledger_path=ledger_path, zone=zone)
+    # Before calendar metadata existed this native fold used UTC dates.
+    old_zone = str(prior.get("calendar_timezone") or "UTC")
+    archives = list(prior.get("calendar_archives") or [])
+    unallocated = _agg()
+    _add(unallocated, prior.get("unallocated_total") or {})
+    if prior.get("days") and old_zone != str(zone):
+        from gideon.core.timezones import zone_or_raise
+        old_rows = fold_files(home=home, audit_path=audit_path, ledger_path=ledger_path, zone=zone_or_raise(old_zone))
+        _add(unallocated, _unallocated(prior, old_rows))
+        archives.append({"timezone": old_zone, "days": prior["days"], "unallocated_total": prior.get("unallocated_total") or {}})
+    else:
+        result["days"] = _merge_days(prior.get("days") or {}, result.get("days") or {})
+    result["calendar_archives"] = archives
+    result["unallocated_total"] = unallocated
     save_usage(home, result)
     return result
 
 
 def _today_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return spend_day.today()
 
 
 def window_dates(window: str, *, today: str = "") -> list[str]:
     count = WINDOW_DAYS.get(window, WINDOW_DAYS["day"])
     try:
-        end = datetime.strptime(today or _today_utc(), "%Y-%m-%d").replace(
-            tzinfo=timezone.utc
-        )
+        return spend_day.days_ending(today or spend_day.today(), count)
     except ValueError:
-        end = datetime.now(timezone.utc)
-    return [
-        (end - timedelta(days=offset)).strftime("%Y-%m-%d")
-        for offset in reversed(range(count))
-    ]
+        return spend_day.days_ending(spend_day.today(), count)
 
 
 def _agg() -> dict[str, Any]:
@@ -451,6 +494,8 @@ def query(
         app_sources=dict(fold.get("app_sources") or {}),
         uncounted=_uncounted_in_window(fold, view.dates),
         reachable_purposes=list(reachable_purposes()),
+        calendar_timezone=fold.get("calendar_timezone") or str(spend_day.zone()),
+        legacy_total=_finish(fold.get("unallocated_total") or _agg()),
     )
 
 

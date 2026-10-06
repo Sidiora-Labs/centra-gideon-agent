@@ -1,7 +1,9 @@
 """Token-window decisions and speech-only text projection for duplex voice."""
 
+import json
 import re
-from collections import defaultdict, deque
+from pathlib import Path
+from collections import deque
 from collections.abc import Iterator
 
 TAIL_WINDOW_WORDS = 6
@@ -9,18 +11,23 @@ TAIL_WINDOW_WORDS = 6
 
 ECHO_MIN_RUN = 3
 
-DEFAULT_CONFIRMATION_PHRASES: tuple[str, ...] = (
-    "do it",
-    "go ahead",
-    "send it",
-    "execute",
-)
+_PHRASE_TABLE = Path(__file__).with_name("phrases.json")
 
-DEFAULT_EXIT_PHRASES: tuple[str, ...] = (
-    "cancel",
-    "never mind",
-    "forget it",
-)
+
+def _shipped_phrases(table: object, key: str) -> tuple[str, ...]:
+    phrases = table.get(key) if isinstance(table, dict) else None
+    if not (
+        isinstance(phrases, list)
+        and phrases
+        and all(isinstance(p, str) and p.strip() for p in phrases)
+    ):
+        raise RuntimeError(f"{_PHRASE_TABLE} has no {key} phrases")
+    return tuple(phrases)
+
+
+_SHIPPED_TABLE = json.loads(_PHRASE_TABLE.read_text(encoding="utf-8"))
+DEFAULT_CONFIRMATION_PHRASES: tuple[str, ...] = _shipped_phrases(_SHIPPED_TABLE, "confirmation")
+DEFAULT_EXIT_PHRASES: tuple[str, ...] = _shipped_phrases(_SHIPPED_TABLE, "exit")
 
 
 VOICE_DISCLAIMER = "(Transcribed from voice; transcription may be inaccurate.)"
@@ -28,7 +35,8 @@ VOICE_DISCLAIMER = "(Transcribed from voice; transcription may be inaccurate.)"
 
 DEFAULT_PUSH_TO_TALK_CHORD = "CommandOrControl+Shift+Space"
 
-_WORD_RE = re.compile(r"[a-z0-9]+(?:'[a-z]+)?")
+_WORD_RE = re.compile(r"[A-Za-z0-9'\u2018\u2019\u02bc]+")
+_APOSTROPHE_RE = re.compile(r"['\u2018\u2019\u02bc]")
 
 _FENCE_RE = re.compile(r"```.*?```|~~~.*?~~~", re.DOTALL)
 _OPEN_FENCE_RE = re.compile(r"(?:```|~~~).*\Z", re.DOTALL)
@@ -52,7 +60,10 @@ _CODE_BLOCK_SPOKEN = " code block. "
 
 
 def _words(text: str) -> list[str]:
-    return [match.group(0) for match in _WORD_RE.finditer(text.lower())]
+    """Word tokens, lowercased with apostrophes removed; punctuation and markup discarded."""
+
+    folded = (_APOSTROPHE_RE.sub("", m.group(0)).lower() for m in _WORD_RE.finditer(text))
+    return [w for w in folded if w]
 
 
 def _runs(tokens: list[str], width: int) -> Iterator[tuple[str, ...]]:
@@ -63,28 +74,56 @@ def _runs(tokens: list[str], width: int) -> Iterator[tuple[str, ...]]:
             yield tuple(window)
 
 
-def _phrase_in_tail(text: str, phrases: object, tail_words: int) -> bool:
-    if not isinstance(phrases, (list, tuple, set, frozenset)):
+def _spells_phrase_in_tail(
+    tokens: list[str], phrase: list[str], tail_words: int, *, split_words: bool
+) -> bool:
+    """True when a run of whole ``tokens`` inside the trailing window spells ``phrase``.
+
+    A run spells a phrase when the two are equal with the spaces between their words
+    taken out: speech-to-text writes "never mind" as "Nevermind", "never-mind" or
+    "Never mind.", and each of them is the phrase. Only whole words count, so "remind"
+    or "whenever" never supplies part of one. With ``split_words`` a single word of the
+    phrase may also arrive as two ("never mind" for a "nevermind" phrase); without it a
+    run may only join the phrase's own words together.
+    """
+
+    key = "".join(phrase)
+    if not key:
         return False
-    vocabulary: dict[int, set[tuple[str, ...]]] = defaultdict(set)
-    for phrase in phrases:
-        if isinstance(phrase, str):
-            words = tuple(_words(phrase))
-            if words:
-                vocabulary[len(words)].add(words)
-    utterance = _words(text)
-    for width, choices in vocabulary.items():
-        tail = utterance[-max(width, tail_words) :]
-        if any(run in choices for run in _runs(tail, width)):
-            return True
+    # Where the phrase itself has a boundary between two of its words, as offsets into key.
+    bounds: set[int] = set()
+    offset = 0
+    for part in phrase[:-1]:
+        offset += len(part)
+        bounds.add(offset)
+    for i in range(len(tokens)):
+        run = ""
+        for j in range(i, len(tokens)):
+            run += tokens[j]
+            if not key.startswith(run):
+                break
+            if len(run) == len(key):
+                # The window must stretch to hold a run longer than tail_words itself.
+                if i >= len(tokens) - max(tail_words, j - i + 1):
+                    return True
+                break
+            if not split_words and len(run) not in bounds:
+                break
     return False
 
 
-def _matches(text: str, phrases: object, tail_words: int) -> bool:
-    return (
-        isinstance(text, str)
-        and bool(text.strip())
-        and _phrase_in_tail(text, phrases, tail_words)
+def _phrase_in_tail(text: str, phrases: object, tail_words: int, *, split_words: bool) -> bool:
+    """True when any phrase is spelled by a run of words inside the trailing window."""
+
+    if not isinstance(phrases, (list, tuple, set, frozenset)):
+        return False
+    tokens = _words(text)
+    if not tokens:
+        return False
+    return any(
+        isinstance(phrase, str)
+        and _spells_phrase_in_tail(tokens, _words(phrase), tail_words, split_words=split_words)
+        for phrase in phrases
     )
 
 
@@ -94,7 +133,22 @@ def is_confirmation(
     *,
     tail_words: int = TAIL_WINDOW_WORDS,
 ) -> bool:
-    return _matches(text, phrases, tail_words)
+    """True when ``text`` ends with a phrase that should fire the buffered turn.
+
+    Matching ignores case, punctuation, hyphens, apostrophes and the spaces
+    between the phrase's words, and is anchored to the trailing ``tail_words``
+    words, so "go ahead and tell me what you think about the plan" does not
+    execute — only a trailing "go ahead" does.
+
+    A confirmation is matched more strictly than an exit: its words may run
+    together ("Sendit.") but a word of the phrase is never assembled from two
+    words that were said ("Goa head" is not "go ahead"). A false confirmation
+    sends a half-finished thought; a false exit only discards one.
+    """
+
+    if not isinstance(text, str) or not text.strip():
+        return False
+    return _phrase_in_tail(text, phrases, tail_words, split_words=False)
 
 
 def is_exit(
@@ -103,7 +157,11 @@ def is_exit(
     *,
     tail_words: int = TAIL_WINDOW_WORDS,
 ) -> bool:
-    return _matches(text, phrases, tail_words)
+    """True when ``text`` ends with a phrase that should clear the buffer."""
+
+    if not isinstance(text, str) or not text.strip():
+        return False
+    return _phrase_in_tail(text, phrases, tail_words, split_words=True)
 
 
 def is_echo(

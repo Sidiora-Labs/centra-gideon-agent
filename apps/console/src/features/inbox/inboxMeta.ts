@@ -16,7 +16,8 @@ export const CLASSIFICATIONS: ClassMeta[] = [
   { key: 'fyi', label: 'FYI', tone: 'var(--color-on-surface-low)', icon: Info },
   { key: 'noise', label: 'Noise', tone: 'var(--color-on-surface-low)', icon: BellOff },
 ]
-export function classMeta(c?: string): ClassMeta {
+export function classMeta(c?: string, failure?: string): ClassMeta {
+  if (!c) return { key: '', label: failure ? "Couldn't sort" : 'Not sorted yet', tone: 'var(--color-on-surface-low)', icon: failure ? AlertTriangle : InboxIcon }
   return resolveMeta(CLASSIFICATIONS, c, 0)
 }
 
@@ -29,6 +30,7 @@ export const CONFIDENCES: ConfMeta[] = [
   { key: 'user', label: 'Set by you', tone: 'var(--color-info)', icon: UserCheck },
 ]
 export function confMeta(c?: string): ConfMeta {
+  if (!c) return { key: '', label: '', tone: 'var(--color-on-surface-low)', icon: Eye }
   return resolveMeta(CONFIDENCES, c, 1)
 }
 
@@ -108,4 +110,8 @@ export function relPast(timestamp?: number | string | null): string {
   const elapsed = Date.now() / 1000 - seconds
   const scale = [{ before: 60, size: 1, unit: '' }, { before: 3600, size: 60, unit: 'm' }, { before: 86400, size: 3600, unit: 'h' }, { before: Infinity, size: 86400, unit: 'd' }].find(step => elapsed < step.before)!
   return scale.unit ? `${Math.floor(elapsed / scale.size)}${scale.unit} ago` : 'just now'
+}
+
+export function isReplyMessage(item: InboxItem): boolean {
+  return ['message', 'mention', 'email'].includes(item.item_kind || 'message')
 }
