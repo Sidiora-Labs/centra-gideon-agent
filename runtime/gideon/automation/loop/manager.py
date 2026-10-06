@@ -195,13 +195,16 @@ def write_brief(loop: Loop) -> None:
 def _arm_worker_approval_posture(state, session, loop: Loop) -> None:
     """Reset reusable worker approval state from the loop's current persisted mode."""
     posture = kinds.worker_approval_posture(loop)
-    session._trust = posture.trust
+    from gideon.automation.loop import run_grants
+    run_grants.register_worker(state, session, loop)
+    session._trust = posture.trust or run_grants.refresh(state, session)
     session._trust_reads = False
     session._agent_floor_seeded = False
     session._unattended = posture.unattended
     session.acp_mode = posture.acp_mode
     try:
-        state.sessions.set_approval_policy(session.key, posture.approval_policy)
+        from gideon.interfaces.dashboard.chat_utils import _history_key_for
+        state.sessions.set_approval_policy(_history_key_for(session.key), posture.approval_policy)
     except Exception:
         logger.warning(
             "loop: failed to set approval posture for %s", session.key, exc_info=True
@@ -216,6 +219,8 @@ async def start(state, svc, loop_id: str) -> Loop:
     per-session trust, and arm the autonudge loop. Used for both ``start`` and
     ``resume`` — both transition to RUNNING + (re)arm on a fresh/idempotent worker.
     """
+    from gideon.automation.loop import run_grants
+    run_grants.revoke(state, loop_id)
     loop = store.get(loop_id)
     if loop is None:
         raise KeyError(loop_id)
@@ -414,6 +419,8 @@ async def pause(state, svc, loop_id: str) -> Loop:
     parallel code/design loop left only its main worker paused would otherwise keep
     its task-workers burning cycles + editing worktrees while the user thinks it's
     paused."""
+    from gideon.automation.loop import run_grants
+    run_grants.revoke(state, loop_id)
     main = svc.get_by_session(session_key(loop_id))
     if main is not None:
         await svc.update(main.id, active=False)
@@ -426,6 +433,8 @@ async def pause(state, svc, loop_id: str) -> Loop:
 
 async def stop(state, svc, loop_id: str) -> Loop:
     """Stop (terminal): tear down + drop the STOP sentinel."""
+    from gideon.automation.loop import run_grants
+    run_grants.revoke(state, loop_id)
     await _teardown(svc, loop_id)
     loop_files.write_stop_sentinel(loop_id)
     return store.update_status(

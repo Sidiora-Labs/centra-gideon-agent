@@ -63,6 +63,11 @@ class DashboardApprovalState:
             "_auto_denied_attempt_id": retry_attempt_id,
             "_auto_denied_node_id": retry_node_id,
         }
+        from gideon.automation.loop import run_grants
+        entry.pop("loop_run_offer", None)
+        if session_obj is not None:
+            entry["loop_run_offer"] = run_grants.offer(self, session_obj)
+        data["loop_run_offer"] = entry.get("loop_run_offer")
         self._hold_approval(entry, broadcast=False)
         data["approval_id"] = approval_id
         data["revision"] = entry["revision"]
@@ -149,6 +154,9 @@ class DashboardApprovalState:
             return False
         if self.refuse_ended_owner(registry_id) or not stands(TRUST, caller=by.label, subject=f"session={session.key}"):
             return False
+        from gideon.automation.loop import run_grants
+        if getattr(session, "_app", "") in {"loop", "loops"}:
+            return by.kind == OWNER and run_grants.issue(self, session, registry_id, entry.get("loop_run_offer"))
         session._trust = True
         session._agent_floor_seeded = False
         from gideon.interfaces.dashboard.chat_utils import _history_key_for
@@ -433,6 +441,8 @@ class DashboardApprovalState:
         return sum(self.cancel_approval(aid, reason="its chat turn was stopped") for aid in ids)
 
     def loop_status_changed(self, loop_id: str, _old: Any, new: Any) -> None:
+        from gideon.automation.loop import run_grants
+        run_grants.revoke(self, loop_id)
         status = str(getattr(new, "value", new))
         reason = f"the loop that requested approval ended as {status}"
         for prefix in (f"loop-{loop_id}", f"loop-plan-{loop_id}", f"code-plan-{loop_id}"):

@@ -55,6 +55,7 @@ export interface ApprovalSegment {
   risk?: 'safe' | 'caution' | 'destructive' | 'unchecked'
   denyConsequence?: import("./denyConsequence").DenyConsequence
   blastRadius?: import('./approvalMeta').BlastRadius
+  loopRunOffer?: { loop_id: string; name: string; duration_seconds: number; run_started_at: number }
   protectedDelete?: string
   toolKind?: string
   canRevise?: boolean
@@ -236,7 +237,7 @@ export function deriveActivity(turns: ChatTurn[]): ChatActivity {
   return { files: [...files.values()], links: [...links.values()] }
 }
 
-export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { owner_question?: OwnerQuestionPayload; finish_reason?: string; cut_off?: { adapter: string; missing: string; model?: string }; kind?: string; id?: string; state?: string; outcome?: string | null; tool_call_id?: string; turn_id?: string; turn_origin?: string; approval_id?: string; tool_kind?: string; can_revise?: boolean; input?: string; tool_input?: string; purpose?: string; risk?: string; deny_consequence?: import("./denyConsequence").DenyConsequence; blast_radius?: import('./approvalMeta').BlastRadius; protected_delete?: string; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; image_delivery?: ImageDeliveryMap; image_delivery_reason?: ImageDeliveryReasonMap; turn_telemetry?: { line?: string }; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[]; file_changes?: ChatFileChange[] } }
+export interface HistMsg { role: string; content: string; ts?: string; variants?: { content: string; ts?: string }[]; variant_idx?: number; rewound?: { messages: { role: string; content: string; ts?: string }[]; ts?: string }[]; meta?: { owner_question?: OwnerQuestionPayload; finish_reason?: string; cut_off?: { adapter: string; missing: string; model?: string }; kind?: string; id?: string; state?: string; outcome?: string | null; tool_call_id?: string; turn_id?: string; turn_origin?: string; approval_id?: string; tool_kind?: string; can_revise?: boolean; input?: string; tool_input?: string; purpose?: string; risk?: string; deny_consequence?: import("./denyConsequence").DenyConsequence; blast_radius?: import('./approvalMeta').BlastRadius; protected_delete?: string; loop_run_offer?: ApprovalSegment['loopRunOffer']; output?: string; done?: boolean; tool?: string; detail?: string; resolved?: string; content_type?: string; raw_ref?: string; truncated?: boolean; original_length?: number; recovery_hints?: string[]; agent_error?: AgentError; ok?: boolean; pastes?: { seq: number; lines: number; content: string }[]; files?: string[]; image_delivery?: ImageDeliveryMap; image_delivery_reason?: ImageDeliveryReasonMap; turn_telemetry?: { line?: string }; original?: string; ui_label?: string; summary?: string; memory_citations?: MemoryCitation[]; skills_used?: SkillUsed[]; file_changes?: ChatFileChange[] } }
 
 export function stopOutcomeForMessage(message: HistMsg): StopOutcome | null {
   const meta = message.meta
@@ -373,7 +374,7 @@ export function hydrateTurns(messages: HistMsg[], running = false): ChatTurn[] {
       }
     } else if (m.role === 'permission') {
       const resolved = m.meta?.resolved || undefined
-      lastAssistant(m.meta?.turn_id).segments.push({ kind: 'approval', id: m.meta?.approval_id || m.meta?.tool_call_id || `perm-${turns.length}`, tool: toolName(m.meta, m.content), toolKind: m.meta?.tool_kind, canRevise: m.meta?.can_revise === true, input: m.meta?.input || m.meta?.tool_input, purpose: m.meta?.purpose, risk: m.meta?.risk as ApprovalSegment['risk'], blastRadius: m.meta?.blast_radius, denyConsequence: m.meta?.deny_consequence, protectedDelete: m.meta?.protected_delete, resolved })
+      lastAssistant(m.meta?.turn_id).segments.push({ kind: 'approval', id: m.meta?.approval_id || m.meta?.tool_call_id || `perm-${turns.length}`, tool: toolName(m.meta, m.content), toolKind: m.meta?.tool_kind, canRevise: m.meta?.can_revise === true, input: m.meta?.input || m.meta?.tool_input, purpose: m.meta?.purpose, risk: m.meta?.risk as ApprovalSegment['risk'], blastRadius: m.meta?.blast_radius, denyConsequence: m.meta?.deny_consequence, protectedDelete: m.meta?.protected_delete, loopRunOffer: m.meta?.loop_run_offer, resolved })
     } else if (m.role === 'error') {
       lastAssistant(m.meta?.turn_id).segments.push({ kind: 'error', text: m.content })
     } else if (m.role === 'system') {

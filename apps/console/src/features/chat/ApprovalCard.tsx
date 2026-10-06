@@ -63,9 +63,12 @@ export function ApprovalCard({ seg, onAct }: { seg: ApprovalSegment; onAct: (id:
   const rungType = useMemo(() => providerRungIndex(ladder).get(seg.tool), [ladder, seg.tool])
   const reach = establishedFacets(deriveBlastRadius({ tool: seg.tool, risk: seg.risk, blastRadius: seg.blastRadius })).map((facet) => facet.label)
   const dangerous = seg.risk === 'destructive' || seg.risk === 'unchecked'
-  const scopes = seg.protectedDelete || (dangerous && !unlockStanding) ? REMEMBER_SCOPES.slice(0, 1) : seg.toolKind && ['prompt', 'write', 'record'].includes(seg.toolKind)
-    ? REMEMBER_SCOPES
-    : REMEMBER_SCOPES.slice(0, 2)
+  const offeredScopes = REMEMBER_SCOPES.map((choice) => choice.key === 'chat' && seg.loopRunOffer
+    ? { ...choice, label: 'This run', promise: `All workers in “${seg.loopRunOffer.name}” may use tools for ${seg.loopRunOffer.duration_seconds} seconds. Pausing or restarting ends this allowance.` }
+    : choice)
+  const scopes = seg.protectedDelete || (dangerous && !unlockStanding) ? offeredScopes.slice(0, 1) : seg.toolKind && ['prompt', 'write', 'record'].includes(seg.toolKind)
+    ? offeredScopes
+    : offeredScopes.slice(0, 2)
   const chosen = scopes.find((s) => s.key === scope) ?? scopes[0]
   const denial = denyConsequenceText(seg.denyConsequence)
   const resolved = seg.resolved ? approvalOutcome(seg.resolved) : null

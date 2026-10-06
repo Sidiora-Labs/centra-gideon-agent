@@ -2314,6 +2314,8 @@ async def run_chat(
                     },
                 )
 
+        from gideon.automation.loop import run_grants
+        run_grants.refresh(state, session)
         _sess_acp_mode = getattr(session, "acp_mode", "") or ""
         if _sess_acp_mode:
             acp_mode = _sess_acp_mode
@@ -2406,6 +2408,9 @@ async def run_chat(
         if session.created_by_app:
             # Owner chat posture is not an app grant. App-origin conversations
             # remain interactive until an app-specific grant is available.
+            state.sessions.set_approval_policy(session_key, "")
+        elif run_grants.refresh(state, session):
+            # Keep permissions observable: each call must validate the live run lease.
             state.sessions.set_approval_policy(session_key, "")
         elif session._trust or state.is_yolo_active():
             state.sessions.set_approval_policy(session_key, "auto")
@@ -3547,6 +3552,7 @@ async def run_chat(
                     subject=event.title,
                     level="hook_based",
                 )
+                run_grants.refresh(state, session)
                 trusted = not app_origin and session._trust and not session._agent_floor_seeded and approval_grants.stands(
                     approval_grants.TRUST, caller=session_key, subject=event.title
                 )
@@ -3808,6 +3814,7 @@ async def run_chat(
                 from gideon.security.approval_brief import compose_approval_brief
                 approval_brief = compose_approval_brief(event) or {}
                 perm_meta = {
+                    "loop_run_offer": run_grants.offer(state, session),
                     "blast_radius": approval_brief.get("blastRadius"),
                     "deny_consequence": approval_brief.get("denyConsequence"),
                     "protected_delete": protected_sentence(protected),
@@ -3851,6 +3858,7 @@ async def run_chat(
                         "risk": effective_risk,
                         "blast_radius": perm_meta.get("blast_radius"),
                         "protected_delete": perm_meta.get("protected_delete", ""),
+                        "loop_run_offer": perm_meta.get("loop_run_offer"),
                         "can_revise": perm_meta["can_revise"],
                         "_call_fingerprint": _call_fingerprint,
                         "_auto_denied_note_id": _retry_note_id,

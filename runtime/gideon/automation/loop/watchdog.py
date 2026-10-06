@@ -1013,9 +1013,12 @@ class LoopWatchdog:
             cid = loop.id
             session = self._state._sessions.get(manager.session_key(cid))
 
-            if loop.started_at and time.time() - loop.started_at > cfg.trust_ttl_secs:
-                if session is not None:
-                    session._trust = False
+            if not loop.attended and loop.started_at and time.time() - loop.started_at > cfg.trust_ttl_secs:
+                from gideon.interfaces.dashboard.chat_utils import _history_key_for
+                for key, worker in self._state._sessions.items():
+                    if key == manager.session_key(cid) or key.startswith(manager.session_key(cid) + "-") or key == f"loop-plan-{cid}":
+                        worker._trust = False
+                        self._state.sessions.set_approval_policy(_history_key_for(key), "")
                 loop_files.write_question(
                     cid,
                     "Auto-approval expired after the trust window. "

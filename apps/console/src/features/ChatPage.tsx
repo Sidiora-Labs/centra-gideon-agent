@@ -969,7 +969,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         const patchApproval = (segs: Segment[]) => {
           const id = String(d.id ?? '')
           if (segs.some((sg) => sg.kind === 'approval' && sg.id === id)) return segs
-          segs.push({ kind: 'approval', id, tool: String(d.tool ?? 'tool'), toolKind: String(d.tool_kind ?? ''), canRevise: d.can_revise === true, input: String(d.tool_input ?? ''), purpose: String(d.tool_purpose ?? ''), risk: (d.risk ? String(d.risk) : undefined) as ApprovalSegment['risk'], blastRadius: decodeBlastRadius(d.blast_radius), denyConsequence: decodeDenyConsequence(d.deny_consequence), protectedDelete: String(d.protected_delete ?? '') })
+          segs.push({ kind: 'approval', id, tool: String(d.tool ?? 'tool'), toolKind: String(d.tool_kind ?? ''), canRevise: d.can_revise === true, input: String(d.tool_input ?? ''), purpose: String(d.tool_purpose ?? ''), risk: (d.risk ? String(d.risk) : undefined) as ApprovalSegment['risk'], blastRadius: decodeBlastRadius(d.blast_radius), denyConsequence: decodeDenyConsequence(d.deny_consequence), protectedDelete: String(d.protected_delete ?? ''), loopRunOffer: d.loop_run_offer as ApprovalSegment['loopRunOffer'] })
           return segs
         }
         if (d.turn_id) patchAssistantForTurn(String(d.turn_id), patchApproval)
