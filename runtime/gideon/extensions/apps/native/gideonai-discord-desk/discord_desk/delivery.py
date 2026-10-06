@@ -112,42 +112,56 @@ class _StreamState:
 
 
 class _PendingApproval:
-    __slots__ = ("future", "channel_id", "message_id", "request_id", "answerer")
+    __slots__ = ("future", "channel_id", "message_id", "request_id", "answerer", "answers", "delivery", "tenant", "owner", "guild", "application", "on_answer", "chosen_answer")
 
     def __init__(self, request_id: str, channel_id: str, message_id: str) -> None:
         self.future: asyncio.Future = asyncio.get_event_loop().create_future()
         self.channel_id = channel_id
         self.message_id = message_id
         self.request_id = request_id
-        self.answerer = None
+        self.answerer = self.on_answer = None
+        from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
+        self.answers = ONE_CALL_ANSWERS
+        self.delivery = None
+        self.tenant = self.owner = self.guild = self.application = self.chosen_answer = ""
 
 
-def _apply_verified_interaction(
-    interaction: dict[str, Any], pending: _PendingApproval | None, owner_id: str
-) -> bool:
-    """Apply only a correctly bound, allowlisted owner decision; performs no I/O."""
-    if int(interaction.get("type", 0) or 0) != INTERACTION_TYPE_COMPONENT:
+def _apply_verified_interaction(interaction: dict[str, Any], pending: _PendingApproval | None, owner_id: str) -> bool:
+    """Apply only the live offered capability from its current authenticated bot."""
+    if interaction.get("type") != INTERACTION_TYPE_COMPONENT:
         return False
     custom_id = str((interaction.get("data") or {}).get("custom_id", ""))
     action, _, request_id = custom_id.partition(":")
-    if action not in (_APPROVE, _DENY) or not request_id:
-        return False
+    answer = {"approve": "approved", "deny": "rejected"}.get(action, action)
     actor = (interaction.get("member") or {}).get("user") or interaction.get("user") or {}
     actor_id = str(actor.get("id", ""))
     message = interaction.get("message") or {}
     channel_id = str(interaction.get("channel_id", ""))
-    if pending is None or pending.future.done() or (
-        actor.get("bot")
-        or not owner_id
-        or actor_id != owner_id
-        or not is_allowed_sender("discord", actor_id)
-        or channel_id != pending.channel_id
-        or str(message.get("id", "")) != pending.message_id
-        or request_id != pending.request_id
-    ):
+    if pending is None or pending.future.done() or pending.delivery is None:
         return False
-    pending.answerer = on_channel("discord", actor_id)
-    pending.future.set_result("approved" if action == _APPROVE else "rejected")
+    identity = pending.delivery.approval_identity(channel_id)
+    if (identity is None or actor.get("bot") or not owner_id or actor_id != owner_id
+        or actor_id != identity["owner"] or actor_id != pending.owner
+        or identity["tenant"] != pending.tenant
+        or str(interaction.get("application_id", "")) != pending.application
+        or pending.application != identity["application"]
+        or str(interaction.get("guild_id") or "") != pending.guild
+        or channel_id != pending.channel_id or str(message.get("id", "")) != pending.message_id
+        or request_id != pending.request_id):
+        return False
+    chosen = next((item for item in pending.answers if item.key == answer), None)
+    if chosen is None:
+        return False
+    by = on_channel("discord", actor_id, pending.tenant)
+    if callable(pending.on_answer):
+        if not pending.on_answer(answer, by):
+            return False
+    elif answer == "trust":
+        return False
+    pending.answerer = by
+    pending.chosen_answer = answer
+    if not pending.future.done():
+        pending.future.set_result(chosen.ends)
     return True
 
 
@@ -182,9 +196,11 @@ def _render_stream_tasks(
 class DiscordDeskDelivery:
     """Renders + delivers gateway results to Discord. Implements ChannelDelivery."""
 
-    def __init__(self, api: DiscordDeskApi, owner_id: str) -> None:
+    def __init__(self, api: DiscordDeskApi, owner_id: str, *, transport: Any = None) -> None:
         self._api = api
         self._owner_id = owner_id
+        self._transport = transport
+        self._approval_channels: dict[str, dict] = {}
         self._streams: dict[str, _StreamState] = {}
         # keyed by "req:<request_id>" (from the button custom_id) and by
         # "<channel>:<message>" (the prompt the buttons live on).
@@ -199,6 +215,39 @@ class DiscordDeskDelivery:
         self._channel_guilds: dict[str, str] = {}
         # monotonic clock is injectable so the throttle test needn't sleep.
         self._now = _monotonic
+
+    def approval_identity(self, channel: str) -> dict | None:
+        from gideon.core.config.credentials import owner_id_for
+        from gideon.integrations.channel_delivery import raw_delivery_for
+        from gideon.integrations.channel_transports import get_transport
+        owner = owner_id_for("discord")
+        application = str(getattr(self._transport, "_own_application_id", "") or "")
+        if (not owner or not application or not is_allowed_sender("discord", owner)
+            or self._transport is None or not self._transport.connected
+            or get_transport("discord") is not self._transport or raw_delivery_for("discord") is not self):
+            return None
+        current = self._approval_channels.get(channel, {})
+        return {"owner": owner, "tenant": f"discord:{application}", "transport": self._transport,
+                "application": application, "guild": current.get("guild", ""),
+                "private": current.get("private", False) and current.get("owner") == owner}
+
+    async def prepare_approval_channel(self, channel: str) -> bool:
+        self._approval_channels.pop(channel, None)
+        identity = self.approval_identity(channel)
+        if identity is None:
+            return False
+        try:
+            actual = await self._api.get_channel(channel)
+        except Exception:
+            return False
+        if str(actual.get("id", "")) != channel:
+            return False
+        recipients = actual.get("recipients") or []
+        private = (actual.get("type") == 1 and not actual.get("guild_id")
+                   and len(recipients) == 1 and str(recipients[0].get("id", "")) == identity["owner"]
+                   and not recipients[0].get("bot"))
+        self._approval_channels[channel] = {"private": bool(private), "guild": str(actual.get("guild_id") or ""), "owner": identity["owner"]}
+        return bool(private)
 
     # ── DM resolution ──
     async def open_dm(self, user_id: str) -> str:
@@ -464,27 +513,55 @@ class DiscordDeskDelivery:
         the gateway falls back to the dashboard. ``on_prompted(pending)`` lets core
         race a dashboard prompt against this one — a dashboard click resolves the
         same future."""
+        from gideon.security.approval_brief import approval_brief_for
+        from gideon.integrations.channel_delivery import offered_answers, ONE_CALL_ANSWERS
+        identity = self.approval_identity("")
+        if identity is None:
+            return None
         channel_id = ""
         if parent_session_key and sessions is not None:
             try:
-                channel_id = sessions.get_channel(parent_session_key) or ""
+                history_key = parent_session_key
+                if sessions.get_channel_provider(history_key) != "discord":
+                    history_key = f"dashboard:{parent_session_key}"
+                if sessions.get_channel_provider(history_key) == "discord":
+                    channel_id = sessions.get_channel(history_key) or ""
             except Exception:
                 channel_id = ""
         if not channel_id:
             # No linked channel: prompt the owner's DM, which must be OPENED first —
             # a Discord user id is not a postable channel id.
-            channel_id = await self.open_dm(self._owner_id) if self._owner_id else ""
+            channel_id = await self.open_dm(identity["owner"])
         if not channel_id:
             return None
 
+        private = await self.prepare_approval_channel(channel_id)
+        identity = self.approval_identity(channel_id)
+        if identity is None:
+            return None
+        brief = approval_brief_for(event)
+        answers = offered_answers(brief.get("answers")) or ONE_CALL_ANSWERS
+        if not private:
+            answers = ONE_CALL_ANSWERS
         request_id = str(getattr(event, "request_id", ""))
         title = _safe(str(getattr(event, "title", "")))
-        prompt = f"🔐 [{source}] Approve: {title}?"
-        msg = await self._api.create_message(
-            channel_id, prompt[:DISCORD_DESK_MAX_TEXT], components=_approval_components(request_id)
-        )
+        lines = [f"🔐 [{source}] {title}"]
+        for value in (getattr(event, "tool_purpose", ""), getattr(event, "tool_input", ""), brief.get("summary"), brief.get("blastRadiusLine")):
+            if value:
+                lines.append(_safe(str(value)))
+        lines.extend(answer.promise for answer in answers if answer.promise)
+        parts = split_message("\n\n".join(lines))
+        msg = {}
+        for index, part in enumerate(parts):
+            msg = await self._api.create_message(channel_id, part,
+                components=_approval_components(request_id, answers) if index == len(parts)-1 else None)
         message_id = str(msg.get("id", ""))
+        if not message_id:
+            return None
         pending = _PendingApproval(request_id, channel_id, message_id)
+        pending.answers, pending.delivery = answers, self
+        pending.owner, pending.tenant = identity["owner"], identity["tenant"]
+        pending.guild, pending.application = identity["guild"], identity["application"]
         self._pending[f"{channel_id}:{message_id}"] = pending
         # Index by request_id too so resolve_interaction can find it from custom_id.
         self._pending[f"req:{request_id}"] = pending
@@ -517,6 +594,9 @@ class DiscordDeskDelivery:
 
         approved = outcome == "approved"
         status = _approval_ending(str(outcome))
+        chosen = next((a for a in answers if a.key == pending.chosen_answer), None)
+        if chosen is not None and chosen.promise and approved:
+            status += " — " + chosen.promise
         try:
             # components=[] strips the buttons: a decided request must not leave a
             # clickable Approve behind.
@@ -537,11 +617,6 @@ class DiscordDeskDelivery:
         within three seconds, so the ack happens even for an unknown/stale custom_id."""
         if int(interaction.get("type", 0) or 0) != INTERACTION_TYPE_COMPONENT:
             return
-        custom_id = str((interaction.get("data") or {}).get("custom_id", ""))
-        action, _, request_id = custom_id.partition(":")
-        if action in (_APPROVE, _DENY) and request_id:
-            pending = self._pending.get(f"req:{request_id}")
-            _apply_verified_interaction(interaction, pending, self._owner_id)
         iid = str(interaction.get("id", ""))
         itoken = str(interaction.get("token", ""))
         if iid and itoken:
@@ -550,31 +625,23 @@ class DiscordDeskDelivery:
             except Exception:
                 logger.debug("discord: interaction ack failed", exc_info=True)
 
+        custom_id = str((interaction.get("data") or {}).get("custom_id", ""))
+        action, _, request_id = custom_id.partition(":")
+        if request_id:
+            pending = self._pending.get(f"req:{request_id}")
+            if action == "trust" and not await self.prepare_approval_channel(str(interaction.get("channel_id", ""))):
+                pending = None
+            identity = self.approval_identity(str(interaction.get("channel_id", "")))
+            _apply_verified_interaction(interaction, pending, identity["owner"] if identity else "")
 
-def _approval_components(request_id: str) -> list[dict[str, Any]]:
-    """One action row with the Approve (success) / Deny (danger) buttons.
 
-    The request id rides in each ``custom_id`` — that is the only state Discord
-    hands back on the press, so it is what re-finds the pending future."""
-    return [
-        {
-            "type": COMPONENT_ACTION_ROW,
-            "components": [
-                {
-                    "type": COMPONENT_BUTTON,
-                    "style": BUTTON_STYLE_SUCCESS,
-                    "label": "Approve",
-                    "custom_id": f"{_APPROVE}:{request_id}",
-                },
-                {
-                    "type": COMPONENT_BUTTON,
-                    "style": BUTTON_STYLE_DANGER,
-                    "label": "Deny",
-                    "custom_id": f"{_DENY}:{request_id}",
-                },
-            ],
-        }
-    ]
+def _approval_components(request_id: str, answers: tuple | None = None) -> list[dict[str, Any]]:
+    """Render exactly the answer capability offered by the native approval owner."""
+    from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
+    return [{"type": COMPONENT_ACTION_ROW, "components": [
+        {"type": COMPONENT_BUTTON, "style": BUTTON_STYLE_DANGER if answer.key == "rejected" else BUTTON_STYLE_SUCCESS,
+         "label": answer.label, "custom_id": f"{answer.key}:{request_id}"}
+        for answer in (answers or ONE_CALL_ANSWERS)]}]
 
 
 def _chunk(items: list[Any], size: int) -> list[list[Any]]:

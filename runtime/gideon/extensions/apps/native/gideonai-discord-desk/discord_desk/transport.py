@@ -89,6 +89,7 @@ class DiscordDeskTransport(ChannelTransportProvider):
         self._gateway_task: asyncio.Task | None = None
         # The bot's own user id, captured from READY — half of the self-message filter.
         self._own_user_id = ""
+        self._own_application_id = ""
 
     @property
     def name(self) -> str:
@@ -118,6 +119,7 @@ class DiscordDeskTransport(ChannelTransportProvider):
         return bool(self._token)
 
     async def disconnect(self) -> None:
+        self._own_application_id = ""
         if self._api is not None:
             await self._api.close()
 
@@ -138,7 +140,7 @@ class DiscordDeskTransport(ChannelTransportProvider):
         # channel result through this ONE provider-agnostic ChannelDelivery handle —
         # it never sees the Discord API client.
         owner_id = self._resolve_owner_id(services)
-        self._delivery = DiscordDeskDelivery(self._api, owner_id)
+        self._delivery = DiscordDeskDelivery(self._api, owner_id, transport=self)
         if hasattr(services, "register_channel_delivery"):
             services.register_channel_delivery(self._delivery)
         if getattr(services, "dashboard_state", None) is not None:
@@ -179,6 +181,7 @@ class DiscordDeskTransport(ChannelTransportProvider):
             return getattr(services, "owner_id", "")
 
     async def stop_inbound(self) -> None:
+        self._own_application_id = ""
         if self._gateway is not None:
             await self._gateway.stop()
         if self._gateway_task is not None:
@@ -197,6 +200,7 @@ class DiscordDeskTransport(ChannelTransportProvider):
     async def _on_ready(self, data: dict[str, Any]) -> None:
         """Capture the bot's own user id — the anchor of the self-message filter."""
         self._own_user_id = str((data.get("user") or {}).get("id", ""))
+        self._own_application_id = str((data.get("application") or {}).get("id", ""))
         logger.info("DiscordDeskTransport: ready as user %s", self._own_user_id or "?")
 
     async def _on_interaction_create(self, interaction: dict[str, Any]) -> None:

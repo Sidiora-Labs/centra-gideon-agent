@@ -77,18 +77,18 @@ class DashboardApprovalState:
 
         key = str(entry.get("session") or "")
         provider = self.channel_provider_for(key)
-        if not key or provider not in {"telegram", "slack"}:
+        if not key or provider not in {"telegram", "slack", "discord"}:
             return None
         history_key = _history_key_for(key)
         thread, channel = self.sessions.get_channel_link(history_key)
-        if provider == "slack":
+        if provider in {"slack", "discord"}:
             from gideon.integrations.channel_delivery import raw_delivery_for
-            delivery = raw_delivery_for("slack")
+            delivery = raw_delivery_for(provider)
             identity = delivery.approval_identity(str(channel)) if delivery is not None and hasattr(delivery, "approval_identity") else None
             if identity is None or not thread or not channel:
                 return None
-            return {"provider": "slack", "thread": str(thread), "channel": str(channel),
-                    **identity, "principal": on_channel("slack", identity["owner"], identity["tenant"]),
+            return {"provider": provider, "thread": str(thread), "channel": str(channel),
+                    **identity, "principal": on_channel(provider, identity["owner"], identity["tenant"]),
                     "work": verify(credential_for(history_key), history_key)}
         pieces = str(thread).split(":")
         if not pieces or pieces[0] != "telegram":
@@ -213,7 +213,7 @@ class DashboardApprovalState:
         delivery = delivery_for(context["provider"])
         if delivery is None:
             return
-        if context["provider"] == "slack":
+        if context["provider"] in {"slack", "discord"}:
             await delivery.prepare_approval_channel(context["channel"])
             refreshed = self._channel_context(entry)
             if refreshed is None or any(refreshed.get(k) != context.get(k) for k in ("provider", "thread", "channel", "owner", "tenant", "transport", "work")):
