@@ -45,6 +45,7 @@ from gideon.integrations.acp.types import (
 )
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
+    EVENT_SPENT,
     EVENT_MODEL_SUBSTITUTION,
     EVENT_PERMISSION_REQUEST,
     EVENT_TEXT_CHUNK,
@@ -4131,6 +4132,10 @@ async def run_chat(
                             "model_substitution": record,
                         },
                     )
+            elif event.kind == EVENT_SPENT:
+                _record_turn_usage(event, session_key=session_key,
+                    source=getattr(session, "_app", "") or "chat", agent=session.agent or "",
+                    provider=getattr(client, "provider_id", ""), model="")
             elif event.kind == EVENT_COMPLETE:
                 if isinstance(_retry_user_message, dict):
                     _retry_meta = _retry_user_message.get("meta")
@@ -4181,16 +4186,9 @@ async def run_chat(
                             and _prov_model != "auto"
                         ):
                             _record_model = _prov_model
-                    if not event.cost_usd and _record_model:
-                        from gideon.operations.pricing import estimate_cost
-
-                        event.cost_usd = estimate_cost(
-                            _record_model,
-                            input_tokens=event.input_tokens,
-                            output_tokens=event.output_tokens,
-                            cache_read_tokens=event.cache_read_tokens,
-                            cache_creation_tokens=event.cache_creation_tokens,
-                        )
+                    from gideon.operations.usage_ledger import EventAccounting
+                    _, _event_price = EventAccounting(event, _record_model or "", False).values(_record_provider)
+                    event.cost_usd = float(_event_price.cost_usd or 0.0)
                     if event.cost_usd:
                         stats.inc_cost_usd(event.cost_usd)
                     _record_turn_usage(
@@ -4208,7 +4206,7 @@ async def run_chat(
                     _turn_cache_read_tokens = int(event.cache_read_tokens or 0)
                     _turn_cache_creation_tokens = int(event.cache_creation_tokens or 0)
                     _turn_cost_usd = float(event.cost_usd or 0.0)
-                    _turn_priced = bool(_turn_cost_usd) or _has_pricing(_record_model)
+                    _turn_priced = _event_price.priced
                     _turn_model = _record_model or ""
                 _stop_reason = event.stop_reason
                 _turn_event_count = event.event_count

@@ -38,6 +38,7 @@ from pathlib import Path
 
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
+    EVENT_SPENT,
     EVENT_TEXT_CHUNK,
     EVENT_THINKING_CHUNK,
     EVENT_TOOL_CALL,
@@ -596,6 +597,7 @@ class ModelCallGuard(ModelProvider):
                     metadata["priced"] = price.priced
                     metadata["price_source"] = price.source
                     metadata["charged_cost_usd"] = price.cost_usd
+                    metadata["price_estimated"] = price.estimated
                     event.tool_meta = metadata
                 _workflow_stream_observation(
                     "event",
@@ -641,6 +643,13 @@ class ModelCallGuard(ModelProvider):
                     price_source=failed_price.source if failed_price else "",
                     model=called_model,
                 )
+            if not settled:
+                self._meter.release(hold)
+                self._meter.settle(None, ref=cost.ref, tokens=0, answer_tokens=0,
+                    dollars=0, priced=False, run_key=run_key, usage_reported=False)
+                settled = True
+            if not recorded:
+                yield self._spent_event(usage_event, failed_price, audit_id, called_model)
             raise ModelCallTimeout(
                 f"model call for use case {self._use_case!r} (provider "
                 f"{self._provider_name!r}) exceeded {self._timeout_secs:.0f}s"
@@ -673,6 +682,13 @@ class ModelCallGuard(ModelProvider):
                     price_source=failed_price.source if failed_price else "",
                     model=called_model,
                 )
+            if not settled:
+                self._meter.release(hold)
+                self._meter.settle(None, ref=cost.ref, tokens=0, answer_tokens=0,
+                    dollars=0, priced=False, run_key=run_key, usage_reported=False)
+                settled = True
+            if not recorded:
+                yield self._spent_event(usage_event, failed_price, audit_id, called_model)
             raise
         finally:
             await self._aclose(source)
@@ -686,6 +702,21 @@ class ModelCallGuard(ModelProvider):
                 self._meter.release(hold)
             _workflow_stream_observation("end", audit_id, completed=recorded)
 
+    def _spent_event(self, usage, price, audit_id, model):
+        from gideon.integrations.llm.events import AgentEvent
+        return AgentEvent(kind=EVENT_SPENT, served_model_ref=f"{self._provider_name}:{model}",
+            input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
+            output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+            cache_read_tokens=int(getattr(usage, "cache_read_tokens", 0) or 0),
+            cache_creation_tokens=int(getattr(usage, "cache_creation_tokens", 0) or 0),
+            cost_usd=float(price.cost_usd or 0) if price else 0,
+            tool_meta={"audit_id": audit_id, "spend_charged": True,
+                "charged_cost_usd": price.cost_usd if price else None,
+                "priced": price.priced if price else False,
+                "price_source": price.source if price else "unknown",
+                "price_estimated": price.estimated if price else False,
+                "usage_status": "partial" if usage else "absent", "model_calls": 1})
+
     def _estimate_dollars(
         self, event: LLMEvent, tokens_in: int, tokens_out: int, *, model: str | None = None
     ):
@@ -695,7 +726,7 @@ class ModelCallGuard(ModelProvider):
         metadata = getattr(event, "tool_meta", None)
         metadata = metadata if isinstance(metadata, dict) else {}
         reported = getattr(event, "cost_usd", None)
-        reported_signal = metadata.get("usage_reported")
+        reported_signal = metadata.get("cost_reported")
         provider_reported = (
             bool(reported_signal)
             if reported_signal is not None

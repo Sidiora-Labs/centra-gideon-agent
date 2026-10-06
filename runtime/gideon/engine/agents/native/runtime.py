@@ -31,7 +31,7 @@ import os
 import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -59,6 +59,7 @@ from gideon.integrations.acp.types import (
 )
 from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
+    EVENT_SPENT,
     EVENT_MODEL_SUBSTITUTION,
     EVENT_PERMISSION_REQUEST,
     EVENT_TEXT_CHUNK,
@@ -337,6 +338,8 @@ class _TurnTotals:
     cache_read_tokens: int = 0
     last_context_usage: ContextUsage | None = None
     served_model_ref: str = ""
+    charged_calls: list[dict] = field(default_factory=list)
+    audit_ids: list[str] = field(default_factory=list)
 
     def account(self, response: "_ModelExchange") -> None:
         self.calls += len(response.calls)
@@ -348,11 +351,24 @@ class _TurnTotals:
             response.usage.context_usage if response.usage is not None else None
         )
         for usage in response.usages:
-            self.measured_calls += 1
+            if any((usage.input_tokens, usage.output_tokens, usage.cache_read_tokens, usage.cache_creation_tokens)) or usage.tool_meta.get("usage_reported"):
+                self.measured_calls += 1
             self.input_tokens += usage.input_tokens or 0
             self.output_tokens += usage.output_tokens or 0
             self.cache_creation_tokens += usage.cache_creation_tokens or 0
             self.cache_read_tokens += usage.cache_read_tokens or 0
+            metadata = usage.tool_meta if isinstance(usage.tool_meta, dict) else {}
+            if metadata.get("spend_charged") is not True:
+                from gideon.operations.usage_ledger import EventAccounting
+                served = str(getattr(usage, "served_model_ref", "") or self.served_model_ref)
+                provider, _, model = served.partition(":")
+                _, price = EventAccounting(usage, model, True).values(provider)
+                metadata = dict(metadata, spend_charged=True, charged_cost_usd=price.cost_usd,
+                    priced=price.priced, price_source=price.source, price_estimated=price.estimated)
+            self.charged_calls.append(dict(metadata))
+            audit_id = str(metadata.get("audit_id") or "")
+            if audit_id and audit_id not in self.audit_ids:
+                self.audit_ids.append(audit_id)
             self.cost += usage.cost_usd or 0.0
             if usage.context_usage_pct is not None:
                 response.runtime._last_context_pct = usage.context_usage_pct
@@ -376,6 +392,12 @@ class _TurnTotals:
             cache_creation_tokens=self.cache_creation_tokens,
             cache_read_tokens=self.cache_read_tokens,
             tool_meta={
+                "spend_charged": bool(self.charged_calls) and all(row.get("spend_charged") is True for row in self.charged_calls),
+                "charged_cost_usd": sum(float(row["charged_cost_usd"]) for row in self.charged_calls if row.get("priced") is True and row.get("charged_cost_usd") is not None),
+                "priced": bool(self.charged_calls) and all(row.get("priced") is True for row in self.charged_calls),
+                "price_source": "call_aggregate",
+                "price_estimated": any(row.get("price_estimated", True) for row in self.charged_calls),
+                "audit_ids": list(self.audit_ids),
                 "model_calls": self.model_calls,
                 "usage_status": (
                     "no_model_calls" if not self.model_calls else
@@ -407,7 +429,7 @@ class _ModelExchange:
             self.runtime._turn_output_visible = True
         elif event.kind in (EVENT_TOOL_RESULT, EVENT_PERMISSION_REQUEST):
             self.runtime._turn_output_visible = True
-        elif event.kind == EVENT_COMPLETE:
+        elif event.kind in (EVENT_COMPLETE, EVENT_SPENT):
             self.usage = event
             self.usages.append(event)
         elif event.kind in (EVENT_TEXT_CHUNK, EVENT_THINKING_CHUNK):
@@ -1199,10 +1221,12 @@ class NativeAgentRuntime(AgentProvider):
                 totals.cycles += 1
                 self._maybe_compact()
                 exchange = _ModelExchange(self, totals)
-                async with closing_stream(exchange.events(tools)) as _owned_events:
-                    async for event in _owned_events:
-                        yield event
-                totals.account(exchange)
+                try:
+                    async with closing_stream(exchange.events(tools)) as _owned_events:
+                        async for event in _owned_events:
+                            yield event
+                finally:
+                    totals.account(exchange)
                 tool_calls = exchange.calls
                 self._messages.append(
                     self._assistant_msg("".join(exchange.fragments), tool_calls)
@@ -1249,6 +1273,12 @@ class NativeAgentRuntime(AgentProvider):
                 if self._drain_steers_into_history():
                     yield AgentEvent(kind=EVENT_TEXT_CHUNK, text="")
             yield totals.finish("max_turns", self._last_context_pct)
+        except Exception:
+            if totals.model_calls:
+                spent = totals.finish("error", self._last_context_pct)
+                spent.kind = EVENT_SPENT
+                yield spent
+            raise
         finally:
             self._staged_images.clear()
             self._cancel.end_turn()

@@ -57,6 +57,7 @@ class TurnUsage:
     import_file_sha256: str | None = None
     import_record_id: str | None = None
     audit_id: str | None = None
+    audit_ids: list[str] | None = None
     unit: str | None = None
     quantity: float | None = None
 
@@ -485,7 +486,7 @@ class EventAccounting:
         cost = float(getattr(self.event, "cost_usd", 0.0) or 0.0)
         metadata = getattr(self.event, "tool_meta", None)
         metadata = metadata if isinstance(metadata, dict) else {}
-        reported = metadata.get("usage_reported")
+        reported = metadata.get("cost_reported")
         provider_reported = (
             bool(reported)
             if reported is not None
@@ -497,7 +498,7 @@ class EventAccounting:
             valid = type(charged) in (int, float) and math.isfinite(charged) and charged >= 0
             priced = metadata.get("priced") is True and valid
             price = EffectiveModelPrice(provider, self.model,
-                float(charged) if priced else None, priced,
+                float(charged) if valid else None, priced,
                 str(metadata.get("price_source") or "unknown"),
                 bool(metadata.get("price_estimated", True)))
         else:
@@ -526,13 +527,14 @@ class EventAccounting:
             model=self.model,
             **counts,
             cost_usd=cost,
-            priced=status == "no_model_calls" or (status == "measured" and price.priced),
+            priced=status == "no_model_calls" or (status in {"measured", "partial"} and price.priced),
             estimated=price.estimated,
             price_source=price.source,
             model_calls=calls,
             usage_status=status,
             duration_ms=int(getattr(self.event, "duration_ms", 0) or 0),
             audit_id=str(metadata.get("audit_id") or "").strip()[:128] or None,
+            audit_ids=[str(value).strip()[:128] for value in metadata.get("audit_ids", []) if isinstance(value, str) and value.strip()] if isinstance(metadata.get("audit_ids"), list) else None,
         )
 
 

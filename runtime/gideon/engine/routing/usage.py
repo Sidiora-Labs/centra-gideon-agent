@@ -272,9 +272,10 @@ def fold_files(
     ledger_rows = _dedup_ledger(_iter_json_lines(ledger))
     turns = sum(accumulator.accept(row) for row in ledger_rows)
     ledgered_audit_ids = frozenset(
-        str(row.get("audit_id", "") or "").strip()
+        value
         for row in ledger_rows
-        if str(row.get("audit_id", "") or "").strip()
+        for value in [str(row.get("audit_id", "") or "").strip(), *[str(item).strip() for item in (row.get("audit_ids") or []) if isinstance(item, str)]]
+        if value
     )
     fold.update(
         uncounted=audit_census(

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from gideon.engine.hooks import fire_tool_hooks, get_global_hook_store
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
+    EVENT_SPENT,
     EVENT_PERMISSION_REQUEST,
     EVENT_TEXT_CHUNK,
     EVENT_TOOL_CALL,
@@ -192,7 +193,7 @@ async def stream_and_collect(
                             event.title,
                             event.tool_input,
                         )
-                    elif event.kind == EVENT_COMPLETE:
+                    elif event.kind in (EVENT_COMPLETE, EVENT_SPENT):
                         if on_complete is not None:
                             try:
                                 on_complete(event)
@@ -202,7 +203,8 @@ async def stream_and_collect(
                                 logger.debug(
                                     "stream_and_collect on_complete failed", exc_info=True
                                 )
-                        break
+                        if event.kind == EVENT_COMPLETE:
+                            break
             return result_text
         except AcpError as exc:
             if "already in progress" not in str(exc) or attempt >= _PROMPT_BUSY_RETRIES:

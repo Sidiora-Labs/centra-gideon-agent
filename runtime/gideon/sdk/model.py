@@ -18,6 +18,7 @@ from gideon.extensions.providers.media_scanners import register_scanner, unregis
 from gideon.integrations.llm.anthropic import AnthropicProvider  # noqa: F401
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
+    EVENT_SPENT,
     EVENT_TEXT_CHUNK,
     EVENT_THINKING_CHUNK,
     EVENT_TOOL_CALL,
@@ -72,6 +73,7 @@ __all__ = [
     "LLMEvent",
     "CancelOutcome",
     "EVENT_COMPLETE",
+    "EVENT_SPENT",
     "EVENT_TEXT_CHUNK",
     "EVENT_THINKING_CHUNK",
     "EVENT_TOOL_CALL",
