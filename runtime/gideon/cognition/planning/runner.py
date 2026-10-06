@@ -67,6 +67,7 @@ async def run_planner_pass(
     sentinel: str,
     brief: str,
     app: str,
+    loop_id: str = "",
     model: str = "",
     provider: str = "",
     provider_agent: str = "",
@@ -107,6 +108,16 @@ async def run_planner_pass(
         except OSError:
             pass
     try:
+        loop = None
+        if loop_id:
+            from gideon.automation.loop import store as loop_store
+            from gideon.automation.loop.loop import PRELAUNCH_STATUSES, LoopStatus
+
+            loop = loop_store.get(loop_id)
+            if loop is None or LoopStatus(loop.status) not in PRELAUNCH_STATUSES:
+                return None
+            model, provider = loop.model, loop.provider
+            provider_agent, reasoning_effort = loop.provider_agent, loop.reasoning_effort
         session = state.get_or_create_session(
             name=skey,
             agent=agent_name,
@@ -114,19 +125,26 @@ async def run_planner_pass(
             workspace_dir=cwd,
             app=app,
         )
-        session._trust = True
-        if provider:
-            session.acp_provider = provider
-            session.acp_provider_agent = provider_agent
-            session.reasoning_effort = reasoning_effort
-            session.acp_mode = "bypassPermissions"
+        session.agent, session.model = agent_name, model
+        session.acp_provider = provider
+        session.acp_provider_agent = provider_agent
+        session.reasoning_effort = reasoning_effort
+        if loop is not None:
+            from gideon.automation.loop.manager import _arm_worker_approval_posture
+
+            _arm_worker_approval_posture(state, session, loop)
+        else:
+            session._trust = session._trust_reads = session._unattended = False
+            session._agent_floor_seeded = False
+            session.acp_mode = ""
+            state.sessions.set_approval_policy(session.key, "")
         try:
             state.push_sessions_update()
         except Exception:
             pass
         from gideon.cognition.autonomous_framing import with_autonomous_framing
 
-        framed_brief = with_autonomous_framing(brief)
+        framed_brief = with_autonomous_framing(brief) if session._unattended else brief
         await svc.add(
             session_name=skey,
             message=framed_brief,
@@ -145,6 +163,10 @@ async def run_planner_pass(
         while time.time() < deadline:
             await asyncio.sleep(PLANNER_POLL_SECS)
             now = time.time()
+            if loop_id:
+                current = loop_store.get(loop_id)
+                if current is None or LoopStatus(current.status) not in PRELAUNCH_STATUSES:
+                    return None
             from gideon.security.guardrails.incident import incident_active
             if incident_active():
                 deadline += now - last
@@ -154,6 +176,8 @@ async def run_planner_pass(
                     from gideon.automation.loop.manager import halt_turn
                     await halt_turn(state, skey)
                 continue
+            if state.waiting_on_owner(skey):
+                deadline += now - last
             last = now
             stopped_for_incident = False
             raw = read_sentinel(workspace_dir, files_dir, sentinel)
@@ -184,6 +208,12 @@ async def run_planner_pass(
         )
         return None
     finally:
+        try:
+            from gideon.automation.loop.manager import halt_turn
+
+            await halt_turn(state, skey)
+        except Exception:
+            logger.warning("planner turn cleanup failed for %s", skey, exc_info=True)
         try:
             loop = svc.get_by_session(skey)
             if loop is not None:

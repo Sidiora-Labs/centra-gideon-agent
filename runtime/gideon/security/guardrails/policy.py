@@ -172,12 +172,13 @@ def _persisted_attended_loop_worker(session_key: str) -> bool:
         return False
     try:
         from gideon.automation.loop import manager, store
+        from gideon.automation.loop.plan_walkthrough import planner_session_key
 
         for loop in store.list_all():
             if getattr(loop, "attended", None) is not True:
                 continue
             main_key = manager.session_key(loop.id)
-            if key == main_key or key.startswith(f"{main_key}-"):
+            if key == planner_session_key(loop.id) or key == main_key or key.startswith(f"{main_key}-"):
                 return True
     except Exception:
         logger.debug(

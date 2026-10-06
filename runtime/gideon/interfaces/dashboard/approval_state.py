@@ -444,10 +444,23 @@ class DashboardApprovalState:
         """
         if attended:
             return 0
-        return self.cancel_approvals(
-            session_prefix=f"loop-{loop_id}",
+        return sum(self.cancel_approvals(
+            session_prefix=prefix,
             reason="the loop was re-armed without an attending owner",
+        ) for prefix in (f"loop-{loop_id}", f"loop-plan-{loop_id}"))
+
+    def waiting_on_owner(self, session_key: str) -> bool:
+        key = session_key.removeprefix("dashboard:")
+        session = self._sessions.get(key)
+        if session is not None and any(not future.done() for future in session._approval_futures.values()):
+            return True
+        return any(
+            entry.get("session", "").removeprefix("dashboard:") == key
+            and (future := self._approval_futures.get(approval_id)) is not None
+            and not future.done()
+            for approval_id, entry in self._pending_approvals.items()
         )
+
 
     def cancel_subagent_approvals(self, agent_id: str, *, reason: str) -> int:
         prefixes = (f"spawn:{agent_id}", f"subagent:{agent_id}:")
@@ -488,16 +501,15 @@ class DashboardApprovalState:
         the main key. Missing or unreadable rows fail closed.
         """
         session = str(entry.get("session") or "").removeprefix("dashboard:")
-        if not session.startswith("loop-") or session.startswith(
-            ("loop-plan-", "code-plan-")
-        ):
+        if not session.startswith("loop-"):
             return entry, ""
         try:
             from gideon.automation.loop import manager, store
+            from gideon.automation.loop.plan_walkthrough import planner_session_key
 
             for loop in store.list_all():
                 main_key = manager.session_key(loop.id)
-                if session != main_key and not session.startswith(f"{main_key}-"):
+                if session != planner_session_key(loop.id) and session != main_key and not session.startswith(f"{main_key}-"):
                     continue
                 if getattr(loop, "attended", None) is not True:
                     return {}, "the loop is no longer attended by its owner"

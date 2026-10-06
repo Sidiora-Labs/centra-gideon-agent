@@ -26,7 +26,7 @@ from typing import Protocol, runtime_checkable
 
 from gideon.automation.loop import files as loop_files
 from gideon.automation.loop import store
-from gideon.automation.loop.loop import LoopStatus
+from gideon.automation.loop.loop import PRELAUNCH_STATUSES, LoopStatus
 from gideon.cognition.planning import session as PS
 from gideon.cognition.planning.session import PlanSession, PlanStep
 
@@ -172,6 +172,9 @@ async def _run_pass(
     """One planner pass via the shared runner, resolving the loop's primitives."""
     from gideon.cognition.planning import runner
 
+    loop = store.get(loop.id)
+    if loop is None or LoopStatus(loop.status) not in PRELAUNCH_STATUSES:
+        return None
     loop_path = loop_files.loop_dir(loop.id)
     if loop_path is None:
         return None
@@ -190,6 +193,7 @@ async def _run_pass(
         sentinel=sentinel,
         brief=_planner_brief_for_loop(brief, sentinel, sentinel_path),
         app="loops",
+        loop_id=loop.id,
         model=getattr(loop, "model", ""),
         provider=getattr(loop, "provider", ""),
         provider_agent=getattr(loop, "provider_agent", ""),
