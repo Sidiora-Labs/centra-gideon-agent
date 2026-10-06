@@ -16,6 +16,7 @@ from gideon.engine.session import ConversationDirectory
 from gideon.extensions.providers.use_cases import save_use_case_settings
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge_capture import register
 from gideon.interfaces.dashboard.state import ConsoleState
+from gideon.interfaces.dashboard.token_auth import token_auth_middleware, generate_token
 from gideon.workspace.capabilities.knowledge.capture import CaptureError, CaptureInbox
 
 
@@ -48,9 +49,10 @@ def audio_bytes():
     return buffer.getvalue()
 
 
-def test_capture_preserves_exact_original(inbox):
+@pytest.mark.asyncio
+async def test_capture_preserves_exact_original(inbox):
     text = "  Original café 🌱\nSecond line with punctuation!  "
-    captured = inbox.create("capture-original", text)
+    captured = await inbox.create("capture-original", text)
     assert captured["text"] == text
     assert captured["input_origin"] == "text"
     assert captured["captured_at"].endswith("+00:00")
@@ -62,21 +64,23 @@ def test_capture_preserves_exact_original(inbox):
     assert inbox.get(captured["id"]) == captured
 
 
-def test_capture_retry_is_exactly_once(inbox):
-    first = inbox.create("capture-retry-1", "A reliable original")
-    repeated = inbox.create("capture-retry-1", "A reliable original")
+@pytest.mark.asyncio
+async def test_capture_retry_is_exactly_once(inbox):
+    first = await inbox.create("capture-retry-1", "A reliable original")
+    repeated = await inbox.create("capture-retry-1", "A reliable original")
     assert first == repeated
     assert inbox.list()["total"] == 1
     with pytest.raises(CaptureError) as refused:
-        inbox.create("capture-retry-1", "Changed original")
+        await inbox.create("capture-retry-1", "Changed original")
     assert refused.value.status == 409
     assert inbox.get(first["id"])["text"] == "A reliable original"
 
 
-def test_routes_into_each_canonical_knowledge_type(inbox):
+@pytest.mark.asyncio
+async def test_routes_into_each_canonical_knowledge_type(inbox):
     for kind in ("note", "journal", "fleeting"):
-        original = inbox.create(f"capture-type-{kind}", f"Original {kind}")
-        routed = inbox.route(
+        original = await inbox.create(f"capture-type-{kind}", f"Original {kind}")
+        routed = await inbox.route(
             original["id"],
             route_payload(original, key=f"route-type-{kind}", destination=kind),
         )
@@ -91,24 +95,26 @@ def test_routes_into_each_canonical_knowledge_type(inbox):
         assert item["file_metadata"]["original_at"] == original["captured_at"]
 
 
-def test_routing_replay_does_not_create_another_destination(inbox):
-    original = inbox.create("capture-routing", "Original routing text")
+@pytest.mark.asyncio
+async def test_routing_replay_does_not_create_another_destination(inbox):
+    original = await inbox.create("capture-routing", "Original routing text")
     payload = route_payload(original)
-    first = inbox.route(original["id"], payload)
-    replay = inbox.route(original["id"], payload)
+    first = await inbox.route(original["id"], payload)
+    replay = await inbox.route(original["id"], payload)
     assert first == replay
     assert len(replay["events"]) == 1
     assert inbox.db.execute("SELECT count(*) FROM items").fetchone()[0] == 1
     with pytest.raises(CaptureError) as refused:
-        inbox.route(original["id"], payload | {"content": "Different retry"})
+        await inbox.route(original["id"], payload | {"content": "Different retry"})
     assert refused.value.status == 409
 
 
-def test_correction_updates_same_destination_and_preserves_history(inbox):
-    original = inbox.create("capture-correct", "Immutable raw thought")
+@pytest.mark.asyncio
+async def test_correction_updates_same_destination_and_preserves_history(inbox):
+    original = await inbox.create("capture-correct", "Immutable raw thought")
     first_payload = route_payload(original)
-    first = inbox.route(original["id"], first_payload)
-    corrected = inbox.route(
+    first = await inbox.route(original["id"], first_payload)
+    corrected = await inbox.route(
         original["id"],
         route_payload(
             first,
@@ -127,31 +133,34 @@ def test_correction_updates_same_destination_and_preserves_history(inbox):
     item = inbox.store.get_item(corrected["destination_id"])
     assert item["item_type"] == "fleeting"
     assert item["content"] == "Corrected thought"
-    assert inbox.route(original["id"], first_payload)["revision"] == 3
+    assert (await inbox.route(original["id"], first_payload))["revision"] == 3
 
 
-def test_stale_route_is_refused_without_mutation(inbox):
-    original = inbox.create("capture-stale-1", "Original")
-    routed = inbox.route(original["id"], route_payload(original))
+@pytest.mark.asyncio
+async def test_stale_route_is_refused_without_mutation(inbox):
+    original = await inbox.create("capture-stale-1", "Original")
+    routed = await inbox.route(original["id"], route_payload(original))
     with pytest.raises(CaptureError) as refused:
-        inbox.route(original["id"], route_payload(original, key="another-stale-route"))
+        await inbox.route(original["id"], route_payload(original, key="another-stale-route"))
     assert refused.value.status == 409
     assert inbox.get(original["id"]) == routed
 
 
-def test_removed_destination_does_not_resurrect(inbox):
-    original = inbox.create("capture-removed", "Original")
-    routed = inbox.route(original["id"], route_payload(original))
+@pytest.mark.asyncio
+async def test_removed_destination_does_not_resurrect(inbox):
+    original = await inbox.create("capture-removed", "Original")
+    routed = await inbox.route(original["id"], route_payload(original))
     inbox.store.delete_item(routed["destination_id"])
     with pytest.raises(CaptureError) as refused:
-        inbox.route(original["id"], route_payload(routed, key="route-after-delete"))
+        await inbox.route(original["id"], route_payload(routed, key="route-after-delete"))
     assert refused.value.status == 409
     assert inbox.get(original["id"])["text"] == "Original"
     assert inbox.db.execute("SELECT count(*) FROM items").fetchone()[0] == 0
 
 
-def test_durable_pending_route_recovers_existing_destination(inbox):
-    original = inbox.create("capture-recover", "Original")
+@pytest.mark.asyncio
+async def test_durable_pending_route_recovers_existing_destination(inbox):
+    original = await inbox.create("capture-recover", "Original")
     payload = route_payload(original)
     inbox.db.execute(
         "UPDATE capability_knowledge_captures SET pending=? WHERE id=?",
@@ -165,16 +174,17 @@ def test_durable_pending_route_recovers_existing_destination(inbox):
         guid=f"capture:route:{original['id']}",
     )
     with pytest.raises(CaptureError):
-        inbox.route(original["id"], payload | {"request_id": "conflicting-pending"})
-    recovered = inbox.route(original["id"], payload)
+        await inbox.route(original["id"], payload | {"request_id": "conflicting-pending"})
+    recovered = await inbox.route(original["id"], payload)
     assert recovered["destination_id"] == destination
     assert recovered["status"] == "routed"
     assert inbox.db.execute("SELECT count(*) FROM items").fetchone()[0] == 1
 
 
-def test_original_and_events_reject_in_place_edits(inbox):
-    original = inbox.create("capture-tamper-1", "Preserved original")
-    routed = inbox.route(original["id"], route_payload(original))
+@pytest.mark.asyncio
+async def test_original_and_events_reject_in_place_edits(inbox):
+    original = await inbox.create("capture-tamper-1", "Preserved original")
+    routed = await inbox.route(original["id"], route_payload(original))
     with pytest.raises(Exception, match="provenance is immutable"):
         inbox.db.execute(
             "UPDATE capability_knowledge_captures SET original_text='changed' WHERE id=?",
@@ -190,18 +200,19 @@ def test_original_and_events_reject_in_place_edits(inbox):
     assert inbox.get(original["id"]) == routed
 
 
-def test_reopen_retains_original_receipts_and_route(tmp_path):
+@pytest.mark.asyncio
+async def test_reopen_retains_original_receipts_and_route(tmp_path):
     path = str(tmp_path / "knowledge.db")
     first_store = KnowledgeStore(path)
     first = CaptureInbox(first_store)
-    original = first.create("capture-persist", "Original preserved across restart")
-    routed = first.route(original["id"], route_payload(original))
+    original = await first.create("capture-persist", "Original preserved across restart")
+    routed = await first.route(original["id"], route_payload(original))
     first_store.close()
     second_store = KnowledgeStore(path)
     second = CaptureInbox(second_store)
     assert second.get(original["id"]) == routed
     assert (
-        second.create("capture-persist", "Original preserved across restart")["id"]
+        (await second.create("capture-persist", "Original preserved across restart"))["id"]
         == original["id"]
     )
     assert (
@@ -210,9 +221,10 @@ def test_reopen_retains_original_receipts_and_route(tmp_path):
     second_store.close()
 
 
-def test_chronology_and_bounded_pages(inbox):
+@pytest.mark.asyncio
+async def test_chronology_and_bounded_pages(inbox):
     created = [
-        inbox.create(f"capture-page-{index}", f"Thought {index}") for index in range(5)
+        await inbox.create(f"capture-page-{index}", f"Thought {index}") for index in range(5)
     ]
     first = inbox.list(limit=2)
     second = inbox.list(limit=2, offset=first["next_offset"])
@@ -237,9 +249,10 @@ def test_chronology_and_bounded_pages(inbox):
         ("capture-number", 42),
     ],
 )
-def test_capture_validation_is_persistent_state_safe(inbox, key, text):
+@pytest.mark.asyncio
+async def test_capture_validation_is_persistent_state_safe(inbox, key, text):
     with pytest.raises(CaptureError):
-        inbox.create(key, text)
+        await inbox.create(key, text)
     assert inbox.list()["total"] == 0
 
 
@@ -254,18 +267,20 @@ def test_capture_validation_is_persistent_state_safe(inbox, key, text):
         {"request_id": "short"},
     ],
 )
-def test_route_validation_cannot_create_destination(inbox, change):
-    original = inbox.create("capture-invalid-route", "Original")
+@pytest.mark.asyncio
+async def test_route_validation_cannot_create_destination(inbox, change):
+    original = await inbox.create("capture-invalid-route", "Original")
     with pytest.raises(CaptureError):
-        inbox.route(original["id"], route_payload(original) | change)
+        await inbox.route(original["id"], route_payload(original) | change)
     assert inbox.store.db.execute("SELECT count(*) FROM items").fetchone()[0] == 0
     assert inbox.get(original["id"])["revision"] == 1
 
 
-def test_real_audio_bytes_are_preserved_and_deduplicated(inbox):
+@pytest.mark.asyncio
+async def test_real_audio_bytes_are_preserved_and_deduplicated(inbox):
     data = audio_bytes()
-    voice = inbox.save_audio("capture-audio-01", data, "recording.wav", "audio/wav")
-    repeated = inbox.save_audio("capture-audio-01", data, "renamed.wav", "audio/wav")
+    voice = await inbox.save_audio("capture-audio-01", data, "recording.wav", "audio/wav")
+    repeated = await inbox.save_audio("capture-audio-01", data, "renamed.wav", "audio/wav")
     assert repeated == voice
     assert voice["input_origin"] == "voice"
     assert voice["audio_sha256"] == hashlib.sha256(data).hexdigest()
@@ -277,29 +292,30 @@ def test_real_audio_bytes_are_preserved_and_deduplicated(inbox):
     assert item["item_type"] == "audio"
     assert item["file_size"] == len(data)
     with pytest.raises(CaptureError) as refused:
-        inbox.save_audio(
+        await inbox.save_audio(
             "capture-audio-01", data + b"other", "recording.wav", "audio/wav"
         )
     assert refused.value.status == 409
 
 
-def test_unavailable_real_transcription_preserves_retryable_audio(
+@pytest.mark.asyncio
+async def test_unavailable_real_transcription_preserves_retryable_audio(
     inbox, monkeypatch, tmp_path
 ):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "no-speech-provider"))
     save_use_case_settings("stt", {"enabled": False})
     inbox = CaptureInbox(inbox.store)
-    voice = inbox.save_audio(
+    voice = await inbox.save_audio(
         "capture-no-stt-1", audio_bytes(), "recording.wav", "audio/wav"
     )
-    result = asyncio.run(inbox.transcribe(voice["id"]))
+    result = await inbox.transcribe(voice["id"])
     assert result["status"] == "transcription_unavailable"
     assert result["transcript"] is None
     assert result["text"] == ""
     assert "preserved" in result["error"]
     assert result["audio_sha256"] == voice["audio_sha256"]
     assert result["revision"] == 2
-    again = asyncio.run(inbox.transcribe(voice["id"]))
+    again = await inbox.transcribe(voice["id"])
     assert again["status"] == "transcription_unavailable"
     assert again["revision"] == 3
     assert inbox.store.get_item(voice["audio_item_id"])["file_size"] == len(
@@ -307,8 +323,9 @@ def test_unavailable_real_transcription_preserves_retryable_audio(
     )
 
 
-def test_changed_audio_refuses_transcription_before_provider(inbox):
-    voice = inbox.save_audio(
+@pytest.mark.asyncio
+async def test_changed_audio_refuses_transcription_before_provider(inbox):
+    voice = await inbox.save_audio(
         "capture-changed-audio", audio_bytes(), "recording.wav", "audio/wav"
     )
     item = inbox.store.get_item(voice["audio_item_id"])
@@ -316,25 +333,26 @@ def test_changed_audio_refuses_transcription_before_provider(inbox):
 
     Path(item["file_path"]).write_bytes(b"changed")
     with pytest.raises(CaptureError) as refused:
-        asyncio.run(inbox.transcribe(voice["id"]))
+        await inbox.transcribe(voice["id"])
     assert refused.value.status == 409
     assert inbox.get(voice["id"])["revision"] == 1
 
 
-def test_audio_validation_and_wrong_origin(inbox):
+@pytest.mark.asyncio
+async def test_audio_validation_and_wrong_origin(inbox):
     with pytest.raises(CaptureError):
-        inbox.save_audio(
+        await inbox.save_audio(
             "capture-bad-mime", audio_bytes(), "recording.wav", "text/plain"
         )
     with pytest.raises(CaptureError):
-        inbox.save_audio("capture-empty-audio", b"", "recording.wav", "audio/wav")
+        await inbox.save_audio("capture-empty-audio", b"", "recording.wav", "audio/wav")
     with pytest.raises(CaptureError):
-        inbox.save_audio(
+        await inbox.save_audio(
             "capture-bad-extension", audio_bytes(), "recording.exe", "audio/wav"
         )
-    text = inbox.create("capture-text-asr", "Actual text")
+    text = await inbox.create("capture-text-asr", "Actual text")
     with pytest.raises(CaptureError):
-        asyncio.run(inbox.transcribe(text["id"]))
+        await inbox.transcribe(text["id"])
     assert inbox.list()["total"] == 1
 
 
@@ -342,7 +360,7 @@ def make_app(path):
     store = KnowledgeStore(str(path))
     state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
     state._knowledge_store = store
-    app = web.Application()
+    app = web.Application(middlewares=[token_auth_middleware()])
     app["state"] = state
     register(app)
     return app, store
@@ -357,6 +375,8 @@ def test_http_capture_review_retry_and_cross_store_isolation(tmp_path):
             TestClient(TestServer(app)) as client,
             TestClient(TestServer(other)) as isolated,
         ):
+            client.session.headers["Authorization"] = "Bearer " + generate_token("capture-owner")
+            isolated.session.headers["Authorization"] = "Bearer " + generate_token("capture-owner")
             response = await client.post(
                 root,
                 json={"request_id": "http-text-capture", "text": "An actual input"},
@@ -414,9 +434,11 @@ def test_http_audio_allocates_at_bound_store_and_refuses_overrides(
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "initial-home"))
         save_use_case_settings("stt", {"enabled": False})
         app, store = make_app(tmp_path / "bound.db")
+        owner_token = generate_token("capture-owner")
         monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "changed-global-home"))
         root = "/api/capabilities/knowledge/captures"
         async with TestClient(TestServer(app)) as client:
+            client.session.headers["Authorization"] = "Bearer " + owner_token
             form = FormData()
             form.add_field(
                 "audio", audio_bytes(), filename="voice.wav", content_type="audio/wav"

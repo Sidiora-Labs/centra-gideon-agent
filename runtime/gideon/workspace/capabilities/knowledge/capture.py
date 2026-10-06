@@ -1,6 +1,7 @@
 """Chronological capture receipts in the existing knowledge database."""
 
 import hashlib
+import asyncio
 import json
 import logging
 import os
@@ -37,6 +38,34 @@ def text_field(value, name, maximum, required=True):
             f"{name} must be nonempty text of at most {maximum} characters"
         )
     return value
+
+
+async def _admit_text(text, surface, request=None):
+    from gideon.workspace.uploads.content_intake import approve_text
+    if request is not None:
+        from gideon.security.approval_answer import OWNER, of_request, work_principal_of_request
+        from gideon.security.session_credentials import work_of_request
+        proof = work_of_request(request)
+        # Only an authenticated owner request is an owner-authored edit. A tool
+        # running on the owner's behalf is still externally produced text.
+        if (of_request(request).kind == OWNER
+                and work_principal_of_request(request).kind == OWNER
+                and not (request.headers.get('X-Session-Proof') and proof is None)
+                and (proof is None or proof.initiator.kind == OWNER)):
+            return text
+    return (await approve_text(text, surface=surface)).text
+
+
+async def _joined_transcription(function, path):
+    task = asyncio.create_task(function(path))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        try:
+            await task
+        except Exception:
+            pass
+        raise
 
 
 class CaptureInbox:
@@ -127,7 +156,7 @@ class CaptureInbox:
             "next_offset": offset + limit if offset + limit < total else None,
         }
 
-    def create(self, request_id, text="", *, audio_item_id=None, audio_sha256=None):
+    async def create(self, request_id, text="", *, audio_item_id=None, audio_sha256=None, _request=None):
         request_id = request_key(request_id)
         text_field(text, "text", 100000, required=audio_item_id is None)
         origin = "voice" if audio_item_id else "text"
@@ -143,6 +172,13 @@ class CaptureInbox:
             ) != (text, origin, audio_sha256):
                 raise CaptureError("request_id already belongs to different input", 409)
             return self.get(previous["id"])
+        if text:
+            text = await _admit_text(text, 'capture_text', _request)
+        previous = self.db.execute('SELECT id,original_text,input_origin,audio_sha256 FROM capability_knowledge_captures WHERE request_id=?', (request_id,)).fetchone()
+        if previous:
+            if (previous['original_text'], previous['input_origin'], previous['audio_sha256']) != (text, origin, audio_sha256):
+                raise CaptureError('request_id already belongs to different input', 409)
+            return self.get(previous['id'])
         self.assert_write_scope()
         if audio_item_id:
             source = self.store.get_item(audio_item_id)
@@ -167,7 +203,26 @@ class CaptureInbox:
         self.db.commit()
         return self.get(identity)
 
-    def save_audio(self, request_id, data, filename, mime):
+    async def save_audio(self, request_id, data, filename, mime):
+        request_key(request_id)
+        if Path(filename).suffix.lower() not in {'.wav', '.mp3', '.m4a', '.webm', '.ogg', '.flac'} or not mime.startswith('audio/'):
+            raise CaptureError('Supported audio file required', 415)
+        self.assert_write_scope()
+        from gideon.workspace.uploads.content_intake import ApprovedFile, approve_stream
+        if isinstance(data, ApprovedFile):
+            data.require_approved()
+            return await self._save_audio(request_id, data, filename, mime)
+        if not data or len(data) > 20 * 1024 * 1024:
+            raise CaptureError('Audio must contain 1 byte to 20 MiB', 413)
+        async def chunks():
+            yield data
+        snapshot = await approve_stream(chunks(), filename, mime, surface="capture_audio")
+        try:
+            return await self._save_audio(request_id, snapshot, filename, mime)
+        finally:
+            snapshot.close()
+
+    async def _save_audio(self, request_id, snapshot, filename, mime):
         request_key(request_id)
         suffix = Path(filename).suffix.lower()
         if suffix not in {
@@ -179,9 +234,9 @@ class CaptureInbox:
             ".flac",
         } or not mime.startswith("audio/"):
             raise CaptureError("Supported audio file required", 415)
-        if not data or len(data) > 20 * 1024 * 1024:
+        if not snapshot.size or snapshot.size > 20 * 1024 * 1024:
             raise CaptureError("Audio must contain 1 byte to 20 MiB", 413)
-        digest = hashlib.sha256(data).hexdigest()
+        digest = snapshot.digest
         existing = self.db.execute(
             "SELECT id FROM capability_knowledge_captures WHERE request_id=?",
             (request_id,),
@@ -194,12 +249,24 @@ class CaptureInbox:
         self.assert_write_scope()
         self.files_root.mkdir(parents=True, exist_ok=True)
         path = self.files_root / f"capture-{digest}{suffix}"
-        if path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() != digest:
-            raise CaptureError("Stored audio integrity mismatch", 409)
-        if not path.exists():
-            from gideon.core.atomic_write import atomic_write_bytes
-
-            atomic_write_bytes(path, data, fsync=True)
+        created = False
+        try:
+            await snapshot.persist(path)
+            created = True
+        except FileExistsError:
+            from gideon.workspace.uploads.content_intake import approve_path
+            existing_file = await approve_path(path, surface='capture_audio_existing')
+            try:
+                if existing_file.digest != digest:
+                    raise CaptureError('Stored audio integrity mismatch', 409)
+            finally:
+                existing_file.close()
+        try:
+            self.assert_write_scope()
+        except BaseException:
+            if created:
+                path.unlink(missing_ok=True)
+            raise
         guid = f"capture:audio:{request_id}"
         row = self.db.execute("SELECT id FROM items WHERE guid=?", (guid,)).fetchone()
         audio_id = (
@@ -211,7 +278,7 @@ class CaptureInbox:
                 guid=guid,
                 extra={
                     "file_path": str(path),
-                    "file_size": len(data),
+                    "file_size": snapshot.size,
                     "mime_type": mime,
                     "file_metadata": {
                         "content_hash": digest,
@@ -220,7 +287,7 @@ class CaptureInbox:
                 },
             )
         )
-        return self.create(request_id, audio_item_id=audio_id, audio_sha256=digest)
+        return await self.create(request_id, audio_item_id=audio_id, audio_sha256=digest)
 
     async def transcribe(self, identity):
         from gideon.integrations.transcribe import is_available, transcribe_audio
@@ -233,45 +300,49 @@ class CaptureInbox:
         self.assert_write_scope()
         item = self.store.get_item(record["audio_item_id"])
         path = Path(item.get("file_path", "")) if item else Path("")
-        if (
-            not path.is_file()
-            or not path.resolve().is_relative_to(self.files_root)
-            or hashlib.sha256(path.read_bytes()).hexdigest() != record["audio_sha256"]
-        ):
-            raise CaptureError("Original audio is missing or changed", 409)
-        status, transcript, error = (
-            "transcription_unavailable",
-            None,
-            "Speech transcription is not available; original audio is preserved.",
-        )
-        if await is_available():
-            try:
-                transcript = await transcribe_audio(str(path))
-                transcript = transcript if transcript and transcript.strip() else None
-                status = (
-                    "needs_review"
-                    if transcript and transcript.strip()
-                    else "transcription_failed"
-                )
-                error = (
-                    None
-                    if status == "needs_review"
-                    else "No transcript was returned; original audio is preserved."
-                )
-            except Exception:
-                status, error = (
-                    "transcription_failed",
-                    "Transcription failed; retry from the preserved audio.",
-                )
+        if not path.resolve().is_relative_to(self.files_root):
+            raise CaptureError('Original audio is missing or changed', 409)
+        from gideon.workspace.uploads.content_intake import approve_path, IntakeRefused
+        try:
+            snapshot = await approve_path(path, surface='capture_transcribe_audio')
+        except OSError as exc:
+            raise CaptureError('Original audio is missing or changed', 409) from exc
+        refusal = None
+        try:
+            if snapshot.digest != record['audio_sha256']:
+                raise CaptureError('Original audio is missing or changed', 409)
+            status, transcript, error = ('transcription_unavailable', None,
+                'Speech transcription is not available; original audio is preserved.')
+            if await is_available():
+                try:
+                    async with snapshot.reader_path() as owned_path:
+                        transcript = await _joined_transcription(transcribe_audio, owned_path)
+                    transcript = transcript if transcript and transcript.strip() else None
+                    if transcript:
+                        transcript = await _admit_text(transcript, 'capture_transcript')
+                    status = 'needs_review' if transcript else 'transcription_failed'
+                    error = None if transcript else 'No transcript was returned; original audio is preserved.'
+                except IntakeRefused as exc:
+                    refusal = exc
+                    status, transcript, error = 'transcription_failed', None, exc.message
+                except Exception:
+                    status, transcript, error = ('transcription_failed', None,
+                        'Transcription failed; retry from the preserved audio.')
+            self.assert_write_scope()
+        finally:
+            snapshot.close()
         status = "routed" if record["destination_id"] else status
         self.db.execute(
             "UPDATE capability_knowledge_captures SET status=?,transcript=?,error=?,revision=revision+1 WHERE id=? AND transcript IS NULL",
             (status, transcript, error, identity),
         )
         self.db.commit()
+        if refusal is not None:
+            raise refusal
         return self.get(identity)
 
-    def route(self, identity, payload):
+    async def route(self, identity, payload, *, _request=None):
+        payload = dict(payload)
         if set(payload) != {
             "request_id",
             "revision",
@@ -311,6 +382,10 @@ class CaptureInbox:
             )
         if current["revision"] != payload["revision"]:
             raise CaptureError("Capture changed; reload before routing", 409)
+        await _admit_text(payload['title'] + '\n' + payload['content'], 'capture_route', _request)
+        # The receipt may have changed while the child was reading the immutable copy.
+        if self.get(identity)['revision'] != payload['revision']:
+            raise CaptureError('Capture changed; reload before routing', 409)
         self.assert_write_scope()
         self.db.execute(
             "UPDATE capability_knowledge_captures SET pending=? WHERE id=?",

@@ -5,6 +5,7 @@ import asyncio
 from aiohttp import web
 
 from gideon.core.http_request import read_json_body
+from gideon.workspace.uploads.content_intake import approve_stream, IntakeRefused
 from gideon.interfaces.dashboard.handlers._shared import (
     _blocks_reads_session,
     _is_restricted_session,
@@ -29,6 +30,8 @@ def endpoint(function):
     async def wrapped(request):
         try:
             return web.json_response(await function(request))
+        except IntakeRefused as exc:
+            return exc.response()
         except CaptureError as exc:
             return web.json_response({"error": str(exc)}, status=exc.status)
         except (ValueError, TypeError) as exc:
@@ -47,7 +50,7 @@ async def captures(request):
     body = await read_json_body(request)
     if not isinstance(body, dict) or set(body) != {"request_id", "text"}:
         raise CaptureError("Text capture requires request_id and text only")
-    return inbox.create(body["request_id"], body["text"])
+    return await inbox.create(body["request_id"], body["text"], _request=request)
 
 
 @endpoint
@@ -61,31 +64,37 @@ async def route(request):
     body = await read_json_body(request)
     if not isinstance(body, dict):
         raise CaptureError("Route requires a JSON object")
-    return inbox.route(request.match_info["id"], body)
+    return await inbox.route(request.match_info["id"], body, _request=request)
 
 
 @endpoint
 async def audio(request):
     inbox = _inbox(request)
+    inbox.assert_write_scope()
     if not request.content_type.startswith("multipart/"):
         raise CaptureError("Multipart audio upload required")
     reader = await request.multipart()
     field = await reader.next()
     if field is None or field.name != "audio":
         raise CaptureError("First multipart field must be audio")
-    data = bytearray()
-    while chunk := await field.read_chunk():
-        data.extend(chunk)
-        if len(data) > 20 * 1024 * 1024:
-            raise CaptureError("Audio exceeds 20 MiB", 413)
-    if await reader.next() is not None:
-        raise CaptureError("Only the audio field is accepted")
-    return inbox.save_audio(
-        request.headers.get("X-Capture-Request-ID"),
-        bytes(data),
-        field.filename or "recording.webm",
-        field.headers.get("Content-Type", ""),
-    )
+    async def chunks():
+        size = 0
+        while chunk := await field.read_chunk():
+            size += len(chunk)
+            if size > 20 * 1024 * 1024:
+                raise CaptureError('Audio exceeds 20 MiB', 413)
+            yield chunk
+    filename = field.filename or 'recording.webm'
+    mime = field.headers.get('Content-Type', '')
+    snapshot = await approve_stream(chunks(), filename, mime, surface='capture_audio')
+    try:
+        if await reader.next() is not None:
+            raise CaptureError('Only the audio field is accepted')
+        return await inbox.save_audio(request.headers.get('X-Capture-Request-ID'),
+                                      snapshot, filename, mime)
+    finally:
+        snapshot.close()
+
 
 
 @endpoint

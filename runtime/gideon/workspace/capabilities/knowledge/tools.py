@@ -2,6 +2,8 @@
 
 import json
 
+from gideon.workspace.uploads.content_intake import IntakeRefused
+
 from jsonschema import ValidationError, validate
 
 from gideon.cognition.memory_service import MemoryService
@@ -774,9 +776,9 @@ class KnowledgeCapabilityTools(ToolProvider):
                 elif tool_name == "knowledge_capture_get":
                     result = self._inbox.get(arguments["id"])
                 elif tool_name == "knowledge_capture_text":
-                    result = self._inbox.create(**arguments)
+                    result = await self._inbox.create(**arguments)
                 elif tool_name == "knowledge_capture_route":
-                    result = self._inbox.route(
+                    result = await self._inbox.route(
                         arguments["id"],
                         {key: value for key, value in arguments.items() if key != "id"},
                     )
@@ -800,7 +802,7 @@ class KnowledgeCapabilityTools(ToolProvider):
             return ToolResult(
                 success=False, error=f"Invalid tool arguments: {exc.message}"
             )
-        except (CaptureError, ValueError) as exc:
+        except (CaptureError, ValueError, IntakeRefused) as exc:
             return ToolResult(
                 success=False,
                 error=str(exc),
