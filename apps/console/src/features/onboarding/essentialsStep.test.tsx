@@ -3,7 +3,10 @@ import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import type { AppCatalogEntry, SearchCapabilitiesInfo, SearchProviderInfo, ToolItem } from '../../shared/data/api'
 
 
-const installApp = vi.fn()
+const previewApp = vi.fn()
+const commitApp = vi.fn()
+const onboardingModelCheck = vi.fn()
+let boundChat = false
 const appCatalog = vi.fn()
 const modelProviderTypes = vi.fn()
 const createModelProvider = vi.fn()
@@ -15,7 +18,17 @@ const saveOnboardingState = vi.fn()
 
 vi.mock('../../shared/data/api', () => ({
   api: {
-    installApp: (...a: unknown[]) => installApp(...a),
+    previewApp: (...a: unknown[]) => previewApp(...a),
+    commitApp: (...a: unknown[]) => commitApp(...a),
+    modelDownloads: () => Promise.resolve([]),
+    modelsAvailable: () => Promise.resolve([]),
+    detectLocalModel: () => Promise.resolve({ detected: false }),
+    modelProviders: () => Promise.resolve([]),
+    activeModels: () => Promise.resolve({ use_cases: { chat: [] }, revisions: { chat: 1 } }),
+    onboardingModelCheck: () => onboardingModelCheck(),
+    searchProviders: () => Promise.resolve([]),
+    searchActive: () => Promise.resolve({}),
+    tools: () => Promise.resolve([]),
     appCatalog: () => appCatalog(),
     modelProviderTypes: () => modelProviderTypes(),
     createModelProvider: (...a: unknown[]) => createModelProvider(...a),
@@ -60,6 +73,7 @@ const CATALOG = { bundled: [], gitSources: [], localApps: [OPENAI, WHISPER, PIPE
 const FRESH = { needs_model: true, has_model_provider: false, has_chat_binding: false }
 
 function renderStep(over: Partial<Parameters<typeof EssentialsStep>[0]> = {}) {
+  if (over.readiness?.has_chat_binding) boundChat = true
   const onDone = vi.fn(), onSkip = vi.fn(), onProgress = vi.fn()
   const r = render(<EssentialsStep readiness={FRESH} onDone={onDone} onSkip={onSkip} onProgress={onProgress} {...over} />)
   return { ...r, onDone, onSkip, onProgress }
@@ -74,6 +88,11 @@ async function openCard(which: keyof typeof CARD) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  boundChat = false
+  onboardingModelCheck.mockImplementation(async () => boundChat
+    ? { ok: true, source: 'binding', bound: ['openai:gpt-5'], provider: 'openai', model: 'gpt-5', local: false }
+    : { ok: false, code: 'no_binding', what: 'No chat model', why: 'Nothing is bound', fix: 'Choose a model' })
+  previewApp.mockImplementation(async (name: string) => ({ ok: true, name, review_digest: 'review-1', needs_consent: false, scan: null }))
   for (const k of ['onboarding:essentials-catalog', 'onboarding:provider-types', 'onboarding:chat-models']) invalidateKeys(k)
   try { sessionStorage.clear() } catch {   }
   appCatalog.mockResolvedValue(CATALOG)
@@ -84,9 +103,9 @@ beforeEach(() => {
   createModelProvider.mockResolvedValue({ ok: true, name: 'openai' })
   testModelProvider.mockResolvedValue({ ok: true, message: 'Reachable' })
   chatModels.mockResolvedValue([{ name: 'openai/gpt-5', model_id: 'gpt-5', provider: 'openai' }])
-  setActiveModel.mockResolvedValue({ ok: true })
+  setActiveModel.mockImplementation(async () => { boundChat = true; return { ok: true } })
   saveOnboardingState.mockResolvedValue({ ok: true, state: {} })
-  installApp.mockResolvedValue({ ok: true, name: 'openai-models', error: '', needs_consent: false, scan: null })
+  commitApp.mockResolvedValue({ ok: true, name: 'openai-models', error: '', needs_consent: false, scan: null })
 })
 
 
@@ -120,7 +139,7 @@ describe('nothing installs without an explicit click', () => {
     const { onProgress } = renderStep()
     await screen.findByText('OpenAI')
     await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
-    expect(installApp, 'mounting the step must not install anything').not.toHaveBeenCalled()
+    expect(commitApp, 'mounting the step must not install anything').not.toHaveBeenCalled()
     expect(onProgress, 'nor record an app the user never chose').not.toHaveBeenCalled()
   })
 
@@ -129,15 +148,16 @@ describe('nothing installs without an explicit click', () => {
     await openCard('openai')
     await screen.findByText('Permissions the gateway enforces')
     await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
-    expect(installApp, 'reviewing an app is not consenting to install it').not.toHaveBeenCalled()
+    expect(commitApp, 'reviewing an app is not consenting to install it').not.toHaveBeenCalled()
   })
 
   it('installs exactly one app, once, when its own Install button is clicked', async () => {
     renderStep()
     await openCard('openai')
     fireEvent.click(await screen.findByRole('button', { name: /Install OpenAI/ }))
-    await waitFor(() => expect(installApp).toHaveBeenCalledTimes(1))
-    expect(installApp).toHaveBeenCalledWith('/apps/openai-models', false)
+    await waitFor(() => expect(commitApp).toHaveBeenCalledTimes(1))
+    expect(previewApp).toHaveBeenCalledWith('openai-models', '/apps/openai-models', undefined)
+    expect(commitApp).toHaveBeenCalledWith('openai-models', '/apps/openai-models', 'review-1', undefined)
   })
 
   it('leaves the resume-point write to the flow shell', async () => {
@@ -166,23 +186,24 @@ describe('per-app install consent is preserved', () => {
     await openCard('brave')
     expect(await screen.findByText('Scheduled jobs')).toBeTruthy()
     expect(screen.getByText(/every hour/)).toBeTruthy()
-    expect(installApp).not.toHaveBeenCalled()
+    expect(commitApp).not.toHaveBeenCalled()
   })
 
   it('routes a scanner WARNING through the Store consent modal and re-attempts only on confirm', async () => {
-    installApp.mockResolvedValueOnce({
-      ok: false, name: 'openai-models', error: '', needs_consent: true,
+    previewApp.mockResolvedValueOnce({
+      ok: false, name: 'openai-models', error: '', needs_consent: true, review_digest: 'review-warning',
       scan: { verdict: 'warning', findings: [{ surface: 'py', severity: 'medium', rule: 'subprocess', path: 'p.py', evidence: 'run()' }] },
     })
     const { onProgress } = renderStep()
     await openCard('openai')
     fireEvent.click(await screen.findByRole('button', { name: /Install OpenAI/ }))
     const anyway = await screen.findByRole('button', { name: /Install anyway/ })
-    expect(installApp).toHaveBeenCalledTimes(1)
+    expect(previewApp).toHaveBeenCalledTimes(1)
+    expect(commitApp).not.toHaveBeenCalled()
     expect(onProgress, 'a blocked install records no progress').not.toHaveBeenCalled()
     fireEvent.click(anyway)
-    await waitFor(() => expect(installApp).toHaveBeenCalledTimes(2))
-    expect(installApp).toHaveBeenLastCalledWith('/apps/openai-models', true)
+    await waitFor(() => expect(commitApp).toHaveBeenCalledTimes(1))
+    expect(commitApp).toHaveBeenLastCalledWith('openai-models', '/apps/openai-models', 'review-warning', undefined)
   })
 })
 
@@ -207,13 +228,13 @@ describe('the model lane completes entirely in-flow', () => {
   it('binds the chosen chat model as a canonical provider:model ref', async () => {
     await walkModelLane()
     fireEvent.click(await screen.findByRole('button', { name: /gpt-5/ }))
-    await waitFor(() => expect(setActiveModel).toHaveBeenCalledWith('chat', ['openai:gpt-5']))
+    await waitFor(() => expect(setActiveModel).toHaveBeenCalledWith('chat', ['openai:gpt-5'], 1))
   })
 
   it('shows a failed Test inline and lets the user retry in place', async () => {
     testModelProvider.mockResolvedValue({ ok: false, message: 'invalid_api_key' })
     await walkModelLane()
-    const alert = await screen.findByRole('alert')
+    const alert = await screen.findByText('invalid_api_key')
     expect(alert.textContent).toContain('invalid_api_key')
     expect(screen.getByLabelText('OpenAI API Key')).toBeTruthy()
     expect(chatModels, 'a failed Test must not advance to binding').not.toHaveBeenCalled()
@@ -222,21 +243,24 @@ describe('the model lane completes entirely in-flow', () => {
   it('never puts a submitted key in an error message', async () => {
     testModelProvider.mockResolvedValue({ ok: false, message: 'invalid_api_key' })
     const { container } = await walkModelLane()
-    await screen.findByRole('alert')
+    await screen.findByText('invalid_api_key')
     expect(container.textContent).not.toContain('sk-secret')
   })
 
   it('skips straight to binding when a provider already exists but nothing is bound', async () => {
     renderStep({ readiness: { needs_model: true, has_model_provider: true, has_chat_binding: false } })
     await screen.findByRole('button', { name: /gpt-5/ })
-    expect(installApp, 'an existing provider needs no app install').not.toHaveBeenCalled()
+    expect(commitApp, 'an existing provider needs no app install').not.toHaveBeenCalled()
     expect(createModelProvider).not.toHaveBeenCalled()
   })
 
   it('asks for nothing when chat already resolves', async () => {
     renderStep({ readiness: { needs_model: false, has_model_provider: true, has_chat_binding: true } })
-    expect(await screen.findByText(/A chat model is configured/)).toBeTruthy()
-    expect(chatModels).not.toHaveBeenCalled()
+    expect(await screen.findByText(/Chat model: openai:gpt-5/)).toBeTruthy()
+    expect(onboardingModelCheck).toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /gpt-5/ })).toBeNull()
+    expect(setActiveModel).not.toHaveBeenCalled()
+    expect(createModelProvider).not.toHaveBeenCalled()
   })
 
   it('applies a corrected key to the existing instance instead of dead-ending on 409', async () => {
@@ -257,7 +281,7 @@ describe('each lane records only its own progress field', () => {
   })
 
   it('records a search install as a flag, naming no other lane', async () => {
-    installApp.mockResolvedValue({ ok: true, name: 'brave-search', error: '', needs_consent: false, scan: null })
+  commitApp.mockResolvedValue({ ok: true, name: 'brave-search', error: '', needs_consent: false, scan: null })
     const { onProgress } = renderStep()
     await openCard('brave')
     fireEvent.click(await screen.findByRole('button', { name: /Install Brave Search/ }))
@@ -266,7 +290,7 @@ describe('each lane records only its own progress field', () => {
   })
 
   it('records a speech install as a flag', async () => {
-    installApp.mockResolvedValue({ ok: true, name: 'faster-whisper', error: '', needs_consent: false, scan: null })
+  commitApp.mockResolvedValue({ ok: true, name: 'faster-whisper', error: '', needs_consent: false, scan: null })
     const { onProgress } = renderStep()
     await openCard('whisper')
     fireEvent.click(await screen.findByRole('button', { name: /Install Faster Whisper/ }))
@@ -274,7 +298,7 @@ describe('each lane records only its own progress field', () => {
   })
 
   it('records a channel install by app name', async () => {
-    installApp.mockResolvedValue({ ok: true, name: 'discord-channel', error: '', needs_consent: false, scan: null })
+  commitApp.mockResolvedValue({ ok: true, name: 'discord-channel', error: '', needs_consent: false, scan: null })
     const { onProgress } = renderStep()
     await openCard('discord')
     fireEvent.click(await screen.findByRole('button', { name: /Install Discord/ }))
@@ -299,7 +323,7 @@ describe('skipping every optional lane still reaches the next step', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /Continue/ })).not.toHaveAttribute('aria-disabled'))
     fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
     expect(onDone).toHaveBeenCalledWith('openai:gpt-5')
-    expect(installApp).toHaveBeenCalledTimes(1)
+    expect(commitApp).toHaveBeenCalledTimes(1)
     const named = onProgress.mock.calls.flatMap(([p]) => Object.keys(p.essentials ?? {}))
     expect(named).toEqual(['model'])
   })
