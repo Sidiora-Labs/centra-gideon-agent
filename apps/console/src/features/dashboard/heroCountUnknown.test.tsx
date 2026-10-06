@@ -15,6 +15,7 @@ function mockApi(over: Record<string, unknown>) {
       inboxOpen: () => Promise.resolve([]),
       skillProposals: () => Promise.resolve({ proposals: [] }),
       uLoops: () => Promise.resolve([]),
+      workflowRuns: () => Promise.resolve({ runs: [] }),
       readyTasks: () => Promise.resolve([]),
       notifications: () => Promise.resolve({ notifications: [] }),
       triggersHistory: () => Promise.resolve({ runs: [], did_ids: [] }),
@@ -79,7 +80,12 @@ describe('DashboardLive exposes the failure of every lane the hero counts', () =
 
   it('the three counted loaders capture their rejection instead of swallowing it', () => {
     for (const [slice, setter] of [['uLoops', 'setLoopsErr'], ['readyTasks', 'setTasksErr'], ['notifications', 'setNotificationsErr']]) {
-      expect(code, `${slice}'s rejection must reach ${setter}`).toMatch(new RegExp(`${slice}\\(\\)[\\s\\S]{0,240}?${setter}\\)\\(e\\)`))
+      if (slice === 'readyTasks') {
+        expect(code, 'the current task rejection reaches its error state')
+          .toMatch(/\.catch\(\(error\) => \{\s*if \(revision === taskRead\.current\) guard\(setTasksErr\)\(error\)/)
+      } else {
+        expect(code, `${slice}'s rejection must reach ${setter}`).toMatch(new RegExp(`${slice}\\(\\)[\\s\\S]{0,240}?${setter}\\)\\(e\\)`))
+      }
     }
   })
 

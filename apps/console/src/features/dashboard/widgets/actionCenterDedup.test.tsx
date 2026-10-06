@@ -35,6 +35,7 @@ function mockApi() {
       inboxOpen: () => Promise.resolve(INBOX),
       skillProposals: () => Promise.resolve({ proposals: PROPOSALS, lastReview: null }),
       uLoops: () => Promise.resolve([]),
+      workflowRuns: () => Promise.resolve({ runs: [] }),
       readyTasks: () => Promise.resolve([]),
       triggersHistory: () => Promise.resolve({ runs: [], did_ids: [], suppressed: 0 }),
     },

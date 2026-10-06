@@ -15,6 +15,7 @@ function mockApi(over: Record<string, unknown>) {
       inboxOpen: () => Promise.resolve([]),
       skillProposals: () => Promise.resolve({ proposals: [] }),
       uLoops: () => Promise.resolve([]),
+      workflowRuns: () => Promise.resolve({ runs: [] }),
       readyTasks: () => Promise.resolve([]),
       notifications: () => Promise.resolve({ notifications: [] }),
       triggersHistory: () => Promise.resolve({ runs: [], did_ids: [] }),
@@ -32,7 +33,7 @@ function mockApi(over: Record<string, unknown>) {
 const route = { sub: '', navigate: () => {}, navEpoch: 0, setQuery: () => {}, query: {} }
 
 const ALL_PENDING = {
-  approvals: pending, inboxOpen: pending, skillProposals: pending, uLoops: pending,
+  approvals: pending, inboxOpen: pending, skillProposals: pending, uLoops: pending, workflowRuns: pending,
   readyTasks: pending, notifications: pending, triggersHistory: pending,
 }
 
@@ -155,8 +156,13 @@ describe('the signal itself', () => {
       ['uLoops', 'loops'], ['readyTasks', 'tasks'], ['notifications', 'notifications'],
       ['triggersHistory', 'schedule'],
     ]) {
-      expect(code, `${call} must mark '${slice}' read in a finally`)
-        .toMatch(new RegExp(`${call}\\([\\s\\S]{0,400}?\\.finally\\(\\(\\) => markRead\\('${slice}'\\)\\)`))
+      if (call === 'readyTasks') {
+        expect(code, 'only the current task read completes its slice')
+          .toMatch(/\.finally\(\(\) => \{ if \(revision === taskRead\.current\) markRead\('tasks'\) \}\)/)
+      } else {
+        expect(code, `${call} must mark '${slice}' read in a finally`)
+          .toMatch(new RegExp(`${call}\\([\\s\\S]{0,400}?\\.finally\\(\\(\\) => markRead\\('${slice}'\\)\\)`))
+      }
     }
   })
 
