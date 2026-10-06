@@ -1925,3 +1925,51 @@ class AppScopeReceipt:
         if not isinstance(value['app_name'], str) or not KEBAB_RE.fullmatch(value['app_name']):
             raise MemoryContractError('app namespace name is invalid')
         return cls(Id(value['scope_id']),actor,scope,Id(value['capability_id']),value['app_name'],Digest(value['manifest_digest']),value['epoch'],value['expires_at_ms'],value['revoked'])
+
+
+@dataclass(frozen=True, slots=True)
+class OwnerWordCapture:
+    history_session_id: Id
+    source_event_id: Id
+    source_digest: Digest
+    original_actor: Mapping[str, str]
+    effective_actor: Mapping[str, str]
+    ingress_event_id: str
+    ingress_own_digest: Digest
+    own_text: str
+    capture_kind: str = "owner_words"
+
+    @classmethod
+    def from_verified(cls, capture) -> OwnerWordCapture:
+        from gideon.security.capture_origin import validate_capture
+        from gideon.security.approval_answer import principal_record
+        verified = validate_capture(capture)
+        if verified is None:
+            raise PermissionError("owner-word capture is no longer verified")
+        return cls(verified.history_session_id, verified.native_source_event_id,
+                   verified.native_source_digest, principal_record(verified.original_actor),
+                   principal_record(verified.effective_work_actor), verified.ingress_event_id,
+                   Digest(verified.ingress_own_digest), verified.own_text)
+
+    def to_wire(self) -> dict[str, JsonValue]:
+        return {"history_session_id": str(self.history_session_id),
+                "source_event_id": str(self.source_event_id), "source_digest": str(self.source_digest),
+                "original_actor": dict(self.original_actor), "effective_actor": dict(self.effective_actor),
+                "ingress_event_id": self.ingress_event_id, "ingress_own_digest": str(self.ingress_own_digest),
+                "own_text": self.own_text, "capture_kind": self.capture_kind}
+
+
+@dataclass(frozen=True, slots=True)
+class ChatRetraction:
+    deleted_ids: tuple[Id, ...]
+    retained_unproven: int
+    retained_independent: int
+    cursor: Cursor
+
+    @classmethod
+    def from_wire(cls, value: object) -> ChatRetraction:
+        body = _object(value, "chat retraction")
+        return cls(tuple(Id(item) for item in body["deleted_ids"]),
+                   _uint(body["retained_unproven"], "retained_unproven"),
+                   _uint(body["retained_independent"], "retained_independent"),
+                   Cursor.from_wire(body["cursor"]))

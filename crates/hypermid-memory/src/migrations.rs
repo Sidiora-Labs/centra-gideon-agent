@@ -2,7 +2,7 @@ use hypermid_contracts::Digest;
 use hypermid_store::authorization::AUTHORIZATION_SCHEMA_SQL;
 use hypermid_store::Migration;
 
-pub const MEMORY_SCHEMA_VERSION: u64 = 4;
+pub const MEMORY_SCHEMA_VERSION: u64 = 5;
 pub const MEMORY_COMPATIBILITY_FLOOR: u64 = 1;
 
 const MEMORY_SCHEMA_V1: u64 = 1;
@@ -106,10 +106,16 @@ fn v3_schema_digest() -> Digest {
     Digest::sha256(&schema)
 }
 
-pub fn schema_digest() -> Digest {
+fn v4_schema_digest() -> Digest {
     let mut schema = v3_schema_digest().to_hex().into_bytes();
     schema.extend_from_slice(crate::app_scopes::APP_SCOPES_SCHEMA.as_bytes());
     Digest::sha256(&schema)
+}
+
+pub fn schema_digest() -> Digest {
+ let mut schema=v4_schema_digest().to_hex().into_bytes();
+ schema.extend_from_slice(crate::provenance::CAPTURE_SCHEMA.as_bytes());
+ Digest::sha256(&schema)
 }
 
 pub fn memory_migrations() -> Vec<Migration> {
@@ -145,8 +151,10 @@ pub fn memory_migrations() -> Vec<Migration> {
     );
     let v3_digest = v3_schema_digest().to_hex();
     let v3_sql = format!("{} UPDATE hypermid_schema_version SET current_version=3, schema_digest='{v3_digest}' WHERE singleton=1; INSERT INTO hypermid_migration_journal(version,migration_digest,started_at_ms,finished_at_ms,state) VALUES(3,'{v3_digest}',CAST(strftime('%s','now') AS INTEGER)*1000,CAST(strftime('%s','now') AS INTEGER)*1000,'finished');", crate::private_scopes::PRIVATE_SCOPES_SCHEMA);
-    let v4_digest = schema_digest().to_hex();
+    let v4_digest = v4_schema_digest().to_hex();
     let v4_sql=format!("{} UPDATE hypermid_schema_version SET current_version=4,schema_digest='{v4_digest}' WHERE singleton=1; INSERT INTO hypermid_migration_journal(version,migration_digest,started_at_ms,finished_at_ms,state) VALUES(4,'{v4_digest}',CAST(strftime('%s','now') AS INTEGER)*1000,CAST(strftime('%s','now') AS INTEGER)*1000,'finished');",crate::app_scopes::APP_SCOPES_SCHEMA);
+    let v5_digest=schema_digest().to_hex();
+    let v5_sql=format!("{} UPDATE hypermid_schema_version SET current_version=5,schema_digest='{v5_digest}' WHERE singleton=1; INSERT INTO hypermid_migration_journal(version,migration_digest,started_at_ms,finished_at_ms,state) VALUES(5,'{v5_digest}',CAST(strftime('%s','now') AS INTEGER)*1000,CAST(strftime('%s','now') AS INTEGER)*1000,'finished');",crate::provenance::CAPTURE_SCHEMA);
     vec![
         Migration::new(
             MEMORY_SCHEMA_V1,
@@ -160,5 +168,6 @@ pub fn memory_migrations() -> Vec<Migration> {
         ),
         Migration::new(3, "hypermid_memory_v3_private_scopes", v3_sql),
         Migration::new(4, "hypermid_memory_v4_app_scopes", v4_sql),
+        Migration::new(5, "hypermid_memory_v5_capture_origins", v5_sql),
     ]
 }

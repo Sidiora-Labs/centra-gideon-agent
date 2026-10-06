@@ -84,3 +84,11 @@ fn remove_derivatives(transaction: &Transaction<'_>, record_id: &Id) -> MemoryRe
     }
     Ok(())
 }
+
+
+pub(crate) fn invalidate_selected_record(tx:&Transaction<'_>,id:&Id,now_ms:u64)->MemoryResult<()> {
+ remove_derivatives(tx,id)?;
+ tx.execute("UPDATE memory_sharing_judgments SET invalidated_at_ms=?2,invalidation_reason='deleted' WHERE record_id=?1 AND invalidated_at_ms IS NULL",params![id.as_str(),now_ms]).map_err(sql_error)?;
+ tx.execute("UPDATE summary_details SET stale_at_ms=?2 WHERE record_id=?1",params![id.as_str(),now_ms]).map_err(sql_error)?;
+ Ok(())
+}

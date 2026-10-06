@@ -801,7 +801,7 @@ async fn handle_request(
         let Some(routes) = state.memory_routes.as_ref() else {
             unreachable!("recovery-mode requests are refused before memory dispatch")
         };
-        let reply = routes.dispatch(session, request, now);
+        let reply = routes.dispatch_with_context(session, request, now,state.context_routes.as_deref());
         return response(request, reply.payload, reply.error);
     }
     if EffectRoutes::handles(operation) {

@@ -34,6 +34,7 @@ pub const MEMORY_OPERATIONS: &[&str] = &[
     "memory.private-scope.resolve",
     "memory.private-scope.retire",
     "memory.drain",
+    "memory.chat.retract",
     "memory.record.create",
     "memory.record.update",
     "memory.record.archive",
@@ -44,6 +45,7 @@ pub const MEMORY_OPERATIONS: &[&str] = &[
     "memory.record.merge",
     "memory.record.split",
     "memory.record.relocate",
+    "memory.record.origins",
     "memory.record.get",
     "memory.record.shared_get",
     "memory.record.list",
@@ -105,10 +107,15 @@ impl MemoryRoutes {
     }
 
     pub fn dispatch(
+        &self,session:&AuthenticatedSession,envelope:&Envelope,now_ms:u64,
+    )->MemoryRouteResponse {self.dispatch_with_context(session,envelope,now_ms,None)}
+
+    pub(crate) fn dispatch_with_context(
         &self,
         session: &AuthenticatedSession,
         envelope: &Envelope,
         now_ms: u64,
+        source_context:Option<&crate::context_routes::ContextRoutes>,
     ) -> MemoryRouteResponse {
         if envelope.scope.as_ref() != Some(&session.bound_scope) {
             return failure(route_error(
@@ -141,7 +148,7 @@ impl MemoryRoutes {
                 ))
             }
         };
-        match dispatch_operation(&mut api, session, operation, payload, trace, now_ms) {
+        match dispatch_operation(&mut api, session, operation, payload, trace, now_ms,source_context) {
             Ok(result) => MemoryRouteResponse {
                 payload: Some(json!({"trace": trace, "result": result})),
                 error: None,
@@ -158,8 +165,18 @@ fn dispatch_operation(
     payload: Value,
     trace: &Trace,
     now_ms: u64,
+    source_context:Option<&crate::context_routes::ContextRoutes>,
 ) -> Result<Value, Error> {
     match operation {
+        "memory.chat.retract" => {
+         let p:ChatRetractPayload=parse(payload)?;
+         require_trace_scope(trace,session,&p.request.actor_scope,&p.request.trace)?;
+         require_operation(&p.request,Operation::Delete)?;
+         if p.request.record_id.as_ref().map(Id::as_str)!=Some("memory-records") || p.request.category.is_some(){return Err(invalid("chat retraction requires exact record collection"));}
+         source_context.ok_or_else(||invalid("native source verifier unavailable"))?.validate_capture_writer(&session.bound_scope,&p.writer_lease,now_ms)?;
+         let ctx=mutation_context(session,&p.request,p.capability_id,static_id("memory-records"),now_ms)?;
+         encode(api.retract_chat_sources(&ctx,&p.request,&p.history_session_id,p.expected_cursor,now_ms)?)
+        }
         "memory.app-scope.lookup" => {
             let p:AppRevokePayload=parse(payload)?;
             let ctx=context(session,session.bound_scope.clone(),CapabilityOperation::Read,static_id("memory-records"),p.capability_id,now_ms)?;
@@ -243,6 +260,11 @@ fn dispatch_operation(
                 resource,
                 now_ms,
             )?;
+            if let Some(capture)=payload.capture.as_ref(){
+             source_context.ok_or_else(||invalid("native source verifier unavailable"))?.validate_capture_source(&session.bound_scope,capture,&payload.sources,payload.writer_lease.as_ref().ok_or_else(||invalid("capture requires native writer lease"))?,now_ms)?;
+             return encode(api.write_captured_record(&context,&payload.request,&payload.draft,&payload.sources,capture,now_ms)?);
+            }
+            if payload.writer_lease.is_some(){return Err(invalid("capture writer lease requires capture evidence"));}
             if operation.ends_with("create") {
                 encode(api.create_record(
                     &context,
@@ -451,7 +473,7 @@ fn dispatch_operation(
                 now_ms,
             )?)
         }
-        "memory.record.get" => {
+        "memory.record.get" | "memory.record.origins" => {
             let payload: AccessPayload = parse(payload)?;
             require_access(trace, session, &payload.request, GrantOperation::Read)?;
             let resource = record_authority_resource(
@@ -468,7 +490,7 @@ fn dispatch_operation(
                 payload.capability_id,
                 now_ms,
             )?;
-            encode(api.record(&context, &payload.request)?)
+            if operation=="memory.record.origins" {encode(api.record_capture_origins(&context,&payload.request)?)} else {encode(api.record(&context, &payload.request)?)}
         }
         "memory.record.shared_get" => {
             let payload: SharedAccessPayload = parse(payload)?;
@@ -1144,6 +1166,10 @@ struct CapabilityPayload {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WriteRecordPayload {
+    #[serde(default)]
+    capture:Option<hypermid_memory::provenance::OwnerWordCapture>,
+    #[serde(default)]
+    writer_lease:Option<hypermid_context::durable_writer::ScopedWriterLease>,
     capability_id: Id,
     #[serde(default)]
     authority_resource: Option<Id>,
@@ -1807,3 +1833,10 @@ struct AppIssuePayload {capability_id:Id,app_name:String,manifest_digest:Digest,
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AppRevokePayload {capability_id:Id,app_name:String,expected_capability_id:Option<Id>}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChatRetractPayload {
+ capability_id:Id,request:MutationRequest,history_session_id:Id,expected_cursor:Cursor,
+ writer_lease:hypermid_context::durable_writer::ScopedWriterLease,
+}

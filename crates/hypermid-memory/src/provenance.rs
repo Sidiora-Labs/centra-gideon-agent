@@ -249,3 +249,64 @@ pub(crate) fn sql_error(cause: rusqlite::Error) -> Error {
     let _ = cause;
     error("MEMORY_STORE_ERROR", "memory store operation failed")
 }
+
+
+pub const CAPTURE_SCHEMA: &str = "
+CREATE TABLE memory_capture_origins(
+ source_id TEXT PRIMARY KEY REFERENCES memory_sources(source_id) ON DELETE CASCADE,
+ owner_scope_digest TEXT NOT NULL, history_scope_digest TEXT NOT NULL,
+ history_session_id TEXT NOT NULL, source_event_id TEXT NOT NULL,
+ source_digest TEXT NOT NULL, original_actor_json TEXT NOT NULL,
+ effective_actor_json TEXT NOT NULL, ingress_event_id TEXT NOT NULL,
+ ingress_own_digest TEXT NOT NULL, capture_kind TEXT NOT NULL CHECK(capture_kind='owner_words'),
+ capture_digest TEXT NOT NULL, captured_at_ms INTEGER NOT NULL
+);
+CREATE TABLE memory_chat_retractions(
+ owner_scope_digest TEXT NOT NULL, history_scope_digest TEXT NOT NULL,
+ history_session_id TEXT NOT NULL, retracted_at_ms INTEGER NOT NULL,
+ PRIMARY KEY(owner_scope_digest,history_scope_digest,history_session_id)
+);";
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureActor { pub kind: String, pub name: String, pub tenant: String }
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct OwnerWordCapture {
+ pub history_session_id: Id, pub source_event_id: Id, pub source_digest: Digest,
+ pub original_actor: CaptureActor, pub effective_actor: CaptureActor,
+ pub ingress_event_id: String, pub ingress_own_digest: Digest,
+ pub own_text: String, pub capture_kind: String,
+}
+
+impl OwnerWordCapture {
+ pub fn validate(&self) -> MemoryResult<()> {
+  if self.capture_kind != "owner_words" || self.original_actor.kind != "owner"
+   || self.effective_actor.kind != "owner" || self.ingress_event_id.is_empty()
+   || self.ingress_event_id.len()>4096 || self.own_text.is_empty()
+   || self.own_text.len()>262144 || Digest::sha256(self.own_text.as_bytes()) != self.ingress_own_digest {
+    return Err(error("CAPTURE_ORIGIN_DENIED","owner-word capture evidence is invalid"));
+  }
+  Ok(())
+ }
+}
+
+pub(crate) fn attach_capture(transaction: &Transaction<'_>, draft: &crate::RecordDraft,
+ sources: &[SourceSnapshot], capture: &OwnerWordCapture, actor_scope: &crate::Scope, now_ms:u64) -> MemoryResult<()> {
+ capture.validate()?;
+ let history_digest=crate::scope_digest(actor_scope).to_string();
+ let target_digest=crate::scope_digest(&draft.scope).to_string();
+ let retired:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM memory_chat_retractions WHERE owner_scope_digest=?1 AND history_scope_digest=?2 AND history_session_id=?3)",params![target_digest,history_digest,capture.history_session_id.as_str()],|r|r.get(0)).map_err(sql_error)?;
+ if retired { return Err(error("CHAT_SOURCE_RETRACTED","chat source has been retired")); }
+ if sources.len()!=1 || sources[0].kind!=SourceKind::Message || sources[0].source_digest!=capture.source_digest
+  || draft.provenance.len()!=1 || draft.provenance[0].source_id!=sources[0].source_id {
+   return Err(error("CAPTURE_SOURCE_MISMATCH","capture must reference its exact native message snapshot"));
+ }
+ let encoded=serde_json::to_string(capture).map_err(|_|error("CAPTURE_ENCODING_FAILED","capture evidence could not be encoded"))?;
+ let digest=Digest::sha256(encoded.as_bytes()).to_string();
+ let existing:Option<String>=transaction.query_row("SELECT capture_digest FROM memory_capture_origins WHERE source_id=?1",[sources[0].source_id.as_str()],|r|r.get(0)).optional().map_err(sql_error)?;
+ if let Some(old)=existing { if old!=digest {return Err(error("CAPTURE_SOURCE_CONFLICT","source attribution is immutable"));} return Ok(()); }
+ transaction.execute("INSERT INTO memory_capture_origins VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![sources[0].source_id.as_str(),target_digest,history_digest,capture.history_session_id.as_str(),capture.source_event_id.as_str(),capture.source_digest.to_string(),serde_json::to_string(&capture.original_actor).map_err(|_|error("CAPTURE_ENCODING_FAILED","actor could not be encoded"))?,serde_json::to_string(&capture.effective_actor).map_err(|_|error("CAPTURE_ENCODING_FAILED","actor could not be encoded"))?,capture.ingress_event_id,capture.ingress_own_digest.to_string(),capture.capture_kind,digest,now_ms]).map_err(sql_error)?;
+ Ok(())
+}

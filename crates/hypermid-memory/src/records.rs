@@ -186,6 +186,10 @@ pub struct RelocationMutation {
     pub destination_cursor: Cursor,
 }
 
+#[derive(Clone,Debug,Deserialize,Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatRetraction {pub deleted_ids:Vec<Id>,pub retained_unproven:u64,pub retained_independent:u64,pub cursor:Cursor}
+
 impl MemoryStore {
     pub fn create_record(
         &mut self,
@@ -234,6 +238,93 @@ impl MemoryStore {
                 now_ms,
             )
         })
+    }
+
+    pub fn write_captured_record(&mut self, context:&AuthContext, request:&MutationRequest,
+      draft:&RecordDraft, sources:&[SourceSnapshot], capture:&crate::provenance::OwnerWordCapture, now_ms:u64) -> MemoryResult<RecordMutation> {
+      require_auth_time(context,now_ms)?;
+      if context.principal.kind!=crate::PrincipalKind::Foreground {return Err(denied("capture requires authenticated foreground host authority"));}
+      if !matches!(request.operation,Operation::Create|Operation::Update) {return Err(denied("capture operation is invalid"));}
+      require_request(request,request.operation,draft)?;
+      self.immediate_authorized(context,request,|tx,auth| {
+       tx.reauthorize(context,request,auth)?;
+       tx.ensure_scope(&draft.scope,as_i64(now_ms)?)?;
+       tx.require_record_revision(&draft.id,&request.revision)?;
+       let mutation=match request.revision {
+        RevisionPrecondition::MustNotExist if request.operation==Operation::Create=>create_in_transaction(tx,request,auth,draft,sources,now_ms)?,
+        RevisionPrecondition::Match(expected) if request.operation==Operation::Update=>update_in_transaction(tx,request,auth,draft,sources,expected,now_ms)?,
+        _=>return Err(conflict("capture requires exact mutation precondition")),
+       };
+       crate::provenance::attach_capture(tx.raw(),draft,sources,capture,&request.actor_scope,now_ms)?;
+       tx.reauthorize(context,request,auth)?;
+       Ok(mutation)
+      })
+    }
+
+    pub fn retract_chat_sources(&mut self,context:&AuthContext,request:&MutationRequest,
+      session_id:&Id,expected_cursor:Cursor,now_ms:u64)->MemoryResult<ChatRetraction> {
+     require_auth_time(context,now_ms)?;
+     if context.principal.kind!=crate::PrincipalKind::Foreground || request.operation!=Operation::Delete
+       || request.record_id.as_ref().map(Id::as_str)!=Some("memory-records") || request.category.is_some() {
+       return Err(denied("chat retraction requires exact foreground collection delete authority"));
+     }
+     self.immediate_authorized(context,request,|tx,auth| {
+      tx.reauthorize(context,request,auth)?;
+      let current=tx.ensure_scope(&request.target_scope,as_i64(now_ms)?)?;
+      if current!=expected_cursor {return Err(conflict("chat retraction source cursor changed"));}
+      let target=scope_digest(&request.target_scope).to_string();
+      let history=scope_digest(&request.actor_scope).to_string();
+      let mut stmt=tx.raw().prepare("SELECT record_id FROM memory_records WHERE owner_scope_digest=?1 AND status IN ('active','stale') ORDER BY record_id").map_err(sql_error)?;
+      let ids=stmt.query_map([&target],|r|r.get::<_,String>(0)).map_err(sql_error)?.collect::<Result<Vec<_>,_>>().map_err(sql_error)?;
+      drop(stmt);
+      let mut proven=std::collections::BTreeSet::new();
+      let mut retained_unproven=0;
+      let mut retained_independent=0;
+      let mut records=Vec::new();
+      for raw in ids {
+       let id=Id::new(raw).map_err(|_|corrupt("record id is invalid"))?;
+       let record=load_record(tx.raw(),&id)?;
+       let (total,exclusive):(u64,u64)=tx.raw().query_row("SELECT COUNT(*),COALESCE(SUM(CASE WHEN c.owner_scope_digest=?3 AND c.history_scope_digest=?4 AND c.history_session_id=?5 THEN 1 ELSE 0 END),0) FROM memory_provenance p LEFT JOIN memory_capture_origins c ON c.source_id=p.source_id WHERE p.record_id=?1 AND p.revision=?2",params![id.as_str(),record.current.number,target,history,session_id.as_str()],|r|Ok((r.get(0)?,r.get(1)?))).map_err(sql_error)?;
+       let parents:Vec<(String,String)>= {let mut st=tx.raw().prepare("SELECT parent_record_id,relation FROM memory_lineage WHERE child_record_id=?1 AND child_revision=?2").map_err(sql_error)?;let out=st.query_map(params![id.as_str(),record.current.number],|r|Ok((r.get(0)?,r.get(1)?))).map_err(sql_error)?.collect::<Result<Vec<_>,_>>().map_err(sql_error)?;out};
+       // An independently supported revision is preserved even when one origin disappears.
+       if record.verification!=VerificationState::Unverified {retained_independent+=1;records.push((record,total,exclusive,parents,false));continue;}
+       if total>0 && total==exclusive && parents.is_empty() {proven.insert(id.clone());}
+       records.push((record,total,exclusive,parents,true));
+      }
+      loop {
+       let before=proven.len();
+       for (r,total,exclusive,parents,eligible) in &records {
+        if !eligible || proven.contains(&r.id) || (*total>0 && total!=exclusive) || parents.is_empty() {continue;}
+        if parents.iter().all(|(p,rel)|matches!(rel.as_str(),"derived_from"|"merged_from"|"split_from") && proven.iter().any(|id|id.as_str()==p)) {proven.insert(r.id.clone());}
+       }
+       if before==proven.len(){break;}
+      }
+      for (r,total,exclusive,parents,eligible) in &records {
+       if !proven.contains(&r.id) && *eligible {
+        let known_origin:bool=tx.raw().query_row("SELECT EXISTS(SELECT 1 FROM memory_provenance p JOIN memory_capture_origins c ON c.source_id=p.source_id WHERE p.record_id=?1 AND p.revision=?2)",params![r.id.as_str(),r.current.number],|row|row.get(0)).map_err(sql_error)?;
+        if known_origin || !parents.is_empty(){retained_independent+=1;} else {retained_unproven+=1;}
+       }
+      }
+      tx.raw().execute("INSERT INTO memory_chat_retractions VALUES(?1,?2,?3,?4) ON CONFLICT(owner_scope_digest,history_scope_digest,history_session_id) DO NOTHING",params![target,history,session_id.as_str(),now_ms]).map_err(sql_error)?;
+      let mut deleted_ids=Vec::new();
+      for (record,_,_,_,_) in &records {
+       if !proven.contains(&record.id){continue;}
+       let mut record_request=request.clone();record_request.record_id=Some(record.id.clone());record_request.category=Some(record.category.clone());record_request.revision=RevisionPrecondition::Match(record.current.digest);
+       let authority=tx.authorize(context,&record_request)?;
+       tx.reauthorize(context,&record_request,&authority)?;
+       tx.require_record_revision(&record.id,&record_request.revision)?;
+       crate::invalidation::invalidate_selected_record(tx.raw(),&record.id,now_ms)?;
+       tx.raw().execute("UPDATE memory_records SET status='tombstoned',deleted_at_ms=?2,updated_at_ms=?2 WHERE record_id=?1",params![record.id.as_str(),now_ms]).map_err(sql_error)?;
+       let cursor=tx.advance_cursor(&request.target_scope,as_i64(now_ms)?)?;
+       insert_event(tx,&record_request,&authority,cursor,Some(&record.id),Some(record.current.digest),Some(record.current.digest),now_ms)?;
+       tx.reauthorize(context,&record_request,&authority)?;
+       deleted_ids.push(record.id.clone());
+      }
+      let cursor=tx.advance_cursor(&request.target_scope,as_i64(now_ms)?)?;
+      insert_event(tx,request,auth,cursor,None,None,None,now_ms)?;
+      tx.reauthorize(context,request,auth)?;
+      Ok(ChatRetraction{deleted_ids,retained_unproven,retained_independent,cursor})
+     })
     }
 
     pub fn archive_record(
@@ -1133,6 +1224,10 @@ fn attach_sources_and_edges(
     revision: u64,
     now_ms: u64,
 ) -> MemoryResult<()> {
+    for span in &draft.provenance {
+        let retired:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM memory_capture_origins c JOIN memory_chat_retractions t ON t.owner_scope_digest=c.owner_scope_digest AND t.history_scope_digest=c.history_scope_digest AND t.history_session_id=c.history_session_id WHERE c.source_id=?1)",[span.source_id.as_str()],|r|r.get(0)).map_err(sql_error)?;
+        if retired {return Err(domain_error("CHAT_SOURCE_RETRACTED","chat source has been retired"));}
+    }
     for source in sources {
         let canonical_id = put_source(transaction, source, now_ms)?;
         if canonical_id != source.source_id

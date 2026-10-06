@@ -69,6 +69,8 @@ class GateReason(str, Enum):
     """
 
     ALLOWED = "allowed"
+    UNVERIFIED_SOURCE = "unverified_learning_source"
+    NATIVE_AUTHORITY_UNAVAILABLE = "native_learning_authority_unavailable"
     DISABLED = "learning_disabled"
     EPHEMERAL = "ephemeral_session"
     RESTRICTED = "restricted_session"

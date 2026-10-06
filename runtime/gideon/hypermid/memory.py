@@ -433,7 +433,75 @@ class HypermidMemoryProvider(MemoryProvider):
                 return None, None
             raise
 
+    def _capture_writer_lease(self) -> dict[str, Any]:
+        snapshot = self._writer.snapshot() if self._writer is not None else None
+        lease = snapshot.lease if snapshot is not None and snapshot.owns_writes else None
+        if lease is None or lease.scope != self.scope:
+            raise PermissionError("captured memory requires the active native primary writer")
+        return {"lease_id": str(lease.lease_id), "scope": lease.scope.to_wire(),
+                "fence_epoch": lease.fence_epoch, "fence_token": str(lease.fence_token),
+                "cursor": lease.cursor.to_wire()}
+
+    def put_captured(self, records: list[GideonRecord], capture) -> None:
+        from dataclasses import replace
+        from gideon.security.capture_origin import validate_capture
+        from .contracts import OwnerWordCapture
+        verified = validate_capture(capture)
+        if verified is None or not self._writes_allowed():
+            raise PermissionError("owner-word capture is not currently authorized")
+        origin = OwnerWordCapture.from_verified(verified)
+        lease = self._capture_writer_lease()
+        target = self._target_scope()
+        source_id = Id("chat-source:" + str(Digest.sha256(json.dumps(
+            [target.to_wire(), str(origin.history_session_id), str(origin.source_event_id), str(origin.source_digest)],
+            sort_keys=True, separators=(",", ":")).encode())))
+        source = SourceSnapshot(source_id=source_id, owner_scope_digest=scope_digest(target),
+            kind=SourceKind.MESSAGE, source_digest=origin.source_digest,
+            locator="chat:" + str(origin.history_session_id) + ":" + str(origin.source_event_id),
+            captured_content=verified.source_bytes.decode("utf-8"), capture_method="accepted_owner_words",
+            observed_at_ms=time.time_ns() // 1_000_000)
+        for record in records:
+            if validate_capture(verified) is None:
+                raise PermissionError("owner-word capture expired during publication")
+            existing, _ = self._remote_get_for_upsert(record.id)
+            draft = self._draft(record)
+            metadata = dict(draft.metadata)
+            metadata["conversation_id"] = verified.origin_session_key
+            draft = replace(draft, metadata=metadata, provenance=(ProvenanceSpan(source_id=source_id,
+                span_start=0, span_end=len(verified.source_bytes), quoted_digest=origin.source_digest),))
+            operation = MemoryOperation.CREATE if existing is None else MemoryOperation.UPDATE
+            revision = RevisionPrecondition.must_not_exist() if existing is None else RevisionPrecondition.match(str(existing.current.digest))
+            request = self._mutation(operation, record.id, revision, category=draft.category)
+            receipt = self._call(lambda client: client.write_captured(request, draft, sources=(source,),
+                capture=origin, writer_lease=lease, now_ms=time.time_ns() // 1_000_000))
+            self._last_cursor = receipt.cursor.sequence
+
+    def record_capture_origins(self, record_id: str) -> Mapping[str, Any]:
+        if not self._reads_allowed():
+            raise PermissionError("capture origin inspection is not authorized")
+        target = self._target_scope()
+        request = self._access(GrantOperation.READ, record_id, target_scope=target)
+        return self._call(lambda client: client.capture_origins(request), target_scope=target)
+
+    def retract_chat_sources(self, history_session_id: Id):
+        if not self._writes_allowed():
+            raise PermissionError("chat forgetting is not currently authorized")
+        lease = self._capture_writer_lease()
+        page = self.record_page(limit=1)
+        request = self._mutation(MemoryOperation.DELETE, "memory-records",
+            RevisionPrecondition.match(str(Digest.sha256(json.dumps(page.cursor.to_wire(),sort_keys=True).encode()))),
+            native_record_id=True)
+        receipt = self._call(lambda client: client.retract_chat(request,
+            history_session_id=history_session_id, expected_cursor=page.cursor, writer_lease=lease))
+        self._last_cursor = receipt.cursor.sequence
+        return receipt
+
     def put(self, records: list[GideonRecord]) -> None:
+        from gideon.security.capture_origin import current_capture
+        capture = current_capture()
+        if capture is not None:
+            self.put_captured(records, capture)
+            return
         if not self._writes_allowed():
             return
         now_ms = time.time_ns() // 1_000_000

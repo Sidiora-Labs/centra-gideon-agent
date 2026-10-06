@@ -179,6 +179,40 @@ class MemoryClient:
         )
         return MutationReceipt.from_wire(value)
 
+    async def capture_origins(self, request: AccessRequest) -> Mapping[str, JsonValue]:
+        self._access(request)
+        if request.operation.value != "read":
+            raise ValueError("capture origin inspection requires read authority")
+        return await self._call("memory.record.origins", {"request": request.to_wire(),
+            "authority_resource": "memory-records"}, trace=request.trace)
+
+    async def write_captured(self, request: MutationRequest, draft: RecordDraft, *,
+                             sources: Sequence[SourceSnapshot], capture, writer_lease: Mapping,
+                             now_ms: int) -> MutationReceipt:
+        from .contracts import OwnerWordCapture
+        if request.operation not in {MemoryOperation.CREATE, MemoryOperation.UPDATE}:
+            raise ValueError("captured writes require create or update")
+        self._mutation(request, request.operation)
+        if not isinstance(capture, OwnerWordCapture):
+            raise TypeError("captured write requires typed owner-word evidence")
+        value = await self._call("memory.record." + request.operation.value,
+            {"request": request.to_wire(), "draft": draft.to_wire(),
+             "sources": [source.to_wire() for source in sources], "capture": capture.to_wire(),
+             "writer_lease": dict(writer_lease), "now_ms": now_ms,
+             "authority_resource": "memory-records"}, trace=request.trace, durable=True)
+        return MutationReceipt.from_wire(value)
+
+    async def retract_chat(self, request: MutationRequest, *, history_session_id: Id,
+                           expected_cursor: Cursor, writer_lease: Mapping):
+        from .contracts import ChatRetraction
+        self._mutation(request, MemoryOperation.DELETE)
+        if request.record_id != Id("memory-records") or request.category is not None:
+            raise ValueError("chat retraction requires exact record collection")
+        value = await self._call("memory.chat.retract", {"request": request.to_wire(),
+            "history_session_id": str(history_session_id), "expected_cursor": expected_cursor.to_wire(),
+            "writer_lease": dict(writer_lease)}, trace=request.trace, durable=True)
+        return ChatRetraction.from_wire(value)
+
     async def _record_state(
         self,
         operation: MemoryOperation,

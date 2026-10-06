@@ -205,6 +205,10 @@ def learning_decision_for_turn(session, user_message: str, tool_calls: int, cfg=
     explicitly makes the sharing visible at the call site instead of implicit in
     object state.
     """
+    from gideon.security.capture_origin import current_capture
+    from gideon.cognition.learning import GateDecision, GateReason, Cadence
+    if current_capture() is None:
+        return GateDecision(False, False, GateReason.UNVERIFIED_SOURCE, Cadence.PER_TURN)
     from gideon.cognition import after_turn_review as atr
     from gideon.cognition.learning import Cadence, LearningGate
     from gideon.core.config.loader import AppConfig
@@ -220,6 +224,26 @@ def learning_decision_for_turn(session, user_message: str, tool_calls: int, cfg=
         correction=atr.is_correction_signal(user_message),
         tool_calls=tool_calls or 0,
     )
+
+
+def _discard_turn_outcomes(provider):
+    drain = getattr(provider, 'drain_tool_outcomes', None)
+    if callable(drain):
+        try:
+            drain()
+        except Exception:
+            logger.debug('turn outcome discard failed', exc_info=True)
+
+
+def _review_completed_turn(state, session, row, assistant_text, tool_calls, *, provider):
+    from gideon.security.capture_origin import owner_word_capture, capturing
+    capture = owner_word_capture(state.conversation_log, _history_key_for(session.key), row)
+    with capturing(capture):
+        words = capture.own_text if capture is not None else ''
+        decision = learning_decision_for_turn(session, words, tool_calls)
+        _maybe_after_turn_review(state, session, words, assistant_text, tool_calls,
+                                 provider=provider, decision=decision)
+        # Outcome/assistant-derived reviews need their own verified contributor proof.
 
 
 def _maybe_after_turn_review(
@@ -244,6 +268,15 @@ def _maybe_after_turn_review(
     from gideon.cognition import after_turn_review as atr
     from gideon.core.config.loader import AppConfig
 
+    from gideon.security.capture_origin import current_capture
+    # owner_words proves authored input, never tool observations or assistant output.
+    _discard_turn_outcomes(provider)
+    capture = current_capture()
+    if capture is None:
+        from gideon.cognition.learning import record_denial, GateDecision, GateReason, Cadence
+        record_denial(GateDecision(False, False, GateReason.UNVERIFIED_SOURCE, Cadence.PER_TURN))
+        return
+    user_message = capture.own_text
     cfg = AppConfig.load().learning
     if decision is None:
         decision = learning_decision_for_turn(session, user_message, tool_calls, cfg)
@@ -254,11 +287,13 @@ def _maybe_after_turn_review(
         return
     correction = atr.is_correction_signal(user_message)
     from gideon.cognition.memory_service import service_for
+    from gideon.hypermid.memory import HypermidMemoryProvider
 
-    memory = state.context_builder.get_memory_for(
-        session.workspace_dir or None, getattr(session, "memory_store", None)
-    )
-    svc = service_for(memory)
+    svc = service_for(state.context_builder.memory)
+    if not isinstance(svc.provider, HypermidMemoryProvider):
+        from gideon.cognition.learning import record_denial, GateDecision, GateReason, Cadence
+        record_denial(GateDecision(False, False, GateReason.NATIVE_AUTHORITY_UNAVAILABLE, Cadence.PER_TURN))
+        return
     facet_learned = atr.capture_preference_facet(svc, user_message)
     if facet_learned and getattr(cfg, "surface_chip", True):
         _flabel, _ = redact_credentials(
@@ -278,20 +313,10 @@ def _maybe_after_turn_review(
 
         record_denial(decision)
         return
-    drain = getattr(provider, "drain_tool_outcomes", None)
-    tool_outcomes: list[tuple[str, str]] = []
-    if callable(drain):
-        try:
-            tool_outcomes = list(drain() or [])
-            atr.record_procedural_outcomes(
-                svc, tool_outcomes, scope_ref=session.workspace_dir or None
-            )
-        except Exception:
-            logger.debug("procedural outcome capture failed", exc_info=True)
     learned = atr.run_after_turn_review(
         service=svc,
         user_message=user_message,
-        assistant_text=assistant_text,
+        assistant_text='',
         correction=correction,
         capture_facets=False,
     )
@@ -306,23 +331,6 @@ def _maybe_after_turn_review(
                 "text": f"Learned: {_label}",
             },
         )
-    if getattr(cfg, "self_model_enabled", True):
-        try:
-            from gideon.cognition.learning import self_model_observer
-
-            self_model_observer.observe_turn(
-                svc,
-                session_key=str(getattr(session, "key", "") or ""),
-                route=_agent_label(session),
-                tools=tuple(sorted({t for t, _outcome in tool_outcomes})),
-                succeeded=all(outcome == "success" for _t, outcome in tool_outcomes),
-                correction=correction,
-            )
-        except Exception:
-            logger.debug("self-model observer failed", exc_info=True)
-    _maybe_refine_stumble(
-        state, session, user_message, assistant_text, tool_outcomes, cfg
-    )
     _stage_turn_capture(session, user_message, learned or facet_learned, cfg)
 
 
@@ -4342,35 +4350,10 @@ async def run_chat(
         else:
             _maybe_consolidate(state, session)
             try:
-                _turn_learning = learning_decision_for_turn(
-                    session, message, _turn_tool_call_count
-                )
+                _review_completed_turn(state, session, _origin_message, assistant_text, _turn_tool_call_count, provider=client)
             except Exception:
-                logger.debug("learning gate evaluation failed", exc_info=True)
-                _turn_learning = None
-            try:
-                _maybe_after_turn_review(
-                    state,
-                    session,
-                    message,
-                    assistant_text,
-                    _turn_tool_call_count,
-                    provider=client,
-                    decision=_turn_learning,
-                )
-            except Exception:
-                logger.debug("after-turn review failed", exc_info=True)
-            try:
-                _maybe_skill_ladder_review(
-                    state,
-                    session,
-                    message,
-                    assistant_text,
-                    _turn_tool_call_count,
-                    decision=_turn_learning,
-                )
-            except Exception:
-                logger.debug("skill-ladder review scheduling failed", exc_info=True)
+                _discard_turn_outcomes(client)
+                logger.debug('verified after-turn capture failed', exc_info=True)
         state.sessions.check_context_usage(session_key, client)
         pct = client.context_usage_pct()
         state.broadcast_ws(
@@ -4589,6 +4572,7 @@ async def run_chat(
         await _fire(HOOK_EVENT_ERROR, _err_text)
         await state.sessions.record_failure(session_key)
     finally:
+        _discard_turn_outcomes(locals().get("client"))
         _owned_stream = locals().get("event_stream")
         if _owned_stream is not None:
             _close = getattr(_owned_stream, "aclose", None)

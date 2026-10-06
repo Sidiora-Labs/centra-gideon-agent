@@ -127,6 +127,32 @@ impl ContextRoutes {
         })
     }
 
+    pub(crate) fn validate_capture_source(&self,scope:&Scope,capture:&hypermid_memory::provenance::OwnerWordCapture,
+      sources:&[hypermid_memory::SourceSnapshot],lease:&ScopedWriterLease,now_ms:u64)->Result<(),Error> {
+      let refused=|| Error::new("CAPTURE_SOURCE_DENIED","capture does not match committed native history",false,None,Some(EffectState::NotStarted)).expect("valid capture error");
+      self.authority.validate(scope,lease,now_ms).map_err(|_|refused())?;
+      capture.validate()?;
+      let journal=Journal::open(self.journal_root(scope,&capture.history_session_id).map_err(|_|refused())?,scope.clone(),capture.history_session_id.clone(),1).map_err(|_|refused())?;
+      let item=journal.all_items().into_iter().find(|i|i.source_event_id==capture.source_event_id && i.source_digest==capture.source_digest && !i.tombstone && i.role==hypermid_core::history::Role::User).ok_or_else(refused)?;
+      let raw=RawSourceJournal::open(self.source_root(scope,&capture.history_session_id).map_err(|_|refused())?).map_err(|_|refused())?;
+      let recovered=journal.recover_item_ids(&[item.item_id],&raw).map_err(|_|refused())?;
+      let bytes=&recovered.first().ok_or_else(refused)?.source_bytes;
+      if Digest::sha256(bytes)!=capture.source_digest || sources.len()!=1
+       || sources[0].source_digest!=capture.source_digest || sources[0].captured_content.as_ref().map(|s|s.as_bytes())!=Some(bytes.as_slice()) {return Err(refused());}
+      let row:Value=serde_json::from_slice(bytes).map_err(|_|refused())?;
+      let ingress=&row["meta"]["ingress"];
+      if row["role"]!="user" || row["content"].as_str()!=Some(&capture.own_text)
+       || ingress["source_event_id"].as_str()!=Some(&capture.ingress_event_id)
+       || ingress["source_digest"].as_str()!=Some(&capture.ingress_own_digest.to_string())
+       || ingress["principal"]!=serde_json::to_value(&capture.original_actor).map_err(|_|refused())?
+       || ingress["origin_proof"].as_str().is_none_or(|p|p.is_empty()) {return Err(refused());}
+      Ok(())
+    }
+
+    pub(crate) fn validate_capture_writer(&self,scope:&Scope,lease:&ScopedWriterLease,now_ms:u64)->Result<(),Error> {
+      self.authority.validate(scope,lease,now_ms).map(|_|()).map_err(|_|Error::new("WRITER_FENCE_DENIED","native primary writer lease is stale or absent",false,None,Some(EffectState::NotStarted)).expect("valid writer error"))
+    }
+
     pub fn dispatch(
         &self,
         session: &AuthenticatedSession,

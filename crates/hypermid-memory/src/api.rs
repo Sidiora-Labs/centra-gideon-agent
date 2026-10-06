@@ -194,6 +194,30 @@ impl MemoryApi {
             .update_record(context, request, draft, sources, now_ms)
     }
 
+    pub fn write_captured_record(&mut self, context:&AuthContext, request:&MutationRequest, draft:&RecordDraft, sources:&[SourceSnapshot], capture:&crate::provenance::OwnerWordCapture, now_ms:u64)->MemoryResult<RecordMutation>{
+      self.require_ready()?; self.store.write_captured_record(context,request,draft,sources,capture,now_ms)
+    }
+
+    pub fn retract_chat_sources(&mut self,context:&AuthContext,request:&MutationRequest,session_id:&Id,expected_cursor:Cursor,now_ms:u64)->MemoryResult<crate::records::ChatRetraction>{
+     self.require_ready()?;self.store.retract_chat_sources(context,request,session_id,expected_cursor,now_ms)
+    }
+
+    pub fn record_capture_origins(&mut self,context:&AuthContext,request:&AccessRequest)->MemoryResult<serde_json::Value>{
+     let view=self.record(context,request)?;
+     let Some(record)=view.record else{return Ok(serde_json::json!({"origins":[],"cursor":view.cursor}));};
+     self.store.immediate_access(context,request,|tx,_auth| {
+      tx.authorize_access(context,request)?;
+      tx.require_record_revision(&record.id,&crate::RevisionPrecondition::Match(record.current.digest))?;
+      let mut st=tx.raw().prepare("SELECT c.source_id,c.history_scope_digest,c.history_session_id,c.source_event_id,c.source_digest,c.original_actor_json,c.effective_actor_json,c.capture_kind,c.capture_digest FROM memory_capture_origins c JOIN memory_provenance p ON p.source_id=c.source_id WHERE p.record_id=?1 AND p.revision=?2 AND c.owner_scope_digest=?3 ORDER BY c.source_id").map_err(crate::provenance::sql_error)?;
+      let rows=st.query_map(rusqlite::params![record.id.as_str(),record.current.number,record.owner_scope_digest.to_string()],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,String>(6)?,r.get::<_,String>(7)?,r.get::<_,String>(8)?))).map_err(crate::provenance::sql_error)?.collect::<Result<Vec<_>,_>>().map_err(crate::provenance::sql_error)?;
+      let origins=rows.into_iter().map(|(source,history_scope,session,event,digest,original,effective,kind,proof)|{
+        Ok(serde_json::json!({"source_id":source,"history_scope_digest":history_scope,"history_session_id":session,"source_event_id":event,"source_digest":digest,"original_actor":serde_json::from_str::<serde_json::Value>(&original).map_err(|_|denied("capture origin is damaged"))?,"effective_actor":serde_json::from_str::<serde_json::Value>(&effective).map_err(|_|denied("capture origin is damaged"))?,"capture_kind":kind,"capture_digest":proof}))
+      }).collect::<MemoryResult<Vec<_>>>()?;
+      tx.authorize_access(context,request)?;
+      Ok(serde_json::json!({"origins":origins,"cursor":view.cursor,"record_id":record.id,"revision_digest":record.current.digest,"owner_scope_digest":record.owner_scope_digest}))
+     })
+    }
+
     pub fn archive_record(
         &mut self,
         context: &AuthContext,
