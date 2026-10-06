@@ -49,6 +49,13 @@ DEFAULT_OPEN_TIMEOUT = 10.0
 class CdpTransportError(RuntimeError):
     """The wire failed, or the browser answered a command with an error."""
 
+    def __init__(
+        self, message: str, *, code: int | None = None, protocol_message: str = ""
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.protocol_message = protocol_message
+
 
 class WebSocketCdpTransport:
     """A :class:`~gideon.integrations.browse.cdp.CdpTransport` over one page target's WebSocket.
@@ -141,6 +148,36 @@ class WebSocketCdpTransport:
         safe to call from the dispatcher while events keep flowing: a ``Page.frameNavigated``
         arriving mid-teardown goes to the queue, not into this reply.
         """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._request_timeout
+        teardown = method == "Page.stopLoading" or (
+            method == "Page.navigate" and params == {"url": "about:blank"}
+        )
+        attachment_deadline: float | None = None
+        while True:
+            remaining = deadline - loop.time()
+            if attachment_deadline is not None:
+                remaining = min(remaining, attachment_deadline - loop.time())
+            try:
+                return await self._send_once(
+                    method, params, timeout=max(0.01, remaining)
+                )
+            except CdpTransportError as exc:
+                if not (
+                    teardown
+                    and exc.code == -32000
+                    and exc.protocol_message == "Not attached to an active page"
+                ):
+                    raise
+                if attachment_deadline is None:
+                    attachment_deadline = min(deadline, loop.time() + 2.0)
+                if loop.time() >= attachment_deadline:
+                    raise
+                await asyncio.sleep(min(0.05, attachment_deadline - loop.time()))
+
+    async def _send_once(
+        self, method: str, params: dict[str, Any] | None, *, timeout: float
+    ) -> dict[str, Any]:
         if self._failure is not None:
             raise CdpTransportError(f"the CDP transport is unusable: {self._failure}")
 
@@ -160,7 +197,7 @@ class WebSocketCdpTransport:
             raise CdpTransportError(f"CDP {method} could not be sent: {exc}") from exc
 
         try:
-            return await asyncio.wait_for(future, timeout=self._request_timeout)
+            return await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError as exc:
             self._pending.pop(message_id, None)
             raise CdpTransportError(
@@ -195,7 +232,17 @@ class WebSocketCdpTransport:
                     if error:
                         future.set_exception(
                             CdpTransportError(
-                                f"the browser rejected the command: {error}"
+                                f"the browser rejected the command: {error}",
+                                code=(
+                                    error.get("code")
+                                    if isinstance(error, dict)
+                                    else None
+                                ),
+                                protocol_message=(
+                                    str(error.get("message") or "")
+                                    if isinstance(error, dict)
+                                    else ""
+                                ),
                             )
                         )
                     else:

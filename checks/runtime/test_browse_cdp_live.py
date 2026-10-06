@@ -251,6 +251,30 @@ async def _location(inner) -> str:
     return str((result.get("result") or {}).get("value") or "")
 
 
+async def _wait_location(inner, predicate, *, timeout: float = 15.0) -> str:
+    """Observe the committed document across renderer execution-context replacement."""
+    from gideon.integrations.browse.transport import CdpTransportError
+
+    deadline = time.monotonic() + timeout
+    observed = ""
+    while time.monotonic() < deadline:
+        try:
+            observed = await _location(inner)
+        except CdpTransportError as exc:
+            if not (
+                exc.code == -32000
+                and exc.protocol_message == "Inspected target navigated or closed"
+            ):
+                raise
+        else:
+            if predicate(observed):
+                return observed
+        await asyncio.sleep(0.05)
+    raise AssertionError(
+        f"document did not settle before deadline; last URL: {observed!r}"
+    )
+
+
 async def _marker(inner) -> dict:
     result = await inner.send(
         "Runtime.evaluate",
@@ -344,6 +368,21 @@ async def _scenario(page_ws: str, site: _Site, sel_rows: list) -> dict:
             "final_url": await _location(inner),
             "server_hits": site.snapshot(),
         }
+        # Exercise further cross-origin renderer swaps on the same attached target.
+        for _ in range(2):
+            before = len(session.blocks)
+            await session.navigate(site.url(ALLOWED_HOST, "/jump-denied"))
+            assert await _settle(lambda: len(session.blocks) > before)
+            assert await _settle(lambda: not session._enforcing)
+            assert not session.quarantine_reason
+            assert (
+                await _wait_location(inner, lambda url: url == cdp.BLANK_URL)
+                == cdp.BLANK_URL
+            )
+            await session.navigate(site.url(ALLOWED_HOST, "/jump-allowed"))
+            assert (
+                await _wait_location(inner, lambda url: url.endswith("/landed"))
+            ).endswith("/landed")
     finally:
         await inner.close()
     _refuse_unmeasured(obs)
