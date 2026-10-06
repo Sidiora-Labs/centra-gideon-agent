@@ -89,7 +89,13 @@ class Room:
 
     def owed(self) -> builtins.list[str]:
         roster = {member.id for member in self.members}
-        return list(dict.fromkeys(member for member in [self.speaking, *self.pending_queue] if member in roster))
+        return list(
+            dict.fromkeys(
+                member
+                for member in [self.speaking, *self.pending_queue]
+                if member in roster
+            )
+        )
 
     def to_dict(self) -> dict:
         payload = asdict(self)
@@ -219,6 +225,7 @@ class RoomStore:
             self._save(rooms)
             self.transcript.delete_session(room_id)
             from gideon.engine.rooms.cursors import cursors_path
+
             cursors_path(self, room_id).unlink(missing_ok=True)
             shutil.rmtree(self.directory / "turns" / room_id, ignore_errors=True)
 
@@ -262,7 +269,7 @@ class RoomStore:
         interrupted: bool = False,
     ) -> dict:
         now = timestamp()
-        record = {
+        record: dict[str, str | bool] = {
             "id": uuid4().hex,
             "role": role,
             "content": content,
@@ -368,7 +375,12 @@ class RoomStore:
         )
 
     def begin_turn(
-        self, room_id: str, content: str, request_id: str, *, pending_queue: builtins.list[str] | None = None
+        self,
+        room_id: str,
+        content: str,
+        request_id: str,
+        *,
+        pending_queue: builtins.list[str] | None = None,
     ) -> tuple[dict, bool]:
         content = message_text(content)
         _identifier(request_id)
@@ -388,7 +400,9 @@ class RoomStore:
             if current and current["status"] in {"queued", "running"}:
                 raise RoomBusyError("room already has an active turn")
             if room.owed():
-                raise RoomBusyError("Continue the remaining room replies before sending a new message")
+                raise RoomBusyError(
+                    "Continue the remaining room replies before sending a new message"
+                )
             queue = list(dict.fromkeys(pending_queue or []))
             if any(member not in {m.id for m in room.members} for member in queue):
                 raise ValueError("queued speaker must be a room member")
@@ -462,9 +476,13 @@ class RoomStore:
         with self._locked():
             rooms = self._read()
             room = rooms[_identifier(room_id)]
-            paid = {row.get("speaker") for row in self.messages(room_id)
-                    if row.get("turn_id") == turn_id and row.get("role") == "assistant"
-                    and not row.get("interrupted")}
+            paid = {
+                row.get("speaker")
+                for row in self.messages(room_id)
+                if row.get("turn_id") == turn_id
+                and row.get("role") == "assistant"
+                and not row.get("interrupted")
+            }
             owed = [member for member in room.owed() if member not in paid]
             room.speaking = owed[0] if owed else ""
             room.pending_queue = owed[1:]
@@ -473,20 +491,31 @@ class RoomStore:
             record = self.turn(room_id, turn_id)
             if record is None:
                 raise KeyError(turn_id)
-            record.update(member_id=room.speaking or None, text="", updated_at=timestamp())
+            record.update(
+                member_id=room.speaking or None, text="", updated_at=timestamp()
+            )
             self._save_turn(record)
-            return next((member for member in room.members if member.id == room.speaking), None)
+            return next(
+                (member for member in room.members if member.id == room.speaking), None
+            )
 
-    def finish_member(self, room_id: str, turn_id: str, *, read_boundary: int | None = None) -> None:
+    def finish_member(
+        self, room_id: str, turn_id: str, *, read_boundary: int | None = None
+    ) -> None:
         with self._locked():
             rooms = self._read()
             room = rooms[_identifier(room_id)]
-            if not any(row.get("turn_id") == turn_id and row.get("speaker") == room.speaking
-                       and row.get("role") == "assistant" and not row.get("interrupted")
-                       for row in self.messages(room_id)):
+            if not any(
+                row.get("turn_id") == turn_id
+                and row.get("speaker") == room.speaking
+                and row.get("role") == "assistant"
+                and not row.get("interrupted")
+                for row in self.messages(room_id)
+            ):
                 raise ValueError("a completed member must have a stored reply")
             if read_boundary is not None:
                 from gideon.engine.rooms.cursors import _advance_locked
+
                 _advance_locked(self, room_id, room.speaking, read_boundary)
             room.speaking = ""
             room.updated_at = timestamp()
@@ -495,9 +524,17 @@ class RoomStore:
     def fail_member(self, room_id: str, turn_id: str, error: str) -> None:
         with self._locked():
             room = self.get(room_id)
-            name = next((member.name for member in room.members if member.id == room.speaking), "A member")
-            self._append(room, "system", f"{name} could not finish: {error}. Continue to retry this member and the remaining replies.",
-                         speaker="system", turn_id=turn_id)
+            name = next(
+                (member.name for member in room.members if member.id == room.speaking),
+                "A member",
+            )
+            self._append(
+                room,
+                "system",
+                f"{name} could not finish: {error}. Continue to retry this member and the remaining replies.",
+                speaker="system",
+                turn_id=turn_id,
+            )
             record = self.turn(room_id, turn_id)
             if record is None:
                 raise KeyError(turn_id)
@@ -516,20 +553,41 @@ class RoomStore:
             try:
                 current = self.turn(room.id)
                 if current and current["status"] in {"queued", "running"}:
-                    paid = {row.get("speaker") for row in self.messages(room.id)
-                            if row.get("turn_id") == current["id"] and row.get("role") == "assistant"
-                            and not row.get("interrupted")}
+                    paid = {
+                        row.get("speaker")
+                        for row in self.messages(room.id)
+                        if row.get("turn_id") == current["id"]
+                        and row.get("role") == "assistant"
+                        and not row.get("interrupted")
+                    }
                     with self._locked():
                         rooms = self._read()
                         room = rooms[room.id]
-                        room.pending_queue = [member for member in room.pending_queue if member not in paid]
+                        room.pending_queue = [
+                            member
+                            for member in room.pending_queue
+                            if member not in paid
+                        ]
                         if room.speaking in paid:
                             room.speaking = ""
                         self._save(rooms)
                     self.update_turn(
-                        room.id, current["id"], status="paused" if room.owed() else "completed" if paid else "failed",
-                        error="Room round paused after a runtime restart. Continue to finish the remaining replies."
-                              if room.owed() else None if paid else "Room turn interrupted by a runtime restart. Send a new message to continue.",
+                        room.id,
+                        current["id"],
+                        status=(
+                            "paused"
+                            if room.owed()
+                            else "completed" if paid else "failed"
+                        ),
+                        error=(
+                            "Room round paused after a runtime restart. Continue to finish the remaining replies."
+                            if room.owed()
+                            else (
+                                None
+                                if paid
+                                else "Room turn interrupted by a runtime restart. Send a new message to continue."
+                            )
+                        ),
                     )
             finally:
                 lock.close()

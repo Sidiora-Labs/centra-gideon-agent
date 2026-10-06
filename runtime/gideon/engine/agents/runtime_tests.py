@@ -19,13 +19,17 @@ def _tenant_key(tenant: Any) -> str:
     return str(tenant or "self-hosted")
 
 
-async def test_runtime(runtime_id: str, entry: Any, *, tenant: Any = None) -> dict[str, Any]:
+async def test_runtime(
+    runtime_id: str, entry: Any, *, tenant: Any = None
+) -> dict[str, Any]:
     """Start the selected ACP runtime once, capture its discovery, and retire it."""
     from gideon.engine.agents import runners
 
     definition = runners.definition_for_runtime(runtime_id)
     if definition is None:
-        return _result(ReadinessStatus(False, "error", "No runner definition is available."))
+        return _result(
+            ReadinessStatus(False, "error", "No runner definition is available.")
+        )
     if not runners.owner_grant_allowed(definition, tenant=tenant):
         return _result(
             ReadinessStatus(
@@ -52,8 +56,8 @@ async def test_runtime(runtime_id: str, entry: Any, *, tenant: Any = None) -> di
 
 
 async def _run_once(runtime_id: str, entry: Any, *, tenant: Any) -> dict[str, Any]:
-    from gideon.engine.agents.registry import get_agent_provider_class
     from gideon.engine.agents import runners
+    from gideon.engine.agents.registry import get_agent_provider_class
     from gideon.integrations.llm.registry import get_default_registry
 
     definition = runners.definition_for_runtime(runtime_id)
@@ -68,14 +72,18 @@ async def _run_once(runtime_id: str, entry: Any, *, tenant: Any) -> dict[str, An
     try:
         current_entry = get_default_registry().get_entry(runtime_id)
     except Exception:
-        return _result(ReadinessStatus(False, "error", "ACP runtime is no longer configured."))
+        return _result(
+            ReadinessStatus(False, "error", "ACP runtime is no longer configured.")
+        )
     if (
         current_entry.type != "acp_agent"
         or current_entry.model != entry.model
         or current_entry.options != entry.options
     ):
         return _result(
-            ReadinessStatus(False, "stale", "ACP runtime configuration changed; refresh and retry.")
+            ReadinessStatus(
+                False, "stale", "ACP runtime configuration changed; refresh and retry."
+            )
         )
     provider = get_agent_provider_class("acp")
     if provider is None:
@@ -87,21 +95,29 @@ async def _run_once(runtime_id: str, entry: Any, *, tenant: Any) -> dict[str, An
         or entry.type != "acp_agent"
         or not isinstance(command, list)
         or not command
-        or any(not isinstance(part, str) or not part or "\0" in part for part in command)
+        or any(
+            not isinstance(part, str) or not part or "\0" in part for part in command
+        )
     ):
         return _result(
-            ReadinessStatus(False, "error", "ACP runtime command configuration is invalid.")
+            ReadinessStatus(
+                False, "error", "ACP runtime command configuration is invalid."
+            )
         )
     options.update(runtime_id=runtime_id, runtime_label=_runtime_label(runtime_id))
     try:
+        from gideon.integrations.llm.acp_agent import AcpAgentProvider
+
         tested_provider = get_default_registry().build(runtime_id, model=entry.model)
+        if not isinstance(tested_provider, AcpAgentProvider):
+            raise TypeError("Runtime Test requires an ACP agent provider")
         readiness, snapshot = await asyncio.wait_for(
             tested_provider.explicit_self_test_with_snapshot(), timeout=120
         )
         agents = []
         permission_modes: list[str] = []
         if readiness.ready:
-            discovered_agents = provider.agents_from_snapshot(
+            discovered_agents = tested_provider.agents_from_snapshot(
                 options, snapshot, record_capabilities=False
             )
             agents = [
@@ -133,7 +149,9 @@ async def _run_once(runtime_id: str, entry: Any, *, tenant: Any) -> dict[str, An
 
 def _runtime_label(runtime_id: str) -> str:
     name = runtime_id.split(":", 1)[-1]
-    return " ".join(part.capitalize() for part in name.replace("_", "-").split("-") if part)
+    return " ".join(
+        part.capitalize() for part in name.replace("_", "-").split("-") if part
+    )
 
 
 def _permission_modes(options: dict[str, Any]) -> list[str]:

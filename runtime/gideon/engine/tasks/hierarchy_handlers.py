@@ -154,7 +154,7 @@ class RepeatableListReset:
                 {"error": "only task lists under the Repeatable project can be reset"},
                 status=400,
             )
-        tasks = []
+        tasks: list[Task] = []
         while True:
             page, total = await registry.list_all_tasks(
                 task_list_id=self.list_id, limit=500, offset=len(tasks)
@@ -171,7 +171,7 @@ class RepeatableListReset:
         for task in tasks:
             reset_task = Task.from_dict(task.to_dict())
             reset_task.reset_for_repeat()
-            fields = {
+            fields: dict[str, Any] = {
                 "status": reset_task.status.value,
                 "exit_criteria": reset_task.exit_criteria,
                 "action_plan": reset_task.action_plan,
@@ -412,14 +412,20 @@ async def api_projects_work_release(request: web.Request) -> web.Response:
 
 
 async def api_projects_update(request: web.Request) -> web.Response:
-    body = await HierarchyRequest.patch(request, _PROJECT_UPDATABLE | {"expected_revision"})
+    body = await HierarchyRequest.patch(
+        request, _PROJECT_UPDATABLE | {"expected_revision"}
+    )
     if isinstance(body, web.Response):
         return body
     expected_revision = body.pop("expected_revision", None)
     if expected_revision is not None and (
         not isinstance(expected_revision, str) or not expected_revision
     ):
-        return json_error("invalid_request", message="expected_revision must be a nonempty string", status=400)
+        return json_error(
+            "invalid_request",
+            message="expected_revision must be a nonempty string",
+            status=400,
+        )
     if "workspace_dir" in body:
         refusal = _workspace_refusal(str(body["workspace_dir"] or "").strip())
         if refusal is not None:
@@ -427,15 +433,23 @@ async def api_projects_update(request: web.Request) -> web.Response:
     store = _store()
     try:
         updated = await asyncio.to_thread(
-            store.update_project, request.match_info["project_id"],
-            expected_revision=expected_revision, **body,
+            store.update_project,
+            request.match_info["project_id"],
+            expected_revision=expected_revision,
+            **body,
         )
     except ProjectRevisionConflict as exc:
-        return json_error("version_conflict", message=str(exc), status=409,
-                          current_revision=exc.current_revision)
+        return json_error(
+            "version_conflict",
+            message=str(exc),
+            status=409,
+            current_revision=exc.current_revision,
+        )
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=400)
-    return HierarchyRequest.record(updated, lambda project: _project_payload(store, project))
+    return HierarchyRequest.record(
+        updated, lambda project: _project_payload(store, project)
+    )
 
 
 def _bound_work_counts(pid: str) -> tuple[int, int]:

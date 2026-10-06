@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import importlib
 import threading
-
-from gideon.core.database_privacy import prepare_database
 from contextlib import closing
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+from gideon.core.database_privacy import prepare_database
 
 
 def _select_driver():
@@ -19,7 +19,14 @@ def _select_driver():
         return importlib.import_module("sqlite3"), "sqlite3"
 
 
-sqlite3, _DRIVER = _select_driver()
+_DRIVER: str
+if TYPE_CHECKING:
+    import sqlite3
+
+    _CursorBase = sqlite3.Cursor
+else:
+    sqlite3, _DRIVER = _select_driver()
+    _CursorBase = object
 __all__ = [
     "sqlite3",
     "SharedConnection",
@@ -46,43 +53,44 @@ class SqliteCapabilities:
     json1: bool
 
 
-class _CursorOperationLock:
+class _CursorOperationLock(_CursorBase):
     """Mixin that serializes native cursor operations through the owning connection."""
+
     def execute(self, *args, **kwargs):
-        with self.connection._operation_lock:
+        with cast(SharedConnection, self.connection)._operation_lock:
             return super().execute(*args, **kwargs)
 
     def executemany(self, *args, **kwargs):
-        with self.connection._operation_lock:
+        with cast(SharedConnection, self.connection)._operation_lock:
             return super().executemany(*args, **kwargs)
 
     def executescript(self, *args, **kwargs):
-        with self.connection._operation_lock:
+        with cast(SharedConnection, self.connection)._operation_lock:
             return super().executescript(*args, **kwargs)
 
     def fetchone(self):
-        with self.connection._operation_lock:
+        with cast(SharedConnection, self.connection)._operation_lock:
             return super().fetchone()
 
     def fetchmany(self, size=None):
-        with self.connection._operation_lock:
+        with cast(SharedConnection, self.connection)._operation_lock:
             if size is None:
                 return super().fetchmany()
             return super().fetchmany(size)
 
     def fetchall(self):
-        with self.connection._operation_lock:
+        with cast(SharedConnection, self.connection)._operation_lock:
             return super().fetchall()
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        with self.connection._operation_lock:
+        with cast(SharedConnection, self.connection)._operation_lock:
             return super().__next__()
 
     def close(self):
-        with self.connection._operation_lock:
+        with cast(SharedConnection, self.connection)._operation_lock:
             return super().close()
 
 

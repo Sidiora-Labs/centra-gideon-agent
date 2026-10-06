@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from gideon.core.cancellation import run_with_timeout, wait_with_timeout
+from gideon.operations import self_update
 
 
 @dataclass(frozen=True)
@@ -64,7 +65,11 @@ class DependencyRepair:
         project = os.environ.get("GIDEON_PROJECT_DIR", "")
         if not missing or not project:
             return
-        from gideon.operations._installer import NoInstallerError, install_argv, installer_env
+        from gideon.operations._installer import (
+            NoInstallerError,
+            install_argv,
+            installer_env,
+        )
 
         self.logger.warning("Missing deps %s — installing directly", missing)
         print(f"Installing missing dependencies: {', '.join(missing)}")
@@ -74,7 +79,9 @@ class DependencyRepair:
             print(f"❌ {error}")
             self.logger.error("Dep repair impossible: %s", error)
             return
-        reply = subprocess.run(command, cwd=project, env=installer_env(), capture_output=True, timeout=300)
+        reply = subprocess.run(
+            command, cwd=project, env=installer_env(), capture_output=True, timeout=300
+        )
         if reply.returncode:
             print("❌ Dependency install failed — run manually: gideon update")
             self.logger.error(

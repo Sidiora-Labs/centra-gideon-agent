@@ -550,6 +550,7 @@ class ConversationDirectory:
                 return None
             files = options.get("session_files_dir")
             environment = options.get("env")
+            session_meta = options.get("session_meta")
             provider = await pool.open_session(
                 runtime,
                 cwd=_resolve_acp_spawn_cwd(cwd),
@@ -562,8 +563,8 @@ class ConversationDirectory:
                 channel_id=channel_id,
                 model=model or "",
                 agent_name=agent or "",
-                session_meta=options.get("session_meta"),
-                compacts_itself=options.get("compacts_itself", False),
+                session_meta=session_meta if isinstance(session_meta, dict) else None,
+                compacts_itself=options.get("compacts_itself") is True,
             )
             if provider is not None:
                 await self._specialize_acp(provider, agent, model, extra_factory_kwargs)
@@ -833,13 +834,19 @@ class ConversationDirectory:
     ) -> tuple[ModelProvider, bool, bool]:
         """Acquire a turn lease; its owner must call ``release`` when the turn ends."""
         from gideon.extensions.apps import app_work as app_scopes
+
         work = extra_factory_kwargs.get("app_work") or app_scopes.of_session(key)
         if work is not None:
             app_scopes.bind_session(key, work)
             extra_factory_kwargs["app_work"] = work
             existing = self._sessions.get(key)
-            if existing is not None and getattr(existing.provider, "_app_work", None) != work:
-                raise RuntimeError("session runtime cannot acquire a different app execution scope")
+            if (
+                existing is not None
+                and getattr(existing.provider, "_app_work", None) != work
+            ):
+                raise RuntimeError(
+                    "session runtime cannot acquire a different app execution scope"
+                )
         if key == BACKGROUND_KEY:
             extra_factory_kwargs.setdefault("model_axis", "background")
         reuse = None
@@ -873,7 +880,9 @@ class ConversationDirectory:
                 model = resolution_context.get("model_override") or None
                 for option in ("model_axis", "provider_kind"):
                     if resolution_context.get(option):
-                        extra_factory_kwargs.setdefault(option, resolution_context[option])
+                        extra_factory_kwargs.setdefault(
+                            option, resolution_context[option]
+                        )
                 if entry is not None:
                     current_basis = _factory_resolution_basis(
                         self._provider_factory, key, resolution_context
@@ -904,20 +913,30 @@ class ConversationDirectory:
                         self._sessions.pop(key)
                         retired = True
                         self._remember_provider(key, stale_entry.provider)
-                        exporter = getattr(stale_entry.provider, "export_turn_state", None)
+                        exporter = getattr(
+                            stale_entry.provider, "export_turn_state", None
+                        )
                         if callable(exporter):
                             try:
                                 self._reload_states[key] = exporter()
                             except Exception:
-                                logger.warning("Could not preserve session state during reload", exc_info=True)
+                                logger.warning(
+                                    "Could not preserve session state during reload",
+                                    exc_info=True,
+                                )
             finally:
                 stale_entry.semaphore.release()
             if retired:
                 await self._close_quietly(stale_entry.provider)
             return await self.get_or_create(
-                key, agent=agent, channel_id=channel_id,
-                approval_policy=approval_policy, model=model, cwd=cwd,
-                extra_env=extra_env, _resolution_context=resolution_context,
+                key,
+                agent=agent,
+                channel_id=channel_id,
+                approval_policy=approval_policy,
+                model=model,
+                cwd=cwd,
+                extra_env=extra_env,
+                _resolution_context=resolution_context,
                 **extra_factory_kwargs,
             )
         if reuse is not None:
@@ -976,9 +995,7 @@ class ConversationDirectory:
                         model_resolution_basis=getattr(
                             provider, "_model_resolution_basis", None
                         )
-                        or _factory_resolution_basis(
-                            factory, key, resolution_context
-                        ),
+                        or _factory_resolution_basis(factory, key, resolution_context),
                         resolution_context=resolution_context,
                     )
                     self._sessions[key] = entry
@@ -1034,8 +1051,10 @@ class ConversationDirectory:
 
     def set_compact_callback(self, callback) -> None:
         """Compatibility adapter for integrations with the former callback."""
+
         async def restarted(key: str, pct: float, reason: str) -> None:
             await callback(key, pct)
+
         self.set_restart_callback(restarted if callback is not None else None)
 
     def set_session_expire_callback(
@@ -1186,7 +1205,11 @@ class ConversationDirectory:
         entry = self._sessions.get(key)
         from gideon.engine.steering import SteeringText
 
-        text = SteeringText(text.strip(), meta=text.meta) if isinstance(text, SteeringText) else text.strip()
+        text = (
+            SteeringText(text.strip(), meta=text.meta)
+            if isinstance(text, SteeringText)
+            else text.strip()
+        )
         if (
             not text
             or entry is None
@@ -1264,7 +1287,11 @@ class ConversationDirectory:
             apply(mode or "agent")
 
     def set_channel_link(
-        self, key: str, thread_ts: str, channel_id: str | None, channel_provider: str = ""
+        self,
+        key: str,
+        thread_ts: str,
+        channel_id: str | None,
+        channel_provider: str = "",
     ) -> None:
         self._session_map.set_channel_link(key, thread_ts, channel_id, channel_provider)
 
@@ -1274,12 +1301,16 @@ class ConversationDirectory:
     def get_channel_provider(self, key: str) -> str:
         return self._session_map.get_channel_provider(key)
 
-    def get_session_for_thread(self, thread_ts: str, provider: str | None = None) -> str | None:
+    def get_session_for_thread(
+        self, thread_ts: str, provider: str | None = None
+    ) -> str | None:
         return self._session_map.get_session_for_thread(thread_ts, provider)
 
     async def set_channel(self, key: str, channel_id: str) -> None:
         thread, _ = self.get_channel_link(key)
-        self.set_channel_link(key, thread or "", channel_id, self.get_channel_provider(key))
+        self.set_channel_link(
+            key, thread or "", channel_id, self.get_channel_provider(key)
+        )
 
     def get_channel(self, key: str) -> str | None:
         return self.get_channel_link(key)[1]
@@ -1291,7 +1322,12 @@ class ConversationDirectory:
         self._session_map.delete(key)
 
     async def set_thread(self, key: str, thread_ts: str) -> None:
-        self.set_channel_link(key, thread_ts, self.get_channel_link(key)[1], self.get_channel_provider(key))
+        self.set_channel_link(
+            key,
+            thread_ts,
+            self.get_channel_link(key)[1],
+            self.get_channel_provider(key),
+        )
 
     def get_thread(self, key: str) -> str | None:
         return self.get_channel_link(key)[0]
@@ -1344,7 +1380,11 @@ class ConversationDirectory:
             try:
                 self._approval_stopper(key)
             except Exception:
-                logger.warning("Withdrawing approvals for stopped turn failed for %s", key, exc_info=True)
+                logger.warning(
+                    "Withdrawing approvals for stopped turn failed for %s",
+                    key,
+                    exc_info=True,
+                )
         entry = self._sessions.get(key)
         if entry is None:
             return "idle"

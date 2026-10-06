@@ -81,6 +81,8 @@ class LoopKindStrategy(Protocol):
     testable in isolation and the engine never branches on ``loop.kind``.
     """
 
+    def turn_capabilities(self, loop: Loop) -> tuple[list[str], list[str]]: ...
+
     kind: str
 
     label: str

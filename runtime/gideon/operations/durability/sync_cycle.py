@@ -19,26 +19,33 @@ never kills the durability service loop.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
-import json
-from datetime import datetime, timezone
 import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from gideon.integrations.sync_transports.base import RemoteRef, SyncTransportProvider
+from gideon.operations.durability import conflicts as conflicts_mod
+from gideon.operations.durability import inventory as inv
+from gideon.operations.durability import reconcile
+from gideon.operations.durability.ancestors import Ancestors
 from gideon.operations.durability.conflicts import ConflictQueue
 from gideon.operations.durability.cursor import Cursor
 from gideon.operations.durability.db_merge import make_db_merger
 from gideon.operations.durability.outbox import Outbox
+from gideon.operations.durability.published import (
+    KEEP_PREVIOUS_SECS,
+    Published,
+    export_digest,
+    superseded,
+)
 from gideon.operations.durability.pull_engine import PullReport, pull_from_peers
 from gideon.operations.durability.push_engine import PushReport, publish_export
 from gideon.operations.durability.registry import REGISTRY_KEY, Registry
 from gideon.operations.durability.shards import export_shards, import_shards
-from gideon.operations.durability.ancestors import Ancestors
-from gideon.operations.durability.published import Published, export_digest, superseded, KEEP_PREVIOUS_SECS
-from gideon.operations.durability import conflicts as conflicts_mod, inventory as inv, reconcile
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +75,11 @@ class SyncCycleReport:
             return f"skipped: {self.skipped}"
         if not self.ok:
             return f"error: {self.error}"
-        sent = f"nothing new to send; seq {self.unchanged_since} stands" if self.unchanged_since else f"published seq {self.seq_published}"
+        sent = (
+            f"nothing new to send; seq {self.unchanged_since} stands"
+            if self.unchanged_since
+            else f"published seq {self.seq_published}"
+        )
         base = f"+{self.rows_added} -{self.rows_removed} rows; {sent}"
         if self.copies_removed:
             base += f"; removed {len(self.copies_removed)} older copies"
@@ -128,7 +139,11 @@ def run_sync_cycle(
 
     codec = None
     try:
-        from gideon.operations.durability.crypto import MissingPassphrase, SyncEncryptionError, codec_for
+        from gideon.operations.durability.crypto import (
+            MissingPassphrase,
+            SyncEncryptionError,
+            codec_for,
+        )
 
         codec = codec_for(transport, setting=encrypt)
     except SyncEncryptionError as exc:
@@ -137,7 +152,9 @@ def run_sync_cycle(
         report.failure = "passphrase" if isinstance(exc, MissingPassphrase) else "salt"
         report.error = f"encryption: {exc}"
         return report
-    except Exception as exc:  # noqa: BLE001 — salt/metadata transport reads fail the pull
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 — salt/metadata transport reads fail the pull
         logger.warning(
             "sync cycle: encryption metadata read failed (%s)", exc, exc_info=True
         )
@@ -176,20 +193,46 @@ def run_sync_cycle(
     try:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
-            exported = export_shards(home, out, include_databases=True, agreements=ancestors.agreements())
+            exported = export_shards(
+                home, out, include_databases=True, agreements=ancestors.agreements()
+            )
             report.left_out = dict(exported.skipped)
             if report.left_out:
                 report.ok = False
                 report.failure = "error"
-                report.error = f"local export could not carry {len(report.left_out)} store(s)"
+                report.error = (
+                    f"local export could not carry {len(report.left_out)} store(s)"
+                )
                 return report
             observed = import_shards(out)
             for entry_id, rows in observed.rows.items():
                 entry = inv.by_id(entry_id)
-                if entry is not None and reconcile.handles_kind(entry.kind) and entry.merge in conflicts_mod._ID_KEYED_MERGES and (home / entry.path).exists():
-                    ancestors.publish(entry.id, {conflicts_mod.row_id(row):conflicts_mod.row_sha(conflicts_mod.compared(entry,row)) for row in rows if conflicts_mod.row_id(row) and not reconcile.writeback._is_tombstone(row)}, now=now)
+                if (
+                    entry is not None
+                    and reconcile.handles_kind(entry.kind)
+                    and entry.merge in conflicts_mod._ID_KEYED_MERGES
+                    and (home / entry.path).exists()
+                ):
+                    ancestors.publish(
+                        entry.id,
+                        {
+                            conflicts_mod.row_id(row): conflicts_mod.row_sha(
+                                conflicts_mod.compared(entry, row)
+                            )
+                            for row in rows
+                            if conflicts_mod.row_id(row)
+                            and not reconcile.writeback._is_tombstone(row)
+                        },
+                        now=now,
+                    )
             ancestors.save()
-            exported = export_shards(home, out, include_databases=True, agreements=ancestors.agreements(), deletions=ancestors.deletions())
+            exported = export_shards(
+                home,
+                out,
+                include_databases=True,
+                agreements=ancestors.agreements(),
+                deletions=ancestors.deletions(),
+            )
             digest = export_digest(out)
             listed = transport.list_remote(f"machines/{self_id}/")
             newest = registry.seq_of(self_id)
@@ -199,9 +242,15 @@ def run_sync_cycle(
             else:
                 _prepare_retry_prefix(transport, out, self_id, newest + 1, codec)
                 report.pushed = publish_export(
-                    transport, out, registry, outbox, self_id=self_id,
-                    manifest_sha=digest or manifest_sha, now=now,
-                    reload_registry=lambda: read_registry(transport), codec=codec,
+                    transport,
+                    out,
+                    registry,
+                    outbox,
+                    self_id=self_id,
+                    manifest_sha=digest or manifest_sha,
+                    now=now,
+                    reload_registry=lambda: read_registry(transport),
+                    codec=codec,
                 )
                 if not report.pushed.registry_committed:
                     report.ok = False
@@ -213,18 +262,32 @@ def run_sync_cycle(
                 published.save(sync_root)
                 ancestors.forget_old_deletes(now)
                 ancestors.save()
-            _retire(transport, listed, self_id, newest, published, sync_root, outbox, now, report)
+            _retire(
+                transport,
+                listed,
+                self_id,
+                newest,
+                published,
+                sync_root,
+                outbox,
+                now,
+                report,
+            )
     except Exception as exc:
         logger.warning("sync cycle: push failed (%s)", exc, exc_info=True)
         report.ok = False
         report.failure = "push"
         report.error = f"push: {exc}"
         return report
-    held = [outcome for outcome in report.pulled.outcomes if outcome.verdict != "consumed"]
+    held = [
+        outcome for outcome in report.pulled.outcomes if outcome.verdict != "consumed"
+    ]
     if held:
         report.ok = False
         report.failure = "refused"
-        report.error = "; ".join(outcome.detail or outcome.verdict for outcome in held[:4])
+        report.error = "; ".join(
+            outcome.detail or outcome.verdict for outcome in held[:4]
+        )
     return report
 
 
@@ -241,6 +304,7 @@ def _copy_complete(transport, seq, self_id, codec):
         if refused.keys or refused.unreadable:
             return False
     from gideon.operations.durability.pull_engine import _materialize
+
     try:
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
@@ -270,24 +334,32 @@ def _prepare_retry_prefix(transport, out, self_id, seq, codec):
         relative = obj.key.removeprefix(prefix)
         path = out / relative
         if not path.is_file():
-            raise OSError("transport retains an incompatible unpublished copy; clear that copy before retry")
+            raise OSError(
+                "transport retains an incompatible unpublished copy; clear that copy before retry"
+            )
         expected = path.read_bytes()
         actual = obj.data
         if relative == "manifest.json":
-            expected_document, actual_document = json.loads(expected), json.loads(actual)
+            expected_document, actual_document = json.loads(expected), json.loads(
+                actual
+            )
             expected_document.pop("generated_at", None)
             actual_document.pop("generated_at", None)
             if expected_document == actual_document:
                 continue
         if expected != actual:
-            raise OSError("transport retains an incompatible unpublished copy; clear that copy before retry")
+            raise OSError(
+                "transport retains an incompatible unpublished copy; clear that copy before retry"
+            )
 
 
-def _retire(transport, listed, self_id, newest, published, sync_root, outbox, now, report):
+def _retire(
+    transport, listed, self_id, newest, published, sync_root, outbox, now, report
+):
     if not transport.removes_old_copies or newest <= 0:
         return
     pattern = re.compile(rf"^machines/{re.escape(self_id)}/seq-(\d+)/")
-    by_seq = {}
+    by_seq: dict[int, list] = {}
     for ref in listed:
         match = pattern.match(ref.key)
         if match:
@@ -308,7 +380,7 @@ def _retire(transport, listed, self_id, newest, published, sync_root, outbox, no
 
 
 def _migrate_legacy_deletes(home, ancestors, registry):
-    from gideon.operations.durability.home_paths import home_path, guard_path
+    from gideon.operations.durability.home_paths import guard_path, home_path
     from gideon.operations.durability.tombstones import TOMBSTONE_FILE, read_tombstones
 
     for entry in inv.export_entries():
@@ -322,6 +394,9 @@ def _migrate_legacy_deletes(home, ancestors, registry):
         if not reconcile._read_proves_absence(entry, folder):
             continue
         rows = read_tombstones(folder)
-        live = {conflicts_mod.row_id(row) for row in reconcile.read_local_rows(entry, folder)}
+        live = {
+            conflicts_mod.row_id(row)
+            for row in reconcile.read_local_rows(entry, folder)
+        }
         ancestors.migrate_legacy(entry.id, rows, live, registry.ancestors_for(entry.id))
     ancestors.save()

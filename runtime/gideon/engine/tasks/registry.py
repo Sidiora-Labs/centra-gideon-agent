@@ -186,7 +186,8 @@ async def list_all_tasks(
         },
     )
     selected = [
-        row for row in rows
+        row
+        for row in rows
         if (not task_list_id or row.task_list_id == task_list_id)
         and (not owner or row.belongs_to(owner))
     ]
@@ -202,7 +203,10 @@ async def get_task(task_id: str, provider_name: str | None = None) -> Task | Non
 def _announce() -> None:
     """Best-effort listing hint after a successful task mutation; headless is a no-op."""
     try:
-        from gideon.integrations.inbox_providers.native_source import get_dashboard_state
+        from gideon.integrations.inbox_providers.native_source import (
+            get_dashboard_state,
+        )
+
         state = get_dashboard_state()
         if state is not None:
             state.push_refresh("tasks")
@@ -215,14 +219,18 @@ async def create_task(provider_name: str = "native", **fields: Any) -> Task:
     provider = _resolve(provider_name)
     assert provider is not None
     provider = sources.writable(provider)
-    task = await provider.create_task(**_task_write_fields(provider, fields, resolve=True))
+    task = await provider.create_task(
+        **_task_write_fields(provider, fields, resolve=True)
+    )
     _announce()
     return task
 
 
 async def update_task(
-    task_id: str, provider_name: str | None = None,
-    expected_revision: str | None = None, **fields: Any
+    task_id: str,
+    provider_name: str | None = None,
+    expected_revision: str | None = None,
+    **fields: Any,
 ) -> Task | None:
     sources = _directory()
     provider = await _resolve_one(task_id, provider_name)
@@ -232,9 +240,13 @@ async def update_task(
     if expected_revision is not None:
         if provider.name != "native":
             raise ValueError("expected_revision is supported only for native tasks")
-        edited = await provider.update_task(task_id, expected_revision=expected_revision, **fields)
+        edited = await provider.update_task(
+            task_id, expected_revision=expected_revision, **fields
+        )
     else:
-        edited = await provider.update_task(task_id, **_task_write_fields(provider, fields, resolve=True))
+        edited = await provider.update_task(
+            task_id, **_task_write_fields(provider, fields, resolve=True)
+        )
     if edited is not None:
         _announce()
     return edited
@@ -248,7 +260,10 @@ async def toggle_checklist_item(
         return None
     if provider.name != "native":
         raise ValueError("checklist operations are supported only for native tasks")
-    edited = await provider.toggle_checklist_item(task_id, kind, index)
+    toggle = getattr(provider, "toggle_checklist_item", None)
+    if not callable(toggle):
+        raise ValueError("This task provider does not support checklist changes")
+    edited = await toggle(task_id, kind, index)
     if edited is not None:
         _announce()
     return edited
@@ -257,7 +272,11 @@ async def toggle_checklist_item(
 async def delete_task(task_id: str, provider_name: str | None = None) -> bool:
     sources = _directory()
     provider = await _resolve_one(task_id, provider_name)
-    deleted = False if provider is None else await sources.writable(provider).delete_task(task_id)
+    deleted = (
+        False
+        if provider is None
+        else await sources.writable(provider).delete_task(task_id)
+    )
     if deleted:
         _announce()
     return deleted
@@ -286,7 +305,9 @@ async def add_comment(
     task_id: str, body: str, author: str = "", provider_name: str | None = None
 ) -> TaskComment | None:
     provider = await _directory().owner(task_id, provider_name)
-    comment = None if provider is None else await provider.add_comment(task_id, body, author)
+    comment = (
+        None if provider is None else await provider.add_comment(task_id, body, author)
+    )
     if comment is not None:
         _announce()
     return comment
@@ -297,7 +318,11 @@ async def delete_comment(
 ) -> bool:
     sources = _directory()
     provider = await sources.owner(task_id, provider_name)
-    removed = False if provider is None else await sources.writable(provider).delete_comment(task_id, comment_id)
+    removed = (
+        False
+        if provider is None
+        else await sources.writable(provider).delete_comment(task_id, comment_id)
+    )
     if removed:
         _announce()
     return removed

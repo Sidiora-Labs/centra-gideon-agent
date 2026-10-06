@@ -57,9 +57,11 @@ class _ConfigLock:
         self.fd = -1
 
     def __enter__(self) -> None:
-        held = getattr(_held, "paths", set())
+        held: set[str] = getattr(_held, "paths", set())
         if self.key in held:
-            raise NestedConfigTransaction("nested config transaction refused; nothing was written")
+            raise NestedConfigTransaction(
+                "nested config transaction refused; nothing was written"
+            )
         deadline = time.monotonic() + self.timeout
         if not self.thread_lock.acquire(timeout=self.timeout):
             raise ConfigLockTimeout("config lock timed out; nothing was written")
@@ -67,11 +69,16 @@ class _ConfigLock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.fd = os.open(
                 self.path,
-                os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+                os.O_RDWR
+                | os.O_CREAT
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
                 0o600,
             )
             if not stat.S_ISREG(os.fstat(self.fd).st_mode):
-                raise ConfigWriteError("config lock is not a regular file; nothing was written")
+                raise ConfigWriteError(
+                    "config lock is not a regular file; nothing was written"
+                )
             os.fchmod(self.fd, 0o600)
             while True:
                 try:
@@ -79,9 +86,13 @@ class _ConfigLock:
                     break
                 except OSError as exc:
                     if exc.errno not in (errno.EAGAIN, errno.EACCES):
-                        raise ConfigWriteError("could not acquire config lock; nothing was written") from exc
+                        raise ConfigWriteError(
+                            "could not acquire config lock; nothing was written"
+                        ) from exc
                     if time.monotonic() >= deadline:
-                        raise ConfigLockTimeout("config lock timed out; nothing was written") from exc
+                        raise ConfigLockTimeout(
+                            "config lock timed out; nothing was written"
+                        ) from exc
                     time.sleep(_POLL_SECS)
         except BaseException:
             self._release()
@@ -113,13 +124,17 @@ def _read_document(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ConfigPreserveError(f"config exists but is unreadable; nothing was written ({exc})") from exc
+        raise ConfigPreserveError(
+            f"config exists but is unreadable; nothing was written ({exc})"
+        ) from exc
     if not isinstance(value, dict):
         raise ConfigPreserveError("config is not a JSON object; nothing was written")
     return value
 
 
-def _diff(before: Any, after: Any, prefix: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], Any]]:
+def _diff(
+    before: Any, after: Any, prefix: tuple[str, ...] = ()
+) -> list[tuple[tuple[str, ...], Any]]:
     if isinstance(before, dict) and isinstance(after, dict):
         changes: list[tuple[tuple[str, ...], Any]] = []
         for key in before.keys() | after.keys():
@@ -134,7 +149,9 @@ def _diff(before: Any, after: Any, prefix: tuple[str, ...] = ()) -> list[tuple[t
     return [] if before == after else [(prefix, copy.deepcopy(after))]
 
 
-def _apply(document: dict[str, Any], changes: list[tuple[tuple[str, ...], Any]]) -> None:
+def _apply(
+    document: dict[str, Any], changes: list[tuple[tuple[str, ...], Any]]
+) -> None:
     for path, value in changes:
         current: dict[str, Any] = document
         for part in path[:-1]:
@@ -156,14 +173,18 @@ def _write(path: Path, document: dict[str, Any], previous: dict[str, Any]) -> No
     stored = plan.document
     if not isinstance(stored, dict):
         plan.abort()
-        raise ConfigWriteError("secret-reference mapper returned an invalid config document; nothing was written")
+        raise ConfigWriteError(
+            "secret-reference mapper returned an invalid config document; nothing was written"
+        )
     try:
         atomic_json_write(path, stored, replace_fallback=False)
     except BaseException as exc:
         try:
             cleanup = plan.abort()
             if getattr(cleanup, "status", "") == "abort_cleanup_incomplete":
-                logger.warning("config secret cleanup was incomplete after an aborted config write")
+                logger.warning(
+                    "config secret cleanup was incomplete after an aborted config write"
+                )
         except BaseException:
             logger.warning("config secret cleanup failed after an aborted config write")
         if isinstance(exc, OSError):
@@ -174,7 +195,9 @@ def _write(path: Path, document: dict[str, Any], previous: dict[str, Any]) -> No
     try:
         cleanup = plan.commit()
         if getattr(cleanup, "status", "") == "cleanup_incomplete":
-            logger.warning("config secret cleanup was incomplete after a committed config write")
+            logger.warning(
+                "config secret cleanup was incomplete after a committed config write"
+            )
     except Exception:
         logger.warning("config secret cleanup failed after a committed config write")
 
@@ -198,15 +221,21 @@ def mutate_config(
 
 
 async def mutate_config_async(
-    mutator: Callable[[dict[str, Any]], T], *, path: Path | None = None,
+    mutator: Callable[[dict[str, Any]], T],
+    *,
+    path: Path | None = None,
     timeout: float = DEFAULT_TIMEOUT_SECS,
 ) -> T:
     return await asyncio.to_thread(mutate_config, mutator, path=path, timeout=timeout)
 
 
 def _save_changes(
-    before: dict[str, Any] | None, after: dict[str, Any], *, path: Path | None = None,
-    timeout: float = DEFAULT_TIMEOUT_SECS, originally_missing: bool = False,
+    before: dict[str, Any] | None,
+    after: dict[str, Any],
+    *,
+    path: Path | None = None,
+    timeout: float = DEFAULT_TIMEOUT_SECS,
+    originally_missing: bool = False,
 ) -> None:
     target = path or config_path()
     with _ConfigLock(target, timeout):
@@ -239,7 +268,9 @@ def save_config(configuration: AppConfig) -> None:
     configuration._loaded_missing = False
 
 
-def update_config(change: Callable[[AppConfig], T], *, timeout: float = DEFAULT_TIMEOUT_SECS) -> T:
+def update_config(
+    change: Callable[[AppConfig], T], *, timeout: float = DEFAULT_TIMEOUT_SECS
+) -> T:
     path = config_path()
     with _ConfigLock(path, timeout):
         _read_document(path)
@@ -256,5 +287,7 @@ def update_config(change: Callable[[AppConfig], T], *, timeout: float = DEFAULT_
         return result
 
 
-async def update_config_async(change: Callable[[AppConfig], T], *, timeout: float = DEFAULT_TIMEOUT_SECS) -> T:
+async def update_config_async(
+    change: Callable[[AppConfig], T], *, timeout: float = DEFAULT_TIMEOUT_SECS
+) -> T:
     return await asyncio.to_thread(update_config, change, timeout=timeout)

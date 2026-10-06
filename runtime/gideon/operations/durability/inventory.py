@@ -115,9 +115,15 @@ def immutable_consent_spec(entry: StateEntry, row) -> bool:
     if not isinstance(spec, dict):
         return False
     try:
-        from gideon.automation.workflows.automation_versions import digest as spec_digest
+        from gideon.automation.workflows.automation_versions import (
+            digest as spec_digest,
+        )
         from gideon.automation.workflows.models import WorkflowDef
-        return WorkflowDef.from_dict(spec).to_dict() == spec and spec_digest(spec) == digest
+
+        return (
+            WorkflowDef.from_dict(spec).to_dict() == spec
+            and spec_digest(spec) == digest
+        )
     except (TypeError, ValueError, KeyError, AttributeError):
         return False
 
@@ -135,16 +141,20 @@ def shared_value(entry: StateEntry, value):
         payload = value["data"] if wrapped else value
         if wrapped or "id" in payload or "name" in payload:
             if not wrapped:
-                return {key: child for key, child in value.items() if key not in entry.machine_local_fields}
-            return {**value, "data": {
-                key: child
-                for key, child in payload.items()
-                if key not in entry.machine_local_fields
-            }}
-        return {
-            key: shared_value(entry, child)
-            for key, child in value.items()
-        }
+                return {
+                    key: child
+                    for key, child in value.items()
+                    if key not in entry.machine_local_fields
+                }
+            return {
+                **value,
+                "data": {
+                    key: child
+                    for key, child in payload.items()
+                    if key not in entry.machine_local_fields
+                },
+            }
+        return {key: shared_value(entry, child) for key, child in value.items()}
     if isinstance(value, list):
         return [shared_value(entry, child) for child in value]
     return value
@@ -166,7 +176,8 @@ def apply_machine_local_fields(entry: StateEntry, incoming, local=None):
             payload = value["data"] if wrapped else value
             prior = previous if isinstance(previous, dict) else {}
             if wrapped or "id" in payload or "name" in payload:
-                prior_payload = prior.get("data") if isinstance(prior.get("data"), dict) else prior
+                prior_data = prior.get("data")
+                prior_payload = prior_data if isinstance(prior_data, dict) else prior
                 local_fields = {}
                 for name in entry.machine_local_fields:
                     if name in prior_payload:
@@ -179,17 +190,23 @@ def apply_machine_local_fields(entry: StateEntry, incoming, local=None):
             result = {key: visit(child, prior.get(key)) for key, child in value.items()}
             return result
         if isinstance(value, list):
-            prior_rows = {
-                str(row.get("id")): row
-                for row in previous
-                if isinstance(row, dict) and row.get("id") is not None
-            } if isinstance(previous, list) else {}
+            prior_rows = (
+                {
+                    str(row.get("id")): row
+                    for row in previous
+                    if isinstance(row, dict) and row.get("id") is not None
+                }
+                if isinstance(previous, list)
+                else {}
+            )
             return [
                 visit(
                     child,
-                    prior_rows.get(str(child.get("id")))
-                    if isinstance(child, dict) and child.get("id") is not None
-                    else None,
+                    (
+                        prior_rows.get(str(child.get("id")))
+                        if isinstance(child, dict) and child.get("id") is not None
+                        else None
+                    ),
                 )
                 for child in value
             ]
@@ -868,9 +885,19 @@ INVENTORY: tuple[StateEntry, ...] = (
         exported_on_write=True,
         help="the one trigger store (automations, event triggers, hooks)",
         machine_local_fields=(
-            "enabled", "next_fire_at", "last_run_id", "run_owner_pid", "run_count",
-            "last_success_at", "last_failure_at", "last_fired_at", "park_retry_after",
-            "last_alert_hash", "last_alert_at", "health_status", "last_error_summary",
+            "enabled",
+            "next_fire_at",
+            "last_run_id",
+            "run_owner_pid",
+            "run_count",
+            "last_success_at",
+            "last_failure_at",
+            "last_fired_at",
+            "park_retry_after",
+            "last_alert_hash",
+            "last_alert_at",
+            "health_status",
+            "last_error_summary",
             "state",
         ),
         arrival_defaults=(("enabled", False),),
@@ -883,7 +910,13 @@ INVENTORY: tuple[StateEntry, ...] = (
         domain=DOMAIN_AUTOMATION,
         merge=MERGE_UNION_BY_ID,
         help="scheduled jobs (legacy; read-only, absorbed by triggers.json)",
-        machine_local_fields=("enabled", "next_fire_at", "run_count", "last_run", "last_fired_at"),
+        machine_local_fields=(
+            "enabled",
+            "next_fire_at",
+            "run_count",
+            "last_run",
+            "last_fired_at",
+        ),
         arrival_defaults=(("enabled", False),),
         records_field="$root",
     ),
@@ -912,8 +945,17 @@ INVENTORY: tuple[StateEntry, ...] = (
         exported_on_write=True,
         help="lifecycle triggers",
         machine_local_fields=(
-            "enabled", "approved", "consent", "run_count", "last_run", "last_run_id",
-            "last_status", "last_error", "last_fired_at", "next_fire_at", "state",
+            "enabled",
+            "approved",
+            "consent",
+            "run_count",
+            "last_run",
+            "last_run_id",
+            "last_status",
+            "last_error",
+            "last_fired_at",
+            "next_fire_at",
+            "state",
         ),
         arrival_defaults=(("enabled", False),),
         records_field="hooks",
@@ -926,8 +968,17 @@ INVENTORY: tuple[StateEntry, ...] = (
         merge=MERGE_UNION_BY_ID,
         help="event-pattern triggers",
         machine_local_fields=(
-            "enabled", "approved", "consent", "fire_count", "run_count", "last_fired_at",
-            "last_status", "last_error", "park_reason", "park_retry_after", "state",
+            "enabled",
+            "approved",
+            "consent",
+            "fire_count",
+            "run_count",
+            "last_fired_at",
+            "last_status",
+            "last_error",
+            "park_reason",
+            "park_retry_after",
+            "state",
         ),
         arrival_defaults=(("enabled", False),),
         records_field="$root",
@@ -977,8 +1028,16 @@ INVENTORY: tuple[StateEntry, ...] = (
         merge=MERGE_UNION_BY_ID,
         help="workflows and SOPs",
         machine_local_fields=(
-            "enabled", "approved", "consent", "run_count", "last_run", "last_status",
-            "last_run_id", "execution_grants", "auto_run", "autostart",
+            "enabled",
+            "approved",
+            "consent",
+            "run_count",
+            "last_run",
+            "last_status",
+            "last_run_id",
+            "execution_grants",
+            "auto_run",
+            "autostart",
         ),
         arrival_defaults=(("enabled", False),),
     ),
@@ -1000,13 +1059,25 @@ INVENTORY: tuple[StateEntry, ...] = (
         exported_on_write=True,
         help="agent definitions",
         machine_local_fields=(
-            "enabled", "approved", "consent", "execution_grants", "permissions",
-            "allowed_tools", "tool_allowlist", "tools", "capabilities", "auto_approve",
-            "run_count", "last_run",
+            "enabled",
+            "approved",
+            "consent",
+            "execution_grants",
+            "permissions",
+            "allowed_tools",
+            "tool_allowlist",
+            "tools",
+            "capabilities",
+            "auto_approve",
+            "run_count",
+            "last_run",
         ),
         arrival_defaults=(
-            ("enabled", False), ("allowed_tools", []), ("tool_allowlist", []),
-            ("tools", []), ("capabilities", []),
+            ("enabled", False),
+            ("allowed_tools", []),
+            ("tool_allowlist", []),
+            ("tools", []),
+            ("capabilities", []),
         ),
     ),
     StateEntry(
@@ -1233,13 +1304,24 @@ INVENTORY: tuple[StateEntry, ...] = (
         merge=MERGE_UNION_BY_ID,
         help="per-agent metadata records",
         machine_local_fields=(
-            "enabled", "approved", "consent", "permissions", "allowed_tools",
-            "tool_allowlist", "tools", "capabilities", "execution_grants", "run_count",
+            "enabled",
+            "approved",
+            "consent",
+            "permissions",
+            "allowed_tools",
+            "tool_allowlist",
+            "tools",
+            "capabilities",
+            "execution_grants",
+            "run_count",
             "last_run",
         ),
         arrival_defaults=(
-            ("enabled", False), ("allowed_tools", []), ("tool_allowlist", []),
-            ("tools", []), ("capabilities", []),
+            ("enabled", False),
+            ("allowed_tools", []),
+            ("tool_allowlist", []),
+            ("tools", []),
+            ("capabilities", []),
         ),
     ),
     StateEntry(
@@ -2018,7 +2100,13 @@ def partition_paths(home: Path) -> list[str]:
     """Discover explicitly declared databases within app-owned data trees."""
     from gideon.operations.durability.sqlite_files import is_database
 
-    return sorted({path.relative_to(home).as_posix()
-                   for entry in INVENTORY if not entry.secret and not entry.derived
-                   for pattern in entry.partitions for path in home.glob(pattern)
-                   if is_database(path) and not is_ignored(path.relative_to(home).as_posix())})
+    return sorted(
+        {
+            path.relative_to(home).as_posix()
+            for entry in INVENTORY
+            if not entry.secret and not entry.derived
+            for pattern in entry.partitions
+            for path in home.glob(pattern)
+            if is_database(path) and not is_ignored(path.relative_to(home).as_posix())
+        }
+    )

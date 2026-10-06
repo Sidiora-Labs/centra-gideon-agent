@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Iterator
 
 from gideon.core.atomic_write import atomic_write
-
 
 _LOCK_NAME = ".gideon-record-files.lock"
 
@@ -29,7 +29,7 @@ def _store_root(root: Path | str, *, create: bool) -> Path:
 
 
 def _lock(fd: int) -> None:
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
         os.lseek(fd, 0, os.SEEK_SET)
@@ -44,7 +44,7 @@ def _lock(fd: int) -> None:
 
 
 def _unlock(fd: int) -> None:
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
         os.lseek(fd, 0, os.SEEK_SET)

@@ -166,7 +166,16 @@ _WRITE_INDICATORS = (
 
 def _event_reads_only(event: LLMEvent) -> bool:
     from gideon.engine.task_modes import resolve_effective_risk
-    return resolve_effective_risk(getattr(event, "risk_level", ""), event.title, event.tool_kind, event.tool_input) == "safe"
+
+    return (
+        resolve_effective_risk(
+            getattr(event, "risk_level", ""),
+            event.title,
+            event.tool_kind,
+            event.tool_input,
+        )
+        == "safe"
+    )
 
 
 def _is_read_only_tool(event_title: str) -> bool:
@@ -239,9 +248,7 @@ class ApprovalFlow:
 
     def cli_approval(self, event: LLMEvent) -> bool:
         mode = self.coordinator._approval_mode
-        if mode != "yolo" and not (
-            mode == "reads" and _event_reads_only(event)
-        ):
+        if mode != "yolo" and not (mode == "reads" and _event_reads_only(event)):
             return False
         try:
             title = redact_exfiltration_urls(redact_credentials(event.title or "")[0])[
@@ -320,21 +327,42 @@ class ApprovalFlow:
         return False
 
     def automatically_allowed(self, event: LLMEvent, hint: str) -> bool:
-        from gideon.security.trust_mode import is_yolo_active
         from gideon.security import approval_grants
+        from gideon.security.trust_mode import is_yolo_active
 
         coordinator = self.coordinator
-        from gideon.security.protected_folders import call_protected_delete, provider_working_folder
+        from gideon.security.protected_folders import (
+            call_protected_delete,
+            provider_working_folder,
+        )
+
         state = coordinator.dashboard_state
-        provider = state.sessions.get_provider(hint) or state.sessions.get_provider(f"dashboard:{hint}") if state else None
-        if call_protected_delete(getattr(event, "risk_level", ""), event.title, event.tool_kind, event.tool_input, cwd=provider_working_folder(provider)):
+        provider = (
+            state.sessions.get_provider(hint)
+            or state.sessions.get_provider(f"dashboard:{hint}")
+            if state
+            else None
+        )
+        if call_protected_delete(
+            getattr(event, "risk_level", ""),
+            event.title,
+            event.tool_kind,
+            event.tool_input,
+            cwd=provider_working_folder(provider),
+        ):
             return False
         try:
             hooks = approval_grants.hooks_now()
         except Exception:
             hooks = None
-        if hooks is not None and self.source in hooks.auto_approve_sources and approval_grants.stands(
-            approval_grants.SOURCE, caller=f"source:{self.source}", subject=event.title
+        if (
+            hooks is not None
+            and self.source in hooks.auto_approve_sources
+            and approval_grants.stands(
+                approval_grants.SOURCE,
+                caller=f"source:{self.source}",
+                subject=event.title,
+            )
         ):
             logger.info(
                 "Auto-approving tool %s from source %s", event.title, self.source
@@ -349,32 +377,59 @@ class ApprovalFlow:
         ):
             return True
         state = coordinator.dashboard_state
-        if state and state.is_yolo_active() and approval_grants.stands(
-            approval_grants.YOLO, caller=f"source:{self.source}", subject=event.title
+        if (
+            state
+            and state.is_yolo_active()
+            and approval_grants.stands(
+                approval_grants.YOLO,
+                caller=f"source:{self.source}",
+                subject=event.title,
+            )
         ):
             return True
         trusted = self.trusted(event, hint)
-        return bool(trusted and approval_grants.stands(
-            approval_grants.TRUST, caller=f"session:{hint or self.source}", subject=event.title
-        ))
+        return bool(
+            trusted
+            and approval_grants.stands(
+                approval_grants.TRUST,
+                caller=f"session:{hint or self.source}",
+                subject=event.title,
+            )
+        )
 
     async def approve(self, event: LLMEvent, parent_session_key: str = "") -> bool:
         hint = self.session_hint()
-        from gideon.security.guardrails.policy import profile_for_session, tool_grant_denial
+        from gideon.security.guardrails.policy import (
+            profile_for_session,
+            tool_grant_denial,
+        )
 
         try:
-            session_key = self.resolver(str(event.request_id)) if self.resolver else parent_session_key or hint
+            session_key = (
+                self.resolver(str(event.request_id))
+                if self.resolver
+                else parent_session_key or hint
+            )
             posture = profile_for_session(session_key or "unattended:approval")
             denial = tool_grant_denial(
-                event.title or "", posture.tool_grants, posture.tool_allowlist, declared=getattr(event, "risk_level", ""), tool_kind=event.tool_kind, tool_input=event.tool_input
+                event.title or "",
+                posture.tool_grants,
+                posture.tool_allowlist,
+                declared=getattr(event, "risk_level", ""),
+                tool_kind=event.tool_kind,
+                tool_input=event.tool_input,
             )
         except Exception:
-            logger.warning("approval tool grant could not be established", exc_info=True)
+            logger.warning(
+                "approval tool grant could not be established", exc_info=True
+            )
             return False
         if denial:
             self.audit_trust(
-                f"session:{session_key or self.source}", "tool_grant_denied",
-                str(denial), approved=False,
+                f"session:{session_key or self.source}",
+                "tool_grant_denied",
+                str(denial),
+                approved=False,
             )
             return False
         if self.automatically_allowed(event, hint):
@@ -392,8 +447,10 @@ class ApprovalFlow:
         if self.coordinator.dashboard_state:
             return await exchange.dashboard()
         self.audit_trust(
-            f"source:{self.source}", "approval_no_surface_denied",
-            event.title or "", approved=False,
+            f"source:{self.source}",
+            "approval_no_surface_denied",
+            event.title or "",
+            approved=False,
         )
         return False
 
@@ -428,7 +485,8 @@ class ApprovalExchange:
             event.title,
             tool_input=event.tool_input,
             tool_purpose=event.tool_purpose,
-            risk_level=getattr(event, "risk_level", ""), tool_kind=event.tool_kind,
+            risk_level=getattr(event, "risk_level", ""),
+            tool_kind=event.tool_kind,
             tool_annotations=getattr(event, "tool_annotations", {}),
             session=session_key,
             asked_by=asker.label,
@@ -465,15 +523,28 @@ class ApprovalExchange:
     def finish_channel_decision(self, decision: bool | None) -> bool | None:
         if decision is None:
             return None
+        from gideon.integrations.channel_delivery import (
+            ONE_CALL_ANSWERS,
+            offered_answers,
+        )
         from gideon.security.approval_answer import CHANNEL, Principal
-
-        from gideon.integrations.channel_delivery import offered_answers, ONE_CALL_ANSWERS
         from gideon.security.approval_brief import approval_brief_for
-        answers = offered_answers((approval_brief_for(self.event) or {}).get("answers")) or ONE_CALL_ANSWERS
+
+        answers = (
+            offered_answers((approval_brief_for(self.event) or {}).get("answers"))
+            or ONE_CALL_ANSWERS
+        )
         pending_future = getattr(self.channel_pending, "future", None)
         chosen = None
-        if pending_future is not None and pending_future.done() and not pending_future.cancelled():
-            chosen = next((answer for answer in answers if answer.key == pending_future.result()), None)
+        if (
+            pending_future is not None
+            and pending_future.done()
+            and not pending_future.cancelled()
+        ):
+            chosen = next(
+                (answer for answer in answers if answer.key == pending_future.result()),
+                None,
+            )
         if chosen is None:
             return None
         approved = chosen.ends == "approved"
@@ -482,30 +553,58 @@ class ApprovalExchange:
         state = self.flow.coordinator.dashboard_state
         if verified_answer and getattr(self, "_channel_provider", "") == "telegram":
             from gideon.integrations.channel_transports import get_transport
+
             transport = get_transport("telegram")
             pending_transport = getattr(self.channel_pending, "transport", None)
             slot = str(getattr(pending_transport, "slot", ""))
             registered = (getattr(transport, "bots", {}) or {}).get(slot)
             if registered is None and getattr(transport, "slot", None) == slot:
                 registered = transport
-            from gideon.security.approval_answer import on_channel
             from gideon.integrations.channel_trust import is_allowed_sender
+            from gideon.security.approval_answer import on_channel
+
             owner = str((getattr(registered, "config", {}) or {}).get("owner_id", ""))
-            verified_answer = bool(registered is pending_transport and getattr(registered, "connected", False)
-                and owner and is_allowed_sender("telegram", owner)
-                and by == on_channel("telegram", owner, f"telegram:{slot}"))
-        if verified_answer and getattr(self, "_channel_provider", "") in {"slack", "discord", "mail-desk"}:
+            verified_answer = bool(
+                registered is pending_transport
+                and getattr(registered, "connected", False)
+                and owner
+                and is_allowed_sender("telegram", owner)
+                and by == on_channel("telegram", owner, f"telegram:{slot}")
+            )
+        if verified_answer and getattr(self, "_channel_provider", "") in {
+            "slack",
+            "discord",
+            "mail-desk",
+        }:
             from gideon.integrations.channel_delivery import raw_delivery_for
             from gideon.security.approval_answer import on_channel
+
             channel_provider = self._channel_provider
             delivery = raw_delivery_for(channel_provider)
             pending = self.channel_pending
-            identity = delivery.approval_identity(getattr(pending, "channel", getattr(pending, "channel_id", ""))) if delivery is not None and hasattr(delivery, "approval_identity") else None
-            if identity is not None and channel_provider == "mail-desk":
-                identity = delivery.approval_identity(pending.channel, thread=pending.thread)
-            verified_answer = bool(identity and pending.delivery is delivery
-                and pending.owner == identity["owner"] and pending.tenant == identity["tenant"]
-                and by == on_channel(channel_provider, identity["owner"], identity["tenant"]))
+            approval_identity = getattr(delivery, "approval_identity", None)
+            identity = (
+                approval_identity(
+                    getattr(pending, "channel", getattr(pending, "channel_id", ""))
+                )
+                if callable(approval_identity)
+                else None
+            )
+            if (
+                identity is not None
+                and pending is not None
+                and callable(approval_identity)
+                and channel_provider == "mail-desk"
+            ):
+                identity = approval_identity(pending.channel, thread=pending.thread)
+            verified_answer = bool(
+                identity
+                and pending.delivery is delivery
+                and pending.owner == identity["owner"]
+                and pending.tenant == identity["tenant"]
+                and by
+                == on_channel(channel_provider, identity["owner"], identity["tenant"])
+            )
         if not verified_answer:
             if (
                 self.dashboard_future is not None
@@ -518,6 +617,8 @@ class ApprovalExchange:
                     return None
             return None
         if state is None:
+            if not isinstance(by, Principal):
+                return None
             if not self._channel_audit_attempted:
                 self._channel_audit_attempted = True
                 try:
@@ -584,6 +685,9 @@ class RuntimeCoordinator:
     :mod:`interactions` respectively.
     """
 
+    from gideon.automation.triggers.event_fire import EventRouter
+
+    _event_router: EventRouter | None
     _cfg: AppConfig
     _no_dashboard: bool
     _no_crons: bool
@@ -1089,6 +1193,7 @@ async def run_gateway(
     approval_mode: str | None = None,
 ) -> None:
     from gideon.engine.gateway_base import claim_home
+
     claim = claim_home()
     try:
         await RuntimeCoordinator(

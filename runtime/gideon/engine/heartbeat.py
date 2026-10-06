@@ -13,8 +13,8 @@ from gideon import shutdown_event
 from gideon.cognition.memory import workspace_dir
 from gideon.core.atomic_write import atomic_write, atomic_write_bytes
 from gideon.engine.heartbeat_store import queue_lock
-from gideon.security.owner_grants import GrantBook, seal
 from gideon.security.approval_answer import OWNER, Principal
+from gideon.security.owner_grants import GrantBook, seal
 
 if TYPE_CHECKING:
     from gideon.cognition.history import HistoryConsolidator
@@ -82,7 +82,9 @@ def _task_lines(content: str) -> Iterator[_TaskLine]:
 
 
 def _task_content(entry: _TaskLine) -> str:
-    return json.dumps([entry.text, entry.destination], ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(
+        [entry.text, entry.destination], ensure_ascii=False, separators=(",", ":")
+    )
 
 
 def _task_keys(entries: tuple[_TaskLine, ...] | list[_TaskLine]) -> list[str]:
@@ -121,7 +123,9 @@ def record_owner_file_added_tasks(
             _HEARTBEAT_GRANTS.give(key, content, principal=principal.label)
             granted += 1
         except OSError:
-            logger.warning("owner heartbeat grant could not be recorded; task remains waiting")
+            logger.warning(
+                "owner heartbeat grant could not be recorded; task remains waiting"
+            )
             try:
                 from gideon.security.sel import sel
 
@@ -147,26 +151,26 @@ def heartbeat_task_rows(content: str | None = None) -> list[dict[str, str | bool
             return []
     entries = tuple(_task_lines(content))
     keys = _task_keys(entries)
-    rows = []
+    rows: list[dict[str, str | bool]] = []
     for entry, key in zip(entries, keys):
         task_content = _task_content(entry)
-        rows.append({
-            "id": key,
-            "text": entry.text,
-            "destination": entry.destination,
-            "revision": seal(task_content),
-            "allowed": _HEARTBEAT_GRANTS.holds(key, task_content),
-            "question": (
-                "Allow this exact heartbeat task to run unattended?\n\n"
-                f"Task: {entry.text}\nDestination: {entry.destination or 'dashboard'}"
-            ),
-        })
+        rows.append(
+            {
+                "id": key,
+                "text": entry.text,
+                "destination": entry.destination,
+                "revision": seal(task_content),
+                "allowed": _HEARTBEAT_GRANTS.holds(key, task_content),
+                "question": (
+                    "Allow this exact heartbeat task to run unattended?\n\n"
+                    f"Task: {entry.text}\nDestination: {entry.destination or 'dashboard'}"
+                ),
+            }
+        )
     return rows
 
 
-def allow_heartbeat_task(
-    task_id: str, *, seen: str, principal: str
-) -> bool:
+def allow_heartbeat_task(task_id: str, *, seen: str, principal: str) -> bool:
     """Allow one current task occurrence only if it still matches the reviewed revision."""
     with queue_lock(heartbeat_path()):
         try:
@@ -178,12 +182,12 @@ def allow_heartbeat_task(
             task_content = _task_content(entry)
             if key == task_id and seal(task_content) == seen:
                 try:
-                    _HEARTBEAT_GRANTS.give(
-                        key, task_content, principal=principal
-                    )
+                    _HEARTBEAT_GRANTS.give(key, task_content, principal=principal)
                     return True
                 except OSError:
-                    logger.warning("heartbeat grant could not be recorded; task remains waiting")
+                    logger.warning(
+                        "heartbeat grant could not be recorded; task remains waiting"
+                    )
                 return False
         return False
 
@@ -209,7 +213,9 @@ class _TaskDocument:
             except FileNotFoundError:
                 return
             except (OSError, UnicodeDecodeError):
-                logger.warning("heartbeat queue unreadable during settlement", exc_info=True)
+                logger.warning(
+                    "heartbeat queue unreadable during settlement", exc_info=True
+                )
                 return
             occurrences: Counter[str] = Counter()
             kept = []
@@ -226,7 +232,10 @@ class _TaskDocument:
             if removed:
                 atomic_write_bytes(self.path, "".join(kept).encode("utf-8"))
         if completed_keys - removed:
-            logger.info("heartbeat completed occurrences edited or removed before settlement: %d", len(completed_keys - removed))
+            logger.info(
+                "heartbeat completed occurrences edited or removed before settlement: %d",
+                len(completed_keys - removed),
+            )
 
 
 @dataclass(frozen=True)
@@ -397,9 +406,11 @@ class HeartbeatService:
             logger.info("Heartbeat tasks: %d owner-approved task(s) found", processed)
             outcomes = await asyncio.gather(
                 *(
-                    self._run_one_task(entry.text, entry.destination)
-                    if allowed
-                    else asyncio.sleep(0, result=_KEEP_SENTINEL)
+                    (
+                        self._run_one_task(entry.text, entry.destination)
+                        if allowed
+                        else asyncio.sleep(0, result=_KEEP_SENTINEL)
+                    )
                     for entry, key, allowed in zip(document.entries, keys, authorized)
                 ),
                 return_exceptions=True,

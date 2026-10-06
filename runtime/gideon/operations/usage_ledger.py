@@ -144,7 +144,14 @@ def _emission_attribution(u: TurnUsage) -> TurnUsage:
             "Usage binding attribution unavailable; preserving turn accounting",
             exc_info=True,
         )
-    return replace(u, **fields)
+    return replace(
+        u,
+        instance_id=fields["instance_id"],
+        provider_instance=fields["provider_instance"],
+        credential_ref=fields["credential_ref"],
+        subscription_source=fields["subscription_source"],
+        attribution=fields["attribution"] or "",
+    )
 
 
 def record_turn(u: TurnUsage) -> None:
@@ -154,18 +161,41 @@ def record_turn(u: TurnUsage) -> None:
         logger.debug("usage ledger append failed", exc_info=True)
 
 
-def record_units(*, source: str, session_key: str, provider: str, model: str,
-                 unit: str, quantity: float | None, cost_usd: float | None,
-                 priced: bool, estimated: bool, price_source: str,
-                 duration_ms: int = 0, usage_status: str = "reported") -> None:
+def record_units(
+    *,
+    source: str,
+    session_key: str,
+    provider: str,
+    model: str,
+    unit: str,
+    quantity: float | None,
+    cost_usd: float | None,
+    priced: bool,
+    estimated: bool,
+    price_source: str,
+    duration_ms: int = 0,
+    usage_status: str = "reported",
+) -> None:
     """Record one unit-billed call without inventing token usage or an unknown quantity."""
-    record_turn(TurnUsage(
-        ts=datetime.now(timezone.utc).isoformat(), session_key=session_key,
-        source=source, agent="", provider=provider, model=model,
-        unit=unit, quantity=quantity, cost_usd=float(cost_usd or 0.0),
-        priced=priced, estimated=estimated, price_source=price_source,
-        model_calls=1, usage_status=usage_status, duration_ms=duration_ms,
-    ))
+    record_turn(
+        TurnUsage(
+            ts=datetime.now(timezone.utc).isoformat(),
+            session_key=session_key,
+            source=source,
+            agent="",
+            provider=provider,
+            model=model,
+            unit=unit,
+            quantity=quantity,
+            cost_usd=float(cost_usd or 0.0),
+            priced=priced,
+            estimated=estimated,
+            price_source=price_source,
+            model_calls=1,
+            usage_status=usage_status,
+            duration_ms=duration_ms,
+        )
+    )
 
 
 _IMPORT_FORMATS = {"claude_code_jsonl", "codex_rollout_jsonl"}
@@ -351,7 +381,9 @@ def _codex_rows(entries, source_name, file_sha):
         ),
         None,
     )
-    session = metadata.get("id") if metadata else None
+    if not isinstance(metadata, dict):
+        raise ValueError("Codex rollout requires session metadata")
+    session = metadata.get("id")
     if not isinstance(session, str) or not session:
         raise ValueError("Codex rollout requires session metadata")
     model = metadata.get("model") if isinstance(metadata.get("model"), str) else None
@@ -487,23 +519,34 @@ class EventAccounting:
         metadata = getattr(self.event, "tool_meta", None)
         metadata = metadata if isinstance(metadata, dict) else {}
         reported = metadata.get("cost_reported")
-        provider_reported = (
-            bool(reported)
-            if reported is not None
-            else bool(cost > 0.0)
-        )
+        provider_reported = bool(reported) if reported is not None else bool(cost > 0.0)
         if metadata.get("spend_charged") is True and "charged_cost_usd" in metadata:
             from gideon.engine.routing.rates import EffectiveModelPrice
+
             charged = metadata["charged_cost_usd"]
-            valid = type(charged) in (int, float) and math.isfinite(charged) and charged >= 0
+            valid = (
+                type(charged) in (int, float)
+                and math.isfinite(charged)
+                and charged >= 0
+            )
             priced = metadata.get("priced") is True and valid
-            price = EffectiveModelPrice(provider, self.model,
-                float(charged) if valid else None, priced,
+            price = EffectiveModelPrice(
+                provider,
+                self.model,
+                float(charged) if valid else None,
+                priced,
                 str(metadata.get("price_source") or "unknown"),
-                bool(metadata.get("price_estimated", True)))
+                bool(metadata.get("price_estimated", True)),
+            )
         else:
             price = resolve_effective_price(
-                provider, self.model, **counts, reported_cost_usd=cost,
+                provider,
+                self.model,
+                input_tokens=counts["input_tokens"],
+                output_tokens=counts["output_tokens"],
+                cache_read_tokens=counts["cache_read_tokens"],
+                cache_creation_tokens=counts["cache_creation_tokens"],
+                reported_cost_usd=cost,
                 provider_reported=provider_reported,
             )
         return counts, price
@@ -527,14 +570,23 @@ class EventAccounting:
             model=self.model,
             **counts,
             cost_usd=cost,
-            priced=status == "no_model_calls" or (status in {"measured", "partial"} and price.priced),
+            priced=status == "no_model_calls"
+            or (status in {"measured", "partial"} and price.priced),
             estimated=price.estimated,
             price_source=price.source,
             model_calls=calls,
             usage_status=status,
             duration_ms=int(getattr(self.event, "duration_ms", 0) or 0),
             audit_id=str(metadata.get("audit_id") or "").strip()[:128] or None,
-            audit_ids=[str(value).strip()[:128] for value in metadata.get("audit_ids", []) if isinstance(value, str) and value.strip()] if isinstance(metadata.get("audit_ids"), list) else None,
+            audit_ids=(
+                [
+                    str(value).strip()[:128]
+                    for value in metadata.get("audit_ids", [])
+                    if isinstance(value, str) and value.strip()
+                ]
+                if isinstance(metadata.get("audit_ids"), list)
+                else None
+            ),
         )
 
 
@@ -575,6 +627,7 @@ def _iter_rows() -> list[dict]:
 
 def _day_of(ts: str, zone=None) -> str:
     from gideon.core import spend_day
+
     return spend_day.day_of(ts, zone)
 
 
@@ -616,13 +669,24 @@ def _fold(agg: dict, row: dict) -> None:
     statuses[status] = statuses.get(status, 0) + 1
     unit = row.get("unit")
     if unit in {"image", "second", "minute", "character"}:
-        value = agg["units"].setdefault(unit, {
-            "quantity": 0.0, "calls": 0, "unknown_quantity_calls": 0,
-            "unpriced_calls": 0, "cost_usd": 0.0,
-        })
+        value = agg["units"].setdefault(
+            unit,
+            {
+                "quantity": 0.0,
+                "calls": 0,
+                "unknown_quantity_calls": 0,
+                "unpriced_calls": 0,
+                "cost_usd": 0.0,
+            },
+        )
         value["calls"] += 1
         quantity = row.get("quantity")
-        if type(quantity) in (int, float) and math.isfinite(quantity) and quantity >= 0:
+        if (
+            isinstance(quantity, (int, float))
+            and not isinstance(quantity, bool)
+            and math.isfinite(quantity)
+            and quantity >= 0
+        ):
             value["quantity"] += quantity
         else:
             value["unknown_quantity_calls"] += 1
@@ -679,6 +743,7 @@ def rollup(
     if group_by not in _GROUP_KEYS:
         raise ValueError(f"group_by must be one of {_GROUP_KEYS}, got {group_by!r}")
     from gideon.core.spend_day import zone as spend_zone
+
     zone = spend_zone() if group_by == "day" else None
     groups: dict = {}
     selected = TurnSelection(since, until, session_key, session_prefix)

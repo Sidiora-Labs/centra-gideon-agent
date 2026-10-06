@@ -28,17 +28,24 @@ and the choice of which entries to apply.
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from gideon.core.atomic_write import atomic_write_bytes
 from gideon.operations.durability import inventory as inv
 from gideon.operations.durability import record_files
-from gideon.operations.durability.home_paths import guard_path, home_path, LinkInTheWay
-from gideon.operations.durability.shards import _year_of, canonical_json, row_file, row_bytes, store_file, _json_rows_from_entity_dir
-from gideon.core.atomic_write import atomic_write_bytes
+from gideon.operations.durability.home_paths import LinkInTheWay, guard_path, home_path
+from gideon.operations.durability.shards import (
+    _json_rows_from_entity_dir,
+    _year_of,
+    canonical_json,
+    row_bytes,
+    row_file,
+    store_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +70,9 @@ def _is_tombstone(row: dict) -> bool:
     return bool(isinstance(data, dict) and data.get(_TOMBSTONE_FIELD))
 
 
-def apply_rows(kind: str, dest: Path, rows: list[dict], *, entry=None, read_rows=None) -> ApplyResult:
+def apply_rows(
+    kind: str, dest: Path, rows: list[dict], *, entry=None, read_rows=None
+) -> ApplyResult:
     """Write ``rows`` back to ``dest`` in the on-disk shape for inventory ``kind``.
 
     Atomic per file. Returns an :class:`ApplyResult`. Raises ``ValueError`` for
@@ -74,17 +83,25 @@ def apply_rows(kind: str, dest: Path, rows: list[dict], *, entry=None, read_rows
     dest = guard_path(dest)
     if kind == inv.KIND_JSON_ENTITY_DIR:
         if read_rows is None:
-            read_rows = _json_rows_from_entity_dir(dest, entry_path=entry.path if entry else "") if dest.is_dir() else []
+            read_rows = (
+                _json_rows_from_entity_dir(dest, entry_path=entry.path if entry else "")
+                if dest.is_dir()
+                else []
+            )
         prepared, skipped = _prepare_entity_rows(rows, read_rows, entry)
-        result = _apply_entity_dir(dest, prepared, expected=getattr(read_rows, "file_shas", None))
+        result = _apply_entity_dir(
+            dest, prepared, expected=getattr(read_rows, "file_shas", None)
+        )
         result.skipped = skipped
         return result
     if kind == inv.KIND_JSON_FILE:
-        prepared = _prepare_document_rows(rows)
-        return _apply_json_file(dest, prepared, expected=getattr(read_rows, "file_shas", None))
+        documents = _prepare_document_rows(rows)
+        return _apply_json_file(
+            dest, documents, expected=getattr(read_rows, "file_shas", None)
+        )
     if kind == inv.KIND_JSONL_APPEND:
-        prepared = _prepare_jsonl_rows(rows)
-        return _apply_jsonl(dest, prepared)
+        jsonl = _prepare_jsonl_rows(rows)
+        return _apply_jsonl(dest, jsonl)
     if kind in (inv.KIND_SQLITE, inv.KIND_TREE):
         raise ValueError(
             f"{kind!r} is not row-applied — the cycle merges sqlite via ATTACH-OR-IGNORE and "
@@ -100,10 +117,12 @@ def _validate_json(value: object) -> None:
         raise ValueError("durability row is not valid JSON data") from exc
 
 
-def _prepare_entity_rows(rows: list[dict], read_rows=None, entry=None) -> tuple[list[tuple[str, bool, bytes | None]], int]:
+def _prepare_entity_rows(
+    rows: list[dict], read_rows=None, entry=None
+) -> tuple[list[tuple[str, bool, bytes | None]], int]:
     prepared: list[tuple[str, bool, bytes | None]] = []
     skipped = 0
-    as_read = {str(row.get("id", "")):row for row in (read_rows or [])}
+    as_read = {str(row.get("id", "")): row for row in (read_rows or [])}
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError("entity row must be an object")
@@ -117,7 +136,9 @@ def _prepare_entity_rows(rows: list[dict], read_rows=None, entry=None) -> tuple[
         if tombstone and original is None:
             skipped += 1
             continue
-        relative = row_file(original if tombstone else row)
+        relative = row_file(
+            original if tombstone and isinstance(original, dict) else row
+        )
         if not store_file(entry, relative):
             raise ValueError(f"file is not part of the store: {relative}")
         # Validate the id as a store-relative path before any write can begin.
@@ -142,8 +163,8 @@ def _validate_relative(relative: str) -> None:
         raise ValueError(f"unsafe record id path: {relative!r}")
 
 
-def _prepare_document_rows(rows: list[dict]) -> list[tuple[bool, str | None]]:
-    prepared: list[tuple[bool, str | None]] = []
+def _prepare_document_rows(rows: list[dict]) -> list[tuple[bool, bytes | None]]:
+    prepared: list[tuple[bool, bytes | None]] = []
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError("document row must be an object")
@@ -166,7 +187,9 @@ def _prepare_jsonl_rows(rows: list[dict]) -> list[dict]:
     return prepared
 
 
-def _apply_entity_dir(root: Path, rows: list[tuple[str, bool, bytes | None]], *, expected=None) -> ApplyResult:
+def _apply_entity_dir(
+    root: Path, rows: list[tuple[str, bool, bytes | None]], *, expected=None
+) -> ApplyResult:
     """One JSON file per row at ``root/<id>.json``; a tombstone removes the file."""
     result = ApplyResult()
     result.skipped = 0
@@ -182,7 +205,11 @@ def _apply_entity_dir(root: Path, rows: list[tuple[str, bool, bytes | None]], *,
                 continue
             if expected is not None:
                 target = record_files.safe_target(store, relative)
-                current = hashlib.sha256(target.read_bytes()).hexdigest() if target.exists() else None
+                current = (
+                    hashlib.sha256(target.read_bytes()).hexdigest()
+                    if target.exists()
+                    else None
+                )
                 if current != expected.get(relative):
                     result.moved.append(relative)
                     continue
@@ -199,7 +226,9 @@ def _apply_entity_dir(root: Path, rows: list[tuple[str, bool, bytes | None]], *,
     return result
 
 
-def _apply_json_file(dest: Path, rows: list[tuple[bool, bytes | None]], *, expected=None) -> ApplyResult:
+def _apply_json_file(
+    dest: Path, rows: list[tuple[bool, bytes | None]], *, expected=None
+) -> ApplyResult:
     """A single-document store: write the one row's ``data`` to ``dest`` (or remove it on a
     tombstone). More than one row is a merge bug (a json_file has exactly one id) — the last
     row wins, logged, rather than a silent half-write."""
@@ -216,7 +245,11 @@ def _apply_json_file(dest: Path, rows: list[tuple[bool, bytes | None]], *, expec
         relative = dest.name
         if expected is not None:
             target = record_files.safe_target(store, relative)
-            current = hashlib.sha256(target.read_bytes()).hexdigest() if target.exists() else None
+            current = (
+                hashlib.sha256(target.read_bytes()).hexdigest()
+                if target.exists()
+                else None
+            )
             if current != expected.get(relative):
                 result.moved.append(relative)
                 return result
@@ -258,5 +291,7 @@ def _apply_jsonl(dest: Path, rows: list[dict]) -> ApplyResult:
     home_path(dest.parent, ".gideon-record-files.lock")
     with record_files.locked_store(dest.parent) as store:
         record_files.safe_target(store, dest.name)
-        result.written = len(rows) * int(record_files.write_text_locked(store, dest.name, body))
+        result.written = len(rows) * int(
+            record_files.write_text_locked(store, dest.name, body)
+        )
     return result

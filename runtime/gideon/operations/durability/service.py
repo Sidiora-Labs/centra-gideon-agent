@@ -102,7 +102,13 @@ def load_state() -> dict:
     for job in ("export", "snapshot"):
         stamp = state.get(f"last_{job}")
         if stamp and f"last_{job}_run" not in state:
-            state.update({f"last_{job}_run": stamp, f"last_{job}_ok": True, f"last_{job}_success": stamp})
+            state.update(
+                {
+                    f"last_{job}_run": stamp,
+                    f"last_{job}_ok": True,
+                    f"last_{job}_success": stamp,
+                }
+            )
     return state
 
 
@@ -143,30 +149,41 @@ def drill_fields(result: JobResult, *, at: float) -> dict:
 
 
 def _verified_fields(archive, drill: dict) -> dict:
-    return {"last_verified_archive": str(archive or ""),
-            "last_verified_at": float(drill.get("last_drill", 0) or 0),
-            "last_verified_detail": str(drill.get("last_drill_detail", "") or ""),
-            "last_verified_databases": int(drill.get("last_drill_databases", 0) or 0)}
+    return {
+        "last_verified_archive": str(archive or ""),
+        "last_verified_at": float(drill.get("last_drill", 0) or 0),
+        "last_verified_detail": str(drill.get("last_drill_detail", "") or ""),
+        "last_verified_databases": int(drill.get("last_drill_databases", 0) or 0),
+    }
 
 
 def last_verified() -> dict:
     state = load_state()
-    return {"archive": str(state.get("last_verified_archive", "") or ""),
-            "at": float(state.get("last_verified_at", 0) or 0),
-            "detail": str(state.get("last_verified_detail", "") or ""),
-            "databases_checked": int(state.get("last_verified_databases", 0) or 0)}
+    return {
+        "archive": str(state.get("last_verified_archive", "") or ""),
+        "at": float(state.get("last_verified_at", 0) or 0),
+        "detail": str(state.get("last_verified_detail", "") or ""),
+        "databases_checked": int(state.get("last_verified_databases", 0) or 0),
+    }
 
 
-def job_stamp_fields(result: JobResult, *, at: float, previous: dict | None = None) -> dict:
+def job_stamp_fields(
+    result: JobResult, *, at: float, previous: dict | None = None
+) -> dict:
     """Keep schedule stamps separate from the latest actual outcome."""
     previous = previous or {}
-    job = {"incremental_export": "export", "nightly_snapshot": "snapshot",
-           "restore_drill": "drill"}.get(result.job, result.job)
+    job = {
+        "incremental_export": "export",
+        "nightly_snapshot": "snapshot",
+        "restore_drill": "drill",
+    }.get(result.job, result.job)
     if job == "sync":
         fields = {"last_sync": at, "last_sync_skipped": result.skipped}
         if not result.skipped:
             fields.update(_outcome_fields(job, result, at=at, previous=previous))
-            fields["sync_removal_failed"] = _quoted(str((result.extra or {}).get("removal_failed", "") or ""))
+            fields["sync_removal_failed"] = _quoted(
+                str((result.extra or {}).get("removal_failed", "") or "")
+            )
         return fields
     if result.skipped:
         return {}
@@ -184,7 +201,9 @@ def job_stamp_fields(result: JobResult, *, at: float, previous: dict | None = No
     return fields
 
 
-def persist_job_result(result: JobResult, *, at: float | None = None, notifier=None) -> None:
+def persist_job_result(
+    result: JobResult, *, at: float | None = None, notifier=None
+) -> None:
     """Record and announce the result from either a manual or scheduled run."""
     state = load_state()
     record_job(result, state, at=time.time() if at is None else at, notifier=notifier)
@@ -193,8 +212,11 @@ def persist_job_result(result: JobResult, *, at: float | None = None, notifier=N
 
 def record_job(result: JobResult, state: dict, *, at: float, notifier=None) -> None:
     fields = job_stamp_fields(result, at=at, previous=state)
-    job = {"incremental_export":"export", "nightly_snapshot":"snapshot",
-           "restore_drill":"drill"}.get(result.job, result.job)
+    job = {
+        "incremental_export": "export",
+        "nightly_snapshot": "snapshot",
+        "restore_drill": "drill",
+    }.get(result.job, result.job)
     previous = dict(state)
     state.update(fields)
     _notify(job, previous, fields, notifier)
@@ -231,7 +253,13 @@ def _due(state: dict, key: str, interval: float, *, now: float | None = None) ->
     return (now or time.time()) - stamp >= interval
 
 
-def _audit(event: str, resources: str, *, outcome: str = "allowed", metadata: dict | None = None) -> None:
+def _audit(
+    event: str,
+    resources: str,
+    *,
+    outcome: str = "allowed",
+    metadata: dict | None = None,
+) -> None:
     try:
         from gideon.security.sel import SecurityEvent, sel
 
@@ -239,12 +267,20 @@ def _audit(event: str, resources: str, *, outcome: str = "allowed", metadata: di
             from datetime import datetime, timezone
             from uuid import uuid4
 
-            sel().log(SecurityEvent(
-                event_id=uuid4().hex[:16], timestamp=datetime.now(timezone.utc).isoformat(),
-                event_type="api_access", caller_identity="durability:service", agent="",
-                source="dashboard", operation=event, outcome=outcome,
-                resources=resources[:400], metadata=metadata,
-            ))
+            sel().log(
+                SecurityEvent(
+                    event_id=uuid4().hex[:16],
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    event_type="api_access",
+                    caller_identity="durability:service",
+                    agent="",
+                    source="dashboard",
+                    operation=event,
+                    outcome=outcome,
+                    resources=resources[:400],
+                    metadata=metadata,
+                )
+            )
             return
         sel().log_api_access(
             caller="durability:service",
@@ -301,7 +337,19 @@ def run_incremental_export() -> JobResult:
                 ok=False,
                 detail=_quoted(str(exc)),
                 duration_secs=time.monotonic() - started,
-                extra={"failure": "disk_full" if getattr(exc, "errno", None) == 28 else "unwritable" if getattr(exc, "errno", None) in (1,13) else "error", "reason": _quoted(str(exc)), "folder": str(locals().get("out_dir", ""))},
+                extra={
+                    "failure": (
+                        "disk_full"
+                        if getattr(exc, "errno", None) == 28
+                        else (
+                            "unwritable"
+                            if getattr(exc, "errno", None) in (1, 13)
+                            else "error"
+                        )
+                    ),
+                    "reason": _quoted(str(exc)),
+                    "folder": str(locals().get("out_dir", "")),
+                },
             )
     exported = int(getattr(result, "entries", 0) or 0)
     manifest_shards = len(getattr(result, "shards", ()) or ())
@@ -309,10 +357,19 @@ def run_incremental_export() -> JobResult:
     return JobResult(
         "incremental_export",
         ok=not result.skipped,
-        detail=f"{exported} store(s) re-exported" + (f"; {len(result.skipped)} unreadable store(s) left out" if result.skipped else ""),
+        detail=f"{exported} store(s) re-exported"
+        + (
+            f"; {len(result.skipped)} unreadable store(s) left out"
+            if result.skipped
+            else ""
+        ),
         duration_secs=time.monotonic() - started,
-        extra={"entries_exported": exported, "manifest_shards": manifest_shards,
-               "failure": "left_out" if result.skipped else "", "reason": str(result.skipped)},
+        extra={
+            "entries_exported": exported,
+            "manifest_shards": manifest_shards,
+            "failure": "left_out" if result.skipped else "",
+            "reason": str(result.skipped),
+        },
     )
 
 
@@ -396,7 +453,19 @@ def run_nightly_snapshot(
                 ok=False,
                 detail=_quoted(str(exc)),
                 duration_secs=time.monotonic() - started,
-                extra={"failure": "disk_full" if getattr(exc, "errno", None) == 28 else "unwritable" if getattr(exc, "errno", None) in (1,13) else "error", "reason": _quoted(str(exc)), "folder": str(locals().get("out_dir", ""))},
+                extra={
+                    "failure": (
+                        "disk_full"
+                        if getattr(exc, "errno", None) == 28
+                        else (
+                            "unwritable"
+                            if getattr(exc, "errno", None) in (1, 13)
+                            else "error"
+                        )
+                    ),
+                    "reason": _quoted(str(exc)),
+                    "folder": str(locals().get("out_dir", "")),
+                },
             )
         if code != 0:
             _audit("durability_snapshot", f"exit={code}", outcome="denied")
@@ -414,7 +483,14 @@ def run_nightly_snapshot(
             weekly=cfg.keep_weekly if weekly is None else weekly,
             monthly=cfg.keep_monthly if monthly is None else monthly,
         )
-    plan["taken"] = next((s.name for s in retention.list_snapshots(Path(out_dir)) if s.name not in before), "")
+    plan["taken"] = next(
+        (
+            s.name
+            for s in retention.list_snapshots(Path(out_dir))
+            if s.name not in before
+        ),
+        "",
+    )
     detail = f"Created {plan['taken'] or 'a snapshot'}. Kept {len(plan['kept'])}; removed {len(plan['pruned'])}."
     if plan["held"]:
         detail += f" Kept {plan['held']} as well: {retention.HELD}."
@@ -423,7 +499,10 @@ def run_nightly_snapshot(
     _audit(
         "durability_snapshot",
         detail,
-        metadata={key: plan[key] for key in ("taken", "held", "reasons", "bytes_freed", "tiers")},
+        metadata={
+            key: plan[key]
+            for key in ("taken", "held", "reasons", "bytes_freed", "tiers")
+        },
     )
     return JobResult(
         "nightly_snapshot",
@@ -569,7 +648,19 @@ def run_sync_job() -> JobResult:
                 ok=False,
                 detail=_quoted(str(exc)),
                 duration_secs=time.monotonic() - started,
-                extra={"failure": "disk_full" if getattr(exc, "errno", None) == 28 else "unwritable" if getattr(exc, "errno", None) in (1,13) else "error", "reason": _quoted(str(exc)), "folder": str(locals().get("out_dir", ""))},
+                extra={
+                    "failure": (
+                        "disk_full"
+                        if getattr(exc, "errno", None) == 28
+                        else (
+                            "unwritable"
+                            if getattr(exc, "errno", None) in (1, 13)
+                            else "error"
+                        )
+                    ),
+                    "reason": _quoted(str(exc)),
+                    "folder": str(locals().get("out_dir", "")),
+                },
             )
     outcome = "allowed" if report.ok else "denied"
     _audit("durability_sync", report.detail, outcome=outcome)
@@ -615,12 +706,17 @@ def _outcome_fields(job: str, result: JobResult, *, at: float, previous: dict) -
             # The code and the system's own words, not a finished sentence: `PROBLEMS` stays the
             # one source of the wording, including for a record written before it changed.
             f"{job}_failure": str(extra.get("failure", "") or "error"),
-            f"{job}_failure_reason": _quoted(str(extra.get("reason", "") or result.detail)),
+            f"{job}_failure_reason": _quoted(
+                str(extra.get("reason", "") or result.detail)
+            ),
             f"{job}_failure_folder": _quoted(str(extra.get("folder", "") or "")),
             f"{job}_failing_since": (
                 float(previous.get(f"{job}_failing_since", 0) or 0) if streak else at
             ),
-            f"{job}_failures": (int(previous.get(f"{job}_failures", 0) or 0) if streak else 0) + 1,
+            f"{job}_failures": (
+                int(previous.get(f"{job}_failures", 0) or 0) if streak else 0
+            )
+            + 1,
         }
     )
     return fields
@@ -701,7 +797,9 @@ PROBLEMS: dict[str, dict[str, tuple[str, str]]] = {
 _REASON_CHARS = 240
 
 
-def job_problem(job: str, code: str, reason: str = "", folder: str = "") -> tuple[str, str]:
+def job_problem(
+    job: str, code: str, reason: str = "", folder: str = ""
+) -> tuple[str, str]:
     """The sentence and the remedy for one way *job* failed (:data:`PROBLEMS`).
 
     The one place a system's or a transport's error enters words a person reads, so it is masked
@@ -712,7 +810,8 @@ def job_problem(job: str, code: str, reason: str = "", folder: str = "") -> tupl
     sentence, remedy = table.get(code, table["error"])
     return (
         sentence.format(
-            reason=_quoted(reason) or "no reason given", folder=_quoted(folder) or "its folder"
+            reason=_quoted(reason) or "no reason given",
+            folder=_quoted(folder) or "its folder",
         ),
         remedy,
     )
@@ -748,7 +847,8 @@ def _snapshots_now() -> dict:
 
 def restorable(snapshot: dict) -> str:
     """What a restore can still bring back, from a status's ``snapshot`` entry (or
-    :func:`_snapshots_now`): in the words the failure note, the Doctor and the CLI use."""
+    :func:`_snapshots_now`): in the words the failure note, the Doctor and the CLI use.
+    """
     newest = snapshot.get("newest") or {}
     if newest.get("name"):
         return f"The newest snapshot a restore can bring back is {newest['name']}."
@@ -770,10 +870,16 @@ class _Notes:
 
 
 NOTES: dict[str, _Notes] = {
-    "export": _Notes("Export failed", "Export is working again", "The last export went through."),
+    "export": _Notes(
+        "Export failed", "Export is working again", "The last export went through."
+    ),
     "snapshot": _Notes("Snapshot failed", "Snapshots are working again"),
-    "drill": _Notes("Backup restore drill FAILED", "Backup restore drill passed", every_run=True),
-    "sync": _Notes("Sync failed", "Sync is working again", "The last sync went through."),
+    "drill": _Notes(
+        "Backup restore drill FAILED", "Backup restore drill passed", every_run=True
+    ),
+    "sync": _Notes(
+        "Sync failed", "Sync is working again", "The last sync went through."
+    ),
 }
 
 
@@ -793,7 +899,13 @@ def _note(job: str, previous: dict, fields: dict) -> tuple[str, str, str] | None
     was_failing = previous.get(ok_key) is False
     if fields[ok_key] is False:
         code = fields.get(f"{job}_failure", "")
-        if not notes.every_run and was_failing and previous.get(f"{job}_failure") == code and previous.get(f"{job}_failure_reason") == fields.get(f"{job}_failure_reason"):
+        if (
+            not notes.every_run
+            and was_failing
+            and previous.get(f"{job}_failure") == code
+            and previous.get(f"{job}_failure_reason")
+            == fields.get(f"{job}_failure_reason")
+        ):
             return None
         return "warning", notes.failed, _failure_body(job, fields)
     if notes.every_run or was_failing:
@@ -933,8 +1045,6 @@ def _draft_conflict_proposals(home: Path) -> None:
         logger.warning("durability: conflict merge pass failed", exc_info=True)
 
 
-
-
 def _tick_graph_maintenance() -> None:
     """One graph-maintenance tick (KL-14). Never raises; logs only when something ran.
 
@@ -1044,7 +1154,9 @@ def run_reclaim() -> JobResult:
             logger.warning("footprint reclaim failed", exc_info=True)
             return JobResult("reclaim", ok=False, detail="Database compaction failed")
         return JobResult(
-            "reclaim", detail=result.describe(), extra=result.to_dict(),
+            "reclaim",
+            detail=result.describe(),
+            extra=result.to_dict(),
             duration_secs=time.monotonic() - started,
         )
 
@@ -1055,8 +1167,11 @@ def _tick_footprint_maintenance() -> None:
     result = run_reclaim()
     persist_job_result(result)
     if not result.skipped:
-        logger.log(logging.INFO if result.ok else logging.WARNING,
-                   "footprint reclaim: %s", result.detail)
+        logger.log(
+            logging.INFO if result.ok else logging.WARNING,
+            "footprint reclaim: %s",
+            result.detail,
+        )
 
 
 def run_due_jobs(
@@ -1140,12 +1255,20 @@ def status() -> dict:
 
     cfg = _cfg()
     stale = float(getattr(cfg, "sync_stale_after_secs", 900) or 900)
-    from gideon.operations.durability.crypto import PASSPHRASE_CREDENTIAL, passphrase_stored
+    from gideon.operations.durability.crypto import (
+        PASSPHRASE_CREDENTIAL,
+        passphrase_stored,
+    )
+
     return {
         "enabled": enabled(),
         "export": {**_entry("last_export", HOURLY_SECS), **_outcome(state, "export")},
-        "snapshot": {**_entry("last_snapshot", NIGHTLY_SECS), **_outcome(state, "snapshot"),
-                     "detail": str(state.get("last_snapshot_detail", "") or ""), **_snapshots_now()},
+        "snapshot": {
+            **_entry("last_snapshot", NIGHTLY_SECS),
+            **_outcome(state, "snapshot"),
+            "detail": str(state.get("last_snapshot_detail", "") or ""),
+            **_snapshots_now(),
+        },
         "drill": _entry("last_drill", DRILL_SECS),
         "reclaim": _entry("last_reclaim", NIGHTLY_SECS),
         "sync": {
@@ -1209,7 +1332,9 @@ class DurabilityService:
         self._notifier = notifier
         self._task: asyncio.Task | None = None
         self._stopping_task: asyncio.Task | None = None
-        self._history_debouncer = None
+        from gideon.operations.durability.history_debounce import HistoryDebouncer
+
+        self._history_debouncer: HistoryDebouncer | None = None
 
     async def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -1223,7 +1348,9 @@ class DurabilityService:
             except asyncio.TimeoutError as exc:
                 raise TimeoutError("durability service is still stopping") from exc
             except Exception:
-                logger.warning("durability service stopped with an error", exc_info=True)
+                logger.warning(
+                    "durability service stopped with an error", exc_info=True
+                )
             if self._stopping_task is task:
                 self._stopping_task = None
         if self._task is not None and not self._task.done():
@@ -1310,6 +1437,7 @@ class DurabilityService:
             first = False
             try:
                 from gideon.cognition.knowledge.file_items import _owned_io
+
                 await _owned_io(_tick_graph_maintenance)
             except asyncio.CancelledError:
                 raise
@@ -1358,5 +1486,6 @@ class DurabilityService:
 
 def _transport_removes_old_copies(cfg):
     from gideon.integrations.sync_transports.registry import get_transport
+
     chosen = get_transport(str(getattr(cfg, "sync_transport", "") or ""))
     return None if chosen is None else bool(chosen.removes_old_copies)

@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 from gideon.core.cancellation import run_with_timeout, wait_with_timeout
 
@@ -45,9 +46,18 @@ def terminal_session_name(session_id: str) -> str:
 def terminal_attach_argv(session_id: str, command: list[str]) -> list[str]:
     name = terminal_session_name(session_id)
     return [
-        "tmux", "-L", socket_name(), "new-session", "-A", "-s",
-        name, *(_literal(str(part)) for part in command),
-        ";", "set-option", KIND_OPTION, TERMINAL_KIND,
+        "tmux",
+        "-L",
+        socket_name(),
+        "new-session",
+        "-A",
+        "-s",
+        name,
+        *(_literal(str(part)) for part in command),
+        ";",
+        "set-option",
+        KIND_OPTION,
+        TERMINAL_KIND,
     ]
 
 
@@ -68,12 +78,16 @@ def command_env() -> dict[str, str]:
     from gideon.core.config.loader import config_dir
 
     home = config_dir()
-    socket_dir = home / "tmux"
+    local_socket_dir = home / "tmux"
+    socket_dir: Path | None = local_socket_dir
     socket_name_value = socket_name()
-    if len(os.fsencode(socket_dir / f"tmux-{os.getuid()}" / socket_name_value)) > 103:
+    if (
+        len(os.fsencode(local_socket_dir / f"tmux-{os.getuid()}" / socket_name_value))
+        > 103
+    ):
         socket_dir = None
     else:
-        socket_dir.mkdir(parents=True, exist_ok=True)
+        local_socket_dir.mkdir(parents=True, exist_ok=True)
     environment = dict(os.environ)
     if socket_dir is None:
         environment["TMUX_TMPDIR"] = "/tmp"
@@ -144,7 +158,10 @@ class TmuxCommand:
     def output_sync(self) -> bytes:
         try:
             return subprocess.run(
-                _argv(*self.arguments), capture_output=True, timeout=PROBE_TIMEOUT_S, env=command_env()
+                _argv(*self.arguments),
+                capture_output=True,
+                timeout=PROBE_TIMEOUT_S,
+                env=command_env(),
             ).stdout
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             return b""
@@ -177,8 +194,15 @@ async def new_session(
         _literal(str(workspace or ".")),
         *environment,
         *(_literal(str(part)) for part in command),
-        ";", "set-option", "-p", "remain-on-exit", "off",
-        ";", "set-option", KIND_OPTION, WORKER_KIND,
+        ";",
+        "set-option",
+        "-p",
+        "remain-on-exit",
+        "off",
+        ";",
+        "set-option",
+        KIND_OPTION,
+        WORKER_KIND,
     ]
     if not await TmuxCommand(tuple(arguments)).status():
         return False
@@ -203,7 +227,9 @@ def has_session_sync(name: str) -> bool:
     output = TmuxCommand(
         ("list-panes", "-s", "-t", f"={name}", "-F", "#{pane_dead}")
     ).output_sync()
-    return any(line.strip() == "0" for line in output.decode("utf-8", "replace").splitlines())
+    return any(
+        line.strip() == "0" for line in output.decode("utf-8", "replace").splitlines()
+    )
 
 
 async def list_sessions() -> list[str]:
@@ -224,7 +250,12 @@ async def list_session_kinds() -> list[tuple[str, str]]:
 
 def pane_paths_sync() -> list[tuple[str, str]]:
     output = TmuxCommand(
-        ("list-panes", "-a", "-F", "#{session_name}\t#{pane_current_path}\t#{pane_dead}")
+        (
+            "list-panes",
+            "-a",
+            "-F",
+            "#{session_name}\t#{pane_current_path}\t#{pane_dead}",
+        )
     ).output_sync()
     pairs = []
     for line in output.decode("utf-8", "replace").splitlines():

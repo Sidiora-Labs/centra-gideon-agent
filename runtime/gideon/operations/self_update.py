@@ -6,11 +6,11 @@ import asyncio
 import contextvars
 import hashlib
 import importlib.metadata
-import signal
 import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -19,7 +19,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast, get_args
 
-from gideon.core.versions import is_newer, normalize_version, order_key, parse_version, same_version
+from gideon.core.versions import (
+    is_newer,
+    normalize_version,
+    order_key,
+    parse_version,
+    same_version,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -423,7 +429,7 @@ class ReleaseSelection:
             return ""
         selected = max(
             candidates,
-            key=lambda row: parse_version(str(row["tag"])),
+            key=lambda row: order_key(str(row["tag"])),
         )
         return str(selected["tag"])
 
@@ -630,13 +636,14 @@ async def commits_behind_upstream(proj: str) -> int | None:
         return None
 
 
-_active_update = contextvars.ContextVar("active_update", default=None)
+_active_update: contextvars.ContextVar[UpdateOperation | None] = contextvars.ContextVar(
+    "active_update", default=None
+)
 
 
 async def launch_update_process(*args, **kwargs):
     """Finish child creation before propagating cancellation, then retire its group."""
     from gideon.core.cancellation import terminate_and_reap
-
     from gideon.operations._installer import installer_env
 
     kwargs.setdefault("env", installer_env())
@@ -678,9 +685,13 @@ class UpdateOperation:
             await work
             journal = read_update_state()
             if self.cancellable and journal.get("phase") == "failed":
-                detail = str(journal.get("error") or "Update failed") + installation_delta(self.metadata)
+                detail = str(
+                    journal.get("error") or "Update failed"
+                ) + installation_delta(self.metadata)
                 if self.head:
-                    detail += await asyncio.to_thread(restore_checkout, self.project, self.head, self.branch)
+                    detail += await asyncio.to_thread(
+                        restore_checkout, self.project, self.head, self.branch
+                    )
                 transition_update("failed", error=detail)
                 progress("error", detail)
         except asyncio.CancelledError:
@@ -694,14 +705,18 @@ class UpdateOperation:
                         try:
                             fields = stat.read_text().rsplit(")", 1)[1].split()
                             if int(fields[2]) == child.pid and fields[0] != "Z":
-                                raise RuntimeError("Update process group has not stopped")
+                                raise RuntimeError(
+                                    "Update process group has not stopped"
+                                )
                         except (FileNotFoundError, ProcessLookupError, PermissionError):
                             continue
             # Inspect retirement before publishing any stopped state.
             detail = "Update stopped. Package installation may be incomplete; review or roll back before restarting."
             detail += installation_delta(self.metadata)
             if self.head:
-                detail += await asyncio.to_thread(restore_checkout, self.project, self.head, self.branch)
+                detail += await asyncio.to_thread(
+                    restore_checkout, self.project, self.head, self.branch
+                )
             transition_update("cancelled", error=detail)
             progress("cancelled", detail)
         finally:
@@ -732,16 +747,29 @@ def installed_metadata():
     for distribution in importlib.metadata.distributions():
         name = distribution.metadata.get("Name", "")
         if name:
-            result[name] = (distribution.version, hashlib.sha256((distribution.read_text("RECORD") or "").encode()).hexdigest())
+            result[name] = (
+                distribution.version,
+                hashlib.sha256(
+                    (distribution.read_text("RECORD") or "").encode()
+                ).hexdigest(),
+            )
     return result
 
 
 def installation_delta(before):
     try:
         after = installed_metadata()
-        changed = sorted(name for name in before.keys() | after.keys() if before.get(name) != after.get(name))
+        changed = sorted(
+            name
+            for name in before.keys() | after.keys()
+            if before.get(name) != after.get(name)
+        )
         if changed:
-            return " Changed distribution metadata: " + ", ".join(changed) + ". Package files may be incomplete."
+            return (
+                " Changed distribution metadata: "
+                + ", ".join(changed)
+                + ". Package files may be incomplete."
+            )
         return " No distribution metadata changes observed; package files may still be incomplete."
     except Exception:
         return " Distribution metadata could not be verified; package files may be incomplete."
@@ -751,8 +779,14 @@ def restore_checkout(project, head, branch):
     """Restore only a clean checkout that retained its original branch identity."""
     if not head:
         return ""
-    status = subprocess.run(["git", "status", "--porcelain"], cwd=project, capture_output=True)
-    if status.returncode or status.stdout.strip() or GitCheckout(project).branch() != branch:
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=project, capture_output=True
+    )
+    if (
+        status.returncode
+        or status.stdout.strip()
+        or GitCheckout(project).branch() != branch
+    ):
         return f" Checkout preserved at {project}; inspect changes and restore {head} manually."
     reset = git_reset_to(project, head)
     if reset.returncode:
@@ -764,7 +798,15 @@ def run_install_command(argv, *, cwd=None, timeout=400):
     """Own the CLI installer session through Ctrl-C and bounded retirement."""
     from gideon.operations._installer import installer_env
 
-    child = subprocess.Popen(argv, cwd=cwd, env=installer_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    child = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        env=installer_env(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
     try:
         stdout, stderr = child.communicate(timeout=timeout)
         return subprocess.CompletedProcess(argv, child.returncode, stdout, stderr)
@@ -796,4 +838,8 @@ def run_install_command(argv, *, cwd=None, timeout=400):
 
 def cli_argv():
     """Launch this install's CLI, including its frozen executable entrypoint."""
-    return [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "gideon"]
+    return (
+        [sys.executable]
+        if getattr(sys, "frozen", False)
+        else [sys.executable, "-m", "gideon"]
+    )

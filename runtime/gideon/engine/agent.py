@@ -42,9 +42,7 @@ class _ActiveHomePath(os.PathLike[str]):
     def __str__(self) -> str:
         return str(self._current())
 
-    def __truediv__(
-        self, child: str | os.PathLike[str]
-    ) -> "_ActiveHomePath | Path":
+    def __truediv__(self, child: str | os.PathLike[str]) -> "_ActiveHomePath | Path":
         path = Path(child)
         if path.is_absolute():
             return path
@@ -206,7 +204,8 @@ _MANAGED_MCP_SERVERS = {
 }
 
 
-def _load_json(path: Path) -> dict[str, Any]:
+def _load_json(path: Path | _ActiveHomePath) -> dict[str, Any]:
+    path = _path_value(path)
     if not path.is_file():
         return {}
     try:
@@ -233,15 +232,13 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def _all_skill_paths() -> list[str]:
+    from gideon.core.outside_home import allowed_paths
     from gideon.extensions.skills.loader import skills_dir
     from gideon.extensions.skills.native import _bundled_root
-    from gideon.core.outside_home import allowed_paths
 
     directories = [skills_dir(), _bundled_root()]
     directories.extend(
-        Path(path)
-        for label, path in allowed_paths()
-        if label == "Shared agent skills"
+        Path(path) for label, path in allowed_paths() if label == "Shared agent skills"
     )
     project = _project_dir()
     if project is not None:
@@ -560,7 +557,9 @@ def _hook_count(hooks: dict) -> int:
     return sum(len(entries) for entries in hooks.values() if isinstance(entries, list))
 
 
-def configured_user_agent_hooks(runtime_config: dict | None = None) -> list[dict[str, str]]:
+def configured_user_agent_hooks(
+    runtime_config: dict | None = None,
+) -> list[dict[str, str]]:
     """Return the current user hook descriptors before grant filtering."""
     if runtime_config is None:
         runtime_config = _load_json(_USER_OVERRIDES) or {}
@@ -760,7 +759,9 @@ class _ConfigAssembly:
             if "autoApprove" in declared:
                 auto_approve = declared["autoApprove"]
                 managed[name]["autoApprove"] = (
-                    list(auto_approve) if isinstance(auto_approve, (list, tuple)) else []
+                    list(auto_approve)
+                    if isinstance(auto_approve, (list, tuple))
+                    else []
                 )
         admitted: dict[str, dict] = {}
         for name, specification in self.shared.items():
@@ -860,7 +861,7 @@ class _ConfigAssembly:
 
 def rebuild_agent_config(*, clean: bool = False) -> Path:
     AGENTS_DIR.mkdir(parents=True, exist_ok=True)
-    destination = AGENTS_DIR / AGENT_FILENAME
+    destination = _path_value(AGENTS_DIR / AGENT_FILENAME)
     if clean or not destination.exists():
         configuration, fresh = build_agent_config(), True
     else:

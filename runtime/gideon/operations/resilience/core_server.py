@@ -41,7 +41,10 @@ def core_server_args() -> list[str]:
     """The server's own arguments, from the one definition a start writes it from."""
     from gideon.engine.agent import _MANAGED_MCP_SERVERS
 
-    return [str(a) for a in _MANAGED_MCP_SERVERS[core_server_name()]["args"]]
+    args = _MANAGED_MCP_SERVERS[core_server_name()]["args"]
+    if not isinstance(args, list):
+        raise RuntimeError("Managed server arguments are malformed")
+    return [str(a) for a in args]
 
 
 def is_program(command: str) -> bool:
@@ -84,7 +87,9 @@ class CoreServerReading:
         """The entry starts Gideon's server as a gateway start writes it: a command that is a
         program on this machine, given the server's own arguments."""
         return (
-            self.entry is not None and is_program(self.command) and self.args == core_server_args()
+            self.entry is not None
+            and is_program(self.command)
+            and self.args == core_server_args()
         )
 
     @property
@@ -99,7 +104,8 @@ def core_server_command() -> str:
     from gideon.engine.agent import _MANAGED_MCP_SERVERS
 
     spec = _MANAGED_MCP_SERVERS[core_server_name()]
-    command = str(spec.get("command") or spec["command_fn"]())
+    resolve = spec.get("command_fn")
+    command = str(spec.get("command") or (resolve() if callable(resolve) else ""))
     return command if is_program(command) else ""
 
 
@@ -118,7 +124,9 @@ def read_core_server(path: Path) -> CoreServerReading:
     except FileNotFoundError:
         return CoreServerReading()
     except OSError as exc:
-        return CoreServerReading(found=True, unreadable=f"it cannot be opened ({exc.strerror})")
+        return CoreServerReading(
+            found=True, unreadable=f"it cannot be opened ({exc.strerror})"
+        )
     try:
         document = json.loads(text)
     except ValueError:
@@ -127,7 +135,9 @@ def read_core_server(path: Path) -> CoreServerReading:
         return CoreServerReading(found=True, unreadable="it is not a JSON object")
     servers = document.get("mcpServers", {})
     if not isinstance(servers, dict):
-        return CoreServerReading(found=True, unreadable="its mcpServers is not a JSON object")
+        return CoreServerReading(
+            found=True, unreadable="its mcpServers is not a JSON object"
+        )
     raw = servers.get(core_server_name())
     ref = f"@{core_server_name()}"
     tools, allowed = document.get("tools"), document.get("allowedTools")
@@ -155,9 +165,7 @@ def core_server_detail(reading: CoreServerReading) -> str:
     if reading.malformed:
         return f"{where} is not a server definition"
     if reading.entry is None:
-        return (
-            f"{AGENT_CONFIG_NAME} has no entry for Gideon's own server ({core_server_name()})"
-        )
+        return f"{AGENT_CONFIG_NAME} has no entry for Gideon's own server ({core_server_name()})"
     command = reading.command
     if not command:
         return f"{where} names no command"
@@ -219,5 +227,7 @@ async def probe_core_server(_ctx: DoctorContext) -> ProbeResult:
         remedy = core_server_remedy(reading)
         return ProbeResult(ok=False, detail=detail, evidence=evidence, remedy=remedy)
     if reading.needs_setting_up:
-        return ProbeResult(ok=False, detail=detail, evidence=evidence, fix_id=CORE_SERVER_FIX)
+        return ProbeResult(
+            ok=False, detail=detail, evidence=evidence, fix_id=CORE_SERVER_FIX
+        )
     return ProbeResult(ok=True, detail=detail, evidence=evidence)

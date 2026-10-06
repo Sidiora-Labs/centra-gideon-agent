@@ -16,6 +16,7 @@ def _safe_text(text: str) -> str:
 
 class UsageWitness:
     def __init__(self, client: Any) -> None:
+        self.client = client
         model = getattr(getattr(client, "client", None), "_model", "") or ""
         self.model = model if isinstance(model, str) and model != "auto" else ""
 
@@ -99,13 +100,15 @@ class HeartbeatJobs:
             self.logger.debug("due-commitment scan failed", exc_info=True)
             return
         for item in pending:
-            from gideon.engine.proactive_plan import plan_commitment
             from gideon.engine import proactive_decisions
+            from gideon.engine.proactive_plan import plan_commitment
             from gideon.extensions.providers.entity_routes import notification_posture
 
             topic = str(item.get("key") or "")
             previous = proactive_decisions.get(topic)
-            if proactive_decisions.suppressed(previous) or (previous and previous.get("delivered_at")):
+            if proactive_decisions.suppressed(previous) or (
+                previous and previous.get("delivered_at")
+            ):
                 service.dismiss_commitment(topic)
                 continue
             try:
@@ -115,10 +118,17 @@ class HeartbeatJobs:
                 self.logger.debug("proactive context read failed", exc_info=True)
                 recent, routines = [], []
             context = {
-                "recent_sessions": [{"id": row.get("id"), "text": row.get("text"),
-                                     "created_at": row.get("created_at")} for row in recent],
-                "learned_routines": [{"key": row.get("key"), "text": row.get("text")}
-                                     for row in routines],
+                "recent_sessions": [
+                    {
+                        "id": row.get("id"),
+                        "text": row.get("text"),
+                        "created_at": row.get("created_at"),
+                    }
+                    for row in recent
+                ],
+                "learned_routines": [
+                    {"key": row.get("key"), "text": row.get("text")} for row in routines
+                ],
             }
             posture = notification_posture("info")
             plan = plan_commitment(
@@ -129,9 +139,14 @@ class HeartbeatJobs:
             )
             text = _safe_text(item.get("text", ""))
             proactive_decisions.record(
-                topic, agent=str(item.get("agent") or ""), text=text,
-                action=plan.action, reason=plan.reason, policy=posture,
-                destination=plan.channel, context=context,
+                topic,
+                agent=str(item.get("agent") or ""),
+                text=text,
+                action=plan.action,
+                reason=plan.reason,
+                policy=posture,
+                destination=plan.channel,
+                context=context,
             )
             self.audit().log_api_access(
                 caller="heartbeat",
@@ -159,7 +174,9 @@ class HeartbeatJobs:
                 )
                 service.dismiss_commitment(item["key"])
             except Exception:
-                proactive_decisions.mark_delivery(topic, destination=plan.channel, error="delivery failed")
+                proactive_decisions.mark_delivery(
+                    topic, destination=plan.channel, error="delivery failed"
+                )
                 self.logger.warning(
                     "Commitment delivery failed for %s", item["key"], exc_info=True
                 )
