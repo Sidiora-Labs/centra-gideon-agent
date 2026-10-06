@@ -191,7 +191,7 @@ class _SessionIngress:
             displayed, _ = redact(displayed)
         from gideon.security.approval_answer import ingress_record, on_channel
         tenant = self.provider
-        if self.provider in {"slack", "discord"}:
+        if self.provider in {"slack", "discord", "mail-desk"}:
             from gideon.integrations.channel_delivery import raw_delivery_for
             delivery = raw_delivery_for(self.provider)
             identity = delivery.approval_identity(self.message.channel_id) if delivery is not None and hasattr(delivery, "approval_identity") else None
@@ -239,7 +239,7 @@ class _SessionIngress:
         if getattr(session, "running", False):
             from gideon.security.approval_answer import ingress_record, on_channel
             tenant = self.provider
-            if self.provider in {"slack", "discord"}:
+            if self.provider in {"slack", "discord", "mail-desk"}:
                 from gideon.integrations.channel_delivery import raw_delivery_for
                 delivery = raw_delivery_for(self.provider)
                 identity = delivery.approval_identity(self.message.channel_id) if delivery is not None and hasattr(delivery, "approval_identity") else None

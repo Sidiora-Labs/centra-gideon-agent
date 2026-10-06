@@ -237,7 +237,7 @@ class MailDeskTransport(ChannelTransportProvider):
                 self._make_sender(settings, smtp_pass),
                 settings.mailbox_address,
                 owner_id=settings.mailbox_address,
-                threads=ThreadStore(),
+                threads=ThreadStore(), transport=self,
             )
             if hasattr(services, "register_channel_delivery"):
                 services.register_channel_delivery(self._delivery)
@@ -425,6 +425,8 @@ class MailDeskTransport(ChannelTransportProvider):
 
     async def _dispatch(self, raw: bytes, uid: int, settings: MailDeskSettings) -> None:
         """Run one raw message through parse → self-filter → trust → session."""
+        if self._delivery is not None:
+            self._delivery.note_account(settings)
         mail = parse_inbound(raw, uid)
         if mail is None:
             return  # fail-closed: unparseable / no From ⇒ nothing surfaces
@@ -458,7 +460,7 @@ class MailDeskTransport(ChannelTransportProvider):
             # resolve an approval by mailing a token.
             from gideon.sdk.channel import is_allowed_sender
 
-            if is_allowed_sender(PROVIDER, cm.sender) and self._delivery.resolve_reply_token(text):
+            if is_allowed_sender(PROVIDER, cm.sender) and self._delivery.resolve_reply_token(text, mail=mail, account=self):
                 return
 
         # The guarded door (EA-7). Core applies the trust gate, the non-owner-content fence,

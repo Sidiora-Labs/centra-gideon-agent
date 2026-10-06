@@ -494,13 +494,15 @@ class ApprovalExchange:
             verified_answer = bool(registered is pending_transport and getattr(registered, "connected", False)
                 and owner and is_allowed_sender("telegram", owner)
                 and by == on_channel("telegram", owner, f"telegram:{slot}"))
-        if verified_answer and getattr(self, "_channel_provider", "") in {"slack", "discord"}:
+        if verified_answer and getattr(self, "_channel_provider", "") in {"slack", "discord", "mail-desk"}:
             from gideon.integrations.channel_delivery import raw_delivery_for
             from gideon.security.approval_answer import on_channel
             channel_provider = self._channel_provider
             delivery = raw_delivery_for(channel_provider)
             pending = self.channel_pending
             identity = delivery.approval_identity(getattr(pending, "channel", getattr(pending, "channel_id", ""))) if delivery is not None and hasattr(delivery, "approval_identity") else None
+            if identity is not None and channel_provider == "mail-desk":
+                identity = delivery.approval_identity(pending.channel, thread=pending.thread)
             verified_answer = bool(identity and pending.delivery is delivery
                 and pending.owner == identity["owner"] and pending.tenant == identity["tenant"]
                 and by == on_channel(channel_provider, identity["owner"], identity["tenant"]))

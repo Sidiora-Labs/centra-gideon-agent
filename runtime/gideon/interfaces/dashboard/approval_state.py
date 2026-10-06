@@ -77,14 +77,14 @@ class DashboardApprovalState:
 
         key = str(entry.get("session") or "")
         provider = self.channel_provider_for(key)
-        if not key or provider not in {"telegram", "slack", "discord"}:
+        if not key or provider not in {"telegram", "slack", "discord", "mail-desk"}:
             return None
         history_key = _history_key_for(key)
         thread, channel = self.sessions.get_channel_link(history_key)
-        if provider in {"slack", "discord"}:
+        if provider in {"slack", "discord", "mail-desk"}:
             from gideon.integrations.channel_delivery import raw_delivery_for
             delivery = raw_delivery_for(provider)
-            identity = delivery.approval_identity(str(channel)) if delivery is not None and hasattr(delivery, "approval_identity") else None
+            identity = (delivery.approval_identity(str(channel), thread=str(thread or "")) if provider == "mail-desk" else delivery.approval_identity(str(channel))) if delivery is not None and hasattr(delivery, "approval_identity") else None
             if identity is None or not thread or not channel:
                 return None
             return {"provider": provider, "thread": str(thread), "channel": str(channel),
@@ -213,8 +213,11 @@ class DashboardApprovalState:
         delivery = delivery_for(context["provider"])
         if delivery is None:
             return
-        if context["provider"] in {"slack", "discord"}:
-            await delivery.prepare_approval_channel(context["channel"])
+        if context["provider"] in {"slack", "discord", "mail-desk"}:
+            if context["provider"] == "mail-desk":
+                await delivery.prepare_approval_channel(context["channel"], thread=context["thread"])
+            else:
+                await delivery.prepare_approval_channel(context["channel"])
             refreshed = self._channel_context(entry)
             if refreshed is None or any(refreshed.get(k) != context.get(k) for k in ("provider", "thread", "channel", "owner", "tenant", "transport", "work")):
                 return

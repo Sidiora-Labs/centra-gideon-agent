@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import hashlib
+import re
 import logging
 import secrets
 from email.message import EmailMessage
@@ -180,13 +182,18 @@ class ThreadStore:
 
 
 class _PendingApproval:
-    __slots__ = ("future", "token", "request_id", "channel")
+    __slots__ = ("future", "token", "request_id", "channel", "thread", "message_id", "answers", "delivery", "owner", "tenant", "answerer", "on_answer", "chosen_answer", "minimum_uid", "uidvalidity")
 
     def __init__(self, request_id: str, token: str, channel: str) -> None:
         self.future: asyncio.Future = asyncio.get_event_loop().create_future()
         self.token = token
         self.request_id = request_id
         self.channel = channel
+        self.thread = self.message_id = self.owner = self.tenant = self.chosen_answer = ""
+        self.answerer = self.on_answer = self.delivery = None
+        self.minimum_uid = self.uidvalidity = 0
+        from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
+        self.answers = ONE_CALL_ANSWERS
 
 
 class MailDeskDelivery:
@@ -194,8 +201,12 @@ class MailDeskDelivery:
 
     def __init__(
         self, sender: SmtpSender, from_addr: str, owner_id: str = "",
-        threads: ThreadStore | None = None,
+        threads: ThreadStore | None = None, *, transport: Any = None,
     ) -> None:
+        self._transport = transport
+        self._approval_threads: dict[str, dict] = {}
+        self._account = self._account_identity()
+        self._received_account = self._account
         self._sender = sender
         self._from = from_addr
         self._owner_id = owner_id
@@ -203,6 +214,43 @@ class MailDeskDelivery:
         # keyed by the uppercase reply token; the transport matches an inbound body
         # against these to resolve an approval.
         self._pending: dict[str, _PendingApproval] = {}
+
+    def _account_identity(self, settings: Any = None) -> str:
+        if self._transport is None:
+            return ""
+        settings = settings or self._transport._settings()
+        fields = (settings.mailbox_address.strip().lower(), settings.imap_host, settings.imap_port,
+                  settings.imap_user, settings.imap_use_ssl, settings.folder,
+                  settings.smtp_host, settings.smtp_port, settings.smtp_user, settings.smtp_security)
+        return hashlib.sha256(json.dumps(fields).encode()).hexdigest()
+
+    def note_account(self, settings: Any) -> None:
+        self._received_account = self._account_identity(settings)
+
+    def approval_identity(self, channel: str, *, thread: str = "") -> dict | None:
+        from gideon.core.config.credentials import owner_id_for
+        from gideon.integrations.channel_delivery import raw_delivery_for
+        from gideon.integrations.channel_transports import get_transport
+        from gideon.integrations.channel_trust import is_allowed_sender
+        owner = owner_id_for("mail-desk").strip().lower()
+        if (not owner or not self._account or self._received_account != self._account
+            or self._account_identity() != self._account
+            or self._transport is None or self._transport._stopping
+            or not self._transport.connected or get_transport("mail-desk") is not self._transport
+            or raw_delivery_for("mail-desk") is not self or not is_allowed_sender("mail-desk", owner)):
+            return None
+        settings = self._transport._settings()
+        mailbox = settings.mailbox_address.strip().lower()
+        observed = self._approval_threads.get(thread, {})
+        tenant = f"mail-desk:{self._account}:{self._transport._uidvalidity}"
+        private = (channel.strip().lower() == owner and observed.get("sender") == owner
+                   and observed.get("recipients") == {mailbox} and observed.get("tenant") == tenant)
+        return {"owner": owner, "tenant": tenant, "transport": self._transport,
+                "private": bool(private), "mailbox": mailbox}
+
+    async def prepare_approval_channel(self, channel: str, *, thread: str = "") -> bool:
+        identity = self.approval_identity(channel, thread=thread)
+        return bool(identity and identity["private"])
 
     # ── thread bookkeeping (the transport feeds inbound; sends feed themselves) ──
 
@@ -215,6 +263,12 @@ class MailDeskDelivery:
         root = getattr(mail, "thread_root", "") or getattr(mail, "message_id", "")
         if not root:
             return
+        identity = self.approval_identity(str(getattr(mail, "from_addr", "")))
+        if identity is not None:
+            self._approval_threads[root] = {"sender": str(mail.from_addr).strip().lower(),
+                "recipients": {str(addr).strip().lower() for addr in mail.to_addrs}, "tenant": identity["tenant"]}
+            if len(self._approval_threads) > MAX_THREADS:
+                self._approval_threads.pop(next(iter(self._approval_threads)))
         self._threads.note_message(
             root,
             message_id=getattr(mail, "message_id", ""),
@@ -462,73 +516,107 @@ class MailDeskDelivery:
         transport resolves this future when an inbound message from an ALLOWED sender
         contains ``APPROVE <token>`` or ``DENY <token>`` (:meth:`resolve_reply_token`).
         ``on_prompted(pending)`` lets core race a dashboard prompt against this one."""
+        from gideon.security.approval_brief import approval_brief_for
+        from gideon.integrations.channel_delivery import offered_answers, ONE_CALL_ANSWERS
+        identity = self.approval_identity("")
+        if identity is None:
+            return None
         channel = ""
         thread_ts = ""
         if parent_session_key and sessions is not None:
-            try:
-                thread_ts, channel = sessions.get_channel_link(parent_session_key)
-            except Exception:
-                thread_ts, channel = "", ""
-        channel = channel or self._owner_id
-        if not channel or "@" not in channel:
+            history_key = parent_session_key
+            if sessions.get_channel_provider(history_key) != "mail-desk":
+                history_key = f"dashboard:{parent_session_key}"
+            if sessions.get_channel_provider(history_key) == "mail-desk":
+                thread_ts, channel = sessions.get_channel_link(history_key)
+        channel = channel or identity["owner"]
+        if not channel or "@" not in channel or channel.strip().lower() != identity["owner"]:
             return None
-
+        identity = self.approval_identity(channel, thread=thread_ts or "")
+        if identity is None:
+            return None
+        brief = approval_brief_for(event)
+        answers = offered_answers(brief.get("answers")) or ONE_CALL_ANSWERS
+        if not identity["private"]:
+            answers = ONE_CALL_ANSWERS
         request_id = str(getattr(event, "request_id", ""))
         title = _safe(str(getattr(event, "title", "")))
         token = secrets.token_hex(_TOKEN_BYTES).upper()
         pending = _PendingApproval(request_id, token, channel)
-        self._pending[token] = pending
-
-        body = (
-            f"Gideon needs your approval for a {source} action:\n\n"
-            f"    {title}\n\n"
-            f"Reply to this message with exactly one of:\n"
-            f"    {APPROVE_WORD} {token}\n"
-            f"    {DENY_WORD} {token}\n\n"
-            f"No reply within {_APPROVAL_TIMEOUT // 3600}h counts as a denial."
-        )
-        sent = await self._deliver(
-            channel, thread_ts or "", f"[Gideon] Approval needed: {title}"[:200], body
-        )
+        pending.answers, pending.delivery = answers, self
+        pending.owner, pending.tenant = identity["owner"], identity["tenant"]
+        pending.minimum_uid, pending.uidvalidity = self._transport._cursor, self._transport._uidvalidity
+        lines = [f"Gideon needs your approval for a {source} action:", title]
+        for value in (getattr(event, "tool_purpose", ""), getattr(event, "tool_input", ""), brief.get("summary"), brief.get("blastRadiusLine")):
+            if value:
+                lines.append(_safe(str(value)))
+        lines.append("Reply to this message with exactly one offered answer:")
+        for answer in answers:
+            lines.append(f"{answer.label}: {answer.word} {token}")
+            if answer.promise:
+                lines.append(answer.promise)
+        sent = await self._deliver(channel, thread_ts or "", f"[Gideon] Approval needed: {title}"[:200], "\n\n".join(lines))
         if not sent:
-            self._pending.pop(token, None)
             return None
-
-        if on_prompted:
-            try:
-                on_prompted(pending)
-            except Exception:
-                logger.debug("mail-desk: on_prompted hook failed", exc_info=True)
-
+        pending.message_id, pending.thread = sent, thread_ts or sent
+        self._pending[token] = pending
+        shared = bool(on_prompted and on_prompted(pending))
+        from gideon.security.approval_grants import approval_window_secs
+        outcome = "cancelled"
+        cancelled = False
         try:
-            outcome = await asyncio.wait_for(pending.future, timeout=_APPROVAL_TIMEOUT)
+            outcome = await pending.future if shared else await asyncio.wait_for(pending.future, timeout=approval_window_secs(_APPROVAL_TIMEOUT))
         except asyncio.TimeoutError:
-            outcome = "rejected"
+            outcome = "expired"
+        except asyncio.CancelledError:
+            cancelled = True
         finally:
             self._pending.pop(token, None)
+        status = {"approved": "Approved", "rejected": "Denied", "expired": "Expired", "cancelled": "Cancelled"}.get(outcome, "Could not confirm")
+        chosen = next((answer for answer in answers if answer.key == pending.chosen_answer), None)
+        if chosen is not None and chosen.promise and outcome == "approved":
+            status += " — " + chosen.promise
+        # Email cannot edit an earlier prompt; a same-thread ending closes its capability.
+        if self.approval_identity(channel, thread=pending.thread) is not None:
+            await self._deliver(channel, pending.thread, f"[Gideon] Approval {status.split(' — ')[0]}",
+                                f"{title}: {status}. This approval is closed; further replies cannot change it.")
+        if cancelled:
+            raise asyncio.CancelledError
         return outcome == "approved"
 
-    def resolve_reply_token(self, text: str) -> bool:
-        """Resolve a pending approval from a reply body. Returns whether one matched.
-
-        The token must appear alongside the verb, so an unrelated mail that happens to
-        contain the word "approve" cannot decide anything. Called by the transport ONLY for
-        a sender the trust seam already allowed — an approval is the highest-value thing a
-        channel can carry, so it never rides an unauthenticated message."""
-        upper = (text or "").upper()
-        for token, pending in list(self._pending.items()):
-            if token not in upper:
-                continue
-            approved = f"{APPROVE_WORD} {token}" in upper or f"{APPROVE_WORD}{token}" in upper
-            denied = f"{DENY_WORD} {token}" in upper or f"{DENY_WORD}{token}" in upper
-            if not approved and not denied:
-                continue
-            if not pending.future.done():
-                # An explicit DENY wins over a body that somehow contains both — a request
-                # to stop must never be read as consent.
-                pending.future.set_result("rejected" if denied else "approved")
-            return True
-        return False
+    def resolve_reply_token(self, text: str, *, mail: Any = None, account: Any = None) -> bool:
+        """Resolve only one exact offered answer from the current owner's actual reply."""
+        if mail is None or account is not self._transport:
+            return False
+        match = re.fullmatch(r"(APPROVE|TRUST|DENY)\s+([A-F0-9]{8})", (text or "").strip(), re.IGNORECASE)
+        if match is None:
+            return False
+        word, token = match.group(1).upper(), match.group(2).upper()
+        pending = self._pending.get(token)
+        if pending is None or pending.future.done():
+            return False
+        identity = self.approval_identity(pending.channel, thread=pending.thread)
+        sender = str(getattr(mail, "from_addr", "")).strip().lower()
+        if (identity is None or sender != pending.owner or sender != identity["owner"]
+            or identity["tenant"] != pending.tenant or mail.thread_root != pending.thread
+            or mail.in_reply_to != pending.message_id or not mail.message_id
+            or mail.uid <= pending.minimum_uid or account._uidvalidity != pending.uidvalidity
+            or {str(addr).strip().lower() for addr in mail.to_addrs} != {identity["mailbox"]}):
+            return False
+        chosen = next((answer for answer in pending.answers if answer.word == word), None)
+        if chosen is None:
+            return False
+        from gideon.security.approval_answer import on_channel
+        by = on_channel("mail-desk", sender, pending.tenant)
+        if callable(pending.on_answer):
+            if not pending.on_answer(chosen.key, by):
+                return False
+        elif chosen.key == "trust":
+            return False
+        pending.answerer, pending.chosen_answer = by, chosen.key
+        if not pending.future.done():
+            pending.future.set_result(chosen.ends)
+        return True
 
 
 def _read_bytes(path: str) -> bytes:
