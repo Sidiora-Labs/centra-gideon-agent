@@ -13,6 +13,9 @@ const consoleRoot = dirname(fileURLToPath(import.meta.url))
 const notices = thirdPartyNotices(consoleRoot, { repoRoot: resolve(consoleRoot, '../..') })
 
 export default defineConfig({
+  // Shared assistant TypeScript uses the console transform settings in this build.
+  // The assistant keeps its separate Expo configuration for native builds.
+  tsconfig: resolve(consoleRoot, 'tsconfig.json'),
   plugins: [react(), tailwindcss(), gatewaySession(backend), consoleArtifacts(consoleRoot), widgetRuntime(), notices.plugin()],
   server: {
     port: 3100,
