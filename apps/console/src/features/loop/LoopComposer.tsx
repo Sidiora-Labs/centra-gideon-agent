@@ -84,7 +84,7 @@ export function LoopComposer({ onCreated, onHistory, initialProjectId, initialKi
   const [granularity, setGranularity] = useState<Granularity>('balanced')
   const [researchDepth, setResearchDepth] = useState<keyof typeof RESEARCH_COVERAGE>('survey')
   const [designFocus, setDesignFocus] = useState<'system' | 'interface' | 'visualization'>('system')
-  const [attended, setAttended] = useState(false)
+  const [attended, setAttended] = useState(true)
   const [scratch, setScratch] = useState(false)
   const [projectKind, setProjectKind] = useState<'greenfield' | 'brownfield'>('greenfield')
   const [projectId, setProjectId] = useState(initialProjectId || getActiveProject())

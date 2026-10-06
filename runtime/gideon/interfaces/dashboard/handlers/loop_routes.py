@@ -157,7 +157,7 @@ def _build_loop_from_body(body: dict) -> Loop:
         workflow_ids=[
             str(w) for w in _as_list(body.get("workflow_ids")) if str(w).strip()
         ],
-        attended=bool(body.get("attended", False)),
+        attended=bool(body.get("attended", True)),
         autopilot=bool(body.get("autopilot", True)),
         auto_teardown_on_complete=bool(body.get("auto_teardown_on_complete", False)),
         max_cycles=int(body.get("max_cycles", 30)),

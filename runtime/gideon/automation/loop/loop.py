@@ -195,7 +195,7 @@ class Loop:
 
     workspace_dir: str = ""
     auto_teardown_on_complete: bool = False
-    attended: bool = False
+    attended: bool = True
     autopilot: bool = True
     max_cycles: int = 30
     max_cost_usd: float = 0.0
@@ -229,7 +229,9 @@ class Loop:
     def from_dict(cls, data: dict[str, Any]) -> "Loop":
         """Build a Loop from a dict, ignoring unknown keys (forward-compatible reads)."""
         allowed = {f for f in cls.__dataclass_fields__}  # noqa: C416
-        return cls(**{k: v for k, v in data.items() if k in allowed})
+        values = {k: v for k, v in data.items() if k in allowed}
+        values.setdefault("attended", False)
+        return cls(**values)
 
 
 def finding_content(finding: dict, *, limit: int = 6000) -> str:
