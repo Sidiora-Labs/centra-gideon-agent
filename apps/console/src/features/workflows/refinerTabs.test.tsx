@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { act, render, fireEvent } from '@testing-library/react'
+import { act, render, fireEvent, within, waitFor } from '@testing-library/react'
 
 
 const MATURITY = { level: 3, label: 'mature', signals: {}, clean_runs: 5, evaluator_rejected: true }
@@ -11,10 +11,12 @@ const VERSIONS = [
 function makeApi(overrides: Record<string, unknown> = {}) {
   return {
     workflowDef: () => Promise.resolve({
-      definition: { name: 'code-project', description: 'A code project template.', root: { kind: 'sequence', id: 'root' } },
-      provider: 'bundled',
+      definition: { name: 'code-project', version: 2, source: 'user', description: 'A code project template.', root: { kind: 'sequence', id: 'root' } },
+      revision: 'current-definition-revision', provider: 'user',
     }),
     startWorkflowRun: () => Promise.resolve({ run_id: 'r1' }),
+    workflowVersion: vi.fn(() => Promise.resolve({ definition: { name: 'code-project', version: 1, source: 'user', description: 'Historical project definition.', root: { kind: 'sequence', id: 'historical-root' } } })),
+    saveWorkflowDef: vi.fn((body: { save: boolean }) => Promise.resolve({ valid: true, saved: body.save, name: 'code-project', issues: [] })),
     workflowVersions: () => Promise.resolve({ versions: VERSIONS, pinned: 2, maturity: MATURITY }),
     workflowVersionDiff: () => Promise.resolve({ a: 1, b: 2, ops: [{ op: 'update_node', node_id: 'build', fields: ['retries'] }] }),
     repinWorkflowVersion: vi.fn(() => Promise.resolve({ ok: true, name: 'code-project', pinned: 1 })),
@@ -45,7 +47,7 @@ describe('WF2LEA-6 template-detail surfaces', () => {
     expect(text).toContain('L3')
   })
 
-  it('lists the version history with a roll-back on the non-pinned version', async () => {
+  it('lists version history with a restore preview on the non-pinned version', async () => {
     const r = await mount(makeApi())
     const tab = [...r.container.querySelectorAll('[role="tab"]')].find((b) => (b.textContent ?? '').includes('Versions'))
     await act(async () => { fireEvent.click(tab!); await new Promise((res) => setTimeout(res, 0)) })
@@ -53,18 +55,34 @@ describe('WF2LEA-6 template-detail surfaces', () => {
     expect(text).toContain('v1')
     expect(text).toContain('v2')
     expect(text).toContain('pinned')
-    expect(text).toContain('Roll back')
+    expect(text).toContain('Restore as new version')
+    expect(within(r.container).getAllByRole('button', { name: 'Restore as new version' })).toHaveLength(1)
     expect(text).toContain('Latest change')
   })
 
-  it('rolls back by calling repin with the chosen version', async () => {
+  it('restores historical content as a new version with current revision authority', async () => {
     const api = makeApi()
     const r = await mount(api)
-    const tab = [...r.container.querySelectorAll('[role="tab"]')].find((b) => (b.textContent ?? '').includes('Versions'))
-    await act(async () => { fireEvent.click(tab!); await new Promise((res) => setTimeout(res, 0)) })
-    const rollback = [...r.container.querySelectorAll('button')].find((b) => (b.textContent ?? '').includes('Roll back'))
-    await act(async () => { fireEvent.click(rollback!); await new Promise((res) => setTimeout(res, 0)) })
-    expect(api.repinWorkflowVersion as unknown as ReturnType<typeof vi.fn>).toHaveBeenCalledWith('code-project', 1)
+    const ui = within(r.container)
+    fireEvent.click(ui.getByRole('tab', { name: 'Versions' }))
+    fireEvent.click(await ui.findByRole('button', { name: 'Restore as new version' }))
+    await ui.findByText('Restore v1 as new version')
+    expect(api.workflowVersion).toHaveBeenCalledWith('code-project', 1)
+    expect(ui.getByLabelText('Description')).toHaveValue('Historical project definition.')
+    expect(api.repinWorkflowVersion).not.toHaveBeenCalled()
+    expect(api.saveWorkflowDef).not.toHaveBeenCalled()
+    fireEvent.click(ui.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.saveWorkflowDef).toHaveBeenCalledTimes(2))
+    expect(api.saveWorkflowDef).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      name: 'code-project', save: false, based_on: 'code-project', based_on_version: 1,
+      root: { kind: 'sequence', id: 'historical-root' },
+    }), 'current-definition-revision')
+    expect(api.saveWorkflowDef).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      name: 'code-project', save: true, create_only: false, expected_revision: 2,
+      based_on: 'code-project', based_on_version: 1,
+      root: { kind: 'sequence', id: 'historical-root' },
+    }), 'current-definition-revision')
+    expect(api.repinWorkflowVersion).not.toHaveBeenCalled()
   })
 
   it('loads the Run Ledger tab lazily', async () => {

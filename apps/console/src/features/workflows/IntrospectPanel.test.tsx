@@ -95,7 +95,9 @@ describe('the nine questions reach the DOM', () => {
       stats: { ...base.stats, tokens: null, tokens_recorded: false },
     })
     render(<IntrospectPanel runId="r1" onClose={() => {}} />)
-    expect(await screen.findByText('not recorded')).toBeTruthy()
+    const tokens = await screen.findByText('Tokens')
+    expect(tokens.nextElementSibling).toHaveTextContent(/^not recorded$/)
+    expect(tokens.nextElementSibling).not.toHaveTextContent(/^0$/)
     expect(screen.getByText(/did not record token usage/i)).toBeTruthy()
   })
 

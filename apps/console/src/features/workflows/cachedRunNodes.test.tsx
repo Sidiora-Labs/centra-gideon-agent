@@ -55,7 +55,7 @@ describe('cached run nodes', () => {
 
   it('labels a cache-served node in the run DAG', async () => {
     render(<WorkflowRunDetail runId="run-30" onBack={() => {}} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Graph' }))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Graph' }))
 
     act(() => lifecycle?.('workflow_node_done', {
       run_id: 'run-30', instance_path: 'root.children[0]', node_id: 'reuse', status: 'done', cached: true,
