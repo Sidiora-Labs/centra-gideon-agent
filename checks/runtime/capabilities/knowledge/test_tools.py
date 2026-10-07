@@ -567,8 +567,10 @@ def test_voice_unavailable_result_keeps_original_receipt(
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path / "disabled-stt"))
     save_use_case_settings("stt", {"enabled": False})
     inbox = CaptureInbox(runtime.state.knowledge_store)
-    capture = inbox.save_audio(
-        "native-voice-original", buffer.getvalue(), "recording.wav", "audio/wav"
+    capture = asyncio.run(
+        inbox.save_audio(
+            "native-voice-original", buffer.getvalue(), "recording.wav", "audio/wav"
+        )
     )
     result = invoke(
         create_provider(), "knowledge_capture_transcribe", {"id": capture["id"]}

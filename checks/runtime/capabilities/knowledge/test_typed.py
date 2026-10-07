@@ -20,6 +20,7 @@ from gideon.integrations.mcp_core import (
 )
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge_types import register
 from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.communications.store import PeopleStore
 from gideon.workspace.capabilities.knowledge.capture import CaptureError
 from gideon.workspace.capabilities.knowledge.tools import KnowledgeCapabilityTools
@@ -40,8 +41,8 @@ def typed(tmp_path, monkeypatch):
 
 
 def prepare(service, kind="idea", fields=None, key="typed-original-001"):
-    original = service.inbox.create(
-        key, "An original imported record\nExact source text"
+    original = asyncio.run(
+        service.inbox.create(key, "An original imported record\nExact source text")
     )
     values = (
         fields
@@ -354,7 +355,9 @@ def test_native_tools_use_real_receipts_and_session_guards(typed):
         ActionServices(state=state, spawn_background=asyncio.create_task)
     )
     provider._home = typed.home
-    capture = typed.inbox.create("native-type-capture", "A real native capture")
+    capture = asyncio.run(
+        typed.inbox.create("native-type-capture", "A real native capture")
+    )
     arguments = {
         "capture_id": capture["id"],
         "kind": "idea",
@@ -410,16 +413,16 @@ def test_real_http_review_commit_and_store_isolation(typed, tmp_path):
     async def journey():
         state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
         state._knowledge_store = typed.store
-        app = web.Application()
+        app = web.Application(middlewares=[token_auth_middleware()])
         app["state"] = state
         register(app)
         other_store = KnowledgeStore(str(tmp_path / "isolated.db"))
         other_state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
         other_state._knowledge_store = other_store
-        other = web.Application()
+        other = web.Application(middlewares=[token_auth_middleware()])
         other["state"] = other_state
         register(other)
-        capture = typed.inbox.create("http-typed-capture", "Actual HTTP input")
+        capture = await typed.inbox.create("http-typed-capture", "Actual HTTP input")
         root = "/api/capabilities/knowledge/types"
         arguments = {
             "capture_id": capture["id"],
@@ -434,6 +437,14 @@ def test_real_http_review_commit_and_store_isolation(typed, tmp_path):
             TestClient(TestServer(app)) as client,
             TestClient(TestServer(other)) as isolated,
         ):
+            anonymous = await client.post(root + "/preview", json=arguments)
+            assert anonymous.status == 403
+            owner_token = generate_token("typed-owner")
+            for endpoint in (client, isolated):
+                endpoint.session.headers["Authorization"] = "Bearer " + owner_token
+                endpoint.session.headers["Origin"] = str(endpoint.make_url("/")).rstrip(
+                    "/"
+                )
             response = await client.post(root + "/preview", json=arguments)
             assert response.status == 200
             preview = await response.json()
