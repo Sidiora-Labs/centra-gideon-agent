@@ -1,3 +1,5 @@
+import ts from 'typescript'
+import { nodes } from '../testing/sourceOwners'
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -59,7 +61,17 @@ describe('every row-scoped RowAction names its row', () => {
 
   it('no OTHER RowAction call site appears without a name — the census is closed', () => {
     const files = walk(SRC).filter((abs) => readFileSync(abs, 'utf8').includes('<RowAction'))
-    expect(files.length, 'widgets using RowAction').toBe(WIDGETS.length)
+    expect(files.length, 'widgets using RowAction').toBeGreaterThanOrEqual(WIDGETS.length)
+    for (const file of files.filter(file => !WIDGETS.some(([rel]) => file === join(SRC, rel)))) {
+      const sites = nodes(readFileSync(file, 'utf8'), node => (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText() === 'RowAction')
+      expect(sites.length).toBeGreaterThan(0)
+      for (const site of sites) {
+        if (!ts.isJsxOpeningElement(site) && !ts.isJsxSelfClosingElement(site)) throw new Error('Unknown RowAction node')
+        const name = site.attributes.properties.find(prop => ts.isJsxAttribute(prop) && prop.name.getText() === 'ariaLabel')
+        expect(name, `${file}: new row control requires its own subject`).toBeDefined()
+        expect(name?.getText()).toMatch(/\$\{[^}]+\}/)
+      }
+    }
   })
 })
 
@@ -72,7 +84,7 @@ describe('the two list surfaces name their row controls too', () => {
 
   it("#/projects' delete button says WHICH project, and keeps a short tooltip", () => {
     const code = read('features/projects/ProjectsSection.tsx')
-    expect(code).toMatch(/label=\{`Delete project: \$\{p\.name\}`\} title="Delete project"/)
+    expect(code).toMatch(/label=\{`Delete project: \$\{project\.name\}`\} title="Delete project"/)
   })
 
   it('the repeated-chip families are left alone on purpose', () => {
@@ -154,40 +166,24 @@ describe('the hand-rolled row actions a primitive-shaped census could not see', 
       return /\.tsx$/.test(n) && !/\.(test|doc)\.tsx$/.test(n) ? [p] : []
     })
 
-  function buttonTags(src: string, from: number, to: number) {
-    const out: { tag: string; end: number }[] = []
-    for (const m of src.matchAll(/<Button\b/g)) {
-      if (m.index! < from || m.index! > to) continue
-      let depth = 0
-      for (let i = m.index! + m[0].length; i < src.length; i++) {
-        const c = src[i]
-        if (c === '{') depth++
-        else if (c === '}') depth--
-        else if (c === '>' && depth === 0) { out.push({ tag: src.slice(m.index!, i + 1), end: i }); break }
-      }
-    }
-    return out
-  }
-
   function rowActions() {
     const out: { rel: string; text: string; named: boolean }[] = []
     for (const abs of walkTsx(SRC)) {
-      const raw = readFileSync(abs, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-      for (const m of raw.matchAll(/\.map\(\((\w+)(?:,\s*\w+)?\)\s*=>/g)) {
-        const item = m[1]
-        for (const t of buttonTags(raw, m.index!, m.index! + 3000)) {
-          const close = raw.indexOf('</Button>', t.end)
-          if (close < 0) continue
-          const text = raw.slice(t.end + 1, close).trim()
-          if (/\{/.test(text)) continue
-          if (!/^[A-Za-z][\w' ,.:—–-]{1,58}$/.test(text)) continue
-          const oc = t.tag.indexOf('onClick={')
-          if (oc < 0) continue
-          let d = 1, j = t.tag.indexOf('{', oc) + 1
-          for (; j < t.tag.length && d > 0; j++) { if (t.tag[j] === '{') d++; else if (t.tag[j] === '}') d-- }
-          if (!new RegExp(`\\b${item}\\b`).test(t.tag.slice(oc, j))) continue
-          out.push({ rel: abs.slice(SRC.length + 1), text, named: /ariaLabel=/.test(t.tag) })
-        }
+      const source = readFileSync(abs, 'utf8')
+      for (const node of nodes(source, node => ts.isJsxElement(node) && node.openingElement.tagName.getText() === 'Button')) {
+        if (!ts.isJsxElement(node)) continue
+        const text = node.children.map(child => ts.isJsxText(child) ? child.text.trim() : '{}').join('').trim()
+        if (!/^[A-Za-z][\w' ,.:—–-]{1,58}$/.test(text)) continue
+        let owner: ts.Node | undefined = node.parent
+        while (owner && !ts.isArrowFunction(owner)) owner = owner.parent
+        if (!owner || !ts.isArrowFunction(owner) || !ts.isCallExpression(owner.parent) || !ts.isPropertyAccessExpression(owner.parent.expression) || owner.parent.expression.name.text !== 'map') continue
+        const item = owner.parameters[0]?.name.getText()
+        const properties = node.openingElement.attributes.properties
+        const action = properties.find(prop => ts.isJsxAttribute(prop) && prop.name.getText() === 'onClick')
+        if (!item || !action) continue
+        const references = nodes(action.getText(), child => ts.isIdentifier(child) && child.text === item)
+        if (!references.length) continue
+        out.push({ rel: abs.slice(SRC.length + 1), text, named: properties.some(prop => ts.isJsxAttribute(prop) && prop.name.getText() === 'ariaLabel') })
       }
     }
     return out

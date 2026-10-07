@@ -61,9 +61,12 @@ describe("the notification row actions name their row, and stay bounded", () => 
   it('all four actions name the row through the shared helper', () => {
     expect(code, 'the row subject is computed once')
       .toMatch(/const subject = rowSubject\(\[n\.title, firstLine\(n\.body \?\? ''\)\]\)/)
-    for (const verb of ['Investigate in chat', 'Mark unread', 'Mark read', 'Delete']) {
-      expect(code, `${verb} must name its row`).toMatch(new RegExp(`\`${verb}: \\$\\{subject\\}\``))
+    for (const verb of ['Investigate in chat', 'Delete']) {
+      expect(code).toContain(`\`${verb}: \${subject}\``)
     }
+    expect(code).toContain("label: 'Mark unread', onSelect: onUnack")
+    expect(code).toContain("label: 'Mark read', onSelect: onAck")
+    expect(code).toContain('label={`${readAction.label}: ${subject}`} title={readAction.label}')
     expect(code, 'the row hit target shares the actions\' subject').toMatch(/<RowHitTarget label=\{subject\} \/>/)
   })
 
@@ -87,8 +90,9 @@ describe("the notification row actions name their row, and stay bounded", () => 
   })
 
   it('the tooltips stay the bare verbs', () => {
-    expect(code).toMatch(/title="Mark unread"/)
-    expect(code).toMatch(/title="Mark read"/)
+    expect(code).toContain('title={readAction.label}')
+    expect(code).toContain("label: 'Mark unread'")
+    expect(code).toContain("label: 'Mark read'")
     expect(code).toMatch(/title="Delete"/)
   })
 

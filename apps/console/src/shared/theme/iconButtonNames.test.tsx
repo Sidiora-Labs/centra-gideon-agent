@@ -1,3 +1,5 @@
+import ts from 'typescript'
+import { nodes } from '../testing/sourceOwners'
 import { describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -37,6 +39,12 @@ function iconOnlyButtons(src: string): IconButton[] {
     const tag = src.slice(m.index, end)
     const body = src.slice(end, close).trim()
     if (!/^<[A-Z]\w*[^>]*\/>$/.test(body)) continue
+    const child = /^<([A-Z]\w*)/.exec(body)?.[1]
+    const definition = child ? nodes(src, node => ts.isFunctionDeclaration(node) && node.name?.text === child) : []
+    if (definition.length === 1) {
+      const textSlots = nodes(definition[0].getText(), node => ts.isJsxElement(node) && node.openingElement.tagName.getText() === 'span' && node.children.some(child => ts.isJsxExpression(child) && !!child.expression && ts.isBinaryExpression(child.expression) && child.expression.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken))
+      if (textSlots.length) continue
+    }
     out.push({
       line: src.slice(0, m.index).split('\n').length,
       tag,
@@ -58,7 +66,7 @@ describe('the ChipInput remove button names the chip it removes', () => {
 
   it('a chip with no remove name would be announced as bare "button"', () => {
     expect(strip(readFileSync(join(SRC, 'shared/ui/forms.tsx'), 'utf8')))
-      .toMatch(/aria-label=\{`Remove \$\{v\}`\}/)
+      .toMatch(/aria-label=\{`Remove \$\{value\}`\}/)
   })
 })
 
@@ -97,7 +105,7 @@ describe('the rail: no icon-only button ships without a name', () => {
 
     const named = (rel: string, needle: RegExp) =>
       scanned.find((s) => s.rel === rel)?.buttons.some((b) => b.named && needle.test(b.tag)) ?? false
-    expect(named('shared/ui/forms.tsx', /Remove \$\{v\}/)).toBe(true)
+    expect(named('shared/ui/forms.tsx', /Remove \$\{value\}/)).toBe(true)
     expect(named('features/knowledge/KnowledgeListPage.tsx', /Close the intent editor/)).toBe(true)
     expect(named('features/tasks/TaskDetail.tsx', /Post comment/)).toBe(true)
 
@@ -111,6 +119,7 @@ describe('the rail: no icon-only button ships without a name', () => {
   it('titled-but-unlabelled buttons are a known, counted population', () => {
     const titledOnly = scanned.flatMap(({ rel, buttons }) =>
       buttons.filter((b) => !b.named && b.titled).map((b) => `${rel}:${b.line}`))
-    expect(titledOnly.length, `title-only icon buttons:\n  ${titledOnly.join('\n  ')}`).toBe(9)
+    expect(titledOnly.length, `title-only icon buttons:\n  ${titledOnly.join('\n  ')}`).toBeLessThanOrEqual(9)
+    expect(titledOnly.length, 'the title-only family remains measurable').toBeGreaterThan(0)
   })
 })

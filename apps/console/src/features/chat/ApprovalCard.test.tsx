@@ -18,7 +18,7 @@ describe('ApprovalCard — the four zones', () => {
   it('renders what, why, what-it-can-touch and how-far-it-reaches', () => {
     const { container } = render(
       <ApprovalCard
-        seg={seg({ tool: 'bash', input: 'rm -rf /tmp/scratch', purpose: 'Clearing the scratch dir before the rebuild', risk: 'destructive' })}
+        seg={seg({ tool: 'bash', input: 'rm -rf /tmp/scratch', purpose: 'Clearing the scratch dir before the rebuild', risk: 'destructive', blastRadius: { writes: true, shell: true, network: false, readOnly: false } })}
         onAct={() => {}}
       />,
     )
@@ -65,15 +65,22 @@ describe('ApprovalCard — the blast-radius zone never over-claims', () => {
     }
   })
 
+  it('does not infer authority from a safe-looking tool name or risk', () => {
+    const { container } = render(<ApprovalCard seg={seg({ tool: 'bash', risk: 'safe' })} onAct={() => {}} />)
+    expect(container.textContent).not.toContain('this grants')
+    expect(container.textContent).not.toContain('Reads only')
+    expect(container.textContent).not.toContain('Runs a command')
+  })
+
   it('shows only the ESTABLISHED facets, never the full four with on/off states', () => {
-    render(<ApprovalCard seg={seg({ tool: 'web_fetch', risk: 'caution' })} onAct={() => {}} />)
+    render(<ApprovalCard seg={seg({ tool: 'web_fetch', risk: 'caution', blastRadius: { network: true, writes: false, shell: false, readOnly: false } })} onAct={() => {}} />)
     expect(reach()).toContain('Uses the network')
     expect(reach()).not.toContain('Runs a command')
     expect(reach()).not.toContain('Reads only')
   })
 
   it('claims a read only on positive evidence, and both facets for a read-only shell call', () => {
-    render(<ApprovalCard seg={seg({ tool: 'bash', risk: 'safe' })} onAct={() => {}} />)
+    render(<ApprovalCard seg={seg({ tool: 'bash', risk: 'safe', blastRadius: { shell: true, readOnly: true, writes: false, network: false } })} onAct={() => {}} />)
     expect(reach()).toContain('Runs a command')
     expect(reach()).toContain('Reads only')
     expect(reach()).not.toContain('Uses the network')
@@ -153,6 +160,10 @@ describe('ApprovalCard — the brief describes, it never advocates', () => {
       const { container, unmount } = render(
         <ApprovalCard seg={seg({ tool: 'bash', input: 'ls -la', purpose: 'Listing the repo root', risk })} onAct={() => {}} />,
       )
+      if (risk === 'destructive') {
+        expect(screen.queryByRole('tab', { name: 'This chat' })).toBeNull()
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Show choices that allow future calls without asking' }))
+      }
       for (const s of REMEMBER_SCOPES) {
         fireEvent.click(scopeTab(s.label))
         const text = readableText(container)
@@ -246,9 +257,11 @@ describe('ApprovalCard — connected PermissionGrant decisions', () => {
     const onAct = vi.fn()
     render(<ApprovalCard seg={seg({ canRevise: true })} onAct={onAct} />)
     const revise = screen.getByRole('button', { name: /^Request a revised bash action/ }) as HTMLButtonElement
-    expect(revise.disabled).toBe(true)
+    expect(revise.getAttribute('aria-disabled')).toBe('true')
+    fireEvent.click(revise)
+    expect(onAct).not.toHaveBeenCalled()
     fireEvent.change(screen.getByRole('textbox', { name: 'How should this action change?' }), { target: { value: '  limit to /tmp  ' } })
-    expect(revise.disabled).toBe(false)
+    expect(revise.getAttribute('aria-disabled')).toBeNull()
     fireEvent.click(revise)
     expect(onAct).toHaveBeenCalledTimes(1)
     expect(onAct).toHaveBeenCalledWith('a1', 'revised', 'limit to /tmp')

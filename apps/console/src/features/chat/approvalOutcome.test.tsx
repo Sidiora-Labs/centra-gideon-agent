@@ -5,12 +5,14 @@ import { approvalOutcome, type ApprovalResolution } from './approvalOutcome'
 import { hydrateTurns, type ApprovalSegment, type HistMsg } from './chatTypes'
 
 
-const ICON_CLASS = { check: 'lucide-check', ban: 'lucide-ban', unknown: 'lucide-circle-question-mark' } as const
+const SETTLED_ICON = 'lucide-key-round'
 
 function paintSettled(resolved: string): { icon: string | null; text: string } {
   const seg: ApprovalSegment = { kind: 'approval', id: 'a1', tool: 'Terminal', resolved }
   const { container } = render(<ApprovalCard seg={seg} onAct={() => {}} />)
   const svg = container.querySelector('svg')
+  expect(container.querySelectorAll('button')).toHaveLength(0)
+  expect(container.querySelector('[data-slot="permission-grant"]')?.getAttribute('aria-label')).toBe(`Terminal — ${approvalOutcome(resolved).label}`)
   return {
     icon: svg?.getAttribute('class')?.split(/\s+/).find((c) => c.startsWith('lucide-')) ?? null,
     text: container.textContent ?? '',
@@ -64,19 +66,19 @@ describe('approvalOutcome mapping', () => {
 })
 
 describe('ApprovalCard settled line', () => {
-  it('shows a check for every approval and a ban only for a denial (#541)', () => {
+  it('shows the neutral capability icon with the exact canonical grant or denial outcome', () => {
     for (const c of CASES) {
       const { icon, text } = paintSettled(c.resolved)
-      expect(icon, c.resolved).toBe(c.approved ? ICON_CLASS.check : ICON_CLASS.ban)
+      expect(icon, c.resolved).toBe(SETTLED_ICON)
       expect(text, c.resolved).toContain('Terminal')
       expect(text, c.resolved).toContain(c.says)
       if (c.approved) expect(text, c.resolved).not.toContain('denied')
     }
   })
 
-  it('shows neither a check nor a ban for an unknown outcome', () => {
+  it('keeps an unknown outcome neutral and unresolved', () => {
     const { icon, text } = paintSettled('trust_project')
-    expect(icon).toBe(ICON_CLASS.unknown)
+    expect(icon).toBe(SETTLED_ICON)
     expect(text).not.toContain('denied')
   })
 
@@ -98,7 +100,7 @@ describe('history hydration parity', () => {
     for (const c of CASES) {
       expect(segOf(permRow(c.resolved)).resolved, c.resolved).toBe(c.resolved)
       expect(paintSettled(segOf(permRow(c.resolved)).resolved!).icon, c.resolved)
-        .toBe(c.approved ? ICON_CLASS.check : ICON_CLASS.ban)
+        .toBe(SETTLED_ICON)
     }
   })
 

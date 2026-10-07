@@ -93,7 +93,7 @@ function SketchPage({ sketchId, onSelectSketch, onJob }: { sketchId?: string; on
     {!sketch && <p>Create a blank canvas or open an image artifact at its original dimensions.</p>}
     {sketch && <>
       <div className="flex flex-wrap items-end gap-s rounded-lg bg-surface-container p-m">
-        <Button aria-pressed={tool === 'draw'} onClick={() => setTool('draw')}>Draw</Button><Button aria-pressed={tool === 'erase'} onClick={() => setTool('erase')}>Erase</Button>
+        <Button ariaPressed={tool === 'draw'} onClick={() => setTool('draw')}>Draw</Button><Button ariaPressed={tool === 'erase'} onClick={() => setTool('erase')}>Erase</Button>
         <label>Color<input aria-label="Color" type="color" value={color} onChange={e => setColor(e.target.value)} /></label>
         <label>Brush width<input aria-label="Brush width" type="number" min="1" max="128" value={width} onChange={e => setWidth(Math.max(1, Math.min(128, Number(e.target.value))))} /></label>
         <Button disabled={!strokes.length || busy} onClick={() => setStrokes(old => old.slice(0, -1))} disabledReason={busy ? BUSY_REASON : undefined}>Undo</Button>
