@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { jsxTags } from '../../shared/testing/jsxContracts'
 
 
 const SRC = join(process.cwd(), "src")
@@ -11,8 +12,8 @@ describe('every sub-goal row names its own delete button', () => {
   const src = code('features/loops/LoopPlanReview.tsx')
 
   it('the remove button is named from the sub-goal it removes', () => {
-    expect(src).toMatch(/aria-label=\{`Remove sub-goal: \$\{s\.length > 60 \? `\$\{s\.slice\(0, 60\)\}…` : s\}`\}/)
-    expect(/aria-label="Remove sub-goal"/.test(src), 'a constant here would announce 6 identical buttons').toBe(false)
+    expect(src).toMatch(/label=\{`Remove sub-goal: \$\{s\.length > 60 \? `\$\{s\.slice\(0, 60\)\}…` : s\}`\}/)
+    expect(/(?:aria-)?label="Remove sub-goal"/.test(src), 'a constant here would announce 6 identical buttons').toBe(false)
   })
 
   it('the add-a-sub-goal input is named', () => {
@@ -26,27 +27,11 @@ describe('every sub-goal row names its own delete button', () => {
 
 describe('no icon-only button in either plan-review surface is unnamed', () => {
   const iconOnlyButtons = (src: string) => {
-    const out: Array<{ line: number; tag: string; named: boolean }> = []
-    const re = /<button\b/g
-    let m: RegExpExecArray | null
-    while ((m = re.exec(src)) !== null) {
-      let depth = 0
-      let end = -1
-      for (let i = m.index + 1; i < src.length; i++) {
-        const ch = src[i]
-        if (ch === '{') depth++
-        else if (ch === '}') depth--
-        else if (depth === 0 && ch === '>') { end = i + 1; break }
-      }
-      if (end === -1) continue
-      const close = src.indexOf('</button>', end)
-      if (close === -1) continue
-      const tag = src.slice(m.index, end)
-      const body = src.slice(end, close).trim()
-      if (!/^<[A-Z]\w*[^>]*\/>$/.test(body)) continue
-      out.push({ line: src.slice(0, m.index).split('\n').length, tag, named: /aria-label/.test(tag) })
-    }
-    return out
+    return jsxTags(src, ['button', 'SquareIconButton', 'IconButton'])
+      .filter(site => site.attributes.has('icon') || /^\s*<[A-Z]\w*[^>]*\/>\s*$/.test(
+        site.element.slice(site.tag.length).replace(/<\/(button|SquareIconButton|IconButton)>$/, '')))
+      .map(site => ({ line: site.line, tag: site.tag,
+        named: site.attributes.has('aria-label') || site.attributes.has('label') }))
   }
 
   for (const rel of ['features/loops/LoopPlanReview.tsx', 'features/code/CodePlanReview.tsx']) {

@@ -497,11 +497,11 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
       <span className="flex-1" />
       { }
       {projId && projName && (onOpenProject
-        ? <button type="button" onClick={() => onOpenProject(projId)} title={`Project: ${projName} — open`}
-            data-type="caption" className="inline-flex items-center gap-1 rounded-pill px-2 h-5 max-w-[14rem] hover:brightness-110"
+        ? <Button variant="ghost" size="sm" type="button" onClick={() => onOpenProject(projId)} title={`Project: ${projName} — open`}
+            data-type="caption" className="!py-0 !border-0 inline-flex items-center !gap-1 !rounded-pill !px-2 !h-5 max-w-[14rem] hover:brightness-110"
             style={accentChip}>
             <FolderKanban size={11} className="shrink-0" /><span className="truncate">{projName}</span>
-          </button>
+          </Button>
         : <MetaPill icon={<FolderKanban size={11} />} text={projName} tone="primary" title="Project" />)}
       {wsDir && <MetaPill icon={<FolderOpen size={11} />} text={wsDir.split('/').pop() || wsDir} title={`Workspace: ${wsDir}`} />}
       <MetaPill icon={<Bot size={11} />} text={c.agent || 'default'} title="Worker agent" />
@@ -529,10 +529,10 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
                   onBlur={commitRename} onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); else if (e.key === 'Escape') abortRename() }}
                   data-type="body-m" className="min-w-[16rem] h-7 rounded-md bg-surface-high px-2 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
               ) : (
-                <button type="button" onClick={startRename} title="Rename loop"
-                  data-type="title-m" className="truncate text-on-surface leading-tight text-left hover:text-on-surface-var" style={fvs(600)}>
+                <Button variant="ghost" size="sm" type="button" onClick={startRename} title="Rename loop"
+                  data-type="title-m" className="!px-0 !py-0 !rounded-none !border-0 !h-auto truncate !text-on-surface leading-tight !text-left hover:text-on-surface-var" style={fvs(600)}>
                   {c.name || c.goal}
-                </button>
+                </Button>
               )}
               {statusLine}
             </div>
@@ -871,13 +871,13 @@ function OutputsPanel({ loop, artifacts, tasks, report, active, onOpenArtifact, 
                 const on = current?.id === t.id
                 const Icon = t.kind === 'tasks' ? ListChecks : t.kind === 'deliverable' ? Spark : FileText
                 return (
-                  <button key={t.id} type="button" onClick={() => setActiveId(t.id)} role="tab" aria-selected={on}
+                  <Button variant="ghost" size="sm" key={t.id} type="button" onClick={() => setActiveId(t.id)} role="tab" aria-selected={on}
                     tabIndex={on ? 0 : -1}
-                    data-type="body-s" className={`shrink-0 inline-flex items-center gap-1.5 px-m h-9 max-w-[14rem] border-b-2 transition-colors ${on ? 'border-primary text-on-surface' : 'border-transparent text-on-surface-low hover:text-on-surface-var'}`}
+                    data-type="body-s" className={`!py-0 !rounded-none !border-x-0 !border-t-0 shrink-0 inline-flex items-center !gap-1.5 !px-m !h-9 max-w-[14rem] !border-b-2 transition-colors ${on ? '!border-primary !text-on-surface' : '!border-transparent !text-on-surface-low hover:text-on-surface-var'}`}
                     style={on ? fvs(600) : undefined}
                     title={t.label}>
                     <Icon size={13} className="shrink-0" /><span className="truncate">{t.label}</span>
-                  </button>
+                  </Button>
                 )
               })}
             </div>
@@ -921,12 +921,12 @@ function OutputsPanel({ loop, artifacts, tasks, report, active, onOpenArtifact, 
               const label = <span className={`flex-1 min-w-0 truncate ${done ? 'text-on-surface-low line-through' : 'text-on-surface'}`}>{t.title}</span>
               const status = <span data-type="caption" className="shrink-0 text-on-surface-low">{t.status}</span>
               return onOpenTask ? (
-                <button key={t.id} type="button" onClick={() => onOpenTask(t.id)}
-                  data-type="body-s" className="group flex w-full items-center gap-s rounded-md px-2 py-1 -mx-2 text-left hover:bg-surface-high transition-colors"
+                <Button variant="ghost" size="sm" key={t.id} type="button" onClick={() => onOpenTask(t.id)}
+                  data-type="body-s" className="!border-0 [&>span]:w-full [&>span]:min-w-0 !h-auto group flex w-full items-center !gap-s !rounded-md !px-2 !py-1 -mx-2 !text-left hover:bg-surface-high transition-colors"
                   title="Open task">
                   {box}{label}{status}
                   <ChevronRight size={14} className="shrink-0 text-on-surface-low opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity" />
-                </button>
+                </Button>
               ) : (
                 <div key={t.id} data-type="body-s" className="flex items-center gap-s">
                   {box}{label}{status}

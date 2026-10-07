@@ -84,10 +84,10 @@ export function LoopPlanReview({ draft, onLaunched, onBack }: {
               onBlur={() => setEditingTitle(false)} onKeyDown={(e) => { if (e.key === 'Enter') setEditingTitle(false) }}
               data-type="body-m" className="h-8 min-w-[16rem] rounded-md bg-surface-high px-m text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
           ) : (
-            <button type="button" onClick={() => setEditingTitle(true)} title="Edit title"
-              data-type="title-m" className="truncate text-on-surface hover:text-on-surface-var" style={fvs(500)}>
+            <Button variant="ghost" size="sm" type="button" onClick={() => setEditingTitle(true)} title="Edit title"
+              data-type="title-m" className="!px-0 !py-0 !rounded-none !border-0 !h-auto truncate !text-on-surface hover:text-on-surface-var" style={fvs(500)}>
               {title || 'Untitled loop'}
-            </button>
+            </Button>
           )}
         </div>
       }
@@ -339,11 +339,11 @@ function PhaseCapPicker({ label, options, selected, onChange }: {
   if (!options.length) return null
   const choose = (id: string) => onChange(selected.includes(id) ? selected.filter((value) => value !== id) : selected.concat(id))
   return <div className="grid gap-1"><span data-type="caption" className="text-on-surface-low">{label}</span>
-    <div role="group" aria-label={label} className="flex flex-wrap gap-1.5">{options.map(({ id, name }) => <button key={id} type="button"
-      title={id} aria-pressed={selected.includes(id)} onClick={() => choose(id)} data-type="caption"
-      className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 transition-colors ${selected.includes(id) ? 'border-primary/40 bg-primary/10 text-primary-emphasis' : 'border-outline-variant/30 bg-surface-high text-on-surface-low hover:text-on-surface'}`}>
+    <div role="group" aria-label={label} className="flex flex-wrap gap-1.5">{options.map(({ id, name }) => <Button variant="ghost" size="sm" key={id} type="button"
+      title={id} ariaPressed={selected.includes(id)} onClick={() => choose(id)} data-type="caption"
+      className={`!py-0 inline-flex !h-7 items-center !gap-1 !rounded-md border !px-2 transition-colors ${selected.includes(id) ? '!border-primary/40 !bg-primary/10 !text-primary-emphasis' : '!border-outline-variant/30 !bg-surface-high !text-on-surface-low hover:text-on-surface'}`}>
       {selected.includes(id) && <Check size={10} />}{name}
-    </button>)}</div>
+    </Button>)}</div>
   </div>
 }
 
@@ -409,10 +409,10 @@ function PlanStep({ phases, setPhases, skills, workflows, agentNames }: {
             onMoveUp={() => change(i, -1)} onMoveDown={() => change(i, 1)} />
         ))}
       </div>
-      <button type="button" onClick={add}
-        data-type="body-s" className="self-start inline-flex items-center gap-1.5 rounded-pill border border-outline-variant/50 px-m h-8 text-on-surface-var hover:bg-surface-high transition-colors">
+      <Button variant="ghost" size="sm" type="button" onClick={add}
+        data-type="body-s" className="!py-0 self-start inline-flex items-center !gap-1.5 !rounded-pill border !border-outline-variant/50 !px-m !h-8 !text-on-surface-var hover:bg-surface-high transition-colors">
         <Plus size={14} /> Add phase
-      </button>
+      </Button>
     </div>
   )
 }
@@ -526,13 +526,12 @@ function SuggestMoreSubGoals({ goal, value, onChange }: { goal: string; value: s
   const tooShort = goal.trim().length < 20
   return (
 
-    <button type="button" onClick={tooShort ? undefined : suggest}
-      disabled={busy}
-      aria-disabled={tooShort || undefined}
-      title={tooShort ? 'Describe the goal in a bit more detail first' : undefined}
-      data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill px-m h-7 text-primary-emphasis hover:bg-surface-high transition-colors disabled:opacity-40 aria-disabled:opacity-40">
+    <Button variant="ghost" size="sm" type="button" onClick={tooShort ? undefined : suggest}
+      disabled={busy || tooShort}
+
+      data-type="body-s" className="!py-0 !border-0 inline-flex items-center !gap-1.5 !rounded-pill !px-m !h-7 !text-primary-emphasis hover:bg-surface-high transition-colors disabled:opacity-40 aria-disabled:opacity-40" disabledReason={tooShort ? 'Describe the goal in a bit more detail first' : undefined} loading={busy}>
       {busy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Suggest more
-    </button>
+    </Button>
   )
 }
 

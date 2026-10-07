@@ -47,13 +47,13 @@ describe('the Suggest-more gate keeps its tab stop', () => {
     expect(src).toMatch(/const tooShort = goal\.trim\(\)\.length < 20/)
   })
 
-  it('keeps the native attribute for busy and only that', () => {
-    expect(src).toMatch(/disabled=\{busy\}/)
-    expect(src).toMatch(/aria-disabled=\{tooShort \|\| undefined\}/)
+  it('passes busy and the prerequisite to the native control', () => {
+    expect(src).toMatch(/disabled=\{busy \|\| tooShort\}/)
+    expect(src).toMatch(/loading=\{busy\}/)
   })
 
   it('says why, and suppresses the click it can no longer refuse natively', () => {
-    expect(src).toMatch(/title=\{tooShort \? 'Describe the goal in a bit more detail first' : undefined\}/)
+    expect(src).toMatch(/disabledReason=\{tooShort \? 'Describe the goal in a bit more detail first' : undefined\}/)
     expect(src).toMatch(/onClick=\{tooShort \? undefined : suggest\}/)
   })
 

@@ -83,8 +83,8 @@ describe('the source no longer swallows the token read, and the exports no longe
 describe('preview review prerequisites', () => {
   const code = readFileSync(join(process.cwd(), 'src/features/loops/DesignCockpitPage.tsx'), 'utf8')
   it('keeps preview approval reachable with the actual render or reviewed reason', () => {
-    expect(code).toContain('disabled={reviewBusy} aria-disabled={!!approvalReason || undefined}')
-    expect(code).toContain('aria-description={approvalReason} title={approvalReason}')
+    expect(code).toContain('disabled={reviewBusy || !!approvalReason}')
+    expect(code).toContain('disabledReason={approvalReason}')
     expect(code).toContain('Fix the preview render error before approving.')
     expect(code).toContain('Wait for the preview to render before approving.')
     expect(code).toContain('This preview version has already been reviewed.')
@@ -92,7 +92,7 @@ describe('preview review prerequisites', () => {
     expect(code).toContain('if (!rendered || renderError || reviewed || reviewBusy) return')
   })
   it('distinguishes blank feedback from an in-flight refinement and guards both', () => {
-    expect(code).toContain('disabled={feedbackBusy} aria-disabled={!feedback.trim() || undefined}')
+    expect(code).toContain('disabled={feedbackBusy || !feedback.trim()}')
     expect(code).toContain('Describe the refinement before requesting it.')
     expect(code).toContain('onClick={!feedback.trim() ? undefined : () => { void requestRefinement() }}')
     expect(code).toContain('if (!feedback.trim() || feedbackBusy) return')

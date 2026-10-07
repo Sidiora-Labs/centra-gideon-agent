@@ -1,7 +1,8 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invalidateKeys, writeQuery } from '../../shared/data/data'
 import type { Loop } from '../../shared/data/api'
+import { registerBuiltinContentTypes } from '../../shared/ui/content/registerBuiltins'
 
 const state = vi.hoisted(() => ({
   loop: null as Loop | null,
@@ -34,7 +35,7 @@ vi.mock('./useRunStream', () => ({
   },
 }))
 
-const { ApiError } = await import('../../shared/data/api')
+const { api, ApiError } = await import('../../shared/data/api')
 const { LoopCockpitPage } = await import('./LoopCockpitPage')
 
 function loop(): Loop {
@@ -93,5 +94,41 @@ describe('a deleted loop replaces stale cockpit data', () => {
 
     await waitFor(() => expect(screen.getByText('Loop not found')).toBeInTheDocument())
     expect(screen.queryByText('Stale cockpit title')).not.toBeInTheDocument()
+  })
+})
+
+
+describe('native loop output controls', () => {
+  it('preserves the actual tab role and roving focus after native adoption', async () => {
+    registerBuiltinContentTypes()
+    const artifact = {
+      slug: 'supporting-evidence', name: 'Supporting evidence', kind: 'markdown' as const,
+      source: 'manual' as const, description: '', tags: [], version: 1,
+      created_at: '', updated_at: '', content: 'Supporting evidence', events: [], source_path: '', readonly: false,
+    }
+    const report = vi.spyOn(api, 'uLoopReport').mockResolvedValue({ report: 'Review complete', log: '' })
+    const artifacts = vi.spyOn(api, 'artifacts').mockResolvedValue([artifact])
+    const detail = vi.spyOn(api, 'artifact').mockResolvedValue(artifact)
+    try {
+      renderCockpit()
+      const first = await screen.findByTitle('Deliverable')
+      const next = await screen.findByTitle('Supporting evidence')
+      expect(first.tagName).toBe('BUTTON')
+      expect(first.textContent).toContain('Deliverable')
+      expect(next.textContent).toContain('Supporting evidence')
+      expect(first).toHaveAttribute('role', 'tab')
+      expect(next).toHaveAttribute('role', 'tab')
+      expect(next.tagName).toBe('BUTTON')
+      expect(first).toHaveAttribute('aria-selected', 'true')
+      expect(first.tabIndex).toBe(0)
+      expect(next.tabIndex).toBe(-1)
+      expect(first).toHaveAttribute('data-type', 'body-s')
+      first.focus()
+      fireEvent.keyDown(first, { key: 'ArrowRight' })
+      await waitFor(() => expect(next).toHaveAttribute('aria-selected', 'true'))
+      expect(document.activeElement).toBe(next)
+      expect(next.tabIndex).toBe(0)
+      expect(first.tabIndex).toBe(-1)
+    } finally { report.mockRestore(); artifacts.mockRestore(); detail.mockRestore() }
   })
 })

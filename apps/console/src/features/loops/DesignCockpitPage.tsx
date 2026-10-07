@@ -243,11 +243,11 @@ export function DesignCockpitPage({ id, onBack, onDeleted, onOpenProject, onBuil
           </span>
         )}
         {(loop.project_id || loop.tasks_project_id) && projName && (
-          <button type="button" onClick={() => onOpenProject?.((loop.project_id || loop.tasks_project_id)!)} title={`Project: ${projName} — open`}
-            data-type="caption" className="inline-flex items-center gap-1 rounded-pill px-2 h-5 hover:brightness-110"
+          <Button variant="ghost" size="sm" type="button" onClick={() => onOpenProject?.((loop.project_id || loop.tasks_project_id)!)} title={`Project: ${projName} — open`}
+            data-type="caption" className="!py-0 !border-0 inline-flex items-center !gap-1 !rounded-pill !px-2 !h-5 hover:brightness-110"
             style={accentChip}>
             <FolderKanban size={11} /><span className="truncate max-w-[14rem]">{projName}</span>
-          </button>
+          </Button>
         )}
         <div data-type="caption" className="ml-auto inline-flex items-center rounded-md bg-surface-container p-0.5">
           {(['light', 'dark'] as Scheme[]).map((s) => (
@@ -263,11 +263,11 @@ export function DesignCockpitPage({ id, onBack, onDeleted, onOpenProject, onBuil
 
       <div className="shrink-0 px-2xl pt-2 flex items-center gap-1 border-b border-outline-variant/30">
         {([['tokens', 'Tokens', Palette], ['canvas', 'Canvas', Box], ['palette', 'Palette', Upload], ['contrast', 'Contrast', Contrast], ['exports', 'Exports', Download]] as [Tab, string, any][]).map(([t, label, Icon]) => (
-          <button key={t} type="button" onClick={() => setTab(t)}
-            data-type="body-s" className={`inline-flex items-center gap-1.5 px-3 h-9 border-b-2 -mb-px transition-colors ${tab === t ? 'border-primary text-on-surface' : 'border-transparent text-on-surface-low hover:text-on-surface'}`}>
+          <Button variant="ghost" size="sm" key={t} type="button" onClick={() => setTab(t)}
+            data-type="body-s" className={`!py-0 !rounded-none !border-x-0 !border-t-0 inline-flex items-center !gap-1.5 !px-3 !h-9 !border-b-2 -mb-px transition-colors ${tab === t ? '!border-primary !text-on-surface' : '!border-transparent !text-on-surface-low hover:text-on-surface'}`}>
             <Icon size={14} />{label}
             {t === 'canvas' && reactArtifacts.length > 0 && <span data-type="caption" className="text-on-surface-low">· {reactArtifacts.length}</span>}
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -723,21 +723,20 @@ function CanvasComponent({ a, loopId, draggable, onDragStart, onDragEnd }: {
       <span role="status" data-type="caption" className={renderError ? 'text-danger' : 'text-on-surface-low'}>
         {renderError ? `Render error: ${renderError}` : rendered ? reviewed ? 'Current version reviewed' : 'Rendered in browser — inspect before approving' : 'Waiting for browser render'}
       </span>
-      <button type="button" disabled={reviewBusy} aria-disabled={!!approvalReason || undefined}
-        aria-description={approvalReason} title={approvalReason}
+      <Button variant="ghost" size="sm" type="button" disabled={reviewBusy || !!approvalReason}
+        disabledReason={approvalReason}
         onClick={approvalReason ? undefined : () => { void approve() }}
-        className="rounded-md bg-primary px-m py-xs text-on-primary disabled:opacity-40 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">
+        className="!border-0 !h-auto !rounded-md !bg-primary !px-m !py-xs !text-on-primary disabled:opacity-40 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed" loading={reviewBusy}>
         {reviewBusy ? 'Saving…' : reviewed ? 'Reviewed' : 'Approve preview'}
-      </button>
+      </Button>
     </div>
     <div className="flex flex-wrap items-center gap-s">
       <input aria-label={`Refinement for ${a.name}`} value={feedback} onChange={event => setFeedback(event.target.value)}
         placeholder="Describe what to change after previewing…" className="min-w-0 flex-1 rounded-md border border-outline/40 bg-surface px-s py-xs text-on-surface" />
-      <button type="button" disabled={feedbackBusy} aria-disabled={!feedback.trim() || undefined}
-        aria-description={!feedback.trim() ? 'Describe the refinement before requesting it.' : undefined}
-        title={!feedback.trim() ? 'Describe the refinement before requesting it.' : undefined}
+      <Button variant="ghost" size="sm" type="button" disabled={feedbackBusy || !feedback.trim()}
+        disabledReason={!feedback.trim() ? 'Describe the refinement before requesting it.' : undefined}
         onClick={!feedback.trim() ? undefined : () => { void requestRefinement() }}
-        className="rounded-md border border-outline/40 px-m py-xs text-on-surface disabled:opacity-40 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">{feedbackBusy ? 'Sending…' : 'Request refinement'}</button>
+        className="!h-auto !rounded-md border !border-outline/40 !px-m !py-xs !text-on-surface disabled:opacity-40 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed" loading={feedbackBusy}>{feedbackBusy ? 'Sending…' : 'Request refinement'}</Button>
     </div>
     {actionError && <p role="alert" data-type="caption" className="text-danger">{actionError}</p>}
   </div>
