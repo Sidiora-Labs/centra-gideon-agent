@@ -3,6 +3,8 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
+import { renderHook } from '@testing-library/react'
+import { familySpring } from '../ui/motion/vocabulary'
 
 
 let REDUCED = false
@@ -49,6 +51,7 @@ interface Probe {
   uninvokable: string[]
   nestedFailures: string[]
   exportNames: string[]
+  hookPreferences: unknown[]
 }
 
 function visit(value: unknown, path: string, out: Probe, ancestors: readonly object[], depth: number): void {
@@ -80,9 +83,15 @@ function visit(value: unknown, path: string, out: Probe, ancestors: readonly obj
 
 function probe(reduced: boolean): Probe {
   REDUCED = reduced
-  const out: Probe = { values: new Map(), uninvokable: [], nestedFailures: [], exportNames: [] }
+  const out: Probe = { values: new Map(), uninvokable: [], nestedFailures: [], exportNames: [], hookPreferences: [] }
   for (const [name, value] of Object.entries(motionModule)) {
     out.exportNames.push(name)
+    if (name === 'useReducedMotion') {
+      const { result, unmount } = renderHook(() => (value as () => unknown)())
+      out.hookPreferences.push(result.current)
+      unmount()
+      continue
+    }
     if (typeof value === 'function') {
       let invoked = 0
       ARG_TUPLES.forEach((args, i) => {
@@ -133,6 +142,8 @@ describe('reduced motion is an app-wide property of design/motion.ts, not a per-
     ).toEqual([])
 
     expect(REDUCED_PROBE.exportNames).toEqual(ALLOWED.exportNames)
+    expect(ALLOWED.hookPreferences).toEqual([false])
+    expect(REDUCED_PROBE.hookPreferences).toEqual([true])
   })
 
   it('the media-query stub actually takes — both passes measure what they claim', () => {
@@ -192,6 +203,7 @@ describe('reduced motion is an app-wide property of design/motion.ts, not a per-
 const CWD = process.cwd()
 const SRC_ROOT = join(CWD, 'src')
 const MOTION_MODULE = 'src/shared/theme/motion.ts'
+const MOTION_REGISTRY = 'src/shared/theme/motionRegistry.ts'
 
 function collectSources(root: string): string[] {
   const out: string[] = []
@@ -261,15 +273,24 @@ function tally(hits: Hit[]): string[] {
 }
 
 const SOURCES = collectSources(SRC_ROOT)
-const OUTSIDE_MODULE = SOURCES.filter((f) => f !== MOTION_MODULE)
+const OUTSIDE_MODULE = SOURCES.filter((f) => f !== MOTION_MODULE && f !== MOTION_REGISTRY)
 
 const SPRING_PARAM_BASELINE: readonly string[] = [
   'src/shared/ui/ComposerStage.tsx:1',
-  'src/shared/ui/SidePanel.tsx:1',
   'src/shared/ui/motion/vocabulary.ts:1',
 ]
 
 describe('no module outside design/motion.ts mints spring physics', () => {
+  it('the canonical raw registry is consumed only through the gated motion module', () => {
+    const consumers = SOURCES.filter(file => file !== MOTION_REGISTRY &&
+      /\b(?:import|export)\b[^;]*?from\s*['"][^'"]*motionRegistry['"]/.test(blankComments(readFileSync(join(CWD, file), 'utf8'))))
+    expect(consumers).toEqual([MOTION_MODULE])
+    const code = blankComments(readFileSync(join(CWD, MOTION_MODULE), 'utf8'))
+    expect(code).toMatch(/spring = family\(motionRegistry\.spring, \(definition\) => gated\(\{ \.\.\.definition \}\)\)/)
+    expect(code).toMatch(/physics = family\(motionRegistry\.physics, \(definition\) => bouncy\(/)
+    expect(code).toMatch(/return gated\(\{ type: 'spring', stiffness, damping, mass: 1 \}\)/)
+    expect(scan([MOTION_REGISTRY], LITERAL_SPRING).length).toBeGreaterThan(0)
+  })
   it('writes no literal spring transition', () => {
     const offenders = scan(OUTSIDE_MODULE, LITERAL_SPRING).map((h) => `${h.file}:${h.line}  ${h.text}`)
     expect(
@@ -289,8 +310,18 @@ describe('no module outside design/motion.ts mints spring physics', () => {
   })
 
   it('every baselined site re-tunes a gated preset rather than building a spring', () => {
+    const vocabulary = 'src/shared/ui/motion/vocabulary.ts'
+    const code = blankComments(readFileSync(join(CWD, vocabulary), 'utf8'))
+    expect(code).toMatch(/const resolved = physics\.fluid/)
+    expect(code).toMatch(/case 'spring': return Object\.assign\(\{\}, resolved, \{ stiffness:/)
+    expect(code).toMatch(/default: return resolved/)
+    REDUCED = false
+    expect(springKind(familySpring(400))).toBe('explicit')
+    REDUCED = true
+    expect(familySpring(400)).toEqual(motionModule['instant'])
     const fromScratch = scan(OUTSIDE_MODULE, SPRING_PARAM)
-      .filter((h) => !h.text.includes('...'))
+      .filter((h) => !h.text.includes('...') && !(h.file === vocabulary &&
+        /^case 'spring': return Object\.assign\(\{\}, resolved, \{ stiffness:/.test(h.text)))
       .map((h) => `${h.file}:${h.line}  ${h.text}`)
     expect(
       fromScratch,
@@ -318,14 +349,15 @@ describe('census self-checks — the floors that stop a silent pass', () => {
   })
 
   it('both patterns match known-positive code in the sanctioned module', () => {
-    const literal = scan([MOTION_MODULE], LITERAL_SPRING)
-    const params = scan([MOTION_MODULE], SPRING_PARAM)
+    const literal = scan([MOTION_MODULE, MOTION_REGISTRY], LITERAL_SPRING)
+    const params = scan([MOTION_MODULE, MOTION_REGISTRY], SPRING_PARAM)
     expect(literal.length, 'LITERAL_SPRING must match the module that mints springs').toBeGreaterThanOrEqual(3)
     expect(params.length, 'SPRING_PARAM must match the module that mints springs').toBeGreaterThanOrEqual(3)
   })
 
   it('comment blanking removes prose that would otherwise be counted as code', () => {
     const raw = readFileSync(join(CWD, 'src/shared/ui/motion/vocabulary.ts'), 'utf8')
+      + '\n// stiffness: 99\n/* damping: 99 */' 
     const rawHits = raw.split('\n').filter((l) => new RegExp(SPRING_PARAM.source).test(l)).length
     const blankedHits = blankComments(raw).split('\n').filter((l) => new RegExp(SPRING_PARAM.source).test(l)).length
     expect(rawHits, 'the control file must carry commented mentions, or it proves nothing').toBeGreaterThan(1)
