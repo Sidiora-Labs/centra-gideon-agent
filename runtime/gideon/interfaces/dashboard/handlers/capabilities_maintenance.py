@@ -30,8 +30,13 @@ async def endpoint(request):
                     request.match_info["id"], body["action"], supervisor()
                 )
             else:
+                from gideon.security.durable_work import accepted_origin_of_request
+
                 result = await maintenance.create(
-                    body, "user:" + str(request["user"]), supervisor()
+                    body,
+                    "user:" + str(request["user"]),
+                    supervisor(),
+                    accepted_origin=accepted_origin_of_request(request),
                 )
         return web.json_response(result, headers={"Cache-Control": "no-store"})
     except (ValueError, OSError) as error:

@@ -67,7 +67,7 @@ def view():
     }
 
 
-async def create(body, actor, supervisor):
+async def create(body, actor, supervisor, *, accepted_origin=None):
     if not actor or supervisor is None:
         raise ValueError("Authenticated requester and workflow supervisor required")
     if not isinstance(body, dict) or set(body) - {
@@ -111,29 +111,32 @@ async def create(body, actor, supervisor):
             ),
             None,
         ) or hierarchy.create_task_list("Maintenance issues", project_id=project.id)
-        return _save(
-            {
-                "id": uuid.uuid4().hex,
-                "project_id": project.id,
-                "workspace": str(Path(project.workspace_dir).resolve()),
-                "workflow": workflow,
-                "definition_hash": hashlib.sha256(
-                    json.dumps(definition.to_dict(), sort_keys=True).encode()
-                ).hexdigest(),
-                "verify_command": body["verify_command"],
-                "guard_command": body["guard_command"],
-                "actor": actor,
-                "task_list_id": task_list.id,
-                "status": "running",
-                "stage": 0,
-                "attempt": 0,
-                "child_id": None,
-                "history": [],
-                "issues_before": [],
-                "no_progress": 0,
-                "error": None,
-            }
-        )
+        row = {
+            "id": uuid.uuid4().hex,
+            "project_id": project.id,
+            "workspace": str(Path(project.workspace_dir).resolve()),
+            "workflow": workflow,
+            "definition_hash": hashlib.sha256(
+                json.dumps(definition.to_dict(), sort_keys=True).encode()
+            ).hexdigest(),
+            "verify_command": body["verify_command"],
+            "guard_command": body["guard_command"],
+            "actor": actor,
+            "task_list_id": task_list.id,
+            "status": "running",
+            "stage": 0,
+            "attempt": 0,
+            "child_id": None,
+            "history": [],
+            "issues_before": [],
+            "no_progress": 0,
+            "error": None,
+        }
+        if accepted_origin is not None:
+            from gideon.security.maintenance_work import seal_acceptance
+
+            row["work_acceptance"] = seal_acceptance(row, accepted_origin)
+        return _save(row)
 
 
 async def _issues(row):
@@ -171,12 +174,17 @@ async def advance(identifier, supervisor):
         if row["status"] not in {"running", "cancelling"} or supervisor is None:
             return row
         try:
+            from gideon.security.maintenance_work import accepted_source
+
+            source = accepted_source(row) if row["status"] == "running" else None
             child = _recover(row)
             if child:
                 row["child_id"] = child.id
                 state = child.status.value
                 if state == "draft" and row["status"] == "running":
-                    result = await service.start_draft(child.id, supervisor=supervisor)
+                    result = await service.start_draft(
+                        child.id, supervisor=supervisor, accepted_origin=source
+                    )
                     if not result.get("ok"):
                         row.update(
                             status="failed",
@@ -270,6 +278,7 @@ async def advance(identifier, supervisor):
                 project_id=row["project_id"],
                 session_key=row["actor"],
                 idempotency_key=_key(row),
+                accepted_origin=source,
             )
             if not result.get("ok"):
                 row.update(

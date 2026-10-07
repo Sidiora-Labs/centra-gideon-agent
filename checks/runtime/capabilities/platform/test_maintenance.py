@@ -44,6 +44,53 @@ def project(tmp_path, monkeypatch):
     )
 
 
+@pytest.fixture
+def authenticated_maintenance(project):
+    """Author and accept the actual maintenance sequence through owner HTTP."""
+
+    async def create(watchdog):
+        from gideon.automation.workflows.handlers import api_def_save
+        from gideon.interfaces.dashboard.handlers.capabilities_maintenance import (
+            endpoint,
+        )
+        from gideon.workspace.capabilities.platform.maintenance_runtime import (
+            bind_application,
+        )
+
+        defs.register_provider(NativeWorkflowDefProvider())
+        app = web.Application(middlewares=[token_auth_middleware(port=0)])
+        app["state"] = SimpleNamespace(workflows=watchdog)
+        bind_application(app)
+        app.router.add_post("/api/workflows", api_def_save)
+        app.router.add_post(PREFIX, endpoint)
+        headers = {"Authorization": "Bearer " + generate_token("owner")}
+        async with TestClient(TestServer(app)) as client:
+            response = await client.post(
+                "/api/workflows",
+                headers=headers,
+                json={
+                    "name": "code-project",
+                    "create_only": True,
+                    "strict": False,
+                    "inputs": {
+                        key: {"required": True}
+                        for key in ("task", "cwd", "verify_command", "guard_command")
+                    },
+                    "root": {
+                        "kind": "transform",
+                        "id": "actual",
+                        "config": {"expr": "done"},
+                    },
+                },
+            )
+            assert response.status == 201, await response.text()
+            response = await client.post(PREFIX, headers=headers, json=body(project))
+            assert response.status == 200, await response.text()
+            return await response.json()
+
+    return create
+
+
 async def definition(name="code-project", wait=False):
     provider = NativeWorkflowDefProvider()
     defs.register_provider(provider)
@@ -80,11 +127,12 @@ async def settle(row, watchdog):
 
 
 @pytest.mark.asyncio
-async def test_complete_seven_real_workflows_and_persisted_order(project):
-    await definition()
+async def test_complete_seven_real_workflows_and_persisted_order(
+    project, authenticated_maintenance
+):
     watchdog = WorkflowWatchdog()
     try:
-        row = await m.create(body(project), "user:owner", watchdog)
+        row = await authenticated_maintenance(watchdog)
         assert row["status"] == "running"
         assert row["stage"] == 0
         assert row["history"] == []
@@ -120,12 +168,12 @@ async def test_complete_seven_real_workflows_and_persisted_order(project):
 @pytest.mark.asyncio
 async def test_real_issue_drain_no_progress_and_resume_after_actual_cancellation(
     project,
+    authenticated_maintenance,
 ):
-    await definition()
     watchdog = WorkflowWatchdog()
     provider = NativeTaskProvider()
     try:
-        row = await m.create(body(project), "user:owner", watchdog)
+        row = await authenticated_maintenance(watchdog)
         issue = await provider.create_task(
             title="Actual maintenance issue", task_list_id=row["task_list_id"]
         )
@@ -159,11 +207,12 @@ async def test_real_issue_drain_no_progress_and_resume_after_actual_cancellation
 
 
 @pytest.mark.asyncio
-async def test_launch_write_crash_recovers_existing_real_child(project):
-    await definition()
+async def test_launch_write_crash_recovers_existing_real_child(
+    project, authenticated_maintenance
+):
     watchdog = WorkflowWatchdog()
     try:
-        row = await m.create(body(project), "user:owner", watchdog)
+        row = await authenticated_maintenance(watchdog)
         before = dict(row)
         launched = await settle(row, watchdog)
         assert launched["child_id"]
@@ -330,5 +379,83 @@ async def test_real_signed_http_and_native_status_control(project):
                     json={"action": "cancel", "actor": "forged"},
                 )
             ).status == 409
+    finally:
+        await watchdog.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("damage", ["missing", "tampered", "private", "foreign"])
+async def test_maintenance_source_refusal_before_child_launch(
+    project, authenticated_maintenance, damage
+):
+    from gideon.security.maintenance_work import seal_acceptance
+    from gideon.security.durable_work import accepted_origin_of_request
+    from gideon.security.approval_answer import Principal, OWNER, APP
+    from gideon.security.session_credentials import begin_turn, end_turn
+
+    watchdog = WorkflowWatchdog()
+    try:
+        row = await authenticated_maintenance(watchdog)
+        if damage == "missing":
+            row.pop("work_acceptance")
+        elif damage == "tampered":
+            row["verify_command"] = "different accepted command"
+        else:
+            # Real middleware validates the live bound work before issuing source proof.
+            actor = (
+                Principal(OWNER, "owner")
+                if damage == "private"
+                else Principal(APP, "foreign")
+            )
+            credential = begin_turn(
+                "subagent:maintenance-refusal",
+                actor,
+                turn_id="source",
+                memory_mode="temporary",
+            )
+            app = web.Application(
+                middlewares=[
+                    token_auth_middleware(
+                        port=0,
+                        internal_secret="maintenance-source-secret",
+                        internal_routes=frozenset({"GET /origin"}),
+                    )
+                ]
+            )
+            app["local_secret"] = "maintenance-source-secret"
+            captured = []
+
+            async def origin(request):
+                captured.append(accepted_origin_of_request(request))
+                return web.json_response({"accepted": captured[-1] is not None})
+
+            app.router.add_get("/origin", origin)
+            try:
+                async with TestClient(TestServer(app)) as client:
+                    response = await client.get(
+                        "/origin",
+                        headers={
+                            "X-Internal-Secret": "maintenance-source-secret",
+                            "X-Session-Key": credential.work.session_key,
+                            "X-Session-Proof": credential.bearer,
+                        },
+                    )
+                    assert response.status == 200, await response.text()
+                    assert (await response.json())["accepted"]
+                with pytest.raises(ValueError, match="persistent owner"):
+                    seal_acceptance(row, captured[0])
+            finally:
+                end_turn(credential)
+            row.pop("work_acceptance")
+        m._save(row)
+        refused = await m.advance(row["id"], watchdog)
+        assert refused["status"] == "failed"
+        assert "source proof" in refused["error"] or "scope changed" in refused["error"]
+        assert refused["child_id"] is None and refused["history"] == []
+        assert store.list_runs(project_id=project.id)[1] == 0
+        cancelled = dict(refused, status="running")
+        m._save(cancelled)
+        safe = await m.control(row["id"], "cancel", watchdog)
+        assert safe["status"] == "cancelled"
     finally:
         await watchdog.stop()
