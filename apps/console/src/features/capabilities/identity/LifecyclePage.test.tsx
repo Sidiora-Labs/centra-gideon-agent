@@ -12,7 +12,7 @@ let directory = ''
 const root = resolve(process.cwd(), '../..')
 beforeAll(async () => {
   directory = await mkdtemp(resolve(tmpdir(), 'gideon-stories-ui-'))
-  server = spawn('/tmp/gideon-runtime-venv/bin/python', [
+  server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', [
     resolve(root, 'checks/runtime/capabilities/identity/lifecycle_ui_server.py'), directory,
   ], { env: { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: directory } })
   endpoint = await new Promise<string>((resolveEndpoint, reject) => {
@@ -22,12 +22,19 @@ beforeAll(async () => {
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
-      const line = output.split('\n').find(value => value.startsWith('http://'))
+      const line = output.split('\n').slice(0, -1).find(value => value.startsWith('http://'))
       if (line) { clearTimeout(timer); resolveEndpoint(line.trim()) }
     })
     server.once('error', error => { clearTimeout(timer); reject(error) })
     server.once('exit', code => { clearTimeout(timer); reject(new Error('HTTP server exited ' + code + ': ' + errors)) })
   })
+  const [base, loopId] = endpoint.split('#')
+  expect(loopId).toBeTruthy()
+  const ready = await fetch(base)
+  expect(ready.status).toBe(200)
+  const state = await ready.json()
+  expect(state.policy.loop_id).toBeFalsy()
+  expect(state.loop).toBeNull()
 })
 afterEach(() => { cleanup(); window.location.hash = '' })
 afterAll(async () => {
@@ -48,7 +55,12 @@ test('actual loop authority, bounded thinking delivery and independent cancellat
   await waitFor(() => expect(screen.getByRole('button', { name: 'Save lifecycle policy' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: 'Save lifecycle policy' }))
   await screen.findByText('Loop state: ready')
-  expect(screen.getByLabelText('Existing loop ID')).toBeDisabled()
+  const boundLoop = screen.getByLabelText('Existing loop ID')
+  expect(boundLoop).not.toBeDisabled()
+  expect(boundLoop).toHaveAttribute('readonly')
+  expect(boundLoop).toHaveAccessibleDescription('This policy already has a bound loop; its ID cannot be changed here.')
+  fireEvent.change(boundLoop, { target: { value: 'another-loop' } })
+  expect(boundLoop).toHaveValue(loopId)
   expect(screen.getByLabelText('Enable bound identity and approve current route')).toBeChecked()
   await waitFor(() => expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: 'Start' }))
@@ -56,8 +68,8 @@ test('actual loop authority, bounded thinking delivery and independent cancellat
   await waitFor(() => expect(screen.getByRole('button', { name: 'Request thinking' })).toBeEnabled())
   fireEvent.click(screen.getByRole('button', { name: 'Request thinking' }))
   await screen.findByText('reflect: pending')
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Dispatch thinking request' })).toBeEnabled())
-  fireEvent.click(screen.getByRole('button', { name: 'Dispatch thinking request' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Dispatch thinking request: Reflect on identity anchors' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Dispatch thinking request: Reflect on identity anchors' }))
   await screen.findByText('reflect: blocked · no_deliverer')
   expect(screen.getByText('Provider readiness: unknown')).toBeVisible()
   await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel current turn' })).toBeEnabled())
