@@ -176,7 +176,7 @@ function DeliveredShelf({ sessionKey, runIds, onOpen }: { sessionKey: string; ru
   useEffect(() => {
     let live = true
     setLoading(true)
-    Promise.all([api.artifacts(), ...runIds.map((id) => api.workflowRunOutbox(id).then((v) => v.files).catch(() => [] as WorkflowOutboxEntry[]))])
+    Promise.all([api.artifacts(), ...runIds.map((id) => api.workflowRunOutbox(id).then((v) => v.files))])
       .then(([artifacts, ...outboxes]) => {
         if (!live) return
         const rows = new Map<string, { slug: string; name: string; source: string }>()

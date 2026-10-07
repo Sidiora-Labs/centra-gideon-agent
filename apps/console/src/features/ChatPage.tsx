@@ -425,7 +425,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   useEffect(() => {
     if (!projectId) { setProjectName(''); return }
     let alive = true
-    api.project(projectId).then((p) => { if (alive) setProjectName(p?.name || '') }).catch(() => {})
+    api.project(projectId).then((p) => { if (alive) setProjectName(p?.name || '') }).catch((error) => { if (alive) { setProjectName(''); notify(`Couldn’t load this project: ${error instanceof Error ? error.message : String(error)}`, 'error') } })
     return () => { alive = false }
   }, [projectId])
   const [sessionCost, setSessionCost] = useState<{ cost: number; tokens: number; priced: boolean } | null>(null)
@@ -436,7 +436,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       const t = d.totals
       const tokens = (t.input_tokens || 0) + (t.output_tokens || 0)
       setSessionCost(t.turns > 0 && tokens > 0 ? { cost: t.cost_usd, tokens, priced: t.priced } : null)
-    }).catch(() => {   })
+    }).catch((error) => { if (sessionRef.current === key) { setSessionCost(null); setMicError(`Couldn’t load this chat’s usage: ${error instanceof Error ? error.message : String(error)}`) } })
   }, [])
   const seededDetail = useRef<ChatDetail | null>(sessionId ? readCachedDetail(sessionId) : null).current
   const [turns, setTurns] = useState<ChatTurn[]>(
@@ -729,6 +729,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
       return detail
     } catch (error) {
       replaySnapshotFrames(replay.settle(generation, null))
+      if (chatSessionOwns(sessionRef, key)) setMicError(`Couldn’t refresh this chat: ${error instanceof Error ? error.message : String(error)}`)
       throw error
     }
   }, [replaySnapshotFrames, announceTurnEnd])
@@ -1796,12 +1797,16 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     if (speakingTurn === turnIndex) { stopSpeak(); return }
     stopSpeak()
     const s = sessionRef.current
-    const ctx = getAudioCtx()
-    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {})
     speakGenRef.current++
     speechModeRef.current = mode
     const requestId = crypto.randomUUID()
     activeSpeechRequestIdRef.current = requestId
+    const ctx = getAudioCtx()
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch((error) => {
+      if (activeSpeechRequestIdRef.current === requestId && sessionRef.current === s) {
+        setMicError(`Couldn’t play audio: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    })
     setSpeakingTurn(turnIndex)
     return api.voiceSynthesize(text, s ?? '', requestId).catch((e: Error) => {
       if (activeSpeechRequestIdRef.current !== requestId) return
@@ -1853,7 +1858,13 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
   async function enqueueAudio(b64: string) {
     const ctx = getAudioCtx()
     if (!ctx) return
-    if (ctx.state === 'suspended') await ctx.resume().catch(() => {})
+    if (ctx.state === 'suspended') {
+      try { await ctx.resume() } catch (error) {
+        stopSpeak()
+        setMicError(`Couldn’t play audio: ${error instanceof Error ? error.message : String(error)}`)
+        return
+      }
+    }
     const gen = speakGenRef.current
     let bytes: Uint8Array
     try {
@@ -1918,16 +1929,16 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     const s = sessionRef.current
     if (!s || sideOpenedRef.current) return
     sideOpenedRef.current = true
-    await api.sideOpen(s).catch(() => {})
+    try { await api.sideOpen(s) } catch (error) { sideOpenedRef.current = false; throw error }
   }
   async function askSide(question: string) {
     const s = sessionRef.current
     const q = question.trim()
     if (!s || !q || sideBusy) return
-    await openSide()
     setSideBusy(true)
     setSideMsgs((prev) => [...prev, { q, a: '', runId: '', done: false }])
     try {
+      await openSide()
       const res = await api.sideTurn(s, q)
       setSideMsgs((prev) => { const i = prev.length - 1; if (i < 0) return prev; const n = [...prev]; if (!n[i].runId) n[i] = { ...n[i], runId: res.run_id }; return n })
     } catch (e) {
@@ -2043,7 +2054,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
     if (!s || regenningTitle) return
     setRegenningTitle(true)
     try {
-      const r = await api.generateTitle(s).catch(() => null)
+      const r = await api.generateTitle(s).catch(reportActionFailure('generate this chat’s title'))
       if (r?.title) setTitle(r.title)
     } finally {
       setRegenningTitle(false)
@@ -3432,7 +3443,9 @@ function ChatHistoryPage({ navigate, query, setQuery }: { navigate: (p: string) 
   const retagRunning = retag?.status === 'running'
   const retagUpdatedRef = useRef(0)
   useEffect(() => {
-    api.retagStatus().then((j) => { if (j && j.status === 'running') setRetag(j) }).catch(() => {})
+    let alive = true
+    api.retagStatus().then((j) => { if (alive && j && j.status === 'running') setRetag(j) }).catch((error) => { if (alive) reportActionFailure('load the retag status')(error) })
+    return () => { alive = false }
   }, [])
   useChatSocket((m: WsMessage) => {
     if (m.type !== 'retag_progress' && m.type !== 'retag_done') return
