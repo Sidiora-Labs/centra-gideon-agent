@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import ts from 'typescript'
 
 
 const notified: string[] = []
@@ -84,11 +85,23 @@ describe('THE RATCHET: no surface writes to the clipboard directly', () => {
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
     .replace(/^(\s*)\/\/.*$/gm, '$1')
 
-  const sites = walk(SRC).flatMap((abs) => {
+  function clipboardAccesses(source: string): { references: number[]; writes: string[] } {
+    const file = ts.createSourceFile('clipboard.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const references: number[] = [], writes: string[] = []
+    const visit = (node: ts.Node) => {
+      if (ts.isPropertyAccessExpression(node) && node.expression.getText(file) === 'navigator' && node.name.text === 'clipboard')
+        references.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1)
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && ['write', 'writeText'].includes(node.expression.name.text))
+        writes.push(node.expression.name.text)
+      ts.forEachChild(node, visit)
+    }
+    visit(file)
+    return { references, writes }
+  }
+  const sites = walk(SRC).flatMap(abs => {
     const rel = abs.slice(SRC.length + 1)
     if (/\.(test|doc)\.tsx?$/.test(rel)) return []
-    const lines = strip(readFileSync(abs, 'utf8')).split('\n')
-    return lines.flatMap((ln, i) => (/navigator\.clipboard/.test(ln) ? [`${rel}:${i + 1}`] : []))
+    return clipboardAccesses(readFileSync(abs, 'utf8')).references.map(line => `${rel}:${line}`)
   })
 
   it('the ONLY module touching navigator.clipboard is app/clipboard.ts', () => {
@@ -100,7 +113,15 @@ describe('THE RATCHET: no surface writes to the clipboard directly', () => {
     const importers = walk(SRC).filter((abs) => !/\.(test|doc)\.tsx?$/.test(abs))
       .filter((abs) => /from '[^']*app\/shell\/clipboard'/.test(strip(readFileSync(abs, 'utf8'))))
     expect(importers.length, 'files importing copyText').toBeGreaterThanOrEqual(8)
-    expect(sites.length, 'app/shell/clipboard.ts still owns exactly one write').toBe(1)
+    const owner = clipboardAccesses(readFileSync(join(SRC, 'app/shell/clipboard.ts'), 'utf8'))
+    expect(owner.references.length, 'native text and binary helpers acquire the browser clipboard').toBe(2)
+    expect(owner.writes.sort(), 'the owner has one text sink and one binary sink').toEqual(['write', 'writeText'])
+  })
+  it('distinguishes capability reads, aliases and writes without counting comments', () => {
+    expect(clipboardAccesses('const clipboard = navigator.clipboard; clipboard.writeText("x")')).toEqual({ references: [1], writes: ['writeText'] })
+    expect(clipboardAccesses('const available = !!navigator.clipboard')).toEqual({ references: [1], writes: [] })
+    expect(clipboardAccesses('// navigator.clipboard.writeText("x")')).toEqual({ references: [], writes: [] })
+    expect(clipboardAccesses('navigator.clipboard.write([])')).toEqual({ references: [1], writes: ['write'] })
   })
 })
 

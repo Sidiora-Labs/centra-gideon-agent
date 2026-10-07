@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { copyText } from '../../../../app/shell/clipboard';
 
 export type UseCopyToClipboardOptions = {
   copiedDuration?: number;
@@ -28,13 +29,14 @@ export const useCopyToClipboard = ({
   );
 
   const copyToClipboard = (value: string) => {
-    if (!value || typeof navigator === "undefined" || !navigator.clipboard) {
+    if (!value) {
       return;
     }
 
     const scopeGeneration = scopeGenerationRef.current;
-    navigator.clipboard.writeText(value).then(
-      () => {
+    copyText(value, "the text").then(
+      (copied) => {
+        if (!copied) return;
         if (scopeGeneration !== scopeGenerationRef.current) return;
 
         if (copiedTimerRef.current !== undefined) {
@@ -46,7 +48,6 @@ export const useCopyToClipboard = ({
           setIsCopied(false);
         }, copiedDuration);
       },
-      () => {},
     );
   };
 

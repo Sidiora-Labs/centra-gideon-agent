@@ -9,6 +9,7 @@ import {
   type PropsWithChildren,
 } from "react";
 import { Modal } from "../../../ui/Modal";
+import { copyImage } from '../../../../app/shell/clipboard';
 import { cva, type VariantProps } from "class-variance-authority";
 import {
   CopyIcon,
@@ -123,20 +124,13 @@ const downloadImagePart = (
 
 const copyImagePart = async (
   part: Pick<ImageMessagePart, "image">,
-): Promise<void> => {
-  if (
-    typeof navigator === "undefined" ||
-    !navigator.clipboard ||
-    typeof ClipboardItem === "undefined"
-  ) {
-    throw new Error("Clipboard API is not available in this environment.");
-  }
+): Promise<boolean> => {
   const blob = /^data:/i.test(part.image)
     ? dataUriToBlob(part.image)
     : await fetch(part.image).then((r) => r.blob());
-  if (!blob) return;
+  if (!blob) return false;
   const mime = mimeFromImage(part.image) ?? blob.type ?? "image/png";
-  await navigator.clipboard.write([new ClipboardItem({ [mime]: blob })]);
+  return copyImage(blob, mime);
 };
 
 const imageVariants = cva(
@@ -421,7 +415,9 @@ function ImageActions({ part, onRegenerate, className }: ImageActionsProps) {
         type="button"
         onClick={() => {
           setCopyError(null);
-          copyImagePart(part).catch(() => setCopyError("Could not copy image. Check clipboard permissions and try again."));
+          copyImagePart(part).then((copied) => {
+            if (!copied) setCopyError("Could not copy image. Check clipboard permissions and try again.");
+          }).catch(() => setCopyError("Could not copy image. Check clipboard permissions and try again."));
         }}
         data-slot="image-copy"
         aria-label="Copy image"
