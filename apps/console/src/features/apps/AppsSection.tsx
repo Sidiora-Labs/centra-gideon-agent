@@ -818,8 +818,8 @@ export function SourcesPanel({ catalog, settled = catalog !== undefined, reloadC
                 )}
                 <Button variant="ghost" size="sm" loading={busy === url} onClick={() => installFrom(url, url)}><Download size={14} /> Install
                 </Button>
-                 {!isBuiltin && (
-                   <SquareIconButton icon={Trash2} tone="danger" label="Remove source" className="shrink-0"
+                  {!isBuiltin && (
+                    <SquareIconButton icon={Trash2} tone="danger" label="Remove source" className="shrink-0"
                     onClick={() => removeSource(url)} />
                 )}
               </div>
@@ -862,8 +862,8 @@ export function SourcesPanel({ catalog, settled = catalog !== undefined, reloadC
                 <span className="min-w-0 flex-1 truncate font-mono text-on-surface text-[0.75rem]">{path}</span>
                 {isFirstParty ? (
                   <span className="shrink-0 rounded-pill bg-surface-highest px-2 py-0.5 text-on-surface-low text-[0.75rem]">First-party</span>
-                 ) : (
-                   <SquareIconButton icon={Trash2} tone="danger" label="Remove local source" className="shrink-0"
+                  ) : (
+                    <SquareIconButton icon={Trash2} tone="danger" label="Remove local source" className="shrink-0"
                     onClick={() => removeLocalSource(path)} />
                 )}
               </div>

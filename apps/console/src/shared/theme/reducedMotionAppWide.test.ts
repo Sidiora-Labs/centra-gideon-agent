@@ -357,7 +357,7 @@ describe('census self-checks — the floors that stop a silent pass', () => {
 
   it('comment blanking removes prose that would otherwise be counted as code', () => {
     const raw = readFileSync(join(CWD, 'src/shared/ui/motion/vocabulary.ts'), 'utf8')
-      + '\n// stiffness: 99\n/* damping: 99 */' 
+      + '\n// stiffness: 99\n/* damping: 99 */'
     const rawHits = raw.split('\n').filter((l) => new RegExp(SPRING_PARAM.source).test(l)).length
     const blankedHits = blankComments(raw).split('\n').filter((l) => new RegExp(SPRING_PARAM.source).test(l)).length
     expect(rawHits, 'the control file must carry commented mentions, or it proves nothing').toBeGreaterThan(1)

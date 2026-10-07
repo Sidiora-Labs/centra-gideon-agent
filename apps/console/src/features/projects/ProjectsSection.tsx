@@ -362,9 +362,9 @@ function ProjectDetailPage({ id, onBack, navigate, query, setQuery }: { id: stri
       <FolderKanban size={18} className="shrink-0 text-primary" />
 
       <PageTitle className="truncate">{project.name}</PageTitle>
-       {project.name_locked && <Lock size={12} className="shrink-0 text-on-surface-low" aria-label="Automatic naming off" />}
+        {project.name_locked && <Lock size={12} className="shrink-0 text-on-surface-low" aria-label="Automatic naming off" />}
       {!project.is_builtin && (
-         <IconButton icon={Pencil} label="Rename project" size={24} iconSize={13} onClick={() => { setNameDraft(project.name); setRenaming(true) }} className="shrink-0 -m-0.5" />
+          <IconButton icon={Pencil} label="Rename project" size={24} iconSize={13} onClick={() => { setNameDraft(project.name); setRenaming(true) }} className="shrink-0 -m-0.5" />
       )}
     </div>
   )

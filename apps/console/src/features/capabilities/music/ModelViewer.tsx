@@ -5,16 +5,16 @@ import { loadGlb } from './glb'
 import {Button} from '../../../shared/ui/Button'
 type Props={artifactRef:{slug:string;version:number};artifactBase?:string;animationName?:string;reducedMotion?:boolean;onClips?:(names:string[])=>void}
 export default function ModelViewer({artifactRef,artifactBase='/api/capabilities/music/models3d/artifacts',animationName,reducedMotion=false,onClips}:Props){
- const host=useRef<HTMLDivElement>(null),mixer=useRef<AnimationMixer|null>(null),clips=useRef<Awaited<ReturnType<typeof loadGlb>>['gltf']['animations']>([]),motion=useRef(reducedMotion),callback=useRef(onClips)
- const action=useRef<AnimationAction|null>(null)
- const [error,setError]=useState(''),[loaded,setLoaded]=useState(false),[attempt,setAttempt]=useState(0)
- callback.current=onClips;motion.current=reducedMotion
- useEffect(()=>{
+  const host=useRef<HTMLDivElement>(null),mixer=useRef<AnimationMixer|null>(null),clips=useRef<Awaited<ReturnType<typeof loadGlb>>['gltf']['animations']>([]),motion=useRef(reducedMotion),callback=useRef(onClips)
+  const action=useRef<AnimationAction|null>(null)
+  const [error,setError]=useState(''),[loaded,setLoaded]=useState(false),[attempt,setAttempt]=useState(0)
+  callback.current=onClips;motion.current=reducedMotion
+  useEffect(()=>{
   let disposed=false,frame=0,renderer:WebGLRenderer|undefined,controls:OrbitControls|undefined,root:Awaited<ReturnType<typeof loadGlb>>|undefined
   const abort=new AbortController();setError('');setLoaded(false)
   const container=host.current!
   async function start(){
-   try{
+    try{
     const response=await fetch(`${artifactBase}/${encodeURIComponent(artifactRef.slug)}/${artifactRef.version}/raw`,{credentials:'same-origin',signal:abort.signal})
     if(!response.ok)throw new Error('Model version unavailable')
     root=await loadGlb(await response.arrayBuffer());if(disposed)return
@@ -26,11 +26,11 @@ export default function ModelViewer({artifactRef,artifactBase='/api/capabilities
     mixer.current=new AnimationMixer(root.gltf.scene);clips.current=root.gltf.animations;callback.current?.(root.clips);setLoaded(true)
     const clock=new Clock()
     const draw=()=>{if(disposed)return;const delta=Math.min(clock.getDelta(),.1);if(!motion.current)mixer.current?.update(delta);controls!.update();renderer!.render(scene,camera);frame=requestAnimationFrame(draw)};draw()
-   }catch(err){if(!disposed)setError((err as Error).message)}
+    }catch(err){if(!disposed)setError((err as Error).message)}
   }
   void start()
   return()=>{disposed=true;abort.abort();cancelAnimationFrame(frame);controls?.dispose();mixer.current?.stopAllAction();mixer.current=null;root?.gltf.scene.traverse(object=>{if(object instanceof Mesh){object.geometry.dispose();const materials=Array.isArray(object.material)?object.material:[object.material];materials.forEach((material:Material)=>{for(const value of Object.values(material))if(value instanceof Texture)value.dispose();material.dispose()})}});renderer?.dispose();renderer?.domElement.remove()}
- },[artifactRef.slug,artifactRef.version,artifactBase,attempt])
- useEffect(()=>{const current=mixer.current;if(!current)return;if(reducedMotion||!animationName){current.stopAllAction();action.current=null;return}const clip=clips.current.find(row=>row.name===animationName);if(clip){action.current?.fadeOut(.15);action.current=current.clipAction(clip).reset().fadeIn(.15).play()}},[animationName,reducedMotion,loaded])
- return <div className="overflow-hidden rounded-lg bg-surface-low"><div ref={host} aria-label="3D model viewer" className="grid min-h-64 w-full place-items-center overflow-hidden"/>{error?<div className="flex items-center justify-between gap-m p-m"><p role="alert" data-type="body-s" className="text-danger">{error}</p><Button size="sm" variant="secondary" onClick={()=>setAttempt(value=>value+1)}>Retry</Button></div>:!loaded?<p role="status" data-type="body-s" className="p-m text-on-surface-low">Loading 3D geometry…</p>:<p data-type="body-s" className="p-m text-on-surface-low">Drag to orbit. Scroll to zoom.</p>}</div>
+  },[artifactRef.slug,artifactRef.version,artifactBase,attempt])
+  useEffect(()=>{const current=mixer.current;if(!current)return;if(reducedMotion||!animationName){current.stopAllAction();action.current=null;return}const clip=clips.current.find(row=>row.name===animationName);if(clip){action.current?.fadeOut(.15);action.current=current.clipAction(clip).reset().fadeIn(.15).play()}},[animationName,reducedMotion,loaded])
+  return <div className="overflow-hidden rounded-lg bg-surface-low"><div ref={host} aria-label="3D model viewer" className="grid min-h-64 w-full place-items-center overflow-hidden"/>{error?<div className="flex items-center justify-between gap-m p-m"><p role="alert" data-type="body-s" className="text-danger">{error}</p><Button size="sm" variant="secondary" onClick={()=>setAttempt(value=>value+1)}>Retry</Button></div>:!loaded?<p role="status" data-type="body-s" className="p-m text-on-surface-low">Loading 3D geometry…</p>:<p data-type="body-s" className="p-m text-on-surface-low">Drag to orbit. Scroll to zoom.</p>}</div>
 }

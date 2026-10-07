@@ -207,7 +207,7 @@ export function DesktopLiveView() {
       )}
       {feed.length > 0 && (
         <div className="flex flex-col gap-xs">
-           {feed.map((row, i) => (
+            {feed.map((row, i) => (
             <WidgetRow key={`${row.timestamp}-${i}`}>
               <div className="flex min-w-0 items-center gap-s">
                 <StatusPill tone={outcomeTone(row.outcome)}>{row.outcome || 'unknown'}</StatusPill>
@@ -226,9 +226,9 @@ export function DesktopLiveView() {
                 </span>
               </div>
             </WidgetRow>
-           ))}
-           <MoreRow total={(data.feed ?? []).length} shown={FEED_ROWS} noun="events" />
-         </div>
+            ))}
+            <MoreRow total={(data.feed ?? []).length} shown={FEED_ROWS} noun="events" />
+          </div>
       )}
     </div>
   )

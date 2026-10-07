@@ -94,7 +94,7 @@ export function parseLiveUISpec(input: unknown): LiveUISpec | null {
         if (!object(item) || !validValue(item, 0) ||
             (item.$action !== undefined && !validAction(item.$action, actions))) return false
       } else if (key !== '$type' && key !== '$key' && key !== '$action' &&
-                 (key.startsWith('$') || key.startsWith('on') || !validValue(item, 0))) return false
+                  (key.startsWith('$') || key.startsWith('on') || !validValue(item, 0))) return false
     }
     return true
   }
@@ -134,7 +134,7 @@ export function bindDonorUISpec(input: unknown): LiveUISpec | null {
       const kind = Array.isArray(bound) ? 'array' : bound === null ? 'null' : typeof bound
       if (!Object.hasOwn(bindings, value.$bind) || !validValue(bound, 0) || kind !== value.$kind ||
           ((value.$bind.endsWith('.src') || value.$bind === 'src') &&
-           (typeof bound !== 'string' || !/^https?:\/\//i.test(bound)))) valid = false
+            (typeof bound !== 'string' || !/^https?:\/\//i.test(bound)))) valid = false
       return bound
     }
     return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, fill(child)]))

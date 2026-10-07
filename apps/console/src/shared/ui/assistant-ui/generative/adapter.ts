@@ -25,8 +25,8 @@ export function planUISpecRender(spec: LiveUISpec, capabilities: ActionCapabilit
       const control = copy[key]
       if (control && typeof control === 'object' && !Array.isArray(control) &&
           (!('$action' in control) || !control.$action || typeof control.$action !== 'object' ||
-           !('type' in control.$action) || typeof control.$action.type !== 'string' ||
-           !availableCapability(spec, control.$action.type, capabilities))) {
+            !('type' in control.$action) || typeof control.$action.type !== 'string' ||
+            !availableCapability(spec, control.$action.type, capabilities))) {
         unavailable.add('$action' in control && control.$action && typeof control.$action === 'object' &&
           'type' in control.$action && typeof control.$action.type === 'string' ? control.$action.type : key)
         delete copy[key]

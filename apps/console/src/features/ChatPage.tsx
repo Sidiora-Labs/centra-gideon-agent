@@ -2841,11 +2841,11 @@ function ArtifactContextPicker({ attached, onPick, onRemove, onClose }: {
                   onClick={() => (on ? onRemove(a.slug) : onPick({ slug: a.slug, name: a.name }))} />
               )
             })}
-             {n && shown.length === 0 && (
+              {n && shown.length === 0 && (
               <p className="px-2 py-2 text-on-surface-low text-[0.8125rem]">No artifact matches that.</p>
-             )}
-             <MoreRow total={matching.length} shown={40} noun="artifacts" />
-           </div>
+              )}
+              <MoreRow total={matching.length} shown={40} noun="artifacts" />
+            </div>
         )}
       </div>
     </Modal>
