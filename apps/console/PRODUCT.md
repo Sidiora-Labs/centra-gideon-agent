@@ -18,7 +18,7 @@ Gideon is a self-hosted personal AI agent platform — an agentic operating syst
 
 ## Positioning
 
-The one AI agent platform you fully own — every capability and every vendor is a removable app, and the whole system answers to one person: you.
+The one AI agent platform you fully own — provider integrations are modular while the gateway retains core authority, and the whole system answers to one person: you.
 
 ## Brand Personality
 
@@ -31,11 +31,11 @@ Friendly, playful, approachable. Gideon should feel like a capable companion, no
 ## Design Principles
 
 1. **Companion, not console.** Every surface should feel personal and warm — one user, their machine, their agent — never like a fleet-management tool.
-2. **Show the machinery, softly.** Autonomy needs legibility: loops, approvals, and agent activity are always visible and steerable, presented calmly rather than as alarm walls.
+2. **Show the machinery, softly.** Autonomy needs legibility: loops, approvals, and agent activity should be legible and steerable where supported, presented calmly rather than as alarm walls.
 3. **Playful within discipline.** Motion and delight are real but budgeted (expressiveness/bounciness scale them, reduced-motion zeroes them); the task always wins.
 4. **Everything is a token.** Colors, spacing, radius, motion all ride the customizable token system — no hardcoded values; the user can retint and reshape the whole app.
 5. **Earned familiarity.** Standard product affordances (nav rail, composer, lists, settings) done exceptionally well beat invented ones.
 
 ## Accessibility & Inclusion
 
-WCAG AA: ≥4.5:1 body-text contrast, visible keyboard focus (global `:focus-visible` ring), and full `prefers-reduced-motion` support — every animation has a reduced alternative and all springy personality collapses to instant/crossfade.
+The design target is WCAG AA, including ≥4.5:1 normal-text contrast, visible keyboard focus and meaningful reduced-motion behavior. Shared controls and theme rules support that target; their presence is not app-wide certification. Verify actual states, themes, viewports and custom animations. See [current interaction patterns](../../docs/design/PATTERNS.md) and [browser-check limits](e2e/README.md).

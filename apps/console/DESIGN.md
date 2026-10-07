@@ -22,7 +22,7 @@ colors:
   danger-red: "#f55e57"
   info-blue: "#4e8ff8"
 typography:
-  # Machine-readable mirror of the tokens.css `data-type` ramp (src/design/
+  # Machine-readable mirror of the tokens.css `data-type` ramp (src/shared/theme/
   # tokens.css) — one entry per distinct size rung. The impeccable design hook
   # parses these fontSize values as the blessed type scale (±0.5px). Keep this in
   # lockstep with tokens.css; the prose "Hierarchy" below summarizes it.
@@ -148,7 +148,7 @@ components:
 
 Gideon's dashboard is a capable engine with a soft shell, working in a studio after hours. The room is dark and calm — near-black canvas (#0f0f0f), tonal surface layers instead of hard borders — and the machine's warmth shows through one coral voice (#ff6b5b) that glows, blooms, and sweeps through gradient accents wherever the agent is alive: the composer focus ring, the thinking pulse, the spark. Two influences are deliberately blended: a **neural-expressive** signature (fractional variable-font weights like `wght 280` display, ambient glow, gradient energy that reads as live intelligence) and **Google's playful expressive element language** (pill shapes, tonal containers, springy overshoot on press) — both re-tinted through Gideon's own coral/terracotta identity rather than copied.
 
-Controls are physical and friendly: pills by default, squircles for large sheets, spring-driven press/hover with earned overshoot. Personality is *budgeted and tunable* — a global expressiveness knob and bounciness slider scale every playful moment, and `prefers-reduced-motion` collapses all of it to crossfades. This system explicitly rejects hacker-terminal cosplay: no green-on-black, no scanlines, no readability sacrificed to look "technical." The optional `data-ui="cli"` density mode tightens spacing and squares corners as a utilitarian layout choice; it is not a costume.
+Controls are physical and friendly: pills by default, squircles for large sheets, spring-driven press/hover with earned overshoot. Personality is *budgeted and tunable* — a global expressiveness knob and bounciness slider guide shared motion, with explicit `prefers-reduced-motion` alternatives for decorative effects. This system explicitly rejects hacker-terminal cosplay: no green-on-black, no scanlines, no readability sacrificed to look "technical." The optional `data-ui="cli"` density mode tightens spacing and squares corners as a utilitarian layout choice; it is not a costume.
 
 **Key Characteristics:**
 - Dark-first tonal layering (canvas → surface → container → high → highest); light mode is an override, dark is home.
@@ -225,8 +225,8 @@ Controls are pill-shaped, tonal, and springy; every interactive component has de
 - **Primary:** coral fill (#ff6b5b), deep-ember ink, 40px height, 20px side padding, label at wght 470.
 - **Hover / Press:** hover lifts to #ff9a86 with a subtle spring scale-up (~1.025); press springs in (~0.95); solid buttons at high expressiveness carry a pointer-tracking radial sheen.
 - **Secondary:** tonal fill (#282a2c → #333537 on hover). **Ghost:** transparent → tonal hover. **Danger:** #f55e57 with white ink.
-- **Loading:** label cross-fades out, centered spinner in; width preserved.
-- **Disabled:** 40% opacity, pointer-events off.
+- **Loading:** expose the actual pending operation with the supported loading state and meaningful label.
+- **Disabled:** retain the action guard and an accurate reason. Explained unavailable controls may remain keyboard-reachable through `aria-disabled`; do not assume every disabled control uses native pointer blocking.
 
 ### Icon Buttons
 - Round pill hit area (40px), idle at ink-variant, hover fills surface-high and brightens to ink; `filled` variant uses solid coral. Optional icon-morph crossfade and one-shot success "bloom" pop (scales with bounciness).
@@ -246,7 +246,7 @@ Controls are pill-shaped, tonal, and springy; every interactive component has de
 
 ### Motion (component-level doctrine)
 - **Spatial springs** (stiffness 200–800, visible overshoot) for position/scale; **effects curve** (0.2s, `cubic-bezier(0.2,0,0,1)`, critically damped) for opacity/color.
-- **Four named presets — `physics.snappy` / `smooth` / `fluid` / `playful`** — are the whole spring vocabulary; `playful` marks the ~3–4 sanctioned personality moments (menu open, success bloom). All four interpolate toward calm via the user's bounciness setting and all four collapse to an instant swap under reduced motion. Full author guide, including the budget and the gesture helpers: [`docs/design/MOTION.md`](../docs/design/MOTION.md).
+- **Four named presets — `physics.snappy` / `smooth` / `fluid` / `playful`** — are the whole spring vocabulary; `playful` marks the ~3–4 sanctioned personality moments (menu open, success bloom). All four interpolate toward calm via the user's bounciness setting and all four collapse to an instant swap under reduced motion. Full author guide, including the budget and the gesture helpers: [`docs/design/MOTION.md`](../../docs/design/MOTION.md).
 
 ## 6. Do's and Don'ts
 
@@ -264,3 +264,12 @@ Controls are pill-shaped, tonal, and springy; every interactive component has de
 - **Don't** bounce opacity or color — overshoot belongs to spatial properties only; effects are critically damped.
 - **Don't** put coral on inactive states, decorative fills, or more than ~10% of a task screen; semantic colors (green/orange/red/blue) never decorate.
 - **Don't** use uppercase tracked eyebrows or display sizes inside panels — weight steps carry hierarchy.
+
+## Source and qualification boundaries
+
+The frontmatter describes the design vocabulary. Runtime theme tokens and the
+typed controls under `apps/console/src/shared/ui/` determine actual behavior.
+[Pattern guidance](../../docs/design/PATTERNS.md) documents current forms, actions
+and recovery; [motion guidance](../../docs/design/MOTION.md) describes the shared
+implementation. Design requirements are not evidence of current visual or
+accessibility qualification on every surface.
