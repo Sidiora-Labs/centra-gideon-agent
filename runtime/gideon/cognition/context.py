@@ -11,7 +11,7 @@ import secrets
 import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Protocol, TypedDict, cast
 
 from gideon.automation.schedule import get_local_tz
 from gideon.cognition.context_headroom import (
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from gideon.engine.session import ConversationDirectory
     from gideon.extensions.skills.allocation import SkillDecision
     from gideon.integrations.channel_history import ChannelHistory
+    from gideon.integrations.llm.base import ModelProvider
 
 logger = logging.getLogger(__name__)
 _memory_stores: dict[str, MemoryJournal] = {}
@@ -53,6 +54,8 @@ def cached_memory_vector_stores() -> tuple[object, ...]:
             stores.append(vector_store)
             seen.add(id(vector_store))
     return tuple(stores)
+
+
 _MAX_CONTEXT_CHARS = 165_000
 _HISTORY_BUDGET_CHARS = 35_000
 _CROSS_TAB_BUDGET_CHARS = 6_000
@@ -480,11 +483,19 @@ def has_restorable_history(
         return False
 
 
+class CompressionSessions(Protocol):
+    async def recycle_background(self) -> None: ...
+    async def get_or_create(
+        self, key: str, agent: str | None = None
+    ) -> tuple["ModelProvider", bool, bool]: ...
+    def release(self, key: str) -> None: ...
+
+
 async def compress_thread_history(
     conversation_log: "ConversationLog",
     session_key: str,
     query: str,
-    sessions: "ConversationDirectory",
+    sessions: "CompressionSessions",
 ) -> str | None:
     from gideon.engine.session import BACKGROUND_KEY
     from gideon.integrations.llm_helpers import stream_and_collect
@@ -637,7 +648,7 @@ class PromptRecall:
 
     def inspection(self) -> dict[str, object]:
         detail = (
-            self.evidence.inspection()
+            getattr(self.evidence, "inspection")()
             if self.evidence is not None
             and callable(getattr(self.evidence, "inspection", None))
             else None
@@ -654,7 +665,9 @@ class PromptRecall:
         return result
 
 
-def _prompt_recall_component(result, *, source: str, policy_revision: int) -> Component | None:
+def _prompt_recall_component(
+    result, *, source: str, policy_revision: int
+) -> Component | None:
     if not result.hits:
         return None
     lines = [
@@ -673,7 +686,14 @@ def _prompt_recall_component(result, *, source: str, policy_revision: int) -> Co
         covered_digest=digest,
         policy_revision=policy_revision,
         cache_region="delta",
-        source_cursor=("scoped:" + hashlib.sha256(json.dumps(result.scope_cursors, sort_keys=True).encode()).hexdigest() if result.scope_cursors else f"{result.cursor.epoch}:{result.cursor.sequence}"),
+        source_cursor=(
+            "scoped:"
+            + hashlib.sha256(
+                json.dumps(result.scope_cursors, sort_keys=True).encode()
+            ).hexdigest()
+            if result.scope_cursors
+            else f"{result.cursor.epoch}:{result.cursor.sequence}"
+        ),
     )
 
 
@@ -732,7 +752,27 @@ def _remote_recall_result(response):
         arms = []
         for scope, source_response in response.sources:
             label = str(scope.workspace_id or "owner")
-            arms.extend((RecallArmEvidence("keyword:" + label, "available", sum(hit.scores.lexical > 0 for hit in source_response.hits)), RecallArmEvidence("vector:" + label, "unavailable" if source_response.degraded and source_response.degradation_reason == "semantic_unavailable" else "available", sum(hit.scores.semantic > 0 for hit in source_response.hits), source_response.degradation_reason or "")))
+            arms.extend(
+                (
+                    RecallArmEvidence(
+                        "keyword:" + label,
+                        "available",
+                        sum(hit.scores.lexical > 0 for hit in source_response.hits),
+                    ),
+                    RecallArmEvidence(
+                        "vector:" + label,
+                        (
+                            "unavailable"
+                            if source_response.degraded
+                            and source_response.degradation_reason
+                            == "semantic_unavailable"
+                            else "available"
+                        ),
+                        sum(hit.scores.semantic > 0 for hit in source_response.hits),
+                        source_response.degradation_reason or "",
+                    ),
+                )
+            )
     return HybridRecallResult(
         hits,
         response.cursor,
@@ -831,11 +871,16 @@ class PromptAssembler:
             return PromptRecall("unavailable", "none", reason="empty_query")
         if source is None:
             from gideon.cognition.memory_service import service_for
+            from gideon.integrations.memory_providers.base import MemoryProvider
 
-            candidate = service_for(self.memory).provider
+            candidate = service_for(cast(MemoryProvider, self.memory)).provider
             if getattr(candidate, "name", "") == "hypermid":
                 source = candidate
-        app_receipt = source._app_receipt() if source is not None and hasattr(source, "_app_receipt") else None
+        app_receipt = (
+            source._app_receipt()
+            if source is not None and hasattr(source, "_app_receipt")
+            else None
+        )
         effective_scope = app_receipt.scope if app_receipt is not None else scope
         reach = memory_reach(effective_scope, app_receipt=app_receipt)
         if not reach.read_allowed:
@@ -845,8 +890,13 @@ class PromptAssembler:
             bound_scope = getattr(source, "scope", None)
             if scope is None:
                 scope = bound_scope
-            if bound_scope is None or scope not in (bound_scope, app_receipt.scope if app_receipt is not None else bound_scope):
-                raise PermissionError("recall scope does not match Hypermid memory authority")
+            if bound_scope is None or scope not in (
+                bound_scope,
+                app_receipt.scope if app_receipt is not None else bound_scope,
+            ):
+                raise PermissionError(
+                    "recall scope does not match Hypermid memory authority"
+                )
             try:
                 response = source.search_with_evidence(text, k=limit)
             except (
@@ -878,11 +928,15 @@ class PromptAssembler:
                 )
 
         if app_receipt is not None:
-            return PromptRecall("unavailable", "hypermid.memory.daemon", reason=remote_failure or "app_scope_unavailable")
+            return PromptRecall(
+                "unavailable",
+                "hypermid.memory.daemon",
+                reason=remote_failure or "app_scope_unavailable",
+            )
         if fallback_archive is None:
-            candidate = getattr(self.memory, "vector_store", None)
-            if candidate is not source:
-                fallback_archive = candidate
+            fallback_candidate = getattr(self.memory, "vector_store", None)
+            if fallback_candidate is not source:
+                fallback_archive = fallback_candidate
         if fallback_archive is None:
             return PromptRecall(
                 "unavailable" if remote_failure else "off",
@@ -896,6 +950,7 @@ class PromptAssembler:
                 reason="fallback_scope_or_cursor_missing",
             )
         from gideon.cognition.vector_memory import ScopedHybridRecall
+        from gideon.hypermid.foundation import Id
         from gideon.hypermid.models import Trace
 
         token = secrets.token_hex(12)
@@ -903,7 +958,7 @@ class PromptAssembler:
             text,
             request_scope=scope,
             cursor=fallback_cursor,
-            trace=Trace(f"trace-recall-{token}", f"request-recall-{token}"),
+            trace=Trace(Id(f"trace-recall-{token}"), Id(f"request-recall-{token}")),
             observed_at_ms=(
                 observed_at_ms
                 if observed_at_ms is not None
@@ -1049,7 +1104,11 @@ class PromptAssembler:
     ) -> str:
         if not key or resumed:
             return ""
-        if self.conversation_log is None and prior_transcript is None and not compressed:
+        if (
+            self.conversation_log is None
+            and prior_transcript is None
+            and not compressed
+        ):
             return ""
         from gideon.integrations.prompt_providers.runtime import render_snippet_block
 
@@ -1180,12 +1239,11 @@ class PromptAssembler:
         dropped_out: list[str] | None = None,
         prior_transcript: list[dict[str, str]] | None = None,
     ) -> str:
-        from gideon.integrations.prompt_providers.runtime import render_snippet_block
-
         from gideon.engine.agents.defaults import (
             DEFAULT_NATIVE_AGENT_NAME,
             normalize_agent_name,
         )
+        from gideon.integrations.prompt_providers.runtime import render_snippet_block
 
         custom = bool(
             agent and normalize_agent_name(agent) != DEFAULT_NATIVE_AGENT_NAME
@@ -1222,9 +1280,13 @@ class PromptAssembler:
             else self._standing_memory(memory, session_key, agent)
         )
         sections.extend(standing.direct)
-        skill_library = self._skill_library(agent, custom=custom, session_key=session_key)
+        skill_library = self._skill_library(
+            agent, custom=custom, session_key=session_key
+        )
         if skill_library is not None:
-            standing.ambient["skill_index"] = skill_library.get_context(agent=agent) or ""
+            standing.ambient["skill_index"] = (
+                skill_library.get_context(agent=agent) or ""
+            )
         if session_key:
             try:
                 from gideon.extensions.skills.ephemeral import context_block
@@ -1295,6 +1357,7 @@ class PromptAssembler:
                 from gideon.integrations.prompt_providers.runtime import (
                     render_use_case_prompt,
                 )
+
                 prompt = (
                     render_use_case_prompt(
                         _prompt_use_case_for(key, use_case),
@@ -1312,14 +1375,21 @@ class PromptAssembler:
                 except OSError:
                     prompt = ""
         if agent_voice.strip() and prompt:
-            from gideon.integrations.prompt_providers.runtime import render_snippet_block
+            from gideon.integrations.prompt_providers.runtime import (
+                render_snippet_block,
+            )
 
             voice_layer = render_snippet_block(
                 "agent-voice-layer",
                 {"voice": agent_voice, "system_prompt": prompt},
             )
             prompt = voice_layer or "\n".join(
-                ("[VOICE — speak and decide as this persona]", agent_voice.strip(), "", prompt)
+                (
+                    "[VOICE — speak and decide as this persona]",
+                    agent_voice.strip(),
+                    "",
+                    prompt,
+                )
             )
         if suffix.strip():
             prompt = "\n\n".join(filter(None, (prompt, suffix)))
@@ -1481,10 +1551,13 @@ class PromptAssembler:
             compressible=False,
         )
 
-    def _skill_library(self, agent: str | None, *, custom: bool, session_key: str | None = None):
+    def _skill_library(
+        self, agent: str | None, *, custom: bool, session_key: str | None = None
+    ):
+        import copy
+
         from gideon.engine.agents.skill_list import agent_skills
         from gideon.extensions.skills.loader import agent_skills_dir
-        import copy
 
         try:
             configuration = AppConfig.load()
@@ -1492,6 +1565,7 @@ class PromptAssembler:
             configuration = None
         grants = agent_skills(agent, configuration)
         from gideon.engine.agents.loop_skills import names
+
         grants = grants.beside(names(session_key or "", grants.agent))
         if custom and not grants.listed:
             return None
@@ -1563,9 +1637,7 @@ class PromptAssembler:
                         requests.append(SkillRequest(name=name, content=body))
         if not requests:
             return
-        allocation = allocate_skills(
-            library, requests, query=text, session=key or ""
-        )
+        allocation = allocate_skills(library, requests, query=text, session=key or "")
         for name, block in allocation.blocks:
             parts.add(block, name=f"skill: {name}")
         if notices is not None:
@@ -1672,7 +1744,11 @@ class PromptAssembler:
             force_skill_ids,
             notices_out,
             skill_decisions_out,
-            self._skill_library(agent, custom=bool(agent and agent.strip().lower() != "gideon"), session_key=session_key),
+            self._skill_library(
+                agent,
+                custom=bool(agent and agent.strip().lower() != "gideon"),
+                session_key=session_key,
+            ),
         )
         if result.action == HOOK_INJECT_CONTEXT:
             parts.add(

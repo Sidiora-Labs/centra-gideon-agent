@@ -21,24 +21,33 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
-
-from gideon.sdk.channel import owner_id_for
+from typing import TYPE_CHECKING, Any, Protocol
 
 from slack_desk_runtime.client import RealSlackDeskClient
 
+from gideon.sdk.channel import owner_id_for
+
 if TYPE_CHECKING:
-    from gideon.sdk.channel import GatewayServices
     from slack_desk_runtime.settings import SlackDeskSettings
 
+    from gideon.sdk.channel import AppConfig
+
 logger = logging.getLogger(__name__)
+
+
+class RuntimeServices(Protocol):
+    @property
+    def config(self) -> "AppConfig": ...
+
+    @property
+    def owner_id(self) -> str: ...
 
 
 class SlackDeskRuntime:
     """Holds Slack-owned state; proxies core services to a GatewayServices handle."""
 
     def __init__(
-        self, services: "GatewayServices", config: dict[str, Any] | None = None
+        self, services: "RuntimeServices", config: dict[str, Any] | None = None
     ) -> None:
         self._services = services
         cfg = services.config

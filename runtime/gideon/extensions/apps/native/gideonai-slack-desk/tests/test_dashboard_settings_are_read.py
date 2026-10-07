@@ -42,11 +42,15 @@ from dataclasses import fields
 from pathlib import Path
 
 import pytest
-
 import slack_desk_runtime.enterprise as enterprise
 import slack_desk_runtime.handler as H
 from slack_desk_runtime.runtime import SlackDeskRuntime
-from slack_desk_runtime.settings import CREDENTIAL_SETTING_KEYS, SlackDeskSettings, load_tokens, reload_settings
+from slack_desk_runtime.settings import (
+    CREDENTIAL_SETTING_KEYS,
+    SlackDeskSettings,
+    load_tokens,
+    reload_settings,
+)
 from slack_desk_runtime.transport import SlackDeskTransport
 
 _APP_DIR = Path(__file__).resolve().parents[1]
@@ -108,7 +112,11 @@ def _settings_accessors() -> dict[str, str]:
     for name, member in vars(SlackDeskSettings).items():
         if name.startswith("_") or name == "load":
             continue
-        func = member.__func__ if isinstance(member, (classmethod, staticmethod)) else member
+        func = (
+            member.__func__
+            if isinstance(member, (classmethod, staticmethod))
+            else member
+        )
         if callable(func):
             out[name] = inspect.getsource(func)
     return out
@@ -136,7 +144,11 @@ def test_every_settings_field_is_read_outside_settings_py(field_name):
     for accessor, accessor_src in _settings_accessors().items():
         if f"self.{field_name}" not in accessor_src:
             continue
-        via += [f"{p} → .{accessor}()" for p, src in sources.items() if f".{accessor}(" in src]
+        via += [
+            f"{p} → .{accessor}()"
+            for p, src in sources.items()
+            if f".{accessor}(" in src
+        ]
     assert direct or via, (
         f"SlackSettings.{field_name} is writable from the dashboard (app.json declares it) "
         "and no runtime module reads it, directly or through an accessor. Wire it in or "
@@ -190,7 +202,9 @@ class _Services:
 
 
 @pytest.mark.parametrize("key", CREDENTIAL_SETTING_KEYS)
-def test_a_credential_setting_reaches_the_runtime_from_the_store_alone(key, store_only_home):
+def test_a_credential_setting_reaches_the_runtime_from_the_store_alone(
+    key, store_only_home
+):
     """Each token key, present ONLY in the app store, must reach the inbound runtime.
 
     Parametrized over the credential keys rather than spelled out, so a third token added
@@ -222,7 +236,9 @@ async def test_store_tokens_start_inbound_and_outbound_from_one_source(store_onl
     different places.
     """
     store = _write_store(
-        store_only_home, bot_token="xoxb-fake-store-bot", app_token="xapp-1-fake-store-app"
+        store_only_home,
+        bot_token="xoxb-fake-store-bot",
+        app_token="xapp-1-fake-store-app",
     )
     transport = SlackDeskTransport(store)
     assert transport.connected, "outbound did not see the store tokens"
@@ -230,11 +246,15 @@ async def test_store_tokens_start_inbound_and_outbound_from_one_source(store_onl
     runtime = SlackDeskRuntime(_Services(), config=transport._config)
     assert runtime._bot_token == store["bot_token"]
     assert runtime._app_token == store["app_token"]
-    assert runtime._slack_desk_enabled, "inbound did not see the same tokens outbound just did"
+    assert (
+        runtime._slack_desk_enabled
+    ), "inbound did not see the same tokens outbound just did"
 
 
 @pytest.mark.asyncio
-async def test_start_inbound_hands_the_store_to_the_runtime(store_only_home, monkeypatch):
+async def test_start_inbound_hands_the_store_to_the_runtime(
+    store_only_home, monkeypatch
+):
     """Drive the real ``start_inbound`` wiring, not just the pieces either side of it.
 
     Added because a mutation run caught the gap: reverting BOTH store paths (the transport
@@ -246,9 +266,13 @@ async def test_start_inbound_hands_the_store_to_the_runtime(store_only_home, mon
     path; the runtime is already built and attached by then, which is what this asserts.
     """
     store = _write_store(
-        store_only_home, bot_token="xoxb-fake-store-bot", app_token="xapp-1-fake-store-app"
+        store_only_home,
+        bot_token="xoxb-fake-store-bot",
+        app_token="xapp-1-fake-store-app",
     )
-    monkeypatch.setattr("slack_desk_runtime.events.validate_enterprise", lambda *a, **k: False)
+    monkeypatch.setattr(
+        "slack_desk_runtime.events.validate_enterprise", lambda *a, **k: False
+    )
 
     transport = SlackDeskTransport(store)
     await transport.start_inbound(_Services("U_OWNER"))
@@ -280,7 +304,9 @@ async def test_health_reports_inbound_offline_instead_of_a_green_row(store_only_
 
 
 @pytest.mark.asyncio
-async def test_health_says_not_started_before_the_gateway_drives_inbound(store_only_home):
+async def test_health_says_not_started_before_the_gateway_drives_inbound(
+    store_only_home,
+):
     """Tokens present but ``start_inbound`` never called is its own reportable state.
 
     Saving config re-cycles the provider and builds a FRESH transport that the gateway does
@@ -288,7 +314,9 @@ async def test_health_says_not_started_before_the_gateway_drives_inbound(store_o
     green the moment a token is saved and stays green over a receiver that does not exist.
     """
     store = _write_store(
-        store_only_home, bot_token="xoxb-fake-store-bot", app_token="xapp-1-fake-store-app"
+        store_only_home,
+        bot_token="xoxb-fake-store-bot",
+        app_token="xapp-1-fake-store-app",
     )
     health = await SlackDeskTransport(store).health()
     assert health["state"] == "error", health
@@ -318,7 +346,9 @@ def test_allowed_users_from_the_store_are_authorized(store_only_home):
     H.set_owner_id("U_OWNER")
     H.set_allowed_users(runtime._allowed_users)
     for uid in ("U_ALICE", "U_BOB", "U_CAROL", "U_OWNER"):
-        assert H.is_allowed_user(uid), f"{uid} is on the operator's allowlist and was refused"
+        assert H.is_allowed_user(
+            uid
+        ), f"{uid} is on the operator's allowlist and was refused"
 
 
 def test_an_id_absent_from_the_store_is_refused(store_only_home):
@@ -361,7 +391,9 @@ def test_open_channels_still_authorizes_nobody(store_only_home):
     """
     _write_store(store_only_home, open_channels=["C_OPEN"])
     runtime = SlackDeskRuntime(_Services(""), config={})
-    assert runtime._open_channels == {"C_OPEN"}, "the field is read; only the gate is inert"
+    assert runtime._open_channels == {
+        "C_OPEN"
+    }, "the field is read; only the gate is inert"
 
     H.set_open_channels(runtime._open_channels)
     assert H.is_open_channel("C_OPEN") is False

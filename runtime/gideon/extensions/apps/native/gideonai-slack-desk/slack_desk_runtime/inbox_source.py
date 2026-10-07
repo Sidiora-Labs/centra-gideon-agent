@@ -38,9 +38,9 @@ _APP_DIR = str(_Path(__file__).resolve().parents[1])
 if _APP_DIR not in _sys.path:
     _sys.path.insert(0, _APP_DIR)
 
-from gideon.sdk.inbox import IncomingMessage, MessageSourceProvider
-
 from slack_desk_runtime.client import RealSlackDeskClient, SlackDeskClientOps
+
+from gideon.sdk.inbox import IncomingMessage, MessageSourceProvider
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,9 @@ class SlackDeskInboxSource(MessageSourceProvider):
     watches_channels = True
 
     def __init__(
-        self, config: dict[str, Any] | None = None, client: SlackDeskClientOps | None = None
+        self,
+        config: dict[str, Any] | None = None,
+        client: SlackDeskClientOps | None = None,
     ) -> None:
         cfg = config or {}
         import os
@@ -121,7 +123,9 @@ class SlackDeskInboxSource(MessageSourceProvider):
                         id=ts,
                         channel_id=channel_id,
                         channel_name=channel_id,
-                        thread_id=str(msg.get("thread_ts")) if msg.get("thread_ts") else None,
+                        thread_id=(
+                            str(msg.get("thread_ts")) if msg.get("thread_ts") else None
+                        ),
                         text=str(msg.get("text", "")),
                         sender_id=sender,
                         sender_name=await self.resolve_user_name(sender),
@@ -132,7 +136,9 @@ class SlackDeskInboxSource(MessageSourceProvider):
             cursors[channel_id] = newest
         return out, cursors
 
-    async def send_reply(self, channel_id: str, text: str, thread_ts: str | None = None) -> bool:
+    async def send_reply(
+        self, channel_id: str, text: str, thread_ts: str | None = None
+    ) -> bool:
         try:
             await self._client.post_message(channel_id, text, thread_ts)
             return True
@@ -160,7 +166,10 @@ class SlackDeskInboxSource(MessageSourceProvider):
         best-effort context, so degrading to "no history" is correct.
         """
         try:
-            return [dict(m) for m in await self._client.fetch_history(channel_id, oldest, limit)]
+            return [
+                dict(m)
+                for m in await self._client.fetch_history(channel_id, oldest, limit)
+            ]
         except Exception:
             logger.debug("inbox history failed for %s", channel_id, exc_info=True)
             return []
@@ -172,7 +181,9 @@ class SlackDeskInboxSource(MessageSourceProvider):
             info = await self._client.get_user_info(user_id) or {}
             name = info.get("real_name") or info.get("name") or user_id
         except Exception:
-            logger.debug("inbox resolve_user_name failed for %s", user_id, exc_info=True)
+            logger.debug(
+                "inbox resolve_user_name failed for %s", user_id, exc_info=True
+            )
             name = user_id
         self._names[user_id] = name
         return name

@@ -10,13 +10,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from slack_desk_helpers import MockSlackDeskClient
-
-from gideon.context import ContextBuilder
-from gideon.memory import MemoryStore
-from gideon.llm.base import LLMEvent
-from gideon.skills import SkillsLoader
 from slack_desk_runtime.client import RealSlackDeskClient
 from slack_desk_runtime.handler import handle_message, set_allowed_users, set_owner_id
+
+from gideon.context import ContextBuilder
+from gideon.llm.base import LLMEvent
+from gideon.memory import MemoryStore
+from gideon.skills import SkillsLoader
 
 if TYPE_CHECKING:
     from gideon.session import SessionManager
@@ -63,7 +63,9 @@ class FakeSessionManager:
         self._provider = FakeProvider()
         self._is_new = True
 
-    async def get_or_create(self, key, agent=None, channel_id=None, approval_policy=None):
+    async def get_or_create(
+        self, key, agent=None, channel_id=None, approval_policy=None
+    ):
         was_new = self._is_new
         self._is_new = False
         return self._provider, was_new, False
@@ -142,11 +144,16 @@ class TestFetchMessage:
                         "blocks": [
                             {
                                 "type": "section",
-                                "text": {"type": "mrkdwn", "text": "standup summary here"},
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": "standup summary here",
+                                },
                             },
                             {
                                 "type": "context",
-                                "elements": [{"type": "mrkdwn", "text": "✅ Acknowledged"}],
+                                "elements": [
+                                    {"type": "mrkdwn", "text": "✅ Acknowledged"}
+                                ],
                             },
                         ],
                     }
@@ -177,7 +184,10 @@ class TestFetchMessage:
                                             {"type": "text", "text": "Check "},
                                             {"type": "user", "user_id": "U123"},
                                             {"type": "text", "text": "'s PR at "},
-                                            {"type": "link", "url": "https://example.com"},
+                                            {
+                                                "type": "link",
+                                                "url": "https://example.com",
+                                            },
                                             {"type": "text", "text": " "},
                                             {"type": "emoji", "name": "rocket"},
                                             {"type": "text", "text": " in "},
@@ -191,13 +201,19 @@ class TestFetchMessage:
                                             {
                                                 "type": "rich_text_section",
                                                 "elements": [
-                                                    {"type": "text", "text": "item one"},
+                                                    {
+                                                        "type": "text",
+                                                        "text": "item one",
+                                                    },
                                                 ],
                                             },
                                             {
                                                 "type": "rich_text_section",
                                                 "elements": [
-                                                    {"type": "text", "text": "item two"},
+                                                    {
+                                                        "type": "text",
+                                                        "text": "item two",
+                                                    },
                                                 ],
                                             },
                                         ],
@@ -210,15 +226,20 @@ class TestFetchMessage:
             }
         )
         result = await client.fetch_message("C123", "1234.5678")
-        assert result == "Check <@U123>'s PR at https://example.com :rocket: in <#C456>\nitem one\nitem two"
+        assert (
+            result
+            == "Check <@U123>'s PR at https://example.com :rocket: in <#C456>\nitem one\nitem two"
+        )
 
     def test_extract_inline_texts_filters_empty_strings(self):
         """Degenerate elements with empty text values should be filtered out."""
-        result = RealSlackDeskClient._extract_inline_texts([
-            {"type": "text", "text": ""},
-            {"type": "text", "text": "hello"},
-            {"type": "link", "url": ""},
-        ])
+        result = RealSlackDeskClient._extract_inline_texts(
+            [
+                {"type": "text", "text": ""},
+                {"type": "text", "text": "hello"},
+                {"type": "link", "url": ""},
+            ]
+        )
         assert result == ["hello"]
 
     @pytest.mark.asyncio
@@ -320,7 +341,7 @@ class TestHandlerFetchesThreadParent:
     @pytest.mark.asyncio
     async def test_fetches_parent_on_new_session(self, tmp_path):
         set_owner_id("U001")
-        set_allowed_users([{"slack_id": "U001"}])
+        set_allowed_users({"U001"})
         slack_desk = MockSlackDeskClient()
         slack_desk._fetch_message_result = "cron output here"
         sessions = cast("SessionManager", FakeSessionManager())
@@ -336,14 +357,17 @@ class TestHandlerFetchesThreadParent:
             user_id="U001",
             context_builder=builder,
         )
-        assert ("fetch_message", {"channel": "C123", "ts": "9999.0001"}) in slack_desk.actions
+        assert (
+            "fetch_message",
+            {"channel": "C123", "ts": "9999.0001"},
+        ) in slack_desk.actions
 
     @pytest.mark.asyncio
     async def test_skips_fetch_when_parent_in_compressed_history(self, tmp_path):
         """When compressed history exists, fetch_message is skipped —
         the parent is already in context."""
         set_owner_id("U001")
-        set_allowed_users([{"slack_id": "U001"}])
+        set_allowed_users({"U001"})
         slack_desk = MockSlackDeskClient()
         slack_desk._fetch_message_result = "cron output here"
         sessions = cast("SessionManager", FakeSessionManager())
@@ -365,14 +389,17 @@ class TestHandlerFetchesThreadParent:
             user_id="U001",
             context_builder=builder,
         )
-        assert ("fetch_message", {"channel": "C123", "ts": "9999.0001"}) not in slack_desk.actions
+        assert (
+            "fetch_message",
+            {"channel": "C123", "ts": "9999.0001"},
+        ) not in slack_desk.actions
 
     @pytest.mark.asyncio
     async def test_truncates_long_parent_text(self, tmp_path):
         """Parent messages over 3000 chars are truncated to prevent
         consuming too much of the LLM context window."""
         set_owner_id("U001")
-        set_allowed_users([{"slack_id": "U001"}])
+        set_allowed_users({"U001"})
         slack_desk = MockSlackDeskClient()
         slack_desk._fetch_message_result = "x" * 5000
         sm = FakeSessionManager()

@@ -5,7 +5,6 @@ from contextlib import contextmanager
 from typing import Any, Generator
 
 import pytest
-
 from slack_desk_runtime import handler as handler_mod
 from slack_desk_runtime.handler import (
     StatusReactionController,
@@ -395,7 +394,9 @@ class TestPhaseSuppression:
 
     @pytest.mark.asyncio
     async def test_build_phase_emojis_accepts_none(self) -> None:
-        result, unknown = handler_mod._build_phase_emojis({"done": None, "error": "boom"})
+        result, unknown = handler_mod._build_phase_emojis(
+            {"done": None, "error": "boom"}
+        )
         assert result["done"] is None
         assert result["error"] == "boom"
         # Other defaults untouched

@@ -22,9 +22,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
-from gideon.sdk.channel import OutboundMessage
-
+from slack_desk_helpers import MockSlackDeskClient
 from slack_desk_runtime.transport import SlackDeskTransport
 from slack_desk_runtime.writes import (
     ENV_DISABLE_LIVE_WRITES,
@@ -33,7 +31,7 @@ from slack_desk_runtime.writes import (
     live_writes_disabled,
 )
 
-from slack_desk_helpers import MockSlackDeskClient
+from gideon.sdk.channel import OutboundMessage
 
 _MSG = OutboundMessage(channel_id="C123", text="ping")
 
@@ -137,6 +135,9 @@ async def test_the_refusal_is_attributable(monkeypatch):
 
     result = await transport.send(_MSG)
 
+    from slack_desk_runtime.writes import SendRefused
+
+    assert isinstance(result, SendRefused)
     assert result.channel == "slack"
     assert result.target == "C123"
     assert ENV_DISABLE_LIVE_WRITES in result.reason
@@ -152,6 +153,9 @@ async def test_the_refusal_names_the_channel_the_transport_reports(monkeypatch):
 
     result = await transport.send(_MSG)
 
+    from slack_desk_runtime.writes import SendRefused
+
+    assert isinstance(result, SendRefused)
     assert result.channel == transport.name
 
 
@@ -160,6 +164,7 @@ async def test_a_refusal_is_distinguishable_from_a_failure(monkeypatch):
     """The whole point of the type. A send that was ATTEMPTED and failed returns a
     plain ``False``; a send the platform suppressed returns ``SendRefused``. Both are
     falsy, and conflating them is what a bare ``False`` would do."""
+
     class Boom:
         async def post_message(self, *a, **k):
             raise RuntimeError("boom")
@@ -215,7 +220,14 @@ def test_any_other_present_value_turns_the_guard_on(monkeypatch, raw):
 
 @pytest.mark.parametrize(
     ("value", "enabled"),
-    [(None, True), (True, True), (False, False), (0, False), (1, True), (object(), True)],
+    [
+        (None, True),
+        (True, True),
+        (False, False),
+        (0, False),
+        (1, True),
+        (object(), True),
+    ],
 )
 def test_guard_flag_matches_cores_parse_for_non_string_shapes(value, enabled):
     assert guard_flag(value) is enabled

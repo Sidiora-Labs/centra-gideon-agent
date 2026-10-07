@@ -19,12 +19,16 @@ import re
 import tempfile
 from typing import TYPE_CHECKING
 
-from gideon.sdk.channel import extract_text, is_parseable_document
-from gideon.sdk.channel import redact_credentials, redact_exfiltration_urls
-from gideon.sdk.channel import sel
+from gideon.sdk.channel import (
+    extract_text,
+    is_parseable_document,
+    redact_credentials,
+    redact_exfiltration_urls,
+    sel,
+)
 
 if TYPE_CHECKING:
-    from gideon.sdk.channel import GatewayServices
+    from .runtime import SlackDeskRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +86,7 @@ def _is_document(mimetype: str, name: str = "") -> bool:
 
 
 async def process_slack_desk_files(
-    orch: "GatewayServices",
+    orch: "SlackDeskRuntime",
     files: list[dict],
 ) -> tuple[list[str], list[str]]:
     """Process non-audio file attachments from a Slack message.
@@ -125,7 +129,10 @@ async def process_slack_desk_files(
                 text_blocks.append(block)
 
         else:
-            note = f"[Attached file: {name} ({mimetype}," f" {size} bytes) — unsupported type]"
+            note = (
+                f"[Attached file: {name} ({mimetype},"
+                f" {size} bytes) — unsupported type]"
+            )
             text_blocks.append(note)
             sel().log_api_access(
                 caller="file_processor",
@@ -140,7 +147,7 @@ async def process_slack_desk_files(
 
 
 async def _download_image(
-    orch: "GatewayServices",
+    orch: "SlackDeskRuntime",
     f: dict,
     url: str,
     name: str,
@@ -196,7 +203,7 @@ async def _download_image(
 
 
 async def _download_text(
-    orch: "GatewayServices",
+    orch: "SlackDeskRuntime",
     f: dict,
     url: str,
     name: str,
@@ -266,7 +273,7 @@ _MAX_DOC_BYTES = 20 * 1024 * 1024  # 20 MB download cap for documents
 
 
 async def _download_document(
-    orch: "GatewayServices",
+    orch: "SlackDeskRuntime",
     f: dict,
     url: str,
     name: str,

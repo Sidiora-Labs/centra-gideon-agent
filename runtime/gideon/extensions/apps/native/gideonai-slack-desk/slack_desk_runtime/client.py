@@ -42,6 +42,10 @@ class SlackDeskClientOps(ABC):
     ) -> str:
         """Post a Block Kit message, return its ts."""
 
+    async def get_user_info(self, user_id: str) -> dict[str, str]:
+        """Optional user directory lookup; clients without it retain the caller's id."""
+        return {}
+
     @abstractmethod
     async def update_message(
         self, channel: str, ts: str, text: str = "", blocks: list[dict] | None = None
@@ -77,7 +81,12 @@ class SlackDeskClientOps(ABC):
 
     @abstractmethod
     async def post_ephemeral(
-        self, channel: str, user_id: str, text: str, blocks: list[dict] | None = None, thread_ts: str | None = None
+        self,
+        channel: str,
+        user_id: str,
+        text: str,
+        blocks: list[dict] | None = None,
+        thread_ts: str | None = None,
     ) -> None:
         """Post an ephemeral message visible only to the specified user."""
 
@@ -116,7 +125,9 @@ class SlackDeskClientOps(ABC):
         """Append text to a streaming message. Returns True on success."""
         return False
 
-    async def stop_stream(self, channel: str, ts: str, final_text: str | None = None) -> bool:
+    async def stop_stream(
+        self, channel: str, ts: str, final_text: str | None = None
+    ) -> bool:
         """Stop a streaming message. Returns True on success."""
         return False
 
@@ -133,7 +144,9 @@ class SlackDeskClientOps(ABC):
         """Append a task_update chunk to a streaming message. Returns True on success."""
         return False
 
-    async def set_thread_status(self, channel: str, thread_ts: str, status: str) -> None:
+    async def set_thread_status(
+        self, channel: str, thread_ts: str, status: str
+    ) -> None:
         """Set assistant thread status via assistant.threads.setStatus.
 
         Pass an empty string to clear the status indicator.
@@ -158,11 +171,15 @@ class SlackDeskClientOps(ABC):
         """
         return None
 
-    async def fetch_thread_replies(self, channel: str, thread_ts: str, limit: int = 200) -> list[dict]:
+    async def fetch_thread_replies(
+        self, channel: str, thread_ts: str, limit: int = 200
+    ) -> list[dict]:
         """Fetch thread replies. Returns list of message dicts with 'user'/'bot_id' and 'text'."""
         return []
 
-    async def fetch_history(self, channel: str, oldest: str, limit: int = 200) -> list[dict]:
+    async def fetch_history(
+        self, channel: str, oldest: str, limit: int = 200
+    ) -> list[dict]:
         """Fetch channel messages newer than ``oldest``, newest-first.
 
         ``oldest`` is EXCLUSIVE (see the concrete implementation) — a message whose
@@ -278,7 +295,12 @@ class RealSlackDeskClient(SlackDeskClientOps):
         return resp["channel"]["id"]
 
     async def post_ephemeral(
-        self, channel: str, user_id: str, text: str, blocks: list[dict] | None = None, thread_ts: str | None = None
+        self,
+        channel: str,
+        user_id: str,
+        text: str,
+        blocks: list[dict] | None = None,
+        thread_ts: str | None = None,
     ) -> None:
         kwargs: dict = {"channel": channel, "user": user_id, "text": text}
         if blocks:
@@ -416,7 +438,9 @@ class RealSlackDeskClient(SlackDeskClientOps):
             logger.debug("chat.appendStream task_update failed", exc_info=True)
             return False
 
-    async def stop_stream(self, channel: str, ts: str, final_text: str | None = None) -> bool:
+    async def stop_stream(
+        self, channel: str, ts: str, final_text: str | None = None
+    ) -> bool:
         """Stop a streaming message via chat.stopStream.
 
         We intentionally do NOT call chat.update after stopping — the streamed
@@ -424,18 +448,26 @@ class RealSlackDeskClient(SlackDeskClientOps):
         that chat.update would downgrade to plain mrkdwn.
         """
         try:
-            await self._web.api_call("chat.stopStream", json={"channel": channel, "ts": ts})
+            await self._web.api_call(
+                "chat.stopStream", json={"channel": channel, "ts": ts}
+            )
             return True
         except Exception:
             logger.debug("chat.stopStream failed", exc_info=True)
             return False
 
-    async def set_thread_status(self, channel: str, thread_ts: str, status: str) -> None:
+    async def set_thread_status(
+        self, channel: str, thread_ts: str, status: str
+    ) -> None:
         """Set assistant thread loading status via assistant.threads.setStatus."""
         try:
             await self._web.api_call(
                 "assistant.threads.setStatus",
-                params={"channel_id": channel, "thread_ts": thread_ts, "status": status},
+                params={
+                    "channel_id": channel,
+                    "thread_ts": thread_ts,
+                    "status": status,
+                },
             )
         except Exception:
             logger.debug("assistant.threads.setStatus failed", exc_info=True)
@@ -532,11 +564,15 @@ class RealSlackDeskClient(SlackDeskClientOps):
             logger.debug("fetch_message failed for %s/%s", channel, ts, exc_info=True)
         return None
 
-    async def fetch_thread_replies(self, channel: str, thread_ts: str, limit: int = 200) -> list[dict]:
+    async def fetch_thread_replies(
+        self, channel: str, thread_ts: str, limit: int = 200
+    ) -> list[dict]:
         """Fetch parent message + replies via conversations.replies API."""
         try:
             resp = await self._web.conversations_replies(
-                channel=channel, ts=thread_ts, limit=limit,
+                channel=channel,
+                ts=thread_ts,
+                limit=limit,
             )
             data: dict = resp.data if hasattr(resp, "data") else dict(resp)  # type: ignore[assignment,call-overload]
             messages: list[dict] = data.get("messages", [])
@@ -544,14 +580,23 @@ class RealSlackDeskClient(SlackDeskClientOps):
             if meta.get("next_cursor"):
                 logger.warning(
                     "Thread %s/%s has more messages than limit=%d; import is incomplete",
-                    channel, thread_ts, limit,
+                    channel,
+                    thread_ts,
+                    limit,
                 )
             return messages
         except (SlackDeskClientError, aiohttp.ClientError, asyncio.TimeoutError):
-            logger.debug("fetch_thread_replies failed for %s/%s", channel, thread_ts, exc_info=True)
+            logger.debug(
+                "fetch_thread_replies failed for %s/%s",
+                channel,
+                thread_ts,
+                exc_info=True,
+            )
         return []
 
-    async def fetch_history(self, channel: str, oldest: str, limit: int = 200) -> list[dict]:
+    async def fetch_history(
+        self, channel: str, oldest: str, limit: int = 200
+    ) -> list[dict]:
         """Fetch channel messages newer than ``oldest`` via conversations.history.
 
         ``inclusive`` is deliberately NOT passed. Slack's ``conversations.history``
@@ -562,7 +607,9 @@ class RealSlackDeskClient(SlackDeskClientOps):
         the caller can distinguish "no new messages" from "the poll failed" — a
         swallowed error here would advance a cursor past unread messages.
         """
-        resp = await self._web.conversations_history(channel=channel, oldest=oldest, limit=limit)
+        resp = await self._web.conversations_history(
+            channel=channel, oldest=oldest, limit=limit
+        )
         data: dict = resp.data if hasattr(resp, "data") else dict(resp)  # type: ignore[assignment,call-overload]
         messages: list[dict] = data.get("messages", [])
         return messages if isinstance(messages, list) else []

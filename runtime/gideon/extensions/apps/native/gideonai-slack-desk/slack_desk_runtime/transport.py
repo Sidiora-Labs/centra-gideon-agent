@@ -26,13 +26,6 @@ _APP_DIR = str(_Path(__file__).resolve().parents[1])
 if _APP_DIR not in _sys.path:
     _sys.path.insert(0, _APP_DIR)
 
-from gideon.sdk.channel import (
-    ChannelCapabilities,
-    ChannelTransportProvider,
-    OutboundMessage,
-    fence_channel_content,
-)
-
 # Import ALL runtime deps at MODULE level (not lazily in start_inbound): the app
 # loader only keeps this app's dir on sys.path while it execs this module, so a
 # ``from slack_desk_runtime.X import`` inside a method runs LATER — when the dir is off
@@ -45,6 +38,13 @@ from slack_desk_runtime.interactions import init as init_interactions
 from slack_desk_runtime.runtime import SlackDeskRuntime
 from slack_desk_runtime.settings import load_tokens
 from slack_desk_runtime.writes import SendRefused, live_writes_disabled
+
+from gideon.sdk.channel import (
+    ChannelCapabilities,
+    ChannelTransportProvider,
+    OutboundMessage,
+    fence_channel_content,
+)
 
 # NOT ``__name__``: the app loader execs this ENTRY module under a synthetic name
 # (``_gid_app_gideonai_slack_desk__slack_desk_runtime_transport``), so ``__name__`` produced a
@@ -102,8 +102,14 @@ class SlackDeskTransport(ChannelTransportProvider):
 
     def capabilities(self) -> ChannelCapabilities:
         return ChannelCapabilities(
-            inbound=True, threads=True, attachments=True, reactions=True,
-            edits=True, rich_text=True, typing_indicator=True, max_text_len=40000,
+            inbound=True,
+            threads=True,
+            attachments=True,
+            reactions=True,
+            edits=True,
+            rich_text=True,
+            typing_indicator=True,
+            max_text_len=40000,
         )
 
     @property
@@ -129,7 +135,11 @@ class SlackDeskTransport(ChannelTransportProvider):
         runtime = SlackDeskRuntime(services, config=self._config)
         if not runtime._slack_desk_enabled:
             missing = " and ".join(
-                n for n, tok in (("Bot Token", runtime._bot_token), ("App Token", runtime._app_token))
+                n
+                for n, tok in (
+                    ("Bot Token", runtime._bot_token),
+                    ("App Token", runtime._app_token),
+                )
                 if not tok
             )
             self._inbound_offline_reason = (
@@ -138,7 +148,10 @@ class SlackDeskTransport(ChannelTransportProvider):
             )
             # WARNING, not INFO: this is the whole reason a correctly-credentialled-looking
             # Slack install answers nothing, and it was previously below the default level.
-            logger.warning("SlackDeskTransport: inbound stays offline — %s", self._inbound_offline_reason)
+            logger.warning(
+                "SlackDeskTransport: inbound stays offline — %s",
+                self._inbound_offline_reason,
+            )
             return
         runtime.slack_desk = RealSlackDeskClient(runtime._bot_token)
         self._runtime = runtime
@@ -160,7 +173,9 @@ class SlackDeskTransport(ChannelTransportProvider):
         # Register outbound delivery on the gateway + the dashboard. Core delivers
         # through this ONE provider-agnostic ChannelDelivery handle (text, attachments,
         # streaming, identity lookups, approvals) — it never sees the Slack client.
-        delivery = SlackDeskDelivery(runtime.slack_desk, runtime._owner_id, runtime=runtime, transport=self)
+        delivery = SlackDeskDelivery(
+            runtime.slack_desk, runtime._owner_id, runtime=runtime, transport=self
+        )
         if hasattr(services, "register_channel_delivery"):
             services.register_channel_delivery(delivery)
         if getattr(services, "dashboard_state", None) is not None:
@@ -188,15 +203,22 @@ class SlackDeskTransport(ChannelTransportProvider):
                 return
             except Exception as e:  # noqa: BLE001 — resilience: never crash the gateway
                 if attempt < 3:
-                    logger.warning("Slack Socket-Mode connect failed (%s/3): %s — retrying", attempt, e)
+                    logger.warning(
+                        "Slack Socket-Mode connect failed (%s/3): %s — retrying",
+                        attempt,
+                        e,
+                    )
                     await asyncio.sleep(2 * attempt)
                 else:
                     logger.error(
                         "Slack Socket-Mode connect failed after 3 attempts (%s) — "
-                        "Slack offline; the rest of the gateway is unaffected.", e,
+                        "Slack offline; the rest of the gateway is unaffected.",
+                        e,
                     )
                     runtime._slack_desk_enabled = False
-                    self._inbound_offline_reason = f"Socket-Mode connect failed after 3 attempts: {e}"
+                    self._inbound_offline_reason = (
+                        f"Socket-Mode connect failed after 3 attempts: {e}"
+                    )
 
     async def stop_inbound(self) -> None:
         rt = self._runtime
@@ -204,7 +226,9 @@ class SlackDeskTransport(ChannelTransportProvider):
             try:
                 await asyncio.wait_for(rt._socket_client.close(), timeout=1.0)
             except Exception:
-                logger.debug("SlackDeskTransport: socket close timed out", exc_info=True)
+                logger.debug(
+                    "SlackDeskTransport: socket close timed out", exc_info=True
+                )
 
     async def send(self, message: OutboundMessage) -> bool | SendRefused:
         """Transmit one outbound message. ``True`` delivered, ``False`` failed, or a
@@ -231,7 +255,11 @@ class SlackDeskTransport(ChannelTransportProvider):
             logger.warning("SlackDeskTransport.send refused: %s", refusal)
             return refusal
         try:
-            client = self._runtime.slack_desk if self._runtime and self._runtime.slack_desk else RealSlackDeskClient(self._bot_token)
+            client = (
+                self._runtime.slack_desk
+                if self._runtime and self._runtime.slack_desk
+                else RealSlackDeskClient(self._bot_token)
+            )
             await client.post_message(
                 channel=message.channel_id,
                 text=message.text,
@@ -258,7 +286,10 @@ class SlackDeskTransport(ChannelTransportProvider):
         if not self._bot_token:
             return {"state": "offline", "detail": "No bot token configured"}
         if self._inbound_started:
-            return {"state": "ready", "detail": "Tokens configured, Socket-Mode connected"}
+            return {
+                "state": "ready",
+                "detail": "Tokens configured, Socket-Mode connected",
+            }
         if self._inbound_offline_reason:
             return {
                 "state": "error",
@@ -286,7 +317,10 @@ class SlackDeskTransport(ChannelTransportProvider):
         # hear them. Derived from health() rather than re-deciding, so the two cannot drift.
         h = await self.health()
         if h["state"] != "ready":
-            return {"ok": False, "detail": f"Authenticated to {team}, but {h['detail']}"}
+            return {
+                "ok": False,
+                "detail": f"Authenticated to {team}, but {h['detail']}",
+            }
         return {"ok": True, "detail": f"Authenticated to {team}"}
 
 

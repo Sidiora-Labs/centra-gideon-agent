@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from slack_desk_runtime.delivery import SlackDeskDelivery
 
 
@@ -26,7 +25,8 @@ class TestOpenDmRetry:
     async def test_retries_on_server_error(self):
         from slack_sdk.errors import SlackApiError
 
-        resp = MagicMock(); resp.status_code = 500
+        resp = MagicMock()
+        resp.status_code = 500
         client = MagicMock()
         client.open_dm = AsyncMock(side_effect=[SlackApiError("500", resp), "D_OK"])
         d = _delivery(client)
@@ -36,7 +36,8 @@ class TestOpenDmRetry:
     async def test_raises_on_non_retryable(self):
         from slack_sdk.errors import SlackApiError
 
-        resp = MagicMock(); resp.status_code = 403
+        resp = MagicMock()
+        resp.status_code = 403
         client = MagicMock()
         client.open_dm = AsyncMock(side_effect=SlackApiError("403", resp))
         d = _delivery(client)
@@ -48,9 +49,12 @@ class TestOpenDmRetry:
     async def test_retries_on_rate_limit(self):
         from slack_sdk.errors import SlackApiError
 
-        resp = MagicMock(); resp.status_code = 429
+        resp = MagicMock()
+        resp.status_code = 429
         client = MagicMock()
-        client.open_dm = AsyncMock(side_effect=[SlackApiError("429", resp), SlackApiError("429", resp), "D_OK"])
+        client.open_dm = AsyncMock(
+            side_effect=[SlackApiError("429", resp), SlackApiError("429", resp), "D_OK"]
+        )
         d = _delivery(client)
         assert await d.open_dm("U1", max_attempts=3) == "D_OK"
 
@@ -58,7 +62,8 @@ class TestOpenDmRetry:
     async def test_raises_after_max_attempts(self):
         from slack_sdk.errors import SlackApiError
 
-        resp = MagicMock(); resp.status_code = 500
+        resp = MagicMock()
+        resp.status_code = 500
         client = MagicMock()
         client.open_dm = AsyncMock(side_effect=SlackApiError("500", resp))
         d = _delivery(client)
@@ -98,7 +103,7 @@ class TestDeliveryRendering:
         d = _delivery(client)
         await d.deliver_chat_mirror("C1", "Pick one\n[OPTIONS: A | B]", "1.0")
         client.post_message.assert_awaited()  # text without the OPTIONS tag
-        client.post_blocks.assert_awaited()   # options rendered as blocks
+        client.post_blocks.assert_awaited()  # options rendered as blocks
 
 
 class TestNewChannelDeliveryMethods:
@@ -110,12 +115,23 @@ class TestNewChannelDeliveryMethods:
         client = MagicMock()
         client.post_message = AsyncMock(return_value="ts1")
         d = _delivery(client)
-        await d.deliver_text("C1", "hi", "th1", unfurl_links=False, unfurl_media=False, reply_broadcast=True)
+        await d.deliver_text(
+            "C1",
+            "hi",
+            "th1",
+            unfurl_links=False,
+            unfurl_media=False,
+            reply_broadcast=True,
+        )
         # first (and only) part carries the hints
         client.post_message.assert_awaited_once()
         args, kwargs = client.post_message.call_args
         assert args[0] == "C1" and args[2] == "th1"
-        assert kwargs == {"unfurl_links": False, "unfurl_media": False, "reply_broadcast": True}
+        assert kwargs == {
+            "unfurl_links": False,
+            "unfurl_media": False,
+            "reply_broadcast": True,
+        }
 
     @pytest.mark.asyncio
     async def test_deliver_rich_posts_blocks_with_fallback(self):
@@ -123,11 +139,19 @@ class TestNewChannelDeliveryMethods:
         client.post_blocks = AsyncMock(return_value="ts2")
         d = _delivery(client)
         blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "x"}}]
-        ts = await d.deliver_rich("C1", blocks, "fallback", thread_ts="th", unfurl_links=False)
+        ts = await d.deliver_rich(
+            "C1", blocks, "fallback", thread_ts="th", unfurl_links=False
+        )
         assert ts == "ts2"
         # unfurl_media/reply_broadcast keep deliver_rich's own defaults (True/False).
         client.post_blocks.assert_awaited_once_with(
-            "C1", blocks, "fallback", thread_ts="th", unfurl_links=False, unfurl_media=True, reply_broadcast=False,
+            "C1",
+            blocks,
+            "fallback",
+            thread_ts="th",
+            unfurl_links=False,
+            unfurl_media=True,
+            reply_broadcast=False,
         )
 
     @pytest.mark.asyncio
@@ -135,8 +159,12 @@ class TestNewChannelDeliveryMethods:
         client = MagicMock()
         client.upload_file = AsyncMock(return_value=None)
         d = _delivery(client)
-        await d.upload_attachment("C1", "/a/b.txt", filename="b.txt", thread_ts="th", title="T")
-        client.upload_file.assert_awaited_once_with("C1", "th", "/a/b.txt", "b.txt", "T")
+        await d.upload_attachment(
+            "C1", "/a/b.txt", filename="b.txt", thread_ts="th", title="T"
+        )
+        client.upload_file.assert_awaited_once_with(
+            "C1", "th", "/a/b.txt", "b.txt", "T"
+        )
 
     @pytest.mark.asyncio
     async def test_stream_primitives(self):
@@ -147,14 +175,18 @@ class TestNewChannelDeliveryMethods:
         d = _delivery(client)
         assert await d.start_stream("C1", "th", initial_text="Thinking…") == "sts"
         await d.append_stream_task("C1", "sts", "t1", "Doing", "in_progress")
-        client.append_task.assert_awaited_once_with("C1", "sts", "t1", "Doing", "in_progress")
+        client.append_task.assert_awaited_once_with(
+            "C1", "sts", "t1", "Doing", "in_progress"
+        )
         await d.stop_stream("C1", "sts")
         client.stop_stream.assert_awaited_once_with("C1", "sts")
 
     @pytest.mark.asyncio
     async def test_resolve_user_name_prefers_real_name(self):
         client = MagicMock()
-        client.get_user_info = AsyncMock(return_value={"name": "u", "real_name": "Real Name"})
+        client.get_user_info = AsyncMock(
+            return_value={"name": "u", "real_name": "Real Name"}
+        )
         d = _delivery(client)
         assert await d.resolve_user_name("U1") == "Real Name"
 
@@ -185,11 +217,14 @@ class TestTransportWiresChannelDelivery:
 
     def test_both_handles_set(self):
         from unittest.mock import MagicMock as MM
+
         from slack_desk_runtime.delivery import SlackDeskDelivery
 
-        ds = MM(); ds.channel_delivery = None
-        orch = MM(); orch.dashboard_state = ds
-        registered = {}
+        ds = MM()
+        ds.channel_delivery = None
+        orch = MM()
+        orch.dashboard_state = ds
+        registered: dict[str, SlackDeskDelivery] = {}
         orch.register_channel_delivery = lambda d: registered.__setitem__("d", d)
 
         # Mirror transport.py:99-103 exactly.
@@ -227,7 +262,12 @@ class TestApprovalBriefOnTheNotification:
     _BRIEF = {
         "tool": "bash",
         "risk": "destructive",
-        "blastRadius": {"writes": True, "network": False, "shell": True, "readOnly": False},
+        "blastRadius": {
+            "writes": True,
+            "network": False,
+            "shell": True,
+            "readOnly": False,
+        },
         "blastRadiusLine": "writes files, runs a command",
     }
 
@@ -262,7 +302,9 @@ class TestApprovalBriefOnTheNotification:
         assert "Can: writes files, runs a command · Risk: destructive" in fallback
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("outcome,verdict", [("approved", True), ("rejected", False)])
+    @pytest.mark.parametrize(
+        "outcome,verdict", [("approved", True), ("rejected", False)]
+    )
     async def test_no_brief_leaves_the_notification_untouched(self, outcome, verdict):
         """VACUITY TWIN for both decisions: no brief, no added clause."""
         got, fallback = await self._prompt(None, outcome)

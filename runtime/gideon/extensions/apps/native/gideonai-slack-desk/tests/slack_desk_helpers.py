@@ -10,18 +10,38 @@ class MockSlackDeskClient(SlackDeskClientOps):
     def __init__(self):
         self.actions: list[tuple[str, dict]] = []
         self._next_ts = 1000000
+        self._stream_enabled = False
         self._fetch_message_result: str | None = None
 
-    async def post_message(self, channel, text, thread_ts=None, unfurl_links=None, unfurl_media=None):
+    async def post_message(
+        self, channel, text, thread_ts=None, unfurl_links=None, unfurl_media=None
+    ):
         ts = f"{self._next_ts}.000000"
         self._next_ts += 1
         self.actions.append(
-            ("post", {"channel": channel, "text": text, "thread_ts": thread_ts, "ts": ts,
-                      "unfurl_links": unfurl_links, "unfurl_media": unfurl_media})
+            (
+                "post",
+                {
+                    "channel": channel,
+                    "text": text,
+                    "thread_ts": thread_ts,
+                    "ts": ts,
+                    "unfurl_links": unfurl_links,
+                    "unfurl_media": unfurl_media,
+                },
+            )
         )
         return ts
 
-    async def post_blocks(self, channel, blocks, text, thread_ts=None, unfurl_links=None, unfurl_media=None):
+    async def post_blocks(
+        self,
+        channel,
+        blocks,
+        text,
+        thread_ts=None,
+        unfurl_links=None,
+        unfurl_media=None,
+    ):
         ts = f"{self._next_ts}.000000"
         self._next_ts += 1
         self.actions.append(
@@ -40,7 +60,7 @@ class MockSlackDeskClient(SlackDeskClientOps):
         )
         return ts
 
-    async def update_message(self, channel, ts, text):
+    async def update_message(self, channel, ts, text="", blocks=None):
         self.actions.append(("update", {"channel": channel, "ts": ts, "text": text}))
 
     async def delete_message(self, channel, ts):
@@ -57,7 +77,18 @@ class MockSlackDeskClient(SlackDeskClientOps):
         return f"D{user_id}"
 
     async def post_ephemeral(self, channel, user_id, text, blocks=None, thread_ts=None):
-        self.actions.append(("ephemeral", {"channel": channel, "user_id": user_id, "text": text, "blocks": blocks, "thread_ts": thread_ts}))
+        self.actions.append(
+            (
+                "ephemeral",
+                {
+                    "channel": channel,
+                    "user_id": user_id,
+                    "text": text,
+                    "blocks": blocks,
+                    "thread_ts": thread_ts,
+                },
+            )
+        )
 
     async def views_publish(self, user_id, view):
         self.actions.append(("views_publish", {"user_id": user_id, "view": view}))
@@ -82,8 +113,12 @@ class MockSlackDeskClient(SlackDeskClientOps):
             )
         )
 
-    async def start_stream(self, channel, thread_ts, initial_text=None, team_id=None, user_id=None):
-        if not getattr(self, "_stream_enabled", False) or getattr(self, "_start_stream_fails", False):
+    async def start_stream(
+        self, channel, thread_ts, initial_text=None, team_id=None, user_id=None
+    ):
+        if not getattr(self, "_stream_enabled", False) or getattr(
+            self, "_start_stream_fails", False
+        ):
             return None
         ts = f"{self._next_ts}.000000"
         self._next_ts += 1
@@ -101,10 +136,14 @@ class MockSlackDeskClient(SlackDeskClientOps):
         return ts
 
     async def append_stream(self, channel, ts, text):
-        self.actions.append(("append_stream", {"channel": channel, "ts": ts, "text": text}))
+        self.actions.append(
+            ("append_stream", {"channel": channel, "ts": ts, "text": text})
+        )
         return True
 
-    async def append_task(self, channel, ts, task_id, title, status, details="", output=""):
+    async def append_task(
+        self, channel, ts, task_id, title, status, details="", output=""
+    ):
         self.actions.append(
             (
                 "append_task",
@@ -120,17 +159,25 @@ class MockSlackDeskClient(SlackDeskClientOps):
         return True
 
     async def stop_stream(self, channel, ts, final_text=None):
-        self.actions.append(("stop_stream", {"channel": channel, "ts": ts, "text": final_text}))
+        self.actions.append(
+            ("stop_stream", {"channel": channel, "ts": ts, "text": final_text})
+        )
         return True
 
     async def set_thread_title(self, channel, thread_ts, title):
         self.actions.append(
-            ("set_thread_title", {"channel": channel, "thread_ts": thread_ts, "title": title})
+            (
+                "set_thread_title",
+                {"channel": channel, "thread_ts": thread_ts, "title": title},
+            )
         )
 
     async def set_thread_status(self, channel, thread_ts, status):
         self.actions.append(
-            ("set_thread_status", {"channel": channel, "thread_ts": thread_ts, "status": status})
+            (
+                "set_thread_status",
+                {"channel": channel, "thread_ts": thread_ts, "status": status},
+            )
         )
 
     async def fetch_message(self, channel: str, ts: str) -> str | None:

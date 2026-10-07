@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from gideon.sdk.channel import redact_credentials, redact_exfiltration_urls
+from gideon.integrations.channel_transports.base import ChannelTransportProvider
+
+if TYPE_CHECKING:
+    from .runtime import SlackDeskRuntime
 
 from slack_desk_runtime.client import RealSlackDeskClient
 from slack_desk_runtime.format import (
@@ -21,6 +24,8 @@ from slack_desk_runtime.format import (
     split_message,
     to_slack_desk_mrkdwn,
 )
+
+from gideon.sdk.channel import redact_credentials, redact_exfiltration_urls
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +39,14 @@ _CRON_MSG_LIMIT = SLACK_BLOCK_SECTION_LIMIT
 class SlackDeskDelivery:
     """Renders + delivers gateway results to Slack. Implements ChannelDelivery."""
 
-    def __init__(self, client: RealSlackDeskClient, owner_id: str, *, runtime: Any = None, transport: Any = None) -> None:
+    def __init__(
+        self,
+        client: RealSlackDeskClient,
+        owner_id: str,
+        *,
+        runtime: "SlackDeskRuntime | None" = None,
+        transport: ChannelTransportProvider | None = None,
+    ) -> None:
         self._client = client
         self._owner_id = owner_id
         self._runtime = runtime
@@ -43,24 +55,42 @@ class SlackDeskDelivery:
 
     def approval_identity(self, channel: str) -> dict | None:
         from slack_desk_runtime import enterprise
+
+        from gideon.core.config.credentials import owner_id_for
         from gideon.integrations.channel_delivery import raw_delivery_for
         from gideon.integrations.channel_transports import get_transport
         from gideon.integrations.channel_trust import is_allowed_sender
-        from gideon.core.config.credentials import owner_id_for
+
         owner = owner_id_for("slack")
         team = enterprise._validated_team_id
-        if (not owner or not team or not is_allowed_sender("slack", owner)
-            or raw_delivery_for("slack") is not self or self._transport is None
-            or get_transport("slack") is not self._transport or not self._transport.connected):
+        transport = self._transport
+        if transport is None:
             return None
-        return {"owner": owner, "tenant": f"slack:{team}", "transport": self._transport,
-                "private": self._private_channels.get(channel, False)}
+        if (
+            not owner
+            or not team
+            or not is_allowed_sender("slack", owner)
+            or raw_delivery_for("slack") is not self
+            or get_transport("slack") is not transport
+            or not transport.connected
+        ):
+            return None
+        return {
+            "owner": owner,
+            "tenant": f"slack:{team}",
+            "transport": self._transport,
+            "private": self._private_channels.get(channel, False),
+        }
 
     async def prepare_approval_channel(self, channel: str) -> bool:
         try:
             response = await self._client._web.conversations_info(channel=channel)
             actual = response.get("channel") or {}
-            self._private_channels[channel] = bool(response.get("ok") and actual.get("id") == channel and actual.get("is_im"))
+            self._private_channels[channel] = bool(
+                response.get("ok")
+                and actual.get("id") == channel
+                and actual.get("is_im")
+            )
         except Exception:
             self._private_channels[channel] = False
         return self._private_channels[channel]
@@ -86,15 +116,23 @@ class SlackDeskDelivery:
                 if not retryable or attempt >= max_attempts:
                     raise
                 logger.warning(
-                    "open_dm attempt %d/%d failed, retrying in %ds", attempt, max_attempts, attempt,
+                    "open_dm attempt %d/%d failed, retrying in %ds",
+                    attempt,
+                    max_attempts,
+                    attempt,
                     exc_info=True,
                 )
                 await asyncio.sleep(attempt)
         return ""
 
     async def deliver_text(
-        self, channel: str, text: str, thread_ts: str = "", *,
-        unfurl_links: bool | None = None, unfurl_media: bool | None = None,
+        self,
+        channel: str,
+        text: str,
+        thread_ts: str = "",
+        *,
+        unfurl_links: bool | None = None,
+        unfurl_media: bool | None = None,
         reply_broadcast: bool | None = None,
     ) -> str:
         body = to_slack_desk_mrkdwn(text)
@@ -106,27 +144,48 @@ class SlackDeskDelivery:
             # Link/broadcast hints apply to the first message only; continuation
             # parts thread under it plainly.
             if i == 0:
-                last = await self._client.post_message(
-                    channel, part, thread_ts or None,
-                    unfurl_links=unfurl_links, unfurl_media=unfurl_media,
-                    reply_broadcast=reply_broadcast,
-                ) or last
+                last = (
+                    await self._client.post_message(
+                        channel,
+                        part,
+                        thread_ts or None,
+                        unfurl_links=unfurl_links,
+                        unfurl_media=unfurl_media,
+                        reply_broadcast=reply_broadcast,
+                    )
+                    or last
+                )
             else:
-                last = await self._client.post_message(channel, part, thread_ts or None) or last
+                last = (
+                    await self._client.post_message(channel, part, thread_ts or None)
+                    or last
+                )
         return last
 
     async def deliver_rich(
-        self, channel: str, payload: Any, fallback_text: str, *,
-        thread_ts: str = "", unfurl_links: bool = True, unfurl_media: bool = True,
+        self,
+        channel: str,
+        payload: Any,
+        fallback_text: str,
+        *,
+        thread_ts: str = "",
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
         reply_broadcast: bool = False,
     ) -> str:
         # payload is Slack Block Kit (already sanitized by the caller); post as blocks.
-        return await self._client.post_blocks(
-            channel, payload, fallback_text,
-            thread_ts=thread_ts or None,
-            unfurl_links=unfurl_links, unfurl_media=unfurl_media,
-            reply_broadcast=reply_broadcast,
-        ) or ""
+        return (
+            await self._client.post_blocks(
+                channel,
+                payload,
+                fallback_text,
+                thread_ts=thread_ts or None,
+                unfurl_links=unfurl_links,
+                unfurl_media=unfurl_media,
+                reply_broadcast=reply_broadcast,
+            )
+            or ""
+        )
 
     async def deliver_cron_result(
         self, channel: str, job_name: str, job_id: str, text: str, thread_ts: str = ""
@@ -138,7 +197,9 @@ class SlackDeskDelivery:
         blocks = [
             {"type": "section", "text": {"type": "mrkdwn", "text": parts[0]}},
         ] + build_cron_ack_block(job_id)
-        parent_ts = await self._client.post_blocks(channel, blocks, parts[0], thread_ts or None)
+        parent_ts = await self._client.post_blocks(
+            channel, blocks, parts[0], thread_ts or None
+        )
         thread_root = thread_ts or parent_ts
         for part in parts[1:]:
             await self._client.post_message(channel, part, thread_root)
@@ -154,6 +215,7 @@ class SlackDeskDelivery:
         self, channel: str, text: str, thread_ts: str = ""
     ) -> None:
         from slack_desk_runtime.format import build_options_blocks
+
         from gideon.sdk.channel import extract_options
 
         body = to_slack_desk_mrkdwn(text)
@@ -177,8 +239,10 @@ class SlackDeskDelivery:
         try:
             from slack_desk_runtime.handler import build_timing_footer
 
-            footer_blocks, footer_text = build_timing_footer(elapsed_secs, self._client)
-            await self._client.post_blocks(channel, footer_blocks, footer_text, thread_ts or None)
+            footer_blocks, footer_text = build_timing_footer(elapsed_secs)
+            await self._client.post_blocks(
+                channel, footer_blocks, footer_text, thread_ts or None
+            )
         except Exception:
             logger.debug("Failed to post subagent timing footer", exc_info=True)
 
@@ -230,7 +294,9 @@ class SlackDeskDelivery:
         from slack_desk_runtime.settings import get_settings
 
         return channel_id in {
-            c.get("channel_id") for c in get_settings().tracking_channels if c.get("channel_id")
+            c.get("channel_id")
+            for c in get_settings().tracking_channels
+            if c.get("channel_id")
         }
 
     def build_thread_link(self, channel: str, ts: str) -> str:
@@ -247,18 +313,38 @@ class SlackDeskDelivery:
 
     # ── Attachment + streaming primitives ──
     async def upload_attachment(
-        self, channel: str, file_path: str, *, filename: str = "", thread_ts: str = "",
-        title: str = "", initial_comment: str = "",
+        self,
+        channel: str,
+        file_path: str,
+        *,
+        filename: str = "",
+        thread_ts: str = "",
+        title: str = "",
+        initial_comment: str = "",
     ) -> str:
         # RealSlackDeskClient.upload_file(channel, thread_ts, file, filename, title) → None.
-        await self._client.upload_file(channel, thread_ts, file_path, filename or "", title or filename or "")
+        await self._client.upload_file(
+            channel, thread_ts, file_path, filename or "", title or filename or ""
+        )
         return ""
 
-    async def start_stream(self, channel: str, thread_ts: str = "", initial_text: str = "") -> str:
-        return await self._client.start_stream(channel, thread_ts, initial_text=initial_text) or ""
+    async def start_stream(
+        self, channel: str, thread_ts: str = "", initial_text: str = ""
+    ) -> str:
+        return (
+            await self._client.start_stream(
+                channel, thread_ts, initial_text=initial_text
+            )
+            or ""
+        )
 
     async def append_stream_task(
-        self, channel: str, stream_ts: str, task_id: str, title: str, status: str,
+        self,
+        channel: str,
+        stream_ts: str,
+        task_id: str,
+        title: str,
+        status: str,
     ) -> None:
         await self._client.append_task(channel, stream_ts, task_id, title, status)
 
@@ -266,8 +352,13 @@ class SlackDeskDelivery:
         await self._client.stop_stream(channel, stream_ts)
 
     async def request_approval(
-        self, event: Any, *, source: str, parent_session_key: str = "",
-        sessions: Any = None, on_prompted: Any = None,
+        self,
+        event: Any,
+        *,
+        source: str,
+        parent_session_key: str = "",
+        sessions: Any = None,
+        on_prompted: Any = None,
     ) -> bool | None:
         """Post the Slack approval prompt and wait for the owner's response.
 
@@ -283,8 +374,12 @@ class SlackDeskDelivery:
             _PendingApproval,
         )
 
+        from gideon.integrations.channel_delivery import (
+            ONE_CALL_ANSWERS,
+            offered_answers,
+        )
         from gideon.security.approval_brief import approval_brief_for
-        from gideon.integrations.channel_delivery import offered_answers, ONE_CALL_ANSWERS
+
         identity = self.approval_identity("")
         if identity is None:
             return None
@@ -298,7 +393,11 @@ class SlackDeskDelivery:
             if sessions.get_channel_provider(history_key) == "slack":
                 channel = sessions.get_channel(history_key)
                 thread_ts = sessions.get_thread(history_key)
-            if not thread_ts and channel and re.fullmatch(r"\d+\.\d+", parent_session_key):
+            if (
+                not thread_ts
+                and channel
+                and re.fullmatch(r"\d+\.\d+", parent_session_key)
+            ):
                 thread_ts = parent_session_key
         is_dm = False
         if not channel:
@@ -308,10 +407,15 @@ class SlackDeskDelivery:
             return None
 
         is_dm = await self.prepare_approval_channel(channel)
-        answers = offered_answers(approval_brief_for(event).get("answers")) or ONE_CALL_ANSWERS
+        answers = (
+            offered_answers((approval_brief_for(event) or {}).get("answers"))
+            or ONE_CALL_ANSWERS
+        )
         if not is_dm:
             answers = ONE_CALL_ANSWERS
-        blocks = _build_approval_blocks(event, is_dm=is_dm, source=source, answers=answers)
+        blocks = _build_approval_blocks(
+            event, is_dm=is_dm, source=source, answers=answers
+        )
         title_safe, _ = redact_exfiltration_urls(event.title)
         title_safe, _ = redact_credentials(title_safe)
         fallback = f"🔐 [{source}] Approve: {title_safe}?"
@@ -321,10 +425,14 @@ class SlackDeskDelivery:
         brief_line = _approval_brief_line(event)
         if brief_line:
             fallback += f" — {brief_line}"
-        approval_ts = await self._client.post_blocks(channel, blocks, fallback, thread_ts)
+        approval_ts = await self._client.post_blocks(
+            channel, blocks, fallback, thread_ts
+        )
 
         pending = _PendingApproval(
-            provider=None, request_id=request_id, session_key=parent_session_key,  # type: ignore[arg-type]
+            provider=None,
+            request_id=request_id,
+            session_key=parent_session_key,  # type: ignore[arg-type]
         )
         pending.answers = answers
         pending.delivery = self
@@ -337,20 +445,36 @@ class SlackDeskDelivery:
         owned = bool(on_prompted and on_prompted(pending))
 
         try:
-            outcome = await pending.future if owned else await asyncio.wait_for(pending.future, timeout=7200)
+            outcome = (
+                await pending.future
+                if owned
+                else await asyncio.wait_for(pending.future, timeout=7200)
+            )
         except asyncio.TimeoutError:
             outcome = "expired"
         finally:
             _pending_approvals.pop(key, None)
 
-        status = {"approved": "✅ Approved", "rejected": "🚫 Denied", "expired": "Expired", "cancelled": "Cancelled"}.get(outcome, "Unavailable")
+        status = {
+            "approved": "✅ Approved",
+            "rejected": "🚫 Denied",
+            "expired": "Expired",
+            "cancelled": "Cancelled",
+        }.get(outcome, "Unavailable")
         chosen = next((a for a in answers if a.key == pending.chosen_answer), None)
         if chosen is not None and chosen.promise and outcome == "approved":
             status += " — " + chosen.promise
         try:
             await self._client.update_message(
-                channel, approval_ts, text=f"🔐 *{title_safe}* — {status}",
-                blocks=[{"type": "section", "text": {"type": "plain_text", "text": status[:3000]}}]
+                channel,
+                approval_ts,
+                text=f"🔐 *{title_safe}* — {status}",
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {"type": "plain_text", "text": status[:3000]},
+                    }
+                ],
             )
         except Exception:
             pass

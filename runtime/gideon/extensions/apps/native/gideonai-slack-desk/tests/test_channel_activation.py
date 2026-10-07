@@ -4,7 +4,6 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from slack_desk_runtime.events import SeenCache, _route_message
 from slack_desk_runtime.settings import (
     ACTIVATION_ALWAYS,
@@ -24,6 +23,7 @@ def _make_orch(
     # events.py reads the activation gate via get_settings() — patched per test run
     # through the module-level _current cache.
     import slack_desk_runtime.settings as _st
+
     _st._current = settings
     orch.settings = settings
     orch.channel_history = MagicMock()
@@ -51,9 +51,17 @@ class TestChannelActivationRouting:
         """DM messages are processed by default (activation=always)."""
         orch = _make_orch()
         seen = SeenCache()
-        event = {"user": "U1", "channel": "D1234", "text": "hello", "ts": "1.0", "team": "TTEST"}
+        event = {
+            "user": "U1",
+            "channel": "D1234",
+            "text": "hello",
+            "ts": "1.0",
+            "team": "TTEST",
+        }
 
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch(
+            "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             with patch("slack_desk_runtime.events.is_allowed_user", return_value=True):
                 await _route_message(orch, event, seen, is_mention=False)
                 # handle_message is dispatched via asyncio.create_task, give it a tick
@@ -69,9 +77,17 @@ class TestChannelActivationRouting:
         """Group channel with mention mode ignores non-mention messages."""
         orch = _make_orch()
         seen = SeenCache()
-        event = {"user": "U1", "channel": "C1234", "text": "hello", "ts": "2.0", "team": "TTEST"}
+        event = {
+            "user": "U1",
+            "channel": "C1234",
+            "text": "hello",
+            "ts": "2.0",
+            "team": "TTEST",
+        }
 
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch(
+            "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             with patch("slack_desk_runtime.events.is_allowed_user", return_value=True):
                 await _route_message(orch, event, seen, is_mention=False)
                 await asyncio.sleep(0)
@@ -90,7 +106,9 @@ class TestChannelActivationRouting:
             "team": "TTEST",
         }
 
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch(
+            "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             with patch("slack_desk_runtime.events.is_allowed_user", return_value=True):
                 await _route_message(orch, event, seen, is_mention=True)
                 await asyncio.sleep(0)
@@ -124,7 +142,9 @@ class TestChannelActivationRouting:
             "thread_ts": "3.0",
         }
 
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch(
+            "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             with patch("slack_desk_runtime.events.is_allowed_user", return_value=True):
                 await _route_message(orch, event, seen, is_mention=False)
                 await asyncio.sleep(0)
@@ -152,7 +172,9 @@ class TestChannelActivationRouting:
             "thread_ts": "3.0",
         }
 
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch(
+            "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             await _route_message(orch, event, seen, is_mention=False)
             # Drain any tasks _route_message may have scheduled — relying on
             # `asyncio.sleep(0)` is too tight on the build farm where worker
@@ -171,9 +193,17 @@ class TestChannelActivationRouting:
         """Channel with activation=off ignores all messages."""
         orch = _make_orch(channels={"C1234": ChannelConfig(activation=ACTIVATION_OFF)})
         seen = SeenCache()
-        event = {"user": "U1", "channel": "C1234", "text": "hello", "ts": "4.0", "team": "TTEST"}
+        event = {
+            "user": "U1",
+            "channel": "C1234",
+            "text": "hello",
+            "ts": "4.0",
+            "team": "TTEST",
+        }
 
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch(
+            "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             await _route_message(orch, event, seen, is_mention=True)
             await asyncio.sleep(0)
             mock_hm.assert_not_called()
@@ -183,7 +213,13 @@ class TestChannelActivationRouting:
         """Channel with activation=off does not record channel history."""
         orch = _make_orch(channels={"C1234": ChannelConfig(activation=ACTIVATION_OFF)})
         seen = SeenCache()
-        event = {"user": "U1", "channel": "C1234", "text": "hello", "ts": "5.0", "team": "TTEST"}
+        event = {
+            "user": "U1",
+            "channel": "C1234",
+            "text": "hello",
+            "ts": "5.0",
+            "team": "TTEST",
+        }
 
         with patch("slack_desk_runtime.events.sel") as mock_sel:
             mock_sel.return_value.log_api_access = MagicMock()
@@ -193,11 +229,21 @@ class TestChannelActivationRouting:
     @pytest.mark.asyncio
     async def test_channel_always_mode_processes_plain_message(self):
         """Channel with activation=always processes plain messages."""
-        orch = _make_orch(channels={"C1234": ChannelConfig(activation=ACTIVATION_ALWAYS)})
+        orch = _make_orch(
+            channels={"C1234": ChannelConfig(activation=ACTIVATION_ALWAYS)}
+        )
         seen = SeenCache()
-        event = {"user": "U1", "channel": "C1234", "text": "hello", "ts": "6.0", "team": "TTEST"}
+        event = {
+            "user": "U1",
+            "channel": "C1234",
+            "text": "hello",
+            "ts": "6.0",
+            "team": "TTEST",
+        }
 
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch(
+            "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             with patch("slack_desk_runtime.events.is_allowed_user", return_value=True):
                 await _route_message(orch, event, seen, is_mention=False)
                 await asyncio.sleep(0)
@@ -222,7 +268,9 @@ class TestChannelActivationRouting:
             "team": "TTEST",
         }
 
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch(
+            "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             with patch("slack_desk_runtime.events.is_allowed_user", return_value=True):
                 await _route_message(orch, event, seen, is_mention=False)
                 await asyncio.sleep(0)
@@ -237,7 +285,6 @@ class TestHandlerChannelAgent:
     async def test_channel_agent_passed_to_session(self):
         """channel_agent parameter is used for session agent selection."""
         from slack_desk_helpers import MockSlackDeskClient
-
         from slack_desk_runtime.handler import handle_message
 
         class FakeProvider:
@@ -248,8 +295,11 @@ class TestHandlerChannelAgent:
             def context_usage_pct(self):
                 return 0.0
 
-        class FakeSessionManager:
+        from test_slack_desk_handler import FakeSessionManager as BaseFakeSessions
+
+        class FakeSessionManager(BaseFakeSessions):
             def __init__(self):
+                super().__init__()
                 self.last_agent: str | None = None
 
             async def get_or_create(self, key, agent=None, channel_id=None):
@@ -331,9 +381,11 @@ class TestRouteMessageStop:
             "team": "TTEST",
         }
 
-        with patch("slack_desk_runtime.events.is_owner", return_value=True), patch(
-            "slack_desk_runtime.events.is_allowed_user", return_value=True
-        ), patch("slack_desk_runtime.events.check_message_origin", return_value=True):
+        with (
+            patch("slack_desk_runtime.events.is_owner", return_value=True),
+            patch("slack_desk_runtime.events.is_allowed_user", return_value=True),
+            patch("slack_desk_runtime.events.check_message_origin", return_value=True),
+        ):
             await _route_message(orch, event, seen, is_mention=False)
 
         # Let cancellation propagate — await the task so CancelledError
@@ -373,12 +425,13 @@ class TestRouteMessageStop:
             "team": "TTEST",
         }
 
-        with patch(
-            "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
-        ) as mock_hm, patch("slack_desk_runtime.events.is_owner", return_value=True), patch(
-            "slack_desk_runtime.events.is_allowed_user", return_value=True
-        ), patch(
-            "slack_desk_runtime.events.check_message_origin", return_value=True
+        with (
+            patch(
+                "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
+            ) as mock_hm,
+            patch("slack_desk_runtime.events.is_owner", return_value=True),
+            patch("slack_desk_runtime.events.is_allowed_user", return_value=True),
+            patch("slack_desk_runtime.events.check_message_origin", return_value=True),
         ):
             await _route_message(orch, event, seen, is_mention=False)
             await asyncio.sleep(0)

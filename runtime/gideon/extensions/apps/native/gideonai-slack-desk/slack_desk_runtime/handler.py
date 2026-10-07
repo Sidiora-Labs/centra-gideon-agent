@@ -24,25 +24,13 @@ import re
 import time
 import uuid
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
 
-from gideon.sdk.channel import AcpError, AcpProcessDied, AcpTimeoutError
-from gideon.sdk.channel import STOP_REASON_CANCELLED, STOP_REASON_END_TURN
-from gideon.sdk.channel import AppConfig, config_dir, config_path
 from slack_desk_runtime.settings import ACTIVATION_REVIEW
-from gideon.sdk.channel import PromptAssembler as ContextBuilder
-from gideon.sdk.channel import (
-    TriggerStore,
-    delete_all_automations,
-    delete_automation,
-    describe_cadence,
-    set_automation_paused,
-    to_schedule_row,
-)
-from gideon.sdk.channel import ConversationLog, HistoryConsolidator
-from gideon.sdk.channel import HOOK_REPLY, TOOL_AUTO_APPROVE, TOOL_DENY, validate_file_path
-from gideon.sdk.channel import save_conversation_turn
+
 from gideon.sdk.channel import (
     EVENT_COMPACTION_STATUS,
     EVENT_COMPLETE,
@@ -50,13 +38,84 @@ from gideon.sdk.channel import (
     EVENT_TEXT_CHUNK,
     EVENT_THINKING_CHUNK,
     EVENT_TOOL_CALL,
+    HOOK_REPLY,
+    STOP_REASON_CANCELLED,
+    STOP_REASON_END_TURN,
+    TOOL_AUTO_APPROVE,
+    TOOL_DENY,
+    AcpError,
+    AcpProcessDied,
+    AcpTimeoutError,
+    AppConfig,
+    ConversationLog,
+    GatewayServices,
+    HistoryConsolidator,
     LLMEvent,
     ModelProvider,
 )
-from gideon.sdk.channel import session_restrictions, trust_mode
-from gideon.sdk.channel import is_sensitive_path, redact_credentials, redact_exfiltration_urls
-from gideon.sdk.channel import sel
-from gideon.sdk.channel import ConversationDirectory as SessionManager
+from gideon.sdk.channel import PromptAssembler as ContextBuilder
+from gideon.sdk.channel import (
+    TriggerStore,
+    config_dir,
+    config_path,
+    delete_all_automations,
+    delete_automation,
+    describe_cadence,
+    is_sensitive_path,
+    redact_credentials,
+    redact_exfiltration_urls,
+    save_conversation_turn,
+    sel,
+    session_restrictions,
+    set_automation_paused,
+    to_schedule_row,
+    trust_mode,
+    validate_file_path,
+)
+
+if TYPE_CHECKING:
+    from .delivery import SlackDeskDelivery
+
+from gideon.integrations.channel_delivery import ApprovalAnswer
+from gideon.security.approval_answer import Principal
+
+
+class ReactionClient(Protocol):
+    async def add_reaction(self, channel: str, ts: str, emoji: str) -> None: ...
+    async def remove_reaction(self, channel: str, ts: str, emoji: str) -> None: ...
+
+
+class ContextUsageProvider(Protocol):
+    def context_usage_pct(self) -> float | None: ...
+
+
+class SessionManager(Protocol):
+    async def recycle_background(self) -> None: ...
+    def has_session(self, key: str) -> bool: ...
+    async def get_or_create(
+        self, key: str, agent: str | None = None, channel_id: str | None = None
+    ) -> tuple[ModelProvider, bool, bool]: ...
+    def check_context_usage(self, key: str, provider: ModelProvider) -> float: ...
+    def record_success(self, key: str) -> None: ...
+    async def record_failure(self, key: str) -> bool: ...
+    def release(self, key: str) -> None: ...
+    async def set_channel(self, key: str, channel_id: str) -> None: ...
+    def set_channel_link(self, key: str, thread_ts: str, channel_id: str) -> None: ...
+    def get_session_for_thread(self, thread_ts: str) -> str | None: ...
+    async def remove(self, key: str) -> None: ...
+    async def destroy(self, key: str) -> None: ...
+    def get_provider(self, key: str) -> ModelProvider | None: ...
+    def get_pid(self, key: str) -> int | None: ...
+    def is_cancelled(self, key: str, msg_ts: str) -> bool: ...
+    async def stop_turn(
+        self,
+        key: str,
+        *,
+        on_soft: Callable[[], Awaitable[None]] | None = None,
+        on_hard: Callable[[], Awaitable[None]] | None = None,
+    ) -> str: ...
+
+
 from slack_desk_runtime.blocks import deprecation_warning_block
 from slack_desk_runtime.client import SlackDeskClientOps
 from slack_desk_runtime.format import (
@@ -66,9 +125,9 @@ from slack_desk_runtime.format import (
     strip_thinking_tags,
     to_slack_desk_mrkdwn,
 )
-from gideon.sdk.channel import Stats
+
 from gideon.sdk.channel import DelegationSupervisor as SubagentManager
-from gideon.sdk.channel import Task
+from gideon.sdk.channel import Stats, Task
 from gideon.sdk.channel import voice_reply as _voice_reply_fn
 
 logger = logging.getLogger(__name__)
@@ -164,7 +223,9 @@ try:
 
     _overrides = _SlackDeskSettings.load().reactions
 except Exception:
-    logger.warning("Failed to load reaction overrides from config; using defaults", exc_info=True)
+    logger.warning(
+        "Failed to load reaction overrides from config; using defaults", exc_info=True
+    )
     _overrides = {}
 _PHASE_EMOJIS, _unknown_phases = _build_phase_emojis(_overrides)
 del _overrides
@@ -236,7 +297,9 @@ class StatusReactionController:
     the agent appears stuck.
     """
 
-    def __init__(self, slack_desk: SlackDeskClientOps, channel: str, ts: str, *, enabled: bool = True) -> None:
+    def __init__(
+        self, slack_desk: ReactionClient, channel: str, ts: str, *, enabled: bool = True
+    ) -> None:
         self._enabled = enabled
         self._slack_desk = slack_desk
         self._channel = channel
@@ -273,7 +336,9 @@ class StatusReactionController:
         # Intermediate phase — debounce
         self._pending_phase = phase
         self._cancel_debounce()
-        self._debounce_handle = self._loop.call_later(_PHASE_DEBOUNCE_SECS, self._fire_debounce)
+        self._debounce_handle = self._loop.call_later(
+            _PHASE_DEBOUNCE_SECS, self._fire_debounce
+        )
 
     def on_progress(self) -> None:
         """Reset stall watchdog — call on any LLM/tool activity."""
@@ -306,7 +371,9 @@ class StatusReactionController:
     async def _do_finalize(self, error: bool) -> None:
         if self._stall_emoji:
             try:
-                await self._slack_desk.remove_reaction(self._channel, self._ts, self._stall_emoji)
+                await self._slack_desk.remove_reaction(
+                    self._channel, self._ts, self._stall_emoji
+                )
             except Exception:
                 pass
             self._stall_emoji = None
@@ -371,8 +438,12 @@ class StatusReactionController:
             asyncio.ensure_future(self._remove_stall_emoji(emoji_to_remove))
         if self._stall_paused or self._finalized:
             return
-        self._stall_soft_handle = self._loop.call_later(_STALL_SOFT_SECS, self._on_stall_soft)
-        self._stall_hard_handle = self._loop.call_later(_STALL_HARD_SECS, self._on_stall_hard)
+        self._stall_soft_handle = self._loop.call_later(
+            _STALL_SOFT_SECS, self._on_stall_soft
+        )
+        self._stall_hard_handle = self._loop.call_later(
+            _STALL_HARD_SECS, self._on_stall_hard
+        )
 
     async def _remove_stall_emoji(self, emoji: str) -> None:
         try:
@@ -392,7 +463,9 @@ class StatusReactionController:
         # Remove previous stall emoji if upgrading
         if self._stall_emoji and self._stall_emoji != emoji:
             try:
-                await self._slack_desk.remove_reaction(self._channel, self._ts, self._stall_emoji)
+                await self._slack_desk.remove_reaction(
+                    self._channel, self._ts, self._stall_emoji
+                )
             except Exception:
                 pass
         self._stall_emoji = emoji
@@ -464,7 +537,7 @@ _orch_cfg: AppConfig | None = None
 
 # Dashboard state reference for pushing refresh events (set by gateway).
 _dashboard_state: object | None = None
-_gateway_services = None
+_gateway_services: GatewayServices | None = None
 
 
 _cached_default_agent: str | None = None  # None = not yet loaded from disk
@@ -632,7 +705,9 @@ def _review_drafts_set(key: str, draft: str, requester_user_id: str) -> None:
     """Store a draft with TTL + requester id, evicting oldest if at capacity."""
     now = time.monotonic()
     # Evict expired entries
-    expired = [k for k, (_, _, ts) in _review_drafts.items() if now - ts > _REVIEW_DRAFT_TTL]
+    expired = [
+        k for k, (_, _, ts) in _review_drafts.items() if now - ts > _REVIEW_DRAFT_TTL
+    ]
     for k in expired:
         _review_drafts.pop(k, None)
     # Evict oldest if still at capacity
@@ -661,7 +736,6 @@ def _get_default_agent() -> str:
     return _cached_default_agent
 
 
-
 def _resolve_agent_name(name: str) -> str | None:
     """Resolve an agent name via suffix matching against installed agents.
 
@@ -683,7 +757,9 @@ def _resolve_agent_name(name: str) -> str | None:
     if not safe:
         return None
     try:
-        return json.loads(Path(safe).read_text(encoding="utf-8")).get("name", match.stem)
+        return json.loads(Path(safe).read_text(encoding="utf-8")).get(
+            "name", match.stem
+        )
     except (json.JSONDecodeError, OSError):
         return match.stem
 
@@ -726,18 +802,36 @@ def _persist_channel_config(
 
 
 class _PendingApproval:
-    __slots__ = ("provider", "request_id", "session_key", "future", "answers", "delivery", "tenant", "owner", "channel", "thread", "answerer", "on_answer", "chosen_answer")
+    __slots__ = (
+        "provider",
+        "request_id",
+        "session_key",
+        "future",
+        "answers",
+        "delivery",
+        "tenant",
+        "owner",
+        "channel",
+        "thread",
+        "answerer",
+        "on_answer",
+        "chosen_answer",
+    )
 
-    def __init__(self, provider: ModelProvider, request_id: str | int, session_key: str = "") -> None:
+    def __init__(
+        self, provider: ModelProvider, request_id: str | int, session_key: str = ""
+    ) -> None:
         self.provider = provider
         self.request_id = request_id
         self.session_key = session_key
         self.future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
         from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
-        self.answers = ONE_CALL_ANSWERS
-        self.delivery = None
+
+        self.answers: tuple[ApprovalAnswer, ...] = ONE_CALL_ANSWERS
+        self.delivery: "SlackDeskDelivery | None" = None
         self.tenant = self.owner = self.channel = self.thread = self.chosen_answer = ""
-        self.answerer = self.on_answer = None
+        self.answerer: Principal | None = None
+        self.on_answer: Callable[[str, Principal], bool] | None = None
 
 
 _OUTCOME_APPROVED = "approved"
@@ -782,6 +876,7 @@ def claim_owner(user_id: str) -> bool:
     _allowed_users = {user_id}
     try:
         from gideon.sdk.channel import CRED_OWNER_ID, save_credential
+
         save_credential(CRED_OWNER_ID, user_id)
     except Exception:
         logger.warning("Failed to persist auto-claimed Slack owner", exc_info=True)
@@ -793,7 +888,9 @@ def claim_owner(user_id: str) -> bool:
 
         allow_sender("slack", user_id, via="owner")
     except Exception:
-        logger.warning("Failed to seed channel_trust with claimed Slack owner", exc_info=True)
+        logger.warning(
+            "Failed to seed channel_trust with claimed Slack owner", exc_info=True
+        )
     return True
 
 
@@ -852,7 +949,7 @@ def _track_linked_channel(channel_id: str) -> None:
         logger.warning("Failed to track linked channel in channel_trust", exc_info=True)
 
 
-def set_gateway_services(services: object) -> None:
+def set_gateway_services(services: GatewayServices) -> None:
     """Store the GatewayServices handle (called by events.py at socket init).
 
     The linked-thread intercept routes through the platform's guarded inbound
@@ -876,7 +973,10 @@ def is_owner(user_id: str) -> bool:
         return False
     if user_id == _owner_id:
         return True
-    return user_id.replace("W", "U", 1) == _owner_id or user_id.replace("U", "W", 1) == _owner_id
+    return (
+        user_id.replace("W", "U", 1) == _owner_id
+        or user_id.replace("U", "W", 1) == _owner_id
+    )
 
 
 def disable_yolo() -> None:
@@ -998,7 +1098,9 @@ async def _handle_slash_command(
     if slash_equiv:
         logger.warning("Deprecated bang command %s used — suggest %s", cmd, slash_equiv)
         warn_block = deprecation_warning_block(cmd, slash_equiv)
-        await slack_desk.post_blocks(channel, [warn_block], f"{cmd} is deprecated", reply_ts)
+        await slack_desk.post_blocks(
+            channel, [warn_block], f"{cmd} is deprecated", reply_ts
+        )
 
     # ── !yolo on / !yolo off ──
     if cmd == "!yolo":
@@ -1014,9 +1116,13 @@ async def _handle_slash_command(
                     source="slack",
                     resources="yolo_off",
                 )
-                await slack_desk.post_message(channel, "🔒 YOLO mode disabled.", reply_ts)
+                await slack_desk.post_message(
+                    channel, "🔒 YOLO mode disabled.", reply_ts
+                )
             else:
-                await slack_desk.post_message(channel, "YOLO mode is already off.", reply_ts)
+                await slack_desk.post_message(
+                    channel, "YOLO mode is already off.", reply_ts
+                )
         elif len(parts) >= 2 and parts[1].lower() == "on":
             if trust_mode.yolo_from_config():
                 sel().log_api_access(
@@ -1026,7 +1132,11 @@ async def _handle_slash_command(
                     source="slack",
                     resources="yolo_on",
                 )
-                await slack_desk.post_message(channel, "🟢 YOLO mode is already permanently ON from config (`agent.yolo=true`).", reply_ts)
+                await slack_desk.post_message(
+                    channel,
+                    "🟢 YOLO mode is already permanently ON from config (`agent.yolo=true`).",
+                    reply_ts,
+                )
             elif not yolo_active:
                 enable_yolo_with_ttl(_YOLO_TTL_SECS)
                 sel().log_api_access(
@@ -1036,13 +1146,21 @@ async def _handle_slash_command(
                     source="slack",
                     resources="yolo_on",
                 )
-                await slack_desk.post_message(channel, f"🔓 YOLO mode enabled (auto-expires in {_YOLO_TTL_SECS // 60}min).", reply_ts)
+                await slack_desk.post_message(
+                    channel,
+                    f"🔓 YOLO mode enabled (auto-expires in {_YOLO_TTL_SECS // 60}min).",
+                    reply_ts,
+                )
             else:
-                await slack_desk.post_message(channel, "YOLO mode is already on.", reply_ts)
+                await slack_desk.post_message(
+                    channel, "YOLO mode is already on.", reply_ts
+                )
         else:
             status = "ON 🔓" if yolo_active else "OFF 🔒"
             await slack_desk.post_message(
-                channel, f"YOLO mode: *{status}*. Use `!yolo on` / `!yolo off`.", reply_ts
+                channel,
+                f"YOLO mode: *{status}*. Use `!yolo on` / `!yolo off`.",
+                reply_ts,
             )
         return ""
 
@@ -1159,7 +1277,9 @@ async def _handle_slash_command(
             )
             return ""
         if len(parts) != 2:
-            await slack_desk.post_message(channel, "Usage: `!agent <name>` or `!agent off`", reply_ts)
+            await slack_desk.post_message(
+                channel, "Usage: `!agent <name>` or `!agent off`", reply_ts
+            )
             return ""
         agent_name = parts[1]
         if agent_name.lower() in ("default", "off"):
@@ -1177,16 +1297,22 @@ async def _handle_slash_command(
                 metadata={"user": user_id, "channel": channel},
             )
             await sessions.remove(session_key)
-            await slack_desk.post_message(channel, "🔄 Reset to default agent.", reply_ts)
+            await slack_desk.post_message(
+                channel, "🔄 Reset to default agent.", reply_ts
+            )
             await _add_phase_reaction(slack_desk, channel, msg_ts, "done")
             return ""
         resolved = _resolve_agent_name(agent_name)
         if not resolved:
             agents_dir = Path.home() / ".gideon" / "agents"
             jsons = sorted(agents_dir.glob("*.json")) if agents_dir.is_dir() else []
-            names = ", ".join(sorted(f.stem for f in jsons)) if jsons else "(none found)"
+            names = (
+                ", ".join(sorted(f.stem for f in jsons)) if jsons else "(none found)"
+            )
             await slack_desk.post_message(
-                channel, f"❌ Unknown agent `{agent_name}`. Available: {names}", reply_ts
+                channel,
+                f"❌ Unknown agent `{agent_name}`. Available: {names}",
+                reply_ts,
             )
             return ""
         try:
@@ -1203,14 +1329,17 @@ async def _handle_slash_command(
             metadata={"agent": resolved, "user": user_id, "channel": channel},
         )
         await sessions.remove(session_key)
-        await slack_desk.post_message(channel, f"🔄 Switched to agent: *{resolved}*", reply_ts)
+        await slack_desk.post_message(
+            channel, f"🔄 Switched to agent: *{resolved}*", reply_ts
+        )
         await _add_phase_reaction(slack_desk, channel, msg_ts, "done")
         return ""
 
     # ── !dashboard [duration] ──
     if cmd == "!dashboard":
-        from gideon.sdk.channel import parse_duration
         from slack_desk_runtime.allowlist import send_dashboard_link
+
+        from gideon.sdk.channel import parse_duration
 
         parts = cmd_text.split()
         ttl = 3600
@@ -1227,58 +1356,107 @@ async def _handle_slash_command(
 
         url = await send_dashboard_link(slack_desk, user_id, ttl)
         if url:
-            await slack_desk.post_message(channel, "🔗 Dashboard link sent via DM.", reply_ts)
+            await slack_desk.post_message(
+                channel, "🔗 Dashboard link sent via DM.", reply_ts
+            )
         else:
-            await slack_desk.post_message(channel, "❌ Failed to send dashboard link.", reply_ts)
+            await slack_desk.post_message(
+                channel, "❌ Failed to send dashboard link.", reply_ts
+            )
         return ""
 
     # ── !link-to-dashboard -- import Slack thread into dashboard ──
     if cmd == "!link-to-dashboard":
         if not is_allowed_user(user_id):
             sel().log_tool_invocation(
-                session_key="", agent="gideon", source="slack",
-                tool_name="link_to_dashboard", tool_kind="command",
+                session_key="",
+                agent="gideon",
+                source="slack",
+                tool_name="link_to_dashboard",
+                tool_kind="command",
                 outcome="denied",
-                metadata={"user_id": user_id, "channel": channel, "reason": "not_allowed_user"},
+                metadata={
+                    "user_id": user_id,
+                    "channel": channel,
+                    "reason": "not_allowed_user",
+                },
             )
             await slack_desk.post_message(channel, "Not authorized.", reply_ts)
             return ""
-        if not _dashboard_state or not hasattr(_dashboard_state, "get_or_create_session"):
+        if not _dashboard_state or not hasattr(
+            _dashboard_state, "get_or_create_session"
+        ):
             sel().log_tool_invocation(
-                session_key="", agent="gideon", source="slack",
-                tool_name="link_to_dashboard", tool_kind="command",
+                session_key="",
+                agent="gideon",
+                source="slack",
+                tool_name="link_to_dashboard",
+                tool_kind="command",
                 outcome="failure",
-                metadata={"user_id": user_id, "channel": channel, "reason": "no_dashboard"},
+                metadata={
+                    "user_id": user_id,
+                    "channel": channel,
+                    "reason": "no_dashboard",
+                },
             )
             await slack_desk.post_message(channel, "Dashboard not available.", reply_ts)
             return ""
         if reply_ts == msg_ts:
             sel().log_tool_invocation(
-                session_key="", agent="gideon", source="slack",
-                tool_name="link_to_dashboard", tool_kind="command",
+                session_key="",
+                agent="gideon",
+                source="slack",
+                tool_name="link_to_dashboard",
+                tool_kind="command",
                 outcome="failure",
-                metadata={"user_id": user_id, "channel": channel, "reason": "not_in_thread"},
+                metadata={
+                    "user_id": user_id,
+                    "channel": channel,
+                    "reason": "not_in_thread",
+                },
             )
-            await slack_desk.post_message(channel, "Use this command inside a thread to import it.", reply_ts)
+            await slack_desk.post_message(
+                channel, "Use this command inside a thread to import it.", reply_ts
+            )
             return ""
         # Fetch thread history and import to dashboard
         from slack_desk_runtime.interactions import _import_thread_to_session
-        session = await _import_thread_to_session(slack_desk, _dashboard_state, channel, reply_ts)
+
+        session = await _import_thread_to_session(
+            slack_desk, _dashboard_state, channel, reply_ts
+        )
         if not session:
             sel().log_tool_invocation(
-                session_key="", agent="gideon", source="slack",
-                tool_name="link_to_dashboard", tool_kind="command",
+                session_key="",
+                agent="gideon",
+                source="slack",
+                tool_name="link_to_dashboard",
+                tool_kind="command",
                 outcome="failure",
-                metadata={"channel": channel, "thread_ts": reply_ts, "reason": "empty_thread"},
+                metadata={
+                    "channel": channel,
+                    "thread_ts": reply_ts,
+                    "reason": "empty_thread",
+                },
             )
-            await slack_desk.post_message(channel, "Could not fetch thread history.", reply_ts)
+            await slack_desk.post_message(
+                channel, "Could not fetch thread history.", reply_ts
+            )
             return ""
         _track_linked_channel(channel)
         sel().log_tool_invocation(
-            session_key=session.key, agent="gideon", source="slack",
-            tool_name="link_to_dashboard", tool_kind="command",
+            session_key=session.key,
+            agent="gideon",
+            source="slack",
+            tool_name="link_to_dashboard",
+            tool_kind="command",
             outcome="success",
-            metadata={"session": session.key, "channel": channel, "thread_ts": reply_ts, "msg_count": len(session.messages)},
+            metadata={
+                "session": session.key,
+                "channel": channel,
+                "thread_ts": reply_ts,
+                "msg_count": len(session.messages),
+            },
         )
         await slack_desk.post_message(
             channel,
@@ -1324,9 +1502,13 @@ async def _handle_slash_command(
         if not resolved:
             agents_dir = Path.home() / ".gideon" / "agents"
             jsons = sorted(agents_dir.glob("*.json")) if agents_dir.is_dir() else []
-            names = ", ".join(sorted(f.stem for f in jsons)) if jsons else "(none found)"
+            names = (
+                ", ".join(sorted(f.stem for f in jsons)) if jsons else "(none found)"
+            )
             await slack_desk.post_message(
-                channel, f"❌ Unknown agent `{agent_name}`. Available: {names}", reply_ts
+                channel,
+                f"❌ Unknown agent `{agent_name}`. Available: {names}",
+                reply_ts,
             )
             return ""
         _thread_agents[session_key] = resolved
@@ -1336,10 +1518,17 @@ async def _handle_slash_command(
             tool_name="!ta",
             tool_kind="command",
             outcome="agent_switch",
-            metadata={"agent": resolved, "user": user_id, "channel": channel, "scope": "thread"},
+            metadata={
+                "agent": resolved,
+                "user": user_id,
+                "channel": channel,
+                "scope": "thread",
+            },
         )
         await sessions.remove(session_key)
-        await slack_desk.post_message(channel, f"🔄 Thread agent: *{resolved}*", reply_ts)
+        await slack_desk.post_message(
+            channel, f"🔄 Thread agent: *{resolved}*", reply_ts
+        )
         await _add_phase_reaction(slack_desk, channel, msg_ts, "done")
         return ""
 
@@ -1363,7 +1552,9 @@ async def _handle_slash_command(
                 resources=channel,
                 error="not owner",
             )
-            await slack_desk.post_message(channel, "⛔ Only the bot owner can use `!channel`.", reply_ts)
+            await slack_desk.post_message(
+                channel, "⛔ Only the bot owner can use `!channel`.", reply_ts
+            )
             return ""
         from slack_desk_runtime.settings import _VALID_ACTIVATIONS
 
@@ -1387,7 +1578,9 @@ async def _handle_slash_command(
         if subcmd == "agent":
             if len(parts) < 3:
                 await slack_desk.post_message(
-                    channel, "Usage: `!channel agent <name>` or `!channel agent off`", reply_ts
+                    channel,
+                    "Usage: `!channel agent <name>` or `!channel agent off`",
+                    reply_ts,
                 )
                 return ""
             agent_name = parts[2]
@@ -1421,7 +1614,9 @@ async def _handle_slash_command(
                 resources=f"{channel}:{agent_name or 'default'}",
             )
             label = f"*{agent_name}*" if agent_name else "default"
-            await slack_desk.post_message(channel, f"Agent for this channel: {label}", reply_ts)
+            await slack_desk.post_message(
+                channel, f"Agent for this channel: {label}", reply_ts
+            )
             return ""
 
         # !channel always|mention|observe|off
@@ -1442,7 +1637,9 @@ async def _handle_slash_command(
             source="slack",
             resources=f"{channel}:{subcmd}",
         )
-        await slack_desk.post_message(channel, f"Channel activation set to *{subcmd}*.", reply_ts)
+        await slack_desk.post_message(
+            channel, f"Channel activation set to *{subcmd}*.", reply_ts
+        )
         return ""
 
     # ── !title — set/generate Slack thread title ──
@@ -1458,7 +1655,11 @@ async def _handle_slash_command(
                 try:
                     conversation_log.set_title(session_key, title_text[:80])
                 except Exception:
-                    logger.debug("Failed to set conversation log title for %s", session_key, exc_info=True)
+                    logger.debug(
+                        "Failed to set conversation log title for %s",
+                        session_key,
+                        exc_info=True,
+                    )
             sel().log_api_access(
                 caller=user_id,
                 operation="slack.thread_title",
@@ -1469,18 +1670,24 @@ async def _handle_slash_command(
             await _add_phase_reaction(slack_desk, channel, msg_ts, "done")
         else:
             await slack_desk.post_message(
-                channel, "Usage: `!title <text>` — set a title for this thread.", reply_ts
+                channel,
+                "Usage: `!title <text>` — set a title for this thread.",
+                reply_ts,
             )
         return ""
 
     # Catch-all: unrecognized ! command — post error instead of falling through to LLM
     await slack_desk.post_message(
-        channel, f"❌ Unknown command `{cmd}`. Type `/gideon help` for available commands.", reply_ts
+        channel,
+        f"❌ Unknown command `{cmd}`. Type `/gideon help` for available commands.",
+        reply_ts,
     )
     return ""
 
 
-def _filter_options_brackets(text: str, bracket_hold: str, stream_buffer: str) -> tuple[str, str]:
+def _filter_options_brackets(
+    text: str, bracket_hold: str, stream_buffer: str
+) -> tuple[str, str]:
     """Filter ``[OPTIONS: ...]`` tags from streaming text character-by-character.
 
     Returns the updated *(bracket_hold, stream_buffer)* tuple.
@@ -1501,7 +1708,7 @@ def _filter_options_brackets(text: str, bracket_hold: str, stream_buffer: str) -
 
 def build_timing_footer(
     elapsed: float,
-    client: ModelProvider | None = None,
+    client: ContextUsageProvider | None = None,
 ) -> tuple[list[dict], str]:
     """Build the timing/context footer blocks for a Slack response.
 
@@ -1515,9 +1722,15 @@ def build_timing_footer(
     footer_text = f"Finished in {duration}"
     if client is not None:
         try:
-            ctx_pct = round(client.context_usage_pct())
-            ctx_icon = "🔴" if ctx_pct >= 70 else "🟠" if ctx_pct >= 50 else "🟡" if ctx_pct >= 30 else "🟢"
-            footer_text = f"Finished in {duration} · {ctx_icon} ctx {ctx_pct}%"
+            context_usage = client.context_usage_pct()
+            if context_usage is not None:
+                ctx_pct = round(context_usage)
+                ctx_icon = (
+                    "🔴"
+                    if ctx_pct >= 70
+                    else "🟠" if ctx_pct >= 50 else "🟡" if ctx_pct >= 30 else "🟢"
+                )
+                footer_text = f"Finished in {duration} · {ctx_icon} ctx {ctx_pct}%"
         except Exception:
             logger.debug("Failed to retrieve context usage", exc_info=True)
     blocks: list[dict] = [
@@ -1544,7 +1757,9 @@ def _append_footer_actions(
         if footer_blocks and footer_blocks[-1].get("type") == "actions":
             footer_blocks[-1]["elements"].append(build_link_dashboard_button())
         else:
-            footer_blocks.append({"type": "actions", "elements": [build_link_dashboard_button()]})
+            footer_blocks.append(
+                {"type": "actions", "elements": [build_link_dashboard_button()]}
+            )
     return footer_blocks
 
 
@@ -1559,7 +1774,9 @@ async def _handle_compact_command(
     """Trigger in-place ACP ``/compact`` on the current thread's session."""
     provider = sessions.get_provider(session_key)
     if not provider:
-        await slack_desk.post_message(channel, "No active session to compact.", reply_ts)
+        await slack_desk.post_message(
+            channel, "No active session to compact.", reply_ts
+        )
         sel().log_tool_invocation(
             session_key=session_key,
             source="slack",
@@ -1582,6 +1799,7 @@ async def _handle_compact_command(
     result_text: str | None = None
     outcome = "unknown"
     try:
+
         async def _run_compact_stream() -> None:
             nonlocal result_text, outcome
             async for event in provider.stream_command("/compact"):
@@ -1589,7 +1807,9 @@ async def _handle_compact_command(
                     if event.text == "completed":
                         summary = event.title or ""
                         result_text = (
-                            f"✅ Compacted: {summary}" if summary else "✅ Context compacted."
+                            f"✅ Compacted: {summary}"
+                            if summary
+                            else "✅ Context compacted."
                         )
                         outcome = "completed"
                     elif event.text == "failed":
@@ -1613,7 +1833,11 @@ async def _handle_compact_command(
                 outcome = "completed"
             elif cr["type"] == "failed":
                 error = cr.get("summary", "")
-                result_text = f"❌ Compaction failed: {error}" if error else "❌ Compaction failed."
+                result_text = (
+                    f"❌ Compaction failed: {error}"
+                    if error
+                    else "❌ Compaction failed."
+                )
                 outcome = "failed"
             else:
                 result_text = "⚠️ Compaction timed out."
@@ -1621,13 +1845,21 @@ async def _handle_compact_command(
     except Exception:
         logger.warning("Compact command failed for %s", session_key, exc_info=True)
         try:
-            await slack_desk.post_message(channel, "❌ Compaction failed unexpectedly.", reply_ts)
+            await slack_desk.post_message(
+                channel, "❌ Compaction failed unexpectedly.", reply_ts
+            )
         except Exception:
-            logger.debug("Failed to post compact error for %s", session_key, exc_info=True)
+            logger.debug(
+                "Failed to post compact error for %s", session_key, exc_info=True
+            )
         try:
             await sessions.destroy(session_key)
         except Exception:
-            logger.warning("Failed to destroy session %s after compact failure", session_key, exc_info=True)
+            logger.warning(
+                "Failed to destroy session %s after compact failure",
+                session_key,
+                exc_info=True,
+            )
         sel().log_tool_invocation(
             session_key=session_key,
             source="slack",
@@ -1714,10 +1946,15 @@ async def handle_message(
         if _linked_session:
             # Auth check FIRST — deny all messages from unauthorized users
             if not is_allowed_user(user_id):
-                logger.warning("Unauthorized user %s in linked thread %s", user_id, session_key)
+                logger.warning(
+                    "Unauthorized user %s in linked thread %s", user_id, session_key
+                )
                 sel().log_tool_invocation(
-                    session_key=session_key, agent="gideon", source="slack",
-                    tool_name="linked_thread_intercept", tool_kind="permission",
+                    session_key=session_key,
+                    agent="gideon",
+                    source="slack",
+                    tool_name="linked_thread_intercept",
+                    tool_kind="permission",
                     outcome="denied",
                     metadata={"user_id": user_id, "reason": "not_allowed_user"},
                 )
@@ -1733,7 +1970,8 @@ async def handle_message(
                 # message is still answered in-thread rather than dropped.
                 logger.warning(
                     "Linked thread %s: no gateway services handle — falling through "
-                    "to normal handling", session_key,
+                    "to normal handling",
+                    session_key,
                 )
             else:
                 # The guarded door (EA-7). Core applies the trust gate, redaction,
@@ -1757,10 +1995,15 @@ async def handle_message(
                     "slack", _cm, is_dm=channel.startswith("D")
                 )
                 if verdict.canned_reply:
-                    await slack_desk.post_message(channel, verdict.canned_reply, reply_ts)
+                    await slack_desk.post_message(
+                        channel, verdict.canned_reply, reply_ts
+                    )
                 sel().log_tool_invocation(
-                    session_key=session_key, agent="gideon", source="slack",
-                    tool_name="linked_thread_intercept", tool_kind="permission",
+                    session_key=session_key,
+                    agent="gideon",
+                    source="slack",
+                    tool_name="linked_thread_intercept",
+                    tool_kind="permission",
                     outcome="allowed" if verdict.allowed else "denied",
                     metadata={
                         "user_id": user_id,
@@ -1771,7 +2014,11 @@ async def handle_message(
                 logger.info(
                     "Linked Slack message for session %s: %s",
                     _linked_session.key,
-                    "routed via the guarded door" if verdict.allowed else f"denied ({verdict.reason})",
+                    (
+                        "routed via the guarded door"
+                        if verdict.allowed
+                        else f"denied ({verdict.reason})"
+                    ),
                 )
                 return
     logger.info(
@@ -1814,7 +2061,13 @@ async def handle_message(
                 resources=channel,
             )
             await _handle_sessions_command(
-                text.strip(), slack_desk, channel, reply_ts, msg_ts, session_key, conversation_log
+                text.strip(),
+                slack_desk,
+                channel,
+                reply_ts,
+                msg_ts,
+                session_key,
+                conversation_log,
             )
         return
 
@@ -1826,7 +2079,12 @@ async def handle_message(
     _cmd_text_stripped, _had_temporary = _strip_temporary_token(_cmd_text)
     if _had_temporary:
         await _apply_temporary_modifier(
-            session_key, user_id, channel, slack_desk, sessions, reply_ts,
+            session_key,
+            user_id,
+            channel,
+            slack_desk,
+            sessions,
+            reply_ts,
         )
         _cmd_text = _cmd_text_stripped
         text = _TEMPORARY_TOKEN_RE.sub("", text)
@@ -1839,7 +2097,12 @@ async def handle_message(
     _cmd_text_stripped, _had_incognito = _strip_incognito_token(_cmd_text)
     if _had_incognito:
         await _apply_incognito_modifier(
-            session_key, user_id, channel, slack_desk, sessions, reply_ts,
+            session_key,
+            user_id,
+            channel,
+            slack_desk,
+            sessions,
+            reply_ts,
         )
         _cmd_text = _cmd_text_stripped
         text = _INCOGNITO_TOKEN_RE.sub("", text)
@@ -1856,7 +2119,9 @@ async def handle_message(
                 source="slack",
                 resources=channel,
             )
-            await _handle_compact_command(slack_desk, sessions, channel, reply_ts, msg_ts, session_key)
+            await _handle_compact_command(
+                slack_desk, sessions, channel, reply_ts, msg_ts, session_key
+            )
             return
         else:
             sel().log_tool_invocation(
@@ -1867,7 +2132,9 @@ async def handle_message(
                 outcome="denied",
                 error=f"unauthorized user {user_id}",
             )
-            await slack_desk.post_message(channel, "⛔ Not authorized to compact.", reply_ts)
+            await slack_desk.post_message(
+                channel, "⛔ Not authorized to compact.", reply_ts
+            )
             return  # deny-by-default: do not fall through
 
     # ── Owner commands: all "!" prefixed messages are reserved for owner ──
@@ -1950,7 +2217,9 @@ async def handle_message(
     # The store is built from the ACTIVE HOME rather than injected (S112): a `cron_service`
     # parameter let the caller decide which scheduler this surface read, and six call sites passed
     # `orch.cron_svc` — the legacy service core has deleted. One home, one store, one answer.
-    cron_reply = _handle_cron_command(text, TriggerStore(base_dir=config_dir()), channel, reply_ts)
+    cron_reply = _handle_cron_command(
+        text, TriggerStore(base_dir=config_dir()), channel, reply_ts
+    )
     if cron_reply:
         await slack_desk.post_message(channel, cron_reply, reply_ts)
         if conversation_log and not _is_slack_desk_restricted(session_key):
@@ -1967,7 +2236,10 @@ async def handle_message(
     from slack_desk_runtime.settings import get_settings
 
     status_ctrl = StatusReactionController(
-        slack_desk, channel, msg_ts, enabled=get_settings().reactions_enabled,
+        slack_desk,
+        channel,
+        msg_ts,
+        enabled=get_settings().reactions_enabled,
     )
     status_ctrl.set_phase("queued")
     _had_error = False
@@ -1983,7 +2255,9 @@ async def handle_message(
 
     accumulated = ""
     thinking_accumulated = ""
-    stream_buffer = ""  # unsent chunks for streaming API (buffered between rate-limited appends)
+    stream_buffer = (
+        ""  # unsent chunks for streaming API (buffered between rate-limited appends)
+    )
     bracket_hold = ""  # text held back from '[' until ']' to filter [OPTIONS: ...]
     last_edit = 0.0
     _task_counter = 0  # incrementing task ID for task cards
@@ -2023,13 +2297,17 @@ async def handle_message(
                 return await slack_desk.append_stream(channel, stream_ts, text)
         return ok
 
-    async def _append_task(task_id: str, title: str, status: str, details: str = "") -> bool:
+    async def _append_task(
+        task_id: str, title: str, status: str, details: str = ""
+    ) -> bool:
         """Append task card to stream, rotating on failure."""
         if not stream_ts:
             return False
         if channel_activation == ACTIVATION_REVIEW:
             return True  # Suppress task cards in review mode
-        ok = await slack_desk.append_task(channel, stream_ts, task_id, title, status, details=details)
+        ok = await slack_desk.append_task(
+            channel, stream_ts, task_id, title, status, details=details
+        )
         if not ok and use_slack_desk_stream:
             if await _rotate_stream():
                 assert stream_ts is not None
@@ -2071,7 +2349,12 @@ async def handle_message(
 
     try:
         task.start()
-        _agent = _thread_agents.get(session_key) or channel_agent or _get_default_agent() or None
+        _agent = (
+            _thread_agents.get(session_key)
+            or channel_agent
+            or _get_default_agent()
+            or None
+        )
         client, is_new, resumed = await sessions.get_or_create(
             session_key, agent=_agent, channel_id=channel
         )
@@ -2092,7 +2375,9 @@ async def handle_message(
         try:
             pid = sessions.get_pid(session_key)
             if isinstance(pid, int):
-                (config_dir() / f"session_pid_{pid}.txt").write_text(session_key, encoding="utf-8")
+                (config_dir() / f"session_pid_{pid}.txt").write_text(
+                    session_key, encoding="utf-8"
+                )
         except Exception:
             pass
 
@@ -2101,7 +2386,12 @@ async def handle_message(
         # is_new = new ACP agent/dashboard process, NOT new conversation.
         # The Slack thread persists across processes, so we compress its
         # history to bootstrap the fresh session's context window.
-        if is_new and not resumed and context_builder and context_builder.conversation_log:
+        if (
+            is_new
+            and not resumed
+            and context_builder
+            and context_builder.conversation_log
+        ):
             from gideon.sdk.channel import compress_thread_history
 
             compressed = await compress_thread_history(
@@ -2204,7 +2494,9 @@ async def handle_message(
                 accumulated += event.text
 
                 if _status_dirty and use_slack_desk_stream:
-                    await slack_desk.set_thread_status(channel, reply_ts, _STATUS_WORKING)
+                    await slack_desk.set_thread_status(
+                        channel, reply_ts, _STATUS_WORKING
+                    )
                     _status_dirty = False
 
                 # ── Bracket hold-back: filter [OPTIONS: ...] from stream ──
@@ -2231,7 +2523,9 @@ async def handle_message(
                     else:
                         assert stream_ts is not None
                         if channel_activation != ACTIVATION_REVIEW:
-                            await _safe_update(slack_desk, channel, stream_ts, accumulated + _CURSOR)
+                            await _safe_update(
+                                slack_desk, channel, stream_ts, accumulated + _CURSOR
+                            )
                     last_edit = now
 
             elif event.kind == EVENT_THINKING_CHUNK:
@@ -2274,7 +2568,9 @@ async def handle_message(
                 tool_status = f"\n🫆 `{tool_name}`\n"
                 await _ensure_stream_started()
                 if use_slack_desk_stream:
-                    await slack_desk.set_thread_status(channel, reply_ts, f"is using {tool_name}")
+                    await slack_desk.set_thread_status(
+                        channel, reply_ts, f"is using {tool_name}"
+                    )
                     _status_dirty = True
                 if use_slack_desk_stream:
                     # Flush any buffered text before the tool status
@@ -2286,7 +2582,9 @@ async def handle_message(
                         stream_buffer = ""
                     # Mark previous task complete, start new one
                     if _active_task_id:
-                        await _append_task(_active_task_id, _active_task_title, "complete")
+                        await _append_task(
+                            _active_task_id, _active_task_title, "complete"
+                        )
                     _task_counter += 1
                     _active_task_id = f"tool_{_task_counter}"
                     _active_task_title = event.tool_purpose or tool_name
@@ -2302,7 +2600,9 @@ async def handle_message(
                     accumulated += tool_status
                     assert stream_ts is not None
                     if channel_activation != ACTIVATION_REVIEW:
-                        await _safe_update(slack_desk, channel, stream_ts, accumulated + _CURSOR)
+                        await _safe_update(
+                            slack_desk, channel, stream_ts, accumulated + _CURSOR
+                        )
                 last_edit = time.monotonic()
 
                 # wait tool blocks MCP for up to 30min — finalize the
@@ -2311,7 +2611,9 @@ async def handle_message(
                 # the next text chunk arrives after wait returns.
                 if tool_name == "wait" and use_slack_desk_stream and stream_ts:
                     if _active_task_id:
-                        await _append_task(_active_task_id, _active_task_title, "complete")
+                        await _append_task(
+                            _active_task_id, _active_task_title, "complete"
+                        )
                         _active_task_id = ""
                     await slack_desk.stop_stream(channel, stream_ts)
                     stream_ts = None
@@ -2394,12 +2696,18 @@ async def handle_message(
                     )
                     continue
 
-                logger.info("Permission request: tool=%s req_id=%s", event.title, event.request_id)
+                logger.info(
+                    "Permission request: tool=%s req_id=%s",
+                    event.title,
+                    event.request_id,
+                )
                 status_ctrl.pause_stall_watchdog()
                 task.await_approval()
                 await _ensure_stream_started()
                 if use_slack_desk_stream:
-                    await slack_desk.set_thread_status(channel, reply_ts, "Waiting for approval…")
+                    await slack_desk.set_thread_status(
+                        channel, reply_ts, "Waiting for approval…"
+                    )
                     _status_dirty = True
                     # Flush buffered text before approval pause
                     if stream_buffer:
@@ -2507,7 +2815,9 @@ async def handle_message(
 
     # Suppress error replies for trusted bot messages to prevent echo loops
     if from_trusted_bot and _had_error:
-        logger.info("Suppressing error reply to trusted bot message to prevent echo loop")
+        logger.info(
+            "Suppressing error reply to trusted bot message to prevent echo loop"
+        )
         if conversation_log and not _is_slack_desk_restricted(session_key):
             save_conversation_turn(
                 conversation_log,
@@ -2524,10 +2834,16 @@ async def handle_message(
         accumulated, inline_thinking = strip_thinking_tags(accumulated)
         accumulated = accumulated.strip()
         if inline_thinking:
-            thinking_accumulated += ("\n\n" if thinking_accumulated else "") + inline_thinking
+            thinking_accumulated += (
+                "\n\n" if thinking_accumulated else ""
+            ) + inline_thinking
 
     actually_streamed = use_slack_desk_stream and bool(stream_ts)
-    final_text = to_slack_desk_mrkdwn(accumulated, keep_tables=actually_streamed) if accumulated else _NO_RESPONSE
+    final_text = (
+        to_slack_desk_mrkdwn(accumulated, keep_tables=actually_streamed)
+        if accumulated
+        else _NO_RESPONSE
+    )
 
     # Scan for URL exfiltration before posting to Slack (link previews auto-fetch)
     final_text, exfil_warnings = redact_exfiltration_urls(final_text)
@@ -2556,13 +2872,21 @@ async def handle_message(
             try:
                 await slack_desk.delete_message(channel, stream_ts)
             except Exception:
-                logger.debug("Failed to delete stream msg in review mode", exc_info=True)
+                logger.debug(
+                    "Failed to delete stream msg in review mode", exc_info=True
+                )
         await slack_desk.set_thread_status(channel, reply_ts, "Awaiting review…")
         # Post ephemeral draft with approve/edit/cancel buttons
         draft = clean_text or _NO_RESPONSE
         draft_key = f"{channel}|{reply_ts}|{uuid.uuid4().hex[:8]}"
         blocks = review_draft_blocks(draft, draft_key)
-        await slack_desk.post_ephemeral(channel, user_id, draft, blocks=blocks, thread_ts=reply_ts if thread_ts else None)
+        await slack_desk.post_ephemeral(
+            channel,
+            user_id,
+            draft,
+            blocks=blocks,
+            thread_ts=reply_ts if thread_ts else None,
+        )
         # Store draft for button handlers (requester can act on their own draft)
         _review_drafts_set(draft_key, draft, user_id)
         logger.info("Review mode: ephemeral draft sent to %s in %s", user_id, channel)
@@ -2584,7 +2908,9 @@ async def handle_message(
         # Flush remaining buffer (bracket_hold excluded — it's either
         # a suppressed OPTIONS tag or an unclosed bracket we drop)
         if stream_buffer:
-            stream_buffer, _ = strip_thinking_tags(stream_buffer, strip_whitespace=False)
+            stream_buffer, _ = strip_thinking_tags(
+                stream_buffer, strip_whitespace=False
+            )
             await _append_stream(stream_buffer)
         await slack_desk.stop_stream(channel, stream_ts, clean_text or _NO_RESPONSE)
 
@@ -2592,8 +2918,11 @@ async def handle_message(
         # Always finalize with clean accumulated text to strip streaming
         # artifacts (whitespace drops, partial flushes).
         from slack_desk_runtime.format import _convert_tables
+
         final_text = _convert_tables(clean_text) if clean_text else _NO_RESPONSE
-        await _safe_final_update(slack_desk, channel, stream_ts, final_text or _NO_RESPONSE, reply_ts)
+        await _safe_final_update(
+            slack_desk, channel, stream_ts, final_text or _NO_RESPONSE, reply_ts
+        )
     else:
         # No stream was started (e.g. no text chunks) — post the final text directly
         await slack_desk.post_message(channel, clean_text or _NO_RESPONSE, reply_ts)
@@ -2618,7 +2947,11 @@ async def handle_message(
     elapsed = time.monotonic() - _t0
     footer_blocks, footer_text = build_timing_footer(elapsed, client)
     footer_blocks = _append_footer_actions(
-        footer_blocks, options, thread_ts, linked_session_key, _dashboard_state,
+        footer_blocks,
+        options,
+        thread_ts,
+        linked_session_key,
+        _dashboard_state,
     )
     await slack_desk.post_blocks(channel, footer_blocks, footer_text, reply_ts)
 
@@ -2660,7 +2993,9 @@ async def handle_message(
                         f"{intro}no TTS voice is configured. {hint}",
                     )
                 except Exception:
-                    logger.debug("Failed to post TTS-unavailable ephemeral", exc_info=True)
+                    logger.debug(
+                        "Failed to post TTS-unavailable ephemeral", exc_info=True
+                    )
             else:
                 asyncio.create_task(
                     _safe_voice_reply(
@@ -2696,8 +3031,18 @@ async def handle_message(
                 session.append("user", text, "msg msg-u")
                 session.append("assistant", accumulated, "msg msg-a")
                 if session._on_message:
-                    session._on_message(session.key, {"role": "user", "content": text, "cls": "msg msg-u"})
-                    session._on_message(session.key, {"role": "assistant", "content": accumulated, "cls": "msg msg-a"})
+                    session._on_message(
+                        session.key,
+                        {"role": "user", "content": text, "cls": "msg msg-u"},
+                    )
+                    session._on_message(
+                        session.key,
+                        {
+                            "role": "assistant",
+                            "content": accumulated,
+                            "cls": "msg msg-a",
+                        },
+                    )
                 ds.push_sessions_update()  # type: ignore[attr-defined]
         except Exception:
             logger.debug("Failed to mirror Slack message to dashboard", exc_info=True)
@@ -2710,7 +3055,13 @@ async def handle_message(
         _mark_titled(session_key)  # claim early to prevent duplicate tasks
         _t = asyncio.create_task(
             _maybe_auto_title_slack_desk(
-                slack_desk, sessions, channel, session_key, conversation_log, text, accumulated
+                slack_desk,
+                sessions,
+                channel,
+                session_key,
+                conversation_log,
+                text,
+                accumulated,
             )
         )
         _background_tasks.add(_t)
@@ -2737,9 +3088,12 @@ def _build_title_prompt(user_msg: str, assistant_msg: str) -> str:
     bindable in Settings → Prompts), rendered with the conversation turn."""
     from gideon.sdk.channel import render_use_case_prompt
 
-    return render_use_case_prompt(
-        "channel_title", {"user_msg": user_msg, "assistant_msg": assistant_msg}
-    ) or ""
+    return (
+        render_use_case_prompt(
+            "channel_title", {"user_msg": user_msg, "assistant_msg": assistant_msg}
+        )
+        or ""
+    )
 
 
 async def _maybe_auto_title_slack_desk(
@@ -2799,7 +3153,11 @@ async def _maybe_auto_title_slack_desk(
             try:
                 conversation_log.set_title(session_key, title)
             except Exception:
-                logger.debug("Failed to set conversation log title for %s", session_key, exc_info=True)
+                logger.debug(
+                    "Failed to set conversation log title for %s",
+                    session_key,
+                    exc_info=True,
+                )
         sel().log_api_access(
             caller="system",
             operation="slack.thread_auto_title",
@@ -2810,7 +3168,9 @@ async def _maybe_auto_title_slack_desk(
         logger.info("Slack thread auto-titled: %s → %r", session_key, title)
     except Exception:
         _titled_threads.pop(session_key, None)  # allow retry on transient failure
-        logger.debug("Slack thread auto-title failed for %s", session_key, exc_info=True)
+        logger.debug(
+            "Slack thread auto-title failed for %s", session_key, exc_info=True
+        )
 
 
 async def _request_approval(
@@ -2824,12 +3184,22 @@ async def _request_approval(
 ) -> str:
     """Post approval buttons, wait for click, return 'approved' or 'rejected'."""
     blocks = _build_approval_blocks(event, is_dm=is_dm)
-    approval_ts = await slack_desk.post_blocks(channel, blocks, "Manual approval required", thread_ts)
+    approval_ts = await slack_desk.post_blocks(
+        channel, blocks, "Manual approval required", thread_ts
+    )
 
     key = f"{channel}:{approval_ts}"
     pending = _PendingApproval(provider, event.request_id, session_key)
     from gideon.integrations.channel_delivery import raw_delivery_for
-    pending.delivery = raw_delivery_for("slack")
+
+    from .delivery import SlackDeskDelivery
+
+    registered_delivery = raw_delivery_for("slack")
+    pending.delivery = (
+        registered_delivery
+        if isinstance(registered_delivery, SlackDeskDelivery)
+        else None
+    )
     identity = pending.delivery.approval_identity(channel) if pending.delivery else None
     if identity is None:
         await provider.reject_tool(event.request_id)
@@ -2852,27 +3222,57 @@ async def _request_approval(
         status = "✅ Approved" if outcome == _OUTCOME_APPROVED else "🚫 Rejected"
         title_safe, _ = redact_exfiltration_urls(event.title)
         title_safe, _ = redact_credentials(title_safe)
-        await _safe_update(slack_desk, channel, approval_ts, f"🔐 *{title_safe}* — {status}")
+        await _safe_update(
+            slack_desk, channel, approval_ts, f"🔐 *{title_safe}* — {status}"
+        )
 
     return outcome
 
 
-async def handle_interaction(channel: str, msg_ts: str, action_id: str, user_id: str = "", thread_ts: str = "", slack_desk: SlackDeskClientOps | None = None, *, team_id: str = "", answer_value: str = "") -> str | None:
+async def handle_interaction(
+    channel: str,
+    msg_ts: str,
+    action_id: str,
+    user_id: str = "",
+    thread_ts: str = "",
+    slack_desk: SlackDeskClientOps | None = None,
+    *,
+    team_id: str = "",
+    answer_value: str = "",
+) -> str | None:
     """Answer only the live offer in its authenticated workspace and destination."""
     from slack_desk_runtime.enterprise import check_message_origin
+
     from gideon.integrations.channel_delivery import raw_delivery_for
     from gideon.security.approval_answer import on_channel
+
     pending = _pending_approvals.get(f"{channel}:{msg_ts}")
     if pending is None or pending.future.done() or not check_message_origin(team_id):
         return None
     delivery = pending.delivery
-    identity = delivery.approval_identity(channel) if delivery is not None else None
-    if (identity is None or raw_delivery_for("slack") is not delivery or slack_desk is not delivery.client
-        or user_id != identity["owner"] or user_id != pending.owner
-        or identity["tenant"] != pending.tenant or pending.channel != channel
-        or pending.thread != thread_ts or answer_value != str(pending.request_id)):
+    if delivery is None:
         return None
-    answer = {"approve_tool": "approved", "trust_tool": "trust", "reject_tool": "rejected"}.get(action_id)
+    identity = delivery.approval_identity(channel)
+    registered_matches = bool(raw_delivery_for("slack") is delivery)
+    if (
+        identity is None
+        or not registered_matches
+        or slack_desk is not delivery.client
+        or user_id != identity["owner"]
+        or user_id != pending.owner
+        or identity["tenant"] != pending.tenant
+        or pending.channel != channel
+        or pending.thread != thread_ts
+        or answer_value != str(pending.request_id)
+    ):
+        return None
+    answer = {
+        "approve_tool": "approved",
+        "trust_tool": "trust",
+        "reject_tool": "rejected",
+    }.get(action_id)
+    if answer is None:
+        return None
     chosen = next((item for item in pending.answers if item.key == answer), None)
     if chosen is None:
         return None
@@ -2951,17 +3351,35 @@ def _approval_brief_line(event: LLMEvent) -> str:
     return line
 
 
-def _build_approval_blocks(event: LLMEvent, is_dm: bool = True, source: str = "", *, answers: tuple | None = None) -> list[dict]:
+def _build_approval_blocks(
+    event: LLMEvent,
+    is_dm: bool = True,
+    source: str = "",
+    *,
+    answers: tuple | None = None,
+) -> list[dict]:
     """Render the exact offered answers and complete tool input.
 
     Standing permission appears only when the native approval owner offers it.
     A private channel alone does not authorize a standing grant.
     """
     from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
+
     answers = answers or ONE_CALL_ANSWERS
-    action_ids = {"approved": _ACTION_APPROVE, "trust": _ACTION_TRUST, "rejected": _ACTION_REJECT}
-    buttons = [{"type": "button", "text": {"type": "plain_text", "text": answer.label},
-                "action_id": action_ids[answer.key], "value": str(event.request_id)} for answer in answers]
+    action_ids = {
+        "approved": _ACTION_APPROVE,
+        "trust": _ACTION_TRUST,
+        "rejected": _ACTION_REJECT,
+    }
+    buttons = [
+        {
+            "type": "button",
+            "text": {"type": "plain_text", "text": answer.label},
+            "action_id": action_ids[answer.key],
+            "value": str(event.request_id),
+        }
+        for answer in answers
+    ]
 
     blocks: list[dict] = []
 
@@ -2981,14 +3399,22 @@ def _build_approval_blocks(event: LLMEvent, is_dm: bool = True, source: str = ""
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": f"🔐 *{tag}Tool approval requested:*"},
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"🔐 *{tag}Tool approval requested:*",
+                },
             },
         )
         # Security: scan for exfiltration URLs and credentials before posting
         sanitized, _ = redact_exfiltration_urls(event.tool_input)
         sanitized, _ = redact_credentials(sanitized)
         for detail in split_message(sanitized, limit=_SLACK_SECTION_TEXT_LIMIT - 6):
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"```{detail}```"}})
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"```{detail}```"},
+                }
+            )
 
     # The blast radius goes ABOVE the buttons: it is the reason to press one, so a
     # reader must meet it before the decision, not after it.
@@ -3000,7 +3426,12 @@ def _build_approval_blocks(event: LLMEvent, is_dm: bool = True, source: str = ""
 
     for answer in answers:
         if answer.promise:
-            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": answer.promise}]})
+            blocks.append(
+                {
+                    "type": "context",
+                    "elements": [{"type": "mrkdwn", "text": answer.promise}],
+                }
+            )
     blocks.append({"type": "actions", "elements": buttons})
     blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]})
     return blocks
@@ -3025,7 +3456,9 @@ def _remove_all_jobs(store: TriggerStore) -> str:
     return f"✅ Removed {len(lines)} automation(s):\n" + "\n".join(lines)
 
 
-def _handle_spawn_command(text: str, manager: SubagentManager, session_key: str = "") -> str | None:
+def _handle_spawn_command(
+    text: str, manager: SubagentManager, session_key: str = ""
+) -> str | None:
     """Intercept spawn/bg keyword commands. Returns reply or None."""
     t = text.strip()
     low = t.lower()
@@ -3054,12 +3487,14 @@ def _do_spawn(task: str, manager: SubagentManager, session_key: str = "") -> str
 
     info = manager.spawn(task, parent_session_key=session_key)
     if not info:
-        return f"⚠️ Subagent capacity reached ({manager.max_concurrent}). Try again later."
+        return (
+            f"⚠️ Subagent capacity reached ({manager.max_concurrent}). Try again later."
+        )
     return f"🚀 Spawned subagent `{info.id}`\n_{task[:100]}_"
 
 
 def _relative_next_run(nxt: float | None, now: float) -> str:
-    """"⏭ in 2h 15m" for a next-run timestamp, or "" when there is none."""
+    """ "⏭ in 2h 15m" for a next-run timestamp, or "" when there is none."""
     if nxt is None:
         return ""
     delta = nxt - now
@@ -3189,7 +3624,7 @@ async def _handle_sessions_command(
             continue
         key = jsonl.stem
         if key.startswith("dashboard_"):
-            key = "dashboard:" + key[len("dashboard_"):]
+            key = "dashboard:" + key[len("dashboard_") :]
         try:
             lines = jsonl.read_text(encoding="utf-8").splitlines()
         except OSError:
@@ -3216,13 +3651,15 @@ async def _handle_sessions_command(
             if role in ("user", "assistant") and txt:
                 msgs.append((role, txt))
 
-        sessions.append({
-            "key": key,
-            "title": title[:80],
-            "agent": agent,
-            "mtime": mtime,
-            "msgs": msgs[-5:],
-        })
+        sessions.append(
+            {
+                "key": key,
+                "title": title[:80],
+                "agent": agent,
+                "mtime": mtime,
+                "msgs": msgs[-5:],
+            }
+        )
 
     sessions.sort(key=lambda s: s["mtime"], reverse=True)
     sessions = sessions[:10]
@@ -3246,13 +3683,15 @@ async def _handle_sessions_command(
             txt, _ = redact_exfiltration_urls(txt)
             txt, _ = redact_credentials(txt)
             emoji_name = "bust_in_silhouette" if role == "user" else "robot_face"
-            rt_items.append({
-                "type": "rich_text_section",
-                "elements": [
-                    {"type": "emoji", "name": emoji_name},
-                    {"type": "text", "text": f" {txt}"},
-                ],
-            })
+            rt_items.append(
+                {
+                    "type": "rich_text_section",
+                    "elements": [
+                        {"type": "emoji", "name": emoji_name},
+                        {"type": "text", "text": f" {txt}"},
+                    ],
+                }
+            )
 
         _title, _ = redact_exfiltration_urls(s["title"])
         _title, _ = redact_credentials(_title)
@@ -3265,25 +3704,33 @@ async def _handle_sessions_command(
         if rt_items:
             task["details"] = {
                 "type": "rich_text",
-                "elements": [{"type": "rich_text_list", "style": "bullet", "elements": rt_items}],
+                "elements": [
+                    {"type": "rich_text_list", "style": "bullet", "elements": rt_items}
+                ],
             }
         blocks.append(task)
-        blocks.append({
-            "type": "actions",
-            "elements": [{
-                "type": "button",
-                "text": {"type": "plain_text", "text": "\u25b6\ufe0f Resume"},
-                "action_id": f"pc_session_resume_{s['key']}",
-                "value": _json.dumps({"key": s["key"], "title": s["title"]}),
-            }],
-        })
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "\u25b6\ufe0f Resume"},
+                        "action_id": f"pc_session_resume_{s['key']}",
+                        "value": _json.dumps({"key": s["key"], "title": s["title"]}),
+                    }
+                ],
+            }
+        )
         if i < len(sessions) - 1:
             blocks.append({"type": "divider"})
 
     await slack_desk.post_blocks(channel, blocks, "Recent sessions:", reply_ts)
 
 
-async def _safe_update(slack_desk: SlackDeskClientOps, channel: str, ts: str, text: str) -> None:
+async def _safe_update(
+    slack_desk: SlackDeskClientOps, channel: str, ts: str, text: str
+) -> None:
     """Update a Slack message, truncating if too long.
 
     Used for progressive streaming edits — truncation is fine here since
@@ -3299,7 +3746,11 @@ async def _safe_update(slack_desk: SlackDeskClientOps, channel: str, ts: str, te
 
 
 async def _safe_final_update(
-    slack_desk: SlackDeskClientOps, channel: str, ts: str, text: str, thread_ts: str | None = None
+    slack_desk: SlackDeskClientOps,
+    channel: str,
+    ts: str,
+    text: str,
+    thread_ts: str | None = None,
 ) -> None:
     """Final message update — splits into multiple messages if too long."""
     text, _ = redact_exfiltration_urls(text)
