@@ -1,3 +1,6 @@
+import { QuietButton } from '../../shared/ui/QuietButton'
+import { SquareIconButton } from '../../shared/ui/SquareIconButton'
+import { BUSY_REASON } from '../../shared/ui/unavailable'
 import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown, Plus, ShieldCheck, Trash2, Users, X } from 'lucide-react'
 import type { SavedAgent } from '../../shared/data/api'
@@ -49,13 +52,13 @@ export function RoomEditor({ room, agents, maxMembers, busy = false, onClose, on
     : members.some(member => member.role.length > 4000) ? t('Keep each member role within 4,000 characters.')
     : !validRoom(name, members, maxMembers) ? t('Review the room name and member settings.') : undefined
   return <section className="rooms-editor" aria-label={room ? t('Room settings') : t('New room')} onKeyDown={event => { if (event.key === 'Escape' && !saving) onClose() }}>
-    <header className="rooms-pane-heading"><div><span className="rooms-eyebrow">{t('SHARED SPACE')}</span><h2>{room ? t('Room settings') : t('Create a room')}</h2></div><button type="button" className="rooms-icon" aria-label={t('Close room settings')} onClick={onClose} disabled={saving}><X size={18} /></button></header>
+    <header className="rooms-pane-heading"><div><span className="rooms-eyebrow">{t('SHARED SPACE')}</span><h2>{room ? t('Room settings') : t('Create a room')}</h2></div><SquareIconButton className="rooms-icon" label={t('Close room settings')} onClick={onClose} disabled={saving} disabledReason={BUSY_REASON}><X size={18} /></SquareIconButton></header>
     <form onSubmit={event => { event.preventDefault(); if (!busy && !saving && validRoom(name, members, maxMembers)) void perform(() => onSave(name.trim(), members)) }}>
       <div className="rooms-editor-body">
         {error && <p className="rooms-error" role="alert">{error}</p>}
         {busy && <p className="rooms-notice">{t('Stop the current turn before changing this room.')}</p>}
         <label className="rooms-field">{t('Room name')}<input ref={nameRef} value={name} maxLength={500} required onChange={event => setName(event.target.value)} placeholder={t('For example, Product studio')} disabled={busy || saving} /></label>
-        <div className="rooms-field-heading"><h3>{t('Members')} <span>{members.length}/{maxMembers}</span></h3><button type="button" className="rooms-button rooms-quiet" aria-expanded={picker} onClick={() => { if (!busy && !saving) setPicker(value => !value) }} disabled={busy || saving}><Plus size={15} />{t('Add members')}</button></div>
+        <div className="rooms-field-heading"><h3>{t('Members')} <span>{members.length}/{maxMembers}</span></h3><QuietButton className="!h-auto rooms-button rooms-quiet" ariaExpanded={picker} onClick={() => { if (!busy && !saving) setPicker(value => !value) }} disabled={busy || saving} disabledReason={BUSY_REASON}><Plus size={15} />{t('Add members')}</QuietButton></div>
         <p className="rooms-hint">{t('Each agent brings its own expertise. Members respond in the order shown.')}</p>
         {picker && <div className="rooms-picker">
           <input aria-label={t('Find an agent')} placeholder={t('Find an agent')} value={query} onChange={event => setQuery(event.target.value)} />
@@ -70,23 +73,23 @@ export function RoomEditor({ room, agents, maxMembers, busy = false, onClose, on
         </div>}
         <div className="rooms-member-settings">
           {members.map((member, index) => <div className="rooms-member-setting" key={member.id}>
-            <button type="button" className="rooms-member-summary" aria-expanded={expanded === member.id} onClick={() => setExpanded(expanded === member.id ? null : member.id)}><span className="rooms-member-order">{index + 1}</span><span><strong dir="auto">{member.name || member.agent}</strong><small>{member.listen_policy === 'all' ? t('Responds to every message') : member.listen_policy === 'mentions' ? t('Responds when mentioned') : t('Paused')}</small></span><ChevronDown size={16} /></button>
+            <QuietButton className="!h-auto rooms-member-summary" ariaExpanded={expanded === member.id} onClick={() => setExpanded(expanded === member.id ? null : member.id)}><span className="rooms-member-order">{index + 1}</span><span><strong dir="auto">{member.name || member.agent}</strong><small>{member.listen_policy === 'all' ? t('Responds to every message') : member.listen_policy === 'mentions' ? t('Responds when mentioned') : t('Paused')}</small></span><ChevronDown size={16} /></QuietButton>
             {expanded === member.id && <div className="rooms-member-fields">
               <label className="rooms-field">{t('Display name')}<input value={member.name} required maxLength={500} onChange={event => patch(member.id, { name: event.target.value })} disabled={busy || saving} /></label>
               <label className="rooms-field">{t('Role in this room')}<textarea value={member.role} maxLength={4000} rows={3} placeholder={t('For example, review proposals and challenge assumptions')} onChange={event => patch(member.id, { role: event.target.value })} disabled={busy || saving} /></label>
               <label className="rooms-field">{t('When to respond')}<select aria-label={t('When to respond')} value={member.listen_policy} onChange={event => patch(member.id, { listen_policy: event.target.value as RoomMember['listen_policy'] })} disabled={busy || saving}><option value="all">{t('Every message')}</option><option value="mentions">{t('Only when mentioned')}</option><option value="none">{t('Paused')}</option></select></label>
               <p className="rooms-hint">{t('Agent')}: <bdi>{member.agent}</bdi></p>
-              <button type="button" className="rooms-button rooms-danger rooms-quiet" disabled={busy || saving} onClick={() => setMembers(current => current.filter(item => item.id !== member.id))}><X size={15} />{t('Remove member')}</button>
+              <QuietButton className="!h-auto rooms-button rooms-danger rooms-quiet" disabled={busy || saving} onClick={() => setMembers(current => current.filter(item => item.id !== member.id))} disabledReason={BUSY_REASON}><X size={15} />{t('Remove member')}</QuietButton>
             </div>}
           </div>)}
           {!members.length && <div className="rooms-empty-members"><Users size={23} /><p>{t('Choose the agents you want in the conversation.')}</p></div>}
         </div>
         <div className="rooms-safety"><ShieldCheck size={18} /><p>{t('New members start with read-only tools and human approval. Room roles never grant extra permissions.')}</p></div>
         {onDelete && <div className="rooms-delete">
-          {confirm ? <><p>{t('Delete this room and its shared conversation? This cannot be undone.')}</p><div className="rooms-actions"><button type="button" className="rooms-button rooms-danger" disabled={busy || saving} onClick={() => void perform(onDelete)}>{t('Delete permanently')}</button><button type="button" className="rooms-button rooms-quiet" onClick={() => setConfirm(false)} disabled={saving}>{t('Keep room')}</button></div></> : <button type="button" className="rooms-button rooms-quiet rooms-danger" onClick={() => setConfirm(true)} disabled={busy || saving}><Trash2 size={15} />{t('Delete room')}</button>}
+          {confirm ? <><p>{t('Delete this room and its shared conversation? This cannot be undone.')}</p><div className="rooms-actions"><QuietButton className="!h-auto rooms-button rooms-danger" disabled={busy || saving} onClick={() => void perform(onDelete)} disabledReason={BUSY_REASON}>{t('Delete permanently')}</QuietButton><QuietButton className="!h-auto rooms-button rooms-quiet" onClick={() => setConfirm(false)} disabled={saving} disabledReason={BUSY_REASON}>{t('Keep room')}</QuietButton></div></> : <QuietButton className="!h-auto rooms-button rooms-quiet rooms-danger" onClick={() => setConfirm(true)} disabled={busy || saving} disabledReason={BUSY_REASON}><Trash2 size={15} />{t('Delete room')}</QuietButton>}
         </div>}
       </div>
-      <footer className="rooms-editor-footer"><button type="button" className="rooms-button rooms-quiet" disabled={saving} onClick={onClose}>{t('Cancel')}</button><Button type="submit" size="sm" className="rooms-button rooms-primary"
+      <footer className="rooms-editor-footer"><QuietButton className="!h-auto rooms-button rooms-quiet" disabled={saving} onClick={onClose} disabledReason={BUSY_REASON}>{t('Cancel')}</QuietButton><Button type="submit" size="sm" className="rooms-button rooms-primary"
         loading={saving} loadingLabel={t('Saving…')} disabled={busy || !validRoom(name, members, maxMembers)}
         disabledReason={busy ? t('Stop the current turn before changing this room.') : invalidReason}>{room ? t('Save changes') : t('Create room')}</Button></footer>
     </form>

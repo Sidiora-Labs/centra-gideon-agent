@@ -1,3 +1,5 @@
+import { BUSY_REASON } from '../../shared/ui/unavailable'
+import { QuietButton } from '../../shared/ui/QuietButton'
 import { useReducer, useRef, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -246,8 +248,8 @@ function GuidedDecomposition({ guided }: { guided: GuidedProps }) {
   const phases = guided.phases ?? []
   const count = phases.flatMap((phase) => phase.steps).length
   const actions = phases.length ? <div className="flex items-center gap-s">
-    <button type="button" onClick={guided.run} data-type="caption" className="text-on-surface-low hover:text-on-surface">Rebuild</button>
-    <button type="button" onClick={guided.clear} data-type="caption" className="text-on-surface-low hover:text-on-surface">Use flat questions</button>
+    <QuietButton onClick={guided.run} className="!h-auto text-on-surface-low hover:text-on-surface">Rebuild</QuietButton>
+    <QuietButton onClick={guided.clear} className="!h-auto text-on-surface-low hover:text-on-surface">Use flat questions</QuietButton>
   </div> : !guided.loading ? <Button variant="ghost" size="sm" onClick={guided.run}><Sparkles size={14} /> Guide me{guided.isThorough ? ' · recommended' : ''}</Button> : null
   let content: React.ReactNode
   if (guided.loading) content = <div data-type="body-s" className="flex items-center gap-s rounded-lg bg-surface-container p-m text-on-surface-low"><Loader2 size={15} className="animate-spin text-primary" /> Scoping the goal into phases — checking memory for what’s already settled…</div>
@@ -316,10 +318,9 @@ function CapabilitiesStep({ skills, skillIds, workflowIds, onToggleSkill, sugges
                     </span>
                     {s.description && <span data-type="caption" className="block text-on-surface-low line-clamp-2">{s.description}</span>}
                   </span>
-                  <button type="button" disabled={done || !!installing[s.id]} onClick={() => onInstall(s)}
-                    data-type="caption" className="shrink-0 inline-flex items-center gap-1 rounded-pill border border-outline-variant/50 px-m h-7 text-primary-emphasis hover:bg-surface-high transition-colors disabled:opacity-50">
+                  <QuietButton disabled={done || !!installing[s.id]} onClick={() => onInstall(s)} className="shrink-0 inline-flex items-center gap-1 rounded-pill border border-outline-variant/50 px-m h-7 text-primary-emphasis hover:bg-surface-high transition-colors disabled:opacity-50" disabledReason={done ? "Already installed" : BUSY_REASON}>
                     {done ? <><Check size={13} /> Installed</> : installing[s.id] ? 'Installing…' : <><Download size={13} /> Install</>}
-                  </button>
+                  </QuietButton>
                 </div>
               )
             })}
@@ -551,8 +552,8 @@ function SubGoalsEdit({ value, onChange }: { value: string[]; onChange: (v: stri
           <span className="mt-0.5 size-1 shrink-0 rounded-pill bg-primary" />
           <span data-type="body-s" className="flex-1 min-w-0 text-on-surface">{s}</span>
 
-          <button type="button" aria-label={`Remove sub-goal: ${s.length > 60 ? `${s.slice(0, 60)}…` : s}`}
-            onClick={() => discard(i)} className="text-on-surface-low hover:text-on-surface"><X size={14} /></button>
+          <SquareIconButton label={`Remove sub-goal: ${s.length > 60 ? `${s.slice(0, 60)}…` : s}`}
+            onClick={() => discard(i)} className="text-on-surface-low hover:text-on-surface"><X size={14} /></SquareIconButton>
         </div>
       ))}
       <div className="flex items-center gap-s">

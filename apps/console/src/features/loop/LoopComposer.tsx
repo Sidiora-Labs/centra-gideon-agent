@@ -1,3 +1,6 @@
+import { QuietButton } from '../../shared/ui/QuietButton'
+import { SquareIconButton } from '../../shared/ui/SquareIconButton'
+import { BUSY_REASON } from '../../shared/ui/unavailable'
 import { useEffect, useRef, useState } from 'react'
 import { reportingWrite } from '../../app/shell/reportingWrite'
 import { motion } from 'framer-motion'
@@ -289,14 +292,13 @@ export function LoopComposer({ onCreated, onHistory, initialProjectId, initialKi
                   {designFiles.map((f, i) => (
                     <span key={i} data-type="caption" className="inline-flex items-center gap-1 rounded-pill bg-surface-high px-2 h-7 text-on-surface-var">
                       <span className="max-w-[140px] truncate">{f.name}</span>
-                      <button type="button" disabled={busy} onClick={() => setDesignFiles((cur) => cur.filter((_, j) => j !== i))}
-                        className="text-on-surface-low hover:text-on-surface" aria-label={`Remove ${f.name}`}><X size={12} /></button>
+                      <SquareIconButton disabled={busy} onClick={() => setDesignFiles((cur) => cur.filter((_, j) => j !== i))}
+                        className="text-on-surface-low hover:text-on-surface" label={`Remove ${f.name}`} disabledReason={BUSY_REASON}><X size={12} /></SquareIconButton>
                     </span>
                   ))}
-                  <button type="button" onClick={() => setPreviewDesignSystem(true)}
-                    data-type="caption" className="ml-auto inline-flex items-center gap-1.5 text-on-surface-low hover:text-on-surface transition-colors">
+                  <QuietButton onClick={() => setPreviewDesignSystem(true)} className="!h-auto ml-auto inline-flex items-center gap-1.5 text-on-surface-low hover:text-on-surface transition-colors">
                     <Palette size={13} /> Default system
-                  </button>
+                  </QuietButton>
                 </div>
               </div>
             )}

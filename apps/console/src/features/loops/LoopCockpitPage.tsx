@@ -301,11 +301,11 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
   }, [id])
 
   useEffect(() => {
-    if (c === null) {
+    if (c === null && !notFound) {
       const seed = peekQuery<GoalLoop>(`loop:${id}`)
       if (seed) setC(seed)
     }
-  }, [id, c])
+  }, [id, c, notFound])
 
   const { connected } = useRunStream(id, !notFound, {
     onSnapshot: (l) => { setC(loopToGoalLoop(l)); setNotFound(false) },
@@ -566,7 +566,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
           {
 }
           <div className="rounded-lg bg-surface-container/60 px-l py-m">
-            <button type="button" onClick={() => setPromptOpen(!promptOpen)} aria-expanded={promptOpen} className="flex items-center gap-s text-left w-full min-w-0">
+            <QuietButton onClick={() => setPromptOpen(!promptOpen)} ariaExpanded={promptOpen} className="!h-auto flex items-center gap-s text-left w-full min-w-0">
               <ChevronRight size={14} className={`shrink-0 text-on-surface-low transition-transform ${promptOpen ? 'rotate-90' : ''}`} />
               <Eyebrow as="span" className="shrink-0">Prompt</Eyebrow>
               { }
@@ -575,7 +575,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
                   {(c.goal || '').split('\n').map((l) => l.trim()).find(Boolean) || '—'}
                 </span>
               )}
-            </button>
+            </QuietButton>
             {promptOpen && <div className="mt-2" />}
             {promptOpen
               ? <div data-type="body-m" className="max-h-[40vh] overflow-y-auto text-on-surface">
@@ -999,9 +999,9 @@ function LiveSubsteps({ activity }: { activity: { kind: string; label: string; d
   const [open, setOpen] = useState(false)
   return (
     <div className="mt-1.5 pl-7">
-      <button onClick={() => setOpen((v) => !v)} aria-expanded={open} data-type="caption" className="flex items-center gap-1.5 text-on-surface-low hover:text-on-surface">
+      <QuietButton onClick={() => setOpen((v) => !v)} ariaExpanded={open} className="!h-auto flex items-center gap-1.5 text-on-surface-low hover:text-on-surface">
         <Search size={12} /> {activity.length} steps <ChevronRight size={12} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
-      </button>
+      </QuietButton>
       {open && (
         <ul className="mt-1 flex flex-col gap-1">
           {activity.slice(-12).map((e, i) => (
@@ -1020,13 +1020,13 @@ function RailRow({ icon, label, hint, onClick }: {
   icon: React.ReactNode; label: string; hint?: string; onClick: () => void
 }) {
   return (
-    <button type="button" onClick={onClick}
-      className="group w-full text-left rounded-lg px-m py-2.5 flex items-center gap-s hover:bg-surface-high transition-colors">
+    <QuietButton onClick={onClick}
+      className="!h-auto group w-full text-left rounded-lg px-m py-2.5 flex items-center gap-s hover:bg-surface-high transition-colors">
       <span className="shrink-0 text-primary">{icon}</span>
       <span data-type="label-s" className="flex-1 truncate text-on-surface" style={fvs(500)}>{label}</span>
       {hint && <span data-type="caption" className="shrink-0 text-on-surface-low">{hint}</span>}
       <ChevronRight size={15} className="shrink-0 text-on-surface-low opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity" />
-    </button>
+    </QuietButton>
   )
 }
 
@@ -1045,7 +1045,7 @@ function PhaseGroup({ phase, index, active, minCycles, cycles, renderCycle, live
   const orderedCycles = [...cycles].reverse()
   return (
     <div className={`rounded-lg ${active ? 'ring-1 ring-primary' : ''}`} style={{ background: 'color-mix(in srgb, var(--color-surface-container) 55%, transparent)' }}>
-      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="w-full flex items-center gap-s px-m py-2 text-left">
+      <QuietButton onClick={() => setOpen((v) => !v)} ariaExpanded={open} className="!h-auto w-full flex items-center gap-s px-m py-2 text-left">
         <ChevronRight size={13} className={`shrink-0 text-on-surface-low transition-transform ${open ? 'rotate-90' : ''}`} />
         <span data-type="caption" className="shrink-0 inline-flex size-5 items-center justify-center rounded-pill bg-surface-high text-on-surface-low tabular-nums">{index + 1}</span>
         { }
@@ -1059,7 +1059,7 @@ function PhaseGroup({ phase, index, active, minCycles, cycles, renderCycle, live
         <span data-type="caption" className="shrink-0 text-on-surface-low tabular-nums" title={`${cycles.length} cycle${cycles.length !== 1 ? 's' : ''} run · minimum ${minCycles}`}>
           {cycles.length >= minCycles ? `${cycles.length} ${cycles.length === 1 ? 'cycle' : 'cycles'}` : `${cycles.length}/${minCycles}`}
         </span>
-      </button>
+      </QuietButton>
       { }
       {open && (
         <div className="px-m pb-2 pl-[42px] flex flex-col gap-1">

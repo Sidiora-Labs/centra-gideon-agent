@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createdLoopRoute } from '../loop/creation'
+import type { Loop } from '../../shared/data/api'
 
 
 const F = (rel: string) => readFileSync(join(process.cwd(), "src/features", rel), 'utf8')
@@ -89,11 +91,21 @@ describe('a loop action that fails tells the user', () => {
   it('the created-loop route still NAVIGATES, deliberately', () => {
     const body = strip(SECTION)
     const kick = body.lastIndexOf('reportingWrite(')
-    const nav = body.indexOf('navigate(kind === ', kick)
+    const nav = body.indexOf('navigate(createdLoopRoute(created))', kick)
     expect(kick, 'the kick is reported').toBeGreaterThan(-1)
     expect(nav, 'and navigation follows it').toBeGreaterThan(kick)
     const between = body.slice(kick, nav)
     expect(between, 'no early return may gate the navigation').not.toMatch(/\breturn\b/)
+    const loop: Loop = {
+      id: 'review/checklist', kind: 'goal', name: 'Review', task: 'Review the checklist', execution: 'solo',
+      agent: '', model: '', attended: false, max_cycles: 6, idle_secs: 120, success_criteria: null,
+      status: 'ready', total_cycles: 0, error_message: null, created_at: 0, started_at: null,
+      completed_at: null, kind_config: {},
+    }
+    expect(createdLoopRoute(loop)).toBe('loops/review%2Fchecklist')
+    expect(createdLoopRoute({ ...loop, kind: 'code' })).toBe('code/review%2Fchecklist')
+    expect(createdLoopRoute({ run_id: 'run/review', kind: 'general', status: 'running', blocking: false }))
+      .toBe('workflows/runs/run%2Freview')
   })
 
   it('every message names the action or the subject', () => {

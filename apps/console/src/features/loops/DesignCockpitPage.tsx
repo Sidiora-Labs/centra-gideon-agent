@@ -1,3 +1,4 @@
+import { QuietButton } from '../../shared/ui/QuietButton'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { reportingWrite } from '../../app/shell/reportingWrite'
 import { fvs, withWeight } from '../../shared/theme/fontWeight'
@@ -250,8 +251,8 @@ export function DesignCockpitPage({ id, onBack, onDeleted, onOpenProject, onBuil
         )}
         <div data-type="caption" className="ml-auto inline-flex items-center rounded-md bg-surface-container p-0.5">
           {(['light', 'dark'] as Scheme[]).map((s) => (
-            <button key={s} type="button" onClick={() => setScheme(s)}
-              className={`px-2.5 h-5 rounded capitalize transition-colors ${scheme === s ? 'bg-surface-high text-on-surface' : 'text-on-surface-low'}`}>{s}</button>
+            <QuietButton key={s} onClick={() => setScheme(s)}
+              className={`px-2.5 h-5 rounded capitalize transition-colors ${scheme === s ? 'bg-surface-high text-on-surface' : 'text-on-surface-low'}`}>{s}</QuietButton>
           ))}
         </div>
       </div>
@@ -390,7 +391,7 @@ export function TokensView({ tokens, tokensErr, scheme, overrideCount, onRefresh
       <div className="flex items-center gap-2">
         <span data-type="caption" className="text-on-surface-low uppercase tracking-wide">{readOnly ? `Gideon default design system · ${scheme}` : `Resolved design system · ${scheme}`}</span>
         {!readOnly && (overrideCount ?? 0) > 0 && <span data-type="caption" className="rounded-pill px-2 h-5 inline-flex items-center" style={accentChip}>{overrideCount} override group{(overrideCount ?? 0) > 1 ? 's' : ''}</span>}
-        {!readOnly && onRefresh && <button type="button" onClick={onRefresh} data-type="caption" className="ml-auto inline-flex items-center gap-1 text-on-surface-low hover:text-on-surface"><RefreshCw size={12} /> Refresh</button>}
+        {!readOnly && onRefresh && <QuietButton onClick={onRefresh} className="!h-auto ml-auto inline-flex items-center gap-1 text-on-surface-low hover:text-on-surface"><RefreshCw size={12} /> Refresh</QuietButton>}
       </div>
 
       <Section icon={Palette} title="Semantic roles">
@@ -460,12 +461,12 @@ export function TokensView({ tokens, tokensErr, scheme, overrideCount, onRefresh
                   <span data-type="caption" className="text-on-surface-low font-mono">{k} · {String(v)}</span>
                 </div>
               ) : (
-                <button key={k} type="button" title={`Override radius.${k} (now ${v})`}
+                <QuietButton key={k} title={`Override radius.${k} (now ${v})`}
                   onClick={async () => { const nv = await promptInput({ title: `Override radius.${k}`, label: `radius.${k} — new value (e.g. 0.5rem, 12px). Empty to reset to default.`, initial: String(v), required: false }); if (nv !== null) onOverride?.(`radius.${k}`, nv) }}
-                  className="flex flex-col items-center gap-1 group">
+                  className="!h-auto flex flex-col items-center gap-1 group">
                   <span className="size-12 bg-surface-high border border-outline-variant/40 transition-colors group-hover:border-primary" style={{ borderRadius: v }} />
                   <span data-type="caption" className="text-on-surface-low font-mono group-hover:text-on-surface">{k}</span>
-                </button>
+                </QuietButton>
               )
             ))}
           </div>
@@ -491,12 +492,12 @@ export function TokensView({ tokens, tokensErr, scheme, overrideCount, onRefresh
                   <span data-type="body-m" className="truncate text-on-surface" style={{ fontFamily: String(v) }}>The quick brown fox</span>
                 </div>
               ) : (
-                <button key={k} type="button" title={`Override typography.family.${k}`}
+                <QuietButton key={k} title={`Override typography.family.${k}`}
                   onClick={async () => { const nv = await promptInput({ title: `Override typography.family.${k}`, label: `typography.family.${k} — new font stack (e.g. "Roboto, sans-serif"). Empty to reset.`, initial: String(v), required: false }); if (nv !== null) onOverride?.(`typography.family.${k}`, nv) }}
-                  className="flex items-baseline gap-3 text-left group">
+                  className="!h-auto flex items-baseline gap-3 text-left group">
                   <span data-type="caption" className="w-16 shrink-0 text-on-surface-low font-mono capitalize group-hover:text-on-surface">{k}</span>
                   <span data-type="body-m" className="truncate text-on-surface group-hover:text-primary" style={{ fontFamily: String(v) }}>The quick brown fox</span>
-                </button>
+                </QuietButton>
               )
             ))}
             {Object.keys(weights).length > 0 && (
