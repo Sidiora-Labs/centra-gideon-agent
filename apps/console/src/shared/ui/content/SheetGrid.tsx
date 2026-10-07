@@ -34,7 +34,7 @@ export function SheetCells({ sheet, selected, editable, reason, onSelect, onEdit
         const address = { row, col }
         return <td key={col} className="border-b border-r border-outline/20 p-0">
           <input type="text" aria-label={cellRef(sheet, row, col)} value={cellText(cell)} readOnly={!editable} disabled={!editable} title={reason || undefined}
-            className={`w-[9rem] px-3 py-2 tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:opacity-60 ${active ? 'bg-primary/5 ring-1 ring-inset ring-primary/50' : 'bg-transparent'} ${cell.bold ? 'font-semibold' : ''} ${cell.italic ? 'italic' : ''} ${cell.formula ? 'text-primary' : 'text-on-surface'}`}
+            className={`w-[9rem] px-3 py-2 tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:opacity-60 ${active ? 'bg-primary/5 ring-1 ring-inset ring-primary/50' : 'bg-transparent'} ${cell.bold ? 'font-semibold' : ''} ${cell.italic ? 'italic' : ''} ${cell.formula ? active ? 'text-on-primary-tint' : 'text-primary-emphasis' : 'text-on-surface'}`}
             style={{ textAlign: (cell.align || 'left') as 'left' | 'center' | 'right' }}
             onFocus={() => onSelect(address)} onChange={event => { if (editable) { onSelect(address); onEdit(address, { ...cell, ...parseEntry(event.currentTarget.value) }) } }} />
         </td>

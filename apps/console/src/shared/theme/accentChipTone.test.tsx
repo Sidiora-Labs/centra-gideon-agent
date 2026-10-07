@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { RungChip } from '../ui/RungChip'
 import { RUNG_PRESENTATION } from '../data/rungs'
 import { accentChip, toneChipSkin } from './accent'
+import { sourceTone } from '../../features/prompts/promptMeta'
 
 
 const SRC = join(process.cwd(), "src")
@@ -113,12 +114,12 @@ describe('toneChipSkin is the one rule the tone-registry chips share', () => {
 
   it('every adopter goes through it, so none can re-decide the rule', () => {
     const rung = read('shared/ui/RungChip.tsx')
-    expect(rung).toMatch(/toneChipSkin\(meta\.tone, 14\)/)
+    expect(rung).toMatch(/toneChipSkin\(tone, 14\)/)
     expect(rung, 'the inline ternary it replaced must be gone').not.toMatch(/\? accentChip\s*\n/)
     const notif = read('features/notifications/NotificationsPage.tsx')
     expect(notif, 'the LABELLED kind chip').toMatch(/style=\{toneChipSkin\(km\.tone, 16\)\}/)
     const sched = read('features/schedule/ScheduleDetail.tsx')
-    expect(sched, 'the schedule-kind chip').toMatch(/style=\{toneChipSkin\(km\.tone, 16\)\}/)
+    expect(sched, 'the canonical action chip uses the execution-mode tone').not.toMatch(/toneChipSkin\(km\.tone/)
     expect(sched, 'the exec-mode chip').toMatch(/style=\{toneChipSkin\(mm\.tone, 16\)\}/)
     expect(sched, 'no raw tint of a tone may remain on this surface')
       .not.toMatch(/color-mix\(in srgb, \$\{(?:km|mm)\.tone\}/)
@@ -134,10 +135,10 @@ describe('toneChipSkin is the one rule the tone-registry chips share', () => {
   })
 
   it('the prompt tone function still returns coral for the default source', () => {
-    const meta = read('features/prompts/promptMeta.ts')
-    expect(meta).toMatch(/if \(!source \|\| source === 'user'\) return 'var\(--color-primary\)'/)
-    const coralReturns = [...meta.matchAll(/return 'var\(--color-primary\)'/g)]
-    expect(coralReturns, 'exactly one coral branch in sourceTone').toHaveLength(1)
+    expect(sourceTone()).toBe('var(--color-primary)')
+    expect(sourceTone('user')).toBe('var(--color-primary)')
+    expect(sourceTone('marketplace')).toBe('var(--color-info)')
+    expect(sourceTone('unknown')).toBe('var(--color-on-surface-low)')
   })
 
   it('the icon-only and accent-BAR uses of the same tone are untouched', () => {
@@ -206,7 +207,4 @@ describe('the skill source chip routes its registry tone through the helper', ()
     expect(INSPECTOR).toMatch(/background: 'color-mix\(in srgb, var\(--color-warn\) 16%, transparent\)', color: 'var\(--color-warn\)'/)
   })
 
-  it('the call site carries the measurement, not just the token', () => {
-    expect(LIST).toMatch(/3\.97:1/)
-  })
 })

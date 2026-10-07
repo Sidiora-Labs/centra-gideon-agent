@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { accentChip } from './accent'
+import ts from 'typescript'
 
 
 const SRC = join(process.cwd(), "src")
@@ -47,37 +48,43 @@ describe('no primary tint under primary ink survives', () => {
 })
 
 
-const CLASS_TINT_ALLOWED = new Set([
-  'shared/ui/Button.tsx',
-])
 
-describe('no primary tint under primary ink survives — utility spelling', () => {
-  const offenders: string[] = []
-  const seen: string[] = []
-  for (const abs of walk(SRC)) {
-    const rel = abs.slice(SRC.length + 1)
-    readFileSync(abs, 'utf8').split('\n').forEach((line, i) => {
-      if (!/bg-primary\/\d+/.test(line)) return
-      if (!/text-primary\b/.test(line)) return
-      seen.push(`${rel}:${i + 1}`)
-      if (!CLASS_TINT_ALLOWED.has(rel)) offenders.push(`${rel}:${i + 1}`)
-    })
-  }
-
-  it('has none left outside the two recorded interactive holdouts', () => {
-    expect(
-      offenders,
-      `coral ink on a coral tint is 3.64–4.20:1 in light — use bg-primary-container + text-on-primary-container:\n  ${offenders.join('\n  ')}`,
-    ).toEqual([])
-  })
-
-  it('still finds the holdouts — the allowlist is not stale', () => {
-    expect(seen.length, 'the matcher stopped matching anything at all').toBeGreaterThan(0)
-    for (const rel of CLASS_TINT_ALLOWED) {
-      expect(seen.some((s) => s.startsWith(rel + ':')), `${rel} no longer carries the pattern — drop it from the allowlist`).toBe(true)
+function textTintHits(source: string): number[] {
+  const tree = ts.createSourceFile('consumer.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const hits: number[] = []
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const opening = ts.isJsxElement(node) ? node.openingElement : node
+      const tag = opening.tagName.getText(tree)
+      const text = tag === 'input' || tag === 'textarea' || (ts.isJsxElement(node) && node.children.some(child =>
+        ts.isJsxText(child) ? child.text.trim().length > 0 : ts.isJsxExpression(child) && !!child.expression))
+      if (text) {
+        const attr = opening.attributes.properties.find(property => ts.isJsxAttribute(property) && property.name.getText(tree) === 'className')
+        const value = attr?.getText(tree) ?? ''
+        if (/(?:^|[\s'"`])(?:hover:)?bg-primary\/\d+/.test(value) && /(?:^|[\s'"`])text-primary(?=$|[\s'"`])/.test(value))
+          hits.push(tree.getLineAndCharacterOfPosition(opening.getStart(tree)).line + 1)
+      }
     }
+    ts.forEachChild(node, visit)
+  }
+  visit(tree)
+  return hits
+}
+
+describe('text consumers do not combine raw primary ink with a primary tint', () => {
+  it('finds no remaining text consumer', () => {
+    const offenders = walk(SRC).flatMap(abs => textTintHits(readFileSync(abs, 'utf8')).map(line => `${abs.slice(SRC.length + 1)}:${line}`))
+    expect(offenders).toEqual([])
+  })
+  it('distinguishes raw ink, emphasis ink, and icon-only or nested elements', () => {
+    expect(textTintHits('<button className="text-primary hover:bg-primary/10">Open</button>')).toEqual([1])
+    expect(textTintHits('<input className={`bg-primary/5 ${formula ? \'text-primary\' : \'text-on-surface\'}`} />')).toEqual([1])
+    expect(textTintHits('<button className="text-primary-emphasis bg-primary/10">Open</button>')).toEqual([])
+    expect(textTintHits('<button className="text-primary bg-primary/10"><Plus /></button>')).toEqual([])
+    expect(textTintHits('<span className="bg-primary/15"><Glyph className="text-primary" /></span>')).toEqual([])
   })
 })
+
 
 describe('the sweep actually adopted the shared definition', () => {
   const adopters = walk(SRC).filter((abs) => /\baccentChip\b/.test(readFileSync(abs, 'utf8')))
@@ -89,7 +96,7 @@ describe('the sweep actually adopted the shared definition', () => {
   it('every adopter imports it rather than re-declaring the colours', () => {
     const bad = adopters
       .filter((abs) => !abs.endsWith(join('shared/theme', 'accent.ts')))
-      .filter((abs) => !/import \{[^}]*accentChip[^}]*\} from '[^']*design\/accent'/.test(readFileSync(abs, 'utf8')))
+      .filter((abs) => !/import \{[^}]*accentChip[^}]*\} from '[^']*theme\/accent'/.test(readFileSync(abs, 'utf8')))
     expect(bad.map((b) => b.slice(SRC.length + 1)), 'uses accentChip without importing it').toEqual([])
   })
 })

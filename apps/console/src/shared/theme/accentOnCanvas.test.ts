@@ -4,6 +4,8 @@ import { join } from 'node:path'
 
 
 const SRC = join(process.cwd(), "src")
+import { SCHEMES } from './schemes'
+
 const read = (rel: string) => readFileSync(join(SRC, rel), 'utf8')
 
 
@@ -30,9 +32,6 @@ describe('the two canvas-painted accent texts use the emphasis shade', () => {
       .not.toMatch(/borderColor: 'var\(--color-primary\)', color: 'var\(--color-primary\)'/)
   })
 
-  it('the call sites carry the measurement, not just the token', () => {
-    expect(read('features/settings/MemoryPanel.tsx')).toMatch(/4\.37:1/)
-  })
 
   it('the scheme rail now measures the canvas, which is what makes this rule enforceable', () => {
     const rail = read('shared/theme/schemeContrast.test.ts')
@@ -158,9 +157,6 @@ describe('a tone-registry ink painted on the canvas uses the emphasis shade', ()
       .toMatch(/key: 'note', label: 'Note', icon: StickyNote, tone: 'var\(--color-primary\)'/)
   })
 
-  it('the call site carries the measurement, not just the token', () => {
-    expect(read('features/knowledge/KnowledgeDetailPage.tsx')).toMatch(/4\.37:1/)
-  })
 
   it('this ground is already scheme-covered, which is what makes the remap safe in all 12', () => {
     expect(read('shared/theme/schemeContrast.test.ts')).toMatch(/primary-emphasis as accent text on the CANVAS/)
@@ -184,16 +180,16 @@ describe('the first-run overlay inks its links by their ground', () => {
   })
 
   it('the canvas-painted skip link takes the emphasis ink', () => {
-    expect(ONB).toMatch(/<TextLink size="sm" ink="emphasis" onClick=\{skipSetup\}>/)
+    expect(ONB).toMatch(/<TextLink size="sm" ink="emphasis" onClick=\{\(\) => exitTo\('chat\/new'\)\}>/)
   })
 
   it('the surface-high Pointer link takes it too', () => {
-    expect(ONB).toMatch(/<TextLink size="sm" ink="emphasis" onClick=\{\(\) => onExitTo\('inbox'\)\}>Open the Inbox instead<\/TextLink>/)
+    expect(ONB).toMatch(/<TextLink size="sm" ink="emphasis" onClick=\{\(\) => exitTo\('inbox'\)\}>Open the Inbox instead<\/TextLink>/)
   })
 
   it('neither onboarding link carries the failing default any more', () => {
-    expect(ONB).not.toMatch(/<TextLink size="sm" onClick=\{skipSetup\}>/)
-    expect(ONB).not.toMatch(/<TextLink size="sm" onClick=\{\(\) => onExitTo\('inbox'\)\}>/)
+    expect(ONB).not.toMatch(/<TextLink size="sm" onClick=\{\(\) => exitTo\('chat\/new'\)\}>/)
+    expect(ONB).not.toMatch(/<TextLink size="sm" onClick=\{\(\) => exitTo\('inbox'\)\}>/)
   })
 
   it('the links INSIDE the step card keep the base ink — they measured 4.83 and pass', () => {
@@ -202,10 +198,6 @@ describe('the first-run overlay inks its links by their ground', () => {
     expect(plain.length, 'EssentialsStep links still on the default ink').toBeGreaterThanOrEqual(3)
   })
 
-  it('both call sites carry the measurement, not just the token', () => {
-    expect(ONB).toMatch(/4\.37:1/)
-    expect(ONB).toMatch(/4\.26:1/)
-  })
 
   it('the emphasis shade exists in light for every scheme, on BOTH grounds this cycle touched', () => {
     const rail = read('shared/theme/schemeContrast.test.ts')
@@ -230,9 +222,6 @@ describe('the voice panel manage-links are inked for the canvas', () => {
     expect(VOICE).not.toMatch(/<TextLink onClick=\{\(\) => go\('providers'\)\} icon=\{ArrowRight\} iconPosition="trailing" size="xs">/)
   })
 
-  it('the call site carries the measurement, not just the token', () => {
-    expect(VOICE).toMatch(/4\.37:1/)
-  })
 
   it("the panel's OTHER link keeps the base ink — it is on a surface and passes", () => {
     expect(VOICE).toMatch(/<TextLink size="xs" onClick=\{async \(\) => \{/)
@@ -240,5 +229,39 @@ describe('the voice panel manage-links are inked for the canvas', () => {
 
   it('the primitive default is still `primary`, so the 20 passing links did not move', () => {
     expect(read('shared/ui/TextLink.tsx')).toMatch(/ink = 'primary'/)
+  })
+})
+
+
+describe('current accent text clears AA on its actual grounds', () => {
+  const css = read('shared/theme/tokens.css')
+  const lightAt = css.search(/\.light\s*\{/)
+  const blocks = { dark: css.slice(0, lightAt), light: css.slice(lightAt) }
+  const rgb = (hex: string) => [0, 2, 4].map(i => parseInt(hex.slice(i + 1, i + 3), 16))
+  const luminance = (values: number[]) => values.map(v => {
+    const c = v / 255
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }).reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i], 0)
+  for (const scheme of SCHEMES) for (const mode of ['dark', 'light'] as const) {
+    for (const ground of ['canvas', 'surface-high', 'surface-container']) for (const alpha of [0, 0.05, 0.10]) {
+      it(`${scheme.id}/${mode}/${ground}/${alpha}: scene ink clears 4.5`, () => {
+        const hex = blocks[mode].match(new RegExp(`--color-${ground}:\\s*(#[0-9a-fA-F]{6})`))?.[1]
+        expect(hex, 'actual token ground').toBeTruthy()
+        const base = rgb(hex!)
+        const primary = rgb(scheme.colors['--color-primary'][mode])
+        const background = base.map((c, i) => c * (1 - alpha) + primary[i] * alpha)
+        const inkName = alpha ? blocks[mode].match(/--color-on-primary-tint:\s*var\((--color-[a-z-]+)\)/)?.[1] : '--color-primary-emphasis'
+        expect(inkName, 'native scene ink').toBeTruthy()
+        const inkHex = scheme.colors[inkName!]?.[mode] ?? blocks[mode].match(new RegExp(`${inkName}:\\s*(#[0-9a-fA-F]{6})`))?.[1]
+        expect(inkHex, 'resolved native scene ink').toBeTruthy()
+        const ink = luminance(rgb(inkHex!))
+        const bg = luminance(background)
+        expect((Math.max(ink, bg) + 0.05) / (Math.min(ink, bg) + 0.05)).toBeGreaterThanOrEqual(4.5)
+      })
+    }
+  }
+  it('attachment actions and selected formula cells use emphasis text', () => {
+    expect(read('features/chat/AttachmentChips.tsx')).toContain('text-primary-emphasis hover:bg-primary/10 hover:text-on-primary-tint')
+    expect(read('shared/ui/content/SheetGrid.tsx')).toContain("cell.formula ? active ? 'text-on-primary-tint' : 'text-primary-emphasis'")
   })
 })
