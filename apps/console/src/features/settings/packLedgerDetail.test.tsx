@@ -141,7 +141,7 @@ describe('staged roster', () => {
     }
     const { container } = render(<PackRow pack={active} />)
     expect(container.textContent).toContain('Active · 1 agents, 1 triggers added disabled')
-    expect(screen.queryByRole('button', { name: 'Activate pack' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Activate pack cfo-pack' })).toBeNull()
   })
 
   it('deploys the roster and its staged triggers with one click', async () => {
@@ -157,7 +157,7 @@ describe('staged roster', () => {
       staged_triggers: ['month-end'],
     }} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Activate pack' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Activate pack cfo-pack' }))
 
     await waitFor(() => {
       expect(roster).toHaveBeenCalledOnce()

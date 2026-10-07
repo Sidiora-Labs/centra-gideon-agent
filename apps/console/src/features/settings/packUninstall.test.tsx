@@ -28,7 +28,7 @@ describe('pack uninstall plan', () => {
       'Removes 2 skills, 1 agent definition, 1 prompt, 1 workflow, 1 staged automation.',
     )
     render(<UninstallPlanDetails plan={plan} />)
-    expect(screen.getByText(/skill:cfo-budget-review/).textContent).toContain('you edited it')
+    expect(screen.getByText(/skill:cfo-budget-review/).closest('li')?.textContent).toContain('you edited it')
     expect(screen.getByText(/MCP server/).textContent).toContain('finance-statements')
   })
 

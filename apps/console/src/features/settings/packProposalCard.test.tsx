@@ -173,7 +173,7 @@ describe('the update preview makes the skip visible', () => {
 
   it('offers Apply only while the update has NOT been applied', () => {
     render(<UpdatePreview update={update} busy={false} onApply={vi.fn()} />)
-    expect(screen.getByRole('button', { name: 'Apply update' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Apply update for infra-ops' })).toBeTruthy()
   })
 
   it('drops the Apply button once applied, and says Updated', () => {

@@ -67,11 +67,18 @@ afterEach(() => vi.restoreAllMocks())
 
 describe('gated-model pre-warnings', () => {
   it('blocks the download before a validated token is ready and points to Models', async () => {
+    const start = vi.spyOn(api, 'startModelDownload')
     render(<LocalModelManager provider="faster-whisper" models={[GATED]} onChanged={vi.fn()} />)
     const download = screen.getByRole('button', { name: 'Download gated-model' })
-    expect(download.hasAttribute('disabled')).toBe(true)
+    expect(download).toHaveAttribute('aria-disabled', 'true')
+    download.focus()
+    expect(download).toHaveFocus()
+    fireEvent.click(download)
+    expect(start).not.toHaveBeenCalled()
     expect(await screen.findByText(/Add a valid Hugging Face token in Models/i)).toBeTruthy()
     expect(gatedModelAccess(GATED, false)).toBe('token-required')
+    fireEvent.click(download)
+    expect(start).not.toHaveBeenCalled()
   })
 
   it('allows a token-ready gated download while warning that model access is separate', async () => {
