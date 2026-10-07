@@ -11,6 +11,9 @@ import { styledGenerativeUILibrary } from './generative/vendor/generative-ui'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { UISpecView } from './generative/UISpecView'
+import { resolveToolUISpec, connectedUISpecContracts } from '../../../features/chat/auiResultRegistry'
+import { renderToolOutput } from '../../../features/chat/toolRenderers/registry'
+import type { ToolSegment } from '../../../features/chat/chatTypes'
 
 describe('twenty-two donor structures integrated with live bindings', () => {
   it('retains the exact gallery order and source provenance', () => {
@@ -23,9 +26,24 @@ describe('twenty-two donor structures integrated with live bindings', () => {
   it.each(Object.keys(generativeActions) as GenerativeTemplate[])('%s has a producer/consumer trace and cannot render donor sample records', (template) => {
     const spec = bindDonorUISpec(boundRecord(template))
     const row = trace.find((item) => item.slug === template)
-    expect(row?.producerContract).toContain('ToolSegment')
+    expect(row?.producerContract).toBe('visualize with explicit real data.generative_ui v1 or registered JSON tool envelope')
     expect(row?.consumerFiles).toContain('features/chat/auiResultRegistry.tsx')
-    expect(row?.consumerMount).toBe('pending')
+    expect(row?.consumerFiles).toContain('features/chat/toolRenderers/registry.tsx')
+    expect(row?.consumerMount).toBe('chat ToolCard via renderToolOutput; other listed product routes pending')
+    const record = boundRecord(template)
+    const envelope = { schemaVersion: 1, template, recordId: record.recordId, bindings: record.bindings }
+    const segment: ToolSegment = {
+      kind: 'tool', id: `visualize-${template}`, tool: 'visualize', done: true, ok: true,
+      input: JSON.stringify({ data: { generative_ui: envelope } }),
+      output: `Show this to the user by embedding the widget block below in your reply:\n\n<widget kind="uispec" title="Visualization">\n${JSON.stringify(envelope)}\n</widget>`,
+    }
+    expect(resolveToolUISpec(segment, connectedUISpecContracts)).toMatchObject({
+      template, producer: 'tool:visualize', recordId: record.recordId,
+    })
+    const rendered = renderToStaticMarkup(<>{renderToolOutput(segment)}</>)
+    expect(rendered).toContain(`aria-label="Live ${template} result"`)
+    expect(rendered).not.toContain('images.unsplash.com')
+    expect(rendered).not.toContain('ACME')
     expect(spec?.tree.$type).toBe(donorStructures.find((item) => item.slug === template)?.tree.$type)
     expect(JSON.stringify(spec?.tree)).not.toContain('images.unsplash.com')
     expect(JSON.stringify(spec?.tree)).not.toContain('ACME')
