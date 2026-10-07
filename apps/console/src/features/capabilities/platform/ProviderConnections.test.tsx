@@ -44,7 +44,7 @@ beforeAll(async () => {
     const headers = new Headers(init?.headers)
     headers.set('Authorization', `Bearer ${ready.token}`)
     return nativeFetch(url, { ...init, headers }).then(async response => {
-      if (init?.method === 'PUT') writes.push({ path: url.pathname, body: String(init.body), status: response.status, result: await response.clone().text() })
+      if (init?.method === 'PUT' || init?.method === 'DELETE') writes.push({ path: url.pathname, body: String(init.body), status: response.status, result: await response.clone().text() })
       return response
     })
   }
@@ -59,6 +59,15 @@ function Wrapper() {
   return <ProviderConnections selected={selected} onSelect={setSelected} baseUrl={baseUrl} />
 }
 const fill = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
+async function activate(name: string) {
+  await waitFor(() => {
+    const button = screen.getByRole('button', { name })
+    expect(button).not.toBeDisabled()
+    expect(button).not.toHaveAttribute('aria-disabled', 'true')
+  })
+  await act(async () => { /* Settle the native inventory's draft revision before the next request. */ })
+  fireEvent.click(screen.getByRole('button', { name }))
+}
 
 it('creates, edits, binds, unbinds and deletes through the real HTTP store', async () => {
   render(<Wrapper />)
@@ -73,12 +82,12 @@ it('creates, edits, binds, unbinds and deletes through the real HTTP store', asy
   expect(screen.getByLabelText('Connection label')).toHaveValue('Work account')
   expect(screen.getByLabelText('Endpoint')).toHaveValue('https://example.invalid/v1')
   expect(screen.getByRole('button', { name: 'Save connection' })).toBeEnabled()
-  fireEvent.click(screen.getByRole('button', { name: 'Save connection' }))
+  await activate('Save connection')
   await waitFor(() => expect(writes).toEqual(expect.arrayContaining([expect.objectContaining({ path: '/api/capabilities/platform/connections/work', status: 200 })])))
   expect(await screen.findByRole('button', { name: 'Work account' })).toBeVisible()
   await waitFor(() => expect(screen.getByLabelText('Connection ID')).toBeDisabled())
   fill('Provider to bind', 'primary')
-  fireEvent.click(screen.getByRole('button', { name: 'Bind provider' }))
+  await activate('Bind provider')
   expect(screen.getByRole('button', { name: 'Bind provider' })).toHaveAccessibleDescription(BUSY_REASON)
   expect(screen.getByRole('button', { name: 'Bind provider' })).toHaveAttribute('aria-disabled', 'true')
   expect(await screen.findByRole('button', { name: 'Unbind primary' })).toBeVisible()
@@ -89,14 +98,14 @@ it('creates, edits, binds, unbinds and deletes through the real HTTP store', asy
   expect(inventory.connections[0].model_access).toEqual({ mode: 'allow', patterns: ['alpha*'] })
   fill('Endpoint', 'https://changed.invalid/v1')
   fill('Model access', 'all')
-  fireEvent.click(screen.getByRole('button', { name: 'Save connection' }))
+  await activate('Save connection')
   await waitFor(async () => {
     const changed = await (await fetch(`${baseUrl}/api/capabilities/platform/connections`)).json()
     expect(changed.connections[0].base_url).toBe('https://changed.invalid/v1')
   })
-  fireEvent.click(screen.getByRole('button', { name: 'Unbind primary' }))
+  await activate('Unbind primary')
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Unbind primary' })).toBeNull())
-  fireEvent.click(screen.getByRole('button', { name: 'Delete connection' }))
+  await activate('Delete connection')
   expect(await screen.findByText('No shared connections configured.')).toBeVisible()
   const removed = await (await fetch(`${baseUrl}/api/capabilities/platform/connections`)).json()
   expect(removed.connections).toEqual([])
@@ -109,7 +118,7 @@ it('keeps invalid input and displays the actual server rejection', async () => {
   fill('Connection ID', 'unsafe')
   fill('Connection label', 'Rejected endpoint')
   fill('Endpoint', 'https://example.invalid/v1?key=secret')
-  fireEvent.click(screen.getByRole('button', { name: 'Save connection' }))
+  await activate('Save connection')
   expect(await screen.findByRole('alert')).toHaveTextContent('without credentials or query parameters')
   expect(screen.getByLabelText('Endpoint')).toHaveValue('https://example.invalid/v1?key=secret')
   const inventory = await (await fetch(`${baseUrl}/api/capabilities/platform/connections`)).json()
