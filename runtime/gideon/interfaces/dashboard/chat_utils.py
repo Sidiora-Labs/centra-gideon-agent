@@ -21,11 +21,8 @@ if TYPE_CHECKING:
     from gideon.integrations.llm.base import LLMEvent
 
 from gideon.assurance.validation import MAX_TOOL_NAME_LEN, sanitize_string
-from gideon.engine import task_modes
+from gideon.engine import history_keys, task_modes
 from gideon.engine.history_keys import _history_key_for as _history_key_for
-from gideon.engine.history_keys import candidate_history_keys as candidate_history_keys
-from gideon.engine.history_keys import persisted_history_key as persisted_history_key
-from gideon.engine.history_keys import resolve_history_key as resolve_history_key
 from gideon.interfaces.dashboard.state import (
     CRON_NOTIFY_PREFIX,
     SUBAGENT_COMPLETION_PREFIX,
@@ -35,6 +32,10 @@ from gideon.interfaces.dashboard.state import (
 )
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
 from gideon.security.sel import SecurityEvent, sel
+
+candidate_history_keys = history_keys.candidate_history_keys
+persisted_history_key = history_keys.persisted_history_key
+resolve_history_key = history_keys.resolve_history_key
 
 logger = logging.getLogger(__name__)
 

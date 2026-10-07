@@ -176,6 +176,8 @@ from gideon.automation.workflows.tick import (
 from gideon.cognition import project_context, review_triage
 from gideon.cognition.knowledge import session_brief
 
+from gideon.automation.workflows import controller_views
+
 logger = logging.getLogger(__name__)
 
 
@@ -5675,8 +5677,6 @@ class RunController:
         """
         return max((i.epoch for i in self.instances.values()), default=0)
 
-
-from gideon.automation.workflows import controller_views
 
 _clip = controller_views._clip
 _confirmation_id = controller_views._confirmation_id

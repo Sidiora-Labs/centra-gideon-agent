@@ -41,6 +41,8 @@ from gideon.security.security import (
     redact_values_for_display,
 )
 
+from gideon.interfaces.dashboard.handlers import trigger_runs
+
 
 def config_dir():
     """The active home, re-resolved per call — see :func:`gideon.core.config.loader.config_dir`.
@@ -2591,8 +2593,6 @@ async def _run_store(raw: str, request: web.Request) -> web.Response:
         )
     return web.json_response(response)
 
-
-from gideon.interfaces.dashboard.handlers import trigger_runs
 
 _accepted_action_origin = trigger_runs._accepted_action_origin
 _dispatch_store_action = trigger_runs._dispatch_store_action

@@ -47,7 +47,6 @@ should refuse to pretend otherwise.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
 import time
@@ -59,7 +58,7 @@ from gideon.core.atomic_write import atomic_write, atomic_write_bytes
 from gideon.core.config import loader as config_loader
 from gideon.security import session_signing
 from gideon.security.auth import session_payload
-from gideon.security.session_signing import _ensure_owner_only as _ensure_owner_only
+_ensure_owner_only = session_signing._ensure_owner_only
 
 
 def config_dir() -> Path:

@@ -63,6 +63,8 @@ from gideon.automation.workflows.models import (
 )
 from gideon.automation.workflows.validator import validate_spec
 
+from gideon.automation.workflows import service_views
+
 logger = logging.getLogger(__name__)
 
 MIN_OBSERVE_MS = 100
@@ -2720,8 +2722,6 @@ def skip_nodes(
         confirm=True,
     )
 
-
-from gideon.automation.workflows import service_views
 
 _coerce_declared_inputs = service_views._coerce_declared_inputs
 _completion_summary = service_views._completion_summary

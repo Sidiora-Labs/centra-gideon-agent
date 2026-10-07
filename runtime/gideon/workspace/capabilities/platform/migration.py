@@ -28,6 +28,8 @@ from gideon.workspace.capabilities.knowledge.reviews import digest as knowledge_
 from gideon.workspace.capabilities.knowledge.typed import BoundHierarchy, BoundTasks
 from gideon.workspace.capabilities.music.store import RepertoireStore
 
+from gideon.workspace.capabilities.platform import migration_commits
+
 FORMAT = "legacy_snapshot_v1"
 MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
 MAX_EXPANDED_BYTES = 32 * 1024 * 1024
@@ -2541,8 +2543,6 @@ def _knowledge_state(knowledge, step, journal):
         else "drift"
     )
 
-
-from gideon.workspace.capabilities.platform import migration_commits
 
 _apply_canonical_step = migration_commits._apply_canonical_step
 _artifact_digest = migration_commits._artifact_digest
