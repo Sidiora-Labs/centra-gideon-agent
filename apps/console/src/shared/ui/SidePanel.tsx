@@ -55,7 +55,7 @@ export function SidePanel({ title, icon, onClose, urlKey, storeKey = 'sidepanel-
   const [mode, setMode] = useReducer((_current: 'dock' | 'full', next: 'dock' | 'full') => next, 'dock')
   const expanded = mode === 'full'
   const { fitWidth, onHandleDown, onHandleKey, min, max } = useResizablePanel(
-    storeKey.replace(/-w$/, ''), { def: Math.min(420, dockMaxWidth()), min: DOCK_MIN, max: dockMaxWidth, side: rtl ? 'left' : 'right', edgePeek: Math.ceil(window.innerWidth / 2), storageKey: storeKey })
+    storeKey.replace(/-w$/, ''), { def: Math.min(420, dockMaxWidth()), min: DOCK_MIN, max: dockMaxWidth, initialMax: DOCK_MAX, side: rtl ? 'left' : 'right', edgePeek: Math.ceil(window.innerWidth / 2), storageKey: storeKey })
   const dockW = Math.min(fitWidth, dockMaxWidth())
   const close = () => {
     urlKey?.setQuery({ [urlKey.key]: null })

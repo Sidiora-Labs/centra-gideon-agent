@@ -308,7 +308,7 @@ export function Composer(props: ComposerProps) {
       data-composer-dropzone="true" data-focused={surface.focused || undefined} data-active={active || undefined}>
       <AssistantComposerBar dragActive={surface.dropping}
         className="gideon-composer-panel relative flex flex-col gap-3 overflow-visible border bg-surface-container px-3 pb-2 pt-4">
-      <div role="separator" aria-label="Resize message input" aria-orientation="horizontal" aria-valuenow={surface.height}
+      <div role="separator" aria-label="Resize message input — arrow keys to resize" aria-orientation="horizontal" aria-valuenow={surface.height}
         aria-valuemin={COMPOSER_HEIGHT.min} aria-valuemax={COMPOSER_HEIGHT.max} tabIndex={0} title="Drag to resize"
         {...surface.resizeBindings}
         className="group absolute -top-2 left-1/2 z-10 flex h-5 w-14 -translate-x-1/2 cursor-ns-resize items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">

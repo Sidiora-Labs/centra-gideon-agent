@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import postcss from 'postcss'
 import { join } from 'node:path'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -6,7 +7,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { TopBar } from './TopBar'
 
 const css = readFileSync(join(process.cwd(), 'src/app/shell/shell.css'), 'utf8')
-const mobile = css.split('@media (max-width: 768px) {')[1]?.split('@media (max-width: 767px) {')[0] ?? ''
+const responsive = postcss.parse(css).nodes.filter((node): node is postcss.AtRule =>
+  node.type === 'atrule' && node.name === 'media' && node.params === '(max-width: 1100px)')
+const mobile = responsive.map(node => node.toString()).join('\n')
 
 function renderArtifactHeader(contentAligned = false) {
   const openLibrary = vi.fn()
@@ -53,6 +56,8 @@ describe('shared TopBar responsive slots', () => {
   })
 
   it('reserves the shell-control band before either page slot at mobile width', () => {
+    expect(responsive).toHaveLength(1)
+    expect(Number(responsive[0].params.match(/(\d+)px/)?.[1])).toBeGreaterThanOrEqual(768)
     expect(mobile).toContain(".gideon-shell:not([data-hosted-mobile='true']) .gideon-topbar")
     expect(mobile).toContain('padding-top: max(64px, var(--shell-corner-rh, 0px))')
     expect(mobile).toContain('height: auto !important')

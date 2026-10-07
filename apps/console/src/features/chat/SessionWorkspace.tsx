@@ -111,7 +111,7 @@ export function SessionWorkspace({ sessionKey, pane, onPane, turns, activity, on
         <PaneContent kind={active} sessionKey={sessionKey} runIds={runIds} activity={activity} onOpenFile={onOpenFile} onOpenArtifact={onOpenArtifact} subagents={subagents} onKillFanout={onKillFanout} side={side} />
       </section>
       {secondary && <>
-        <div role="separator" aria-label="Resize workspace panes" aria-orientation="horizontal" tabIndex={0} aria-valuemin={25} aria-valuemax={75} aria-valuenow={split}
+        <div role="separator" aria-label="Resize workspace panes — arrow keys to resize" aria-orientation="horizontal" tabIndex={0} aria-valuemin={25} aria-valuemax={75} aria-valuenow={split}
           onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId) }}
           onPointerMove={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const parent = event.currentTarget.parentElement; if (parent) resize(((event.clientY - parent.getBoundingClientRect().top) / parent.clientHeight) * 100) }}
           onPointerUp={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId) }}

@@ -8,6 +8,7 @@ interface PanelOptions {
   side: PanelSide
   collapsible?: boolean
   storageKey?: string
+  initialMax?: number
   edgePeek?: number
 }
 interface PanelState { width: number; collapsed: boolean }
@@ -27,7 +28,7 @@ export function useResizablePanel(key: string, opts: PanelOptions) {
     return { min, max: typeof max === 'function' ? max() : max }
   }, [])
   const [state, dispatch] = useReducer(panelReducer, undefined, () => ({
-    width: initialPanelSize(storageKey, opts.def, bounds()),
+    width: initialPanelSize(storageKey, opts.def, { ...bounds(), max: opts.initialMax ?? bounds().max }),
     collapsed: !!opts.collapsible && readPanelStorage(`${key}-collapsed`) === '1',
   }))
   const [viewport, refreshViewport] = useReducer(() => ({ width: window.innerWidth, height: window.innerHeight }),

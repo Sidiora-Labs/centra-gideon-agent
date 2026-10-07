@@ -1,73 +1,107 @@
-import { describe, expect, it, beforeEach } from 'vitest'
-import { render } from '@testing-library/react'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { render, screen, fireEvent, cleanup, within } from '@testing-library/react'
 import { act } from 'react'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { SidePanel } from './SidePanel'
 
-
 const STORE_KEY = 'sidepanel-clamp-test'
-const EDGE_PEEK = 32
+const sheetCSS = readFileSync(join(process.cwd(), 'src/shared/ui/mobileSheet.css'), 'utf8')
+let originalWidth: PropertyDescriptor | undefined
 
-function setViewport(w: number) {
-  ;(window as unknown as { innerWidth: number }).innerWidth = w
+function setViewport(width: number) {
+  act(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+    window.dispatchEvent(new Event('resize'))
+  })
 }
 
-function renderedDockWidth(container: HTMLElement): number {
-  const inner = container.querySelector<HTMLElement>('div.flex.h-full.flex-col')
-  if (!inner) throw new Error('docked panel inner column not found — the selector no longer matches')
-  const w = inner.style.width
-  if (!/^\d+px$/.test(w)) throw new Error(`expected an explicit px width, got ${JSON.stringify(w)}`)
-  return Number.parseInt(w, 10)
+function renderedDockWidth(): number {
+  const region = screen.getByRole('region', { name: 'Explorer' })
+  const inner = region.querySelector<HTMLElement>(':scope > div.flex.h-full.flex-col')
+  if (!inner) throw new Error('docked panel inner column not found')
+  expect(inner.style.width).toMatch(/^\d+px$/)
+  return Number.parseInt(inner.style.width, 10)
 }
 
-function mount(viewportW: number) {
-  setViewport(viewportW)
-  return render(
-    <SidePanel title="Explorer" storeKey={STORE_KEY} fillHeight onClose={() => {}}>
-      <p>body</p>
-    </SidePanel>,
-  )
+function mount(viewportWidth: number) {
+  setViewport(viewportWidth)
+  return render(<SidePanel title="Explorer" storeKey={STORE_KEY} fillHeight onClose={() => {}}>
+    <input aria-label="Panel search" defaultValue="retained search" />
+    <p>body</p>
+  </SidePanel>)
 }
 
-describe('SidePanel clamps its docked width to the viewport', () => {
+describe('SidePanel preserves the saved choice while fitting its actual responsive container', () => {
   beforeEach(() => {
+    originalWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth')
     localStorage.clear()
     setViewport(1440)
   })
-
-  it('does NOT engage on a desktop viewport — the stored width wins', () => {
-    const { container } = mount(1440)
-    expect(renderedDockWidth(container)).toBe(420)
+  afterEach(() => {
+    cleanup()
+    vi.useRealTimers()
+    if (originalWidth) Object.defineProperty(window, 'innerWidth', originalWidth)
   })
 
-  it.each([
-    [390, 390 - EDGE_PEEK],
-    [320, 320 - EDGE_PEEK],
-  ])('at %ipx the dock renders %ipx — inside the screen, not clipped by it', (vw, expected) => {
-    const { container } = mount(vw)
-    const w = renderedDockWidth(container)
-    expect(w).toBe(expected)
-    expect(w).toBeLessThanOrEqual(vw)
+  it('keeps the stored width on a desktop viewport', () => {
+    localStorage.setItem(STORE_KEY, '540')
+    mount(1440)
+    expect(renderedDockWidth()).toBe(540)
   })
 
-  it('clamps a WIDER stored width without overwriting it — a wide screen restores the choice', () => {
+  it.each([390, 320])('at %ipx uses the bounded native modal sheet with reachable body and close control', width => {
+    mount(width)
+    expect(screen.queryByRole('region')).toBeNull()
+    const sheet = screen.getByRole('dialog', { name: 'Explorer' })
+    expect(sheet).toHaveAttribute('aria-modal', 'true')
+    expect(sheet).toContainElement(screen.getByRole('textbox', { name: 'Panel search' }))
+    expect(within(sheet).getByRole('button', { name: 'Close' })).toBeEnabled()
+    expect(sheetCSS).toMatch(/\.gideon-mobile-sheet\s*\{[^}]*width:\s*100%/)
+    expect(sheetCSS).toMatch(/\.gideon-mobile-sheet-overlay\s*\{[^}]*inset-inline:\s*0/)
+    expect(sheetCSS).toMatch(/padding:\s*max\(8px,/)
+    expect(sheetCSS).toMatch(/min-width:\s*0/)
+  })
+
+  it('keeps a wider saved choice after a narrow initial mount, settled persistence and desktop restoration', () => {
+    vi.useFakeTimers()
     localStorage.setItem(STORE_KEY, '720')
-    const { container } = mount(390)
-    expect(renderedDockWidth(container)).toBe(390 - EDGE_PEEK)
+    mount(320)
+    act(() => vi.advanceTimersByTime(250))
     expect(localStorage.getItem(STORE_KEY)).toBe('720')
+    setViewport(1440)
+    expect(renderedDockWidth()).toBe(720)
+    expect(screen.getByRole('textbox', { name: 'Panel search' })).toHaveValue('retained search')
   })
 
-  it('follows a resize — a rotation or a dragged window re-clamps', () => {
-    const { container } = mount(1440)
-    expect(renderedDockWidth(container)).toBe(420)
-    act(() => {
-      setViewport(360)
-      window.dispatchEvent(new Event('resize'))
-    })
-    expect(renderedDockWidth(container)).toBe(360 - EDGE_PEEK)
-    act(() => {
-      setViewport(1440)
-      window.dispatchEvent(new Event('resize'))
-    })
-    expect(renderedDockWidth(container)).toBe(420)
+  it('re-clamps to half the workspace and restores the chosen width after rotation without overwriting it', () => {
+    vi.useFakeTimers()
+    localStorage.setItem(STORE_KEY, '720')
+    mount(1440)
+    expect(renderedDockWidth()).toBe(720)
+    setViewport(900)
+    expect(renderedDockWidth()).toBe(450)
+    expect(screen.getByRole('separator')).toHaveAttribute('aria-valuenow', '450')
+    expect(screen.getByRole('separator')).toHaveAttribute('aria-valuemax', '450')
+    act(() => vi.advanceTimersByTime(250))
+    expect(localStorage.getItem(STORE_KEY)).toBe('720')
+    setViewport(320)
+    expect(screen.getByRole('dialog', { name: 'Explorer' })).toBeInTheDocument()
+    setViewport(1440)
+    expect(renderedDockWidth()).toBe(720)
+  })
+
+  it('keeps keyboard resize bounded and the focused separator operable', () => {
+    mount(1440)
+    const handle = screen.getByRole('separator', { name: /Resize panel.*arrow keys/ })
+    handle.focus()
+    fireEvent.keyDown(handle, { key: 'End' })
+    expect(renderedDockWidth()).toBe(720)
+    expect(handle).toHaveFocus()
+    fireEvent.keyDown(handle, { key: 'Home' })
+    expect(renderedDockWidth()).toBe(320)
+    fireEvent.keyDown(handle, { key: 'ArrowLeft' })
+    expect(renderedDockWidth()).toBe(336)
+    expect(handle).toHaveAttribute('aria-valuenow', '336')
   })
 })
