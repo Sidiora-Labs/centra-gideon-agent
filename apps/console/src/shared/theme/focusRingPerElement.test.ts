@@ -54,7 +54,7 @@ const INVENTORY: { file: string; anchor: string; ring: RegExp; what: string }[] 
   },
   {
     file: 'shared/ui/Combobox.tsx',
-    anchor: 'w-full h-8 rounded-md bg-surface pl-8 pr-2',
+    anchor: 'h-8 w-full rounded-md bg-surface pl-8 pr-2',
     ring: ELEMENT_RING,
     what: 'combobox search input',
   },
@@ -115,7 +115,6 @@ const INVENTORY: { file: string; anchor: string; ring: RegExp; what: string }[] 
 ]
 
 const RINGED_BY_AN_ANCESTOR = [
-  'shared/ui/RowHitTarget.tsx',
   'shared/ui/ListScaffold.tsx',
   'features/settings/bento.tsx',
   'app/shell/Onboarding.tsx',
@@ -182,6 +181,13 @@ describe('every control that kills its outline carries a replacement ring', () =
         /focus-within:ring-2|has-\[>button:focus-visible\]:ring-2/,
       )
     }
+  })
+
+  it('the row hit target has its ring on the actual rendered parent', () => {
+    expect(read('shared/ui/RowHitTarget.tsx')).toContain('data-row-target')
+    const parent = read('shared/ui/ListScaffold.tsx')
+    expect(parent).toContain('<RowHitTarget')
+    expect(parent).toContain('has-[>button:focus-visible]:ring-2 has-[>button:focus-visible]:ring-inset has-[>button:focus-visible]:ring-primary')
   })
 
   it('no two inventory entries duplicate a file+anchor pair', () => {

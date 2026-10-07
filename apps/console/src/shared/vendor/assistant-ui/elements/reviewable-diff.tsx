@@ -151,7 +151,7 @@ export function ReviewableDiff({
             onClick={onApply}
             className={cn(
               inkButton,
-              "flex h-7 items-center rounded-full px-3 text-xs font-medium disabled:pointer-events-none disabled:opacity-30",
+              "flex h-7 items-center rounded-full px-3 text-xs font-medium disabled:pointer-events-none disabled:opacity-40",
             )}
           >
             Apply {kept}

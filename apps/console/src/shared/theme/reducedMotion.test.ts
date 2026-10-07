@@ -77,7 +77,14 @@ describe('reduced motion policy', () => {
       expect(source, `${path} bypasses the shared reduced-motion boundary`).toMatch(
         /from ['"][^'"]*theme\/motion['"]|from ['"]\.\/motion['"]/
       )
-      expect(source, `${path} has no reduced-motion consultation`).toMatch(/(?:use|prefers)ReducedMotion\(/)
+      const imports = source.match(/import\s*\{([^}]+)\}\s*from\s*['"][^'"]*(?:theme\/motion|\.\/motion)['"]/)
+      const gatedFamilies = ['spring', 'physics', ...Object.keys(motionRegistry.variants)]
+      const usesGatedFamily = imports?.[1].split(',').some(binding => {
+        const [exported, local = exported] = binding.trim().split(/\s+as\s+/)
+        return gatedFamilies.includes(exported) && source.split(new RegExp(`\\b${local}\\b`)).length > 2
+      })
+      expect(/(?:use|prefers)ReducedMotion\(/.test(source) || usesGatedFamily,
+        `${path} must call the accessor or use a registered runtime-gated family`).toBe(true)
       expect(source, `${path} imports Framer's reduced-motion hook`).not.toMatch(
         /import\s*\{[^}]*useReducedMotion[^}]*\}\s*from ['"]framer-motion['"]/
       )
@@ -96,12 +103,28 @@ describe('reduced motion policy', () => {
           const source = readFileSync(path, 'utf8')
           if (source.includes('prefers-reduced-motion')
             && path !== join(sourceRoot, 'shared/theme/motion.ts')
-            && path !== join(sourceRoot, 'shared/theme/consistencyAudit.report.ts')) offenders.push(path)
+            && path !== join(sourceRoot, 'shared/theme/consistencyAudit.report.ts')
+            && !['features/hypermid/hypermid.css', 'features/rooms/rooms.css'].some(relative => path === join(sourceRoot, relative))) offenders.push(path)
         }
       }
     }
     visit(sourceRoot)
     expect(offenders.map((path) => path.slice(sourceRoot.length + 1))).toEqual([])
+  })
+
+  it('standalone CSS retains the OS fallback and the shared root boundary', () => {
+    const app = readFileSync(join(process.cwd(), 'src/app/shell/App.tsx'), 'utf8')
+    expect(app).toContain("toggleAttribute('data-reduced-motion', reducedMotion)")
+    for (const file of ['features/hypermid/hypermid.css', 'features/rooms/rooms.css']) {
+      const css = readFileSync(join(process.cwd(), 'src', file), 'utf8')
+      expect(css).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/)
+      expect(css).toContain(':root[data-reduced-motion]')
+      if (file.includes('hypermid')) {
+        for (const declaration of ['scroll-behavior: auto !important', 'animation-duration: 0.01ms !important', 'animation-iteration-count: 1 !important', 'transition-duration: 0.01ms !important']) {
+          expect(css.split(declaration).length - 1).toBe(2)
+        }
+      } else expect(css.match(/animation:none/g)?.length).toBe(2)
+    }
   })
 
   it('never resolves a spring or an indefinite transition when motion is reduced', () => {

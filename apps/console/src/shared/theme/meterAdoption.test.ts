@@ -28,7 +28,6 @@ const PRIMITIVES = [
 const DEFERRED = [
   join('features', 'settings', 'ModelsPanel.tsx'),
   join('features', 'loops', 'RunProgress.tsx'),
-  join('shared/ui', 'genui', 'components.tsx'),
 ]
 
 const TRACK = /\bh-(?:0\.5|1|1\.5|2|2\.5|3|\[\d+px\])\b/
@@ -62,7 +61,9 @@ describe('the determinate progress primitive', () => {
       'the track+fill detector no longer matches a known hand-rolled bar — the rail has gone vacuous',
     ).toEqual([])
     expect(deferredHits.length).toBeGreaterThanOrEqual(DEFERRED.length)
-    expect(DEFERRED.length, 'never add to DEFERRED; adopt ui/Meter instead').toBe(3)
+    const migrated = readFileSync(join(SRC, 'shared/ui/genui/components.tsx'), 'utf8')
+    expect(migrated).toMatch(/<Meter\b[^>]*label=\{label\}/)
+    expect(DEFERRED.length + 1, 'two remaining deferred sites and the migrated GenUI site').toBe(3)
   })
 
   it('has no hand-rolled determinate bar outside the primitives and the deferred four', () => {

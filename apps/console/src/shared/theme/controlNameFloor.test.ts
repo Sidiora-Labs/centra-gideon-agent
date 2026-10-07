@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import ts from 'typescript'
 
 
 const SRC = join(process.cwd(), "src")
@@ -12,26 +13,26 @@ const walk = (d: string): string[] =>
     return /\.tsx$/.test(n) && !/\.(test|doc)\.tsx$/.test(n) ? [p] : []
   })
 
-function inputTags(): Array<{ file: string; line: number; tag: string }> {
-  const out: Array<{ file: string; line: number; tag: string }> = []
+function inputTags(): Array<{ file: string; line: number; tag: string; namedByLabel: boolean }> {
+  const out: Array<{ file: string; line: number; tag: string; namedByLabel: boolean }> = []
   for (const abs of walk(SRC)) {
     const text = readFileSync(abs, 'utf8')
-    for (const m of text.matchAll(/<input\b/g)) {
-      let depth = 0
-      for (let i = m.index! + m[0].length; i < text.length; i++) {
-        const ch = text[i]
-        if (ch === '{') depth++
-        else if (ch === '}') depth--
-        else if (ch === '>' && depth === 0) {
-          out.push({
-            file: abs.slice(SRC.length + 1),
-            line: text.slice(0, m.index).split('\n').length,
-            tag: text.slice(m.index!, i + 1),
-          })
-          break
+    const source = ts.createSourceFile(abs, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const visit = (node: ts.Node) => {
+      if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(source) === 'input') {
+        let namedByLabel = false
+        for (let parent = node.parent; parent; parent = parent.parent) {
+          if (ts.isJsxElement(parent) && parent.openingElement.tagName.getText(source) === 'label') {
+            namedByLabel = parent.children.some(child => ts.isJsxText(child) && child.text.trim().length > 0)
+            break
+          }
         }
+        out.push({ file: abs.slice(SRC.length + 1), line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+          tag: node.getText(source), namedByLabel })
       }
+      ts.forEachChild(node, visit)
     }
+    visit(source)
   }
   return out
 }
@@ -52,7 +53,7 @@ describe('the file-input escape hatch stays an escape hatch', () => {
   it('every file input is hidden, so it needs no name', () => {
     const visible = fileInputs
       .filter((t) => !/\bhidden\b/.test(t.tag) && !/className=["'][^"']*\bhidden\b/.test(t.tag) && !/sr-only/.test(t.tag))
-      .filter((t) => !/aria-label|aria-labelledby/.test(t.tag))
+      .filter((t) => !t.namedByLabel && !/aria-label|aria-labelledby/.test(t.tag))
       .map((t) => `${t.file}:${t.line}`)
     expect(
       visible,
@@ -71,7 +72,7 @@ describe('an on-demand edit input carries its own name', () => {
 
   it('every autoFocus input is named', () => {
     const nameless = autoFocused
-      .filter((t) => !/aria-label|aria-labelledby|\bid=|placeholder=/.test(t.tag))
+      .filter((t) => !t.namedByLabel && !/aria-label|aria-labelledby|\bid=|placeholder=/.test(t.tag))
       .map((t) => `${t.file}:${t.line}`)
     expect(
       nameless,

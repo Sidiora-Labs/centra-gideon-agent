@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useMemo, type KeyboardEvent, type RefObject } from 'react'
+import { prefersReducedMotion } from '../../shared/theme/motion'
 import { FocusScope } from '../../shared/ui/focusNavigation'
 import { useDismissKey } from '../../shared/ui/overlayInteraction'
 import { ArrowDown, ListTree, Search, X } from 'lucide-react'
@@ -108,7 +109,7 @@ export function SessionMarkerRail({
     const turnIndex = entries[index]?.turnIndex
     setCurrent(index)
     if (turnIndex !== undefined) {
-      if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      if (prefersReducedMotion()) {
         const node = nodeOf(turnIndex)
         if (node) node.scrollIntoView({ behavior: 'instant', block: 'center' })
         else onJumpTo(turnIndex)
@@ -120,7 +121,7 @@ export function SessionMarkerRail({
   const selectResult = useCallback((index: number, entryIndex: number) => {
     setCurrent(entryIndex)
     const root = nodeOf(index)
-    root?.scrollIntoView({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'center' })
+    root?.scrollIntoView({ behavior: prefersReducedMotion() ? 'instant' : 'smooth', block: 'center' })
     clearHighlight()
     if (root) {
       root.classList.add('ring-2', 'ring-primary/30')
@@ -183,7 +184,7 @@ export function SessionMarkerRail({
       </div>
       {drawerOpen && (
         <div className="fixed inset-0 z-[var(--z-content)] md:hidden">
-          <button type="button" aria-label="Close session map" onClick={() => setDrawerOpen(false)} className="absolute inset-0 bg-scrim/40" />
+          <button type="button" aria-label="Close session map" onClick={() => setDrawerOpen(false)} className="absolute inset-0 bg-black/40" />
           <aside ref={drawerRef} role="dialog" aria-modal="true" aria-label="Session map drawer"
             className="absolute inset-y-0 right-0 flex w-72 max-w-[85vw] flex-col border-l border-outline-variant bg-surface p-l shadow-xl">
             <header className="mb-l flex items-center justify-between gap-s">

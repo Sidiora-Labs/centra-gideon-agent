@@ -127,7 +127,7 @@ export function CanvasSplitHeader({
         onClick={onCopy}
         className={cn(
           ghostButton,
-          "size-7 shrink-0 disabled:pointer-events-none disabled:opacity-30",
+          "size-7 shrink-0 disabled:pointer-events-none disabled:opacity-40",
         )}
       >
         <CopyIcon className="size-3.5" />
@@ -138,7 +138,7 @@ export function CanvasSplitHeader({
         onClick={onClose}
         className={cn(
           ghostButton,
-          "size-7 shrink-0 disabled:pointer-events-none disabled:opacity-30",
+          "size-7 shrink-0 disabled:pointer-events-none disabled:opacity-40",
         )}
       >
         <XIcon className="size-3.5" />

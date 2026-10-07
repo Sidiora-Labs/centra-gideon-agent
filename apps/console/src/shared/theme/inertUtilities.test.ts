@@ -25,11 +25,11 @@ describe('inert-utility rail (a text-/bg-/border-/rounded-/gap- class must emit 
     for (const live of ['text-on-surface-low', 'border-outline-variant', 'text-primary', 'bg-surface']) {
       expect(isLive(live), `${live} is a real token and must compile`).toBe(true)
     }
-    for (const dead of ['text-muted', 'border-border', 'bg-accent-subtle', 'text-accent']) {
+    for (const dead of ['text-gideon-missing-color', 'border-gideon-missing-color', 'bg-accent-subtle', 'text-gideon-missing-accent']) {
       expect(isLive(dead), `${dead} has no token and must NOT compile`).toBe(false)
     }
     for (const live of [
-      'text-center', 'border-t', 'bg-transparent', 'bg-white', 'text-sm',
+      'text-muted', 'border-border', 'text-accent', 'text-center', 'border-t', 'bg-transparent', 'bg-white', 'text-sm',
       'bg-gradient-to-br', 'text-on-surface-low/40', 'hover:bg-primary/15',
       'group-hover/dock:text-on-surface', 'text-[0.75rem]', 'border-l-[3px]',
     ]) {

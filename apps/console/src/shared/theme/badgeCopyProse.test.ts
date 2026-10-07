@@ -15,7 +15,7 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 function badgeTokens(): { file: string; token: string; uppercased: boolean }[] {
-  const re = /className="([^"]*rounded-(?:pill|md|lg)[^"]*)"[^>]*>([a-z][a-z0-9_-]{2,19})</g
+  const re = /className="([^"]*rounded-(?:pill|md|lg)[^"]*)"[^>]*>([A-Za-z][A-Za-z0-9_-]{2,19})</g
   const hits: { file: string; token: string; uppercased: boolean }[] = []
   for (const abs of walk(SRC)) {
     const src = readFileSync(abs, 'utf8')
@@ -30,7 +30,7 @@ function badgeTokens(): { file: string; token: string; uppercased: boolean }[] {
   return hits
 }
 
-const EXEMPT = new Set(['esc', 'manual', 'suppressed', 'multi-instance', 'span', 'div'])
+const EXEMPT = new Set(['manual', 'suppressed', 'multi-instance', 'span', 'div'])
 
 const CONVERGED: [string, string][] = [
   ['builtin', 'Built-in'],

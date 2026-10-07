@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bookmark, FastForward, Pause, Play, Rewind, RotateCcw, X } from 'lucide-react'
 import { api, type KnowledgeItem, type KnowledgeRsvpState } from '../../shared/data/api'
+import { Meter } from '../../shared/ui/Meter'
 import { Button } from '../../shared/ui/Button'
 import { IconButton } from '../../shared/ui/IconButton'
 import { InlineError } from '../../shared/ui/InlineError'
@@ -193,7 +194,7 @@ export function RsvpReader({ item, onClose }: { item: KnowledgeItem; onClose: ()
       <div aria-hidden className="absolute inset-y-0 left-1/2 w-px bg-outline-variant/40" />
       <FocalWord value={chunk.text} />
     </div>
-    <div className="h-1 bg-surface-high"><div className="h-full bg-primary" style={{ width: `${progress * 100}%` }} /></div>
+    <Meter label="Reading progress" pct={progress * 100} size="thin" />
     <div className="flex flex-col gap-m p-m">
       <div className="flex flex-wrap items-center gap-s">
         <IconButton icon={Rewind} label="Back 5 words" onClick={() => { setPlaying(false); update({ word_index: Math.max(0, state.word_index - 5) }) }} />
