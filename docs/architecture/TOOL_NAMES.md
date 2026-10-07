@@ -1,37 +1,34 @@
-# Tool-name wire fidelity (SM-12)
+# Tool names on the wire
 
-This page follows a tool's name from its `ToolDefinition` to the moment the
-runtime dispatches a call back to it. One invariant is protected, by this page
-and by the census rail in `checks/runtime/test_tool_name_wire_fidelity.py`: a chat
-turn that references a tool by any form the wire can produce dispatches to
-exactly that tool, on this turn and on every later turn.
+A registered tool has a canonical name. Model protocol adapters send that name in their
+tool schema; a returned call must resolve to the current admitted tool before invocation.
+Provider APIs can impose their own name constraints, so successful local registration
+is not proof that every provider accepts the same spelling.
 
-## The wire map
+## Resolution
 
-| # | Hop | Transform | Owner |
-|---|-----|-----------|-------|
-| 1 | `ToolDefinition.name` to the OpenAI-shape schema (`tool_definitions_to_openai_schema`, `agents/native/tools.py`) | **verbatim** | us |
-| 2 | Schema to the provider adapter (`llm/openai.py` passthrough; `llm/anthropic.py` `_translate_tools` hoists fields) | **verbatim**: the shape changes, the name string does not | us |
-| 3 | Adapter to the provider API | the provider **may rewrite or reject** the name, because hosted APIs constrain it (commonly `[a-zA-Z0-9_-]`, 64 chars or fewer). We do not control this hop; `_sanitized_tool_key` (`agents/native/runtime.py`) mirrors it | provider |
-| 4 | Model to tool call | the model echoes either the real name or the provider-rewritten form, including a form it saw in an earlier turn's history (the chat turn boundary) | model |
-| 5 | Call to dispatch (`_resolve_name`) | **exact match first, always**; only a name that is neither a real tool nor a meta-tool consults the sanitized(real) to real healing map | us |
+Schema construction lives in `runtime/gideon/engine/agents/native/tools.py`. Shared model
+adapters live under `runtime/gideon/integrations/llm/`. Native runtime resolution is in
+`runtime/gideon/engine/agents/native/runtime.py`, including `_sanitized_tool_key`,
+`build_sanitized_index`, and `_resolve_name`.
 
-Turn history stores whatever form the model used at hop 4. Nothing rewrites it on
-replay, so hop 5 is the single healing point for every later turn too.
+Resolution prefers an exact canonical or meta-tool name. A non-exact name can consult
+the sanitized alias index only when it maps unambiguously to a current real tool.
+Colliding aliases and aliases that shadow exact names are not guessed. If two names
+collapse to one provider spelling, the returned spelling cannot identify both safely.
 
-## The one lossy spot, and its rail
+History may retain the spelling used in an earlier model call. That does not make a
+retired or currently forbidden tool available. Current profile grants, app limits,
+provider inventory, approval, and invocation risk still constrain dispatch after name
+resolution. Recovering a name is not recovering permission.
 
-`build_sanitized_index` refuses to heal a sanitized form that two real names
-share, because dispatching a guess would be worse than failing. It also refuses
-to remap a form that shadows a real exact name. Those tools stay callable by
-their exact names, but a provider rewrite of them cannot be healed. That is the
-only loss on the wire, so it is handled two ways:
+## Contributor checks
 
-- **loud**: `_load_tools` logs a warning naming the colliding real names;
-- **railed**: the census test asserts the full shipped tool census is
-  collision-free under `_sanitized_tool_key`, so a new tool whose name would
-  collide fails CI instead of shipping a heal gap.
+Choose names compatible with the intended provider protocols and avoid sanitized
+collisions. Preserve canonical identity across schema, metadata, result records, and
+provider invocation. Surface unknown or ambiguous names as failures instead of calling
+a similarly named tool.
 
-The fix for a collision is to rename the tool, not to heal more cleverly. The
-rewrite at hop 3 belongs to the provider, so no local scheme can make two
-identical rewritten forms distinguishable on the way back.
+`checks/runtime/test_tool_name_wire_fidelity.py` covers the repository's naming contract.
+Its existence is not a current full-provider qualification result; exercise the actual
+adapter and provider when introducing a new wire behavior.
