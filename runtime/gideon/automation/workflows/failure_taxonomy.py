@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import socket
 import re
+import socket
 import time
 from collections.abc import Iterable
 from typing import Any
@@ -66,7 +66,11 @@ def _typed_failure(exc: BaseException) -> Failure | None:
     if name in {"budgetexceedederror"}:
         return _failure(FailureClass.BUDGET, message)
     if name in {"secretleakblocked", "promptinjectionblocked"}:
-        return _failure(FailureClass.PERMISSION, message, "resolve the guardrail finding before retrying")
+        return _failure(
+            FailureClass.PERMISSION,
+            message,
+            "resolve the guardrail finding before retrying",
+        )
     if name in {"outputcontracterror"}:
         return _failure(FailureClass.PROTOCOL, message)
     if name in {"credentialmissing"}:
@@ -83,7 +87,9 @@ def _typed_failure(exc: BaseException) -> Failure | None:
         cls = http_status_class(status)
         cause = f"HTTP {status}: {message}" if message else f"HTTP {status}"
         return _failure(cls, cause)
-    if isinstance(exc, (socket.gaierror, ConnectionError, OSError)) and not isinstance(exc, FileNotFoundError):
+    if isinstance(exc, (socket.gaierror, ConnectionError, OSError)) and not isinstance(
+        exc, FileNotFoundError
+    ):
         return _failure(FailureClass.NETWORK, f"{type(exc).__name__}: {message}")
     return None
 
@@ -100,11 +106,35 @@ def _by_text(name: str, text: str, *, timed_out: bool = False) -> Failure:
     if match:
         cls = http_status_class(int(match.group(1)))
         return _failure(cls, cause)
-    if any(term in low for term in ("connection", "network", "dns", "unreachable", "socket")):
+    if any(
+        term in low
+        for term in ("connection", "network", "dns", "unreachable", "socket")
+    ):
         return _failure(FailureClass.NETWORK, cause)
-    if any(term in low for term in ("permission", "forbidden", "unauthorized", "credential", "access denied")):
+    if any(
+        term in low
+        for term in (
+            "permission",
+            "forbidden",
+            "unauthorized",
+            "credential",
+            "access denied",
+        )
+    ):
         return _failure(FailureClass.PERMISSION, cause)
-    if any(term in low for term in ("rate limit", "429", "throttl", "overloaded", "capacity", "503", "502", "500")):
+    if any(
+        term in low
+        for term in (
+            "rate limit",
+            "429",
+            "throttl",
+            "overloaded",
+            "capacity",
+            "503",
+            "502",
+            "500",
+        )
+    ):
         return _failure(FailureClass.TRANSIENT, cause)
     if any(term in low for term in ("schema", "json", "output contract")):
         return _failure(FailureClass.PROTOCOL, cause)
@@ -119,15 +149,21 @@ def classify_exception(exc: BaseException, *, use_case: str = "") -> Failure:
             break
         typed = _typed_failure(seen)
         if typed is not None:
-            typed.cause_plain = typed.cause_plain or f"{type(exc).__name__}: {exc}"[:500]
+            typed.cause_plain = (
+                typed.cause_plain or f"{type(exc).__name__}: {exc}"[:500]
+            )
             return typed
         seen = seen.__cause__
-    return _by_text(type(exc).__name__, str(exc), timed_out=isinstance(exc, TimeoutError))
+    return _by_text(
+        type(exc).__name__, str(exc), timed_out=isinstance(exc, TimeoutError)
+    )
 
 
 def classify_action_result(result: Any) -> Failure:
     """Classify an actual failed action result; unrecognized failures remain nonretryable."""
-    cause = str(getattr(result, "error", "") or getattr(result, "stderr", "") or "action failed")[:500]
+    cause = str(
+        getattr(result, "error", "") or getattr(result, "stderr", "") or "action failed"
+    )[:500]
     err = getattr(result, "agent_error", None)
     fix = str(getattr(err, "fix", "") or "") if err is not None else ""
     declared = str(getattr(result, "failure_class", "") or "")
@@ -135,7 +171,9 @@ def classify_action_result(result: Any) -> Failure:
         cls = FailureClass(declared) if declared else None
     except ValueError:
         cls = None
-    status = getattr(result, "status_code", None) or getattr(result, "http_status", None)
+    status = getattr(result, "status_code", None) or getattr(
+        result, "http_status", None
+    )
     if cls is None and isinstance(status, int) and 100 <= status <= 599:
         cls = http_status_class(status)
     if cls is None:
@@ -146,13 +184,18 @@ def classify_action_result(result: Any) -> Failure:
         cause_plain=cause,
         remediation=fix or _CLASS_FIX[cls],
         recoverable=cls in RETRYABLE_CLASSES,
-        retry_at=(time.time() + max(0.0, float(getattr(result, "retry_after", 0.0) or 0.0)))
-        if cls in RETRYABLE_CLASSES and getattr(result, "retry_after", None) is not None
-        else None,
+        retry_at=(
+            (time.time() + max(0.0, float(getattr(result, "retry_after", 0.0) or 0.0)))
+            if cls in RETRYABLE_CLASSES
+            and getattr(result, "retry_after", None) is not None
+            else None
+        ),
     )
 
 
-def with_breaker_window(failure: Failure | None, providers: Iterable[str] = ()) -> Failure | None:
+def with_breaker_window(
+    failure: Failure | None, providers: Iterable[str] = ()
+) -> Failure | None:
     """Refresh retry eligibility from each named provider's live breaker on a status read."""
     if failure is None or not failure.retryable:
         return failure

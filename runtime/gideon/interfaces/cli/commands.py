@@ -6,7 +6,6 @@ import sys
 import time as _time
 import urllib.error
 import urllib.request
-from gideon.engine.home_gateway import open_loopback
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,6 +16,7 @@ from gideon.assurance.validation import CHANNEL_ID_RE, CHANNEL_MAX_LEN
 from gideon.cognition.vector_memory import SemanticArchive
 from gideon.core.config import config_dir
 from gideon.core.config.loader import AgentProfile, AppConfig
+from gideon.engine.home_gateway import open_loopback
 from gideon.engine.hooks import safe_read_file
 from gideon.integrations.embedding_providers.registry import get_active_embedding_dim
 from gideon.security.security import (
@@ -34,13 +34,21 @@ class CliRefusal(SystemExit):
 
     def __init__(self, reason: str = "") -> None:
         if reason:
-            print(reason if reason.startswith("Error:") else f"Error: {reason}", file=sys.stderr)
+            print(
+                reason if reason.startswith("Error:") else f"Error: {reason}",
+                file=sys.stderr,
+            )
         super().__init__(1)
 
 
 def _spawn(args: argparse.Namespace) -> None:
     """Dispatch spawn subcommands: run, list."""
-    from gideon.engine.home_gateway import require_home_gateway, HomeGatewayMismatch, NoGatewayRunning
+    from gideon.engine.home_gateway import (
+        HomeGatewayMismatch,
+        NoGatewayRunning,
+        require_home_gateway,
+    )
+
     try:
         args.port = require_home_gateway(args.port)
     except (HomeGatewayMismatch, NoGatewayRunning) as error:
@@ -434,7 +442,9 @@ def _cron(args: argparse.Namespace) -> None:
                 from croniter import croniter
 
                 if not croniter.is_valid(str(candidate_spec.get("expr") or "")):
-                    raise CliRefusal("invalid cron expression; provide a schedule that can fire")
+                    raise CliRefusal(
+                        "invalid cron expression; provide a schedule that can fire"
+                    )
             patch["spec"] = candidate_spec
 
         if "message" in patch or approval is not None:
@@ -491,8 +501,8 @@ def _cron(args: argparse.Namespace) -> None:
         existing = store.get(args.job_id)
         if existing is not None:
             from gideon.automation.triggers.screen import (
-                capability_allows,
                 capabilities_for_action,
+                capability_allows,
             )
 
             requested = capabilities_for_action(existing.trigger)
@@ -1503,7 +1513,9 @@ def _memory_cmd(args: argparse.Namespace) -> None:
             try:
                 data = json.loads(safe_read_file(str(path)))
             except (OSError, ValueError):
-                raise CliRefusal(f"Could not read a JSON export from {import_file}") from None
+                raise CliRefusal(
+                    f"Could not read a JSON export from {import_file}"
+                ) from None
             if not isinstance(data, dict):
                 raise CliRefusal(f"{import_file} must contain a JSON object")
             counts = store.import_memory(data)

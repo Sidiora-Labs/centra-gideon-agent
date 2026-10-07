@@ -733,7 +733,9 @@ def promotion_eligibility(key: str) -> Eligibility:
     rule = _rule_for(key)
     window_days = max(rule.min_days, _config_window_days())
     try:
-        approvals, rejections, observed = _sel_evidence(key, now - timedelta(days=window_days))
+        approvals, rejections, observed = _sel_evidence(
+            key, now - timedelta(days=window_days)
+        )
         rejections += _feedback_rejections(key, window_days)
     except Exception:  # noqa: BLE001 — unreadable evidence proves nothing
         logger.warning("autonomy evidence read failed for %s", key, exc_info=True)
@@ -767,7 +769,9 @@ def promotion_eligibility(key: str) -> Eligibility:
     if observed < rule.min_days:
         return replace(
             partial,
-            reason=(f"Approvals span {observed:.1f} of the {rule.min_days} days required."),
+            reason=(
+                f"Approvals span {observed:.1f} of the {rule.min_days} days required."
+            ),
         )
     return replace(
         partial,

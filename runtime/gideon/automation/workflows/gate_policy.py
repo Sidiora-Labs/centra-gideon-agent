@@ -137,9 +137,9 @@ def decide(
         if applies():
             decision, reason = outcome()
             decided_by = (
-                "remembered" if decision == Decision.REMEMBERED
-                else "gate_policy" if decision == Decision.AUTO_APPROVED
-                else "nobody"
+                "remembered"
+                if decision == Decision.REMEMBERED
+                else "gate_policy" if decision == Decision.AUTO_APPROVED else "nobody"
             )
             return PolicyVerdict(decision, reason, risk.value, decided_by)
     return PolicyVerdict(Decision.ASK, "attended run", risk.value)
@@ -156,7 +156,10 @@ def may_answer(run: Any, *, responder: str, channel: str = "") -> tuple[bool, st
 
     kind = str(responder or "").partition(":")[0]
     if kind not in (OWNER, CHANNEL):
-        return False, "only the authenticated owner or a verified paired owner channel may answer"
+        return (
+            False,
+            "only the authenticated owner or a verified paired owner channel may answer",
+        )
     owner = owner_of(run)
     asked_by = f"run:{getattr(run, 'id', '')}"
     if responder == asked_by:

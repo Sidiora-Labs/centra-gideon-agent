@@ -23,7 +23,10 @@ from gideon.cognition.knowledge.pipeline import outcomes as oc
 from gideon.cognition.knowledge.pipeline.graph import PipelineGraph
 from gideon.cognition.knowledge.pipeline.outcomes import PhaseOutcome
 from gideon.cognition.knowledge.pipeline.registry import (
-    get_node, node_available, unavailable_outcome, unserved_reason_sync,
+    get_node,
+    node_available,
+    unavailable_outcome,
+    unserved_reason_sync,
 )
 from gideon.cognition.knowledge.pipeline.types import NodeContext, NodeOutput, PoolRow
 
@@ -212,20 +215,28 @@ class PipelineExecutor:
             if output is not None and output.success:
                 outcome = oc.branch_not_taken(oc.step_name(edge.from_node))
             else:
-                outcome = result.outcomes.get(edge.from_node) or oc.skipped("It did not run.")
+                outcome = result.outcomes.get(edge.from_node) or oc.skipped(
+                    "It did not run."
+                )
             upstream.setdefault(edge.from_node, outcome)
         if len(upstream) == 1:
             outcome = next(iter(upstream.values()))
             if outcome.status == oc.NOT_APPLICABLE:
                 return outcome
-        return oc.waited_on([(oc.step_name(name), outcome) for name, outcome in upstream.items()])
+        return oc.waited_on(
+            [(oc.step_name(name), outcome) for name, outcome in upstream.items()]
+        )
 
-    def _skip(self, node_type: str, result: ExecutionResult, outcome: PhaseOutcome) -> None:
+    def _skip(
+        self, node_type: str, result: ExecutionResult, outcome: PhaseOutcome
+    ) -> None:
         result.skipped.append(node_type)
         result.outcomes[node_type] = outcome
         self._notify(node_type, outcome.status)
 
-    def _fail(self, node_type: str, result: ExecutionResult, output: NodeOutput) -> None:
+    def _fail(
+        self, node_type: str, result: ExecutionResult, output: NodeOutput
+    ) -> None:
         result.outputs[node_type] = output
         result.failed.append(node_type)
         result.outcomes[node_type] = oc.failed(output.error or "It did not finish.")
@@ -250,7 +261,11 @@ class PipelineExecutor:
         use_case = params.get("use_case", spec.uses_use_case)
         node = get_node(node_type, backend)
         if node is None:
-            self._skip(node_type, result, oc.skipped("This step is not available in this install."))
+            self._skip(
+                node_type,
+                result,
+                oc.skipped("This step is not available in this install."),
+            )
             return
         reason = unserved_reason_sync(use_case)
         if reason:
@@ -264,37 +279,73 @@ class PipelineExecutor:
         inputs = {
             edge.from_node: result.outputs[edge.from_node]
             for edge in self._graph.predecessors(node_type)
-            if edge.from_node in result.outputs and result.outputs[edge.from_node].success
+            if edge.from_node in result.outputs
+            and result.outputs[edge.from_node].success
         }
-        timeout_s = float(params["timeout_s"]) if "timeout_s" in params else self._scaled_timeout(node_type, spec, use_case, ctx)
+        timeout_s = (
+            float(params["timeout_s"])
+            if "timeout_s" in params
+            else self._scaled_timeout(node_type, spec, use_case, ctx)
+        )
         try:
             output = await asyncio.wait_for(node.run(inputs, ctx), timeout=timeout_s)
         except asyncio.TimeoutError:
-            self._fail(node_type, result, NodeOutput(
-                node_type=node_type, backend=backend, success=False,
-                error=f"It did not finish within {timeout_s:g} seconds, so it was stopped.",
-            ))
+            self._fail(
+                node_type,
+                result,
+                NodeOutput(
+                    node_type=node_type,
+                    backend=backend,
+                    success=False,
+                    error=f"It did not finish within {timeout_s:g} seconds, so it was stopped.",
+                ),
+            )
             return
         except Exception as error:
             logger.exception("knowledge node %s failed", node_type)
-            self._fail(node_type, result, NodeOutput(
-                node_type=node_type, backend=backend, success=False, error=str(error),
-            ))
+            self._fail(
+                node_type,
+                result,
+                NodeOutput(
+                    node_type=node_type,
+                    backend=backend,
+                    success=False,
+                    error=str(error),
+                ),
+            )
             return
-        if output.success and (ctx.file_path or ctx.params.get('_content_scan_required') or node_type == 'bookmark_scrape'):
-            from gideon.workspace.uploads.content_intake import approve_text, IntakeRefused
+        if output.success and (
+            ctx.file_path
+            or ctx.params.get("_content_scan_required")
+            or node_type == "bookmark_scrape"
+        ):
             import json
+
+            from gideon.workspace.uploads.content_intake import (
+                IntakeRefused,
+                approve_text,
+            )
 
             # Segments and self-named pool rows can reach a later model without
             # appearing in the node's primary text. Read those representations too.
-            text = '\n\n'.join([output.text, *(row.text for row in output.pool_rows),
-                                 json.dumps(output.segments, ensure_ascii=False),
-                                 json.dumps(output.metadata, ensure_ascii=False, default=str)])
+            text = "\n\n".join(
+                [
+                    output.text,
+                    *(row.text for row in output.pool_rows),
+                    json.dumps(output.segments, ensure_ascii=False),
+                    json.dumps(output.metadata, ensure_ascii=False, default=str),
+                ]
+            )
             try:
-                await approve_text(text, surface='knowledge_extraction')
+                await approve_text(text, surface="knowledge_extraction")
             except IntakeRefused as refused:
-                output = NodeOutput(node_type=node_type, backend=backend, success=False,
-                                    error=refused.message, metadata={'content_refusal': refused.code})
+                output = NodeOutput(
+                    node_type=node_type,
+                    backend=backend,
+                    success=False,
+                    error=refused.message,
+                    metadata={"content_refusal": refused.code},
+                )
         if output.success:
             result.outputs[node_type] = output
             result.ran.append(node_type)

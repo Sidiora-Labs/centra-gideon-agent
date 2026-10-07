@@ -11,7 +11,8 @@ class TestSlackDeskClientOpsBase:
     @pytest.mark.asyncio
     async def test_base_returns_empty(self):
         """Verify the default implementation returns [] (tested via MockSlackDeskClient
-        which inherits from SlackDeskClientOps without overriding fetch_thread_replies)."""
+        which inherits from SlackDeskClientOps without overriding fetch_thread_replies).
+        """
         from slack_desk_helpers import MockSlackDeskClient
 
         client = MockSlackDeskClient()
@@ -40,7 +41,9 @@ class TestRealSlackDeskClientFetchThreadReplies:
         assert len(result) == 1
         assert result[0]["text"] == "hi"
         web.conversations_replies.assert_called_once_with(
-            channel="C1", ts="100.0", limit=200,
+            channel="C1",
+            ts="100.0",
+            limit=200,
         )
 
     @pytest.mark.asyncio
@@ -66,7 +69,6 @@ class TestRealSlackDeskClientFetchThreadReplies:
     @pytest.mark.asyncio
     async def test_returns_empty_on_error(self):
         import aiohttp
-
         from slack_desk_runtime.client import RealSlackDeskClient
 
         web = AsyncMock()

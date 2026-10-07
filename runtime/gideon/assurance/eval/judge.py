@@ -1,11 +1,11 @@
 """LLM Judge — scores agent responses via a separate agent session."""
 
-from gideon.core.turn_streams import closing_stream
 import json
 import logging
 from dataclasses import dataclass
 from typing import Any
 
+from gideon.core.turn_streams import closing_stream
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,

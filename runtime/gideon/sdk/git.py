@@ -13,9 +13,21 @@ from gideon.sdk.credentials import CredentialStore
 from gideon.security.net.git import git_argv, git_child_env
 
 _TOKEN_ENV = "GIDEON_SDK_GIT_TOKEN"
-_ASKPASS = "#!/usr/bin/env python3\nimport os, sys\nprompt = sys.argv[1].lower() if len(sys.argv) > 1 else \"\"\nif \"username\" in prompt:\n    print(\"x-access-token\")\nelif \"password\" in prompt:\n    print(os.environ.get(\"GIDEON_SDK_GIT_TOKEN\", \"\"))\n"
-_REMOTE_COMMANDS = frozenset({"clone", "fetch", "pull", "push", "ls-remote", "send-pack", "upload-pack"})
-_GLOBAL_OPTIONS_WITH_VALUE = frozenset({"-C", "-c", "--config-env", "--exec-path", "--git-dir", "--namespace", "--work-tree"})
+_ASKPASS = '#!/usr/bin/env python3\nimport os, sys\nprompt = sys.argv[1].lower() if len(sys.argv) > 1 else ""\nif "username" in prompt:\n    print("x-access-token")\nelif "password" in prompt:\n    print(os.environ.get("GIDEON_SDK_GIT_TOKEN", ""))\n'
+_REMOTE_COMMANDS = frozenset(
+    {"clone", "fetch", "pull", "push", "ls-remote", "send-pack", "upload-pack"}
+)
+_GLOBAL_OPTIONS_WITH_VALUE = frozenset(
+    {
+        "-C",
+        "-c",
+        "--config-env",
+        "--exec-path",
+        "--git-dir",
+        "--namespace",
+        "--work-tree",
+    }
+)
 
 
 def _validate_remote_urls(args: Sequence[str]) -> None:
@@ -23,8 +35,14 @@ def _validate_remote_urls(args: Sequence[str]) -> None:
         if "://" not in value:
             continue
         parsed = urlsplit(value)
-        if parsed.scheme.lower() != "https" or parsed.username is not None or parsed.password is not None:
-            raise ValueError("Authenticated SDK Git operations require HTTPS URLs without embedded credentials")
+        if (
+            parsed.scheme.lower() != "https"
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise ValueError(
+                "Authenticated SDK Git operations require HTTPS URLs without embedded credentials"
+            )
 
 
 def _subcommand(args: Sequence[str]) -> str | None:
@@ -74,7 +92,9 @@ def run_git(
     env = git_child_env(site="sdk-git")
     if remote:
         if not isinstance(credential, str) or not credential.strip():
-            raise ValueError("A stored credential name is required for remote Git operations")
+            raise ValueError(
+                "A stored credential name is required for remote Git operations"
+            )
         if not isinstance(credentials, CredentialStore):
             raise TypeError("Remote Git operations require a Gideon CredentialStore")
         token = credentials.resolve(credential).secret
@@ -100,15 +120,29 @@ def run_git(
         else:
             result = _run(argv, cwd=cwd, env=env, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        output = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        error = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        output = (
+            exc.stdout.decode(errors="replace")
+            if isinstance(exc.stdout, bytes)
+            else (exc.stdout or "")
+        )
+        error = (
+            exc.stderr.decode(errors="replace")
+            if isinstance(exc.stderr, bytes)
+            else (exc.stderr or "")
+        )
         if token:
-            output, error = output.replace(token, "[redacted]"), error.replace(token, "[redacted]")
-        raise subprocess.TimeoutExpired(argv, timeout, output=output, stderr=error) from None
+            output, error = output.replace(token, "[redacted]"), error.replace(
+                token, "[redacted]"
+            )
+        raise subprocess.TimeoutExpired(
+            argv, timeout, output=output, stderr=error
+        ) from None
 
     stdout, stderr = result.stdout or "", result.stderr or ""
     if token:
-        stdout, stderr = stdout.replace(token, "[redacted]"), stderr.replace(token, "[redacted]")
+        stdout, stderr = stdout.replace(token, "[redacted]"), stderr.replace(
+            token, "[redacted]"
+        )
     return subprocess.CompletedProcess(
         argv,
         result.returncode,

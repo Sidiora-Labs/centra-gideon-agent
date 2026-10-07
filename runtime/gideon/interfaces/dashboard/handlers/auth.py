@@ -202,8 +202,11 @@ async def api_auth_login(request: web.Request) -> web.Response:
         cfg.session_ttl, default_secs=DEFAULT_BROWSER_SESSION_TTL_SECS
     )
     token = generate_token(
-        username.strip() or "owner", ttl_seconds=ttl, kind="browser",
-        label=str(request.headers.get("User-Agent") or "Browser")[:64], client_ip=ip,
+        username.strip() or "owner",
+        ttl_seconds=ttl,
+        kind="browser",
+        label=str(request.headers.get("User-Agent") or "Browser")[:64],
+        client_ip=ip,
     )
     _clear_failures(ip)
     _sel().log_api_access(
@@ -354,12 +357,23 @@ async def api_auth_set_password(request: web.Request) -> web.Response:
         body = {}
 
     from gideon.interfaces.dashboard.owner_presence import (
-        ACTION_CHANGE_PASSWORD, ACTION_SET_PASSWORD, Identity, require_owner_presence,
+        ACTION_CHANGE_PASSWORD,
+        ACTION_SET_PASSWORD,
+        Identity,
+        require_owner_presence,
     )
+
     configured = creds.has_credentials()
     refused = require_owner_presence(
-        request, ACTION_CHANGE_PASSWORD if configured else ACTION_SET_PASSWORD,
-        identity=Identity(str(body.get("current_password") or ""), str(body.get("totp") or "")) if configured else None,
+        request,
+        ACTION_CHANGE_PASSWORD if configured else ACTION_SET_PASSWORD,
+        identity=(
+            Identity(
+                str(body.get("current_password") or ""), str(body.get("totp") or "")
+            )
+            if configured
+            else None
+        ),
     )
     if refused is not None:
         return refused
@@ -398,7 +412,11 @@ async def api_auth_enroll_start(request: web.Request) -> web.Response:
     if not check_origin(request):
         return json_error(ERR_ORIGIN, status=403)
 
-    from gideon.interfaces.dashboard.owner_presence import ACTION_ENROLL_DEVICE, require_owner_presence
+    from gideon.interfaces.dashboard.owner_presence import (
+        ACTION_ENROLL_DEVICE,
+        require_owner_presence,
+    )
+
     refused = require_owner_presence(request, ACTION_ENROLL_DEVICE)
     if refused is not None:
         return refused
@@ -461,7 +479,9 @@ async def api_auth_enroll_complete(request: web.Request) -> web.Response:
         cfg.session_ttl, default_secs=DEFAULT_BROWSER_SESSION_TTL_SECS
     )
     token = generate_token(
-        "enrolled-device", ttl_seconds=ttl, kind="browser",
+        "enrolled-device",
+        ttl_seconds=ttl,
+        kind="browser",
         label=str(request.headers.get("User-Agent") or "Browser")[:64],
         client_ip=_client_ip(request),
     )
@@ -622,21 +642,41 @@ async def api_auth_confirm(request: web.Request) -> web.Response:
     """Verify the owner now and replace only this session; failed proof leaves it live."""
     if not check_origin(request):
         return json_error(ERR_ORIGIN, status=403)
-    from gideon.interfaces.dashboard.owner_presence import ACTION_CONFIRM, Identity, PRESENCE_WINDOW_SECS, require_owner_presence
+    from gideon.interfaces.dashboard.owner_presence import (
+        ACTION_CONFIRM,
+        PRESENCE_WINDOW_SECS,
+        Identity,
+        require_owner_presence,
+    )
     from gideon.interfaces.dashboard.token_auth import _login_offered, renew_sign_in
+
     if not _login_offered():
-        return json_error("auth_not_enabled", message="Open a new sign-in link from gideon token.", status=403)
+        return json_error(
+            "auth_not_enabled",
+            message="Open a new sign-in link from gideon token.",
+            status=403,
+        )
     try:
         body = await read_json_body(request)
     except Exception:
         return json_error("invalid_json", status=400)
     if not isinstance(body, dict):
         return json_error("invalid_body", status=400)
-    refused = require_owner_presence(request, ACTION_CONFIRM, identity=Identity(str(body.get("password") or ""), str(body.get("totp") or "")))
+    refused = require_owner_presence(
+        request,
+        ACTION_CONFIRM,
+        identity=Identity(str(body.get("password") or ""), str(body.get("totp") or "")),
+    )
     if refused is not None:
         return refused
-    ttl = parse_config_duration(_auth_cfg().session_ttl, default_secs=DEFAULT_BROWSER_SESSION_TTL_SECS)
-    token = renew_sign_in(request, ttl_seconds=ttl, user_id=str(creds.status()["username"] or "owner"))
-    resp = web.json_response({"ok": True, "expires_in": ttl, "recent_for": PRESENCE_WINDOW_SECS})
+    ttl = parse_config_duration(
+        _auth_cfg().session_ttl, default_secs=DEFAULT_BROWSER_SESSION_TTL_SECS
+    )
+    token = renew_sign_in(
+        request, ttl_seconds=ttl, user_id=str(creds.status()["username"] or "owner")
+    )
+    resp = web.json_response(
+        {"ok": True, "expires_in": ttl, "recent_for": PRESENCE_WINDOW_SECS}
+    )
     _set_session_cookie(request, resp, token, ttl)
     return resp

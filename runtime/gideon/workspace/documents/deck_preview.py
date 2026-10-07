@@ -28,8 +28,12 @@ def _slide_html(slide: Slide, model: DeckModel, image: tuple[bytes, str] | None)
     width = max(1.0, model.width_in or 13.333)
     height = max(1.0, model.height_in or 7.5)
     ratio = width / height
-    body_style = _box_style(slide.body_box, width, height, "left:7%;top:27%;width:86%;height:64%")
-    title_style = _box_style(slide.title_box, width, height, "left:7%;top:8%;width:86%;height:16%")
+    body_style = _box_style(
+        slide.body_box, width, height, "left:7%;top:27%;width:86%;height:64%"
+    )
+    title_style = _box_style(
+        slide.title_box, width, height, "left:7%;top:8%;width:86%;height:16%"
+    )
     has_image = image is not None
     bullets = "".join(
         f'<li style="margin-left:{min(8, max(0, bullet.level)) * 2.6}%">{html.escape(bullet.text)}</li>'
@@ -48,20 +52,20 @@ def _slide_html(slide: Slide, model: DeckModel, image: tuple[bytes, str] | None)
     body_width = "width:48%;" if has_image and slide.body_box.width_in <= 0 else ""
     return (
         '<!doctype html><html><head><meta charset="utf-8"><style>'
-        f'html,body{{margin:0;width:1280px;height:{round(1280 / ratio)}px;overflow:hidden}}'
-        'body{font-family:Arial,Helvetica,sans-serif;color:#18243a;background:#fff}'
-        '.slide{position:relative;width:100%;height:100%;box-sizing:border-box;overflow:hidden;'
-        'background:#fff;border-top:12px solid #304d83}'
-        '.title,.body{position:absolute;overflow:hidden;box-sizing:border-box}'
-        '.title{font-size:48px;line-height:1.14;font-weight:700}'
-        '.body{font-size:29px;line-height:1.36}'
-        '.body ul{padding:0;margin:0;list-style:none}.body li{margin-bottom:12px}'
+        f"html,body{{margin:0;width:1280px;height:{round(1280 / ratio)}px;overflow:hidden}}"
+        "body{font-family:Arial,Helvetica,sans-serif;color:#18243a;background:#fff}"
+        ".slide{position:relative;width:100%;height:100%;box-sizing:border-box;overflow:hidden;"
+        "background:#fff;border-top:12px solid #304d83}"
+        ".title,.body{position:absolute;overflow:hidden;box-sizing:border-box}"
+        ".title{font-size:48px;line-height:1.14;font-weight:700}"
+        ".body{font-size:29px;line-height:1.36}"
+        ".body ul{padding:0;margin:0;list-style:none}.body li{margin-bottom:12px}"
         '.body li:before{content:"• ";color:#304d83}'
-        '.figure{position:absolute;right:7%;top:29%;width:38%;height:59%;object-fit:contain}'
+        ".figure{position:absolute;right:7%;top:29%;width:38%;height:59%;object-fit:contain}"
         '</style></head><body><main class="slide">'
         f'<div class="title" style="{title_style}">{html.escape(slide.title)}</div>'
         f'<div class="body" style="{body_style};{body_width}"><ul>{bullets}</ul></div>'
-        f'{picture}</main></body></html>'
+        f"{picture}</main></body></html>"
     )
 
 
@@ -74,13 +78,19 @@ def critique_png(data: bytes, slide: Slide) -> list[str]:
     occupancy = stats.mean[0] / 255
     notes: list[str] = []
     if occupancy < 0.015:
-        notes.append("The rendered slide is visually sparse; consider adding a useful visual or claim.")
+        notes.append(
+            "The rendered slide is visually sparse; consider adding a useful visual or claim."
+        )
     if occupancy > 0.28:
-        notes.append("The rendered slide is visually dense; inspect legibility and split content if needed.")
+        notes.append(
+            "The rendered slide is visually dense; inspect legibility and split content if needed."
+        )
     if not slide.title.strip():
         notes.append("The rendered slide has no headline.")
     if len(slide.bullets) > 6:
-        notes.append("More than six bullets may be difficult to scan at presentation size.")
+        notes.append(
+            "More than six bullets may be difficult to scan at presentation size."
+        )
     return notes
 
 
@@ -100,19 +110,31 @@ async def _layout_critique(page: Any) -> list[str]:
     }""")
     notes: list[str] = []
     if metrics["titleClipped"]:
-        notes.append("The rendered headline is clipped; shorten it or enlarge its title box.")
+        notes.append(
+            "The rendered headline is clipped; shorten it or enlarge its title box."
+        )
     if metrics["bodyClipped"]:
-        notes.append("The rendered bullet area overflows; split the content or enlarge its body box.")
+        notes.append(
+            "The rendered bullet area overflows; split the content or enlarge its body box."
+        )
     if metrics["titleOutside"] or metrics["bodyOutside"]:
-        notes.append("A positioned text box extends beyond the slide edge; move or resize it.")
+        notes.append(
+            "A positioned text box extends beyond the slide edge; move or resize it."
+        )
     if metrics["titleBodyOverlap"]:
-        notes.append("Headline and body boxes overlap in the rendered layout; separate their positions.")
+        notes.append(
+            "Headline and body boxes overlap in the rendered layout; separate their positions."
+        )
     if metrics["figureBodyOverlap"] or metrics["figureTitleOverlap"]:
-        notes.append("The figure overlaps rendered text; resize or reposition the figure or text boxes.")
+        notes.append(
+            "The figure overlaps rendered text; resize or reposition the figure or text boxes."
+        )
     return notes
 
 
-async def render_deck_preview(model: DeckModel, provider: Any) -> list[tuple[bytes, list[str]]]:
+async def render_deck_preview(
+    model: DeckModel, provider: Any
+) -> list[tuple[bytes, list[str]]]:
     """Render every editable slide in Chromium and inspect the resulting PNG bytes."""
     from playwright.async_api import async_playwright
 
@@ -125,9 +147,15 @@ async def render_deck_preview(model: DeckModel, provider: Any) -> list[tuple[byt
             image_refs.append(None)
             continue
         artifact = provider.get(slide.artifact_slug)
-        image = provider.raw_bytes(slide.artifact_slug) if artifact and artifact.kind == "image" else None
+        image = (
+            provider.raw_bytes(slide.artifact_slug)
+            if artifact and artifact.kind == "image"
+            else None
+        )
         if image is None:
-            raise ValueError(f"slide image artifact {slide.artifact_slug!r} is unavailable")
+            raise ValueError(
+                f"slide image artifact {slide.artifact_slug!r} is unavailable"
+            )
         image_refs.append(image)
     result: list[tuple[bytes, list[str]]] = []
     async with async_playwright() as playwright:
@@ -146,7 +174,9 @@ async def render_deck_preview(model: DeckModel, provider: Any) -> list[tuple[byt
             for slide, image in zip(slides, image_refs, strict=True):
                 page = await browser.new_page(viewport={"width": 1280, "height": 900})
                 try:
-                    await page.set_content(_slide_html(slide, model, image), wait_until="load")
+                    await page.set_content(
+                        _slide_html(slide, model, image), wait_until="load"
+                    )
                     await page.evaluate("document.fonts.ready")
                     layout_notes = await _layout_critique(page)
                     png = await page.locator(".slide").screenshot(type="png")

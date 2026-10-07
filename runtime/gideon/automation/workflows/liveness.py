@@ -8,7 +8,9 @@ HEARTBEAT_SECS = 0.5
 
 
 def last_heard(last_progress: float, calls: Any) -> float:
-    return max(float(last_progress or 0.0), float(getattr(calls, "last_activity", 0.0) or 0.0))
+    return max(
+        float(last_progress or 0.0), float(getattr(calls, "last_activity", 0.0) or 0.0)
+    )
 
 
 async def wait_with_progress(controller: Any, timeout: float, on_progress: Any) -> Any:

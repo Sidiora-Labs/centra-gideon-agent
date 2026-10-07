@@ -1,12 +1,13 @@
 """Telegram tools bound to the currently executing Gideon conversation."""
 
-from gideon.integrations.tool_providers.base import (
-    ToolProvider,
-    ToolDefinition,
-    ToolResult,
-    RiskLevel,
-)
 from gideon.integrations.mcp_core import get_current_session_key
+from gideon.integrations.tool_providers.base import (
+    RiskLevel,
+    ToolDefinition,
+    ToolProvider,
+    ToolResult,
+)
+
 from .api import TelegramError
 
 

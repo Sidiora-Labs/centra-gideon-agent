@@ -24,6 +24,7 @@ _STDOUT_BUFFER_LIMIT = 10 * 1024 * 1024
 def _acp_trace(direction: str, text: str) -> None:
     if _ACP_TRACE:
         from gideon.security.security import redact_credentials
+
         logger.info("ACP-TRACE %s %s", direction, redact_credentials(text)[0][:600])
 
 
@@ -248,6 +249,7 @@ class AcpProcess:
         if self._session_key:
             extra["GIDEON_SESSION_KEY"] = self._session_key
             from gideon.security.session_credentials import credential_for
+
             proof = credential_for(self._session_key)
             if proof:
                 extra["GIDEON_SESSION_PROOF"] = proof
@@ -397,6 +399,7 @@ class AcpProcess:
         self._stderr_task = None
         if self._pid:
             from gideon.security.session_credentials import forget_pid
+
             forget_pid(self._pid)
         identifiers = (
             ("_untrack_child_pids", self._child_pids),

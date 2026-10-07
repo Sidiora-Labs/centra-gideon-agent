@@ -117,7 +117,10 @@ def declared_level(declared: object) -> str:
 
 
 def _has_hint(name: str, hints: tuple[str, ...]) -> bool:
-    words = {word.lower() for word in re.findall(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+", name)}
+    words = {
+        word.lower()
+        for word in re.findall(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+", name)
+    }
     return any(hint.strip("_") in words for hint in hints)
 
 
@@ -127,13 +130,22 @@ class CallReading:
     effects: CommandEffects | None
 
 
-def read_call(declared: object, title: str, tool_kind: str, tool_input: object) -> CallReading:
+def read_call(
+    declared: object, title: str, tool_kind: str, tool_input: object
+) -> CallReading:
     command = shell_command(title, tool_kind, tool_input, declared=declared)
     if not command:
         return CallReading(declared_level(declared) or "caution", None)
     effects = command_effects(command)
-    risk = ("safe" if effects.reads_only else "destructive" if effects.deletes
-            else UNCHECKED if effects.unread else "caution")
+    risk = (
+        "safe"
+        if effects.reads_only
+        else (
+            "destructive"
+            if effects.deletes
+            else UNCHECKED if effects.unread else "caution"
+        )
+    )
     return CallReading(risk, effects)
 
 
@@ -176,7 +188,9 @@ class _Invocation:
 
     def classification(self, declared: object = None) -> str:
         if is_shell_invocation(self.name, self.kind, declared=declared):
-            command = shell_command(self.name, self.kind, self.arguments, declared=declared)
+            command = shell_command(
+                self.name, self.kind, self.arguments, declared=declared
+            )
             if not command:
                 return UNCLASSIFIED
             return READ_ONLY if is_read_only_bash(command) else MUTATING
@@ -210,26 +224,37 @@ def is_shell_invocation(title: str, tool_kind: str, *, declared: object = "") ->
     return _Invocation.read(title, tool_kind, None).runs_shell
 
 
-def shell_command(title: str, tool_kind: str, tool_input: object, *, declared: object = "") -> str:
+def shell_command(
+    title: str, tool_kind: str, tool_input: object, *, declared: object = ""
+) -> str:
     if not is_shell_invocation(title, tool_kind, declared=declared):
         return ""
     command = extract_bash_command(tool_input)
     if command:
         return command
     if (title or "").lower().startswith(SHELL_TITLE_PREFIXES):
-        return title[len("running: "):]
+        return title[len("running: ") :]
     return ""
 
 
-def classify_invocation(title: str, tool_kind: str, tool_input: object, *, declared: object = None) -> str:
+def classify_invocation(
+    title: str, tool_kind: str, tool_input: object, *, declared: object = None
+) -> str:
     return _Invocation.read(title, tool_kind, tool_input).classification(declared)
 
 
-def _is_read_only_tool(title: str, tool_kind: str, tool_input: object, *, declared: object = "") -> bool:
-    return classify_invocation(title, tool_kind, tool_input, declared=declared) == READ_ONLY
+def _is_read_only_tool(
+    title: str, tool_kind: str, tool_input: object, *, declared: object = ""
+) -> bool:
+    return (
+        classify_invocation(title, tool_kind, tool_input, declared=declared)
+        == READ_ONLY
+    )
 
 
-def resolve_effective_risk(declared: object, title: str, tool_kind: str, tool_input: object) -> str:
+def resolve_effective_risk(
+    declared: object, title: str, tool_kind: str, tool_input: object
+) -> str:
     return read_call(declared, title, tool_kind, tool_input).risk
 
 
@@ -242,11 +267,7 @@ def infer_risk_from_name(name: str) -> str:
         (_MUTATING_NAME_HINTS, "caution"),
     )
     return next(
-        (
-            risk
-            for fragments, risk in priorities
-            if _has_hint(bare, fragments)
-        ),
+        (risk for fragments, risk in priorities if _has_hint(bare, fragments)),
         "caution",
     )
 
@@ -259,14 +280,23 @@ _MODE_REFUSALS = {
 
 
 def task_mode_denies(
-    task_mode: str, title: str, tool_kind: str, tool_input: object, *, declared: object = None
+    task_mode: str,
+    title: str,
+    tool_kind: str,
+    tool_input: object,
+    *,
+    declared: object = None,
 ) -> str:
     if task_mode == "agent" or task_mode not in VALID_TASK_MODES:
         return ""
     call = _Invocation.read(title, tool_kind, tool_input)
     if call.classification(declared) == READ_ONLY:
         return ""
-    if task_mode == "build" and declared_level(declared) != "destructive" and call.produces_deliverable():
+    if (
+        task_mode == "build"
+        and declared_level(declared) != "destructive"
+        and call.produces_deliverable()
+    ):
         return ""
     return _MODE_REFUSALS[task_mode]
 
@@ -274,4 +304,8 @@ def task_mode_denies(
 def tool_input_to_str(value: object) -> str:
     if isinstance(value, str):
         return value
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":")) if value is not None else ""
+    return (
+        json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        if value is not None
+        else ""
+    )

@@ -90,14 +90,19 @@ def voice_config_modal(
                 "placeholder": {"type": "plain_text", "text": "1.0"},
                 "initial_value": str(length_scale),
             },
-            "label": {"type": "plain_text", "text": "Speaking speed (<1 faster, >1 slower)"},
+            "label": {
+                "type": "plain_text",
+                "text": "Speaking speed (<1 faster, >1 slower)",
+            },
         },
         {
             "type": "context",
-            "elements": [{
-                "type": "mrkdwn",
-                "text": "Pick the voice model in the dashboard → Settings → Models (`tts`).",
-            }],
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": "Pick the voice model in the dashboard → Settings → Models (`tts`).",
+                }
+            ],
         },
     ]
 
@@ -115,7 +120,10 @@ def allowlist_list_block(user_ids: list[str]) -> list[dict]:
     """List allowed users with per-user remove buttons."""
     if not user_ids:
         return [
-            {"type": "section", "text": {"type": "mrkdwn", "text": "_No users on the allowlist._"}}
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "_No users on the allowlist._"},
+            }
         ]
     blocks: list[dict] = [
         {
@@ -143,11 +151,19 @@ def allowlist_list_block(user_ids: list[str]) -> list[dict]:
 def channel_list_block(channel_ids: list[str]) -> list[dict]:
     """List tracked channels with per-channel remove buttons."""
     if not channel_ids:
-        return [{"type": "section", "text": {"type": "mrkdwn", "text": "_No tracked channels._"}}]
+        return [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "_No tracked channels._"},
+            }
+        ]
     blocks: list[dict] = [
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": f"*Tracked Channels* ({len(channel_ids)})"},
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*Tracked Channels* ({len(channel_ids)})",
+            },
         },
     ]
     for cid in sorted(channel_ids):
@@ -193,33 +209,40 @@ def channels_modal(
     agents = agent_names or []
 
     if not channels:
-        blocks.append({
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": "_No tracked channels yet._"},
-        })
+        blocks.append(
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "_No tracked channels yet._"},
+            }
+        )
     else:
         for ch in channels:
             cid = ch["channel_id"]
             cur = ch.get("activation", "mention")
             cur_agent = ch.get("agent", "")
             # Row 1: channel name + remove button
-            blocks.append({
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": f"<#{cid}>"},
-                "accessory": {
-                    "type": "button",
-                    "action_id": f"pc_ch_remove_{cid}",
-                    "text": {"type": "plain_text", "text": "✕ Remove"},
-                    "style": "danger",
-                    "value": cid,
-                    "confirm": {
-                        "title": {"type": "plain_text", "text": "Remove channel?"},
-                        "text": {"type": "mrkdwn", "text": f"Stop tracking <#{cid}>?"},
-                        "confirm": {"type": "plain_text", "text": "Remove"},
-                        "deny": {"type": "plain_text", "text": "Cancel"},
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"<#{cid}>"},
+                    "accessory": {
+                        "type": "button",
+                        "action_id": f"pc_ch_remove_{cid}",
+                        "text": {"type": "plain_text", "text": "✕ Remove"},
+                        "style": "danger",
+                        "value": cid,
+                        "confirm": {
+                            "title": {"type": "plain_text", "text": "Remove channel?"},
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f"Stop tracking <#{cid}>?",
+                            },
+                            "confirm": {"type": "plain_text", "text": "Remove"},
+                            "deny": {"type": "plain_text", "text": "Cancel"},
+                        },
                     },
-                },
-            })
+                }
+            )
             # Row 2: activation mode + agent selector
             opts = [
                 {
@@ -230,51 +253,68 @@ def channels_modal(
                 for val, label, desc in _ACTIVATION_OPTIONS
             ]
             initial = next((o for o in opts if o["value"] == cur), opts[1])
-            elements: list[dict] = [{
-                "type": "static_select",
-                "action_id": f"pc_ch_activation_{cid}",
-                "initial_option": initial,
-                "options": opts,
-            }]
+            elements: list[dict] = [
+                {
+                    "type": "static_select",
+                    "action_id": f"pc_ch_activation_{cid}",
+                    "initial_option": initial,
+                    "options": opts,
+                }
+            ]
             if agents:
                 agent_opts = [
-                    {"text": {"type": "plain_text", "text": "🤖 default"}, "value": "__default__"},
+                    {
+                        "text": {"type": "plain_text", "text": "🤖 default"},
+                        "value": "__default__",
+                    },
                 ] + [
                     {"text": {"type": "plain_text", "text": n[:75]}, "value": n}
                     for n in agents
                 ]
                 agent_initial = next(
-                    (o for o in agent_opts if o["value"] == (cur_agent or "__default__")),
+                    (
+                        o
+                        for o in agent_opts
+                        if o["value"] == (cur_agent or "__default__")
+                    ),
                     agent_opts[0],
                 )
-                elements.append({
-                    "type": "static_select",
-                    "action_id": f"pc_ch_agent_{cid}",
-                    "initial_option": agent_initial,
-                    "options": agent_opts,
-                })
-            blocks.append({
-                "type": "actions",
-                "block_id": f"pc_ch_actions_{cid}",
-                "elements": elements,
-            })
+                elements.append(
+                    {
+                        "type": "static_select",
+                        "action_id": f"pc_ch_agent_{cid}",
+                        "initial_option": agent_initial,
+                        "options": agent_opts,
+                    }
+                )
+            blocks.append(
+                {
+                    "type": "actions",
+                    "block_id": f"pc_ch_actions_{cid}",
+                    "elements": elements,
+                }
+            )
             blocks.append({"type": "divider"})
 
     # Add channel picker at the bottom (conversations_select includes private channels)
-    blocks.append({
-        "type": "actions",
-        "block_id": "pc_ch_add_block",
-        "elements": [{
-            "type": "conversations_select",
-            "action_id": "pc_ch_add",
-            "placeholder": {"type": "plain_text", "text": "➕ Add a channel…"},
-            "filter": {
-                "include": ["public", "private"],
-                "exclude_bot_users": True,
-                "exclude_external_shared_channels": True,
-            },
-        }],
-    })
+    blocks.append(
+        {
+            "type": "actions",
+            "block_id": "pc_ch_add_block",
+            "elements": [
+                {
+                    "type": "conversations_select",
+                    "action_id": "pc_ch_add",
+                    "placeholder": {"type": "plain_text", "text": "➕ Add a channel…"},
+                    "filter": {
+                        "include": ["public", "private"],
+                        "exclude_bot_users": True,
+                        "exclude_external_shared_channels": True,
+                    },
+                }
+            ],
+        }
+    )
 
     return {
         "type": "modal",
@@ -300,7 +340,10 @@ def build_stopping_blocks(session_key: str) -> list[dict]:
     return [
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": "⏹  *Stopping…*\nCooperative cancel in progress."},
+            "text": {
+                "type": "mrkdwn",
+                "text": "⏹  *Stopping…*\nCooperative cancel in progress.",
+            },
         },
         {
             "type": "actions",

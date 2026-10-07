@@ -109,7 +109,10 @@ def delimited_rows(text: str, delimiter: str = ",") -> list[list[str]]:
     """Read quoted CSV/TSV cells consistently, skipping delimiter spaces and blank rows."""
     import csv
     import io
-    reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter, skipinitialspace=True)
+
+    reader = csv.reader(
+        io.StringIO(text, newline=""), delimiter=delimiter, skipinitialspace=True
+    )
     return [row for row in reader if any(cell.strip() for cell in row)]
 
 
@@ -193,12 +196,12 @@ class FileReader:
         from gideon.workspace.uploads.content_intake import ApprovedFile
 
         if not isinstance(snapshot, ApprovedFile):
-            raise TypeError('An approved file snapshot is required.')
+            raise TypeError("An approved file snapshot is required.")
         snapshot.require_approved()
         with snapshot.materialize() as path:
             body, metadata = self.read(path)
-        metadata['title'] = Path(snapshot.filename).stem
-        metadata['source_digest'] = snapshot.digest
+        metadata["title"] = Path(snapshot.filename).stem
+        metadata["source_digest"] = snapshot.digest
         return body, metadata
 
     def _read_text(self, path: str, fmt: str) -> tuple[str, dict]:
@@ -245,9 +248,13 @@ class FileReader:
                 if not scanned:
                     return "\n".join(pages), metadata
                 if self.ocr_provider is None:
-                    metadata.update(ocr_required=True, ocr_available=False,
-                                    ocr_pages_skipped=len(scanned), extraction_partial=True,
-                                    extraction_warning=f"OCR unavailable for {len(scanned)} scanned pages")
+                    metadata.update(
+                        ocr_required=True,
+                        ocr_available=False,
+                        ocr_pages_skipped=len(scanned),
+                        extraction_partial=True,
+                        extraction_warning=f"OCR unavailable for {len(scanned)} scanned pages",
+                    )
                     if not any(text.strip() for text in pages):
                         message = "scanned PDF requires an available OCR provider"
                         metadata.update(
@@ -272,9 +279,13 @@ class FileReader:
                     extraction_partial=bool(skipped_pages or ocr_skipped),
                 )
                 if skipped_pages:
-                    metadata["extraction_warning"] = f"OCR page limit skipped {skipped_pages} scanned pages"
+                    metadata["extraction_warning"] = (
+                        f"OCR page limit skipped {skipped_pages} scanned pages"
+                    )
                 elif ocr_skipped:
-                    metadata["extraction_warning"] = f"OCR byte limit skipped {ocr_skipped} bytes"
+                    metadata["extraction_warning"] = (
+                        f"OCR byte limit skipped {ocr_skipped} bytes"
+                    )
                 if ocr_skipped and not any(text.strip() for text in pages):
                     message = (
                         f"OCR byte limit skipped {ocr_skipped} bytes after reading "

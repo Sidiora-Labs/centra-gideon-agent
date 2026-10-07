@@ -100,10 +100,16 @@ def _validate_declaration(
 
 def _app_callable_owner(factory):
     from gideon.extensions.apps.code_provenance import loaded_app, owner
+
     app = owner()
     module = sys.modules.get(getattr(factory, "__module__", ""))
     path = getattr(module, "__file__", None)
-    if app is None or module is None or not isinstance(path, str) or loaded_app(path) != app:
+    if (
+        app is None
+        or module is None
+        or not isinstance(path, str)
+        or loaded_app(path) != app
+    ):
         return None
     globals_ = getattr(factory, "__globals__", None)
     if globals_ is not None and globals_ is not vars(module):
@@ -167,7 +173,9 @@ class ProviderRegistry:
     def capability_of(self, type_: str) -> ProviderCapability:
         return _required(self._capabilities, type_, "type")
 
-    def not_ready(self, entry: ProviderEntry, *, implicit: bool) -> tuple[str, str] | None:
+    def not_ready(
+        self, entry: ProviderEntry, *, implicit: bool
+    ) -> tuple[str, str] | None:
         if entry.type not in self._factories:
             return (
                 f"The provider type for “{entry.name}” is not available",
@@ -179,7 +187,9 @@ class ProviderRegistry:
         try:
             verdict = probe(entry, implicit=implicit)
         except Exception:
-            logger.warning("Provider readiness probe failed for %r", entry.type, exc_info=True)
+            logger.warning(
+                "Provider readiness probe failed for %r", entry.type, exc_info=True
+            )
             return None
         return verdict if isinstance(verdict, tuple) and len(verdict) == 2 else None
 
@@ -220,8 +230,14 @@ class ProviderRegistry:
         if sys.modules.get(module_name) is not module:
             return 0
         removed = 0
-        for type_, (registered_app, registered_module, factory) in tuple(self._factory_owners.items()):
-            if registered_app != app or registered_module is not module or self._factories.get(type_) is not factory:
+        for type_, (registered_app, registered_module, factory) in tuple(
+            self._factory_owners.items()
+        ):
+            if (
+                registered_app != app
+                or registered_module is not module
+                or self._factories.get(type_) is not factory
+            ):
                 continue
             self._factory_owners.pop(type_, None)
             self._factories.pop(type_, None)
@@ -230,8 +246,14 @@ class ProviderRegistry:
             self._passes_on.pop(type_, None)
             self._in_process_types.discard(type_)
             removed += 1
-        for type_, (registered_app, registered_module, factory) in tuple(self._catalog_owners.items()):
-            if registered_app == app and registered_module is module and self._catalog_factories.get(type_) is factory:
+        for type_, (registered_app, registered_module, factory) in tuple(
+            self._catalog_owners.items()
+        ):
+            if (
+                registered_app == app
+                and registered_module is module
+                and self._catalog_factories.get(type_) is factory
+            ):
                 self._catalog_owners.pop(type_, None)
                 self._catalog_factories.pop(type_, None)
         return removed
@@ -326,18 +348,27 @@ def serving_endpoint(entry: ProviderEntry) -> str:
         options.get("base_url")
         or options.get("endpoint")
         or (spec.default_base_url if spec is not None else "")
-        or getattr(get_default_registry()._capabilities.get(entry.type), "default_endpoint", "")
+        or getattr(
+            get_default_registry()._capabilities.get(entry.type), "default_endpoint", ""
+        )
     ).strip()
 
 
-def endpoint_on_this_machine(provider: str | ProviderEntry, *, actual_provider=None) -> bool:
+def endpoint_on_this_machine(
+    provider: str | ProviderEntry, *, actual_provider=None
+) -> bool:
     """Endpoint location, independent of where the model is executed."""
     entry = provider if isinstance(provider, ProviderEntry) else serving_entry(provider)
     endpoint = serving_endpoint(entry) if entry is not None else ""
     if actual_provider is not None:
-        endpoint = str(getattr(actual_provider, "endpoint", "") or getattr(actual_provider, "_base_url", "") or endpoint).strip()
+        endpoint = str(
+            getattr(actual_provider, "endpoint", "")
+            or getattr(actual_provider, "_base_url", "")
+            or endpoint
+        ).strip()
     import ipaddress
     from urllib.parse import urlsplit
+
     host = urlsplit(endpoint).hostname if endpoint else None
     if host == "localhost" or (host and host.endswith(".localhost")):
         return True
@@ -356,7 +387,11 @@ def served_on_this_machine(provider: str | ProviderEntry, model: str) -> bool:
     if entry.type in registry._in_process_types:
         return True
     descriptor = registry._capabilities.get(entry.type)
-    if descriptor is None or not descriptor.hosts_model or not endpoint_on_this_machine(entry):
+    if (
+        descriptor is None
+        or not descriptor.hosts_model
+        or not endpoint_on_this_machine(entry)
+    ):
         return False
     probe = registry._passes_on.get(entry.type)
     if probe is not None:
@@ -364,14 +399,20 @@ def served_on_this_machine(provider: str | ProviderEntry, model: str) -> bool:
             if probe(entry, str(model or "")):
                 return False
         except Exception:
-            logger.warning("provider pass-on probe failed for %r", entry.type, exc_info=True)
+            logger.warning(
+                "provider pass-on probe failed for %r", entry.type, exc_info=True
+            )
             return False
     return True
 
 
-def serving_is_local(provider: str | ProviderEntry, *, model: str = "", actual_provider=None) -> bool:
+def serving_is_local(
+    provider: str | ProviderEntry, *, model: str = "", actual_provider=None
+) -> bool:
     entry = provider if isinstance(provider, ProviderEntry) else serving_entry(provider)
-    return served_on_this_machine(provider, model or (entry.own_model if entry is not None else ""))
+    return served_on_this_machine(
+        provider, model or (entry.own_model if entry is not None else "")
+    )
 
 
 def serving_type(provider: str) -> str:

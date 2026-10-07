@@ -48,7 +48,9 @@ def image_part_url(path: str) -> str:
                 return ""
             from gideon.workspace.uploads.policy import check_upload
 
-            gate = check_upload(Path(path).name, mimetypes.guess_type(path)[0], size=info.st_size)
+            gate = check_upload(
+                Path(path).name, mimetypes.guess_type(path)[0], size=info.st_size
+            )
             if not gate.ok or gate.category != "image":
                 return ""
             raw = stream.read(info.st_size + 1)

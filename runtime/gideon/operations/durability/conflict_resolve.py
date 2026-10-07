@@ -165,9 +165,20 @@ def resolve_conflict(
     try:
         applied = _write_chosen_row(entry, dest, rec.entity_id, row)
         if applied.linked:
-            return _refuse("link_in_the_way", "Linked local files were left unchanged: " + "; ".join(applied.linked.values()), choice=choice, record_id=record_id)
+            return _refuse(
+                "link_in_the_way",
+                "Linked local files were left unchanged: "
+                + "; ".join(applied.linked.values()),
+                choice=choice,
+                record_id=record_id,
+            )
         if applied.moved:
-            return _refuse("changed_since_read", "A newer local edit was left unchanged; review this conflict again.", choice=choice, record_id=record_id)
+            return _refuse(
+                "changed_since_read",
+                "A newer local edit was left unchanged; review this conflict again.",
+                choice=choice,
+                record_id=record_id,
+            )
     except Exception as exc:  # noqa: BLE001 — a failed write must leave the review open
         logger.warning(
             "conflict resolve: write failed for %s", record_id, exc_info=True
@@ -214,6 +225,7 @@ def _write_chosen_row(
     one the conflict was detected in, so a resolution cannot reshape the store.
     """
     from gideon.operations.durability.home_paths import guard_path
+
     dest = guard_path(dest)
     rows = reconcile.read_local_rows(entry, dest)
     existing = next((r for r in rows if conflicts_mod.row_id(r) == entity_id), None)
@@ -222,5 +234,9 @@ def _write_chosen_row(
     out = [r for r in rows if conflicts_mod.row_id(r) != entity_id]
     out.append(preserved)
     return writeback.apply_rows(
-        entry.kind, dest, reconcile.rows_for_store(entry, dest, out), entry=entry, read_rows=rows
+        entry.kind,
+        dest,
+        reconcile.rows_for_store(entry, dest, out),
+        entry=entry,
+        read_rows=rows,
     )

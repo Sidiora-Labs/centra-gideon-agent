@@ -5,13 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-from gideon.core.turn_streams import closing_stream
-
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from gideon.core.turn_streams import closing_stream
 from gideon.integrations.acp.errors import AcpError
 from gideon.integrations.acp.types import STOP_REASON_CANCELLED, STOP_REASON_END_TURN
 from gideon.integrations.llm.base import CancelOutcome
@@ -204,7 +203,7 @@ class ProbePlan:
                 dialect=dialect,
                 extra_env=self.options.get("env") or {},
                 sandbox_mode=options_sandbox_mode(self.options),
-            session_meta=self.options.get("session_meta"),
+                session_meta=self.options.get("session_meta"),
             ),
             timeout=self.timeout,
         )

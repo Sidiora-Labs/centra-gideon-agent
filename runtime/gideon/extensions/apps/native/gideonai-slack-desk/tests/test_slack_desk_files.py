@@ -4,7 +4,6 @@ import os
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from slack_desk_runtime.files import (
     _MAX_IMAGE_BYTES,
     _MAX_TEXT_BYTES,
@@ -254,7 +253,9 @@ class TestProcessSlackDeskFiles:
                 "size": 11,
             }
         ]
-        with patch("slack_desk_runtime.files.tempfile.mkstemp", side_effect=tracking_mkstemp):
+        with patch(
+            "slack_desk_runtime.files.tempfile.mkstemp", side_effect=tracking_mkstemp
+        ):
             await process_slack_desk_files(orch, files)
         assert len(created_paths) == 1
         assert not os.path.exists(created_paths[0])

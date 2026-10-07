@@ -26,15 +26,13 @@ archive before an import writes anything. v1/v2 zips still import — there is s
 nothing to verify them against, which is stated rather than silently assumed.
 """
 
-import hashlib
 import fnmatch
+import hashlib
 import io
 import json
 import logging
 import os
 import shutil
-
-from gideon.operations.durability import sqlite_files
 import socket
 import tempfile
 import zipfile
@@ -44,6 +42,7 @@ from pathlib import Path, PurePosixPath
 
 from gideon.core.config import loader as config_loader
 from gideon.core.sqlite_compat import connect, sqlite3
+from gideon.operations.durability import sqlite_files
 from gideon.security.security import is_sensitive_path
 from gideon.workspace.snapshot import (
     _copy_json_with_arrival_policy,
@@ -224,11 +223,10 @@ def domain_of(rel: str) -> str:
     best_len, best = -1, ""
     for entry in inv.INVENTORY:
         if (
-            (fnmatch.fnmatch(rel, entry.path) if any(c in entry.path for c in "*?[") else (rel == entry.path or rel.startswith(entry.path + "/")))
-            and len(
-            entry.path
-            ) > best_len
-        ):
+            fnmatch.fnmatch(rel, entry.path)
+            if any(c in entry.path for c in "*?[")
+            else (rel == entry.path or rel.startswith(entry.path + "/"))
+        ) and len(entry.path) > best_len:
             best_len, best = len(entry.path), entry.domain
     return best or _UNDECLARED_LITERAL_DOMAINS.get(rel, "platform")
 
@@ -744,6 +742,7 @@ def _strip_excluded_from_staged(snap: Path) -> list[str]:
     """
     removed: list[str] = []
     from gideon.operations.durability import inventory as inv
+
     excluded = _excluded_entry_paths() | frozenset(
         entry.path for entry in inv.INVENTORY if not entry.merged_in
     )
@@ -820,6 +819,7 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
     pc = _pc_dir()
     summary: dict = {"mode": mode, "items": []}
     from gideon.operations.durability.home_paths import LinkInTheWay, home_path
+
     left: list[str] = []
 
     with tempfile.TemporaryDirectory() as work_str:
@@ -848,7 +848,6 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
             )
             summary["refused"] = stripped
 
-
         if mode == "replace":
             before = {p.name for p in pc.glob("pre-restore-*") if p.is_dir()}
             try:
@@ -861,12 +860,16 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
                 )
                 if new:
                     summary["pre_restore"] = new[-1]
-            summary["items"].append("replace applied" if not left else "replace partially applied")
+            summary["items"].append(
+                "replace applied" if not left else "replace partially applied"
+            )
         else:
             try:
                 if (snap / "memory.db").is_file():
                     if not (pc / "memory.db").is_file():
-                        sqlite_files.copy_file(str(snap / "memory.db"), str(pc / "memory.db"))
+                        sqlite_files.copy_file(
+                            str(snap / "memory.db"), str(pc / "memory.db")
+                        )
                         summary["items"].append("memory (copied)")
                     else:
                         _merge_memory(snap / "memory.db", pc / "memory.db")
@@ -875,8 +878,12 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
                 link.put_on(left)
 
             try:
-                if (snap / "learning.db").is_file() and not (pc / "learning.db").is_file():
-                    sqlite_files.copy_file(str(snap / "learning.db"), str(pc / "learning.db"))
+                if (snap / "learning.db").is_file() and not (
+                    pc / "learning.db"
+                ).is_file():
+                    sqlite_files.copy_file(
+                        str(snap / "learning.db"), str(pc / "learning.db")
+                    )
                     summary["items"].append("learning staging (copied)")
             except LinkInTheWay as link:
                 link.put_on(left)
@@ -888,7 +895,9 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
                         summary["items"].append("automations (merged)")
                     else:
                         _copy_json_with_arrival_policy(
-                            snap / "triggers.json", pc / "triggers.json", "triggers.json"
+                            snap / "triggers.json",
+                            pc / "triggers.json",
+                            "triggers.json",
                         )
                         summary["items"].append("automations (copied)")
             except LinkInTheWay as link:
@@ -937,8 +946,12 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
                 link.put_on(left)
 
             try:
-                if (snap / "config.json").is_file() and not (pc / "config.json").is_file():
-                    sqlite_files.copy_file(str(snap / "config.json"), str(pc / "config.json"))
+                if (snap / "config.json").is_file() and not (
+                    pc / "config.json"
+                ).is_file():
+                    sqlite_files.copy_file(
+                        str(snap / "config.json"), str(pc / "config.json")
+                    )
                     summary["items"].append("config (restored)")
             except LinkInTheWay as link:
                 link.put_on(left)
@@ -963,7 +976,9 @@ def apply_import_zip(zip_path: Path, mode: str = "merge") -> dict:
                 if (snap / "feedback.jsonl").is_file() and not (
                     pc / "feedback.jsonl"
                 ).is_file():
-                    sqlite_files.copy_file(str(snap / "feedback.jsonl"), str(pc / "feedback.jsonl"))
+                    sqlite_files.copy_file(
+                        str(snap / "feedback.jsonl"), str(pc / "feedback.jsonl")
+                    )
                     summary["items"].append("feedback (restored)")
             except LinkInTheWay as link:
                 link.put_on(left)

@@ -137,7 +137,9 @@ class Applied:
 
 def refinement_id(record: dict[str, Any]) -> str:
     """The id of a stored refinement record: a digest of its canonical JSON."""
-    canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    canonical = json.dumps(
+        record, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    )
     return hashlib.sha256(canonical.encode("ascii")).hexdigest()[:16]
 
 
@@ -210,7 +212,9 @@ def apply_overlay(
         raise ValueError(f"{name!r} is not a safe skill name")
     with hold_library():
         refinements = _records(name)
-        refinements.append(Refinement(description, procedure_md, created_at, trigger).to_dict())
+        refinements.append(
+            Refinement(description, procedure_md, created_at, trigger).to_dict()
+        )
         _store(name, path, refinements)
     return len(refinements)
 
@@ -218,7 +222,10 @@ def apply_overlay(
 def _store(name: str, path: Path, refinements: list[Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(
-        path, json.dumps({"skill": name, "refinements": refinements}, indent=2, ensure_ascii=False)
+        path,
+        json.dumps(
+            {"skill": name, "refinements": refinements}, indent=2, ensure_ascii=False
+        ),
     )
 
 
@@ -240,7 +247,9 @@ def revert_overlay(name: str) -> int:
         try:
             path.unlink()
         except OSError:
-            logger.warning("overlays: could not revert overlay for %s", name, exc_info=True)
+            logger.warning(
+                "overlays: could not revert overlay for %s", name, exc_info=True
+            )
             return 0
     return count
 

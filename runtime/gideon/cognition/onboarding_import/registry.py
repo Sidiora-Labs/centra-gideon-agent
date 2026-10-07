@@ -38,7 +38,11 @@ def _source(module) -> ImportSource:
     return SourceDirectory.describe(ImportSource, module)
 
 
-SOURCES: tuple[ImportSource, ...] = (_source(claude_code), _source(codex), _source(hermes))
+SOURCES: tuple[ImportSource, ...] = (
+    _source(claude_code),
+    _source(codex),
+    _source(hermes),
+)
 
 _BY_NAME: dict[str, ImportSource] = {src.name: src for src in SOURCES}
 

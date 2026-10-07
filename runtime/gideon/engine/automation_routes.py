@@ -121,8 +121,10 @@ class DailySpendGate:
                 if self.runtime.dashboard_state is not None:
                     try:
                         from gideon.workspace import notification_kinds
+
                         self.runtime.dashboard_state.notify(
-                            notification_kinds.WARNING, "Daily dollar budget reached",
+                            notification_kinds.WARNING,
+                            "Daily dollar budget reached",
                             f"${totals.dollars:.2f} of ${limit.max_dollars:.2f} spent. "
                             "Paid model calls are refused until the daily reset; free models "
                             "and work that calls no model keep running. Raise the budget "

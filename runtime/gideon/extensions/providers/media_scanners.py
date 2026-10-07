@@ -48,9 +48,17 @@ def register_scanner(
         if scanner in lst:
             return
         # Reloaded modules contribute their current implementation under the same name.
-        identity = (getattr(scanner, "__module__", None), getattr(scanner, "__qualname__", None))
+        identity = (
+            getattr(scanner, "__module__", None),
+            getattr(scanner, "__qualname__", None),
+        )
         if all(identity):
-            lst[:] = [fn for fn in lst if (getattr(fn, "__module__", None), getattr(fn, "__qualname__", None)) != identity]
+            lst[:] = [
+                fn
+                for fn in lst
+                if (getattr(fn, "__module__", None), getattr(fn, "__qualname__", None))
+                != identity
+            ]
         lst.append(scanner)
         _generation += 1
 
@@ -66,8 +74,12 @@ def unregister_scanner(capability: str, scanner: Callable) -> None:
 
 def unregister_module_scanners(module_name: str) -> None:
     with _lock:
-        owned = [(capability, scanner) for capability, scanners in _scanners.items()
-                 for scanner in scanners if getattr(scanner, "__module__", None) == module_name]
+        owned = [
+            (capability, scanner)
+            for capability, scanners in _scanners.items()
+            for scanner in scanners
+            if getattr(scanner, "__module__", None) == module_name
+        ]
         for capability, scanner in owned:
             unregister_scanner(capability, scanner)
 

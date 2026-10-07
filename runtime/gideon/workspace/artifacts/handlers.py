@@ -9,18 +9,17 @@ restricted (incognito/guest) sessions and SEL-audited.
 from __future__ import annotations
 
 import asyncio
-import logging
-import tempfile
 import csv
+import logging
 import re
-from urllib.parse import quote
+import tempfile
 from pathlib import Path
-
-from gideon.core.atomic_write import atomic_write_bytes
 from typing import Any
+from urllib.parse import quote
 
 from aiohttp import web
 
+from gideon.core.atomic_write import atomic_write_bytes
 from gideon.core.http_request import RequestBodyTypeError, read_json_body
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.handlers._shared import _is_restricted_session
@@ -42,8 +41,8 @@ from gideon.workspace.artifacts.build import (
 from gideon.workspace.artifacts.deploy import (
     DEPLOYABLE_KINDS,
     SERVE_HEADERS,
-    SERVED_FILE_HEADERS,
     SERVE_URL_PREFIX,
+    SERVED_FILE_HEADERS,
     ArtifactDeployStore,
     content_type_for,
     rejects_path,
@@ -213,7 +212,9 @@ async def api_artifacts_create(request: web.Request) -> web.Response:
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
         if error := _source_revision_error(source_path, source_revision):
-            status = 428 if "required" in error else (409 if "changed" in error else 400)
+            status = (
+                428 if "required" in error else (409 if "changed" in error else 400)
+            )
             return web.json_response({"error": error}, status=status)
         try:
             existing = prov.find_by_source_path(source_path)
@@ -309,23 +310,31 @@ async def api_artifact_deck_create(request: web.Request) -> web.Response:
     except Exception:
         return json_error("invalid_json", status=400)
     if not isinstance(body, dict):
-        return json_error("invalid_body", message="JSON body must be an object", status=400)
+        return json_error(
+            "invalid_body", message="JSON body must be an object", status=400
+        )
     name = body.get("name")
     slug = body.get("slug")
     if not isinstance(name, str) or not name.strip() or len(name.strip()) > 200:
-        return json_error("invalid_name", message="name must be 1 to 200 characters", status=400)
+        return json_error(
+            "invalid_name", message="name must be 1 to 200 characters", status=400
+        )
     if slug is not None and (not isinstance(slug, str) or not is_valid_slug(slug)):
         return json_error("invalid_slug", message="slug is invalid", status=400)
     codec = get_codec("pptx")
     writer = get_writer("pptx")
     if codec is None or writer is None:
-        return json_error("render_unavailable", message="PPTX rendering is unavailable", status=503)
+        return json_error(
+            "render_unavailable", message="PPTX rendering is unavailable", status=503
+        )
     try:
         model = codec.from_dict(body.get("model"))
     except ValueError as exc:
         return json_error("invalid_model", message=str(exc), status=400)
     if not model.slides:
-        return json_error("invalid_model", message="provide at least one slide", status=400)
+        return json_error(
+            "invalid_model", message="provide at least one slide", status=400
+        )
     try:
         data = await asyncio.to_thread(writer, model)
     except Exception:
@@ -333,29 +342,50 @@ async def api_artifact_deck_create(request: web.Request) -> web.Response:
         _audit(request, "artifact.deck_create", "error", "render_failed")
         return json_error("render_failed", message="PPTX rendering failed", status=500)
     if not isinstance(data, bytes) or not data:
-        return json_error("render_failed", message="PPTX renderer returned no document", status=500)
+        return json_error(
+            "render_failed", message="PPTX renderer returned no document", status=500
+        )
     if len(data) > MAX_BINARY_CONTENT_BYTES:
-        return json_error("request_too_large", message="rendered PPTX exceeds the binary artifact limit", status=413)
+        return json_error(
+            "request_too_large",
+            message="rendered PPTX exceeds the binary artifact limit",
+            status=413,
+        )
     try:
         if slug:
             lock = getattr(prov, "mutation_lock", None)
             if lock is None:
-                return json_error("create_unavailable", message="this provider cannot reserve a presentation slug", status=503)
+                return json_error(
+                    "create_unavailable",
+                    message="this provider cannot reserve a presentation slug",
+                    status=503,
+                )
             with lock:
                 if prov.get(slug) is not None:
-                    return json_error("slug_conflict", message="artifact slug already exists", status=409)
+                    return json_error(
+                        "slug_conflict",
+                        message="artifact slug already exists",
+                        status=409,
+                    )
                 art = prov.create_binary(
-                    name=name.strip(), data=data,
+                    name=name.strip(),
+                    data=data,
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    kind="pptx", source="manual", slug=slug,
-                    actor="user", session_id=_session_key(request),
+                    kind="pptx",
+                    source="manual",
+                    slug=slug,
+                    actor="user",
+                    session_id=_session_key(request),
                 )
         else:
             art = prov.create_binary(
-                name=name.strip(), data=data,
+                name=name.strip(),
+                data=data,
                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                kind="pptx", source="manual",
-                actor="user", session_id=_session_key(request),
+                kind="pptx",
+                source="manual",
+                actor="user",
+                session_id=_session_key(request),
             )
     except (ValueError, PermissionError, NotImplementedError) as exc:
         _audit(request, "artifact.deck_create", "error", str(exc))
@@ -363,8 +393,12 @@ async def api_artifact_deck_create(request: web.Request) -> web.Response:
     if prov.raw_bytes(art.slug, version=art.version) is None:
         prov.delete(art.slug)
         _audit(request, "artifact.deck_create", "error", "binary_missing")
-        return json_error("artifact_create_failed", message="rendered PPTX was not stored", status=500)
-    _audit(request, "artifact.deck_create", "ok", f"slug={art.slug} version={art.version}")
+        return json_error(
+            "artifact_create_failed", message="rendered PPTX was not stored", status=500
+        )
+    _audit(
+        request, "artifact.deck_create", "ok", f"slug={art.slug} version={art.version}"
+    )
     return web.json_response(_serialize(art), status=201)
 
 
@@ -446,10 +480,14 @@ async def api_artifact_update(request: web.Request) -> web.Response:
     try:
         content = body.get("content")
         if content is not None and not isinstance(content, str):
-            return web.json_response({"error": "content must be text or null"}, status=400)
+            return web.json_response(
+                {"error": "content must be text or null"}, status=400
+            )
         source_revision = body.get("source_revision")
         if source_revision is not None and not isinstance(source_revision, str):
-            return web.json_response({"error": "source_revision must be text"}, status=400)
+            return web.json_response(
+                {"error": "source_revision must be text"}, status=400
+            )
         art = prov.update(
             slug,
             content=content,
@@ -498,6 +536,7 @@ async def api_artifact_delete(request: web.Request) -> web.Response:
 async def api_artifact_csv_export(request: web.Request) -> web.Response:
     """Authenticated derived CSV download, including untouched historical/source text."""
     from gideon.workspace.documents.writers.csv_writer import render_csv_text
+
     prov = _provider(request)
     if prov is None:
         return web.json_response({"error": "unknown provider"}, status=400)
@@ -513,19 +552,31 @@ async def api_artifact_csv_export(request: web.Request) -> web.Response:
     if art is None:
         return web.json_response({"error": "not found"}, status=404)
     if art.kind != "csv":
-        return web.json_response({"error": "this export is only for CSV artifacts"}, status=400)
+        return web.json_response(
+            {"error": "this export is only for CSV artifacts"}, status=400
+        )
     try:
         text = render_csv_text(_redact(art.content or ""))
     except csv.Error as exc:
-        return web.json_response({"error": f"could not read the csv text: {exc}"}, status=422)
-    filename = re.sub(r'[\s/\\:*?"<>|\x00-\x1f]+', '-', art.name.strip()).strip('-') or art.slug
+        return web.json_response(
+            {"error": f"could not read the csv text: {exc}"}, status=422
+        )
+    filename = (
+        re.sub(r'[\s/\\:*?"<>|\x00-\x1f]+', "-", art.name.strip()).strip("-")
+        or art.slug
+    )
     suffix = "" if version is None else f"-v{version}"
     headers = {
         "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename + suffix + '.csv', safe='')}",
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
     }
-    return web.Response(body=text.encode("utf-8"), content_type="text/csv", charset="utf-8", headers=headers)
+    return web.Response(
+        body=text.encode("utf-8"),
+        content_type="text/csv",
+        charset="utf-8",
+        headers=headers,
+    )
 
 
 async def api_artifact_raw(request: web.Request) -> web.Response:
@@ -690,18 +741,25 @@ async def _store_binary(
     state to hold back: there is no silent-save mode to offer, and the version it bumps
     is what makes a lossy edit revertible (§C5) rather than destructive.
     """
-    if operation == 'artifact.raw_write':
-        from gideon.workspace.uploads.content_intake import approve_stream, IntakeRefused
+    if operation == "artifact.raw_write":
+        from gideon.workspace.uploads.content_intake import (
+            IntakeRefused,
+            approve_stream,
+        )
+
         async def chunks():
             yield data
+
         snapshot = None
         try:
-            snapshot = await approve_stream(chunks(), art.slug + '.bin', mime,
-                                            surface='artifact_binary')
+            snapshot = await approve_stream(
+                chunks(), art.slug + ".bin", mime, surface="artifact_binary"
+            )
             from gideon.cognition.knowledge.file_items import _owned_io
+
             data = await _owned_io(snapshot.read_bytes)
         except IntakeRefused as exc:
-            _audit(request, operation, 'denied', f'slug={art.slug} {exc.code}')
+            _audit(request, operation, "denied", f"slug={art.slug} {exc.code}")
             return exc.response()
         finally:
             if snapshot is not None:
@@ -909,7 +967,9 @@ async def api_artifact_deck_preview(request: web.Request) -> web.Response:
     if refusal is not None or art is None:
         return refusal or json_error("not_found", status=404)
     if art.kind != "pptx":
-        return json_error("model_unavailable", message="preview requires a PPTX artifact", status=415)
+        return json_error(
+            "model_unavailable", message="preview requires a PPTX artifact", status=415
+        )
     _, refusal = _if_match(request, art)
     if refusal is not None:
         return refusal
@@ -923,17 +983,33 @@ async def api_artifact_deck_preview(request: web.Request) -> web.Response:
         return json_error("preview_unavailable", message=str(exc), status=400)
     except Exception:
         logger.exception("deck preview render failed for %s", slug)
-        return json_error("preview_unavailable", message="Chromium could not render the deck preview", status=503)
+        return json_error(
+            "preview_unavailable",
+            message="Chromium could not render the deck preview",
+            status=503,
+        )
     current = prov.get(slug)
     if current is None or current.version != art.version:
-        return json_error("version_conflict", message="deck changed during preview; reload it", status=409)
+        return json_error(
+            "version_conflict",
+            message="deck changed during preview; reload it",
+            status=409,
+        )
     slides = []
     for index, (png, critique) in enumerate(rendered, 1):
-        identity = sha256(f"{slug}:{art.version}:{index}".encode() + png).hexdigest()[:20]
+        identity = sha256(f"{slug}:{art.version}:{index}".encode() + png).hexdigest()[
+            :20
+        ]
         preview_slug = f"deck-preview-{identity}"
         existing = prov.get(preview_slug)
-        if existing is not None and (existing.kind != "image" or f"preview:{identity}" not in existing.tags):
-            return json_error("preview_conflict", message="preview artifact name is occupied", status=409)
+        if existing is not None and (
+            existing.kind != "image" or f"preview:{identity}" not in existing.tags
+        ):
+            return json_error(
+                "preview_conflict",
+                message="preview artifact name is occupied",
+                status=409,
+            )
         if existing is None:
             existing = prov.create_binary(
                 slug=preview_slug,
@@ -948,21 +1024,30 @@ async def api_artifact_deck_preview(request: web.Request) -> web.Response:
                 session_id=_session_key(request),
                 project_id=art.project_id,
             )
-        slides.append({
-            "index": index,
-            "slug": existing.slug,
-            "version": existing.version,
-            "raw_url": f"/api/artifacts/{existing.slug}/raw?version={existing.version}",
-            "critique": critique,
-        })
-    _audit(request, "artifact.deck_preview", "ok", f"slug={slug} version={art.version} slides={len(slides)}")
-    return web.json_response({
-        "slug": slug,
-        "version": art.version,
-        "fidelity": "Chromium raster of editable slide content with heuristic layout critique; PowerPoint master and layout fidelity is not represented.",
-        "loss": loss.to_dict(),
-        "slides": slides,
-    })
+        slides.append(
+            {
+                "index": index,
+                "slug": existing.slug,
+                "version": existing.version,
+                "raw_url": f"/api/artifacts/{existing.slug}/raw?version={existing.version}",
+                "critique": critique,
+            }
+        )
+    _audit(
+        request,
+        "artifact.deck_preview",
+        "ok",
+        f"slug={slug} version={art.version} slides={len(slides)}",
+    )
+    return web.json_response(
+        {
+            "slug": slug,
+            "version": art.version,
+            "fidelity": "Chromium raster of editable slide content with heuristic layout critique; PowerPoint master and layout fidelity is not represented.",
+            "loss": loss.to_dict(),
+            "slides": slides,
+        }
+    )
 
 
 async def api_artifact_model_write(request: web.Request) -> web.Response:
@@ -1562,19 +1647,31 @@ async def api_artifact_deploy(request: web.Request) -> web.Response:
     if not isinstance(body, dict):
         body = {}
     store = _deploy_store(prov)
-    observed = (art.created_at, art.version, art.updated_at, art.content, art.source_path)
+    observed = (
+        art.created_at,
+        art.version,
+        art.updated_at,
+        art.content,
+        art.source_path,
+    )
     entry = str(body.get("entry") or "")
     build: BuildResult | None = None
     built_files: dict[str, bytes] = {}
     if needs_build(art.kind):
         try:
-            with tempfile.TemporaryDirectory(prefix="gideon-artifact-build-") as directory:
+            with tempfile.TemporaryDirectory(
+                prefix="gideon-artifact-build-"
+            ) as directory:
                 staging = Path(directory)
                 build = await build_react_artifact(
-                    slug=slug, source=art.content or "", files_root=staging,
+                    slug=slug,
+                    source=art.content or "",
+                    files_root=staging,
                     title=art.name or slug,
                 )
-                built_files = {name: (staging / name).read_bytes() for name in build.files}
+                built_files = {
+                    name: (staging / name).read_bytes() for name in build.files
+                }
         except ArtifactBuildError as exc:
             _audit(request, "artifact.deploy", "denied", f"slug={slug} build_failed")
             return json_error("artifact_build_failed", message=str(exc), status=422)
@@ -1585,16 +1682,34 @@ async def api_artifact_deploy(request: web.Request) -> web.Response:
     try:
         with prov.mutation_lock:
             current = prov.get(slug)
-            if current is None or (current.created_at, current.version, current.updated_at, current.content, current.source_path) != observed:
-                return web.json_response({"error": "artifact changed; reload before deploying"}, status=409)
+            if (
+                current is None
+                or (
+                    current.created_at,
+                    current.version,
+                    current.updated_at,
+                    current.content,
+                    current.source_path,
+                )
+                != observed
+            ):
+                return web.json_response(
+                    {"error": "artifact changed; reload before deploying"}, status=409
+                )
             if build is not None:
                 destination = store.files_root(slug)
-                if destination.is_symlink() or not destination.resolve().is_relative_to(prov.root.resolve()):
+                if destination.is_symlink() or not destination.resolve().is_relative_to(
+                    prov.root.resolve()
+                ):
                     raise ValueError("unsafe build destination")
                 destination.mkdir(parents=True, exist_ok=True)
                 for name, data in built_files.items():
                     # New outputs must be simple files from the trusted bundler.
-                    if rejects_path(name) or "/" in name or (destination / name).is_symlink():
+                    if (
+                        rejects_path(name)
+                        or "/" in name
+                        or (destination / name).is_symlink()
+                    ):
                         raise ValueError("unsafe build output")
                     atomic_write_bytes(destination / name, data)
                 stale_css = destination / "bundle.css"
@@ -1640,13 +1755,25 @@ def _refuse_serve(
     """One exit for every refusal on the serve path — audited, and never echoing the
     requested path back into the response (that body would render in a browser)."""
     _audit(request, "artifact.serve", "denied", f"slug={slug} {reason}")
-    return web.Response(status=status, text="refused", content_type="text/plain", headers=dict(SERVE_HEADERS))
+    return web.Response(
+        status=status,
+        text="refused",
+        content_type="text/plain",
+        headers=dict(SERVE_HEADERS),
+    )
 
 
-def _served(body: bytes, content_type: str, *, charset: str | None = None, redirect: str = "") -> web.Response:
+def _served(
+    body: bytes, content_type: str, *, charset: str | None = None, redirect: str = ""
+) -> web.Response:
     if redirect:
         return web.Response(status=308, headers={**SERVE_HEADERS, "Location": redirect})
-    return web.Response(body=body, content_type=content_type, charset=charset, headers=dict(SERVED_FILE_HEADERS))
+    return web.Response(
+        body=body,
+        content_type=content_type,
+        charset=charset,
+        headers=dict(SERVED_FILE_HEADERS),
+    )
 
 
 async def serve_deployed_artifact(request: web.Request) -> web.StreamResponse:

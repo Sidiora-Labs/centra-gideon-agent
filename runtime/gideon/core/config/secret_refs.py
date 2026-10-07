@@ -12,7 +12,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from gideon.core.config import credentials, document as config_document
+from gideon.core.config import credentials
+from gideon.core.config import document as config_document
 
 logger = logging.getLogger(__name__)
 _PREFIX = credentials.CONFIG_SECRET_REFERENCE_PREFIX
@@ -62,7 +63,9 @@ def _walk(value: Any, path: tuple[str, ...] = ()):
     if isinstance(value, dict):
         for key, item in value.items():
             child_path = path + (_escape(key),)
-            if config_document._credential_field(key) and isinstance(item, (dict, list)):
+            if config_document._credential_field(key) and isinstance(
+                item, (dict, list)
+            ):
                 yield "/" + "/".join(child_path), item, str(key)
             else:
                 yield from _walk(item, child_path)
@@ -91,7 +94,12 @@ def _pointer_parts(path: tuple[str, ...]) -> tuple[str, ...]:
 
 def _is_provider_connection_locator(path: tuple[str, ...]) -> bool:
     parts = _pointer_parts(path)
-    return len(parts) == 3 and parts[0] == "provider_connections" and bool(parts[1]) and parts[2] == "credential_ref"
+    return (
+        len(parts) == 3
+        and parts[0] == "provider_connections"
+        and bool(parts[1])
+        and parts[2] == "credential_ref"
+    )
 
 
 def _is_credential_keychain_policy(path: tuple[str, ...]) -> bool:
@@ -112,7 +120,9 @@ def _validate_provider_connection_locator(value: Any) -> Any:
     from gideon.integrations.llm.credentials import CredentialStore
 
     if not CredentialStore(config_dir()).has(value):
-        raise ConfigSecretReferenceError("provider connection credential locator is missing")
+        raise ConfigSecretReferenceError(
+            "provider connection credential locator is missing"
+        )
     return value
 
 
@@ -123,7 +133,9 @@ def _reference_at(value: Any, owner: str) -> str | None:
     if parsed is None:
         return None
     if parsed[0] != owner:
-        raise ConfigSecretReferenceError("config secret reference belongs to another field")
+        raise ConfigSecretReferenceError(
+            "config secret reference belongs to another field"
+        )
     if credentials.get_secret_value(value) == "":
         raise ConfigSecretReferenceError("config secret reference is missing")
     return value
@@ -131,12 +143,20 @@ def _reference_at(value: Any, owner: str) -> str | None:
 
 def _scan_stray_references(value: Mapping[str, Any], secret_owners: set[str]) -> None:
     for owner, leaf, _name in _walk(value):
-        if isinstance(leaf, str) and leaf.startswith(_PREFIX) and owner not in secret_owners:
-            raise ConfigSecretReferenceError("config secret reference is outside a credential field")
+        if (
+            isinstance(leaf, str)
+            and leaf.startswith(_PREFIX)
+            and owner not in secret_owners
+        ):
+            raise ConfigSecretReferenceError(
+                "config secret reference is outside a credential field"
+            )
 
 
 class ConfigSecretPlan:
-    def __init__(self, stored: dict[str, Any], staged: list[str], superseded: list[str]):
+    def __init__(
+        self, stored: dict[str, Any], staged: list[str], superseded: list[str]
+    ):
         self.document = stored
         self._staged = staged
         self._superseded = superseded
@@ -159,7 +179,10 @@ class ConfigSecretPlan:
         self._finished = True
         removed, failures = self._remove(self._staged)
         if failures:
-            logger.warning("config secret cleanup incomplete after aborted write (%d failures)", failures)
+            logger.warning(
+                "config secret cleanup incomplete after aborted write (%d failures)",
+                failures,
+            )
         return ConfigSecretCleanupResult(
             "abort_cleanup_incomplete" if failures else "aborted", removed, failures
         )
@@ -170,7 +193,10 @@ class ConfigSecretPlan:
         self._finished = True
         removed, failures = self._remove(self._superseded)
         if failures:
-            logger.warning("config secret cleanup incomplete after committed write (%d failures)", failures)
+            logger.warning(
+                "config secret cleanup incomplete after committed write (%d failures)",
+                failures,
+            )
         return ConfigSecretCleanupResult(
             "cleanup_incomplete" if failures else "complete", removed, failures
         )
@@ -184,7 +210,9 @@ def prepare_config_secrets(
         raise TypeError("config document must be an object")
     old = previous if isinstance(previous, Mapping) else {}
     stored = copy.deepcopy(document)
-    old_leaves = {owner: (value, name, path) for owner, value, name, path in _walk_with_paths(old)}
+    old_leaves = {
+        owner: (value, name, path) for owner, value, name, path in _walk_with_paths(old)
+    }
     staged: list[str] = []
     superseded: set[str] = set()
     secret_owners: set[str] = set()
@@ -198,7 +226,9 @@ def prepare_config_secrets(
                 if value == config_document.CREDENTIAL_MASK:
                     prior = old_leaves.get(owner)
                     if prior is None or prior[0] in (None, ""):
-                        raise ConfigSecretReferenceError("masked provider locator has no stored value")
+                        raise ConfigSecretReferenceError(
+                            "masked provider locator has no stored value"
+                        )
                     locator = prior[0]
                 _set_path(stored, path, _validate_provider_connection_locator(locator))
                 continue
@@ -206,12 +236,16 @@ def prepare_config_secrets(
                 continue
             secret_owners.add(owner)
             if isinstance(value, (dict, list)):
-                raise ConfigSecretReferenceError("credential fields must contain scalar values")
+                raise ConfigSecretReferenceError(
+                    "credential fields must contain scalar values"
+                )
             old_value = old_leaves.get(owner, (None, "", ()))[0]
             old_reference = _reference_at(old_value, owner)
             if value == config_document.CREDENTIAL_MASK:
                 if old_reference is None:
-                    raise ConfigSecretReferenceError("masked credential has no stored owner reference")
+                    raise ConfigSecretReferenceError(
+                        "masked credential has no stored owner reference"
+                    )
                 replacement = old_reference
             elif value is None or value == "":
                 replacement = value
@@ -220,15 +254,24 @@ def prepare_config_secrets(
                 if current_reference is not None:
                     replacement = current_reference
                 elif value.startswith(_PREFIX):
-                    raise ConfigSecretReferenceError("malformed config secret reference")
-                elif old_reference is not None and credentials.get_secret_value(old_reference) == value:
+                    raise ConfigSecretReferenceError(
+                        "malformed config secret reference"
+                    )
+                elif (
+                    old_reference is not None
+                    and credentials.get_secret_value(old_reference) == value
+                ):
                     replacement = old_reference
                 else:
-                    replacement = f"{_PREFIX}{_encode_owner(owner)}:{secrets.token_hex(16)}"
+                    replacement = (
+                        f"{_PREFIX}{_encode_owner(owner)}:{secrets.token_hex(16)}"
+                    )
                     credentials.put_secret_value(replacement, value)
                     staged.append(replacement)
             else:
-                raise ConfigSecretReferenceError("credential fields must contain strings")
+                raise ConfigSecretReferenceError(
+                    "credential fields must contain strings"
+                )
             _set_path(stored, path, replacement)
             if old_reference is not None and replacement != old_reference:
                 superseded.add(old_reference)
@@ -255,7 +298,15 @@ def prepare_config_secrets(
             and value.startswith(_PREFIX)
         }
         superseded.update(old_refs - current_refs)
-        _scan_stray_references(old, {owner for owner, (_value, name, _path) in old_leaves.items() if not _is_credential_keychain_policy(_path) and config_document._credential_field(name)})
+        _scan_stray_references(
+            old,
+            {
+                owner
+                for owner, (_value, name, _path) in old_leaves.items()
+                if not _is_credential_keychain_policy(_path)
+                and config_document._credential_field(name)
+            },
+        )
     except BaseException:
         ConfigSecretPlan._remove(staged)
         raise
@@ -266,7 +317,9 @@ def _walk_with_paths(value: Any, path: tuple[str, ...] = ()):
     if isinstance(value, dict):
         for key, item in value.items():
             child_path = path + (_escape(key),)
-            if config_document._credential_field(key) and isinstance(item, (dict, list)):
+            if config_document._credential_field(key) and isinstance(
+                item, (dict, list)
+            ):
                 yield "/" + "/".join(child_path), item, str(key), child_path
             else:
                 yield from _walk_with_paths(item, child_path)
@@ -274,7 +327,9 @@ def _walk_with_paths(value: Any, path: tuple[str, ...] = ()):
         for index, item in enumerate(value):
             yield from _walk_with_paths(item, path + (str(index),))
     else:
-        yield "/" + "/".join(path), value, path[-1].replace("~1", "/").replace("~0", "~") if path else "", path
+        yield "/" + "/".join(path), value, (
+            path[-1].replace("~1", "/").replace("~0", "~") if path else ""
+        ), path
 
 
 def resolve_config_secrets(document: Mapping[str, Any]) -> dict[str, Any]:
@@ -294,7 +349,9 @@ def resolve_config_secrets(document: Mapping[str, Any]) -> dict[str, Any]:
             continue
         secret_owners.add(owner)
         if isinstance(value, (dict, list)):
-            raise ConfigSecretReferenceError("credential fields must contain scalar values")
+            raise ConfigSecretReferenceError(
+                "credential fields must contain scalar values"
+            )
         if isinstance(value, str) and value.startswith(_PREFIX):
             reference = _reference_at(value, owner)
             if reference is None:
@@ -345,7 +402,9 @@ class SecretOwner:
 
 
 def _owner_segment(value: str) -> str:
-    clean = re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_").upper()[:32].rstrip("_") or "X"
+    clean = (
+        re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_").upper()[:32].rstrip("_") or "X"
+    )
     return f"{clean}_{hashlib.sha256(value.encode()).hexdigest()[:10].upper()}"
 
 
@@ -373,18 +432,34 @@ def _owned_secret_field(name: str, declared: set[str]) -> bool:
 
 
 def _audit_foreign(owner: SecretOwner, field: str, operation: str) -> None:
-    logger.warning("foreign credential reference refused owner=%s field=%s operation=%s", owner.kind.lower(), field, operation)
+    logger.warning(
+        "foreign credential reference refused owner=%s field=%s operation=%s",
+        owner.kind.lower(),
+        field,
+        operation,
+    )
     try:
         from gideon.security.sel import sel
-        sel().log_api_access(caller=f"{owner.kind.lower()}:{owner.name}", operation=operation,
-                             outcome="denied", source="secret_refs", resources="credential-reference",
-                             error="credential reference belongs to another owner")
+
+        sel().log_api_access(
+            caller=f"{owner.kind.lower()}:{owner.name}",
+            operation=operation,
+            outcome="denied",
+            source="secret_refs",
+            resources="credential-reference",
+            error="credential reference belongs to another owner",
+        )
     except Exception:
         logger.debug("credential ownership audit unavailable", exc_info=True)
 
 
-def store(values: dict[str, Any], *, owner: SecretOwner, declared: set[str] | None = None,
-          previous: dict[str, Any] | None = None) -> dict[str, Any]:
+def store(
+    values: dict[str, Any],
+    *,
+    owner: SecretOwner,
+    declared: set[str] | None = None,
+    previous: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Store secret fields and return a record containing owner-bound references only."""
     if not isinstance(values, dict):
         raise ValueError("settings must be an object")
@@ -398,18 +473,26 @@ def store(values: dict[str, Any], *, owner: SecretOwner, declared: set[str] | No
         if value in (None, ""):
             if old_key and not owner.owns(old_key):
                 _audit_foreign(owner, str(field), "clear")
-                raise ForeignSecretReference("credential reference belongs to another owner")
+                raise ForeignSecretReference(
+                    "credential reference belongs to another owner"
+                )
             result[field] = value
             continue
         if new_key is not None:
             if not owner.owns(new_key) or not credentials.get_secret_value(new_key):
                 _audit_foreign(owner, str(field), "store")
-                raise ForeignSecretReference("credential reference belongs to another owner")
+                raise ForeignSecretReference(
+                    "credential reference belongs to another owner"
+                )
             result[field] = value
             continue
         if not isinstance(value, str):
             raise ValueError("credential fields must contain strings")
-        if old_key and owner.owns(old_key) and credentials.get_secret_value(old_key) == value:
+        if (
+            old_key
+            and owner.owns(old_key)
+            and credentials.get_secret_value(old_key) == value
+        ):
             result[field] = "{{secret:" + old_key + "}}"
             continue
         key = owner.key(str(field))
@@ -431,7 +514,9 @@ def resolve(values: dict[str, Any], *, owner: SecretOwner) -> dict[str, Any]:
             continue
         if not owner.owns(key):
             _audit_foreign(owner, str(field), "resolve")
-            raise ForeignSecretReference("credential reference belongs to another owner")
+            raise ForeignSecretReference(
+                "credential reference belongs to another owner"
+            )
         secret = credentials.get_secret_value(key)
         if not secret:
             raise ValueError("owned credential reference is missing")
@@ -452,7 +537,11 @@ def purge_unused(owner: SecretOwner, values: dict[str, Any]) -> int:
     retained = {_owned_reference(value) for value in values.values()}
     removed = 0
     for key in credentials.credential_names():
-        if owner.owns(key) and key not in retained and credentials.delete_secret_value(key):
+        if (
+            owner.owns(key)
+            and key not in retained
+            and credentials.delete_secret_value(key)
+        ):
             removed += 1
     return removed
 

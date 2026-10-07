@@ -507,9 +507,16 @@ class KnowledgeVault:
             return (False, f"edited text exceeds {MAX_ITEM_BYTES} bytes")
         if value == str(live.get("content") or "").rstrip():
             return (False, "")
-        from gideon.workspace.uploads.content_intake import approve_text, IntakeRefused, run_owned_sync
+        from gideon.workspace.uploads.content_intake import (
+            IntakeRefused,
+            approve_text,
+            run_owned_sync,
+        )
+
         try:
-            value = run_owned_sync(lambda: approve_text(value, surface='knowledge_vault_edit')).text
+            value = run_owned_sync(
+                lambda: approve_text(value, surface="knowledge_vault_edit")
+            ).text
         except IntakeRefused as exc:
             return False, exc.message
         self._store.update_item(item_id, content=value)

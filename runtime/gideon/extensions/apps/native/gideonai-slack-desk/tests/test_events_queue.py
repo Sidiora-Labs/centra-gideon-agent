@@ -11,7 +11,9 @@ class TestHandleMessageDeleted:
     """Tests for the extracted _handle_message_deleted function."""
 
     @staticmethod
-    def _make_event(deleted_ts="ts_del", thread_ts="thread1", channel="C1", user="U_ALLOWED"):
+    def _make_event(
+        deleted_ts="ts_del", thread_ts="thread1", channel="C1", user="U_ALLOWED"
+    ):
         return {
             "deleted_ts": deleted_ts,
             "channel": channel,
@@ -32,8 +34,10 @@ class TestHandleMessageDeleted:
 
         orch = self._make_orch()
         event = self._make_event(user="U_BAD")
-        with patch("slack_desk_runtime.events.is_allowed_user", return_value=False), \
-             patch("slack_desk_runtime.events.sel"):
+        with (
+            patch("slack_desk_runtime.events.is_allowed_user", return_value=False),
+            patch("slack_desk_runtime.events.sel"),
+        ):
             await _handle_message_deleted(orch, event)
         orch.sessions.cancel_queued.assert_not_called()
 
@@ -44,8 +48,10 @@ class TestHandleMessageDeleted:
         orch = self._make_orch()
         orch.sessions.cancel_queued.return_value = True
         event = self._make_event()
-        with patch("slack_desk_runtime.events.is_allowed_user", return_value=True), \
-             patch("slack_desk_runtime.events.sel") as mock_sel:
+        with (
+            patch("slack_desk_runtime.events.is_allowed_user", return_value=True),
+            patch("slack_desk_runtime.events.sel") as mock_sel,
+        ):
             await _handle_message_deleted(orch, event)
         orch.sessions.cancel_queued.assert_called_once_with("thread1", "ts_del")
         mock_sel().log_api_access.assert_called_once()
@@ -55,10 +61,14 @@ class TestHandleMessageDeleted:
         from slack_desk_runtime.events import _handle_message_deleted
 
         orch = self._make_orch()
-        orch._pending_queue = {"thread1": [("ts_del", "hello", {}), ("ts_other", "keep", {})]}
+        orch._pending_queue = {
+            "thread1": [("ts_del", "hello", {}), ("ts_other", "keep", {})]
+        }
         event = self._make_event()
-        with patch("slack_desk_runtime.events.is_allowed_user", return_value=True), \
-             patch("slack_desk_runtime.events.sel"):
+        with (
+            patch("slack_desk_runtime.events.is_allowed_user", return_value=True),
+            patch("slack_desk_runtime.events.sel"),
+        ):
             await _handle_message_deleted(orch, event)
         assert orch._pending_queue == {"thread1": [("ts_other", "keep", {})]}
 
@@ -69,8 +79,10 @@ class TestHandleMessageDeleted:
         orch = self._make_orch()
         orch._pending_queue = {"thread1": [("ts_del", "hello", {})]}
         event = self._make_event()
-        with patch("slack_desk_runtime.events.is_allowed_user", return_value=True), \
-             patch("slack_desk_runtime.events.sel"):
+        with (
+            patch("slack_desk_runtime.events.is_allowed_user", return_value=True),
+            patch("slack_desk_runtime.events.sel"),
+        ):
             await _handle_message_deleted(orch, event)
         assert "thread1" not in orch._pending_queue
 
@@ -80,9 +92,15 @@ class TestHandleMessageDeleted:
 
         orch = self._make_orch()
         orch.sessions.cancel_queued.return_value = True
-        event = {"deleted_ts": "ts_dm", "channel": "D1", "previous_message": {"user": "U1"}}
-        with patch("slack_desk_runtime.events.is_allowed_user", return_value=True), \
-             patch("slack_desk_runtime.events.sel"):
+        event = {
+            "deleted_ts": "ts_dm",
+            "channel": "D1",
+            "previous_message": {"user": "U1"},
+        }
+        with (
+            patch("slack_desk_runtime.events.is_allowed_user", return_value=True),
+            patch("slack_desk_runtime.events.sel"),
+        ):
             await _handle_message_deleted(orch, event)
         # No thread_ts → session_key = deleted_ts
         orch.sessions.cancel_queued.assert_called_once_with("ts_dm", "ts_dm")
@@ -96,8 +114,10 @@ class TestHandleMessageDeleted:
         orch.sessions = None  # startup window — no session manager yet
         orch._pending_queue = {"thread1": [("ts_del", "hello", {})]}
         event = self._make_event()
-        with patch("slack_desk_runtime.events.is_allowed_user", return_value=True), \
-             patch("slack_desk_runtime.events.sel"):
+        with (
+            patch("slack_desk_runtime.events.is_allowed_user", return_value=True),
+            patch("slack_desk_runtime.events.sel"),
+        ):
             await _handle_message_deleted(orch, event)
         assert "thread1" not in orch._pending_queue
 
@@ -123,9 +143,19 @@ class TestDispatchQueued:
         orch.consolidator = None
         orch.subagent_mgr = None
         orch.task_runner = None
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock) as mock_hm:
-            await _dispatch_queued(orch, "thread1", "ts_q", "hello", {"channel": "C1", "thread_ts": "thread1"})
-        orch.slack_desk.remove_reaction.assert_awaited_once_with("C1", "ts_q", "hourglass_flowing_sand")
+        with patch(
+            "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
+        ) as mock_hm:
+            await _dispatch_queued(
+                orch,
+                "thread1",
+                "ts_q",
+                "hello",
+                {"channel": "C1", "thread_ts": "thread1"},
+            )
+        orch.slack_desk.remove_reaction.assert_awaited_once_with(
+            "C1", "ts_q", "hourglass_flowing_sand"
+        )
         mock_hm.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -146,7 +176,9 @@ class TestDispatchQueued:
         orch.consolidator = None
         orch.subagent_mgr = None
         orch.task_runner = None
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch(
+            "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             await _dispatch_queued(orch, "thread1", "ts_q", "hello", {"channel": "C1"})
         mock_hm.assert_awaited_once()
 
@@ -161,6 +193,7 @@ def _make_route_orch() -> MagicMock:
     orch = MagicMock()
     settings = SlackDeskSettings(channels={}, dm_activation=ACTIVATION_ALWAYS)
     import slack_desk_runtime.settings as _st
+
     _st._current = settings
     orch.settings = settings
     orch.channel_history = MagicMock()
@@ -198,7 +231,14 @@ class TestQueueRouting:
         orch = _make_route_orch()
         orch._session_tasks["ts_new"] = MagicMock()  # DM: session_key = msg_ts
         orch.sessions.enqueue.return_value = True
-        event = {"user": "U1", "text": "queued", "ts": "ts_new", "channel": "D1", "channel_type": "im", "team": "T1"}
+        event = {
+            "user": "U1",
+            "text": "queued",
+            "ts": "ts_new",
+            "channel": "D1",
+            "channel_type": "im",
+            "team": "T1",
+        }
         with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock):
             for p in _ROUTE_PATCHES:
                 p.start()
@@ -218,7 +258,15 @@ class TestQueueRouting:
         orch = _make_route_orch()
         orch._session_tasks["thread1"] = MagicMock()
         orch.sessions.enqueue.return_value = False  # no session object
-        event = {"user": "U1", "text": "queued", "ts": "ts_new", "thread_ts": "thread1", "channel": "C1", "channel_type": "channel", "team": "T1"}
+        event = {
+            "user": "U1",
+            "text": "queued",
+            "ts": "ts_new",
+            "thread_ts": "thread1",
+            "channel": "C1",
+            "channel_type": "channel",
+            "team": "T1",
+        }
         with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock):
             for p in _ROUTE_PATCHES:
                 p.start()
@@ -238,7 +286,14 @@ class TestQueueRouting:
 
         orch = _make_route_orch()
         orch.sessions.enqueue.return_value = True  # semaphore locked
-        event = {"user": "U1", "text": "queued", "ts": "ts_new", "channel": "D1", "channel_type": "im", "team": "T1"}
+        event = {
+            "user": "U1",
+            "text": "queued",
+            "ts": "ts_new",
+            "channel": "D1",
+            "channel_type": "im",
+            "team": "T1",
+        }
         with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock):
             for p in _ROUTE_PATCHES:
                 p.start()
@@ -262,10 +317,19 @@ class TestOnDoneDrain:
             ("ts_q", "queued text", {"channel": "C1", "thread_ts": "thread1"}),
             None,
         ]
-        event = {"user": "U1", "text": "first", "ts": "ts1", "channel": "D1", "channel_type": "im", "team": "T1"}
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock), \
-             patch("slack_desk_runtime.events.is_allowed_user", return_value=True), \
-             patch("slack_desk_runtime.events.check_message_origin", return_value=True):
+        event = {
+            "user": "U1",
+            "text": "first",
+            "ts": "ts1",
+            "channel": "D1",
+            "channel_type": "im",
+            "team": "T1",
+        }
+        with (
+            patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock),
+            patch("slack_desk_runtime.events.is_allowed_user", return_value=True),
+            patch("slack_desk_runtime.events.check_message_origin", return_value=True),
+        ):
             await _route_message(orch, event, SeenCache(), is_mention=True)
             await asyncio.sleep(0.05)
             # Drain should have dispatched the queued message via _dispatch_queued
@@ -284,10 +348,19 @@ class TestOnDoneDrain:
         orch.sessions.dequeue.return_value = None  # session queue empty
         # Stash in pending queue
         orch._pending_queue = {"ts1": [("ts_pq", "pending", {"channel": "C1"})]}
-        event = {"user": "U1", "text": "first", "ts": "ts1", "channel": "D1", "channel_type": "im", "team": "T1"}
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock), \
-             patch("slack_desk_runtime.events.is_allowed_user", return_value=True), \
-             patch("slack_desk_runtime.events.check_message_origin", return_value=True):
+        event = {
+            "user": "U1",
+            "text": "first",
+            "ts": "ts1",
+            "channel": "D1",
+            "channel_type": "im",
+            "team": "T1",
+        }
+        with (
+            patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock),
+            patch("slack_desk_runtime.events.is_allowed_user", return_value=True),
+            patch("slack_desk_runtime.events.check_message_origin", return_value=True),
+        ):
             await _route_message(orch, event, SeenCache(), is_mention=True)
             await asyncio.sleep(0.05)
             tasks = list(orch._handler_tasks)

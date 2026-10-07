@@ -495,7 +495,8 @@ class RecordCodecs:
             subagent_claim_holder=row.scalar("subagent_claim_holder"),
             served_model_ref=row.scalar("served_model_ref"),
             model_substitutions=[
-                dict(value) for value in (row.raw("model_substitutions") or [])
+                dict(value)
+                for value in (row.raw("model_substitutions") or [])
                 if isinstance(value, dict)
             ],
         )

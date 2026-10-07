@@ -132,10 +132,15 @@ def _coerce_disposition(raw: object) -> GateDisposition | None:
 def dispositions_problem(raw: str) -> str:
     """Validate the structured reply through the native model JSON decoder."""
     from gideon.integrations.llm_helpers import parse_llm_json
+
     payload = raw if isinstance(raw, dict) else parse_llm_json(raw)
     if payload is None:
         return "no JSON object"
-    return "" if isinstance(payload.get("dispositions"), list) else "no 'dispositions' array"
+    return (
+        ""
+        if isinstance(payload.get("dispositions"), list)
+        else "no 'dispositions' array"
+    )
 
 
 def parse_gate_output(raw: object, manifest: Manifest) -> dict[str, GateOutcome]:

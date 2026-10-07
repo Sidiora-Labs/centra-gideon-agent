@@ -30,9 +30,9 @@ pins that promise per format.
 
 from __future__ import annotations
 
-import re
 import hashlib
 import os
+import re
 import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -425,7 +425,9 @@ def export_entities(
             raise ExportClobberRefused(
                 f"preview did not include destination {rf.relpath}"
             )
-        expected = expected_existing.get(rf.relpath) if expected_existing is not None else None
+        expected = (
+            expected_existing.get(rf.relpath) if expected_existing is not None else None
+        )
         if expected_existing is not None:
             exists = target.exists()
             if exists != (expected is not None):
@@ -434,13 +436,19 @@ def export_entities(
                 )
             if exists:
                 if not overwrite or not _is_ours(target):
-                    raise ExportClobberRefused(f"refusing to overwrite {target} (not written by gideon)")
+                    raise ExportClobberRefused(
+                        f"refusing to overwrite {target} (not written by gideon)"
+                    )
                 try:
                     digest = hashlib.sha256(target.read_bytes()).hexdigest()
                 except OSError as exc:
-                    raise ExportClobberRefused(f"destination changed after preview: {target}") from exc
+                    raise ExportClobberRefused(
+                        f"destination changed after preview: {target}"
+                    ) from exc
                 if digest != expected:
-                    raise ExportClobberRefused(f"destination changed after preview: {target}")
+                    raise ExportClobberRefused(
+                        f"destination changed after preview: {target}"
+                    )
         elif target.exists() and not (overwrite and _is_ours(target)):
             hint = (
                 "not written by gideon"
@@ -454,7 +462,11 @@ def export_entities(
     try:
         for target, rf in targets:
             target.parent.mkdir(parents=True, exist_ok=True)
-            expected = expected_existing.get(rf.relpath) if expected_existing is not None else None
+            expected = (
+                expected_existing.get(rf.relpath)
+                if expected_existing is not None
+                else None
+            )
             if expected_existing is not None and expected is not None:
                 current = target.read_bytes()
                 if hashlib.sha256(current).hexdigest() != expected:
@@ -465,8 +477,11 @@ def export_entities(
                 if current == rendered:
                     continue
                 with tempfile.NamedTemporaryFile(
-                    mode="wb", dir=target.parent, prefix=f".{target.name}.",
-                    suffix=".tmp", delete=False,
+                    mode="wb",
+                    dir=target.parent,
+                    prefix=f".{target.name}.",
+                    suffix=".tmp",
+                    delete=False,
                 ) as stream:
                     staged = Path(stream.name)
                     stream.write(rendered)

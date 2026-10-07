@@ -249,7 +249,10 @@ def trust_policies(provider: str) -> dict[str, str]:
 
 
 def set_trust_policies(
-    provider: str, *, dm: str | None = None, group: str | None = None,
+    provider: str,
+    *,
+    dm: str | None = None,
+    group: str | None = None,
     confirm_open: bool = False,
 ) -> dict[str, str]:
     """Persist provider-scoped trust choices; opening DMs requires explicit consent."""
@@ -286,7 +289,9 @@ def note_seen_channel(provider: str, channel_id: str, name: str = "") -> None:
 
 
 def list_seen_channels(provider: str) -> list[dict[str, str]]:
-    return _directory_projection(_lookup(provider, "seen_channels"), "channel_id", ("name", "added_at"))
+    return _directory_projection(
+        _lookup(provider, "seen_channels"), "channel_id", ("name", "added_at")
+    )
 
 
 def cancel_pairing_code(provider: str) -> bool:
@@ -339,15 +344,28 @@ def provider_trust(provider: str) -> dict[str, Any]:
             record["tracked_channels"], "channel_id", ("name", "added_at")
         ),
         "seen_senders": [
-            {"sender_id": key, "name": str(value.get("name") or "").strip(),
-             "since": str(value.get("since") or ""), "last_seen": str(value.get("last_seen") or ""),
-             "count": _messages_counted(value)}
-            for key, value in sorted(record["seen_senders"].items(),
-                key=lambda entry: str(entry[1].get("last_seen", "")) if isinstance(entry[1], dict) else "",
-                reverse=True)
-            if isinstance(value, dict) and key not in record["allowed_senders"] and key != owner_id
+            {
+                "sender_id": key,
+                "name": str(value.get("name") or "").strip(),
+                "since": str(value.get("since") or ""),
+                "last_seen": str(value.get("last_seen") or ""),
+                "count": _messages_counted(value),
+            }
+            for key, value in sorted(
+                record["seen_senders"].items(),
+                key=lambda entry: (
+                    str(entry[1].get("last_seen", ""))
+                    if isinstance(entry[1], dict)
+                    else ""
+                ),
+                reverse=True,
+            )
+            if isinstance(value, dict)
+            and key not in record["allowed_senders"]
+            and key != owner_id
         ],
-        "pairing_active": _PairingTicket.from_record(code).verdict("", _now()) == "wrong_code",
+        "pairing_active": _PairingTicket.from_record(code).verdict("", _now())
+        == "wrong_code",
         "pairing_expires_at": str(code.get("expires_at", "") or ""),
     }
 
@@ -402,16 +420,22 @@ def _looks_like_a_pairing_code(text: str) -> bool:
     )
 
 
-def redeem_pairing_code(provider: str, sender_id: str, code: str, name: str = "") -> bool:
+def redeem_pairing_code(
+    provider: str, sender_id: str, code: str, name: str = ""
+) -> bool:
     with _editing(provider) as change:
         ticket = _PairingTicket.from_record(change.record["pairing"])
-        outcome = (ticket.verdict(code, _now())
-                   if change.record["policies"].get("dm") == "pairing"
-                   else "pairing_policy_required")
+        outcome = (
+            ticket.verdict(code, _now())
+            if change.record["policies"].get("dm") == "pairing"
+            else "pairing_policy_required"
+        )
         if outcome in ("paired", "expired_code"):
             change.record["pairing"] = {}
             if outcome == "paired":
-                change.record["allowed_senders"][sender_id] = _entry(name, via="pairing")
+                change.record["allowed_senders"][sender_id] = _entry(
+                    name, via="pairing"
+                )
                 change.record["seen_senders"].pop(sender_id, None)
             change.commit()
     accepted = outcome == "paired"
@@ -433,27 +457,36 @@ def create_owner_pairing_code(provider: str) -> str:
     """Create a short-lived, single-use code that binds this channel's owner."""
     code = str(secrets.randbelow(10**PAIRING_CODE_DIGITS)).zfill(PAIRING_CODE_DIGITS)
     issued = _now()
-    _save_owner_pairing_record(provider, {
-            "code_hash": hmac.new(_OWNER_PAIRING_SECRET, code.encode(), hashlib.sha256).hexdigest(),
+    _save_owner_pairing_record(
+        provider,
+        {
+            "code_hash": hmac.new(
+                _OWNER_PAIRING_SECRET, code.encode(), hashlib.sha256
+            ).hexdigest(),
             "epoch": _OWNER_PAIRING_EPOCH,
             "created_at": _iso(issued),
             "expires_at": _iso(issued + timedelta(seconds=PAIRING_CODE_TTL_SECS)),
             "attempts": 0,
             "ended": "",
-        })
+        },
+    )
     _emit_sel("owner_pairing_code_created", "created", provider)
     return code
 
 
 def owner_pairing_status(provider: str) -> dict[str, Any]:
     ticket = _owner_pairing_record(provider)
-    active = bool(ticket.get("code_hash")) and ticket.get("epoch") == _OWNER_PAIRING_EPOCH
+    active = (
+        bool(ticket.get("code_hash")) and ticket.get("epoch") == _OWNER_PAIRING_EPOCH
+    )
     ended = str(ticket.get("ended") or "")
     if ticket.get("code_hash") and not active:
         ended = "expired"
     if active:
         try:
-            active = _now() <= datetime.fromisoformat(str(ticket.get("expires_at") or ""))
+            active = _now() <= datetime.fromisoformat(
+                str(ticket.get("expires_at") or "")
+            )
         except (TypeError, ValueError):
             active = False
         if not active:
@@ -485,7 +518,9 @@ def redeem_owner_pairing_code(
     from gideon.integrations.channel_transports import get_transport
 
     transport = get_transport(provider)
-    capability = getattr(transport, "capabilities", lambda: None)() if transport else None
+    capability = (
+        getattr(transport, "capabilities", lambda: None)() if transport else None
+    )
     if (
         not sender_id
         or transport is None
@@ -499,7 +534,9 @@ def redeem_owner_pairing_code(
         ticket = _owner_pairing_record(provider)
         digest = str(ticket.get("code_hash") or "")
         try:
-            unexpired = _now() <= datetime.fromisoformat(str(ticket.get("expires_at") or ""))
+            unexpired = _now() <= datetime.fromisoformat(
+                str(ticket.get("expires_at") or "")
+            )
         except (ValueError, TypeError):
             unexpired = False
         valid_epoch = ticket.get("epoch") == _OWNER_PAIRING_EPOCH
@@ -507,10 +544,17 @@ def redeem_owner_pairing_code(
             if digest:
                 _save_owner_pairing_record(provider, {"ended": "expired"})
         else:
-            expected = hmac.new(_OWNER_PAIRING_SECRET, code.encode(), hashlib.sha256).hexdigest()
+            expected = hmac.new(
+                _OWNER_PAIRING_SECRET, code.encode(), hashlib.sha256
+            ).hexdigest()
             if hmac.compare_digest(digest, expected):
                 save_credential(owner_id_credential(provider), sender_id)
-                _update_directory(provider, "allowed_senders", sender_id, _entry(name, via="owner_pairing"))
+                _update_directory(
+                    provider,
+                    "allowed_senders",
+                    sender_id,
+                    _entry(name, via="owner_pairing"),
+                )
                 _save_owner_pairing_record(
                     provider, {"ended": "paired", "paired_at": _iso(_now())}
                 )
@@ -522,10 +566,12 @@ def redeem_owner_pairing_code(
                 else:
                     ticket["attempts"] = attempts
                 _save_owner_pairing_record(provider, ticket)
-    _emit_sel("owner_paired" if accepted else "owner_pairing_attempt", "paired" if accepted else "refused", provider)
+    _emit_sel(
+        "owner_paired" if accepted else "owner_pairing_attempt",
+        "paired" if accepted else "refused",
+        provider,
+    )
     return accepted
-
-
 
 
 def fence_channel_content(text: str, provider: str, sender_id: str) -> str:
@@ -646,7 +692,9 @@ def report_inbound_verdict(
     repeated = level > logging.DEBUG and _visible_line_is_deduped(
         "|".join((provider, context.scope, context.subject, verdict.reason))
     )
-    reported_sender = "<paired-owner>" if verdict.meta.get("owner_paired") else sender_id
+    reported_sender = (
+        "<paired-owner>" if verdict.meta.get("owner_paired") else sender_id
+    )
     logger.log(
         logging.DEBUG if repeated else level,
         "channel inbound %s: provider=%s scope=%s reason=%s policy=%s sender=%s channel=%s%s%s",
@@ -665,29 +713,40 @@ def report_inbound_verdict(
 
 def _messages_counted(metadata: Any) -> int:
     try:
-        return max(0, int(metadata.get("count", 0))) if isinstance(metadata, dict) else 0
+        return (
+            max(0, int(metadata.get("count", 0))) if isinstance(metadata, dict) else 0
+        )
     except (ValueError, TypeError):
         return 0
 
 
 def owner_ref(provider: str) -> dict[str, str]:
     import os
+
     from gideon.core.config import loader
     from gideon.core.config.credentials import get_credential, owner_id_credential
 
     owner, source = "", ""
-    for key, candidate_source in ((owner_id_credential(provider), "channel"), (loader.CRED_OWNER_ID, "shared")):
+    for key, candidate_source in (
+        (owner_id_credential(provider), "channel"),
+        (loader.CRED_OWNER_ID, "shared"),
+    ):
         value = os.environ.get(key, "").strip() or get_credential(key).strip()
         if value:
             owner, source = value, candidate_source
             break
     metadata = _lookup(provider, "allowed_senders").get(owner)
     metadata = metadata if isinstance(metadata, dict) else {}
-    return {"owner_id": owner, "owner_name": str(metadata.get("name") or "").strip(),
-            "owner_source": source}
+    return {
+        "owner_id": owner,
+        "owner_name": str(metadata.get("name") or "").strip(),
+        "owner_source": source,
+    }
 
 
-def _claim_contact(provider: str, sender_id: str, name: str = "", *, held: bool = False) -> bool:
+def _claim_contact(
+    provider: str, sender_id: str, name: str = "", *, held: bool = False
+) -> bool:
     with _editing(provider) as change:
         rate = change.record["rate"]
         now = _now()
@@ -695,11 +754,18 @@ def _claim_contact(provider: str, sender_id: str, name: str = "", *, held: bool 
             seen = change.record["seen_senders"]
             before = seen.get(sender_id)
             before = before if isinstance(before, dict) else {}
-            seen[sender_id] = {"name": name or str(before.get("name") or ""),
-                               "since": str(before.get("since") or "") or _iso(now),
-                               "last_seen": _iso(now), "count": _messages_counted(before) + 1}
-            newest = sorted(seen, key=lambda key: str(seen[key].get("last_seen", "")), reverse=True)
-            change.record["seen_senders"] = {key: seen[key] for key in newest[:SEEN_SENDERS_MAX]}
+            seen[sender_id] = {
+                "name": name or str(before.get("name") or ""),
+                "since": str(before.get("since") or "") or _iso(now),
+                "last_seen": _iso(now),
+                "count": _messages_counted(before) + 1,
+            }
+            newest = sorted(
+                seen, key=lambda key: str(seen[key].get("last_seen", "")), reverse=True
+            )
+            change.record["seen_senders"] = {
+                key: seen[key] for key in newest[:SEEN_SENDERS_MAX]
+            }
             change.commit()
         previous = rate.get(sender_id, "")
         if previous:
@@ -822,7 +888,9 @@ def guard_inbound(
             and _looks_like_a_pairing_code(candidate)
             and _pairing_code_outstanding(provider)
         )
-        if eligible and redeem_pairing_code(provider, sender_id, candidate, sender_name):
+        if eligible and redeem_pairing_code(
+            provider, sender_id, candidate, sender_name
+        ):
             decision = TrustVerdict(
                 False, "paired", canned_reply=CANNED_PAIRED_REPLY, meta={"paired": True}
             )
@@ -848,7 +916,11 @@ def guard_inbound(
                 )
             else:
                 announced = note_unknown_sender(
-                    state, provider, sender_id, sender_name, silent=policy == "owner_only"
+                    state,
+                    provider,
+                    sender_id,
+                    sender_name,
+                    silent=policy == "owner_only",
                 )
             decision = TrustVerdict(
                 False,

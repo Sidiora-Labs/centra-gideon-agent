@@ -28,8 +28,6 @@ and re-run the expensive half of the graph for nothing.
 
 from __future__ import annotations
 
-from gideon.security.safety_flags import yes_or_no
-
 import copy
 import logging
 from dataclasses import dataclass, field
@@ -45,6 +43,7 @@ from gideon.automation.workflows.models import (
     NodeInstance,
     walk,
 )
+from gideon.security.safety_flags import yes_or_no
 
 logger = logging.getLogger(__name__)
 

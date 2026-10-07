@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from gideon.security.safety_flags import yes_or_no
-
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -33,6 +31,7 @@ from gideon.automation.workflows.models import (
     walk,
 )
 from gideon.automation.workflows.validator import EDGE_BINDING, dep_edges_for_root
+from gideon.security.safety_flags import yes_or_no
 
 
 @dataclass
@@ -116,7 +115,10 @@ def tolerate_failures(
         return child_states
     result = []
     for child, state in zip(children, child_states):
-        enabled = yes_or_no((getattr(child, "config", None) or {}).get("allow_failure")) is True
+        enabled = (
+            yes_or_no((getattr(child, "config", None) or {}).get("allow_failure"))
+            is True
+        )
         result.append(
             InstanceState.DEGRADED
             if enabled and state == InstanceState.FAILED

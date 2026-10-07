@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-
 import json
 import logging
 import shutil
@@ -137,13 +136,20 @@ def fork_run(
 ) -> ForkResult:
     transfer = _ForkTransfer(parent, dict(instances))
     from gideon.automation.workflows import ownership, private_work
+
     admitted_origin = private_work.fork_origin(parent.id)
-    if ownership.run_mode(parent) is not ownership.MemoryMode.NORMAL and admitted_origin is None:
-        raise ValueError("private forks require current authenticated origin and live native scope admission")
+    if (
+        ownership.run_mode(parent) is not ownership.MemoryMode.NORMAL
+        and admitted_origin is None
+    ):
+        raise ValueError(
+            "private forks require current authenticated origin and live native scope admission"
+        )
     transfer.select(checkpoint_id)
     child, axis = transfer.create(checkpoint_id, note)
     if admitted_origin is not None:
         from gideon.security.durable_work import bind_run_origin
+
         if not bind_run_origin(child, admitted_origin):
             store.delete(child.id)
             raise ValueError("fork source proof does not fit the child scope")

@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextvars
 import logging
 from dataclasses import dataclass, replace
-from typing import Any, Iterable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Iterable
 
 if TYPE_CHECKING:
     from gideon.extensions.skills.loader import ProcedureLibrary

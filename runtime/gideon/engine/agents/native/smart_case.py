@@ -38,7 +38,9 @@ def case_override(raw: Any) -> bool | None:
         return None
     value = yes_or_no(raw)
     if value is None:
-        raise ValueError("ignore_case must be true or false, or left out for smart case")
+        raise ValueError(
+            "ignore_case must be true or false, or left out for smart case"
+        )
     return value
 
 
@@ -61,7 +63,9 @@ def glob_case_sensitive(pattern: str, override: Any = None) -> bool | None:
     case keeps it on every platform: left to itself, pathlib can match a pattern's plain names by
     the file system's own rule (any case, on macOS) and its wildcards by exact case.
     """
-    ignore = ignores_case(pattern, override=override)  # an unreadable override is refused here too
+    ignore = ignores_case(
+        pattern, override=override
+    )  # an unreadable override is refused here too
     if pattern.lower() == pattern.upper():
         return None
     return not ignore

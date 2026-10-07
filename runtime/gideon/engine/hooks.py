@@ -562,8 +562,12 @@ class _HookDispatch:
             )
         hook = self.hook
         from gideon.automation.triggers import grants
+
         if not grants.is_granted(grants.hook_trigger(hook)):
-            return None, self.failure("held_for_owner_confirmation", "the owner must allow this hook action before it can run")
+            return None, self.failure(
+                "held_for_owner_confirmation",
+                "the owner must allow this hook action before it can run",
+            )
         session = str(
             self.payload.get("parent_session_key", "")
         ) or unattended_dispatch_key(f"hook:{hook.id}")
@@ -592,7 +596,9 @@ class _HookDispatch:
         if result.blocked:
             return "blocked" if self.enforced else "advisory"
         if result.success is not True or result.exit_code not in (None, 0):
-            return "timeout" if result.error and "Timed out" in result.error else "error"
+            return (
+                "timeout" if result.error and "Timed out" in result.error else "error"
+            )
         from gideon.automation.triggers.executor import classify
         from gideon.automation.triggers.models import Outcome
 
@@ -614,8 +620,13 @@ class _HookDispatch:
                 label=hook.name or hook.provider,
                 refs={"hook": hook.id, "provider": hook.provider},
             )
-        error = result.error if result.agent_error is None else result.agent_error.render()
-        if status not in ("ok", "launched", "queued", "waiting", "needs_input") and not error:
+        error = (
+            result.error if result.agent_error is None else result.agent_error.render()
+        )
+        if (
+            status not in ("ok", "launched", "queued", "waiting", "needs_input")
+            and not error
+        ):
             error = "The provider did not confirm successful completion."
         return ScriptHookResult(
             hook.id,
@@ -623,7 +634,12 @@ class _HookDispatch:
             hook.event,
             stdout=result.stdout,
             stderr=result.stderr,
-            exit_code=(result.exit_code if result.exit_code is not None and (status == "ok" or result.exit_code != 0) else -1),
+            exit_code=(
+                result.exit_code
+                if result.exit_code is not None
+                and (status == "ok" or result.exit_code != 0)
+                else -1
+            ),
             error=error,
             duration_ms=result.duration_ms,
         )
@@ -641,14 +657,16 @@ class _HookDispatch:
                 "error", f"Unknown action provider {self.hook.provider!r}"
             )
         context = ActionContext(
-            event=self.hook.event, context=self.context, payload=self.payload,
+            event=self.hook.event,
+            context=self.context,
+            payload=self.payload,
             trigger_id="lifecycle:" + str(self.hook.id),
         )
         route, refusal = self.admit(context)
         if refusal is not None:
             return refusal
-        from gideon.security.net.policy import egress_held_to
         from gideon.security.guardrails.policy import unattended_dispatch_key
+        from gideon.security.net.policy import egress_held_to
 
         try:
             with egress_held_to(unattended_dispatch_key(f"hook:{self.hook.id}")):
@@ -814,7 +832,9 @@ class ScriptHookStore:
             raise ValueError("hooks.json has an invalid record envelope")
         return [ScriptHook.from_dict(entry) for entry in document["hooks"]]
 
-    def _mutate(self, operation: Callable[[dict[str, ScriptHook]], tuple[object, bool]]):
+    def _mutate(
+        self, operation: Callable[[dict[str, ScriptHook]], tuple[object, bool]]
+    ):
         with record_files.locked_store(self._dir):
             hooks = {record.id: record for record in self._read_records()}
             result, changed = operation(hooks)
@@ -859,6 +879,7 @@ class ScriptHookStore:
                 return None, False
             _validate_hook_patch(data)
             from gideon.automation.triggers import grants
+
             before = grants.hook_trigger(record)
             editable = (
                 "name",
@@ -869,9 +890,7 @@ class ScriptHookStore:
                 "timeout",
                 "enabled",
             )
-            record.__dict__.update(
-                {key: data[key] for key in editable if key in data}
-            )
+            record.__dict__.update({key: data[key] for key in editable if key in data})
             after = grants.hook_trigger(record)
             grants.narrow(after, before)
             record.capabilities = after.capabilities
@@ -884,6 +903,7 @@ class ScriptHookStore:
             removed = hooks.pop(hook_id, None) is not None
             if removed:
                 from gideon.automation.triggers import grants
+
                 grants.revoke("lifecycle:" + hook_id)
             return removed, removed
 

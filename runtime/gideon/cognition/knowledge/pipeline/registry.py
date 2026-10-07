@@ -79,7 +79,9 @@ def unserved_reason_sync(use_case: str | None) -> str:
             return f"The {name} model chosen in Settings → Models cannot run right now."
         return f"No {name} model is set up."
     except Exception:
-        logger.debug("use-case readiness could not be read for %s", use_case, exc_info=True)
+        logger.debug(
+            "use-case readiness could not be read for %s", use_case, exc_info=True
+        )
         return f"The {name} model could not be checked."
 
 
@@ -91,7 +93,9 @@ def node_available(node: "ProcessingNode") -> bool:
     try:
         return bool(available() if callable(available) else available)
     except Exception:
-        logger.debug("node dependency check failed for %s", node.node_type, exc_info=True)
+        logger.debug(
+            "node dependency check failed for %s", node.node_type, exc_info=True
+        )
         return False
 
 

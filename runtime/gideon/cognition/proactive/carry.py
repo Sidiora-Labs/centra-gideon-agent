@@ -66,9 +66,7 @@ DROPPED_FILTERED = "filtered"
 DROPPED_EXPIRED = "waited_too_long"
 
 #: What the digest says once wherever it carries a proposal or drops one for its age.
-CARRY_RULE = (
-    f"A proposal you have not answered comes back in each digest for up to {CARRY_DAYS} days."
-)
+CARRY_RULE = f"A proposal you have not answered comes back in each digest for up to {CARRY_DAYS} days."
 
 
 @dataclass(frozen=True)
@@ -177,7 +175,8 @@ def waiting_from(view: Mapping) -> tuple[Waiting, ...]:
                     materiality=_text(row, "materiality") or MATERIALITY_RESPONSE,
                     ordinal=ordinal,
                 ),
-                first_proposed_at=_text(row, "first_proposed_at") or _text(view, "proposed_at"),
+                first_proposed_at=_text(row, "first_proposed_at")
+                or _text(view, "proposed_at"),
                 first_run_id=_text(row, "first_run_id") or own_run,
                 clamped=bool(row.get("clamped")),
             )
@@ -284,7 +283,11 @@ def _order(entry: Waiting) -> tuple[str, int, int, str]:
     return (
         entry.first_proposed_at,
         int(ordinal) if ordinal.isdigit() else 0,
-        COLLECT_SOURCES.index(source) if source in COLLECT_SOURCES else len(COLLECT_SOURCES),
+        (
+            COLLECT_SOURCES.index(source)
+            if source in COLLECT_SOURCES
+            else len(COLLECT_SOURCES)
+        ),
         entry.item.source_id,
     )
 
@@ -310,7 +313,9 @@ def place(
     fresh = {item.fingerprint: item for item in window.items}
     proposed = {p.item_id for p in proposals}
     filtered = {item.ordinal for item in gate.dropped}
-    dropped: list[Dropped] = [Dropped(waiting=w, reason=DROPPED_HANDLED) for w in handled]
+    dropped: list[Dropped] = [
+        Dropped(waiting=w, reason=DROPPED_HANDLED) for w in handled
+    ]
     carried: list[Carried] = []
     numbered: list[CollectedItem] = []
     seen: set[str] = set()
@@ -345,7 +350,9 @@ def place(
             )
         )
     carried.sort(key=lambda c: int(c.item.ordinal) if c.item.ordinal.isdigit() else 0)
-    return CarryResult(carried=tuple(carried), dropped=tuple(dropped), items=tuple(numbered))
+    return CarryResult(
+        carried=tuple(carried), dropped=tuple(dropped), items=tuple(numbered)
+    )
 
 
 __all__ = [

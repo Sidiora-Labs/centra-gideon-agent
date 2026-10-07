@@ -49,7 +49,9 @@ def _mapping(value) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _core_effect(title: str, kind: str, tool_input: object) -> tuple[str, dict[str, bool]]:
+def _core_effect(
+    title: str, kind: str, tool_input: object
+) -> tuple[str, dict[str, bool]]:
     from gideon.integrations.acp.mcp_servers import core_tool_declaration
 
     risk, tells_owner = core_tool_declaration(title, kind, tool_input)

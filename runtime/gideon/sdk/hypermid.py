@@ -112,9 +112,7 @@ class HypermidRuntimeSDK:
         try:
             async for event in subscription:
                 async with self._subscription_lock:
-                    pending = sum(
-                        1 for key in self._deliveries if key[0] == consumer
-                    )
+                    pending = sum(1 for key in self._deliveries if key[0] == consumer)
                     if pending >= _MAX_PENDING_DELIVERIES:
                         raise HypermidSDKError(
                             "consumer has too many unacknowledged events"

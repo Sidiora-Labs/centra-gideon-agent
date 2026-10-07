@@ -90,10 +90,10 @@ from gideon.assurance.ledger import (
     STEERING,
     STEP_ATTEMPT,
     STEP_CACHED,
+    STEP_CANCELLED,
     STEP_COMPLETED,
     STEP_ESCALATED,
     STEP_FAILED,
-    STEP_CANCELLED,
     STEP_SCOPE,
     STEP_SKIPPED,
     STEP_STARTED,
@@ -114,7 +114,6 @@ from gideon.assurance.ledger import (
 from gideon.automation.workflows import store
 from gideon.automation.workflows.models import Failure, InstanceState
 from gideon.automation.workflows.step_usage import StepUsage
-
 
 
 def inputs_hash(resolved: dict[str, Any]) -> str:
@@ -220,7 +219,9 @@ class Journal(LedgerWriter):
             retries=int(retries),
             model=usage.model if usage is not None else model,
             provider=usage.provider if usage is not None else provider,
-            cost_usd=(usage.cost_usd if usage is not None else round(float(cost_usd), 6)),
+            cost_usd=(
+                usage.cost_usd if usage is not None else round(float(cost_usd), 6)
+            ),
             degraded_reason=degraded_reason,
             resolved_prompt_ref=resolved_prompt_ref,
             output_ref=output_ref,

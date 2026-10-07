@@ -588,7 +588,9 @@ class _SpecContract:
         if kind == "event":
             report.extend(_agent_scope_issues(self.spec))
             if str(spec.get("source") or "") not in {"memory", "inbox", "app"}:
-                report.add("spec.source", "event source must be memory, inbox, or app", "error")
+                report.add(
+                    "spec.source", "event source must be memory, inbox, or app", "error"
+                )
             event_patterns = {
                 "MemoryUpdate",
                 "MemoryKeyPattern",
@@ -600,7 +602,9 @@ class _SpecContract:
             }
             pattern = str(spec.get("pattern") or "MemoryUpdate")
             if pattern not in event_patterns:
-                report.add("spec.pattern", f"unknown event pattern {pattern!r}", "error")
+                report.add(
+                    "spec.pattern", f"unknown event pattern {pattern!r}", "error"
+                )
             for field_name in (
                 "key_glob",
                 "content_re",
@@ -620,18 +624,28 @@ class _SpecContract:
                 if max_fires < 0:
                     raise ValueError
             except (TypeError, ValueError):
-                report.add("spec.max_fires", "max_fires must be a non-negative integer", "error")
+                report.add(
+                    "spec.max_fires",
+                    "max_fires must be a non-negative integer",
+                    "error",
+                )
             content_re = spec.get("content_re")
             if isinstance(content_re, str) and content_re:
                 if len(content_re) > 512:
-                    report.add("spec.content_re", "content_re exceeds 512 characters", "error")
+                    report.add(
+                        "spec.content_re", "content_re exceeds 512 characters", "error"
+                    )
                 else:
                     try:
                         import re
 
                         re.compile(content_re)
                     except re.error:
-                        report.add("spec.content_re", "content_re is not a valid regular expression", "error")
+                        report.add(
+                            "spec.content_re",
+                            "content_re is not a valid regular expression",
+                            "error",
+                        )
         return report.items
 
 
@@ -898,7 +912,11 @@ class _TriggerDecoder:
             overlap=overlap,
             state=state,
             author=source.text("author").strip().lower(),
-            enabled=source.flags(("enabled",))["enabled"] if "enabled" in source.data and not self.report.fatal else not self.report.fatal,
+            enabled=(
+                source.flags(("enabled",))["enabled"]
+                if "enabled" in source.data and not self.report.fatal
+                else not self.report.fatal
+            ),
             resource_slots=list(map(str, source.data.get("resource_slots") or [])),
             run_count=_int(source.data.get("run_count"), 0),
             run_owner_pid=_int(source.data.get("run_owner_pid"), 0),

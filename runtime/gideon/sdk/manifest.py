@@ -7,17 +7,17 @@ tooling that validates or generates a manifest.
 """
 
 from gideon.extensions.apps.manifest import (
+    LAUNCH_INHERITS,
+    PROGRAM_YOU_NAME,
     AppManifest,
     BackendConfig,
     Dependencies,
     ExternalPrerequisite,
     ExternalWrite,
     LaunchedProgram,
-    SettingCondition,
-    LAUNCH_INHERITS,
-    PROGRAM_YOU_NAME,
     Permissions,
     ProviderConfig,
+    SettingCondition,
     SetupConfig,
 )
 

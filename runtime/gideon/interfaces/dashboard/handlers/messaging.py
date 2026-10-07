@@ -10,15 +10,14 @@ from typing import Any
 
 from aiohttp import web
 
-from gideon.core.http_request import RequestBodyTypeError
-from gideon.http_errors import json_error
 from gideon.assurance.validation import (
     SPAWN_RUN_SCHEMA,
     ValidationError,
     validate_tool_args,
 )
-from gideon.core.http_request import read_json_body
+from gideon.core.http_request import RequestBodyTypeError, read_json_body
 from gideon.engine.subagent_persistence import _agent_dir, read_state
+from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.chat_persistence import _rehydrate_session_from_history
 from gideon.interfaces.dashboard.chat_utils import _remove_queued_by_id
 from gideon.interfaces.dashboard.state import (
@@ -83,10 +82,13 @@ async def api_spawn(request: web.Request) -> web.Response:
     max_turns = cleaned.get("max_turns") or 0
     cwd = cleaned.get("cwd") or ""
     from gideon.extensions.apps.app_work import AppWork, of_session
+
     app_name = request.get("app", "")
     work = AppWork.for_app(app_name) if app_name else of_session(parent_session)
     if work is not None and not work.current_tier():
-        return json_error("agent_tier_exceeded", message="app may run no agent work now", status=403)
+        return json_error(
+            "agent_tier_exceeded", message="app may run no agent work now", status=403
+        )
     info = state.subagents.spawn(
         task,
         parent_session_key=parent_session,
@@ -173,8 +175,17 @@ async def api_spawn_status(request: web.Request) -> web.Response:
     if info.done:
         from gideon.engine.subagent_memory import read_receipt
 
-        receipt = read_receipt(agent_id) if info.memory_receipt.get("status") == "pending" else info.memory_receipt
-        data["memory_receipt"] = info.memory_receipt if receipt.get("status") == "unavailable" and info.memory_receipt.get("status") == "pending" else receipt
+        receipt = (
+            read_receipt(agent_id)
+            if info.memory_receipt.get("status") == "pending"
+            else info.memory_receipt
+        )
+        data["memory_receipt"] = (
+            info.memory_receipt
+            if receipt.get("status") == "unavailable"
+            and info.memory_receipt.get("status") == "pending"
+            else receipt
+        )
         result = info.result
         if info.result_path and not is_sensitive_path(info.result_path):
             try:
@@ -323,10 +334,16 @@ async def api_notifications(request: web.Request) -> web.Response:
     if app:
         notifications = newest_first(state.notifications_for_app(app))
         return web.json_response(
-            {"notifications": notifications, "unread": state.unread_notifications_for_app(app)}
+            {
+                "notifications": notifications,
+                "unread": state.unread_notifications_for_app(app),
+            }
         )
     return web.json_response(
-        {"notifications": newest_first(state._notification_log), "unread": state.unread_count()}
+        {
+            "notifications": newest_first(state._notification_log),
+            "unread": state.unread_count(),
+        }
     )
 
 
@@ -414,13 +431,23 @@ async def api_notification_trust(request: web.Request) -> web.Response:
         or not isinstance(actions, list)
         or action not in actions
     ):
-        return json_error("invalid_request", message="This notice cannot answer a sender.", status=409)
+        return json_error(
+            "invalid_request", message="This notice cannot answer a sender.", status=409
+        )
     from gideon.integrations import channel_trust
 
     if not channel_trust.owner_was_asked_about(provider, sender_id):
-        return json_error("invalid_request", message="The trust gate did not ask about this sender.", status=409)
+        return json_error(
+            "invalid_request",
+            message="The trust gate did not ask about this sender.",
+            status=409,
+        )
     if note.get("trust_answer"):
-        return json_error("invalid_request", message="This sender notice was already answered.", status=409)
+        return json_error(
+            "invalid_request",
+            message="This sender notice was already answered.",
+            status=409,
+        )
 
     name = str(note.get("sender_name") or "")
     allowed = action == "allow"
@@ -760,7 +787,9 @@ async def api_send_message(request: web.Request) -> web.Response:
                     if target_channel:
                         channel = target_channel
                     elif target_user:
-                        channel = await delivery.open_dm(target_user) if delivery else ""
+                        channel = (
+                            await delivery.open_dm(target_user) if delivery else ""
+                        )
                     else:
                         channel = ""
 
@@ -795,24 +824,35 @@ async def api_send_message(request: web.Request) -> web.Response:
                     delivery = state.channel_delivery
                     if delivery:
                         from gideon.core.config.credentials import owner_id_for
-                        from gideon.integrations.channel_delivery import provider_for_delivery
+                        from gideon.integrations.channel_delivery import (
+                            provider_for_delivery,
+                        )
 
                         provider = provider_for_delivery(delivery)
                         owner_id = owner_id_for(provider) if provider else ""
                         channel = await delivery.open_dm(owner_id) if owner_id else ""
                         if channel:
                             channel_attempted = True
-                            send = delivery.deliver_rich if blocks else delivery.deliver_text
+                            send = (
+                                delivery.deliver_rich
+                                if blocks
+                                else delivery.deliver_text
+                            )
                             if blocks:
                                 channel_ts = await send(
-                                    channel, blocks, text, thread_ts=thread_ts,
+                                    channel,
+                                    blocks,
+                                    text,
+                                    thread_ts=thread_ts,
                                     unfurl_links=unfurl_links,
                                     unfurl_media=unfurl_media,
                                     reply_broadcast=reply_broadcast,
                                 )
                             else:
                                 channel_ts = await send(
-                                    channel, text, thread_ts=thread_ts,
+                                    channel,
+                                    text,
+                                    thread_ts=thread_ts,
                                     unfurl_links=unfurl_links,
                                     unfurl_media=unfurl_media,
                                     reply_broadcast=reply_broadcast,
@@ -829,14 +869,17 @@ async def api_send_message(request: web.Request) -> web.Response:
                     nonlocal channel_ts
                     if blocks:
                         channel_ts = await delivery.deliver_rich(
-                            channel, blocks, text,
+                            channel,
+                            blocks,
+                            text,
                             unfurl_links=unfurl_links,
                             unfurl_media=unfurl_media,
                             reply_broadcast=reply_broadcast,
                         )
                     else:
                         channel_ts = await delivery.deliver_text(
-                            channel, text,
+                            channel,
+                            text,
                             unfurl_links=unfurl_links,
                             unfurl_media=unfurl_media,
                             reply_broadcast=reply_broadcast,
@@ -849,7 +892,12 @@ async def api_send_message(request: web.Request) -> web.Response:
                 if not result.delivered:
                     channel_error = result.reason
             note_meta = None
-            if not target_channel and not target_user and channel_attempted and not sent_channel:
+            if (
+                not target_channel
+                and not target_user
+                and channel_attempted
+                and not sent_channel
+            ):
                 safe_reason, _ = redact_credentials(channel_error)
                 safe_reason, _ = redact_exfiltration_urls(safe_reason)
                 note_meta = {"channel_delivery": "failed", "reason": safe_reason}

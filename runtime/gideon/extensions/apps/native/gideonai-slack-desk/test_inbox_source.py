@@ -24,7 +24,10 @@ if str(_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_APP_DIR))
 
 from slack_desk_runtime.client import SlackDeskClientOps  # noqa: E402
-from slack_desk_runtime.inbox_source import SlackDeskInboxSource, create_provider  # noqa: E402
+from slack_desk_runtime.inbox_source import (  # noqa: E402
+    SlackDeskInboxSource,
+    create_provider,
+)
 
 
 class StubClient(SlackDeskClientOps):
@@ -55,10 +58,14 @@ class StubClient(SlackDeskClientOps):
             return list(self._raw[channel])
         # Return only messages strictly newer than `oldest`, newest-first — what
         # conversations.history does with an exclusive `oldest`.
-        msgs = [m for m in self._history.get(channel, []) if float(m["ts"]) > float(oldest)]
+        msgs = [
+            m for m in self._history.get(channel, []) if float(m["ts"]) > float(oldest)
+        ]
         return sorted(msgs, key=lambda m: float(m["ts"]), reverse=True)[:limit]
 
-    async def post_message(self, channel, text, thread_ts=None, unfurl_links=None, unfurl_media=None):
+    async def post_message(
+        self, channel, text, thread_ts=None, unfurl_links=None, unfurl_media=None
+    ):
         if channel == "C_BAD":
             raise RuntimeError("cannot post")
         self.posts.append((channel, text, thread_ts))
@@ -74,15 +81,32 @@ class StubClient(SlackDeskClientOps):
         return self._users.get(user_id, {})
 
     # ── unused ABC surface ────────────────────────────────────────────────────
-    async def post_blocks(self, *a, **k): return ""
-    async def update_message(self, *a, **k): return None
-    async def delete_message(self, *a, **k): return None
-    async def remove_reaction(self, *a, **k): return None
-    async def upload_file(self, *a, **k): return None
-    async def open_dm(self, *a, **k): return ""
-    async def post_ephemeral(self, *a, **k): return None
-    async def views_publish(self, *a, **k): return None
-    async def get_prompts(self, *a, **k): return []
+    async def post_blocks(self, *a, **k):
+        return ""
+
+    async def update_message(self, *a, **k):
+        return None
+
+    async def delete_message(self, *a, **k):
+        return None
+
+    async def remove_reaction(self, *a, **k):
+        return None
+
+    async def upload_file(self, *a, **k):
+        return None
+
+    async def open_dm(self, *a, **k):
+        return ""
+
+    async def post_ephemeral(self, *a, **k):
+        return None
+
+    async def views_publish(self, *a, **k):
+        return None
+
+    async def get_prompts(self, *a, **k):
+        return []
 
 
 def _msg(ts, user="U_ALICE", text="hello", **extra):
@@ -108,9 +132,9 @@ def test_manifest_declares_at_least_two_providers():
     has grown is the completeness rail's business, not this file's.
     """
     manifest = json.loads((_APP_DIR / "app.json").read_text(encoding="utf-8"))
-    declared = ([manifest["provider"]] if manifest.get("provider") else []) + manifest.get(
-        "providers", []
-    )
+    declared = (
+        [manifest["provider"]] if manifest.get("provider") else []
+    ) + manifest.get("providers", [])
     assert len(declared) >= 2, declared
     types = {p["type"] for p in declared}
     assert {"channel", "inbox"} <= types, types
@@ -140,12 +164,17 @@ def test_token_falls_back_to_the_shared_credential_store(monkeypatch):
 
 def test_poll_maps_messages_and_advances_the_checkpoint():
     src = _source(
-        history={"C1": [_msg("1700000001.000100"), _msg("1700000002.000200", text="second")]},
+        history={
+            "C1": [_msg("1700000001.000100"), _msg("1700000002.000200", text="second")]
+        },
         users={"U_ALICE": {"real_name": "Alice Example"}},
     )
     msgs, cursors = asyncio.run(src.poll(["C1"], {}, "U_ME"))
 
-    assert [m.id for m in msgs] == ["1700000001.000100", "1700000002.000200"]  # oldest-first
+    assert [m.id for m in msgs] == [
+        "1700000001.000100",
+        "1700000002.000200",
+    ]  # oldest-first
     assert [m.text for m in msgs] == ["hello", "second"]
     first = msgs[0]
     assert first.channel_id == "C1"
@@ -160,7 +189,9 @@ def test_poll_maps_messages_and_advances_the_checkpoint():
 def test_poll_passes_the_checkpoint_as_oldest_and_does_not_redeliver():
     """`oldest` is exclusive, so the message AT the cursor must not come back —
     the property that makes the ts a correct resume cursor."""
-    src = _source(history={"C1": [_msg("1700000001.000100"), _msg("1700000002.000200")]})
+    src = _source(
+        history={"C1": [_msg("1700000001.000100"), _msg("1700000002.000200")]}
+    )
     msgs, cursors = asyncio.run(src.poll(["C1"], {"C1": "1700000001.000100"}, "U_ME"))
 
     assert src._client.history_calls == [("C1", "1700000001.000100", 50)]
@@ -181,9 +212,9 @@ def test_poll_skips_bot_own_and_authorless_messages_but_still_advances():
     src = _source(
         history={
             "C1": [
-                _msg("1700000001.000100", user="U_ME"),               # our own
+                _msg("1700000001.000100", user="U_ME"),  # our own
                 _msg("1700000002.000200", user="U_BOT", bot_id="B1"),  # a bot
-                _msg("1700000003.000300", user=""),                    # join/topic, no author
+                _msg("1700000003.000300", user=""),  # join/topic, no author
                 _msg("1700000004.000400", user="U_ALICE", text="real"),
             ]
         }
@@ -206,11 +237,15 @@ def test_poll_keeps_the_old_checkpoint_when_a_channel_errors():
 
     assert [m.channel_id for m in msgs] == ["C_OK"]
     assert cursors["C_OK"] == "1700000005.000500"
-    assert cursors["C_ERR"] == "1699999999.000000"  # untouched, so the next poll retries
+    assert (
+        cursors["C_ERR"] == "1699999999.000000"
+    )  # untouched, so the next poll retries
 
 
 def test_poll_carries_thread_id_and_marks_dms():
-    src = _source(history={"D9": [_msg("1700000001.000100", thread_ts="1700000000.000000")]})
+    src = _source(
+        history={"D9": [_msg("1700000001.000100", thread_ts="1700000000.000000")]}
+    )
     msgs, _ = asyncio.run(src.poll(["D9"], {}, "U_ME"))
     assert msgs[0].thread_id == "1700000000.000000"
     assert msgs[0].is_dm is True  # D-prefixed channel

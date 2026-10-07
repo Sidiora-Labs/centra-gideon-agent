@@ -136,6 +136,7 @@ class SseRegistry:
         private = False
         if key.startswith("workflow:"):
             from gideon.automation.workflows import chat_runs, store
+
             try:
                 run = store.get(key.removeprefix("workflow:"))
                 private = run is None or chat_runs.whose(run) is not None

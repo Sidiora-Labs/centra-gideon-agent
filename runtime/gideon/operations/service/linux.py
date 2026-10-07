@@ -277,10 +277,14 @@ def environment_status() -> str:
         for line in UNIT_PATH.read_text(encoding="utf-8").splitlines():
             if line.startswith("# GideonEnvironmentExcluded="):
                 excluded.append(line.partition("=")[2])
-            elif line.startswith("Environment=\"") and line.endswith('"'):
+            elif line.startswith('Environment="') and line.endswith('"'):
                 raw = line[len('Environment="') : -1]
                 name, separator, value = raw.partition("=")
                 if separator:
-                    value = value.replace("%%", "%").replace('\\"', '"').replace("\\\\", "\\")
+                    value = (
+                        value.replace("%%", "%")
+                        .replace('\\"', '"')
+                        .replace("\\\\", "\\")
+                    )
                     values[name] = value
     return status_environment_lines(ServiceEnvironment(values, tuple(sorted(excluded))))

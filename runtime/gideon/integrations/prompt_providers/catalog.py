@@ -313,8 +313,14 @@ BUNDLED_PROMPTS: tuple[BundledPrompt, ...] = (
         kind="user",
         category="internal",
         description="Sort a bounded batch of new inbox messages with a verdict and confidence per numbered message.",
-        variables=(PromptVariable(name="messages", type="textarea", required=True,
-                                  description="Numbered messages, each fenced with channel, sender and thread context."),),
+        variables=(
+            PromptVariable(
+                name="messages",
+                type="textarea",
+                required=True,
+                description="Numbered messages, each fenced with channel, sender and thread context.",
+            ),
+        ),
     ),
     BundledPrompt(
         name="task-inbox-draft",

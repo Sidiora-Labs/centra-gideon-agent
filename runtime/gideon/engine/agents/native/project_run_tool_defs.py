@@ -65,8 +65,14 @@ def project_run_tool_definitions(
                                 "deliverable": {"type": "string"},
                                 "task_list_name": {"type": "string"},
                                 "agent_name": {"type": "string"},
-                                "skill_ids": {"type": "array", "items": {"type": "string"}},
-                                "workflow_ids": {"type": "array", "items": {"type": "string"}},
+                                "skill_ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "workflow_ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
                                 "min_findings": {"type": "integer"},
                                 "min_dwell_secs": {"type": "integer"},
                                 "metric_pass": {"type": "number"},

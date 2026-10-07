@@ -3,7 +3,6 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from slack_desk_runtime import handler
 
 
@@ -21,7 +20,14 @@ async def test_unrecognized_bang_returns_error():
     slack_desk = _make_slack_desk()
     with patch.object(handler, "is_allowed_user", return_value=True):
         result = await handler._handle_slash_command(
-            "!foo", slack_desk, MagicMock(), "C1", "t1", "msg1", "t1", "U1",
+            "!foo",
+            slack_desk,
+            MagicMock(),
+            "C1",
+            "t1",
+            "msg1",
+            "t1",
+            "U1",
         )
     assert result == ""
     slack_desk.post_message.assert_called_once_with(
@@ -46,7 +52,14 @@ async def test_recognized_bang_still_works():
     ):
         mock_sel.return_value.log_api_access = MagicMock()
         result = await handler._handle_slash_command(
-            "!yolo on", slack_desk, MagicMock(), "C1", "t1", "msg1", "t1", "U1",
+            "!yolo on",
+            slack_desk,
+            MagicMock(),
+            "C1",
+            "t1",
+            "msg1",
+            "t1",
+            "U1",
         )
     assert result == ""
     # The error message should NOT have been posted
@@ -61,7 +74,14 @@ async def test_bare_exclamation_returns_error():
     slack_desk = _make_slack_desk()
     with patch.object(handler, "is_allowed_user", return_value=True):
         result = await handler._handle_slash_command(
-            "!", slack_desk, MagicMock(), "C1", "t1", "msg1", "t1", "U1",
+            "!",
+            slack_desk,
+            MagicMock(),
+            "C1",
+            "t1",
+            "msg1",
+            "t1",
+            "U1",
         )
     assert result == ""
     slack_desk.post_message.assert_called_once_with(

@@ -17,10 +17,10 @@ from gideon.integrations.mcp_core import InternalSecretUnavailable, _internal_se
 from gideon.security.sandbox import (
     PROFILE_TOOL,
     build_child_env,
+    no_network_note,
     spawn_shim_argv,
     wrap_argv,
     wrap_refusal,
-    no_network_note,
 )
 
 _DEFAULT_SCRIPT_TIMEOUT = 30

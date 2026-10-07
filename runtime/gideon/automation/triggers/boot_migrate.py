@@ -40,7 +40,9 @@ class StartupMigration:
             )
             return self.failure("migration raised")
         armed = arm_unarmed(store, now=self.now)
-        result: dict = {key: report.get(key, []) for key in ("imported", "retired", "pending")}
+        result: dict = {
+            key: report.get(key, []) for key in ("imported", "retired", "pending")
+        }
         result.update(
             ok=not bool(report.get("pending")),
             armed=armed,

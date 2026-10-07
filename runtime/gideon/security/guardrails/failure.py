@@ -238,7 +238,11 @@ class BudgetExceededError(GuardError):
         left_out = self._left_out()
         tail = f", {left_out}" if left_out else ""
         if self.why == NO_ROOM:
-            held = f", {self.held:.4g} set aside by calls running now" if self.held > 0 else ""
+            held = (
+                f", {self.held:.4g} set aside by calls running now"
+                if self.held > 0
+                else ""
+            )
             return (
                 f"{head} has no room for this call: spent {self.spent:.4g} of "
                 f"{self.limit:.4g}{held}, and a call to {self.ref} may use {self.needed:.4g}{tail}"
@@ -273,7 +277,9 @@ class BudgetExceededError(GuardError):
         left_out = self._left_out()
         if self.why == NO_ROOM:
             left = max(0.0, self.limit - self.spent - self.held)
-            running = " once the calls running now are paid for" if self.held > 0 else ""
+            running = (
+                " once the calls running now are paid for" if self.held > 0 else ""
+            )
             verb = "use" if self.dimension == "tokens" else "cost"
             aside = f" ({left_out})" if left_out else ""
             return (
@@ -303,7 +309,9 @@ class BudgetExceededError(GuardError):
         """The refusal as a person reads it: which ceiling stopped the call, what was spent
         against it, and where it is changed."""
         reason = self.reason()
-        if self.why != UNPRICED:  # a model's ref opens an unpriced one, spelled as it is
+        if (
+            self.why != UNPRICED
+        ):  # a model's ref opens an unpriced one, spelled as it is
             reason = reason[:1].upper() + reason[1:]
         return f"{reason}: {self.fix()}."
 

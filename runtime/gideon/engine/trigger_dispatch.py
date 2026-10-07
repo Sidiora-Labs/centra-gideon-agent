@@ -32,7 +32,9 @@ class TriggerAction:
 
     @property
     def timeout(self) -> int:
-        from gideon.integrations.action_providers.command_lifecycle import action_timeout
+        from gideon.integrations.action_providers.command_lifecycle import (
+            action_timeout,
+        )
 
         return action_timeout(self.config, {"bash": 300}.get(self.name, 30))
 
@@ -78,24 +80,39 @@ class TriggerDispatch:
         owner_pid = os.getpid()
         try:
             from uuid import uuid4
+
             from gideon.automation.triggers import claims
+            from gideon.automation.triggers.routing import routed
             from gideon.automation.triggers.scheduling import Claim
             from gideon.automation.triggers.store import TriggerStore
-            from gideon.automation.triggers.routing import routed
             from gideon.core.config.loader import config_dir
 
             store = routed(TriggerStore(base_dir=config_dir()))
             identity = str(getattr(self.trigger, "id", "") or "")
             stored = store.get(identity)
-            if stored is not None and stored.trigger.run_owner_pid and not claims.read_claims(identity, base_dir=config_dir()):
+            if (
+                stored is not None
+                and stored.trigger.run_owner_pid
+                and not claims.read_claims(identity, base_dir=config_dir())
+            ):
                 return False
             expected_holder = str(self.payload.get("claim_holder") or "")
-            self._claim_holder = claims.bind_owner(identity, owner_pid=owner_pid, base_dir=config_dir(), expected_holder=expected_holder)
+            self._claim_holder = claims.bind_owner(
+                identity,
+                owner_pid=owner_pid,
+                base_dir=config_dir(),
+                expected_holder=expected_holder,
+            )
             if expected_holder and not self._claim_holder:
                 return False
             if not self._claim_holder:
                 claim = Claim(identity, f"dispatch:{uuid4().hex}", time.time())
-                if not claims.acquire_claim(claim, owner_pid=owner_pid, overlap=self.trigger.overlap, base_dir=config_dir()):
+                if not claims.acquire_claim(
+                    claim,
+                    owner_pid=owner_pid,
+                    overlap=self.trigger.overlap,
+                    base_dir=config_dir(),
+                ):
                     return False
                 self._claim_holder = claim.holder
             stored = store.get(str(getattr(self.trigger, "id", "") or ""))
@@ -106,7 +123,12 @@ class TriggerDispatch:
             return True
         except Exception:
             if getattr(self, "_claim_holder", ""):
-                claims.release_claim(self.trigger.id, base_dir=config_dir(), holder=self._claim_holder, owner_pid=owner_pid)
+                claims.release_claim(
+                    self.trigger.id,
+                    base_dir=config_dir(),
+                    holder=self._claim_holder,
+                    owner_pid=owner_pid,
+                )
             self.logger.warning(
                 "trigger %s: could not persist run owner PID",
                 getattr(self.trigger, "id", ""),
@@ -119,17 +141,30 @@ class TriggerDispatch:
         owner_pid = os.getpid()
         try:
             from gideon.automation.triggers import claims
-            from gideon.automation.triggers.store import TriggerStore
             from gideon.automation.triggers.routing import routed
+            from gideon.automation.triggers.store import TriggerStore
             from gideon.core.config.loader import config_dir
 
             store = routed(TriggerStore(base_dir=config_dir()))
-            if not claims.release_claim(self.trigger.id, base_dir=config_dir(), holder=getattr(self, "_claim_holder", ""), owner_pid=owner_pid):
+            if not claims.release_claim(
+                self.trigger.id,
+                base_dir=config_dir(),
+                holder=getattr(self, "_claim_holder", ""),
+                owner_pid=owner_pid,
+            ):
                 return
             stored = store.get(str(getattr(self.trigger, "id", "") or ""))
             if stored is None or stored.trigger.run_owner_pid != owner_pid:
                 return
-            stored.trigger.run_owner_pid = next((claim.owner_pid for claim in claims.read_claims(self.trigger.id, base_dir=config_dir())), 0)
+            stored.trigger.run_owner_pid = next(
+                (
+                    claim.owner_pid
+                    for claim in claims.read_claims(
+                        self.trigger.id, base_dir=config_dir()
+                    )
+                ),
+                0,
+            )
             store.upsert(stored.trigger)
             if getattr(self.trigger, "run_owner_pid", 0) == owner_pid:
                 self.trigger.run_owner_pid = 0
@@ -219,24 +254,30 @@ class TriggerDispatch:
     async def execute(
         self, action: TriggerAction, config: dict[str, Any], context: Any, route: Any
     ) -> None:
-        from gideon.security.guardrails.rungs import record_execution
         from gideon.automation.triggers.missed import late_outcome
         from gideon.automation.triggers.models import Outcome
         from gideon.security.guardrails.policy import unattended_dispatch_key
+        from gideon.security.guardrails.rungs import record_execution
         from gideon.security.net.policy import egress_held_to
 
         started = time.time()
-        _, late = late_outcome(
-            Outcome.RAN.value,
-            scheduled_for=float(self.payload.get("scheduled_for") or 0),
-            started_at=started,
-        ) if self.payload.get("scheduled_for") else ("", "")
+        _, late = (
+            late_outcome(
+                Outcome.RAN.value,
+                scheduled_for=float(self.payload.get("scheduled_for") or 0),
+                started_at=started,
+            )
+            if self.payload.get("scheduled_for")
+            else ("", "")
+        )
         settled = False
         observing = False
         effect_unresolved = False
 
         if not self._stamp_run_owner():
-            await self.refuse("another run owns this trigger, or its ownership could not be verified")
+            await self.refuse(
+                "another run owns this trigger, or its ownership could not be verified"
+            )
             return
         try:
             identity = unattended_dispatch_key(f"trigger:{self.trigger.id}")
@@ -255,15 +296,33 @@ class TriggerDispatch:
                 finished=time.time(),
                 late=late,
             )
-            settled = status is not None and status not in {"launched", "queued", "waiting", "interrupted"}
+            settled = status is not None and status not in {
+                "launched",
+                "queued",
+                "waiting",
+                "interrupted",
+            }
             from gideon.automation.triggers import parks
 
-            effect_unresolved = status in {"launched", "queued", "waiting"} and not parks.parked(result)
+            effect_unresolved = status in {
+                "launched",
+                "queued",
+                "waiting",
+            } and not parks.parked(result)
             completion = getattr(result, "completion", None)
             if status in {"launched", "queued", "waiting"} and completion is not None:
                 import asyncio
 
-                task = asyncio.create_task(self._settle_completion(completion, started, late, route=route, label=action.name, refs=self.references(action)))
+                task = asyncio.create_task(
+                    self._settle_completion(
+                        completion,
+                        started,
+                        late,
+                        route=route,
+                        label=action.name,
+                        refs=self.references(action),
+                    )
+                )
                 self.runtime._handler_tasks.add(task)
                 task.add_done_callback(self.runtime._handler_tasks.discard)
                 observing = True
@@ -290,34 +349,64 @@ class TriggerDispatch:
             try:
                 self.runtime._push_trigger_refresh()
                 if settled:
-                    await self.runtime._fire_chained_triggers(self.trigger, self.payload)
+                    await self.runtime._fire_chained_triggers(
+                        self.trigger, self.payload
+                    )
             finally:
                 if not observing and not effect_unresolved:
                     self._clear_run_owner()
 
-    async def _settle_completion(self, completion: Any, started: float, late: str, *, route: Any = None, label: str = "", refs: Any = None) -> None:
+    async def _settle_completion(
+        self,
+        completion: Any,
+        started: float,
+        late: str,
+        *,
+        route: Any = None,
+        label: str = "",
+        refs: Any = None,
+    ) -> None:
         import asyncio
+
         from gideon.integrations.action_providers.base import ActionResult
         from gideon.security.guardrails.policy import unattended_dispatch_key
         from gideon.security.net.policy import egress_held_to
 
         try:
             try:
-                with egress_held_to(unattended_dispatch_key(f"trigger:{self.trigger.id}")):
+                with egress_held_to(
+                    unattended_dispatch_key(f"trigger:{self.trigger.id}")
+                ):
                     result = await completion()
             except asyncio.CancelledError:
-                result = ActionResult(False, outcome="interrupted", error="completion observer stopped during shutdown")
+                result = ActionResult(
+                    False,
+                    outcome="interrupted",
+                    error="completion observer stopped during shutdown",
+                )
             except Exception as error:
                 result = ActionResult(False, error=f"{type(error).__name__}: {error}")
             if route is not None:
                 from gideon.security.guardrails.rungs import record_execution
+
                 record_execution(route, result, label=label, refs=refs)
             status = await self.runtime._record_fire_outcome(
-                self.trigger, result=result, started=started, finished=time.time(), late=late
+                self.trigger,
+                result=result,
+                started=started,
+                finished=time.time(),
+                late=late,
             )
-            if status is not None and status not in {"launched", "queued", "waiting", "interrupted"}:
+            if status is not None and status not in {
+                "launched",
+                "queued",
+                "waiting",
+                "interrupted",
+            }:
                 if status != "skipped_noop":
-                    self.runtime._deliver_fire_outcome(self.trigger, ok=result.success, error=result.error)
+                    self.runtime._deliver_fire_outcome(
+                        self.trigger, ok=result.success, error=result.error
+                    )
                 self._retire_recorded(status)
                 await self.runtime._fire_chained_triggers(self.trigger, self.payload)
         finally:
@@ -331,9 +420,18 @@ class TriggerDispatch:
         from gideon.core.config.loader import config_dir
 
         try:
-            retire_after_run(routed(TriggerStore(base_dir=config_dir())), self.trigger, status=status, settled_holder=getattr(self, "_claim_holder", ""))
+            retire_after_run(
+                routed(TriggerStore(base_dir=config_dir())),
+                self.trigger,
+                status=status,
+                settled_holder=getattr(self, "_claim_holder", ""),
+            )
         except Exception:
-            self.logger.warning("trigger %s: retirement failed; retained for review", self.trigger.id, exc_info=True)
+            self.logger.warning(
+                "trigger %s: retirement failed; retained for review",
+                self.trigger.id,
+                exc_info=True,
+            )
 
     async def run(self) -> None:
         from gideon.automation.triggers import secrets
@@ -359,6 +457,7 @@ class TriggerDispatch:
             await self.refuse(str(error))
             return
         from gideon.security.durable_work import accepted_trigger_origin
+
         context = ActionContext(
             event=self.event,
             accepted_origin=accepted_trigger_origin(str(self.trigger.id)),

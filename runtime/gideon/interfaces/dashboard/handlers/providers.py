@@ -84,7 +84,9 @@ def _provider_document(path) -> dict[str, Any]:
         return {}
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or not isinstance(data.get("providers", []), list):
-        raise ValueError("provider configuration must be an object with a providers list")
+        raise ValueError(
+            "provider configuration must be an object with a providers list"
+        )
     return data
 
 
@@ -255,9 +257,7 @@ async def api_agent_providers_list(request: web.Request) -> web.Response:
                 "login_command": None,
             }
         else:
-            hit = _readiness_cache.get(
-                (_tenant_cache_key(tenant_scope), entry.name)
-            )
+            hit = _readiness_cache.get((_tenant_cache_key(tenant_scope), entry.name))
             if hit and (time.monotonic() - hit[0]) < _READINESS_TTL_SECS:
                 status_d = hit[1]
             else:
@@ -290,7 +290,9 @@ async def warm_readiness_cache() -> int:
     entries = [
         e for e in get_default_registry().list_entries() if e.type == "acp_agent"
     ]
-    return sum(1 for entry in entries if pool is not None and pool.is_warmed(entry.name))
+    return sum(
+        1 for entry in entries if pool is not None and pool.is_warmed(entry.name)
+    )
 
 
 _DISCOVERY_TTL_SECS = 600.0
@@ -692,7 +694,10 @@ async def api_provider_create(request: web.Request) -> web.Response:
     if not name or not ptype:
         return web.json_response({"error": "name and type are required"}, status=400)
     if not isinstance(model, str) or not isinstance(options, dict):
-        return web.json_response({"error": "model must be a string and options must be an object"}, status=400)
+        return web.json_response(
+            {"error": "model must be a string and options must be an object"},
+            status=400,
+        )
 
     from gideon.integrations.llm.registry import canonical_provider_type
     from gideon.integrations.llm.registry import get_default_registry as _gdr
@@ -726,8 +731,13 @@ async def api_provider_create(request: web.Request) -> web.Response:
             providers = []
             data["providers"] = providers
         if not isinstance(providers, list):
-            raise ValueError("provider configuration must be an object with a providers list")
-        if any(isinstance(provider, dict) and provider.get("name") == name for provider in providers):
+            raise ValueError(
+                "provider configuration must be an object with a providers list"
+            )
+        if any(
+            isinstance(provider, dict) and provider.get("name") == name
+            for provider in providers
+        ):
             return {"status": "exists"}
         providers.append(entry)
         return {"status": "created"}
@@ -735,13 +745,21 @@ async def api_provider_create(request: web.Request) -> web.Response:
     try:
         result = await mutate_config_async(add_provider)
     except ConfigPreserveError as exc:
-        return web.json_response({"error": f"Could not read provider configuration: {exc}"}, status=409)
+        return web.json_response(
+            {"error": f"Could not read provider configuration: {exc}"}, status=409
+        )
     except ValueError as exc:
-        return web.json_response({"error": f"Could not read provider configuration: {exc}"}, status=409)
+        return web.json_response(
+            {"error": f"Could not read provider configuration: {exc}"}, status=409
+        )
     except Exception:
-        return web.json_response({"error": "Could not write provider configuration"}, status=409)
+        return web.json_response(
+            {"error": "Could not write provider configuration"}, status=409
+        )
     if result["status"] == "exists":
-        return web.json_response({"error": f"Provider '{name}' already exists"}, status=409)
+        return web.json_response(
+            {"error": f"Provider '{name}' already exists"}, status=409
+        )
 
     from gideon.integrations.llm.registry import (
         ProviderEntry,
@@ -780,12 +798,13 @@ def _refresh_media_registries() -> None:
     OpenAI-family endpoint selectable as the active voice/image model without a
     gateway restart.
     """
+    from gideon.integrations.embedding_providers.registry import (
+        refresh_providers as _embed_refresh,
+    )
     from gideon.integrations.image_gen.registry import refresh_providers as _img_refresh
     from gideon.integrations.stt.registry import refresh_providers as _stt_refresh
     from gideon.integrations.tts.registry import refresh_providers as _tts_refresh
     from gideon.integrations.video_gen.registry import refresh_providers as _vid_refresh
-
-    from gideon.integrations.embedding_providers.registry import refresh_providers as _embed_refresh
 
     _embed_refresh()
     _stt_refresh()
@@ -823,9 +842,15 @@ async def api_provider_update(request: web.Request) -> web.Response:
     def update_provider(data: dict) -> dict:
         providers = data.get("providers", [])
         if not isinstance(providers, list):
-            raise ValueError("provider configuration must be an object with a providers list")
+            raise ValueError(
+                "provider configuration must be an object with a providers list"
+            )
         target = next(
-            (provider for provider in providers if isinstance(provider, dict) and provider.get("name") == name),
+            (
+                provider
+                for provider in providers
+                if isinstance(provider, dict) and provider.get("name") == name
+            ),
             None,
         )
         if target is None:
@@ -844,9 +869,13 @@ async def api_provider_update(request: web.Request) -> web.Response:
     try:
         result = await mutate_config_async(update_provider)
     except (ConfigPreserveError, ValueError) as exc:
-        return web.json_response({"error": f"Could not read provider configuration: {exc}"}, status=409)
+        return web.json_response(
+            {"error": f"Could not read provider configuration: {exc}"}, status=409
+        )
     except Exception:
-        return web.json_response({"error": "Could not write provider configuration"}, status=409)
+        return web.json_response(
+            {"error": "Could not write provider configuration"}, status=409
+        )
     if result["status"] == "missing":
         return web.json_response({"error": "not found"}, status=404)
     target = result["provider"]
@@ -879,7 +908,9 @@ async def api_provider_delete(request: web.Request) -> web.Response:
     def delete_provider(data: dict) -> dict[str, bool]:
         providers = data.get("providers", [])
         if not isinstance(providers, list):
-            raise ValueError("provider configuration must be an object with a providers list")
+            raise ValueError(
+                "provider configuration must be an object with a providers list"
+            )
         if any(not isinstance(provider, dict) for provider in providers):
             raise ValueError("provider configuration contains an invalid entry")
         retained = [provider for provider in providers if provider.get("name") != name]
@@ -891,9 +922,13 @@ async def api_provider_delete(request: web.Request) -> web.Response:
     try:
         result = await mutate_config_async(delete_provider)
     except (ConfigPreserveError, ValueError) as exc:
-        return web.json_response({"error": f"Could not read provider configuration: {exc}"}, status=409)
+        return web.json_response(
+            {"error": f"Could not read provider configuration: {exc}"}, status=409
+        )
     except Exception:
-        return web.json_response({"error": "Could not write provider configuration"}, status=409)
+        return web.json_response(
+            {"error": "Could not write provider configuration"}, status=409
+        )
     if not result["deleted"]:
         return web.json_response({"error": "not found"}, status=404)
 
@@ -981,16 +1016,15 @@ async def api_provider_test(request: web.Request) -> web.Response:
         if refusal:
             return web.json_response({"error": refusal}, status=409)
 
+        from gideon.engine.agents.runtime_tests import test_runtime
         from gideon.extensions.providers.connection import (
-            Connection,
             CONNECTED,
             FAILED,
+            Connection,
             entry_fingerprint,
             get_connection_board,
         )
         from gideon.extensions.providers.failure_copy import relayed_failure_copy
-
-        from gideon.engine.agents.runtime_tests import test_runtime
 
         tested = await test_runtime(name, entry, tenant=tenant)
         status_d = {
@@ -1022,7 +1056,11 @@ async def api_provider_test(request: web.Request) -> web.Response:
             }
         )
 
-    from gideon.extensions.providers.connection import entry_fingerprint, get_connection_board, measure
+    from gideon.extensions.providers.connection import (
+        entry_fingerprint,
+        get_connection_board,
+        measure,
+    )
 
     catalog = registry.build_catalog(entry)
     answer = await measure(catalog)
@@ -1037,7 +1075,9 @@ async def api_provider_test(request: web.Request) -> web.Response:
             }
         )
     if answer.state == "connected":
-        return web.json_response({"ok": True, "status": "connected", "message": answer.detail})
+        return web.json_response(
+            {"ok": True, "status": "connected", "message": answer.detail}
+        )
     return web.json_response({"ok": False, "status": "error", "message": answer.detail})
 
 

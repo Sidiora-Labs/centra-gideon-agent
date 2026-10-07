@@ -170,7 +170,11 @@ async def _drain(binding: _Binding) -> None:
 async def settled() -> None:
     """Wait until all queued reconciliation passes have completed."""
     binding = _binding
-    while binding is not None and binding.pending is not None and not binding.pending.done():
+    while (
+        binding is not None
+        and binding.pending is not None
+        and not binding.pending.done()
+    ):
         await asyncio.wait({binding.pending})
         binding = _binding
 
@@ -208,13 +212,18 @@ async def reconcile_inbound() -> None:
             configured = await _configured(transport)
             current = _receivers.get(name)
             if configured or (
-                configured is None and current is not None and current.transport is transport
+                configured is None
+                and current is not None
+                and current.transport is transport
             ):
                 wanted[name] = transport
 
         blocked: set[str] = set()
         for name, receiver in list(_receivers.items()):
-            if receiver.binding is not binding or wanted.get(name) is not receiver.transport:
+            if (
+                receiver.binding is not binding
+                or wanted.get(name) is not receiver.transport
+            ):
                 if not await _retire(name):
                     blocked.add(name)
         for name, transport in wanted.items():
@@ -245,7 +254,9 @@ async def _start(transport: "ChannelTransportProvider", services: Any) -> str:
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        timed_out = isinstance(exc, TimeoutError) and loop.time() - began >= START_TIMEOUT_SECS
+        timed_out = (
+            isinstance(exc, TimeoutError) and loop.time() - began >= START_TIMEOUT_SECS
+        )
         reason = (
             f"it did not finish starting within {START_TIMEOUT_SECS:g} seconds"
             if timed_out
@@ -282,9 +293,7 @@ async def _retire(name: str) -> bool:
 
 async def _stop(transport: "ChannelTransportProvider") -> None:
     try:
-        await asyncio.wait_for(
-            transport.stop_inbound(), timeout=STOP_TIMEOUT_SECS
-        )
+        await asyncio.wait_for(transport.stop_inbound(), timeout=STOP_TIMEOUT_SECS)
     except Exception:
         logger.warning("channel %s receiver stop failed", transport.name, exc_info=True)
     from gideon.integrations.channel_delivery import register
@@ -292,9 +301,7 @@ async def _stop(transport: "ChannelTransportProvider") -> None:
     register(None, provider=transport.name)
 
 
-_URL_RE = re.compile(
-    r"\b([a-z][a-z0-9+.-]*://[^/\s'\"<>]+)[^\s'\"<>]*", re.IGNORECASE
-)
+_URL_RE = re.compile(r"\b([a-z][a-z0-9+.-]*://[^/\s'\"<>]+)[^\s'\"<>]*", re.IGNORECASE)
 
 
 def _safe_origin(match: re.Match[str]) -> str:
@@ -343,9 +350,7 @@ async def channel_health(transport: "ChannelTransportProvider") -> dict[str, Any
         if receiver.failure:
             return {"state": "error", "detail": receiver.failure}
     try:
-        status = await asyncio.wait_for(
-            transport.health(), timeout=HEALTH_TIMEOUT_SECS
-        )
+        status = await asyncio.wait_for(transport.health(), timeout=HEALTH_TIMEOUT_SECS)
     except Exception as exc:
         return {"state": "error", "detail": _describe(exc)}
     return _safe_value(status)

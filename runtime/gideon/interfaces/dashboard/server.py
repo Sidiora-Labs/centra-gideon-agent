@@ -12,16 +12,14 @@ from typing import TYPE_CHECKING, Any
 from aiohttp import web
 from aiohttp.web_log import AccessLogger
 
-from gideon.workspace.artifacts.deploy import SERVE_HEADERS, SERVE_URL_PREFIX
-
 from gideon.cognition.suggestions import api_suggestions
 from gideon.core.cancellation import cancel_task_bounded
 from gideon.core.config import config_dir
 from gideon.core.layout import package_path
 from gideon.engine.hooks import ScriptHookStore, set_global_hook_store
 from gideon.interfaces.dashboard import chat, handlers, handlers_inbox, ws
-from gideon.interfaces.dashboard.handlers.doc_comments import setup_doc_comment_routes
 from gideon.interfaces.dashboard.handlers.core import third_party_notices
+from gideon.interfaces.dashboard.handlers.doc_comments import setup_doc_comment_routes
 from gideon.interfaces.dashboard.handlers.knowledge import setup_knowledge_routes
 from gideon.interfaces.dashboard.handlers.research_reports import (
     setup_research_report_routes,
@@ -36,9 +34,10 @@ from gideon.interfaces.dashboard.state import _DEFAULT_PORT, ConsoleState
 from gideon.interfaces.dashboard.token_auth import (
     INTERNAL_ROUTES,
     MIXED_INTERNAL_ROUTES,
-    token_auth_middleware,
     served_port,
+    token_auth_middleware,
 )
+from gideon.workspace.artifacts.deploy import SERVE_HEADERS, SERVE_URL_PREFIX
 
 if TYPE_CHECKING:
     from gideon.interfaces.dashboard._types import (
@@ -301,7 +300,11 @@ def _ws_csp_sources() -> str:
 
 def _dashboard_csp(port: int = 0) -> str:
     """Return the dashboard policy, including its explicit framing boundary."""
-    local_connections = f" ws://localhost:{port} ws://127.0.0.1:{port} ws://[::1]:{port}" if port else ""
+    local_connections = (
+        f" ws://localhost:{port} ws://127.0.0.1:{port} ws://[::1]:{port}"
+        if port
+        else ""
+    )
     return (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' blob:; "
@@ -325,8 +328,11 @@ def _append_vary(headers: Any, name: str) -> None:
 
 class _GatewayAccessLogger(AccessLogger):
     """Retain native access logging without capability URLs or referrers."""
+
     def log(self, request, response, time):
-        if request.path.startswith(SERVE_URL_PREFIX + "/") or SERVE_URL_PREFIX + "/" in request.headers.get("Referer", ""):
+        if request.path.startswith(
+            SERVE_URL_PREFIX + "/"
+        ) or SERVE_URL_PREFIX + "/" in request.headers.get("Referer", ""):
             return
         super().log(request, response, time)
 
@@ -337,10 +343,13 @@ def _apply_response_policies(
     """Declare dashboard framing and the Agent Card's browser-origin boundary."""
     resource = request.match_info.route.resource
     if resource is not None and resource.canonical in (
-        "/artifacts/serve/{slug}", "/artifacts/serve/{slug}/{path}"
+        "/artifacts/serve/{slug}",
+        "/artifacts/serve/{slug}/{path}",
     ):
         response.headers.update(SERVE_HEADERS)
-    response.headers.setdefault("Content-Security-Policy", _dashboard_csp(served_port(request)))
+    response.headers.setdefault(
+        "Content-Security-Policy", _dashboard_csp(served_port(request))
+    )
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
 
     if request.path != "/a2a/agent-card":
@@ -395,7 +404,9 @@ async def app_conversation_scope_middleware(
     state = request.app.get("state")
 
     def creator(name: str) -> str:
-        return state.created_by_app_for_session(name) if name and state is not None else ""
+        return (
+            state.created_by_app_for_session(name) if name and state is not None else ""
+        )
 
     session_name = str(request.match_info.get("session", "") or "")
     body: object = {}
@@ -412,17 +423,23 @@ async def app_conversation_scope_middleware(
     if session_name and path.endswith("/resume") and isinstance(body, dict):
         history_key = str(body.get("key") or "")
         if history_key and creator(history_key) != app_name:
-            return web.json_response({"error": "app does not own this session"}, status=403)
+            return web.json_response(
+                {"error": "app does not own this session"}, status=403
+            )
     if path == "/api/chat/sessions" and request.method == "POST":
         candidate = str(body.get("name") or "") if isinstance(body, dict) else ""
         if candidate:
             exists = candidate in getattr(state, "_sessions", {})
             if not exists and getattr(state, "conversation_log", None):
-                from gideon.interfaces.dashboard.chat_persistence import session_key_exists
+                from gideon.interfaces.dashboard.chat_persistence import (
+                    session_key_exists,
+                )
 
                 exists = session_key_exists(state, candidate)
             if exists and creator(candidate) != app_name:
-                return web.json_response({"error": "app does not own this session"}, status=403)
+                return web.json_response(
+                    {"error": "app does not own this session"}, status=403
+                )
     return await handler(request)  # type: ignore[operator]
 
 
@@ -585,7 +602,9 @@ async def start_dashboard(
 
             app_["security_status"] = create_daemon_security_status(client)
         except (TypeError, ValueError):
-            logger.warning("Hypermid security status was not initialized", exc_info=True)
+            logger.warning(
+                "Hypermid security status was not initialized", exc_info=True
+            )
 
     app.on_startup.append(_hypermid_security_startup)
 
@@ -636,10 +655,17 @@ async def start_dashboard(
             register_routes as _register_openai,
         )
         from gideon.interfaces.dashboard.chat_handlers import _run_chat_scoped
+        from gideon.interfaces.dashboard.chat_persistence import (
+            resolve_session,
+            save_session_to_history,
+        )
 
-        from gideon.interfaces.dashboard.chat_persistence import resolve_session, save_session_to_history
-
-        _register_openai(app, turn_runner=_run_chat_scoped, persist_turn=save_session_to_history, restore_session=resolve_session)
+        _register_openai(
+            app,
+            turn_runner=_run_chat_scoped,
+            persist_turn=save_session_to_history,
+            restore_session=resolve_session,
+        )
     except Exception:  # noqa: BLE001 — an inbound fault must never block startup
         logging.getLogger(__name__).warning("inbound: /v1 mount failed", exc_info=True)
     try:
@@ -733,8 +759,8 @@ async def start_dashboard(
         api_ephemeral_skill_discard,
         api_ephemeral_skill_promote,
         api_ephemeral_skills_list,
-        api_skill_files,
         api_skill_bundled_choice,
+        api_skill_files,
         api_skill_overlay_revert,
         api_skill_proposal_accept,
         api_skill_proposal_detail,
@@ -766,7 +792,9 @@ async def start_dashboard(
     app.router.add_post("/api/skills/proposals/{id}/accept", api_skill_proposal_accept)
     app.router.add_delete("/api/skills/proposals/{id}", api_skill_proposal_reject)
     app.router.add_post("/api/skills/overlay/revert", api_skill_overlay_revert)
-    app.router.add_post("/api/skills/{name:.+}/bundled/{choice:update|keep}", api_skill_bundled_choice)
+    app.router.add_post(
+        "/api/skills/{name:.+}/bundled/{choice:update|keep}", api_skill_bundled_choice
+    )
     app.router.add_get("/api/skills/{name:.+}/files", api_skill_files)
     app.router.add_post("/api/skills/{name:.+}/verify", api_skill_verify)
     app.router.add_delete("/api/skills/{name:.+}", api_skills_delete)
@@ -778,8 +806,6 @@ async def start_dashboard(
         api_agent_provider_agents,
         api_agent_providers_list,
         api_agent_runners_list,
-        runner_grant_tenant_middleware,
-        register_runner_routes,
         api_provider_create,
         api_provider_delete,
         api_provider_model_delete,
@@ -791,6 +817,8 @@ async def start_dashboard(
         api_provider_types,
         api_provider_update,
         api_providers_list,
+        register_runner_routes,
+        runner_grant_tenant_middleware,
     )
 
     app.router.add_get("/api/model-providers", api_providers_list)
@@ -817,7 +845,10 @@ async def start_dashboard(
 
     register_model_registry_routes(app)
 
-    from gideon.interfaces.dashboard.handlers.model_rates import register_model_rates_routes
+    from gideon.interfaces.dashboard.handlers.model_rates import (
+        register_model_rates_routes,
+    )
+
     register_model_rates_routes(app)
 
     from gideon.interfaces.dashboard.handlers.search_registry import (
@@ -907,7 +938,9 @@ async def start_dashboard(
     app.router.add_post("/api/memory/promote", handlers.api_memory_promote)
     app.router.add_get("/api/memory/entities", handlers.api_memory_entities)
     app.router.add_post("/api/memory/entities", handlers.api_memory_entity_create)
-    app.router.add_delete("/api/memory/entities/{entity_id}", handlers.api_memory_entity_delete)
+    app.router.add_delete(
+        "/api/memory/entities/{entity_id}", handlers.api_memory_entity_delete
+    )
     app.router.add_post(
         "/api/memory/entities/proposals", handlers.api_memory_entity_proposals
     )
@@ -937,11 +970,11 @@ async def start_dashboard(
     app.router.add_get("/api/action-providers", handlers.api_action_providers)
     app.router.add_get("/api/agent-hooks", handlers.api_agent_hooks)
 
-    from gideon.interfaces.dashboard.handlers.hooks import api_agent_hook_allow
     from gideon.interfaces.dashboard.handlers.heartbeat_tasks import (
         api_heartbeat_task_allow,
         api_heartbeat_tasks,
     )
+    from gideon.interfaces.dashboard.handlers.hooks import api_agent_hook_allow
     from gideon.interfaces.dashboard.handlers.trigger_callbacks import (
         api_hook_allow,
         api_hooks_pending,
@@ -949,7 +982,9 @@ async def start_dashboard(
 
     app.router.add_post("/api/agent-hooks/allow", api_agent_hook_allow)
     app.router.add_get("/api/heartbeat/tasks", api_heartbeat_tasks)
-    app.router.add_post("/api/heartbeat/tasks/{task_id}/allow", api_heartbeat_task_allow)
+    app.router.add_post(
+        "/api/heartbeat/tasks/{task_id}/allow", api_heartbeat_task_allow
+    )
     app.router.add_get("/api/hooks/pending", api_hooks_pending)
     app.router.add_post("/api/hooks/{hook_id}/allow", api_hook_allow)
 
@@ -1002,7 +1037,10 @@ async def start_dashboard(
     app.router.add_get("/api/guardrails/project-trust", handlers.api_project_trust)
     app.router.add_post("/api/guardrails/project-trust", handlers.api_project_trust)
     app.router.add_get("/api/external-access", handlers.api_external_access)
-    app.router.add_post("/api/external-access/clients/{client_id}/persistent-sessions", handlers.api_external_access_client_persistent_sessions)
+    app.router.add_post(
+        "/api/external-access/clients/{client_id}/persistent-sessions",
+        handlers.api_external_access_client_persistent_sessions,
+    )
     app.router.add_post(
         "/api/external-access/clients", handlers.api_external_access_client
     )
@@ -1068,7 +1106,9 @@ async def start_dashboard(
     from gideon.interfaces.dashboard.handlers import mcp_protocol
 
     app.router.add_get("/api/mcp/servers/{name}/resources", mcp_protocol.resources_list)
-    app.router.add_get("/api/mcp/servers/{name}/resources/read", mcp_protocol.resource_read)
+    app.router.add_get(
+        "/api/mcp/servers/{name}/resources/read", mcp_protocol.resource_read
+    )
     app.router.add_get("/api/mcp/servers/{name}/prompts", mcp_protocol.prompts_list)
     app.router.add_post("/api/mcp/servers/{name}/prompts/get", mcp_protocol.prompt_get)
     app.router.add_get("/api/mcp/importable", handlers.api_mcp_importable)
@@ -1081,15 +1121,30 @@ async def start_dashboard(
     app.router.add_put("/api/mcp/servers/{name}", handlers.api_mcp_server_detail)
     app.router.add_delete("/api/mcp/servers/{name}", handlers.api_mcp_server_detail)
     app.router.add_post("/api/mcp/servers/{name}/allow", handlers.api_mcp_server_allow)
-    from gideon.interfaces.dashboard.handlers.mcp_trust import api_mcp_server_read_only_trust
-    app.router.add_post("/api/mcp/servers/{name}/read-only-trust", api_mcp_server_read_only_trust)
-    app.router.add_delete("/api/mcp/servers/{name}/read-only-trust", api_mcp_server_read_only_trust)
+    from gideon.interfaces.dashboard.handlers.mcp_trust import (
+        api_mcp_server_read_only_trust,
+    )
+
+    app.router.add_post(
+        "/api/mcp/servers/{name}/read-only-trust", api_mcp_server_read_only_trust
+    )
+    app.router.add_delete(
+        "/api/mcp/servers/{name}/read-only-trust", api_mcp_server_read_only_trust
+    )
     app.router.add_get("/api/mcp/servers/{name}/oauth", handlers.api_mcp_oauth_status)
-    app.router.add_post("/api/mcp/servers/{name}/oauth/start", handlers.api_mcp_oauth_start)
-    app.router.add_delete("/api/mcp/servers/{name}/oauth", handlers.api_mcp_oauth_signout)
+    app.router.add_post(
+        "/api/mcp/servers/{name}/oauth/start", handlers.api_mcp_oauth_start
+    )
+    app.router.add_delete(
+        "/api/mcp/servers/{name}/oauth", handlers.api_mcp_oauth_signout
+    )
     app.router.add_get("/api/mcp/oauth/callback", handlers.api_mcp_oauth_callback)
 
-    from gideon.interfaces.dashboard.chat_questions import api_question_answer, api_question_pending
+    from gideon.interfaces.dashboard.chat_questions import (
+        api_question_answer,
+        api_question_pending,
+    )
+
     app.router.add_post("/api/chat/questions/answer", api_question_answer)
     app.router.add_get("/api/chat/questions", api_question_pending)
     app.router.add_post("/api/chat", chat.api_chat)
@@ -1385,20 +1440,20 @@ async def start_dashboard(
     )
     app.router.add_get("/api/sandbox/providers", handlers.api_sandbox_providers)
 
-    from gideon.interfaces.dashboard.handlers.channel_trust import (
-        api_channel_trust,
-        api_channel_trust_revoke,
-        api_channel_trust_policy,
-        api_channel_trust_track,
-        api_channel_trust_untrack,
-        api_channel_trust_pairing,
-        api_channel_trust_pairing_cancel,
-        api_telegram_pairing,
-    )
     from gideon.interfaces.dashboard.handlers.channel_owner import (
         api_channel_owner,
         api_channel_owner_pair,
         api_channel_owner_pair_cancel,
+    )
+    from gideon.interfaces.dashboard.handlers.channel_trust import (
+        api_channel_trust,
+        api_channel_trust_pairing,
+        api_channel_trust_pairing_cancel,
+        api_channel_trust_policy,
+        api_channel_trust_revoke,
+        api_channel_trust_track,
+        api_channel_trust_untrack,
+        api_telegram_pairing,
     )
     from gideon.interfaces.dashboard.handlers.channels import (
         api_channel_connect,
@@ -1410,14 +1465,29 @@ async def start_dashboard(
 
     app.router.add_get("/api/channels", api_channels_list)
     app.router.add_get("/api/channels/trust", api_channel_trust)
-    app.router.add_put("/api/channels/trust/{provider}/policies", api_channel_trust_policy)
-    app.router.add_post("/api/channels/trust/{provider}/channels", api_channel_trust_track)
-    app.router.add_delete("/api/channels/trust/{provider}/channels/{channel_id}", api_channel_trust_untrack)
-    app.router.add_post("/api/channels/trust/{provider}/pairing", api_channel_trust_pairing)
-    app.router.add_delete("/api/channels/trust/{provider}/pairing", api_channel_trust_pairing_cancel)
+    app.router.add_put(
+        "/api/channels/trust/{provider}/policies", api_channel_trust_policy
+    )
+    app.router.add_post(
+        "/api/channels/trust/{provider}/channels", api_channel_trust_track
+    )
+    app.router.add_delete(
+        "/api/channels/trust/{provider}/channels/{channel_id}",
+        api_channel_trust_untrack,
+    )
+    app.router.add_post(
+        "/api/channels/trust/{provider}/pairing", api_channel_trust_pairing
+    )
+    app.router.add_delete(
+        "/api/channels/trust/{provider}/pairing", api_channel_trust_pairing_cancel
+    )
     app.router.add_get("/api/channels/{provider}/owner", api_channel_owner)
-    app.router.add_post("/api/channels/{provider}/owner/pairing", api_channel_owner_pair)
-    app.router.add_delete("/api/channels/{provider}/owner/pairing", api_channel_owner_pair_cancel)
+    app.router.add_post(
+        "/api/channels/{provider}/owner/pairing", api_channel_owner_pair
+    )
+    app.router.add_delete(
+        "/api/channels/{provider}/owner/pairing", api_channel_owner_pair_cancel
+    )
     app.router.add_post("/api/channels/telegram/pairing", api_telegram_pairing)
     app.router.add_delete(
         "/api/channels/trust/{provider}/senders/{sender_id}", api_channel_trust_revoke
@@ -1492,17 +1562,22 @@ async def start_dashboard(
 
     async def _batch_restore(app_):
         from gideon.automation.workflows.batch_start import restore
+
         await restore(state, getattr(state, "workflows", None))
+
     async def _batch_shutdown(app_):
         tasks = list(getattr(state, "_workflow_batch_tasks", {}).values())
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
     app.on_startup.append(_batch_restore)
     app.on_cleanup.append(_batch_shutdown)
 
-    from gideon.interfaces.dashboard.handlers.experiments import register_experiment_routes
+    from gideon.interfaces.dashboard.handlers.experiments import (
+        register_experiment_routes,
+    )
 
     register_experiment_routes(app)
 
@@ -1648,17 +1723,18 @@ async def start_dashboard(
     async def _durability_export_startup(app_: web.Application) -> None:
         from gideon.operations.durability.export_follow import install
         from gideon.operations.durability.service import active_home
+
         app_["durability_export_follower"] = install(home=active_home())
 
     async def _durability_export_shutdown(app_: web.Application) -> None:
         from gideon.operations.durability.export_follow import uninstall
+
         follower = app_.get("durability_export_follower")
         if follower is not None:
             uninstall(follower)
 
     app.on_startup.append(_durability_export_startup)
     app.on_cleanup.append(_durability_export_shutdown)
-
 
     async def _control_bridge_startup(app_: web.Application) -> None:
         """Bind the loopback control bridge on its own random port (EXTERNAL-ACCESS §4).
@@ -1733,21 +1809,33 @@ async def start_dashboard(
 
     def _notify_mcp_descriptions(server: str, tools: tuple[str, ...]) -> None:
         from urllib.parse import quote
+
         from gideon.security.mcp_read_only_trust import description_notice
+
         title, body = description_notice(server, tools)
-        app["state"].notify("mcp_description_changed", title, body, meta={"statusUrl": f"#/tools?q={quote(server)}", "server": server, "tools": list(tools)})
+        app["state"].notify(
+            "mcp_description_changed",
+            title,
+            body,
+            meta={
+                "statusUrl": f"#/tools?q={quote(server)}",
+                "server": server,
+                "tools": list(tools),
+            },
+        )
 
     async def _mcp_description_startup(app_: web.Application) -> None:
         from gideon.security.mcp_read_only_trust import subscribe
+
         subscribe(_notify_mcp_descriptions)
 
     async def _mcp_description_shutdown(app_: web.Application) -> None:
         from gideon.security.mcp_read_only_trust import unsubscribe
+
         unsubscribe(_notify_mcp_descriptions)
 
     app.on_startup.append(_mcp_description_startup)
     app.on_cleanup.append(_mcp_description_shutdown)
-
 
     async def _action_providers_startup(app_: web.Application) -> None:
         """Register the bundled action providers (bash, webhook, run-script, …)."""

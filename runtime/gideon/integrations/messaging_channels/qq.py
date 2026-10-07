@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from gideon.integrations.channel_transports.base import ChannelCapabilities, OutboundMessage
+from gideon.integrations.channel_transports.base import (
+    ChannelCapabilities,
+    OutboundMessage,
+)
 from gideon.integrations.messaging_channels.base import MessagingTransport
 
 
@@ -42,7 +45,10 @@ class QQTransport(MessagingTransport):
             async def on_direct_message_create(self, message: Any) -> None:
                 await transport._message(message, "guild_dm")
 
-        self.client = Bot(intents=botpy.Intents(public_messages=True, direct_message=True), ext_handlers=False)
+        self.client = Bot(
+            intents=botpy.Intents(public_messages=True, direct_message=True),
+            ext_handlers=False,
+        )
         self._detail = "Connecting to QQ"
 
     async def _message(self, message: Any, kind: str) -> None:
@@ -55,7 +61,11 @@ class QQTransport(MessagingTransport):
                 or getattr(message.author, "user_openid", None)
                 or ""
             )
-            chat = str(getattr(message, "guild_id", "") or sender) if kind == "guild_dm" else sender
+            chat = (
+                str(getattr(message, "guild_id", "") or sender)
+                if kind == "guild_dm"
+                else sender
+            )
         self.chat_types[chat] = kind
         await self._inbound(
             chat,
@@ -69,7 +79,9 @@ class QQTransport(MessagingTransport):
     async def _receive(self) -> None:
         while True:
             try:
-                await self.client.start(appid=self.config["app_id"], secret=self.config["secret"])
+                await self.client.start(
+                    appid=self.config["app_id"], secret=self.config["secret"]
+                )
             except asyncio.CancelledError:
                 raise
             except Exception:

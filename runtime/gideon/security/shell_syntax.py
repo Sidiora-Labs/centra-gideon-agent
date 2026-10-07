@@ -37,7 +37,9 @@ class Simple:
 
     words: list[Word] = field(default_factory=list)
     redirects: list[tuple[Redirect, Word]] = field(default_factory=list)
-    then: str = ""  # the operator after it: "&&", "||", "|", ";", "\n", or "" at the end
+    then: str = (
+        ""  # the operator after it: "&&", "||", "|", ";", "\n", or "" at the end
+    )
 
 
 Token = tuple[str, object]  # ("word", Word) | ("op", str) | ("redir", Redirect)
@@ -99,7 +101,8 @@ def _declined(unread: list[str] | None, kind: str) -> list[Token] | None:
 
 def _dollar_kind(text: str, i: int) -> str:
     """What the ``$`` at *i*, which :func:`_expansion_end` does not parse, begins: a command
-    substitution (``$(``, or a ``${`` holding one before it closes), or another expansion."""
+    substitution (``$(``, or a ``${`` holding one before it closes), or another expansion.
+    """
     if text.startswith("$(", i):
         return SUBSTITUTION
     if text.startswith("${", i):
@@ -112,7 +115,8 @@ def _dollar_kind(text: str, i: int) -> str:
 
 def _expansion_end(text: str, i: int) -> int | None:
     """Where the parameter expansion whose ``$`` is at *i* ends, or ``None`` for one this reader
-    does not parse (a command substitution, arithmetic, ``$'…'``, a nested expansion)."""
+    does not parse (a command substitution, arithmetic, ``$'…'``, a nested expansion).
+    """
     n = len(text)
     if i + 1 >= n:
         return None
@@ -167,7 +171,9 @@ def _heredoc_delimiter(text: str, i: int) -> tuple[str, bool, int] | None:
     return (delimiter, quoted, i) if delimiter else None
 
 
-def _skip_heredoc(text: str, i: int, delimiter: str, *, strip: bool, quoted: bool) -> int | None:
+def _skip_heredoc(
+    text: str, i: int, delimiter: str, *, strip: bool, quoted: bool
+) -> int | None:
     """Where the line after a here-document's body (from *i*, a line start) begins, or ``None``
     when its delimiter line never comes or its unquoted body expands something."""
     n = len(text)
@@ -207,8 +213,17 @@ def lex(  # noqa: C901 - one pass over a small grammar
     def finish() -> None:
         nonlocal buf, glob_at, in_word, digits_only, opaque, leading
         if in_word:
-            tokens.append(("word", Word("".join(buf), glob_at, opaque, "" if opaque else leading)))
-        buf, glob_at, in_word, digits_only, opaque, leading = [], -1, False, True, False, ""
+            tokens.append(
+                ("word", Word("".join(buf), glob_at, opaque, "" if opaque else leading))
+            )
+        buf, glob_at, in_word, digits_only, opaque, leading = (
+            [],
+            -1,
+            False,
+            True,
+            False,
+            "",
+        )
 
     def expansion(spelled: str, *, at_start: bool) -> None:
         """Note a parameter expansion: a leading path variable, or a part whose text is unknown."""
@@ -275,7 +290,9 @@ def lex(  # noqa: C901 - one pass over a small grammar
                     continue
                 if d == "`":
                     return _declined(unread, SUBSTITUTION)
-                if d == "$" and (j + 1 >= n or text[j + 1] not in _LITERAL_DOLLAR_BEFORE):
+                if d == "$" and (
+                    j + 1 >= n or text[j + 1] not in _LITERAL_DOLLAR_BEFORE
+                ):
                     stop = _expansion_end(text, j)
                     if stop is None:
                         return _declined(unread, _dollar_kind(text, j))
@@ -333,7 +350,14 @@ def lex(  # noqa: C901 - one pass over a small grammar
         elif c in "<>":
             fd = "".join(buf) if in_word and digits_only else ""
             if fd:
-                buf, glob_at, in_word, digits_only, opaque, leading = [], -1, False, True, False, ""
+                buf, glob_at, in_word, digits_only, opaque, leading = (
+                    [],
+                    -1,
+                    False,
+                    True,
+                    False,
+                    "",
+                )
             else:
                 finish()
             if text.startswith("<<<", i):
@@ -422,7 +446,8 @@ def joins_commands(text: str) -> bool:
     """Whether *text*, read as the shell reads it, is more than one command: two commands joined
     by an operator the shell runs, or a command that runs another (:data:`RUNS_ANOTHER`: a
     substitution, a subshell, a background job). Syntax this reader cannot vouch for that does
-    neither (a quote that never closes, a comment) is not evidence of a second command."""
+    neither (a quote that never closes, a comment) is not evidence of a second command.
+    """
     unread: list[str] = []
     tokens = lex(text, unread=unread)
     if tokens is None:

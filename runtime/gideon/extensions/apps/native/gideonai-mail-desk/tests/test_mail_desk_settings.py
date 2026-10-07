@@ -4,8 +4,6 @@ boundary (secrets in the credential store, everything else in the app store).
 
 from __future__ import annotations
 
-from gideon.sdk.channel import ProviderSettings, save_credential
-
 from mail_desk_runtime.settings import (
     ACTIVATION_ALWAYS,
     ACTIVATION_OFF,
@@ -17,12 +15,14 @@ from mail_desk_runtime.settings import (
     SMTP_SSL,
     SMTP_STARTTLS,
     MailDeskSettings,
+    _validate_activation,
+    _validate_smtp_security,
     get_settings,
     load_credentials,
     reload_settings,
-    _validate_activation,
-    _validate_smtp_security,
 )
+
+from gideon.sdk.channel import ProviderSettings, save_credential
 
 _APP = "gideonai-mail-desk"
 
@@ -49,10 +49,18 @@ class TestLoadAndCoercion:
         ProviderSettings.update(
             _APP,
             {
-                "imap_host": "imap.test", "imap_port": 143, "imap_user": "u@test",
-                "imap_use_ssl": False, "folder": "Agent", "smtp_host": "smtp.test",
-                "smtp_port": 465, "smtp_user": "s@test", "smtp_security": "ssl",
-                "address": "bot@test", "poll_secs": 120, "dm_activation": "off",
+                "imap_host": "imap.test",
+                "imap_port": 143,
+                "imap_user": "u@test",
+                "imap_use_ssl": False,
+                "folder": "Agent",
+                "smtp_host": "smtp.test",
+                "smtp_port": 465,
+                "smtp_user": "s@test",
+                "smtp_security": "ssl",
+                "address": "bot@test",
+                "poll_secs": 120,
+                "dm_activation": "off",
             },
         )
         settings = MailDeskSettings.load()
@@ -70,7 +78,9 @@ class TestLoadAndCoercion:
         assert settings.dm_activation == ACTIVATION_OFF
 
     def test_hosts_and_logins_are_stripped(self):
-        ProviderSettings.update(_APP, {"imap_host": "  imap.test  ", "imap_user": " u@t "})
+        ProviderSettings.update(
+            _APP, {"imap_host": "  imap.test  ", "imap_user": " u@t "}
+        )
         settings = MailDeskSettings.load()
         assert settings.imap_host == "imap.test"
         assert settings.imap_user == "u@t"
@@ -125,7 +135,9 @@ class TestPollClamping:
 
 class TestMailboxAddress:
     def test_the_explicit_address_wins(self):
-        ProviderSettings.update(_APP, {"address": "bot@test", "imap_user": "login@test"})
+        ProviderSettings.update(
+            _APP, {"address": "bot@test", "imap_user": "login@test"}
+        )
         assert MailDeskSettings.load().mailbox_address == "bot@test"
 
     def test_it_falls_back_to_the_imap_login(self):
@@ -189,6 +201,8 @@ class TestSettingsCache:
         ProviderSettings.update(_APP, {"folder": "First"})
         assert get_settings().folder == "First"
         ProviderSettings.update(_APP, {"folder": "Second"})
-        assert get_settings().folder == "First"  # cached (a deliberate process singleton)
+        assert (
+            get_settings().folder == "First"
+        )  # cached (a deliberate process singleton)
         assert reload_settings().folder == "Second"
         assert get_settings().folder == "Second"

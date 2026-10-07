@@ -58,6 +58,7 @@ def component_digest(path: Path) -> str:
     path does not exist, which a caller reads as "gone" rather than as a hash collision.
     """
     from gideon.operations.durability.home_paths import guard_path
+
     path = guard_path(Path(path), read=True)
     if path.is_file():
         try:
@@ -228,12 +229,19 @@ def _decide(plan: "ImportPlan", installed: Any, home: Path) -> list[ComponentUpd
             continue
         target = home / lock.get("path", "")
         from gideon.operations.durability.home_paths import LinkInTheWay
+
         try:
             current = component_digest(target)
         except LinkInTheWay as link:
-            out.append(ComponentUpdate(ref=ref, action=ACTION_SKIP_UNVERIFIABLE,
-                                       reason=f"linked contents left unchanged: {link}",
-                                       pack_path=comp.path, home_path=lock.get("path", "")))
+            out.append(
+                ComponentUpdate(
+                    ref=ref,
+                    action=ACTION_SKIP_UNVERIFIABLE,
+                    reason=f"linked contents left unchanged: {link}",
+                    pack_path=comp.path,
+                    home_path=lock.get("path", ""),
+                )
+            )
             continue
         if current == "":
             out.append(
@@ -376,7 +384,9 @@ def apply_update(
 
         update_id = uuid.uuid4().hex[:16]
         try:
-            pack_import.refuse_links(home, parsed, plan.name or pack_name, update_id, refs=write_refs)
+            pack_import.refuse_links(
+                home, parsed, plan.name or pack_name, update_id, refs=write_refs
+            )
         except pack_import.PackImportRefused as error:
             raise PackUpdateError(f"update destinations refused: {error}") from error
         journal = pack_import._Journal(home, update_id)

@@ -217,7 +217,9 @@ def disable_totp() -> None:
 
     delete_credential(TOTP_SECRET_KEY)
     if get_credential(TOTP_SECRET_KEY) or os.environ.get(TOTP_SECRET_KEY):
-        raise CredentialError("could not remove the TOTP secret from the credential store")
+        raise CredentialError(
+            "could not remove the TOTP secret from the credential store"
+        )
     _set_flag("totp_enabled", False)
     _audit("totp_disabled", "owner", "ok")
 

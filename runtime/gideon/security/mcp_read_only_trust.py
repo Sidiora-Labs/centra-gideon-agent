@@ -65,7 +65,9 @@ def definition(tool: Any) -> Definition:
         schema, labels = tool.get("inputSchema"), tool.get("annotations")
     else:
         name, description = getattr(tool, "name", ""), getattr(tool, "description", "")
-        schema, labels = getattr(tool, "input_schema", None), getattr(tool, "annotations", None)
+        schema, labels = getattr(tool, "input_schema", None), getattr(
+            tool, "annotations", None
+        )
     return Definition(
         name=name if isinstance(name, str) else "",
         description=description if isinstance(description, str) else "",
@@ -76,9 +78,9 @@ def definition(tool: Any) -> Definition:
 
 def _canonical(value: Any) -> bytes:
     """*value* serialized the one way a digest is taken of it (see the module docstring)."""
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
-        "utf-8"
-    )
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
 
 
 def _sha256(data: bytes) -> str:
@@ -129,12 +131,15 @@ def _locked(record: str) -> Iterator[None]:
 
 def _write(record: str, servers: dict[str, Any]) -> None:
     # Every owner record remains compatible with the protected grant-book envelope.
-    _book(record)._write({name: {"seal": "observed", **entry} for name, entry in servers.items()})
+    _book(record)._write(
+        {name: {"seal": "observed", **entry} for name, entry in servers.items()}
+    )
 
 
 def configuration_revision(server: str) -> str:
     from gideon.integrations.mcp_discovery import list_servers
     from gideon.security import mcp_grants
+
     configured = next((item for item in list_servers() if item.name == server), None)
     if configured is None or not mcp_grants.allowed(configured):
         return ""
@@ -143,11 +148,17 @@ def configuration_revision(server: str) -> str:
     except (mcp_grants.McpGrantDefinitionError, ValueError, TypeError):
         return ""
 
+
 def _sealed_tools(server: str) -> dict[str, dict[str, str]] | None:
     """The tools the owner's trust in *server* is sealed to, by name, or ``None`` when the owner
-    does not trust its labels. An entry that is not one the Tools page writes seals nothing."""
+    does not trust its labels. An entry that is not one the Tools page writes seals nothing.
+    """
     entry = _servers(TRUST_RECORD).get(server)
-    if not isinstance(entry, dict) or not entry.get("configuration") or entry["configuration"] != configuration_revision(server):
+    if (
+        not isinstance(entry, dict)
+        or not entry.get("configuration")
+        or entry["configuration"] != configuration_revision(server)
+    ):
         return None
     tools = entry.get("tools")
     if not isinstance(tools, dict):
@@ -166,7 +177,8 @@ def believes(server: str, tool: Any) -> bool:
     """Whether *tool*'s read-only label is believed: the owner trusts *server*'s labels, and the
     trust is sealed to *tool* exactly as it is defined now. THE read the approval gate takes a label
     through (`ConfiguredMcpToolProvider.list_tools`). A tool added or changed since the owner trusted the
-    server, or last reviewed it, is not believed, and asks like any untrusted server's tool."""
+    server, or last reviewed it, is not believed, and asks like any untrusted server's tool.
+    """
     sealed = _sealed_tools(server)
     if not sealed:
         return False
@@ -216,7 +228,9 @@ class Review:
         if self.trusted and self.listed is not None:
             out.update(
                 added=list(self.added),
-                changed=[{"name": c.name, "parts": list(c.parts)} for c in self.changed],
+                changed=[
+                    {"name": c.name, "parts": list(c.parts)} for c in self.changed
+                ],
                 removed=list(self.removed),
             )
         return out
@@ -228,7 +242,11 @@ def review(server: str, tools: Iterable[Any] | None) -> Review:
     digest of each listed now."""
     sealed = _sealed_tools(server)
     entry = _servers(TRUST_RECORD).get(server)
-    at = str(entry.get("at") or "") if sealed is not None and isinstance(entry, dict) else ""
+    at = (
+        str(entry.get("at") or "")
+        if sealed is not None and isinstance(entry, dict)
+        else ""
+    )
     if tools is None:
         return Review(trusted=sealed is not None, at=at)
     now = {d.name: d for d in map(definition, tools) if d.name}
@@ -265,7 +283,9 @@ class Sealed:
     changed_since: tuple[str, ...]
 
 
-def seal(server: str, tools: Iterable[Any], seen: Mapping[str, str], *, configuration: str) -> Sealed:
+def seal(
+    server: str, tools: Iterable[Any], seen: Mapping[str, str], *, configuration: str
+) -> Sealed:
     """Record the owner's trust in *server*'s labels, sealed to the tools they reviewed. *seen* is
     each tool the page showed them, with the digest it showed; *tools* is the server's listing now.
     A tool is sealed when the listing still defines it as shown. One defined differently by now, or
@@ -293,7 +313,11 @@ def seal(server: str, tools: Iterable[Any], seen: Mapping[str, str], *, configur
         servers = dict(_servers(TRUST_RECORD, strict=True))
         if not configuration or configuration_revision(server) != configuration:
             raise ValueError("The reviewed server configuration changed")
-        servers[server] = {"at": utc_now_iso(), "configuration": configuration, "tools": kept}
+        servers[server] = {
+            "at": utc_now_iso(),
+            "configuration": configuration,
+            "tools": kept,
+        }
         _write(TRUST_RECORD, servers)
     return Sealed(sealed=tuple(sorted(kept)), changed_since=tuple(changed_since))
 
@@ -389,16 +413,24 @@ def observe(server: str, tools: Iterable[Any]) -> None:
         _listings_changed += 1
     try:
         changed = _note_descriptions(server, defs)
-    except Exception:  # noqa: BLE001 - a record that cannot be written must not fail the start
-        logger.warning("MCP tool descriptions for %s could not be recorded", server, exc_info=True)
+    except (
+        Exception
+    ):  # noqa: BLE001 - a record that cannot be written must not fail the start
+        logger.warning(
+            "MCP tool descriptions for %s could not be recorded", server, exc_info=True
+        )
         return
     if not changed or holds_trust(server):
         return
     for listener in list(_listeners):
         try:
             listener(server, changed)
-        except Exception:  # noqa: BLE001 - the owner is told elsewhere if this one fails
-            logger.warning("MCP description notice for %s failed", server, exc_info=True)
+        except (
+            Exception
+        ):  # noqa: BLE001 - the owner is told elsewhere if this one fails
+            logger.warning(
+                "MCP description notice for %s failed", server, exc_info=True
+            )
 
 
 def _note_descriptions(server: str, defs: list[Definition]) -> tuple[str, ...]:
@@ -412,7 +444,9 @@ def _note_descriptions(server: str, defs: list[Definition]) -> tuple[str, ...]:
         # Nothing seen before can be compared, and the record is never written over: no notice.
         return ()
     before = held if isinstance(held, dict) else {}
-    changed = tuple(sorted(n for n, h in current.items() if n in before and before[n] != h))
+    changed = tuple(
+        sorted(n for n, h in current.items() if n in before and before[n] != h)
+    )
     if all(before.get(n) == h for n, h in current.items()):
         return changed
     with _locked(SEEN_RECORD):

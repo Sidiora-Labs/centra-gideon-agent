@@ -19,7 +19,9 @@ if TYPE_CHECKING:
     from gideon.automation.workflows.controller import RunController
 
 
-_LAST_SEGMENT = re.compile(r"\.(children\[(\d+)\]|cases\[[^\]]*\]|default|body(?:[#@]\d+)?)$")
+_LAST_SEGMENT = re.compile(
+    r"\.(children\[(\d+)\]|cases\[[^\]]*\]|default|body(?:[#@]\d+)?)$"
+)
 _FAULTS = frozenset(
     {
         InstanceState.FAILED,
@@ -108,14 +110,22 @@ def _parts(
     if node.kind in (NodeKind.SEQUENCE, NodeKind.PARALLEL):
         paths = [f"{path}.children[{i}]" for i in range(len(node.children))]
         masked = tolerate_failures(
-            node.children, [derived(child, child_path) for child, child_path in zip(node.children, paths)]
+            node.children,
+            [
+                derived(child, child_path)
+                for child, child_path in zip(node.children, paths)
+            ],
         )
         yield from zip(node.children, paths, masked)
     elif node.kind == NodeKind.FOREACH and node.body is not None:
         prefix = f"{path}.body#"
         items: set[int] = set()
         for other in ctl.instances:
-            head = other[len(prefix):].split(".", 1)[0] if other.startswith(prefix) else ""
+            head = (
+                other[len(prefix) :].split(".", 1)[0]
+                if other.startswith(prefix)
+                else ""
+            )
             if head.isdigit():
                 items.add(int(head))
         for index in sorted(items):
@@ -127,7 +137,9 @@ def _parts(
             yield case, case_path, derived(case, case_path)
         if node.default_case is not None:
             default_path = f"{path}.default"
-            yield node.default_case, default_path, derived(node.default_case, default_path)
+            yield node.default_case, default_path, derived(
+                node.default_case, default_path
+            )
 
 
 def _followers(ctl: RunController, path: str, nodes: dict[str, Node]) -> list[str]:
@@ -137,11 +149,18 @@ def _followers(ctl: RunController, path: str, nodes: dict[str, Node]) -> list[st
         match = _LAST_SEGMENT.search(cursor)
         if match is None:
             return out
-        parent = cursor[:match.start()]
+        parent = cursor[: match.start()]
         container = nodes.get(spec_path(parent))
-        if match.group(2) is not None and container is not None and container.kind == NodeKind.SEQUENCE:
+        if (
+            match.group(2) is not None
+            and container is not None
+            and container.kind == NodeKind.SEQUENCE
+        ):
             index = int(match.group(2))
-            out.extend(f"{parent}.children[{i}]" for i in range(index + 1, len(container.children)))
+            out.extend(
+                f"{parent}.children[{i}]"
+                for i in range(index + 1, len(container.children))
+            )
         cursor = parent
 
 
@@ -165,13 +184,21 @@ def for_failures(ctl: RunController) -> str:
     went_on = [path for path in paths if _ran_after(ctl, path, nodes)]
     first, rest = paths[0], paths[1:]
     if went_on == [first] and not rest:
-        return f"The run continued past {_first_part(ctl, nodes, first, joined=', which')}"
+        return (
+            f"The run continued past {_first_part(ctl, nodes, first, joined=', which')}"
+        )
     parts = []
     if went_on:
-        parts.append(f"The run continued past {_listed([_name(ctl, nodes, path) for path in went_on])}.")
+        parts.append(
+            f"The run continued past {_listed([_name(ctl, nodes, path) for path in went_on])}."
+        )
     parts.append(_first_part(ctl, nodes, first))
     for kind in _KINDS:
-        named = [_name(ctl, nodes, path) for path in rest if _kind(ctl.instances[path].state) == kind]
+        named = [
+            _name(ctl, nodes, path)
+            for path in rest
+            if _kind(ctl.instances[path].state) == kind
+        ]
         if named:
             parts.append(f"{_listed(named)} {_verb(kind, plural=len(named) > 1)} too.")
     return " ".join(parts)

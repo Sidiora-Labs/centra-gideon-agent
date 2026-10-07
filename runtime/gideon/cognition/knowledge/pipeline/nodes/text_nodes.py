@@ -66,22 +66,35 @@ class DocumentReadNode:
             ocr_provider = _model_ocr_provider()
         reader = FileReader(ocr_provider=ocr_provider)
         loop = asyncio.get_running_loop()
-        from gideon.workspace.uploads.content_intake import approve_path, approve_text, IntakeRefused
+        from gideon.workspace.uploads.content_intake import (
+            IntakeRefused,
+            approve_path,
+            approve_text,
+        )
 
-        snapshot = ctx.params.get('_approved_source')
+        snapshot = ctx.params.get("_approved_source")
         owned = snapshot is None
         try:
             if owned:
-                snapshot = await approve_path(ctx.file_path, surface='document_extraction')
-            read = asyncio.ensure_future(loop.run_in_executor(None, reader.read_approved, snapshot))
+                snapshot = await approve_path(
+                    ctx.file_path, surface="document_extraction"
+                )
+            read = asyncio.ensure_future(
+                loop.run_in_executor(None, reader.read_approved, snapshot)
+            )
             try:
                 text, meta = await asyncio.shield(read)
             except asyncio.CancelledError:
                 await read
                 raise
         except IntakeRefused as refused:
-            return NodeOutput(node_type=self.node_type, backend=self.backend, success=False,
-                              error=refused.message, metadata={'content_refusal': refused.code})
+            return NodeOutput(
+                node_type=self.node_type,
+                backend=self.backend,
+                success=False,
+                error=refused.message,
+                metadata={"content_refusal": refused.code},
+            )
         finally:
             if owned and snapshot is not None:
                 snapshot.close()
@@ -103,10 +116,15 @@ class DocumentReadNode:
             )
         meta.pop("title", None)
         try:
-            approved = await approve_text(text or '', surface='document_extraction')
+            approved = await approve_text(text or "", surface="document_extraction")
         except IntakeRefused as refused:
-            return NodeOutput(node_type=self.node_type, backend=self.backend, success=False,
-                              error=refused.message, metadata={'content_refusal': refused.code})
+            return NodeOutput(
+                node_type=self.node_type,
+                backend=self.backend,
+                success=False,
+                error=refused.message,
+                metadata={"content_refusal": refused.code},
+            )
         return NodeOutput(
             node_type=self.node_type,
             backend=self.backend,

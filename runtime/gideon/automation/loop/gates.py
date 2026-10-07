@@ -9,11 +9,11 @@ owns the lifecycle decision; these only supply the signal.
 
 from __future__ import annotations
 
-from gideon.core.turn_streams import closing_stream
 import asyncio
 import logging
 
 from gideon.core.cancellation import run_with_timeout
+from gideon.core.turn_streams import closing_stream
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +48,13 @@ async def run_verify_command(
     if danger:
         logger.warning("loop gate: refusing to run %s command — %s", label, danger)
         return None
-    from gideon.security.sandbox import egress_bound_argv, remove_wrap
     from gideon.security.guardrails.policy import unattended_dispatch_key
+    from gideon.security.sandbox import egress_bound_argv, remove_wrap
+
     try:
-        argv, cleanup = egress_bound_argv(["/bin/sh", "-c", cmd], run=unattended_dispatch_key("loop_gate"))
+        argv, cleanup = egress_bound_argv(
+            ["/bin/sh", "-c", cmd], run=unattended_dispatch_key("loop_gate")
+        )
     except PermissionError as error:
         logger.warning("loop gate: %s", error)
         return None

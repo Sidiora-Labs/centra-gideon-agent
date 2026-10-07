@@ -29,10 +29,20 @@ class TestLinkToDashboardCommand:
             patch.object(handler, "is_allowed_user", return_value=True),
         ):
             result = await handler._handle_slash_command(
-                "!link-to-dashboard", slack_desk, MagicMock(), "C1", "t1", "msg1", "t1", "U1",
+                "!link-to-dashboard",
+                slack_desk,
+                MagicMock(),
+                "C1",
+                "t1",
+                "msg1",
+                "t1",
+                "U1",
             )
         assert result == ""
-        assert any("not available" in str(c).lower() for c in slack_desk.post_message.call_args_list)
+        assert any(
+            "not available" in str(c).lower()
+            for c in slack_desk.post_message.call_args_list
+        )
 
     @pytest.mark.asyncio
     async def test_not_in_thread(self):
@@ -46,10 +56,19 @@ class TestLinkToDashboardCommand:
             patch.object(handler, "is_allowed_user", return_value=True),
         ):
             result = await handler._handle_slash_command(
-                "!link-to-dashboard", slack_desk, MagicMock(), "C1", "msg1", "msg1", "msg1", "U1",
+                "!link-to-dashboard",
+                slack_desk,
+                MagicMock(),
+                "C1",
+                "msg1",
+                "msg1",
+                "msg1",
+                "U1",
             )
         assert result == ""
-        assert any("thread" in str(c).lower() for c in slack_desk.post_message.call_args_list)
+        assert any(
+            "thread" in str(c).lower() for c in slack_desk.post_message.call_args_list
+        )
 
     @pytest.mark.asyncio
     async def test_empty_thread_returns_error(self):
@@ -67,10 +86,20 @@ class TestLinkToDashboardCommand:
             ),
         ):
             result = await handler._handle_slash_command(
-                "!link-to-dashboard", slack_desk, MagicMock(), "C1", "t1", "msg1", "t1", "U1",
+                "!link-to-dashboard",
+                slack_desk,
+                MagicMock(),
+                "C1",
+                "t1",
+                "msg1",
+                "t1",
+                "U1",
             )
         assert result == ""
-        assert any("could not" in str(c).lower() for c in slack_desk.post_message.call_args_list)
+        assert any(
+            "could not" in str(c).lower()
+            for c in slack_desk.post_message.call_args_list
+        )
 
     @pytest.mark.asyncio
     async def test_unauthorized_user_blocked(self):
@@ -79,10 +108,20 @@ class TestLinkToDashboardCommand:
         slack_desk = _make_slack_desk()
         with patch.object(handler, "is_allowed_user", return_value=False):
             result = await handler._handle_slash_command(
-                "!link-to-dashboard", slack_desk, MagicMock(), "C1", "t1", "msg1", "t1", "UBAD",
+                "!link-to-dashboard",
+                slack_desk,
+                MagicMock(),
+                "C1",
+                "t1",
+                "msg1",
+                "t1",
+                "UBAD",
             )
         assert result == ""
-        assert any("not authorized" in str(c).lower() for c in slack_desk.post_message.call_args_list)
+        assert any(
+            "not authorized" in str(c).lower()
+            for c in slack_desk.post_message.call_args_list
+        )
 
     @pytest.mark.asyncio
     async def test_success_emits_sel_audit(self):
@@ -107,7 +146,14 @@ class TestLinkToDashboardCommand:
                 ),
             ):
                 result = await handler._handle_slash_command(
-                    "!link-to-dashboard", slack_desk, MagicMock(), "C1", "t1", "msg1", "t1", "U1",
+                    "!link-to-dashboard",
+                    slack_desk,
+                    MagicMock(),
+                    "C1",
+                    "t1",
+                    "msg1",
+                    "t1",
+                    "U1",
                 )
         finally:
             handler.sel = orig_sel
@@ -154,7 +200,9 @@ def _door_services(state):
             async def turn_runner(st, session, text):
                 self.turns.append((session, text))
 
-            return await deliver_inbound(self, provider, msg, is_dm=is_dm, turn_runner=turn_runner)
+            return await deliver_inbound(
+                self, provider, msg, is_dm=is_dm, turn_runner=turn_runner
+            )
 
     return _Services()
 
@@ -187,7 +235,13 @@ class TestLinkedThreadIntercept:
                 patch.object(handler, "is_allowed_user", return_value=False),
             ):
                 await handler.handle_message(
-                    slack_desk, MagicMock(), "C1", "hello", "t1", "msg1", "UBAD",
+                    slack_desk,
+                    MagicMock(),
+                    "C1",
+                    "hello",
+                    "t1",
+                    "msg1",
+                    "UBAD",
                 )
                 mock_sel_inst.log_tool_invocation.assert_called_once()
                 kw = mock_sel_inst.log_tool_invocation.call_args[1]
@@ -219,7 +273,13 @@ class TestLinkedThreadIntercept:
             patch("gideon.channel_inbound.admit", _allowed_verdict),
         ):
             await handler.handle_message(
-                slack_desk, MagicMock(), "C1", "hello", "t1", "msg1", "U1",
+                slack_desk,
+                MagicMock(),
+                "C1",
+                "hello",
+                "t1",
+                "msg1",
+                "U1",
             )
             import asyncio as _aio
 
@@ -251,11 +311,22 @@ class TestLinkedThreadIntercept:
             patch.object(handler, "_gateway_services", services),
             patch.object(handler, "is_allowed_user", return_value=True),
             patch("gideon.channel_inbound.admit", _allowed_verdict),
-            patch("gideon.security.redact_exfiltration_urls", return_value=("[REDACTED-URL]", True)),
-            patch("gideon.security.redact_credentials", return_value=("[REDACTED]", True)),
+            patch(
+                "gideon.security.redact_exfiltration_urls",
+                return_value=("[REDACTED-URL]", True),
+            ),
+            patch(
+                "gideon.security.redact_credentials", return_value=("[REDACTED]", True)
+            ),
         ):
             await handler.handle_message(
-                slack_desk, MagicMock(), "C1", "hello http://evil.com", "t1", "msg1", "U1",
+                slack_desk,
+                MagicMock(),
+                "C1",
+                "hello http://evil.com",
+                "t1",
+                "msg1",
+                "U1",
             )
             import asyncio as _aio
 
@@ -274,7 +345,9 @@ class TestLinkedThreadIntercept:
         type(session).running = PropertyMock(return_value=True)
         session.key = "session1"
         session._queue = []
-        session.queue_append = lambda content: (session._queue.append({"id": "test", "content": content}) or "test")
+        session.queue_append = lambda content: (
+            session._queue.append({"id": "test", "content": content}) or "test"
+        )
         ds = MagicMock()
         ds.get_linked_session = MagicMock(return_value=session)
         ds.broadcast_ws = MagicMock()
@@ -288,7 +361,13 @@ class TestLinkedThreadIntercept:
             patch("gideon.channel_inbound.admit", _allowed_verdict),
         ):
             await handler.handle_message(
-                slack_desk, MagicMock(), "C1", "hello", "t1", "msg1", "U1",
+                slack_desk,
+                MagicMock(),
+                "C1",
+                "hello",
+                "t1",
+                "msg1",
+                "U1",
             )
             assert len(session._queue) == 1
             assert services.turns == []
@@ -298,8 +377,9 @@ class TestLinkedThreadIntercept:
         """When the door denies (e.g. an untracked group), nothing is routed and
         the SEL row records the door's reason — the intercept still returns, so a
         linked thread's message never falls through to the ACP path."""
-        from gideon.sdk.channel import TrustVerdict
         from slack_desk_runtime import handler
+
+        from gideon.sdk.channel import TrustVerdict
 
         slack_desk = _make_slack_desk()
         session = MagicMock()
@@ -322,7 +402,13 @@ class TestLinkedThreadIntercept:
                 patch("gideon.channel_inbound.admit", _denied),
             ):
                 await handler.handle_message(
-                    slack_desk, MagicMock(), "C1", "hello", "t1", "msg1", "U1",
+                    slack_desk,
+                    MagicMock(),
+                    "C1",
+                    "hello",
+                    "t1",
+                    "msg1",
+                    "U1",
                 )
         finally:
             handler.sel = orig_sel
@@ -350,10 +436,21 @@ class TestLinkedThreadIntercept:
             patch.object(handler, "_gateway_services", services),
             patch.object(handler, "is_allowed_user", return_value=True),
             patch.object(handler, "is_owner", return_value=True),
-            patch.object(handler, "_handle_slash_command", new_callable=AsyncMock, return_value="") as slash,
+            patch.object(
+                handler,
+                "_handle_slash_command",
+                new_callable=AsyncMock,
+                return_value="",
+            ) as slash,
         ):
             await handler.handle_message(
-                slack_desk, MagicMock(), "C1", "!yolo", "t1", "msg1", "U1",
+                slack_desk,
+                MagicMock(),
+                "C1",
+                "!yolo",
+                "t1",
+                "msg1",
+                "U1",
             )
             assert services.turns == []
             slash.assert_called_once()
@@ -366,8 +463,9 @@ class TestChannelTrustWriteThrough:
     """Owner actions land in core's channel_trust store, not only SlackDeskSettings."""
 
     def test_persist_allowed_user_writes_through(self, monkeypatch):
-        import gideon.channel_trust as ct
         from slack_desk_runtime import allowlist
+
+        import gideon.channel_trust as ct
 
         monkeypatch.setattr(
             "slack_desk_runtime.settings.persist_list_entry", lambda *a, **kw: None
@@ -379,8 +477,9 @@ class TestChannelTrustWriteThrough:
         assert not ct.is_allowed_sender("slack", "U7")
 
     def test_persist_tracking_channel_writes_through(self, monkeypatch):
-        import gideon.channel_trust as ct
         from slack_desk_runtime import allowlist
+
+        import gideon.channel_trust as ct
 
         monkeypatch.setattr(
             "slack_desk_runtime.settings.persist_list_entry", lambda *a, **kw: None
@@ -392,8 +491,9 @@ class TestChannelTrustWriteThrough:
         assert not ct.is_tracked_channel("slack", "C9")
 
     def test_sync_channel_trust_mirrors_owner_and_channels(self):
-        import gideon.channel_trust as ct
         from slack_desk_runtime.allowlist import sync_channel_trust
+
+        import gideon.channel_trust as ct
 
         sync_channel_trust("UOWNER", {"C1", "C2"})
         assert ct.is_allowed_sender("slack", "UOWNER")
@@ -404,19 +504,19 @@ class TestChannelTrustWriteThrough:
         sync_channel_trust("UOWNER", {"C1", "C2"})
 
     def test_claim_owner_seeds_channel_trust(self, monkeypatch):
-        import gideon.channel_trust as ct
         from slack_desk_runtime import handler
 
+        import gideon.channel_trust as ct
+
         monkeypatch.setattr(handler, "_owner_id", "")
-        monkeypatch.setattr(
-            "gideon.sdk.channel.save_credential", lambda *a, **kw: None
-        )
+        monkeypatch.setattr("gideon.sdk.channel.save_credential", lambda *a, **kw: None)
         assert handler.claim_owner("UNEW") is True
         assert ct.is_allowed_sender("slack", "UNEW")
 
     def test_track_linked_channel_tracks_groups_not_dms(self):
-        import gideon.channel_trust as ct
         from slack_desk_runtime.handler import _track_linked_channel
+
+        import gideon.channel_trust as ct
 
         _track_linked_channel("C42")
         assert ct.is_tracked_channel("slack", "C42")

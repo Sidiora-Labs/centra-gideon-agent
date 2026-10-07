@@ -12,7 +12,6 @@ import smtplib
 from email.message import EmailMessage
 
 import pytest
-
 from mail_desk_runtime.smtp_client import (
     SMTP_TIMEOUT_SECS,
     SmtpError,
@@ -93,7 +92,14 @@ class TestTransportSelection:
         after TLS — otherwise login is attempted against the pre-TLS advertisement."""
         SmtplibSender("mail.test", 587, "u", "p", security="starttls").send(_msg())
         client = FakeSmtp.instances[-1]
-        assert client.calls == ["ehlo", "starttls", "ehlo", "login", "send_message", "quit"]
+        assert client.calls == [
+            "ehlo",
+            "starttls",
+            "ehlo",
+            "login",
+            "send_message",
+            "quit",
+        ]
 
     def test_ssl_skips_starttls_entirely(self):
         SmtplibSender("mail.test", 465, "u", "p", security="ssl").send(_msg())

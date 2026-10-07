@@ -9,15 +9,12 @@ store is faked to a dict here (that IS the seam core hands the step:
 ``get_credential`` / ``save_credential`` callables), while the app store is the real
 ``ProviderSettings`` writing under the tmp ``GIDEON_HOME``."""
 
-
 from __future__ import annotations
-
-import pytest
-from gideon.sdk.channel import CRED_OWNER_ID, ProviderSettings, save_credential
-from gideon.sdk.cli import SetupContext
 
 import discord_desk_doctor
 import discord_desk_setup
+import pytest
+from discord_desk.settings import CRED_BOT_TOKEN
 from discord_desk_setup import (
     INVITE_PERMISSIONS,
     PERM_ADD_REACTIONS,
@@ -28,7 +25,9 @@ from discord_desk_setup import (
     PERM_VIEW_CHANNEL,
     invite_url,
 )
-from discord_desk.settings import CRED_BOT_TOKEN
+
+from gideon.sdk.channel import CRED_OWNER_ID, ProviderSettings, save_credential
+from gideon.sdk.cli import SetupContext
 
 _APP = "gideonai-discord-desk"
 
@@ -134,10 +133,14 @@ class TestInvitePermissions:
 
     @pytest.mark.parametrize(
         "bit,expected",
-        [(PERM_ADD_REACTIONS, 1 << 6), (PERM_VIEW_CHANNEL, 1 << 10),
-         (PERM_SEND_MESSAGES, 1 << 11), (PERM_ATTACH_FILES, 1 << 15),
-         (PERM_READ_MESSAGE_HISTORY, 1 << 16),
-         (PERM_SEND_MESSAGES_IN_THREADS, 1 << 38)],
+        [
+            (PERM_ADD_REACTIONS, 1 << 6),
+            (PERM_VIEW_CHANNEL, 1 << 10),
+            (PERM_SEND_MESSAGES, 1 << 11),
+            (PERM_ATTACH_FILES, 1 << 15),
+            (PERM_READ_MESSAGE_HISTORY, 1 << 16),
+            (PERM_SEND_MESSAGES_IN_THREADS, 1 << 38),
+        ],
     )
     def test_documented_bit_positions(self, bit, expected):
         assert bit == expected
@@ -192,5 +195,7 @@ class TestDoctor:
     def test_token_value_is_never_printed(self):
         """A doctor section is pasted into issues — it must not leak the secret."""
         save_credential(CRED_BOT_TOKEN, "super.secret.token")
-        rendered = " ".join(f"{line.label}{line.detail}" for line in discord_desk_doctor.probe())
+        rendered = " ".join(
+            f"{line.label}{line.detail}" for line in discord_desk_doctor.probe()
+        )
         assert "super.secret.token" not in rendered

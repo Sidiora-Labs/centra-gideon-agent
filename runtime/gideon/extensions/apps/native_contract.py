@@ -41,9 +41,9 @@ the workspace ``apps/`` dir is absent).
 from __future__ import annotations
 
 import ast
-from contextlib import contextmanager
 import importlib.util
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -138,6 +138,7 @@ def load_bundle_module(ext_dir: Path, app_name: str, module_path: str) -> Any:
     if root not in file_path.parents:
         raise ImportError("App module resolves outside its code directory")
     from gideon.extensions.apps.code_provenance import loading
+
     unique_name = namespaced_module_name(app_name, module_path)
     cached = sys.modules.get(unique_name)
     if cached is not None:

@@ -111,7 +111,9 @@ def resolve_service_environment(
             or env_name_is_sensitive(name)
             or _credential_field(name)
         ):
-            raise ServiceEnvironmentError(f"{name} is not an allowlisted service variable")
+            raise ServiceEnvironmentError(
+                f"{name} is not an allowlisted service variable"
+            )
         if not _safe_value(name, value):
             excluded.add(name)
             raise ServiceEnvironmentError(
@@ -123,11 +125,17 @@ def resolve_service_environment(
     for raw_name in removals:
         name = str(raw_name)
         if not _ENV_NAME.fullmatch(name):
-            raise ServiceEnvironmentError("--no-env requires an environment variable name")
+            raise ServiceEnvironmentError(
+                "--no-env requires an environment variable name"
+            )
         if name in SERVICE_OWNED_ENVIRONMENT_NAMES:
-            raise ServiceEnvironmentError(f"{name} is service-owned and cannot be removed")
+            raise ServiceEnvironmentError(
+                f"{name} is service-owned and cannot be removed"
+            )
         if name not in SERVICE_ENVIRONMENT_ALLOWLIST:
-            raise ServiceEnvironmentError(f"{name} is not an allowlisted service variable")
+            raise ServiceEnvironmentError(
+                f"{name} is not an allowlisted service variable"
+            )
         values.pop(name, None)
         excluded.discard(name)
 
@@ -142,10 +150,14 @@ def systemd_environment_lines(
     all_values = {**(fixed_values or {}), **environment.values}
     for name, value in sorted(all_values.items()):
         if "\x00" in value or "\r" in value or "\n" in value:
-            raise ServiceEnvironmentError(f"{name} cannot be serialized as a service value")
+            raise ServiceEnvironmentError(
+                f"{name} cannot be serialized as a service value"
+            )
         escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
         lines.append(f'Environment="{name}={escaped}"')
-    lines.extend(f"# GideonEnvironmentExcluded={name}" for name in environment.excluded_names)
+    lines.extend(
+        f"# GideonEnvironmentExcluded={name}" for name in environment.excluded_names
+    )
     return "\n".join(lines)
 
 

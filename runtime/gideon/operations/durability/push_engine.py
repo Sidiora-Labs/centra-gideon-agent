@@ -150,7 +150,10 @@ def _commit_registry(
         # stop rather than risk announcing a second shard set.
         remote_self = remote.machines.get(self_id)
         if remote_self is not None and remote_self.seq >= report.seq:
-            if remote_self.seq == report.seq and remote_self.manifest_sha == manifest_sha:
+            if (
+                remote_self.seq == report.seq
+                and remote_self.manifest_sha == manifest_sha
+            ):
                 return True
             report.detail = "registry read-back advanced this machine; refusing a duplicate shard announcement"
             return False
@@ -172,7 +175,9 @@ def _commit_registry(
         # different prefix and make the published shard set undiscoverable.
         local_self = registry.machines.get(self_id)
         if local_self is None or local_self.seq != report.seq:
-            report.detail = "local registry sequence no longer matches the published shard set"
+            report.detail = (
+                "local registry sequence no longer matches the published shard set"
+            )
             return False
         merged.machines[self_id] = local_self
         for mid, e in registry.machines.items():

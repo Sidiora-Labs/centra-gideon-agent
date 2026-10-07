@@ -28,25 +28,43 @@ class MessageDelivery:
     async def open_dm(self, user_id: str) -> str:
         return user_id
 
-    async def deliver_text(self, channel: str, text: str, thread_ts: str = "", **kwargs: Any) -> str:
+    async def deliver_text(
+        self, channel: str, text: str, thread_ts: str = "", **kwargs: Any
+    ) -> str:
         result = await self.transport.send(OutboundMessage(channel, text, thread_ts))
         if not result:
             raise ConnectionError(f"{self.transport.name} message was not accepted")
         return str(result) if result is not True else ""
 
-    async def deliver_rich(self, channel: str, payload: object, fallback_text: str, *, thread_ts: str = "", **kwargs: Any) -> str:
+    async def deliver_rich(
+        self,
+        channel: str,
+        payload: object,
+        fallback_text: str,
+        *,
+        thread_ts: str = "",
+        **kwargs: Any,
+    ) -> str:
         return await self.deliver_text(channel, fallback_text, thread_ts)
 
-    async def deliver_cron_result(self, channel: str, job_name: str, job_id: str, text: str, thread_ts: str = "") -> str:
+    async def deliver_cron_result(
+        self, channel: str, job_name: str, job_id: str, text: str, thread_ts: str = ""
+    ) -> str:
         return await self.deliver_text(channel, f"{job_name}\n{text}", thread_ts)
 
-    async def deliver_notification(self, channel: str, title: str, text: str, thread_ts: str = "") -> str:
+    async def deliver_notification(
+        self, channel: str, title: str, text: str, thread_ts: str = ""
+    ) -> str:
         return await self.deliver_text(channel, f"{title}\n{text}", thread_ts)
 
-    async def deliver_chat_mirror(self, channel: str, text: str, thread_ts: str = "") -> None:
+    async def deliver_chat_mirror(
+        self, channel: str, text: str, thread_ts: str = ""
+    ) -> None:
         await self.deliver_text(channel, text, thread_ts)
 
-    async def deliver_subagent_reply(self, channel: str, text: str, thread_ts: str = "", elapsed_secs: float = 0.0) -> None:
+    async def deliver_subagent_reply(
+        self, channel: str, text: str, thread_ts: str = "", elapsed_secs: float = 0.0
+    ) -> None:
         await self.deliver_text(channel, text, thread_ts)
 
     async def resolve_user_name(self, user_id: str) -> str:
@@ -56,7 +74,10 @@ class MessageDelivery:
         return {"id": user_id}
 
     async def channel_info(self, channel_id: str) -> dict[str, Any]:
-        return {"id": channel_id, "name": self.transport._channels.get(channel_id, channel_id)}
+        return {
+            "id": channel_id,
+            "name": self.transport._channels.get(channel_id, channel_id),
+        }
 
     def list_reply_channels(self) -> list[dict[str, str]]:
         return [
@@ -72,19 +93,33 @@ class MessageDelivery:
     def build_thread_link(self, channel: str, ts: str) -> str:
         return ""
 
-    async def upload_attachment(self, channel: str, file_path: str, **kwargs: Any) -> str:
+    async def upload_attachment(
+        self, channel: str, file_path: str, **kwargs: Any
+    ) -> str:
         raise NotImplementedError(f"{self.transport.name} does not support file upload")
 
-    async def start_stream(self, channel: str, thread_ts: str = "", initial_text: str = "") -> str:
+    async def start_stream(
+        self, channel: str, thread_ts: str = "", initial_text: str = ""
+    ) -> str:
         return ""
 
-    async def append_stream_task(self, channel: str, stream_ts: str, task_id: str, title: str, status: str) -> None:
+    async def append_stream_task(
+        self, channel: str, stream_ts: str, task_id: str, title: str, status: str
+    ) -> None:
         return None
 
     async def stop_stream(self, channel: str, stream_ts: str) -> None:
         return None
 
-    async def request_approval(self, event: object, *, source: str, parent_session_key: str = "", sessions: object | None = None, on_prompted: Any = None) -> None:
+    async def request_approval(
+        self,
+        event: object,
+        *,
+        source: str,
+        parent_session_key: str = "",
+        sessions: object | None = None,
+        on_prompted: Any = None,
+    ) -> None:
         return None
 
 
@@ -155,19 +190,33 @@ class MessagingTransport(ChannelTransportProvider):
     async def _close(self) -> None:
         raise NotImplementedError
 
-    async def _inbound(self, chat: str, sender: str, text: str, *, message_id: str, is_dm: bool, thread: str = "", metadata: dict[str, Any] | None = None) -> None:
+    async def _inbound(
+        self,
+        chat: str,
+        sender: str,
+        text: str,
+        *,
+        message_id: str,
+        is_dm: bool,
+        thread: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         if not text.strip() or not chat or not sender or not message_id:
             return
         msg = ChannelMessage(
             channel_id=chat,
             text=text,
             sender=sender,
-            thread_id=f"{self.name}:{chat}:{thread}" if thread else f"{self.name}:{chat}",
+            thread_id=(
+                f"{self.name}:{chat}:{thread}" if thread else f"{self.name}:{chat}"
+            ),
             message_id=message_id,
             ts=time.time(),
             metadata=metadata or {},
         )
-        verdict = await self.services.deliver_channel_inbound(self.name, msg, is_dm=is_dm)
+        verdict = await self.services.deliver_channel_inbound(
+            self.name, msg, is_dm=is_dm
+        )
         if verdict.allowed:
             self._channels[chat] = str((metadata or {}).get("channel_name") or chat)
             self._channels.move_to_end(chat)

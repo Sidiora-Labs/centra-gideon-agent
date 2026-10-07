@@ -21,10 +21,10 @@ path (by design).
 from __future__ import annotations
 
 import contextlib
-import re
 import hashlib
 import json
 import logging
+import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -169,8 +169,11 @@ def _id_label(slug: str) -> str:
     Built from that allowlist, never by removing what is unsafe, so no spelling of a name can
     bring a separator, a parent-folder segment or a drive into the id.
     """
-    label = re.sub(r"[^a-z0-9]+", "-", slug.lower()).strip("-")[:_ID_LABEL_MAX].rstrip("-")
+    label = (
+        re.sub(r"[^a-z0-9]+", "-", slug.lower()).strip("-")[:_ID_LABEL_MAX].rstrip("-")
+    )
     return label or "proposal"
+
 
 def _make_id(slug: str, session_key: str, created_at: str) -> str:
     """The id of a proposal for *slug*: the name of one file, directly in the proposals folder.
@@ -186,8 +189,11 @@ def _make_id(slug: str, session_key: str, created_at: str) -> str:
     The digest covers the whole slug, so two names that read the same once flattened (``a/b`` and
     ``a-b``) still get two ids.
     """
-    h = hashlib.sha1(f"{slug}|{session_key}|{created_at}".encode("utf-8")).hexdigest()[:12]
+    h = hashlib.sha1(f"{slug}|{session_key}|{created_at}".encode("utf-8")).hexdigest()[
+        :12
+    ]
     return f"{_id_label(slug)}-{h}"
+
 
 def _successor(old_id: object) -> str:
     """The id a proposal the store filed as *old_id* has now, or ``""`` when *old_id* is an id
@@ -204,6 +210,7 @@ def _successor(old_id: object) -> str:
     old = _OLD_ID.fullmatch(old_id)
     return f"{_id_label(old['slug'])}-{old['digest']}" if old else ""
 
+
 def _own_slug(prop: SkillProposal) -> str:
     """The slug of the ``auto/`` skill *prop* names as the user's own, or ``""`` when its slug
     holds nothing the auto namespace can spell.
@@ -217,13 +224,17 @@ def _own_slug(prop: SkillProposal) -> str:
     name: the slug in the namespace's alphabet, without the ``auto/`` it may already carry, so a
     deleted ``auto/`` skill comes back under its own name.
     """
-    from gideon.extensions.skills.loader import AUTO_SKILL_NAMESPACE, _auto_name_from_title
+    from gideon.extensions.skills.loader import (
+        AUTO_SKILL_NAMESPACE,
+        _auto_name_from_title,
+    )
 
     return _auto_name_from_title(prop.slug.removeprefix(f"{AUTO_SKILL_NAMESPACE}/"))
 
 
 def accept_target(*, slug: str, kind: str = "new", refine_target: str = "") -> str:
     from gideon.extensions.skills.loader import _auto_name_from_title
+
     own = _auto_name_from_title(slug.removeprefix("auto/")) or slug
     return refine_target if kind == "refine" and refine_target else f"auto/{own}"
 
@@ -256,8 +267,8 @@ def coalesce_reason(
     cutoff = incoming.timestamp() - _COALESCE_WINDOW_SECONDS
     if kind == "refine":
         from gideon.extensions.skills import overlays
-
         from gideon.extensions.skills.loader import ProcedureLibrary, overlay_identity
+
         path = ProcedureLibrary(install_builtins=False).skill_file(subject)
         identity = subject
         if path is not None:
@@ -502,14 +513,26 @@ def _move_old_records(d: Path) -> int:
     for old_file in found:
         if old_file.parent == d and is_safe_record_id(old_file.stem):
             continue
-        if any(part.is_symlink() for part in (old_file, *old_file.parents) if part != d.parent) or not old_file.resolve().is_relative_to(d.resolve()) or not old_file.is_file():
+        if (
+            any(
+                part.is_symlink()
+                for part in (old_file, *old_file.parents)
+                if part != d.parent
+            )
+            or not old_file.resolve().is_relative_to(d.resolve())
+            or not old_file.is_file()
+        ):
             continue
         try:
             rec = SkillProposal(**json.loads(old_file.read_text(encoding="utf-8")))
         except (OSError, ValueError, TypeError):
             continue
         new_id = _successor(rec.id)
-        if not new_id or _make_id(rec.slug, rec.session_key, rec.created_at) != new_id or old_file.relative_to(d).as_posix() != f"{rec.id}.json":
+        if (
+            not new_id
+            or _make_id(rec.slug, rec.session_key, rec.created_at) != new_id
+            or old_file.relative_to(d).as_posix() != f"{rec.id}.json"
+        ):
             continue
         old_id, rec.id = rec.id, new_id
         target = _path(new_id)
@@ -544,6 +567,7 @@ def _move_old_records(d: Path) -> int:
         logger.info("moved %d skill proposal(s) to ids the store can address", moved)
     return moved
 
+
 def _point_rows_at_moved_records(store: Any) -> list[Any]:
     """Point every Inbox row that names its proposal by an old id at the id the record was moved
     to (:func:`_successor`), its dedup key with it. Returns the rows it changed.
@@ -561,7 +585,12 @@ def _point_rows_at_moved_records(store: Any) -> list[Any]:
             continue
         record = _load(new_id)
         match = _OLD_ID.fullmatch(old_id)
-        if record is None or not match or record.slug != match["slug"] or _make_id(record.slug, record.session_key, record.created_at) != new_id:
+        if (
+            record is None
+            or not match
+            or record.slug != match["slug"]
+            or _make_id(record.slug, record.session_key, record.created_at) != new_id
+        ):
             continue
         row.refs["skill_proposal"] = new_id
         if row.refs.get("dedup_key") == f"skill_proposal:{old_id}":
@@ -569,9 +598,11 @@ def _point_rows_at_moved_records(store: Any) -> list[Any]:
         changed.append(row)
     return changed
 
+
 def _announce_rows(rows: list[Any]) -> None:
     """Send each changed row to every open surface, as every other writer of a row does."""
     from gideon.integrations.inbox_providers.native_source import get_dashboard_state
+
     state = get_dashboard_state()
     if state is None:
         return
@@ -580,8 +611,13 @@ def _announce_rows(rows: list[Any]) -> None:
     for row in rows:
         try:
             state.broadcast_ws("inbox_item_updated", redact_item(row.to_dict()))
-        except Exception:  # noqa: BLE001 — a surface missing a frame re-reads; the row is saved
-            logger.debug("proposal row %s: could not announce it", row.id, exc_info=True)
+        except (
+            Exception
+        ):  # noqa: BLE001 — a surface missing a frame re-reads; the row is saved
+            logger.debug(
+                "proposal row %s: could not announce it", row.id, exc_info=True
+            )
+
 
 def backfill_inbox_items(pending: "list[SkillProposal] | None" = None) -> int:
     """Give every pending proposal an inbox item if it doesn't have one. Returns how many.
@@ -735,6 +771,7 @@ def accept(
     if target:
         try:
             from gideon.extensions.skills.loader import hold_library, overlay_identity
+
             with hold_library():
                 if _load(pid) is None:
                     raise ValueError("This proposal was already resolved")
@@ -746,7 +783,11 @@ def accept(
                     root = root.parent
                 identity = overlay_identity(root, target)
                 records = overlays._records(identity)
-                records.append(overlays.Refinement(eff_description, eff_procedure, prop.created_at, prop.trigger).to_dict())
+                records.append(
+                    overlays.Refinement(
+                        eff_description, eff_procedure, prop.created_at, prop.trigger
+                    ).to_dict()
+                )
                 overlay_path = overlays.overlay_path(identity)
                 if overlay_path is None:
                     raise ValueError("Invalid refinement identity")

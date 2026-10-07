@@ -279,9 +279,8 @@ class ToolTypeHandler(_TypeHandler):
         return factory(config)
 
     def register(self, ext: RegisteredProvider, instance: Any) -> None:
-        from gideon.integrations.tool_providers.registry import register_provider
-
         from gideon.extensions.apps.app_manager import trust_tier_of
+        from gideon.integrations.tool_providers.registry import register_provider
 
         owner_type = "core" if trust_tier_of(ext.name) == "builtin" else "app"
 
@@ -294,18 +293,15 @@ class ToolTypeHandler(_TypeHandler):
                 provider,
                 owner_type=owner_type,
                 owner=ext.name,
-                instance_id=str(
-                    getattr(provider, "instance_id", "") or ext.name
-                ),
+                instance_id=str(getattr(provider, "instance_id", "") or ext.name),
                 status_callback=update_status,
             )
             if result.get("accepted") is False:
                 update_status(result)
 
     def deregister(self, ext: RegisteredProvider, instance: Any) -> None:
-        from gideon.integrations.tool_providers.registry import unregister_provider
-
         from gideon.extensions.apps.app_manager import trust_tier_of
+        from gideon.integrations.tool_providers.registry import unregister_provider
 
         owner_type = "core" if trust_tier_of(ext.name) == "builtin" else "app"
         providers = instance if isinstance(instance, list) else [instance]

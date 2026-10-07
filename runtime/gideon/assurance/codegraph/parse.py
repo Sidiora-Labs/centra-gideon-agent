@@ -248,9 +248,7 @@ def _get_parser(language: str):
         settings = configure_library_environment()
         from tree_sitter_language_pack import PackConfig, configure, get_parser
 
-        configure(
-            PackConfig(cache_dir=settings["TREE_SITTER_LANGUAGE_PACK_CACHE_DIR"])
-        )
+        configure(PackConfig(cache_dir=settings["TREE_SITTER_LANGUAGE_PACK_CACHE_DIR"]))
         from gideon.assurance.codegraph.grammars import ensure
 
         ensure(language)

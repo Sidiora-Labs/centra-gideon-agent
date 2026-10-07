@@ -64,7 +64,11 @@ def action_summary(status: str, result: Any = None, error: str = "") -> str:
         payload = {}
     workflow = str(payload.get("workflow") or "").strip()
     if status == "launched":
-        return f"Workflow {workflow!r} launched." if workflow else "The workflow run was launched."
+        return (
+            f"Workflow {workflow!r} launched."
+            if workflow
+            else "The workflow run was launched."
+        )
     if status == "queued":
         return (
             f"Workflow {workflow!r} queued behind a run already in flight."

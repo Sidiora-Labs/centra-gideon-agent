@@ -47,6 +47,7 @@ def sensitive_field_names(schema: dict[str, Any]) -> set[str]:
     if not isinstance(props, dict):
         return set()
     from gideon.core.config.document import _credential_field
+
     return {
         key
         for key, spec in props.items()

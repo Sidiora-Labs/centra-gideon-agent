@@ -13,12 +13,15 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise urllib.error.URLError("gateway callback redirects are forbidden")
 
 
-_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+_LOCAL_OPENER = urllib.request.build_opener(
+    urllib.request.ProxyHandler({}), _NoRedirect()
+)
 
 RESULT_PREFIX = "__GIDEON_SCRIPT_RESULT__"
 
@@ -62,9 +65,14 @@ class GatewayChannel:
 
     def send(self, path: str, body: dict):
         if self.secret_unavailable:
-            return {"ok": False, "status": 0, "error": {
-                "code": "internal_secret_unavailable", "message": self.secret_unavailable,
-            }}
+            return {
+                "ok": False,
+                "status": 0,
+                "error": {
+                    "code": "internal_secret_unavailable",
+                    "message": self.secret_unavailable,
+                },
+            }
         request = urllib.request.Request(
             url=self.address + path,
             headers=self.headers,

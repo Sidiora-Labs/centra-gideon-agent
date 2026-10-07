@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from gideon.security.safety_flags import yes_or_no
-
 import hashlib
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
+
+from gideon.security.safety_flags import yes_or_no
 
 DEFAULT_TTL_SECS = 7 * 24 * 3600
 MAX_PREVIEW_CHARS = 400

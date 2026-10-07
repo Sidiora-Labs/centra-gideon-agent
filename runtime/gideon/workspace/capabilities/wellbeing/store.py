@@ -69,7 +69,7 @@ def normalized(kind, unit, values):
     return unit, numbers
 
 
-class MeasurementStore:
+class MeasurementDatabase:
     def __init__(self, home: Path):
         self.path = Path(home) / "capabilities" / "wellbeing.sqlite3"
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -94,6 +94,8 @@ class MeasurementStore:
         finally:
             db.close()
 
+
+class MeasurementStore(MeasurementDatabase):
     def _get(self, db, identity):
         row = db.execute(
             "SELECT data FROM revisions WHERE id=? ORDER BY revision DESC LIMIT 1",

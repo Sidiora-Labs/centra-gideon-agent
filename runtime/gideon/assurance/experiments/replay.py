@@ -21,12 +21,33 @@ def _root() -> Path:
 
 
 def _digest(value: Any) -> str:
-    raw = json.dumps(value, sort_keys=True, ensure_ascii=False, default=str, separators=(",", ":"))
+    raw = json.dumps(
+        value, sort_keys=True, ensure_ascii=False, default=str, separators=(",", ":")
+    )
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-_PLAIN = {"kind", "node_id", "instance_path", "epoch", "effect_status", "state", "status", "provider", "tool", "lane"}
-_IGNORE = {"at", "ts", "timestamp", "elapsed_ms", "elapsed_seconds", "wall_time", "event_id"}
+_PLAIN = {
+    "kind",
+    "node_id",
+    "instance_path",
+    "epoch",
+    "effect_status",
+    "state",
+    "status",
+    "provider",
+    "tool",
+    "lane",
+}
+_IGNORE = {
+    "at",
+    "ts",
+    "timestamp",
+    "elapsed_ms",
+    "elapsed_seconds",
+    "wall_time",
+    "event_id",
+}
 
 
 def _event(row: dict[str, Any]) -> dict[str, Any]:
@@ -45,11 +66,17 @@ def _steps(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not path:
             continue
         key = (path, str(event.get("epoch") or 0))
-        step = ordered.setdefault(key, {
-            "instance_path": path, "epoch": event.get("epoch", 0),
-            "node_id": event.get("node_id", ""), "state": "pending",
-            "attempts": 0, "events": [],
-        })
+        step = ordered.setdefault(
+            key,
+            {
+                "instance_path": path,
+                "epoch": event.get("epoch", 0),
+                "node_id": event.get("node_id", ""),
+                "state": "pending",
+                "attempts": 0,
+                "events": [],
+            },
+        )
         kind = str(event.get("kind") or "")
         step["events"].append(event)
         if kind == "step_attempt":
@@ -89,10 +116,20 @@ def _record(run_id: str) -> dict[str, Any]:
 def capture(run_id: str) -> dict[str, Any]:
     body = _record(run_id)
     replay_id = secrets.token_hex(12)
-    artifact = {"id": replay_id, "created_at": datetime.now(timezone.utc).isoformat(), **body}
+    artifact = {
+        "id": replay_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        **body,
+    }
     path = _root() / f"{replay_id}.json"
-    atomic_write(path, json.dumps(artifact, ensure_ascii=False, sort_keys=True, indent=2), mode=0o600)
-    return {key: value for key, value in artifact.items() if key != "events"} | {"event_count": len(body["events"])}
+    atomic_write(
+        path,
+        json.dumps(artifact, ensure_ascii=False, sort_keys=True, indent=2),
+        mode=0o600,
+    )
+    return {key: value for key, value in artifact.items() if key != "events"} | {
+        "event_count": len(body["events"])
+    }
 
 
 def read(replay_id: str) -> dict[str, Any]:
@@ -110,7 +147,13 @@ def compare(replay_id: str, candidate_run_id: str = "") -> dict[str, Any]:
     divergence: list[dict[str, Any]] = []
     for field in ("workflow_name", "status", "spec_sha256"):
         if baseline.get(field) != candidate.get(field):
-            divergence.append({"path": field, "recorded": baseline.get(field), "candidate": candidate.get(field)})
+            divergence.append(
+                {
+                    "path": field,
+                    "recorded": baseline.get(field),
+                    "candidate": candidate.get(field),
+                }
+            )
     first = baseline.get("events") or []
     second = candidate["events"]
     before_steps = _steps(first)
@@ -120,13 +163,25 @@ def compare(replay_id: str, candidate_run_id: str = "") -> dict[str, Any]:
         new = after_steps[index] if index < len(after_steps) else {}
         for key in ("instance_path", "epoch", "node_id", "state", "attempts"):
             if old.get(key) != new.get(key):
-                divergence.append({"path": f"steps[{index}].{key}", "recorded": old.get(key), "candidate": new.get(key)})
+                divergence.append(
+                    {
+                        "path": f"steps[{index}].{key}",
+                        "recorded": old.get(key),
+                        "candidate": new.get(key),
+                    }
+                )
     for index in range(max(len(first), len(second))):
         old = first[index] if index < len(first) else {}
         new = second[index] if index < len(second) else {}
         for key in sorted(set(old) | set(new)):
             if old.get(key) != new.get(key):
-                divergence.append({"path": f"events[{index}].{key}", "recorded": old.get(key), "candidate": new.get(key)})
+                divergence.append(
+                    {
+                        "path": f"events[{index}].{key}",
+                        "recorded": old.get(key),
+                        "candidate": new.get(key),
+                    }
+                )
     return {
         "replay_id": replay_id,
         "recorded_run_id": baseline["run_id"],

@@ -19,8 +19,8 @@ from gideon.core.http_request import read_json_body
 from gideon.core.layout import package_path
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.interfaces.dashboard.token_auth import (
-    MAX_SESSION_TTL_SECS,
     DEFAULT_BROWSER_SESSION_TTL_SECS,
+    MAX_SESSION_TTL_SECS,
     generate_token,
     parse_duration,
 )
@@ -205,7 +205,9 @@ async def assistant_entry(request: web.Request) -> web.StreamResponse:
     accept = request.headers.get("Accept", "")
     if "text/html" in accept:
         return web.FileResponse(entry, headers={"Content-Type": "text/html"})
-    return web.Response(status=404, text="Assistant route not found", content_type="text/plain")
+    return web.Response(
+        status=404, text="Assistant route not found", content_type="text/plain"
+    )
 
 
 async def favicon(request: web.Request) -> web.StreamResponse:
@@ -522,7 +524,10 @@ async def api_gideon_config(request: web.Request) -> web.Response:
             return _deny("no recognized settings provided")
         applied = list(staged)
 
-        from gideon.core.config.transactions import ConfigPreserveError, mutate_config_async
+        from gideon.core.config.transactions import (
+            ConfigPreserveError,
+            mutate_config_async,
+        )
 
         def update_agent(data: dict) -> dict:
             agent = data.get("agent")
@@ -544,7 +549,10 @@ async def api_gideon_config(request: web.Request) -> web.Response:
             return web.json_response({"error": "config.json is corrupt"}, status=500)
         except Exception:
             _sel().log_api_access(
-                caller=caller, operation="config.update", outcome="error", error="config write failed"
+                caller=caller,
+                operation="config.update",
+                outcome="error",
+                error="config write failed",
             )
             return web.json_response({"error": "config write failed"}, status=500)
         _sel().log_api_access(
@@ -1130,7 +1138,11 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
                 current = current.get(segment) if isinstance(current, dict) else None
             consent = security_loosening(path_key, current, value)
             if consent and path_key.split(".", 1)[0] == "auth":
-                from gideon.interfaces.dashboard.owner_presence import ACTION_SIGN_IN_SETTING, require_owner_presence
+                from gideon.interfaces.dashboard.owner_presence import (
+                    ACTION_SIGN_IN_SETTING,
+                    require_owner_presence,
+                )
+
                 refused = require_owner_presence(request, ACTION_SIGN_IN_SETTING)
                 if refused is not None:
                     return {"status": "presence_refused", "response": refused}
@@ -1187,7 +1199,8 @@ async def api_gideon_config_patch(request: web.Request) -> web.Response:
     if outcome["status"] == "section_not_dict":
         _log_sel("error", f"{path_key}=section_not_dict")
         return web.json_response(
-            {"error": f"config section '{outcome['segment']}' is not an object"}, status=500
+            {"error": f"config section '{outcome['segment']}' is not an object"},
+            status=500,
         )
 
     _log_sel("success", f"{path_key}={value}")
@@ -1453,7 +1466,10 @@ async def api_token_local(request: web.Request) -> web.Response:
             )
         ttl = parsed
     token = generate_token(
-        "local-app", ttl_seconds=ttl, kind="cli", label="CLI token",
+        "local-app",
+        ttl_seconds=ttl,
+        kind="cli",
+        label="CLI token",
         client_ip=request.remote or "",
     )
     _sel().log_api_access(
@@ -1463,13 +1479,15 @@ async def api_token_local(request: web.Request) -> web.Response:
         source="local-bootstrap",
         resources="token-issued",
     )
-    return web.json_response({
-        "token": token,
-        "expires_in": ttl,
-        "maximum_lifetime_seconds": MAX_SESSION_TTL_SECS,
-        "default_lifetime_seconds": MAX_SESSION_TTL_SECS,
-        "browser_default_lifetime_seconds": DEFAULT_BROWSER_SESSION_TTL_SECS,
-    })
+    return web.json_response(
+        {
+            "token": token,
+            "expires_in": ttl,
+            "maximum_lifetime_seconds": MAX_SESSION_TTL_SECS,
+            "default_lifetime_seconds": MAX_SESSION_TTL_SECS,
+            "browser_default_lifetime_seconds": DEFAULT_BROWSER_SESSION_TTL_SECS,
+        }
+    )
 
 
 async def api_session_agents_list(request: web.Request) -> web.Response:

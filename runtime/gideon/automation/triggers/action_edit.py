@@ -44,7 +44,15 @@ def edited_workflow(stored: Any, edit: Any) -> Any:
     block = dict(stored) if isinstance(stored, Mapping) else {}
     action = edited_action(block, sent)
     if isinstance(block.get("inline"), Mapping):
-        return {**block, **{k: v for k, v in edit.items() if k not in {"inline", "provider", "config"}}, "inline": action}
+        return {
+            **block,
+            **{
+                k: v
+                for k, v in edit.items()
+                if k not in {"inline", "provider", "config"}
+            },
+            "inline": action,
+        }
     if "provider" in block or "config" in block:
         return {**block, **{k: v for k, v in edit.items() if k != "inline"}, **action}
     return {**edit, "inline": action} if sent is nested else action

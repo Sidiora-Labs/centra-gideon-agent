@@ -19,8 +19,8 @@ another port can only arrive in a redirect, which is the server's choice and not
 
 from __future__ import annotations
 
-import ipaddress
 import functools
+import ipaddress
 import logging
 import os
 import re
@@ -29,10 +29,10 @@ import shutil
 import socket
 import socketserver
 import subprocess
-import threading
 import tempfile
-from dataclasses import dataclass
+import threading
 from collections.abc import Sequence
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from gideon.security.net.guard import GuardDecision, evaluate
@@ -43,9 +43,19 @@ logger = logging.getLogger(__name__)
 HTTPS_PORT = 443
 MIN_GIT_VERSION = (2, 12)
 _GLOBAL_OPTIONS_WITH_VALUE = frozenset(
-    {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--attr-source"}
+    {
+        "-C",
+        "-c",
+        "--git-dir",
+        "--work-tree",
+        "--namespace",
+        "--config-env",
+        "--attr-source",
+    }
 )
-_DIFF_SUBCOMMANDS = frozenset({"diff", "diff-files", "diff-index", "diff-tree", "log", "show"})
+_DIFF_SUBCOMMANDS = frozenset(
+    {"diff", "diff-files", "diff-index", "diff-tree", "log", "show"}
+)
 _NEUTRAL_SETTINGS = (
     f"core.hooksPath={os.devnull}",
     "core.fsmonitor=false",
@@ -116,7 +126,11 @@ def git_child_env(*, site: str) -> dict[str, str]:
     """Build the child allowlist and remove inherited Git configuration overrides."""
     from gideon.security.sandbox import build_child_env
 
-    env = {key: value for key, value in build_child_env(site=site).items() if not key.startswith("GIT_")}
+    env = {
+        key: value
+        for key, value in build_child_env(site=site).items()
+        if not key.startswith("GIT_")
+    }
     env.update(
         GIT_CONFIG_NOSYSTEM="1",
         GIT_CONFIG_GLOBAL=os.devnull,
@@ -140,7 +154,9 @@ def _subcommand_index(args: Sequence[str]) -> int:
     return len(args)
 
 
-def git_argv(args: Sequence[str], *, https_only: bool = False, git: str = "git") -> list[str]:
+def git_argv(
+    args: Sequence[str], *, https_only: bool = False, git: str = "git"
+) -> list[str]:
     """Put repository-independent safety settings after caller Git options."""
     require_git(git)
     args = list(args)
@@ -160,6 +176,7 @@ def git_argv(args: Sequence[str], *, https_only: bool = False, git: str = "git")
     if tail[0] in _DIFF_SUBCOMMANDS:
         tail = [tail[0], "--no-ext-diff", "--no-textconv", *tail[1:]]
     return [git, *args[:index], *neutral, *tail]
+
 
 _HEAD_LIMIT = 16 * 1024  # a CONNECT request is one line and a few headers
 _HEAD_TIMEOUT_S = 10.0
@@ -244,7 +261,9 @@ def guarded_git_env() -> dict[str, str]:
     return env
 
 
-def _audit(policy: EgressPolicy, target: str, *, outcome: str, reason: str = "") -> None:
+def _audit(
+    policy: EgressPolicy, target: str, *, outcome: str, reason: str = ""
+) -> None:
     """One SEL row per connection git asked for, allowed or not (best-effort, like net.fetch)."""
     try:
         from gideon.security.sel import sel
@@ -283,7 +302,8 @@ def _split_target(target: str) -> tuple[str, int] | None:
 
     The host must be a plain hostname or an IP literal: it is put into a URL for the guard, and a
     host carrying ``/``, ``@`` or ``#`` would have the guard judge a different host than the one
-    named here (the dial goes to what the guard judged, so that is a refusal, not a bypass)."""
+    named here (the dial goes to what the guard judged, so that is a refusal, not a bypass).
+    """
     host, sep, port = target.rpartition(":")
     if not sep or not host or not port.isdigit():
         return None
@@ -301,7 +321,9 @@ def _split_target(target: str) -> tuple[str, int] | None:
 
 def _relay(a: socket.socket, b: socket.socket, idle_timeout: float) -> None:
     """Copy bytes both ways until either side closes or the link sits idle for ``idle_timeout``."""
-    selector = selectors.DefaultSelector()  # not select(): the gateway may hold >1024 descriptors
+    selector = (
+        selectors.DefaultSelector()
+    )  # not select(): the gateway may hold >1024 descriptors
     try:
         selector.register(a, selectors.EVENT_READ, b)
         selector.register(b, selectors.EVENT_READ, a)
@@ -369,7 +391,10 @@ class GuardedTunnel:
     def _refuse(self, conn: socket.socket, status: str, refusal: TunnelRefusal) -> None:
         self.refused.append(refusal)
         _audit(
-            self.policy, f"{refusal.host}:{refusal.port}", outcome="denied", reason=refusal.reason
+            self.policy,
+            f"{refusal.host}:{refusal.port}",
+            outcome="denied",
+            reason=refusal.reason,
         )
         _answer(conn, status)
 
@@ -389,7 +414,9 @@ class GuardedTunnel:
                 host = (urlsplit(target).hostname or target).lower()
                 reason = "only HTTPS connections are allowed"
                 self._refuse(
-                    conn, "405 Method Not Allowed", TunnelRefusal(host, 0, "", "method", reason)
+                    conn,
+                    "405 Method Not Allowed",
+                    TunnelRefusal(host, 0, "", "method", reason),
                 )
                 return
             split = _split_target(target)
@@ -399,7 +426,9 @@ class GuardedTunnel:
             host, port = split
             if port != HTTPS_PORT:
                 reason = f"only port {HTTPS_PORT} is allowed, not {port}"
-                self._refuse(conn, "403 Forbidden", TunnelRefusal(host, port, "", "port", reason))
+                self._refuse(
+                    conn, "403 Forbidden", TunnelRefusal(host, port, "", "port", reason)
+                )
                 return
             self._connect(conn, host, port, early)
         finally:
@@ -469,7 +498,11 @@ def preflight(url: str, policy: EgressPolicy) -> GuardDecision:
     connects to it, which is the check a name that rebinds in between cannot pass."""
     decision = evaluate(url, policy)
     if not decision.allow:
-        outcome = "failed" if getattr(decision, "category", "policy") == "unresolvable" else "denied"
+        outcome = (
+            "failed"
+            if getattr(decision, "category", "policy") == "unresolvable"
+            else "denied"
+        )
         _audit(policy, url, outcome=outcome, reason=decision.reason)
     return decision
 
@@ -484,18 +517,21 @@ def run_git_guarded(
     exited 0: something tried to reach where it may not), :class:`GitHostUnreachable` when git
     failed and a host did not resolve or answer, and ``subprocess.TimeoutExpired`` past ``timeout``.
     """
-    with tempfile.TemporaryDirectory(prefix="gideon-git-home-") as git_home, GuardedTunnel(policy) as tunnel:
+    with (
+        tempfile.TemporaryDirectory(prefix="gideon-git-home-") as git_home,
+        GuardedTunnel(policy) as tunnel,
+    ):
         env = guarded_git_env()
         env.update(HOME=git_home, XDG_CONFIG_HOME=git_home, CURL_HOME=git_home)
         proc = subprocess.run(
             git_argv(
                 [
-                "-c",
-                f"http.proxy=http://127.0.0.1:{tunnel.port}",
-                # A listing fetch presents none of the owner's saved credentials to anyone.
-                "-c",
-                "credential.helper=",
-                *args,
+                    "-c",
+                    f"http.proxy=http://127.0.0.1:{tunnel.port}",
+                    # A listing fetch presents none of the owner's saved credentials to anyone.
+                    "-c",
+                    "credential.helper=",
+                    *args,
                 ],
                 https_only=True,
             ),

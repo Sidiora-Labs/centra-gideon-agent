@@ -289,12 +289,19 @@ def default_budget_check(run_key: str = "") -> BudgetCheckFn:
             if verdict is BudgetVerdict.EXCEEDED:
                 return True, reason
             if run_key:
-                verdict, reason = meter.check_run_before_work(run_key, run_budget_from_config())
+                verdict, reason = meter.check_run_before_work(
+                    run_key, run_budget_from_config()
+                )
                 if verdict is BudgetVerdict.EXCEEDED:
                     return True, reason
-        except Exception as exc:  # noqa: BLE001 - an unverified ceiling authorises nothing
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - an unverified ceiling authorises nothing
             logger.warning("auto-execute: budget check failed", exc_info=True)
-            return True, f"the budget could not be verified ({type(exc).__name__}), so nothing ran"
+            return (
+                True,
+                f"the budget could not be verified ({type(exc).__name__}), so nothing ran",
+            )
         return False, ""
 
     return check
@@ -320,7 +327,9 @@ def _action_config(proposal: Proposal, item: Any) -> dict:
     config["action_type"] = proposal.action_type
     config["item_id"] = item.source_id
     if proposal.action_type == "create_task":
-        config["title"] = arguments.get("title") or item.title or f"Follow up: {item.source_id}"
+        config["title"] = (
+            arguments.get("title") or item.title or f"Follow up: {item.source_id}"
+        )
         config["title_template"] = "$title"
     return config
 
@@ -366,7 +375,9 @@ async def auto_execute(
             return
         try:
             ledger(kind, fields)
-        except Exception:  # noqa: BLE001 - a ledger failure must not undo a landed action
+        except (
+            Exception
+        ):  # noqa: BLE001 - a ledger failure must not undo a landed action
             logger.warning("auto-execute: ledger row %s failed", kind, exc_info=True)
             return
         rows += 1
@@ -374,7 +385,9 @@ async def auto_execute(
     if not enabled:
         return AutoExecResult(
             deferred=tuple(
-                DeferredProposal(proposal=p, reason=SKIP_DISABLED, detail="auto-execution is off")
+                DeferredProposal(
+                    proposal=p, reason=SKIP_DISABLED, detail="auto-execution is off"
+                )
                 for p in proposals
             ),
         )
@@ -427,7 +440,9 @@ async def auto_execute(
     for index, proposal in enumerate(proposals):
         if breached:
             deferred.append(
-                DeferredProposal(proposal=proposal, reason=SKIP_BUDGET, detail=breach_reason)
+                DeferredProposal(
+                    proposal=proposal, reason=SKIP_BUDGET, detail=breach_reason
+                )
             )
             write(
                 SKIPPED_BUDGET,
@@ -443,11 +458,15 @@ async def auto_execute(
 
         provider = PROVIDER_FOR_ACTION.get(proposal.action_type, "")
         if not provider:
-            deferred.append(DeferredProposal(proposal=proposal, reason=SKIP_NO_PROVIDER))
+            deferred.append(
+                DeferredProposal(proposal=proposal, reason=SKIP_NO_PROVIDER)
+            )
             continue
         if provider not in allowed:
             deferred.append(
-                DeferredProposal(proposal=proposal, reason=SKIP_NOT_CAPABLE, detail=provider)
+                DeferredProposal(
+                    proposal=proposal, reason=SKIP_NOT_CAPABLE, detail=provider
+                )
             )
             continue
 
@@ -456,11 +475,15 @@ async def auto_execute(
             # Belt AND braces: `parse_proposals` already refuses an ordinal the manifest never
             # minted. Re-checking here is what makes the ordinal contract hold for ANY caller
             # of this stage, not only for one that came through the parser.
-            deferred.append(DeferredProposal(proposal=proposal, reason=SKIP_UNKNOWN_ITEM))
+            deferred.append(
+                DeferredProposal(proposal=proposal, reason=SKIP_UNKNOWN_ITEM)
+            )
             continue
         if provider == "inbox-op" and item.source != _INBOX_OP_LANE:
             deferred.append(
-                DeferredProposal(proposal=proposal, reason=SKIP_WRONG_LANE, detail=item.source)
+                DeferredProposal(
+                    proposal=proposal, reason=SKIP_WRONG_LANE, detail=item.source
+                )
             )
             continue
 
@@ -469,14 +492,20 @@ async def auto_execute(
         if match.decision is Decision.DENY:
             deferred.append(
                 DeferredProposal(
-                    proposal=proposal, reason=SKIP_DENIED, detail=match.reason, rule=rule_key
+                    proposal=proposal,
+                    reason=SKIP_DENIED,
+                    detail=match.reason,
+                    rule=rule_key,
                 )
             )
             continue
         if match.decision is Decision.SUPPRESS:
             deferred.append(
                 DeferredProposal(
-                    proposal=proposal, reason=SKIP_SUPPRESSED, detail=match.reason, rule=rule_key
+                    proposal=proposal,
+                    reason=SKIP_SUPPRESSED,
+                    detail=match.reason,
+                    rule=rule_key,
                 )
             )
             continue
@@ -487,7 +516,9 @@ async def auto_execute(
         if len(executed) >= max(0, int(cap or 0)):
             deferred.append(
                 DeferredProposal(
-                    proposal=proposal, reason=SKIP_CAP, detail=f"cap {cap} reached at #{index + 1}"
+                    proposal=proposal,
+                    reason=SKIP_CAP,
+                    detail=f"cap {cap} reached at #{index + 1}",
                 )
             )
             continue
@@ -495,7 +526,9 @@ async def auto_execute(
         breached, breach_reason = check()
         if breached:
             deferred.append(
-                DeferredProposal(proposal=proposal, reason=SKIP_BUDGET, detail=breach_reason)
+                DeferredProposal(
+                    proposal=proposal, reason=SKIP_BUDGET, detail=breach_reason
+                )
             )
             write(
                 SKIPPED_BUDGET,
@@ -521,7 +554,9 @@ async def auto_execute(
         if decision.blocked:
             # The rule's code and its sentence, as a trigger's fire records the same refusal.
             deferred.append(
-                DeferredProposal(proposal=proposal, reason=SKIP_DENYLIST, detail=decision.refusal())
+                DeferredProposal(
+                    proposal=proposal, reason=SKIP_DENYLIST, detail=decision.refusal()
+                )
             )
             continue
 
@@ -551,7 +586,9 @@ async def auto_execute(
         if not ok:
             # Its own kind, never an `auto_executed` row with a failed outcome: a reader counting
             # what the machine did counts the kind, and the failure would be counted as done.
-            deferred.append(DeferredProposal(proposal=proposal, reason=SKIP_FAILED, detail=error))
+            deferred.append(
+                DeferredProposal(proposal=proposal, reason=SKIP_FAILED, detail=error)
+            )
             write(AUTO_FAILED, {**attempt, "outcome": SKIP_FAILED, "reason": error})
             continue
         executed.append(
@@ -566,7 +603,12 @@ async def auto_execute(
         )
         write(
             AUTO_EXECUTED,
-            {**attempt, "reversal": reversal, "undoable": bool(reversal), "outcome": "executed"},
+            {
+                **attempt,
+                "reversal": reversal,
+                "undoable": bool(reversal),
+                "outcome": "executed",
+            },
         )
 
     return AutoExecResult(
@@ -623,7 +665,9 @@ _WHY: dict[str, str] = {
     SKIP_DISABLED: "auto-execution is off",
     SKIP_NEEDS_YOU: "it needs your say",
 }
-_DETAIL_IS_THE_CAUSE: frozenset[str] = frozenset({SKIP_FAILED, SKIP_DENYLIST, SKIP_BUDGET})
+_DETAIL_IS_THE_CAUSE: frozenset[str] = frozenset(
+    {SKIP_FAILED, SKIP_DENYLIST, SKIP_BUDGET}
+)
 
 
 def why_not_done(reason: str, detail: str = "", *, on_its_own: bool = False) -> str:
@@ -696,7 +740,9 @@ def stopped_note(reasons: Iterable[str], *, budget_reason: str = "") -> str:
         return ""
     cause = (budget_reason or "").strip().rstrip(".") or "the spend ceiling was reached"
     rest = (
-        "1 proposal it had not run waits" if left == 1 else f"{left} proposals it had not run wait"
+        "1 proposal it had not run waits"
+        if left == 1
+        else f"{left} proposals it had not run wait"
     )
     return f"Auto-execution stopped early: {cause}. {rest} for you."
 

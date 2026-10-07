@@ -6,8 +6,14 @@ from pathlib import Path
 
 
 def _single_segment(value: str) -> bool:
-    return bool(value) and value not in {".", ".."} and len(value) <= 128 and Path(value).name == value and not any(
-        character in value for character in ("/", "\\", ":", "\x00", "\r", "\n")
+    return (
+        bool(value)
+        and value not in {".", ".."}
+        and len(value) <= 128
+        and Path(value).name == value
+        and not any(
+            character in value for character in ("/", "\\", ":", "\x00", "\r", "\n")
+        )
     )
 
 

@@ -1,4 +1,5 @@
 """Serialize heartbeat queue read/change/write across threads and processes."""
+
 from __future__ import annotations
 
 import fcntl
@@ -9,8 +10,8 @@ from functools import wraps
 
 @contextmanager
 def queue_lock(path):
-    from gideon.engine.heartbeat import heartbeat_path
     from gideon.core.concurrency import lock_path
+    from gideon.engine.heartbeat import heartbeat_path
 
     if os.path.realpath(path) != os.path.realpath(heartbeat_path()):
         yield
@@ -28,4 +29,5 @@ def queue_locked(path, writer):
     def locked():
         with queue_lock(path):
             return writer()
+
     return locked

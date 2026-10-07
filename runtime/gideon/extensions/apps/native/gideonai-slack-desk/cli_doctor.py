@@ -20,11 +20,14 @@ from gideon.sdk.cli import DoctorLine
 
 def probe() -> list[DoctorLine]:
     creds = AppConfig.load().load_credentials()
-    has_tokens = bool(creds.get(CRED_SLACK_APP_TOKEN) and creds.get(CRED_SLACK_BOT_TOKEN))
+    has_tokens = bool(
+        creds.get(CRED_SLACK_APP_TOKEN) and creds.get(CRED_SLACK_BOT_TOKEN)
+    )
     if not has_tokens:
         return [
             DoctorLine(
-                "status", "info",
+                "status",
+                "info",
                 "not configured (dashboard-only mode) — run 'gideon setup' to add tokens",
             )
         ]
@@ -35,6 +38,10 @@ def probe() -> list[DoctorLine]:
     else:
         lines.append(DoctorLine("owner", "warn", "GIDEON_OWNER_ID not set"))
     lines.append(
-        DoctorLine("workspace", "info", "use the Channels page → Slack → Test to verify the token")
+        DoctorLine(
+            "workspace",
+            "info",
+            "use the Channels page → Slack → Test to verify the token",
+        )
     )
     return lines

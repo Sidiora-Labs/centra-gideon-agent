@@ -340,8 +340,11 @@ async def poll(
     if not fires:
         return 0, skipped
     from gideon.security.guardrails.incident import incident_active
+
     if incident_active():
-        skipped.extend(dict(trigger_id=fire.trigger.id, reason=SKIP_INCIDENT) for fire in fires)
+        skipped.extend(
+            dict(trigger_id=fire.trigger.id, reason=SKIP_INCIDENT) for fire in fires
+        )
         return 0, skipped
     nudge_fires = [fire for fire in fires if _is_nudge(fire.trigger)]
     wake_fires = [fire for fire in fires if not _is_nudge(fire.trigger)]

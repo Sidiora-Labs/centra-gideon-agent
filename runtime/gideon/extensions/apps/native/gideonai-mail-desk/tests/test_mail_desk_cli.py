@@ -14,15 +14,14 @@ probes are patched — this suite never opens a connection.
 
 from __future__ import annotations
 
+import cli_doctor
+import cli_setup
 import pytest
+from cli_setup import PRESETS
+from mail_desk_runtime.settings import CRED_IMAP_PASS, CRED_SMTP_PASS
 
 from gideon.sdk.channel import ProviderSettings, save_credential
 from gideon.sdk.cli import SetupContext
-
-import cli_doctor
-import cli_setup
-from cli_setup import PRESETS
-from mail_desk_runtime.settings import CRED_IMAP_PASS, CRED_SMTP_PASS
 
 _APP = "gideonai-mail-desk"
 
@@ -65,8 +64,22 @@ def _gmail_answers() -> list[str]:
     # smtp user, smtp host, smtp port, security, imap password, smtp password,
     # poll secs, activation
     return [
-        "y", "gmail", "bot@gmail.com", "", "", "", "", "", "", "", "", "",
-        "imap-app-pw", "", "90", "always",
+        "y",
+        "gmail",
+        "bot@gmail.com",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "imap-app-pw",
+        "",
+        "90",
+        "always",
     ]
 
 
@@ -144,15 +157,30 @@ class TestSetupHappyPath:
     def test_ssl_defaults_off_for_a_non_standard_port(self):
         answers = _gmail_answers()
         answers[A_IMAP_PORT] = "143"
-        cli_setup.run(Ctx(answers).ctx)  # blank ssl answer takes the port-derived default
+        cli_setup.run(
+            Ctx(answers).ctx
+        )  # blank ssl answer takes the port-derived default
         assert ProviderSettings.load(_APP)["imap_use_ssl"] is False
 
     def test_custom_hosts_when_no_preset_is_chosen(self):
         c = Ctx(
             [
-                "y", "", "bot@corp.test", "svc@corp.test", "mail.corp.test", "143",
-                "n", "Agent", "svc@corp.test", "relay.corp.test", "25", "plain",
-                "pw", "", "60", "always",
+                "y",
+                "",
+                "bot@corp.test",
+                "svc@corp.test",
+                "mail.corp.test",
+                "143",
+                "n",
+                "Agent",
+                "svc@corp.test",
+                "relay.corp.test",
+                "25",
+                "plain",
+                "pw",
+                "",
+                "60",
+                "always",
             ]
         )
         cli_setup.run(c.ctx)
@@ -296,9 +324,15 @@ class TestDoctor:
         ProviderSettings.update(
             _APP,
             {
-                "imap_host": "imap.test", "imap_port": 993, "imap_user": "u@test",
-                "smtp_host": "smtp.test", "smtp_port": 587, "smtp_user": "u@test",
-                "address": "bot@test", "folder": "INBOX", "smtp_security": "starttls",
+                "imap_host": "imap.test",
+                "imap_port": 993,
+                "imap_user": "u@test",
+                "smtp_host": "smtp.test",
+                "smtp_port": 587,
+                "smtp_user": "u@test",
+                "address": "bot@test",
+                "folder": "INBOX",
+                "smtp_security": "starttls",
             },
         )
 
@@ -319,7 +353,8 @@ class TestDoctor:
 
     def test_the_probe_is_login_plus_select_on_the_configured_folder(self):
         """The plan's ``probe = login+select``: a login alone doesn't prove the folder we
-        poll exists, and a wrong folder name is the second most common misconfiguration."""
+        poll exists, and a wrong folder name is the second most common misconfiguration.
+        """
         ProviderSettings.update(_APP, {"folder": "Agent"})
         self._configured()
         ProviderSettings.update(_APP, {"folder": "Agent"})
@@ -372,5 +407,7 @@ class TestDoctor:
     def test_no_password_is_ever_echoed(self):
         self._configured()
         save_credential(CRED_IMAP_PASS, "super-secret-pw")
-        rendered = " ".join(f"{line.label} {line.detail}" for line in cli_doctor.probe())
+        rendered = " ".join(
+            f"{line.label} {line.detail}" for line in cli_doctor.probe()
+        )
         assert "super-secret-pw" not in rendered

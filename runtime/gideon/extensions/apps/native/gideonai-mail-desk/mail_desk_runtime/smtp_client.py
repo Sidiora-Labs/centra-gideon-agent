@@ -52,7 +52,13 @@ class SmtplibSender:
     plaintext, which is the whole failure this check exists to prevent."""
 
     def __init__(
-        self, host: str, port: int, username: str, password: str, *, security: str = "starttls"
+        self,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        *,
+        security: str = "starttls",
     ) -> None:
         self._host = host
         self._port = port
@@ -64,7 +70,9 @@ class SmtplibSender:
         client: smtplib.SMTP | None = None
         try:
             if self._security == "ssl":
-                client = smtplib.SMTP_SSL(self._host, self._port, timeout=SMTP_TIMEOUT_SECS)
+                client = smtplib.SMTP_SSL(
+                    self._host, self._port, timeout=SMTP_TIMEOUT_SECS
+                )
             else:
                 client = smtplib.SMTP(self._host, self._port, timeout=SMTP_TIMEOUT_SECS)
                 client.ehlo()

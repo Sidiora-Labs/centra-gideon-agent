@@ -115,7 +115,8 @@ def register_acp_cli_entry(
     The registered :class:`ProviderEntry`, or ``None`` if the CLI was
     unavailable.
     """
-    from gideon.integrations.acp.options import session_metadata, compacts_itself as validate_compaction
+    from gideon.integrations.acp.options import compacts_itself as validate_compaction
+    from gideon.integrations.acp.options import session_metadata
 
     metadata = session_metadata(session_meta)
     compacts_itself = validate_compaction(compacts_itself)

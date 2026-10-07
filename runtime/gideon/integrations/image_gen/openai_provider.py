@@ -131,7 +131,10 @@ class OpenAIImageProvider(ImageGenProvider):
         return models
 
     def _default_model(self, model: str) -> str:
-        from gideon.integrations.llm.registry import ProviderResolutionError, require_model
+        from gideon.integrations.llm.registry import (
+            ProviderResolutionError,
+            require_model,
+        )
 
         try:
             return require_model(model)

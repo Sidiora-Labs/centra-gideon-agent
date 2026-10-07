@@ -26,10 +26,10 @@ Design constraints (matching Gideon's posture):
 
 from __future__ import annotations
 
-import logging
 import inspect
-from dataclasses import dataclass, field
+import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from gideon.cognition.context_headroom import (

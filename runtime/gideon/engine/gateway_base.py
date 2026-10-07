@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import atexit
 import hashlib
-import stat
 import json
 import logging
 import os
 import shlex
+import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +23,7 @@ _claim = None
 
 def home_fingerprint() -> str:
     from gideon.core.config.loader import config_dir
+
     return hashlib.sha256(os.fsencode(config_dir().resolve())).hexdigest()
 
 
@@ -47,22 +48,30 @@ def claim_home() -> HomeClaim:
     """Hold one kernel lock per home through startup and shutdown."""
     global _claim
     import fcntl
+
     from gideon.core.config.loader import config_dir
+
     home = config_dir().resolve()
     if _claim is not None:
         if _claim.home != home:
             raise HomeAlreadyClaimed("gateway already claimed another home")
         return _claim
-    fd = os.open(home / CLAIM_FILE, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    fd = os.open(
+        home / CLAIM_FILE, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600
+    )
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-            raise HomeAlreadyClaimed("gateway lock must be a regular file with one link")
+            raise HomeAlreadyClaimed(
+                "gateway lock must be a regular file with one link"
+            )
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             owner = os.pread(fd, 256, 0).decode("utf-8", "replace").strip()
-            raise HomeAlreadyClaimed(f"gateway {owner or '(starting)'} already owns this home: {home}") from error
+            raise HomeAlreadyClaimed(
+                f"gateway {owner or '(starting)'} already owns this home: {home}"
+            ) from error
         os.fchmod(fd, 0o600)
         os.ftruncate(fd, 0)
         os.write(fd, f"pid {os.getpid()}".encode())
@@ -123,7 +132,10 @@ def process_facts(pid: int) -> ProcessFacts | None:
     try:
         result = subprocess.run(
             ["ps", "-ww", "-p", str(pid), "-o", "lstart=", "-o", "args="],
-            capture_output=True, text=True, timeout=4, check=False,
+            capture_output=True,
+            text=True,
+            timeout=4,
+            check=False,
         )
         output = result.stdout.strip()
         if result.returncode or len(output) < 25:
@@ -143,7 +155,8 @@ class BoundGateway:
         destination.parent.mkdir(parents=True, exist_ok=True)
         staging = destination.with_suffix(".tmp")
         staging.write_text(
-            json.dumps(dict(port=self.port, pid=self.pid, identity=self.identity)), encoding="utf-8"
+            json.dumps(dict(port=self.port, pid=self.pid, identity=self.identity)),
+            encoding="utf-8",
         )
         os.replace(staging, destination)
 
@@ -156,7 +169,8 @@ class BoundGateway:
         try:
             document = json.loads(text)
             return cls(
-                int(document["port"]), int(document.get("pid", 0)),
+                int(document["port"]),
+                int(document.get("pid", 0)),
                 str(document.get("identity", "")),
             )
         except (ValueError, TypeError, KeyError, json.JSONDecodeError):
@@ -167,7 +181,11 @@ class BoundGateway:
         if 0 < self.port <= 65535 and _pid_is_alive(self.pid):
             if self.identity:
                 facts = process_facts(self.pid)
-                if facts is None or facts.identity != self.identity or facts.state == "Z":
+                if (
+                    facts is None
+                    or facts.identity != self.identity
+                    or facts.state == "Z"
+                ):
                     return None
             return self.port
         return None
@@ -197,7 +215,12 @@ def unpublish() -> None:
         path = _runtime_path()
         binding = BoundGateway.read(path)
         facts = process_facts(os.getpid())
-        if binding and binding.pid == os.getpid() and facts and binding.identity == facts.identity:
+        if (
+            binding
+            and binding.pid == os.getpid()
+            and facts
+            and binding.identity == facts.identity
+        ):
             path.unlink()
     except Exception:
         logger.debug("could not remove %s", RUNTIME_FILE, exc_info=True)

@@ -82,7 +82,9 @@ _NAME_UNSAFE = re.compile(r"[^a-z0-9-]+")
 
 
 def _batch_def_name() -> str:
-    return f"subagent-batch-{int(time.time() * 1000)}-{__import__('uuid').uuid4().hex[:8]}"
+    return (
+        f"subagent-batch-{int(time.time() * 1000)}-{__import__('uuid').uuid4().hex[:8]}"
+    )
 
 
 def _findings_report(result: batch_compile.CompileResult) -> str:
@@ -128,9 +130,15 @@ def _run_compiled_batch(
     root = result.spec.get("root")
     if not isinstance(root, dict):
         return "Error: the compiler produced no root node"
-    body: dict[str, Any] = {"name": name, "mode": "background", "run_once": {
-        **result.spec, "name": name, "description": f"Compiled batch of {len(leaves)} tasks.",
-    }}
+    body: dict[str, Any] = {
+        "name": name,
+        "mode": "background",
+        "run_once": {
+            **result.spec,
+            "name": name,
+            "description": f"Compiled batch of {len(leaves)} tasks.",
+        },
+    }
     if cwd:
         body["inputs"] = {"cwd": cwd}
     started = _post("/api/workflows/batches", body)
@@ -459,6 +467,7 @@ def _validate_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
 def _preflight_tool(name: str, args: dict[str, Any]) -> str:
     from gideon.integrations.mcp_shared import preflight_tool
+
     return preflight_tool(name, args, _validate_args)
 
 

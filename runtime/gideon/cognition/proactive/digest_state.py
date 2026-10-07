@@ -68,7 +68,12 @@ def install_state() -> dict[str, Any]:
     enabled = bool(getattr(proactive, "triage_enabled", False))
     trigger = find_schedule(trigger_store())
     if trigger is None:
-        return {"installed": False, "enabled": enabled, "schedule": None, "drift": False}
+        return {
+            "installed": False,
+            "enabled": enabled,
+            "schedule": None,
+            "drift": False,
+        }
     payload = schedule_payload(trigger)
     return {
         "installed": True,
@@ -80,10 +85,12 @@ def install_state() -> dict[str, Any]:
 
 def _digest(status: str = "") -> tuple[dict | None, dict | None, list[dict]]:
     """The most recent triage run (of *status*, when given), its node output and its ledger."""
-    from gideon.cognition.proactive.surface import TRIAGE_NODE_ID, TRIAGE_WORKFLOW
     from gideon.automation.workflows import journal, service, store
+    from gideon.cognition.proactive.surface import TRIAGE_NODE_ID, TRIAGE_WORKFLOW
 
-    runs, _total = store.list_runs(workflow_name=TRIAGE_WORKFLOW, status=status, limit=1, offset=0)
+    runs, _total = store.list_runs(
+        workflow_name=TRIAGE_WORKFLOW, status=status, limit=1, offset=0
+    )
     if not runs:
         return None, None, []
     run = runs[0].to_dict()

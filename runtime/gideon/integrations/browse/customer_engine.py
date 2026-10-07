@@ -63,8 +63,12 @@ async def launch_owned_browser(profile: Path, *, timeout: float = 15) -> OwnedBr
     if browse_killed():
         raise BrowserUnavailable("Browser activity is stopped")
     executable = next(
-        (candidate for name in ("chromium", "chromium-browser", "google-chrome")
-         if (candidate := shutil.which(name))), None
+        (
+            candidate
+            for name in ("chromium", "chromium-browser", "google-chrome")
+            if (candidate := shutil.which(name))
+        ),
+        None,
     )
     if executable == "/snap/bin/chromium":
         snap_binary = Path("/snap/chromium/current/usr/lib/chromium-browser/chrome")
@@ -79,19 +83,30 @@ async def launch_owned_browser(profile: Path, *, timeout: float = 15) -> OwnedBr
     proxy = CustomerBrowserProxy()
     await proxy.start()
     args = [
-        executable, "--headless=new", "--no-first-run", "--no-default-browser-check",
-        "--disable-background-networking", "--remote-debugging-address=127.0.0.1",
+        executable,
+        "--headless=new",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-background-networking",
+        "--remote-debugging-address=127.0.0.1",
         "--disable-quic",
         "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
         f"--proxy-server=http=127.0.0.1:{proxy.port};https=127.0.0.1:{proxy.port}",
         "--proxy-bypass-list=<-loopback>",
-        "--remote-debugging-port=0", f"--user-data-dir={profile}", "about:blank",
+        "--remote-debugging-port=0",
+        f"--user-data-dir={profile}",
+        "about:blank",
     ]
     if os.geteuid() == 0:
         args.insert(1, "--no-sandbox")
     try:
-        process = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL, start_new_session=True)
+        process = subprocess.Popen(
+            args,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
     except OSError as exc:
         await proxy.close()
         raise BrowserUnavailable("Chromium could not start") from exc
@@ -109,24 +124,37 @@ async def launch_owned_browser(profile: Path, *, timeout: float = 15) -> OwnedBr
         if target is None:
             raise BrowserUnavailable("Chromium page did not accept commands")
         transport = await WebSocketCdpTransport.connect(target)
-        gate = GatedCdpSession(transport, caller_identity="customer_browser", source="dashboard")
+        gate = GatedCdpSession(
+            transport, caller_identity="customer_browser", source="dashboard"
+        )
         await gate.start()
 
         async def browser_event(method: str, params: dict) -> None:
             if method == "Fetch.requestPaused":
-                await transport.send("Fetch.continueRequest", {"requestId": params["requestId"]})
+                await transport.send(
+                    "Fetch.continueRequest", {"requestId": params["requestId"]}
+                )
             elif method == "Fetch.authRequired":
                 challenge = params.get("authChallenge") or {}
                 origin = str(challenge.get("origin") or "")
                 parsed = urlsplit(origin if "://" in origin else f"http://{origin}")
-                is_own_proxy = (challenge.get("source") == "Proxy"
-                                and parsed.hostname == "127.0.0.1" and parsed.port == proxy.port)
-                response = {"response": "ProvideCredentials" if is_own_proxy else "CancelAuth"}
+                is_own_proxy = (
+                    challenge.get("source") == "Proxy"
+                    and parsed.hostname == "127.0.0.1"
+                    and parsed.port == proxy.port
+                )
+                response = {
+                    "response": "ProvideCredentials" if is_own_proxy else "CancelAuth"
+                }
                 if is_own_proxy:
                     response["username"], response["password"] = proxy.credentials
-                await transport.send("Fetch.continueWithAuth", {
-                    "requestId": params["requestId"], "authChallengeResponse": response,
-                })
+                await transport.send(
+                    "Fetch.continueWithAuth",
+                    {
+                        "requestId": params["requestId"],
+                        "authChallengeResponse": response,
+                    },
+                )
             else:
                 await gate.handle_event(method, params)
 

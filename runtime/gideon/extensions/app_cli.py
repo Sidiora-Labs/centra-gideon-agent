@@ -30,8 +30,8 @@ from gideon.extensions.apps.native_contract import (
     app_dir_on_path,
     load_bundle_module,
 )
-from gideon.security.security import redact_credentials
 from gideon.sdk.cli import DoctorLine, SetupContext
+from gideon.security.security import redact_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -97,9 +97,7 @@ def run_app_setup_steps(only_app: str = "") -> list[str]:
         steps = [(n, r) for (n, r) in steps if n == only_app]
         if not steps:
             reason = f"ValueError: no enabled app named {only_app!r} declares cli.setup"
-            print(
-                f"  ⚠️  {only_app}: {reason}"
-            )
+            print(f"  ⚠️  {only_app}: {reason}")
             return [f"{only_app}: {reason}"]
 
     failures: list[str] = []
@@ -194,6 +192,7 @@ def run_app_doctor_probes() -> list[str]:
         print(f"\n{app_name}")
         try:
             fn = _import_app_callable(app_name, ref)
+
             def _invoke_probe() -> Any:
                 with app_dir_on_path(app_dir(app_name)):
                     return fn()

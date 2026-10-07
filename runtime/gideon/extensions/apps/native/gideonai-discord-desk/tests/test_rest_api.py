@@ -6,14 +6,12 @@ a recording stub, and the monotonic clock is a fake. What that exercises is the
 per-bucket vs global-429 distinction — the thing that makes Discord's rate limiting
 different from a flat ``retry_after``."""
 
-
 from __future__ import annotations
 
 import json
 
 import httpx
 import pytest
-
 from discord_desk.api import (
     API_BASE,
     DISCORD_DESK_MAX_TEXT,
@@ -39,7 +37,9 @@ def _ok(body=None, *, bucket="b1", remaining=4, reset_after=1.0, status=200):
 
 
 def _429(*, retry_after=2.0, is_global=False, bucket="b1"):
-    headers = {"X-RateLimit-Global": "true"} if is_global else {"X-RateLimit-Bucket": bucket}
+    headers = (
+        {"X-RateLimit-Global": "true"} if is_global else {"X-RateLimit-Bucket": bucket}
+    )
     body = {"message": "You are being rate limited.", "retry_after": retry_after}
     if is_global:
         body["global"] = True
@@ -86,7 +86,11 @@ def _api(responder, *, max_retries: int = 3):
         headers=DiscordDeskHttpApi.auth_headers("TEST"),
     )
     api = DiscordDeskHttpApi(
-        "TEST", client=client, max_retries=max_retries, sleep=_sleep, now=lambda: clock["t"]
+        "TEST",
+        client=client,
+        max_retries=max_retries,
+        sleep=_sleep,
+        now=lambda: clock["t"],
     )
     return api, rec, slept, clock
 
@@ -116,8 +120,13 @@ class TestWrappers:
     @pytest.mark.asyncio
     async def test_get_gateway_bot(self):
         api, rec, _, _ = _api(
-            lambda r: _ok({"url": "wss://gateway.discord.gg", "shards": 1,
-                           "session_start_limit": {"remaining": 999}})
+            lambda r: _ok(
+                {
+                    "url": "wss://gateway.discord.gg",
+                    "shards": 1,
+                    "session_start_limit": {"remaining": 999},
+                }
+            )
         )
         info = await api.get_gateway_bot()
         assert info["url"] == "wss://gateway.discord.gg"
@@ -137,7 +146,14 @@ class TestWrappers:
     @pytest.mark.asyncio
     async def test_create_message_with_components(self):
         api, rec, _, _ = _api(lambda r: _ok({"id": "43"}))
-        rows = [{"type": 1, "components": [{"type": 2, "style": 3, "label": "Go", "custom_id": "g"}]}]
+        rows = [
+            {
+                "type": 1,
+                "components": [
+                    {"type": 2, "style": 3, "label": "Go", "custom_id": "g"}
+                ],
+            }
+        ]
         await api.create_message("500", "pick", components=rows)
         assert rec.payload()["components"] == rows
         await api.close()
@@ -179,7 +195,9 @@ class TestWrappers:
         assert b"report.csv" in body
         assert b"payload_json" in body
         assert b"see attached" in body
-        assert rec.requests[-1].headers["content-type"].startswith("multipart/form-data")
+        assert (
+            rec.requests[-1].headers["content-type"].startswith("multipart/form-data")
+        )
         await api.close()
 
     @pytest.mark.asyncio
@@ -204,8 +222,10 @@ class TestWrappers:
         """An unencoded unicode emoji in the path 404s."""
         api, rec, _, _ = _api(lambda r: httpx.Response(204))
         await api.add_reaction("500", "9", "✅")
-        assert rec.requests[-1].url.raw_path.decode().endswith(
-            "/channels/500/messages/9/reactions/%E2%9C%85/@me"
+        assert (
+            rec.requests[-1]
+            .url.raw_path.decode()
+            .endswith("/channels/500/messages/9/reactions/%E2%9C%85/@me")
         )
         await api.close()
 
@@ -246,7 +266,9 @@ class TestBucketBackoff:
     @pytest.mark.asyncio
     async def test_preemptive_wait_when_remaining_hits_zero(self):
         """The bucket said 0 remaining, so the NEXT call waits instead of eating a 429."""
-        api, rec, slept, clock = _api(lambda r: _ok({"id": "1"}, remaining=0, reset_after=5.0))
+        api, rec, slept, clock = _api(
+            lambda r: _ok({"id": "1"}, remaining=0, reset_after=5.0)
+        )
         await api.create_message("500", "a")
         assert slept == []  # first call had no prior state to wait on
         await api.create_message("500", "b")
@@ -261,7 +283,9 @@ class TestBucketBackoff:
         def responder(r):
             # Discord gives each channel its own bucket hash.
             channel = r.url.path.split("/")[4]
-            return _ok({"id": "1"}, bucket=f"bucket-{channel}", remaining=0, reset_after=5.0)
+            return _ok(
+                {"id": "1"}, bucket=f"bucket-{channel}", remaining=0, reset_after=5.0
+            )
 
         api, rec, slept, _ = _api(responder)
         await api.create_message("500", "a")  # exhausts channel 500's bucket
@@ -276,8 +300,12 @@ class TestBucketBackoff:
         def responder(r):
             if r.url.path.endswith("/typing"):
                 return httpx.Response(
-                    204, headers={"X-RateLimit-Bucket": "typing", "X-RateLimit-Remaining": "9",
-                                  "X-RateLimit-Reset-After": "1.0"},
+                    204,
+                    headers={
+                        "X-RateLimit-Bucket": "typing",
+                        "X-RateLimit-Remaining": "9",
+                        "X-RateLimit-Reset-After": "1.0",
+                    },
                 )
             return _ok({"id": "1"}, bucket="messages", remaining=0, reset_after=5.0)
 
@@ -308,7 +336,9 @@ class TestBucketBackoff:
 
     @pytest.mark.asyncio
     async def test_global_429_recorded_globally_not_on_the_bucket(self):
-        api, rec, slept, clock = _api(lambda r: _429(retry_after=6.0, is_global=True), max_retries=0)
+        api, rec, slept, clock = _api(
+            lambda r: _429(retry_after=6.0, is_global=True), max_retries=0
+        )
         with pytest.raises(DiscordDeskApiError):
             await api.create_message("500", "a")
         # the global gate was armed; no per-bucket state was invented for the route
@@ -318,7 +348,9 @@ class TestBucketBackoff:
 
     @pytest.mark.asyncio
     async def test_per_route_429_recorded_on_the_bucket_not_globally(self):
-        api, rec, slept, _ = _api(lambda r: _429(retry_after=6.0, bucket="bkt"), max_retries=0)
+        api, rec, slept, _ = _api(
+            lambda r: _429(retry_after=6.0, bucket="bkt"), max_retries=0
+        )
         with pytest.raises(DiscordDeskApiError):
             await api.create_message("500", "a")
         assert api._global_reset_at == 0.0
@@ -351,7 +383,9 @@ class TestBucketBackoff:
         def responder(r):
             calls["n"] += 1
             if calls["n"] == 1:
-                return httpx.Response(429, headers={"Retry-After": "2"}, text="rate limited")
+                return httpx.Response(
+                    429, headers={"Retry-After": "2"}, text="rate limited"
+                )
             return _ok({"id": "1"})
 
         api, rec, slept, _ = _api(responder)
@@ -388,7 +422,9 @@ class TestErrorMapping:
     @pytest.mark.asyncio
     async def test_4xx_raises_immediately_with_the_api_code(self):
         def responder(r):
-            return httpx.Response(403, json={"message": "Missing Access", "code": 50001})
+            return httpx.Response(
+                403, json={"message": "Missing Access", "code": 50001}
+            )
 
         api, rec, slept, _ = _api(responder)
         with pytest.raises(DiscordDeskApiError) as exc:
@@ -403,7 +439,9 @@ class TestErrorMapping:
     @pytest.mark.asyncio
     async def test_401_surfaces_status(self):
         """A bad token: the transport's test() reports this, it must not be retried."""
-        api, rec, _, _ = _api(lambda r: httpx.Response(401, json={"message": "401: Unauthorized"}))
+        api, rec, _, _ = _api(
+            lambda r: httpx.Response(401, json={"message": "401: Unauthorized"})
+        )
         with pytest.raises(DiscordDeskApiError) as exc:
             await api.get_gateway_bot()
         assert exc.value.status == 401
@@ -412,7 +450,9 @@ class TestErrorMapping:
 
     @pytest.mark.asyncio
     async def test_non_json_body_raises_typed_error(self):
-        api, _, _, _ = _api(lambda r: httpx.Response(200, text="<html>cloudflare</html>"))
+        api, _, _, _ = _api(
+            lambda r: httpx.Response(200, text="<html>cloudflare</html>")
+        )
         with pytest.raises(DiscordDeskApiError) as exc:
             await api.get_gateway_bot()
         assert "non-JSON" in exc.value.message
@@ -433,11 +473,16 @@ class TestErrorMapping:
     @pytest.mark.asyncio
     async def test_unparseable_rate_limit_headers_are_ignored(self):
         """Garbage headers must not crash the request path."""
+
         def responder(r):
             return httpx.Response(
-                200, json={"id": "1"},
-                headers={"X-RateLimit-Bucket": "b", "X-RateLimit-Remaining": "many",
-                         "X-RateLimit-Reset-After": "soon"},
+                200,
+                json={"id": "1"},
+                headers={
+                    "X-RateLimit-Bucket": "b",
+                    "X-RateLimit-Remaining": "many",
+                    "X-RateLimit-Reset-After": "soon",
+                },
             )
 
         api, _, _, _ = _api(responder)

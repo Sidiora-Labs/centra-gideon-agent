@@ -140,8 +140,8 @@ async def _synthesize_chunk(
     provider: TtsProvider, text: str, *, voice: str, speed: float, speech_voice: str
 ) -> str | None:
     style = _SpeechStyle(voice, speed, speech_voice)
-    from gideon.security.guardrails.media_call import MediaCall, metered_media_call
     from gideon.security.guardrails.failure import BudgetExceededError
+    from gideon.security.guardrails.media_call import MediaCall, metered_media_call
 
     try:
         return await metered_media_call(
@@ -227,7 +227,9 @@ def _concat_manifest(paths: list[str]):
 
     scratch = config_dir() / "tmp"
     scratch.mkdir(parents=True, exist_ok=True)
-    descriptor, manifest = tempfile.mkstemp(prefix="voice_concat_", suffix=".ffconcat", dir=scratch)
+    descriptor, manifest = tempfile.mkstemp(
+        prefix="voice_concat_", suffix=".ffconcat", dir=scratch
+    )
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             stream.write("ffconcat version 1.0\n")

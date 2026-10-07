@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from gideon.security.safety_flags import yes_or_no
-
 import fnmatch
 import hashlib
 import logging
@@ -12,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from gideon.automation.workflows.judge_contract import Verdict
+from gideon.security.safety_flags import yes_or_no
 
 logger = logging.getLogger(__name__)
 

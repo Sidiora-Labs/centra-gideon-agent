@@ -18,16 +18,15 @@ Additional marketplaces (skills.sh, custom registries) register via
 import builtins
 import hashlib
 import json
-from collections.abc import Mapping
 import logging
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from gideon.core.record_ids import record_path
-
 
 logger = logging.getLogger(__name__)
 
@@ -290,11 +289,16 @@ def install_record(skill_dir: Path) -> InstallRecord | None:
         raise DamagedInstallRecord(f"{path.name} is not an object")
     digests = data.get("sha256")
     if not isinstance(digests, dict) or not all(
-        isinstance(rel, str) and isinstance(digest, str) for rel, digest in digests.items()
+        isinstance(rel, str) and isinstance(digest, str)
+        for rel, digest in digests.items()
     ):
-        raise DamagedInstallRecord(f"{path.name} holds no digest of the files installed")
+        raise DamagedInstallRecord(
+            f"{path.name} holds no digest of the files installed"
+        )
     source = data.get("source")
-    return InstallRecord(source=source if isinstance(source, str) else "", sha256=dict(digests))
+    return InstallRecord(
+        source=source if isinstance(source, str) else "", sha256=dict(digests)
+    )
 
 
 def write_install_record(
@@ -324,7 +328,9 @@ def write_install_record(
     try:
         atomic_json_write(Path(skill_dir) / LOCK_FILENAME, record)
     except OSError:
-        logger.warning("could not write the install record of %s", skill_dir, exc_info=True)
+        logger.warning(
+            "could not write the install record of %s", skill_dir, exc_info=True
+        )
 
 
 def payload_digests(files: "list[dict[str, Any]]") -> dict[str, str]:
@@ -341,7 +347,8 @@ def _write_lock(
     target_dir: Path, detail: "SkillDetail", source: str, tier: "Any", report: "Any"
 ) -> None:
     """Record what an install wrote (:func:`write_install_record`): the payload's files, which
-    are exactly the folder's files (:func:`install_skill_files`), from *source* at *tier*."""
+    are exactly the folder's files (:func:`install_skill_files`), from *source* at *tier*.
+    """
     skill_dir = Path(target_dir) / (detail.name or detail.id)
     if not skill_dir.is_dir():
         return
@@ -370,11 +377,14 @@ UNVERIFIED = "unverified"
 @dataclass
 class IntegrityReport:
     """One skill's files compared with its install record. ``state`` is one of the four answers
-    above; ``mutated`` / ``missing`` / ``added`` name what changed, for an ``edited`` skill."""
+    above; ``mutated`` / ``missing`` / ``added`` name what changed, for an ``edited`` skill.
+    """
 
     skill: str
     state: str = UNVERIFIED
-    mutated: list[str] = field(default_factory=list)  # a recorded file whose bytes changed
+    mutated: list[str] = field(
+        default_factory=list
+    )  # a recorded file whose bytes changed
     missing: list[str] = field(default_factory=list)  # a recorded file now gone
     added: list[str] = field(default_factory=list)  # a file the record does not hold
     #: The digest of the folder's files as they are (:func:`files_digest`), when it was read.
@@ -435,7 +445,9 @@ def verify_skill_integrity(skill_dir: Path) -> IntegrityReport:
         return rep
     on_disk = file_digests(skill_dir)
     if record is None:
-        return IntegrityReport(skill=name, state=UNVERIFIED, digest=files_digest(on_disk))
+        return IntegrityReport(
+            skill=name, state=UNVERIFIED, digest=files_digest(on_disk)
+        )
     rep = IntegrityReport(skill=name, digest=files_digest(on_disk))
     for rel, want in record.sha256.items():
         got = on_disk.get(rel)
@@ -449,7 +461,13 @@ def verify_skill_integrity(skill_dir: Path) -> IntegrityReport:
 
 
 def _audit_install(
-    source: str, skill_id: str, tier: "Any", report: "Any", *, outcome: str, rules: str = ""
+    source: str,
+    skill_id: str,
+    tier: "Any",
+    report: "Any",
+    *,
+    outcome: str,
+    rules: str = "",
 ) -> None:
     """Emit a SEL audit event for a scan/install/refuse (best-effort)."""
     try:
@@ -461,7 +479,8 @@ def _audit_install(
             outcome=outcome,
             source="skills",
             resources=f"{source}/{skill_id}",
-            error=f"tier={getattr(tier, 'value', tier)} verdict={getattr(report.verdict, 'value', report.verdict)}" + (f" rules={rules}" if rules else ""),  # noqa: E501
+            error=f"tier={getattr(tier, 'value', tier)} verdict={getattr(report.verdict, 'value', report.verdict)}"
+            + (f" rules={rules}" if rules else ""),  # noqa: E501
         )
     except Exception:
         logger.debug("skill install SEL audit failed", exc_info=True)
@@ -515,7 +534,10 @@ class SkillsRegistry:
     def info(self) -> "builtins.list[dict[str, str]]":
         with self._lock:
             rows = sorted(self._marketplaces.items())
-        return [{"name": n, "type": mp.marketplace_type, "trust_tier": mp.trust_tier} for n, mp in rows]
+        return [
+            {"name": n, "type": mp.marketplace_type, "trust_tier": mp.trust_tier}
+            for n, mp in rows
+        ]
 
     def install_guarded(
         self,
@@ -557,15 +579,23 @@ def warnings_consent(detail: "SkillDetail", report: "Any") -> str:
     digest = hashlib.sha256(f"{detail.id}\0{detail.name}\n".encode("utf-8"))
     for entry in sorted(detail.files, key=lambda e: str(e.get("path", ""))):
         body = entry.get("data")
-        raw = body if isinstance(body, bytes) else str(entry.get("contents", "")).encode("utf-8")
-        digest.update(f"{entry.get('path', '')}\0{hashlib.sha256(raw).hexdigest()}\n".encode())
+        raw = (
+            body
+            if isinstance(body, bytes)
+            else str(entry.get("contents", "")).encode("utf-8")
+        )
+        digest.update(
+            f"{entry.get('path', '')}\0{hashlib.sha256(raw).hexdigest()}\n".encode()
+        )
     warned = [f for f in report.findings if f.severity is Verdict.WARNING]
     for line in sorted(f"{f.rule}\0{f.path}\0{f.evidence}" for f in warned):
         digest.update(f"{line}\n".encode("utf-8"))
     return digest.hexdigest()[:16]
 
 
-def scan_before_install(marketplace: "SkillsMarketplace", skill_id: str) -> "tuple[Any, str]":
+def scan_before_install(
+    marketplace: "SkillsMarketplace", skill_id: str
+) -> "tuple[Any, str]":
     import shutil
     import tempfile
 
@@ -581,7 +611,9 @@ def scan_before_install(marketplace: "SkillsMarketplace", skill_id: str) -> "tup
     home.mkdir(parents=True, exist_ok=True)
     staged_root = Path(tempfile.mkdtemp(prefix=".gideon-skill-quarantine-", dir=home))
     try:
-        staged_skill = record_path(staged_root, detail.name or skill_id, suffix="", kind="skill name")
+        staged_skill = record_path(
+            staged_root, detail.name or skill_id, suffix="", kind="skill name"
+        )
         _stage_files(detail.files, staged_skill)
         report = scan_dir(staged_skill, tier)
         return report, warnings_consent(detail, report)
@@ -638,9 +670,7 @@ def install_scanned(
         tier = TrustTier.COMMUNITY
 
     detail = marketplace.fetch(skill_id)
-    staged_root = Path(
-        tempfile.mkdtemp(prefix=".gideon-skill-quarantine-", dir=home)
-    )
+    staged_root = Path(tempfile.mkdtemp(prefix=".gideon-skill-quarantine-", dir=home))
     try:
         staged_skill = record_path(
             staged_root, detail.name or skill_id, suffix="", kind="skill name"
@@ -657,14 +687,25 @@ def install_scanned(
             if not force and accepted_warnings != warnings_consent(detail, report):
                 _audit_install(source, skill_id, tier, report, outcome="needs_confirm")
                 raise SkillInstallRefused(report, dangerous=False)
-            rules = ",".join(sorted({finding.rule for finding in report.findings
-                                     if finding.severity is Verdict.WARNING}))
-            _audit_install(source, skill_id, tier, report, outcome="accepted", rules=rules)
+            rules = ",".join(
+                sorted(
+                    {
+                        finding.rule
+                        for finding in report.findings
+                        if finding.severity is Verdict.WARNING
+                    }
+                )
+            )
+            _audit_install(
+                source, skill_id, tier, report, outcome="accepted", rules=rules
+            )
 
         from gideon.extensions.skills.loader import hold_library
 
         with hold_library():
-            written = install_skill_files(detail.files, detail.name or skill_id, target_dir)
+            written = install_skill_files(
+                detail.files, detail.name or skill_id, target_dir
+            )
             _write_lock(target_dir, detail, source, tier, report)
         _audit_install(source, skill_id, tier, report, outcome="installed")
         return InstallResult(path=written, report=report, tier=tier)

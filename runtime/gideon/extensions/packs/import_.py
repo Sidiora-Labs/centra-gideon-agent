@@ -824,22 +824,32 @@ def _audit(
 
 
 def _landing(home: Path, relative: str) -> Path:
-    from gideon.operations.durability.home_paths import home_path, LinkInTheWay
+    from gideon.operations.durability.home_paths import LinkInTheWay, home_path
+
     try:
         return home_path(home, relative)
     except LinkInTheWay as link:
-        raise PackImportRefused("link", f"pack destination left unchanged: {link}") from link
+        raise PackImportRefused(
+            "link", f"pack destination left unchanged: {link}"
+        ) from link
     except ValueError as error:
-        raise PackImportRefused("integrity", f"invalid pack destination: {relative}") from error
+        raise PackImportRefused(
+            "integrity", f"invalid pack destination: {relative}"
+        ) from error
 
 
 def refuse_links(home: Path, parsed, stage: str, import_id: str, *, refs=None) -> None:
     """Validate every publication destination before a pack starts its journal."""
     from gideon.extensions.packs.component_paths import component_path
     from gideon.extensions.packs.installed import LEDGER_FILE
-    for relative in (f"packs/.installing/{import_id}.json", f"packs/{LEDGER_FILE}",
-                     f"packs/{LEDGER_FILE}.lock", f"packs/staged/{stage}/config_subset.json",
-                     f"packs/staged/{stage}/{pack_roster.ROSTER_FILE}"):
+
+    for relative in (
+        f"packs/.installing/{import_id}.json",
+        f"packs/{LEDGER_FILE}",
+        f"packs/{LEDGER_FILE}.lock",
+        f"packs/staged/{stage}/config_subset.json",
+        f"packs/staged/{stage}/{pack_roster.ROSTER_FILE}",
+    ):
         _landing(home, relative)
     for component in parsed:
         if refs is not None and f"{component.kind}:{component.id}" not in refs:
@@ -850,7 +860,10 @@ def refuse_links(home: Path, parsed, stage: str, import_id: str, *, refs=None) -
         _landing(home, path.relative_to(home).as_posix())
         if component.kind == "skill":
             for item in component.skill_files or []:
-                _landing(home, (path.relative_to(home) / str(item.get("path", ""))).as_posix())
+                _landing(
+                    home,
+                    (path.relative_to(home) / str(item.get("path", ""))).as_posix(),
+                )
 
 
 class _Journal:
@@ -875,6 +888,7 @@ class _Journal:
 
     def _flush(self) -> None:
         from gideon.core.atomic_write import atomic_write
+
         _landing(self._home, self._path.relative_to(self._home).as_posix())
         atomic_write(self._path, json.dumps(self._entries, indent=2), mode=0o600)
 
@@ -952,8 +966,8 @@ def _write_component_file(path: Path, text: str) -> None:
     A named seam so the whole commit path funnels through one call — the atomicity test
     injects a fault by patching THIS to raise, exercising the real rollback."""
     from gideon.core.atomic_write import atomic_write
-
     from gideon.operations.durability.home_paths import guard_path
+
     guard_path(path)
     atomic_write(path, text, mode=0o600)
 

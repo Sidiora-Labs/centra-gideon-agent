@@ -104,6 +104,7 @@ class Cursor:
 
     def _persist(self) -> None:
         from gideon.operations.durability.home_paths import guard_path
+
         guard_path(self._path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write(

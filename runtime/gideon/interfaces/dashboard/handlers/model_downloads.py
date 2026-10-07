@@ -49,11 +49,18 @@ async def api_model_download_start(request: web.Request) -> web.Response:
         body = await read_json_body(request)
     except Exception:
         return web.json_response(
-            {"error": {"code": "invalid_json", "message": "Invalid JSON body"}}, status=400
+            {"error": {"code": "invalid_json", "message": "Invalid JSON body"}},
+            status=400,
         )
     if not isinstance(body, dict):
         return web.json_response(
-            {"error": {"code": "invalid_body", "message": "JSON body must be an object"}}, status=400
+            {
+                "error": {
+                    "code": "invalid_body",
+                    "message": "JSON body must be an object",
+                }
+            },
+            status=400,
         )
 
     provider = str(body.get("provider", ""))
@@ -61,7 +68,8 @@ async def api_model_download_start(request: web.Request) -> web.Response:
     if not provider or not model:
         field = "provider" if not provider else "model"
         return web.json_response(
-            {"error": {"code": "invalid_request", "message": f"Missing '{field}'"}}, status=400
+            {"error": {"code": "invalid_request", "message": f"Missing '{field}'"}},
+            status=400,
         )
 
     precheck = await _download_precheck(_registry(request), provider, model)
@@ -104,7 +112,10 @@ async def _download_precheck(reg, provider_name: str, model: str):
     try:
         for lm in await catalog_for(provider):
             if lm.name == model:
-                if lm.downloaded and str(getattr(lm, "integrity", "") or "") != "truncated":
+                if (
+                    lm.downloaded
+                    and str(getattr(lm, "integrity", "") or "") != "truncated"
+                ):
                     return None
                 need_mb = float(lm.size_mb or 0)
                 break

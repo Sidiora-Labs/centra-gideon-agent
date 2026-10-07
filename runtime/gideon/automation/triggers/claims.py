@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import json
 import fcntl
+import json
 import logging
 import os
 import re
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 from uuid import uuid4
-from contextlib import contextmanager
 
 from gideon.automation.triggers.scheduling import CLAIM_MAX_DURATION_SECS, Claim
 
@@ -81,13 +81,22 @@ class ClaimJournal:
         if document is None:
             return []
         holders = document.get("holders")
-        return [row for row in holders if isinstance(row, dict)] if isinstance(holders, list) else [document]
+        return (
+            [row for row in holders if isinstance(row, dict)]
+            if isinstance(holders, list)
+            else [document]
+        )
 
     @staticmethod
     def claim(record: dict) -> Claim:
-        return Claim(str(record["trigger_id"]), str(record["holder"]),
-                     float(record["claimed_at"]), float(record.get("max_duration_secs") or CLAIM_MAX_DURATION_SECS),
-                     int(record.get("owner_pid") or 0), str(record.get("owner_identity") or ""))
+        return Claim(
+            str(record["trigger_id"]),
+            str(record["holder"]),
+            float(record["claimed_at"]),
+            float(record.get("max_duration_secs") or CLAIM_MAX_DURATION_SECS),
+            int(record.get("owner_pid") or 0),
+            str(record.get("owner_identity") or ""),
+        )
 
     def live(self, identity: str, observed_at: float) -> Claim | None:
         for record in self.records(identity):
@@ -101,11 +110,16 @@ class ClaimJournal:
 
     @staticmethod
     def record(claim: Any) -> dict:
-        return {"trigger_id": claim.trigger_id, "holder": claim.holder,
-                "claimed_at": float(claim.claimed_at),
-                "max_duration_secs": float(claim.max_duration_secs or CLAIM_MAX_DURATION_SECS),
-                "owner_pid": int(getattr(claim, "owner_pid", 0) or 0),
-                "owner_identity": str(getattr(claim, "owner_identity", "") or "")}
+        return {
+            "trigger_id": claim.trigger_id,
+            "holder": claim.holder,
+            "claimed_at": float(claim.claimed_at),
+            "max_duration_secs": float(
+                claim.max_duration_secs or CLAIM_MAX_DURATION_SECS
+            ),
+            "owner_pid": int(getattr(claim, "owner_pid", 0) or 0),
+            "owner_identity": str(getattr(claim, "owner_identity", "") or ""),
+        }
 
     def publish(self, claim: Any) -> None:
         acquire_claim(claim, base_dir=self.directory.parent)
@@ -113,7 +127,9 @@ class ClaimJournal:
     def _publish(self, claim: Any) -> None:
         records = self.records(claim.trigger_id)
         record = self.record(claim)
-        records = [record if row.get("holder") == claim.holder else row for row in records]
+        records = [
+            record if row.get("holder") == claim.holder else row for row in records
+        ]
         if not any(row.get("holder") == claim.holder for row in records):
             records.append(record)
         self._write_records(claim.trigger_id, records)
@@ -181,14 +197,21 @@ def read_claims(trigger_id: str, *, base_dir: Path | str | None = None) -> list[
         return [journal.claim(record) for record in journal.records(trigger_id)]
 
 
-def acquire_claim(claim: Claim, *, owner_pid: int = 0, overlap: str = "skip", base_dir: Path | str | None = None) -> bool:
+def acquire_claim(
+    claim: Claim,
+    *,
+    owner_pid: int = 0,
+    overlap: str = "skip",
+    base_dir: Path | str | None = None,
+) -> bool:
     journal = ClaimJournal(base_dir)
     with journal.locked():
         records = journal.records(claim.trigger_id)
         if journal.path(claim.trigger_id).exists() and not records:
             return False  # Unreadable ownership needs explicit recovery.
         if overlap != "parallel" and any(
-            int(row.get("owner_pid") or 0) > 0 or not journal.claim(row).expired(time.time())
+            int(row.get("owner_pid") or 0) > 0
+            or not journal.claim(row).expired(time.time())
             for row in records
         ):
             return False
@@ -201,7 +224,13 @@ def acquire_claim(claim: Claim, *, owner_pid: int = 0, overlap: str = "skip", ba
         return True
 
 
-def bind_owner(trigger_id: str, *, owner_pid: int, base_dir: Path | str | None = None, expected_holder: str = "") -> str:
+def bind_owner(
+    trigger_id: str,
+    *,
+    owner_pid: int,
+    base_dir: Path | str | None = None,
+    expected_holder: str = "",
+) -> str:
     journal = ClaimJournal(base_dir)
     with journal.locked():
         for record in journal.records(trigger_id):
@@ -212,13 +241,21 @@ def bind_owner(trigger_id: str, *, owner_pid: int, base_dir: Path | str | None =
             claim = journal.claim(record)
             if claim.expired(time.time()):
                 continue
-            claim.owner_pid, claim.owner_identity = owner_pid, process_identity(owner_pid)
+            claim.owner_pid, claim.owner_identity = owner_pid, process_identity(
+                owner_pid
+            )
             journal._publish(claim)
             return claim.holder
         return ""
 
 
-def release_claim(trigger_id: str, *, base_dir: Path | str | None = None, holder: str = "", owner_pid: int = 0) -> bool:
+def release_claim(
+    trigger_id: str,
+    *,
+    base_dir: Path | str | None = None,
+    holder: str = "",
+    owner_pid: int = 0,
+) -> bool:
     journal = ClaimJournal(base_dir)
     with journal.locked():
         records = journal.records(trigger_id)
@@ -232,9 +269,13 @@ def release_claim(trigger_id: str, *, base_dir: Path | str | None = None, holder
             if not holder and not pid:
                 continue
             if pid and owner_state(pid, identity) is not False:
-                if not holder or pid != owner_pid or identity != process_identity(owner_pid):
+                if (
+                    not holder
+                    or pid != owner_pid
+                    or identity != process_identity(owner_pid)
+                ):
                     continue
-            journal._write_records(trigger_id, records[:index] + records[index + 1:])
+            journal._write_records(trigger_id, records[:index] + records[index + 1 :])
             return True
         return False
 

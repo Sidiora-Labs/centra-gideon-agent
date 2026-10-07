@@ -1,4 +1,5 @@
 """Private per-peer agreements, published versions and deletion history."""
+
 from __future__ import annotations
 
 import json
@@ -49,7 +50,11 @@ class Deletion:
         if not isinstance(raw, dict):
             return None
         held = raw.get("held")
-        shas = [str(s) for s in held if isinstance(s, str) and s] if isinstance(held, list) else []
+        shas = (
+            [str(s) for s in held if isinstance(s, str) and s]
+            if isinstance(held, list)
+            else []
+        )
         return cls(
             at=str(raw.get("at", "") or ""),
             held=tuple(sorted(set(shas))),
@@ -69,7 +74,8 @@ def _moment(stamp: str) -> datetime | None:
 
 def _past_the_horizon(at: str, now: str) -> bool:
     """Whether a delete noticed at *at* is older than :data:`DELETE_HORIZON_SECS` at *now*. Never,
-    when either time doesn't parse: a delete is forgotten only by a time that says so."""
+    when either time doesn't parse: a delete is forgotten only by a time that says so.
+    """
     start, end = _moment(at), _moment(now)
     if start is None or end is None:
         return False
@@ -112,7 +118,12 @@ class Ancestors:
             return
         if not isinstance(raw, dict):
             return
-        self._legacy = {str(k):str(v) for k,v in (raw.get("legacy", {}) if isinstance(raw.get("legacy"), dict) else {}).items()}
+        self._legacy = {
+            str(k): str(v)
+            for k, v in (
+                raw.get("legacy", {}) if isinstance(raw.get("legacy"), dict) else {}
+            ).items()
+        }
         peers = raw.get("peers")
         for peer, families in (peers if isinstance(peers, dict) else {}).items():
             self._peers[str(peer)] = {
@@ -127,7 +138,9 @@ class Ancestors:
             }
         for entry_id, family in _families(raw.get("deleted")).items():
             marks = {rid: Deletion.from_dict(mark) for rid, mark in family.items()}
-            self._deleted[entry_id] = {rid: m for rid, m in marks.items() if m is not None}
+            self._deleted[entry_id] = {
+                rid: m for rid, m in marks.items() if m is not None
+            }
 
     def of(self, peer_id: str, entry_id: str) -> dict[str, str]:
         """``entity id → content sha`` this home and *peer_id* last agreed on in *entry_id*. A copy,
@@ -159,7 +172,9 @@ class Ancestors:
 
     def published(self, entry_id: str) -> dict[str, list[str]]:
         """``entity id → the versions this home published of it, oldest first`` in *entry_id*."""
-        return {rid: list(shas) for rid, shas in self._published.get(entry_id, {}).items()}
+        return {
+            rid: list(shas) for rid, shas in self._published.get(entry_id, {}).items()
+        }
 
     def held(self, entry_id: str) -> dict[str, list[str]]:
         """``entity id → every version of it this home held`` in *entry_id*, sorted: the versions
@@ -194,14 +209,20 @@ class Ancestors:
 
     def took_deletion(self, entry_id: str, marks: Mapping[str, Deletion]) -> None:
         """Record *marks* — the records of *entry_id* a reconcile deleted here because another
-        machine deleted them (``ReconcileResult.deleted_there``) — as that machine's deletes."""
+        machine deleted them (``ReconcileResult.deleted_there``) — as that machine's deletes.
+        """
         if not marks:
             return
         self._deleted.setdefault(entry_id, {}).update(marks)
         self._changed = True
 
     def publish(
-        self, entry_id: str, shas: Mapping[str, str], *, now: str = "", unread: Iterable[str] = ()
+        self,
+        entry_id: str,
+        shas: Mapping[str, str],
+        *,
+        now: str = "",
+        unread: Iterable[str] = (),
     ) -> None:
         """Record *shas* — every record of *entry_id* as this home is about to publish it — as the
         newest version of each, keeping the last :data:`PUBLISHED_VERSIONS`, and what is gone.
@@ -259,6 +280,7 @@ class Ancestors:
     def migrate_legacy(self, entry_id, rows, live, old_agreements=None):
         """Retain old delete intent once, with every known version, without altering the old log."""
         import hashlib
+
         digest = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
         if self._legacy.get(entry_id) == digest:
             return
@@ -272,16 +294,23 @@ class Ancestors:
             versions = set(known.get(rid, ()))
             if (old_agreements or {}).get(rid):
                 versions.add(old_agreements[rid])
-            marks[rid] = Deletion(prior.at if prior else str(row.get("deleted_at", "")), tuple(sorted(versions)), prior.by if prior else "")
+            marks[rid] = Deletion(
+                prior.at if prior else str(row.get("deleted_at", "")),
+                tuple(sorted(versions)),
+                prior.by if prior else "",
+            )
         self._legacy[entry_id] = digest
         self._changed = True
 
     def forget_old_deletes(self, now: str) -> None:
         """Forget every delete older than :data:`DELETE_HORIZON_SECS` at *now*. Called after a
-        sync's copy reached the store, so a delete rides at least one copy before it goes."""
+        sync's copy reached the store, so a delete rides at least one copy before it goes.
+        """
         for entry_id in list(self._deleted):
             marks = self._deleted[entry_id]
-            kept = {rid: m for rid, m in marks.items() if not _past_the_horizon(m.at, now)}
+            kept = {
+                rid: m for rid, m in marks.items() if not _past_the_horizon(m.at, now)
+            }
             if kept != marks:
                 self._changed = True
                 if kept:
@@ -296,6 +325,7 @@ class Ancestors:
         if not self._changed:
             return
         from gideon.operations.durability.home_paths import guard_path
+
         guard_path(self._path)
         atomic_json_write(
             self._path,
@@ -304,7 +334,9 @@ class Ancestors:
                 "peers": self._peers,
                 "published": self._published,
                 "deleted": {
-                    entry_id: {rid: mark.to_dict() for rid, mark in sorted(marks.items())}
+                    entry_id: {
+                        rid: mark.to_dict() for rid, mark in sorted(marks.items())
+                    }
                     for entry_id, marks in sorted(self._deleted.items())
                 },
             },

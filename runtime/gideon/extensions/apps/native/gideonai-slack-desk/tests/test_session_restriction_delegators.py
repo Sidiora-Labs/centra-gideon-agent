@@ -8,11 +8,11 @@ import pytest
 
 import gideon.session_restrictions as sr
 
-
 # ---------------------------------------------------------------------------
 # Session temporary mode — state lives in core session_restrictions; the Slack
 # handler's is_thread_temporary/_mark_temporary are thin delegators over it.
 # ---------------------------------------------------------------------------
+
 
 class TestSlackDeskThreadTemporary:
     def setup_method(self):
@@ -33,8 +33,9 @@ class TestSlackDeskThreadTemporary:
 
     def test_bounded_eviction(self):
         """Oldest entry is evicted when max size exceeded."""
-        from gideon import session_restrictions as sr
         from slack_desk_runtime.handler import _mark_temporary, is_thread_temporary
+
+        from gideon import session_restrictions as sr
 
         original_max = sr._MAX
         sr._MAX = 3
@@ -54,6 +55,7 @@ class TestSlackDeskThreadTemporary:
 # Slack: !temporary command handler
 # ---------------------------------------------------------------------------
 
+
 class TestTemporaryCommand:
     def setup_method(self):
         from gideon import session_restrictions as sr
@@ -63,12 +65,17 @@ class TestTemporaryCommand:
 
     @pytest.mark.asyncio
     async def test_temporary_modifier_marks_thread(self):
-        from slack_desk_runtime.handler import _apply_temporary_modifier, is_thread_temporary
+        from slack_desk_runtime.handler import (
+            _apply_temporary_modifier,
+            is_thread_temporary,
+        )
 
         slack_desk = AsyncMock()
         sessions = MagicMock()
 
-        await _apply_temporary_modifier("sk1", "U1", "C123", slack_desk, sessions, "ts1")
+        await _apply_temporary_modifier(
+            "sk1", "U1", "C123", slack_desk, sessions, "ts1"
+        )
 
         assert is_thread_temporary("sk1") is True
         slack_desk.post_message.assert_called_once()
@@ -77,14 +84,19 @@ class TestTemporaryCommand:
 
     @pytest.mark.asyncio
     async def test_temporary_modifier_idempotent(self):
-        from slack_desk_runtime.handler import _apply_temporary_modifier, _mark_temporary
+        from slack_desk_runtime.handler import (
+            _apply_temporary_modifier,
+            _mark_temporary,
+        )
 
         _mark_temporary("sk2")
 
         slack_desk = AsyncMock()
         sessions = MagicMock()
 
-        await _apply_temporary_modifier("sk2", "U1", "C123", slack_desk, sessions, "ts2")
+        await _apply_temporary_modifier(
+            "sk2", "U1", "C123", slack_desk, sessions, "ts2"
+        )
 
         # Idempotent — no message posted on second call
         slack_desk.post_message.assert_not_called()

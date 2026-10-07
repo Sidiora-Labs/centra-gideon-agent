@@ -26,25 +26,25 @@ touches our home.
 from __future__ import annotations
 
 from gideon.cognition.onboarding_import.engine import (
-    plans,
     already_imported,
     detected,
+    plans,
     run_import,
     scan_all,
     scan_source,
     select_items,
 )
 from gideon.cognition.onboarding_import.model import (
-    ItemState,
-    Plan,
-    offer,
     ImportCategory,
     ImportItem,
     ImportReport,
+    ItemState,
+    Plan,
     ScanResult,
     WriteOutcome,
     WriteResult,
     fingerprint_of,
+    offer,
 )
 from gideon.cognition.onboarding_import.registry import (
     ImportSource,

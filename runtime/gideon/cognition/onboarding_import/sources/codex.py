@@ -46,7 +46,11 @@ from typing import Any, BinaryIO, TextIO
 
 import zstandard
 
-from gideon.cognition.onboarding_import.floors import read_text_safely, refuses, safe_text
+from gideon.cognition.onboarding_import.floors import (
+    read_text_safely,
+    refuses,
+    safe_text,
+)
 from gideon.cognition.onboarding_import.model import (
     ImportCategory,
     ImportItem,
@@ -78,13 +82,13 @@ from gideon.cognition.onboarding_import.sources.common import (
     message_count,
     not_imported_rows,
     one_line,
+    one_walk,
     prompt_history,
     recorded_label,
     scan_skills,
     settings_not_imported,
     slug_name,
     text_item,
-    one_walk,
 )
 
 NAME = "codex"
@@ -189,7 +193,9 @@ _OWN_VARIABLE_PREFIX = "GIDEON_"
 def _string_map(value: Any) -> dict[str, str]:
     if not isinstance(value, dict):
         return {}
-    return {str(k): str(v) for k, v in value.items() if isinstance(v, (str, int, float))}
+    return {
+        str(k): str(v) for k, v in value.items() if isinstance(v, (str, int, float))
+    }
 
 
 def _variable_names(value: Any) -> list[str]:
@@ -220,7 +226,9 @@ class _Variables:
         return value
 
 
-def _mcp_server(name: str, entry: dict[str, Any], environ: Mapping[str, str]) -> McpServer:
+def _mcp_server(
+    name: str, entry: dict[str, Any], environ: Mapping[str, str]
+) -> McpServer:
     """One ``[mcp_servers.<name>]`` table in Gideon's form, and what to know about it."""
     spec: dict[str, Any] = {}
     variables = _Variables(environ)
@@ -308,7 +316,9 @@ def _mcp_server(name: str, entry: dict[str, Any], environ: Mapping[str, str]) ->
     )
 
 
-def _servers_from(config: dict[str, Any], environ: Mapping[str, str]) -> list[McpServer]:
+def _servers_from(
+    config: dict[str, Any], environ: Mapping[str, str]
+) -> list[McpServer]:
     table = config.get(_MCP_TABLE)
     if not isinstance(table, dict):
         return []
@@ -348,11 +358,16 @@ def mcp_servers(
 # ── the scan ──────────────────────────────────────────────────────────────────
 
 
-def scan(root: Path | str | None = None, *, look: bool = False,
-         environ: Mapping[str, str] | None = None,
-         isolated_home: Path | None = None) -> ScanResult:
+def scan(
+    root: Path | str | None = None,
+    *,
+    look: bool = False,
+    environ: Mapping[str, str] | None = None,
+    isolated_home: Path | None = None,
+) -> ScanResult:
     """What Codex holds. To ``look`` is to read each session not read before only as far as its
-    first typed prompt (:func:`_scan_conversations`); otherwise every one is read in full."""
+    first typed prompt (:func:`_scan_conversations`); otherwise every one is read in full.
+    """
     explicit = Path(root).expanduser() if root is not None else None
     base = explicit if explicit is not None else resolve_root()
     result = ScanResult(
@@ -366,7 +381,10 @@ def scan(root: Path | str | None = None, *, look: bool = False,
         _scan_instructions(base, result)
         _scan_memories(base, result)
         if config_name == _TOML_CONFIG:
-            _scan_mcp(_servers_from(config, os.environ if environ is None else environ), result)
+            _scan_mcp(
+                _servers_from(config, os.environ if environ is None else environ),
+                result,
+            )
         scan_skills(NAME, _skill_roots(base, explicit), result)
         _scan_agents(base, result)
         _scan_prompts(base, result)
@@ -389,7 +407,13 @@ def _count_withheld_files(base: Path, result: ScanResult) -> None:
     count is how the user learns they were there and left alone. Files a category already
     accounted for are excluded so nothing is counted twice.
     """
-    visited = {*_INSTRUCTION_FILES, _TOML_CONFIG, _JSON_CONFIG, _HISTORY_FILE, _SESSION_INDEX}
+    visited = {
+        *_INSTRUCTION_FILES,
+        _TOML_CONFIG,
+        _JSON_CONFIG,
+        _HISTORY_FILE,
+        _SESSION_INDEX,
+    }
     for path in sorted(base.iterdir()):
         if path.is_file() and path.name not in visited and refuses(path):
             result.secrets_skipped += 1
@@ -442,8 +466,11 @@ def _scan_memories(base: Path, result: ScanResult) -> None:
             working += sum(1 for p in folder.rglob("*") if p.is_file())
     if working:
         result.not_imported.append(
-            {"what": "Memory working files", "count": working,
-             "why": "Codex builds its memories from these files. Its memories and conversations come over."}
+            {
+                "what": "Memory working files",
+                "count": working,
+                "why": "Codex builds its memories from these files. Its memories and conversations come over.",
+            }
         )
 
 
@@ -518,7 +545,9 @@ _HINT_RE = re.compile(r"\b([A-Z][A-Z0-9_]*)=(\S+)")
 _ARGUMENTS = "ARGUMENTS"
 
 
-def prompt_template(body: str, *, argument_hint: str) -> tuple[str, list[dict[str, Any]]]:
+def prompt_template(
+    body: str, *, argument_hint: str
+) -> tuple[str, list[dict[str, Any]]]:
     """A Codex custom prompt as a Gideon prompt: ``(content, variables)``.
 
     Codex's rule, kept: a prompt with any named placeholder (``$ISSUE``) takes named values, each
@@ -526,23 +555,36 @@ def prompt_template(body: str, *, argument_hint: str) -> tuple[str, list[dict[st
     ``$1``…``$9`` become ``{{arg1}}``… and ``$ARGUMENTS`` all of them, as ``{{arguments}}``. A
     ``$$`` stays as Codex left it.
     """
-    names = [m.group(1) for m in _NAMED_PLACEHOLDER_RE.finditer(body) if m.group(1) != _ARGUMENTS]
+    names = [
+        m.group(1)
+        for m in _NAMED_PLACEHOLDER_RE.finditer(body)
+        if m.group(1) != _ARGUMENTS
+    ]
     if names:
-        hints = {key: value.strip("<>") for key, value in _HINT_RE.findall(argument_hint)}
+        hints = {
+            key: value.strip("<>") for key, value in _HINT_RE.findall(argument_hint)
+        }
 
         def _named(match: re.Match[str]) -> str:
             word = match.group(1)
             return match.group(0) if word == _ARGUMENTS else f"{{{{{word.lower()}}}}}"
 
         variables = [
-            {"name": n.lower(), "type": "text", "description": hints.get(n, ""), "required": True}
+            {
+                "name": n.lower(),
+                "type": "text",
+                "description": hints.get(n, ""),
+                "required": True,
+            }
             for n in dict.fromkeys(names)
         ]
         return _NAMED_PLACEHOLDER_RE.sub(_named, body), variables
     return _positional_template(body, argument_hint)
 
 
-def _positional_template(body: str, argument_hint: str) -> tuple[str, list[dict[str, Any]]]:
+def _positional_template(
+    body: str, argument_hint: str
+) -> tuple[str, list[dict[str, Any]]]:
     """``$1``…``$9`` and ``$ARGUMENTS``, read the way Codex's expansion read them."""
     out: list[str] = []
     digits: set[str] = set()
@@ -572,10 +614,13 @@ def _positional_template(body: str, argument_hint: str) -> tuple[str, list[dict[
             {
                 "name": "arguments",
                 "type": "textarea",
-                "description": argument_hint or "What the prompt was given after its name.",
+                "description": argument_hint
+                or "What the prompt was given after its name.",
             }
         )
-    variables.extend({"name": f"arg{d}", "type": "text", "description": ""} for d in sorted(digits))
+    variables.extend(
+        {"name": f"arg{d}", "type": "text", "description": ""} for d in sorted(digits)
+    )
     return "".join(out), variables
 
 
@@ -591,7 +636,8 @@ def _scan_prompts(base: Path, result: ScanResult) -> None:
             continue
         meta = parse_frontmatter(text)
         content, variables = prompt_template(
-            ProcedureLibrary.strip_frontmatter(text), argument_hint=meta.get("argument-hint", "")
+            ProcedureLibrary.strip_frontmatter(text),
+            argument_hint=meta.get("argument-hint", ""),
         )
         result.redactions += redactions
         result.items.append(
@@ -663,7 +709,9 @@ def parse_rules(source: str) -> tuple[list[CommandRule], int]:
         ):
             continue
         try:
-            given = {kw.arg: ast.literal_eval(kw.value) for kw in call.keywords if kw.arg}
+            given = {
+                kw.arg: ast.literal_eval(kw.value) for kw in call.keywords if kw.arg
+            }
             if call.args:
                 given.setdefault("pattern", ast.literal_eval(call.args[0]))
         except (ValueError, TypeError, SyntaxError, RecursionError, MemoryError):
@@ -679,7 +727,9 @@ def parse_rules(source: str) -> tuple[list[CommandRule], int]:
             CommandRule(
                 pattern=pattern,
                 decision=decision,
-                justification=justification.strip() if isinstance(justification, str) else "",
+                justification=(
+                    justification.strip() if isinstance(justification, str) else ""
+                ),
             )
         )
     return rules, unreadable
@@ -688,7 +738,8 @@ def parse_rules(source: str) -> tuple[list[CommandRule], int]:
 def _scan_rules(base: Path, result: ScanResult) -> None:
     """``rules/*.rules``. A ``forbidden`` rule is a command Codex refuses to run, and becomes one
     Gideon refuses: a shell-denylist pattern. Gideon has no rule that asks before one
-    command, and an import never lets a command run unasked, so the other two are counted."""
+    command, and an import never lets a command run unasked, so the other two are counted.
+    """
     root = base / _RULES_DIR
     if not root.is_dir():
         return
@@ -714,7 +765,11 @@ def _scan_rules(base: Path, result: ScanResult) -> None:
                     result,
                     key=f"{_RULES_DIR}/{path.name}:{json.dumps(rule.pattern)}",
                     pattern=rule.pattern,
-                    note=f"Codex's reason: {rule.justification}" if rule.justification else "",
+                    note=(
+                        f"Codex's reason: {rule.justification}"
+                        if rule.justification
+                        else ""
+                    ),
                 )
     not_imported_rows(
         result,
@@ -733,9 +788,21 @@ def _scan_rules(base: Path, result: ScanResult) -> None:
 # ── conversations ─────────────────────────────────────────────────────────────
 
 #: What Codex puts around a prompt in the model's input: its context, not something you typed.
-_CONTEXT_PREFIXES = ("<environment_context>", "<user_instructions>", "# AGENTS.md instructions")
+_CONTEXT_PREFIXES = (
+    "<environment_context>",
+    "<user_instructions>",
+    "# AGENTS.md instructions",
+)
 #: Call arguments that say what a call did, in the order they are preferred.
-_CALL_SUMMARY_FIELDS = ("cmd", "command", "query", "path", "file_path", "url", "pattern")
+_CALL_SUMMARY_FIELDS = (
+    "cmd",
+    "command",
+    "query",
+    "path",
+    "file_path",
+    "url",
+    "pattern",
+)
 _CALL_SUMMARY_CHARS = 160
 _PATCH_OPS = ("*** Add File: ", "*** Update File: ", "*** Delete File: ")
 _SESSION_ID_RE = re.compile(
@@ -761,13 +828,17 @@ _DAMAGED = "does not decompress: its data is damaged, or is not zstd"
 
 def _too_large(*, compressed: bool) -> str:
     size = f"{MAX_SESSION_BYTES / 1_000_000:g} MB"
-    what = f"decompresses to more than {size}" if compressed else f"is larger than {size}"
+    what = (
+        f"decompresses to more than {size}" if compressed else f"is larger than {size}"
+    )
     return f"{what}, the most this import reads for one conversation"
 
 
 def _not_read(exc: OSError) -> str:
     """Why a file could not be opened or read, in the system's words and without its path."""
-    return f"could not be read ({exc.strerror})" if exc.strerror else "could not be read"
+    return (
+        f"could not be read ({exc.strerror})" if exc.strerror else "could not be read"
+    )
 
 
 def _plain_name(name: str) -> str:
@@ -868,7 +939,11 @@ def _session_titles(base: Path) -> dict[str, str]:
                     continue
                 if isinstance(entry, dict):
                     session, name = entry.get("id"), entry.get("thread_name")
-                    if isinstance(session, str) and isinstance(name, str) and name.strip():
+                    if (
+                        isinstance(session, str)
+                        and isinstance(name, str)
+                        and name.strip()
+                    ):
                         titles[session] = name
     except OSError:
         return titles
@@ -883,7 +958,8 @@ def _content_text(content: Any) -> str:
     parts = [
         str(block.get("text") or "")
         for block in content
-        if isinstance(block, dict) and block.get("type") in ("input_text", "output_text", "text")
+        if isinstance(block, dict)
+        and block.get("type") in ("input_text", "output_text", "text")
     ]
     return "\n\n".join(p for p in parts if p.strip())
 
@@ -894,7 +970,11 @@ def _command_text(value: Any) -> str:
         return value
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         return ""
-    if len(value) >= 3 and value[0].rsplit("/", 1)[-1].endswith("sh") and value[1] in ("-lc", "-c"):
+    if (
+        len(value) >= 3
+        and value[0].rsplit("/", 1)[-1].endswith("sh")
+        and value[1] in ("-lc", "-c")
+    ):
         return value[2]
     return " ".join(value)
 
@@ -918,7 +998,9 @@ def _call_line(payload: dict[str, Any]) -> str:
         text = str(payload.get("input") or "")
         ops = [line[4:] for line in text.splitlines() if line.startswith(_PATCH_OPS)]
         summary = (
-            "; ".join(ops) if ops else next((ln for ln in text.splitlines() if ln.strip()), "")
+            "; ".join(ops)
+            if ops
+            else next((ln for ln in text.splitlines() if ln.strip()), "")
         )
     elif kind in ("local_shell_call", "web_search_call"):
         held = payload.get("action")
@@ -928,7 +1010,9 @@ def _call_line(payload: dict[str, Any]) -> str:
     else:
         return ""
     name = name or "tool"
-    return f"{name}: {one_line(summary, _CALL_SUMMARY_CHARS)}" if summary.strip() else name
+    return (
+        f"{name}: {one_line(summary, _CALL_SUMMARY_CHARS)}" if summary.strip() else name
+    )
 
 
 def _session_lines(path: Path) -> Generator[str, None, None]:
@@ -999,10 +1083,18 @@ class _Rollout:
                     last["content"] = f"{last['content']}\n\n{cleaned}"
                     last["ts"] = ts or last["ts"]
                 else:
-                    self.messages.append({"role": "assistant", "content": cleaned, "ts": ts})
+                    self.messages.append(
+                        {"role": "assistant", "content": cleaned, "ts": ts}
+                    )
             elif role == "user" and not text.lstrip().startswith(_CONTEXT_PREFIXES):
                 self.messages.append(
-                    {"role": "user", "content": cleaned, "ts": ts, "input": True, "n": n}
+                    {
+                        "role": "user",
+                        "content": cleaned,
+                        "ts": ts,
+                        "input": True,
+                        "n": n,
+                    }
                 )
             return
         call = _call_line(payload)
@@ -1028,7 +1120,9 @@ class _Rollout:
     def session(self, path: Path) -> str:
         plain = Path(_plain_name(path.name))
         found = _SESSION_ID_RE.search(plain.name)
-        return str(self.meta.get("id") or "") or (found.group(1) if found else plain.stem)
+        return str(self.meta.get("id") or "") or (
+            found.group(1) if found else plain.stem
+        )
 
     def conversation(
         self, path: Path, titles: Mapping[str, str]
@@ -1039,12 +1133,15 @@ class _Rollout:
         if not prompts:
             return None
         session = self.session(path)
-        title, _n = safe_text(one_line(titles.get(session) or prompts[0]["content"], TITLE_CHARS))
+        title, _n = safe_text(
+            one_line(titles.get(session) or prompts[0]["content"], TITLE_CHARS)
+        )
         stamps = [m["ts"] for m in kept if m["ts"]]
         conversation = {
             "messages": kept,
             "title": title,
-            "created_at": str(self.meta.get("timestamp") or "") or (stamps[0] if stamps else ""),
+            "created_at": str(self.meta.get("timestamp") or "")
+            or (stamps[0] if stamps else ""),
             "updated_at": stamps[-1] if stamps else "",
             "cwd": str(self.meta.get("cwd") or ""),
         }
@@ -1066,12 +1163,15 @@ class _Rollout:
                 redactions=redactions,
             )
         typed_or_input = self.typed_prompt or next(
-            (m["content"] for m in self.messages if m.get("input") and not self.typed), ""
+            (m["content"] for m in self.messages if m.get("input") and not self.typed),
+            "",
         )
         if not typed_or_input:
             return None
         return Transcript(
-            title=one_line(typed_or_input, TITLE_CHARS), session=self.session(path), cwd=cwd
+            title=one_line(typed_or_input, TITLE_CHARS),
+            session=self.session(path),
+            cwd=cwd,
         )
 
 
@@ -1121,7 +1221,9 @@ def _reading(path: Path, *, look: bool) -> Reading:
     return reading
 
 
-def read_rollout(path: Path, titles: Mapping[str, str]) -> tuple[dict[str, Any], str, int] | None:
+def read_rollout(
+    path: Path, titles: Mapping[str, str]
+) -> tuple[dict[str, Any], str, int] | None:
     """One Codex session file as a Gideon conversation: ``(conversation, session id,
     redactions)``, or ``None`` for one with no prompt in it. ``path`` is the session as Codex
     wrote it (``.jsonl``) or as it compressed it (``.jsonl.zst``), and both read the same.
@@ -1151,7 +1253,8 @@ def read_rollout(path: Path, titles: Mapping[str, str]) -> tuple[dict[str, Any],
 
 def read_for_import(item: ImportItem) -> tuple[dict[str, Any], int] | None:
     """The conversation ``item`` names, read in full now (:func:`read_rollout`), titled as the scan
-    listed it. Raises :class:`SessionUnreadable` for a file that cannot be read to its end."""
+    listed it. Raises :class:`SessionUnreadable` for a file that cannot be read to its end.
+    """
     listed = str(item.payload.get("listed_as") or "")
     read = read_rollout(Path(item.path), {item.name: listed} if listed else {})
     if read is None:
@@ -1178,7 +1281,10 @@ def _session_files(root: Path) -> list[Path]:
         return []
     found: dict[Path, Path] = {}
     for path in root.rglob("rollout-*"):
-        if not path.name.endswith((_SESSION_SUFFIX, _COMPRESSED_SUFFIX)) or not path.is_file():
+        if (
+            not path.name.endswith((_SESSION_SUFFIX, _COMPRESSED_SUFFIX))
+            or not path.is_file()
+        ):
             continue
         plain = path.with_name(_plain_name(path.name))
         if path == plain or plain not in found:
@@ -1271,6 +1377,10 @@ def _scan_settings(
     names = [
         str(key)
         for key, value in config.items()
-        if not (config_name == _TOML_CONFIG and key == _MCP_TABLE and isinstance(value, dict))
+        if not (
+            config_name == _TOML_CONFIG
+            and key == _MCP_TABLE
+            and isinstance(value, dict)
+        )
     ]
     settings_not_imported(result, DISPLAY_NAME, names)

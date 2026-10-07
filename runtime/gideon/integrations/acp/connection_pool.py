@@ -254,7 +254,7 @@ class AcpConnectionPool:
                         extra_env=extra_env,
                         session_key=session_key,
                         channel_id=channel_id,
-                session_meta=session_meta,
+                        session_meta=session_meta,
                     )
                     await candidate.initialize(
                         {

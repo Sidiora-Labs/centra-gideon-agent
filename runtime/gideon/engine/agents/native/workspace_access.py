@@ -150,7 +150,11 @@ class WorkspaceTree:
         return "\n".join(sorted(names)) or "(empty)"
 
     def matching_files(self, pattern: str, *, case_sensitive: bool | None = None):
-        return (path for path in self.root.glob(pattern, case_sensitive=case_sensitive) if path.is_file())
+        return (
+            path
+            for path in self.root.glob(pattern, case_sensitive=case_sensitive)
+            if path.is_file()
+        )
 
     def glob_listing(self, pattern: str) -> str:
         paths = sorted(

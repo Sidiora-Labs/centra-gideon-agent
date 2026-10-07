@@ -16,8 +16,8 @@ from gideon import __version__
 from gideon.assurance.testing.channel_conformance import (
     CapturingState,
     ChannelContractError,
-    assert_channel_contract,
     assert_channel_approvals,
+    assert_channel_contract,
 )
 from gideon.automation.schedule import compute_next_run_ts, format_schedule
 from gideon.automation.triggers.models import Trigger
@@ -90,32 +90,31 @@ from gideon.integrations.channel_transports.base import (
     OutboundMessage,
 )
 from gideon.integrations.channel_trust import (
-    CANNED_PAIRING_REPLY,
     CANNED_OWNER_PAIRED_REPLY,
+    CANNED_PAIRING_REPLY,
     TrustVerdict,
     allow_sender,
     apply_trust_action,
     cancel_owner_pairing,
-    create_pairing_code,
     cancel_pairing_code,
     create_owner_pairing_code,
+    create_pairing_code,
     deny_sender,
     fence_channel_content,
     guard_inbound,
     is_allowed_sender,
     is_tracked_channel,
-    note_unknown_sender,
-    note_seen_channel,
-    owner_pairing_status,
-    redeem_pairing_code,
-    redeem_owner_pairing_code,
-    track,
     list_seen_channels,
+    note_seen_channel,
+    note_unknown_sender,
+    owner_pairing_status,
+    redeem_owner_pairing_code,
+    redeem_pairing_code,
     set_trust_policies,
+    track,
     trust_policies,
     untrack,
 )
-from gideon.security.approval_brief import channel_approval_brief
 from gideon.integrations.llm.base import (
     EVENT_COMPACTION_STATUS,
     EVENT_COMPLETE,
@@ -146,13 +145,14 @@ from gideon.interfaces.dashboard.origin import (
 from gideon.interfaces.dashboard.token_auth import (
     LINK_WINDOW_SECS,
     MAX_SESSION_TTL_SECS,
+    NOT_THE_OWNER_SENTENCE,
     generate_token,
     owner_sign_in_token,
-    NOT_THE_OWNER_SENTENCE,
     parse_duration,
 )
 from gideon.operations.stats import Stats
 from gideon.security import trust_mode
+from gideon.security.approval_brief import channel_approval_brief
 
 # ── Security + audit ──
 from gideon.security.security import (

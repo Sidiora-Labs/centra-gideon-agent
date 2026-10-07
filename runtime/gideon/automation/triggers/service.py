@@ -235,7 +235,9 @@ class TickPass:
         from gideon.automation.triggers import claims
 
         if self.persist and decision.claim is not None:
-            if not claims.acquire_claim(decision.claim, overlap=trigger.overlap, base_dir=self.base_dir):
+            if not claims.acquire_claim(
+                decision.claim, overlap=trigger.overlap, base_dir=self.base_dir
+            ):
                 return False
         trigger.run_count = int(getattr(trigger, "run_count", 0) or 0) + 1
         trigger.last_fired_at = to_iso(self.now)
@@ -262,7 +264,10 @@ class TickPass:
         self.result.ledger_rows.append(row)
         granted = decision.allowed and self.grant(trigger, decision, scheduled_for)
         if decision.allowed and not granted:
-            row.update(outcome=Outcome.SKIPPED_OVERLAP.value, reason="another run acquired the claim before dispatch")
+            row.update(
+                outcome=Outcome.SKIPPED_OVERLAP.value,
+                reason="another run acquired the claim before dispatch",
+            )
         if not granted and self.persist:
             if trigger.id in self.result.retired:
                 self.store.upsert(trigger)
@@ -311,7 +316,12 @@ def _own_time(trigger: Any) -> float:
 
 
 def retire_after_run(
-    store: Any, trigger: Any, *, status: str, from_review: bool = False, settled_holder: str = ""
+    store: Any,
+    trigger: Any,
+    *,
+    status: str,
+    from_review: bool = False,
+    settled_holder: str = "",
 ) -> bool:
     if status not in {"success", "ran_late", "degraded", "skipped_noop"}:
         return False
@@ -320,8 +330,12 @@ def retire_after_run(
         return False
     from gideon.automation.triggers import claims
 
-    if any(claim.holder != settled_holder and not claim.expired(time.time())
-           for claim in claims.read_claims(trigger.id, base_dir=getattr(store, "base_dir", None))):
+    if any(
+        claim.holder != settled_holder and not claim.expired(time.time())
+        for claim in claims.read_claims(
+            trigger.id, base_dir=getattr(store, "base_dir", None)
+        )
+    ):
         return False
     current = row.trigger
     spec = current.spec if isinstance(current.spec, dict) else {}
@@ -460,7 +474,11 @@ async def record_suppression(
             )
         )
     except Exception:
-        logger.debug("could not persist trigger suppression for %s", getattr(trigger, "id", "?"), exc_info=True)
+        logger.debug(
+            "could not persist trigger suppression for %s",
+            getattr(trigger, "id", "?"),
+            exc_info=True,
+        )
 
 
 async def _fires_in_window(

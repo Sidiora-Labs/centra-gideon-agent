@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import logging
 import hashlib
 import hmac
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -129,15 +129,25 @@ def principal_from_record(value: Any) -> Principal:
 
 def ingress_record(principal: Principal, session_key: str, own_text: str) -> dict:
     """Server-authenticated provenance; this record is evidence, never a capability."""
-    record = {"principal": principal_record(principal), "source_thread": session_key,
-            "source_user": principal.label, "source_event_id": uuid.uuid4().hex,
-            "source_digest": hashlib.sha256(own_text.encode("utf-8")).hexdigest()}
+    record = {
+        "principal": principal_record(principal),
+        "source_thread": session_key,
+        "source_user": principal.label,
+        "source_event_id": uuid.uuid4().hex,
+        "source_digest": hashlib.sha256(own_text.encode("utf-8")).hexdigest(),
+    }
     from gideon.security.durable_work import sign_ingress
+
     return sign_ingress(record)
 
 
 def work_principal_of_request(request: Any) -> Principal:
     """Work constraints can inherit proven ancestry; approval answers never do."""
     from gideon.security.session_credentials import work_of_request
+
     proof = work_of_request(request)
-    return (proof.work_actor or proof.initiator) if proof is not None else of_request(request)
+    return (
+        (proof.work_actor or proof.initiator)
+        if proof is not None
+        else of_request(request)
+    )

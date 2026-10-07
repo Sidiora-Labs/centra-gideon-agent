@@ -67,7 +67,9 @@ class NoneSandboxProvider(SandboxProvider):
 
     def wrap(self, spec: SandboxSpec, argv: list[str]) -> _NoneHandle:
         if spec.egress_tier not in {"all", "off"}:
-            from gideon.integrations.sandbox_providers.base import SandboxUnavailableError
+            from gideon.integrations.sandbox_providers.base import (
+                SandboxUnavailableError,
+            )
 
             raise SandboxUnavailableError(
                 "The program was not started",

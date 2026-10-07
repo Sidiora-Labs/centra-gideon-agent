@@ -30,7 +30,12 @@ RUN_ACTION_SOURCE_STATES: dict[str, frozenset[LoopStatus]] = {
     "pause": frozenset({LoopStatus.RUNNING}),
     "resume": frozenset({LoopStatus.PAUSED}),
     "stop": frozenset(
-        {LoopStatus.READY, LoopStatus.RUNNING, LoopStatus.PAUSED, LoopStatus.NEEDS_INPUT}
+        {
+            LoopStatus.READY,
+            LoopStatus.RUNNING,
+            LoopStatus.PAUSED,
+            LoopStatus.NEEDS_INPUT,
+        }
     ),
 }
 
@@ -72,13 +77,15 @@ def _cycles_completed(run_id: str, path: str) -> int:
     except Exception:
         logger.warning("loop view: iteration read failed for %s", run_id, exc_info=True)
         return 0
-    return len({
-        int(row["iteration"])
-        for row in rows
-        if row.get("instance_path") == path
-        and isinstance(row.get("iteration"), int)
-        and int(row["iteration"]) >= 0
-    })
+    return len(
+        {
+            int(row["iteration"])
+            for row in rows
+            if row.get("instance_path") == path
+            and isinstance(row.get("iteration"), int)
+            and int(row["iteration"]) >= 0
+        }
+    )
 
 
 def run_loop_view(run: WorkflowRun) -> dict[str, Any]:
@@ -98,11 +105,18 @@ def run_loop_view(run: WorkflowRun) -> dict[str, Any]:
         reason = LoopStopReason.USER.value
     elif run.status in (RunStatus.ESCALATED, RunStatus.FAILED):
         reason = LoopStopReason.WORKER_FAILED.value
-        if run.status == RunStatus.ESCALATED and (run.attention or {}).get("reason") == "max_iterations":
+        if (
+            run.status == RunStatus.ESCALATED
+            and (run.attention or {}).get("reason") == "max_iterations"
+        ):
             reason = LoopStopReason.CYCLE_BUDGET.value
     error = run.error_message or ""
     if not error and run.status == RunStatus.ESCALATED:
-        error = str((run.attention or {}).get("detail") or (run.attention or {}).get("reason") or "")
+        error = str(
+            (run.attention or {}).get("detail")
+            or (run.attention or {}).get("reason")
+            or ""
+        )
     elapsed = max(0.0, float(run.elapsed_seconds or 0.0))
     if run.status == RunStatus.RUNNING and run.started_at:
         elapsed = max(elapsed, time.time() - (_epoch(run.started_at) or time.time()))

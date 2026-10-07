@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import logging
-from gideon.core.turn_streams import closing_stream
-from gideon.integrations.acp.spend import AcpTurnMeter
-
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from gideon.core.turn_streams import closing_stream
 from gideon.engine.agents.provider import AgentProvider
 from gideon.integrations.acp.outcomes import AcpToolOutcomesMixin
+from gideon.integrations.acp.spend import AcpTurnMeter
 from gideon.integrations.llm.acp_provider_runtime import (
     cancel_turn,
     capability_names,
@@ -26,7 +25,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class AcpSessionProvider(AcpTurnMeter, AcpToolOutcomesMixin, AgentProvider, ModelProvider):
+class AcpSessionProvider(
+    AcpTurnMeter, AcpToolOutcomesMixin, AgentProvider, ModelProvider
+):
     supports_tools = True
 
     def __init__(
@@ -41,7 +42,9 @@ class AcpSessionProvider(AcpTurnMeter, AcpToolOutcomesMixin, AgentProvider, Mode
         session_snapshot: dict | None = None,
         compacts_itself: bool = False,
     ) -> None:
-        from gideon.integrations.acp.options import compacts_itself as validate_compaction
+        from gideon.integrations.acp.options import (
+            compacts_itself as validate_compaction,
+        )
 
         self._compacts_itself = validate_compaction(compacts_itself)
         self._conn, self._session = connection, session
@@ -137,7 +140,17 @@ class AcpSessionProvider(AcpTurnMeter, AcpToolOutcomesMixin, AgentProvider, Mode
         )
 
     async def stream(self, message: str) -> AsyncIterator[LLMEvent]:
-        async with closing_stream(self._metered(relay_events(self, self._session.stream_events, message, self._stamp_turn_telemetry), prompt=message)) as events:
+        async with closing_stream(
+            self._metered(
+                relay_events(
+                    self,
+                    self._session.stream_events,
+                    message,
+                    self._stamp_turn_telemetry,
+                ),
+                prompt=message,
+            )
+        ) as events:
             async for event in events:
                 yield event
 
@@ -150,7 +163,17 @@ class AcpSessionProvider(AcpTurnMeter, AcpToolOutcomesMixin, AgentProvider, Mode
 
         if not self.supports_native_commands:
             raise AcpCommandsUnsupported(command)
-        async with closing_stream(self._metered(relay_events(self, self._session.stream_command, command, self._stamp_turn_telemetry), prompt=command)) as events:
+        async with closing_stream(
+            self._metered(
+                relay_events(
+                    self,
+                    self._session.stream_command,
+                    command,
+                    self._stamp_turn_telemetry,
+                ),
+                prompt=command,
+            )
+        ) as events:
             async for event in events:
                 yield event
 

@@ -26,8 +26,8 @@ here would bypass host classification, private-IP denial and the redirect-hop re
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
@@ -43,13 +43,26 @@ class _ApprovedSighting:
 
 
 def _snapshot_sighting(item) -> str:
-    fields = ('guid', 'title', 'content', 'url', 'published_at', 'metadata', 'also_seen_in', 'change')
-    return json.dumps({name: getattr(item, name) for name in fields}, ensure_ascii=False)
+    fields = (
+        "guid",
+        "title",
+        "content",
+        "url",
+        "published_at",
+        "metadata",
+        "also_seen_in",
+        "change",
+    )
+    return json.dumps(
+        {name: getattr(item, name) for name in fields}, ensure_ascii=False
+    )
 
 
 async def _approve_sighting(payload: str) -> _ApprovedSighting:
     from gideon.workspace.uploads.content_intake import approve_text
+
     data = json.loads(payload)
+
     # Decode strings before scanning: JSON escaping must not hide a script's
     # line boundaries or an invisible character in a nested metadata value.
     def strings(value):
@@ -62,9 +75,10 @@ async def _approve_sighting(payload: str) -> _ApprovedSighting:
         elif isinstance(value, list):
             for child in value:
                 yield from strings(child)
-    await approve_text('\n'.join(strings(data)), surface='watched_source')
+
+    await approve_text("\n".join(strings(data)), surface="watched_source")
     approved = _ApprovedSighting(payload)
-    object.__setattr__(approved, '_seal', _SIGHTING_SEAL)
+    object.__setattr__(approved, "_seal", _SIGHTING_SEAL)
     return approved
 
 
@@ -375,10 +389,11 @@ class SourceEngine:
         refused_codes = []
         retry = False
         from gideon.workspace.uploads.content_intake import IntakeRefused
+
         for item in result.items[:max_items]:
             payload = None
             try:
-                prior_refusal = getattr(item, '_intake_refusal', None)
+                prior_refusal = getattr(item, "_intake_refusal", None)
                 if isinstance(prior_refusal, IntakeRefused):
                     raise prior_refusal
                 payload = _snapshot_sighting(item)
@@ -390,23 +405,40 @@ class SourceEngine:
                     retry = True
                 else:
                     try:
-                        self._record_refusal(source, json.loads(payload) if payload is not None else
-                                             {'guid': item.guid, 'change': item.change}, exc.code)
+                        self._record_refusal(
+                            source,
+                            (
+                                json.loads(payload)
+                                if payload is not None
+                                else {"guid": item.guid, "change": item.change}
+                            ),
+                            exc.code,
+                        )
                     except Exception:
                         retry = True
-                        refused_codes.append('source_receipt_unavailable')
-                        logger.warning('source %s refusal receipt could not be stored', sid, exc_info=True)
+                        refused_codes.append("source_receipt_unavailable")
+                        logger.warning(
+                            "source %s refusal receipt could not be stored",
+                            sid,
+                            exc_info=True,
+                        )
             except Exception:
                 retry = True
-                refused_codes.append('source_item_unavailable')
-                logger.warning('source %s sighting could not be admitted', sid, exc_info=True)
-        health = HEALTH_DEGRADED if refused_codes else (getattr(result, 'health_status', '') or HEALTH_OK)
+                refused_codes.append("source_item_unavailable")
+                logger.warning(
+                    "source %s sighting could not be admitted", sid, exc_info=True
+                )
+        health = (
+            HEALTH_DEGRADED
+            if refused_codes
+            else (getattr(result, "health_status", "") or HEALTH_OK)
+        )
         self._store.record_poll(
             sid,
             cursor=cursor if retry else (result.cursor or cursor),
             new_count=new_count,
             health_status=health,
-            error_summary=', '.join(sorted(set(refused_codes))),
+            error_summary=", ".join(sorted(set(refused_codes))),
             next_poll_at=next_at,
             escalations=escalations,
         )
@@ -436,8 +468,9 @@ class SourceEngine:
         silently mis-persisted as an ingestion.
         """
         if not isinstance(item, _ApprovedSighting) or item._seal is not _SIGHTING_SEAL:
-            raise PermissionError('Source content has not passed intake.')
+            raise PermissionError("Source content has not passed intake.")
         from gideon.integrations.knowledge_providers.base import SourceItem
+
         item = SourceItem(**json.loads(item.payload))
         from gideon.integrations.knowledge_providers.base import (
             CHANGE_CREATED,
@@ -466,12 +499,24 @@ class SourceEngine:
         Accepted edits/deletions retain the existing row byte-for-byte.
         """
         from gideon.integrations.knowledge_providers.base import CHANGE_DELETED
-        if sighting.get('change') == CHANGE_DELETED or self._store.find_source_item(source['id'], sighting['guid']):
+
+        if sighting.get("change") == CHANGE_DELETED or self._store.find_source_item(
+            source["id"], sighting["guid"]
+        ):
             return
-        self._store.create_typed_item(item_type=source.get('item_type') or 'bookmark',
-            title='Source content refused', content='', url='', provider=source['provider'],
-            source_id=source['id'], guid=sighting['guid'],
-            extra={'processing_status':'failed', 'file_metadata':{'content_refusal':code}})
+        self._store.create_typed_item(
+            item_type=source.get("item_type") or "bookmark",
+            title="Source content refused",
+            content="",
+            url="",
+            provider=source["provider"],
+            source_id=source["id"],
+            guid=sighting["guid"],
+            extra={
+                "processing_status": "failed",
+                "file_metadata": {"content_refusal": code},
+            },
+        )
 
     @staticmethod
     def _declared_attributions(item: Any) -> list[str]:

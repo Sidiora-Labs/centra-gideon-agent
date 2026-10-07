@@ -312,10 +312,17 @@ class Failure:
         except (TypeError, ValueError, OverflowError):
             failure.retry_at = None
         raw_providers = d.get("providers", [])
-        failure.providers = list(dict.fromkeys(
-            str(provider) for provider in raw_providers
-            if isinstance(provider, str) and provider
-        )) if isinstance(raw_providers, list) else []
+        failure.providers = (
+            list(
+                dict.fromkeys(
+                    str(provider)
+                    for provider in raw_providers
+                    if isinstance(provider, str) and provider
+                )
+            )
+            if isinstance(raw_providers, list)
+            else []
+        )
         return failure
 
 

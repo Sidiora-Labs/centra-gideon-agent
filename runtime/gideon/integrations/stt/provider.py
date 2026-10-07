@@ -79,7 +79,11 @@ class SttError(Exception):
     def __init__(self, code: str = "provider_failed", *, detail: str = "") -> None:
         self.code = code if code in self._MESSAGES else "provider_failed"
         self.detail = detail if self.code == "budget_exceeded" else ""
-        super().__init__(detail if self.code == "budget_exceeded" and detail else self._MESSAGES[self.code])
+        super().__init__(
+            detail
+            if self.code == "budget_exceeded" and detail
+            else self._MESSAGES[self.code]
+        )
 
 
 class SttProvider(ABC):

@@ -60,11 +60,9 @@ def next_fire(
     iterator = croniter(expression, cursor)
     for _ in range(500):
         match = iterator.get_next(datetime)
-        if (
-            last_local is not None
-            and match.replace(second=0, microsecond=0)
-            == last_local.replace(second=0, microsecond=0)
-        ):
+        if last_local is not None and match.replace(
+            second=0, microsecond=0
+        ) == last_local.replace(second=0, microsecond=0):
             continue
         placed = _placed(match, zone, after)
         if placed > after:

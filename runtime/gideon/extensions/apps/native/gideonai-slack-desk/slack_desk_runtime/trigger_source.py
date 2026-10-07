@@ -58,9 +58,9 @@ _APP_DIR = str(_Path(__file__).resolve().parents[1])
 if _APP_DIR not in _sys.path:
     _sys.path.insert(0, _APP_DIR)
 
-from gideon.sdk.trigger_source import SourceEvent, TriggerSourceProvider
-
 from slack_desk_runtime.inbound_tap import subscribe, unsubscribe
+
+from gideon.sdk.trigger_source import SourceEvent, TriggerSourceProvider
 
 logger = logging.getLogger(__name__)
 

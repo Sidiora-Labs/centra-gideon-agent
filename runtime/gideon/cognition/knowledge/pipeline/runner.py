@@ -14,15 +14,17 @@ from __future__ import annotations
 
 import logging
 
-from gideon.cognition.knowledge.pipeline import outcomes as oc
-from gideon.cognition.knowledge.pipeline.outcomes import PhaseOutcome
-
 from gideon.cognition.knowledge.pipeline import (
     TERMINAL_STAGES,
     ensure_nodes_registered,
     graph_for,
 )
-from gideon.cognition.knowledge.pipeline.executor import ExecutionResult, PipelineExecutor
+from gideon.cognition.knowledge.pipeline import outcomes as oc
+from gideon.cognition.knowledge.pipeline.executor import (
+    ExecutionResult,
+    PipelineExecutor,
+)
+from gideon.cognition.knowledge.pipeline.outcomes import PhaseOutcome
 from gideon.cognition.knowledge.pipeline.types import NodeContext
 from gideon.integrations.knowledge_providers.base import ENRICHMENT_FULL, ENRICHMENT_RAW
 
@@ -136,9 +138,15 @@ async def ingest_item(
         _persist_extracted_contents(store, item_id, result)
 
         _persist_structural_metadata(store, item_id, item, result)
-        _merge_file_metadata(store, item_id, {
-            "node_phases": {name: outcome.to_dict() for name, outcome in result.outcomes.items()}
-        })
+        _merge_file_metadata(
+            store,
+            item_id,
+            {
+                "node_phases": {
+                    name: outcome.to_dict() for name, outcome in result.outcomes.items()
+                }
+            },
+        )
 
         pooled = result.pooled_outputs()
         consolidated = ""
@@ -162,34 +170,78 @@ async def ingest_item(
                 store.db.commit()
 
         if raw_mode:
-            insights_phase = entities_phase = intents_phase = oc.not_applicable("This source is set to no AI enrichment.")
+            insights_phase = entities_phase = intents_phase = oc.not_applicable(
+                "This source is set to no AI enrichment."
+            )
             for stage in ("insights", "entities", "intents"):
-                _emit("node", node=stage, phase=oc.NOT_APPLICABLE, outcome=insights_phase.to_dict())
+                _emit(
+                    "node",
+                    node=stage,
+                    phase=oc.NOT_APPLICABLE,
+                    outcome=insights_phase.to_dict(),
+                )
         else:
             _emit("node", node="insights", phase="running")
-            insights_phase = await _run_insights(store, item_id, consolidated, insights_pool)
-            _emit("node", node="insights", phase=insights_phase.status, outcome=insights_phase.to_dict())
+            insights_phase = await _run_insights(
+                store, item_id, consolidated, insights_pool
+            )
+            _emit(
+                "node",
+                node="insights",
+                phase=insights_phase.status,
+                outcome=insights_phase.to_dict(),
+            )
             if insights_phase.status == oc.DONE:
-                from gideon.integrations.action_providers.knowledge_persist_provider import run_ingest_conflict_pass
+                from gideon.integrations.action_providers.knowledge_persist_provider import (
+                    run_ingest_conflict_pass,
+                )
+
                 run_ingest_conflict_pass(store, item_id)
 
             _emit("node", node="entities", phase="running")
-            entities_phase = await _run_entities_stage(store, item_id, consolidated, insights_pool)
-            _emit("node", node="entities", phase=entities_phase.status, outcome=entities_phase.to_dict())
+            entities_phase = await _run_entities_stage(
+                store, item_id, consolidated, insights_pool
+            )
+            _emit(
+                "node",
+                node="entities",
+                phase=entities_phase.status,
+                outcome=entities_phase.to_dict(),
+            )
 
             _emit("node", node="intents", phase="running")
-            intents_phase = await _run_intents_stage(store, item_id, item_type, consolidated, insights_pool)
-            _emit("node", node="intents", phase=intents_phase.status, outcome=intents_phase.to_dict())
+            intents_phase = await _run_intents_stage(
+                store, item_id, item_type, consolidated, insights_pool
+            )
+            _emit(
+                "node",
+                node="intents",
+                phase=intents_phase.status,
+                outcome=intents_phase.to_dict(),
+            )
 
         _emit("node", node="embed", phase="running")
         embed_phase = _embed(store, item_id, embedder)
-        _emit("node", node="embed", phase=embed_phase.status, outcome=embed_phase.to_dict())
+        _emit(
+            "node",
+            node="embed",
+            phase=embed_phase.status,
+            outcome=embed_phase.to_dict(),
+        )
 
         _emit("node", node="dedup", phase="running")
         dedup_phase, dedup_result = _run_dedup_stage(store, item_id, embedder)
-        if dedup_phase.status == oc.SKIPPED and embed_phase.status in (oc.SKIPPED, oc.FAILED):
+        if dedup_phase.status == oc.SKIPPED and embed_phase.status in (
+            oc.SKIPPED,
+            oc.FAILED,
+        ):
             dedup_phase = oc.waited_on([("Embedding", embed_phase)])
-        _emit("node", node="dedup", phase=dedup_phase.status, outcome=dedup_phase.to_dict())
+        _emit(
+            "node",
+            node="dedup",
+            phase=dedup_phase.status,
+            outcome=dedup_phase.to_dict(),
+        )
         if dedup_result:
             _emit("dedup", **dedup_result)
     except Exception as exc:
@@ -197,7 +249,11 @@ async def ingest_item(
             _cleanup_orphaned_artifacts(item_id)
             return "deleted"
         logger.exception("knowledge ingest failed mid-pipeline for %s", item_id)
-        reached = {name.removesuffix("_phase"): value.to_dict() for name, value in list(locals().items()) if name.endswith("_phase") and isinstance(value, PhaseOutcome)}
+        reached = {
+            name.removesuffix("_phase"): value.to_dict()
+            for name, value in list(locals().items())
+            if name.endswith("_phase") and isinstance(value, PhaseOutcome)
+        }
         previous = (store.get_item(item_id) or {}).get("file_metadata") or {}
         reached = {**(previous.get("node_phases") or {}), **reached}
         try:
@@ -216,20 +272,35 @@ async def ingest_item(
 
     status, proc_error = _processing_outcome(result)
     terminal_phases = {
-        "insights": insights_phase, "entities": entities_phase,
-        "intents": intents_phase, "embed": embed_phase, "dedup": dedup_phase,
+        "insights": insights_phase,
+        "entities": entities_phase,
+        "intents": intents_phase,
+        "embed": embed_phase,
+        "dedup": dedup_phase,
     }
-    actual_failures = [(name, phase) for name, phase in terminal_phases.items() if phase.status == oc.FAILED]
+    actual_failures = [
+        (name, phase)
+        for name, phase in terminal_phases.items()
+        if phase.status == oc.FAILED
+    ]
     if status == "done" and actual_failures:
         status = "partial"
     if actual_failures:
         detail = "; ".join(f"{name}: {phase.reason}" for name, phase in actual_failures)
         proc_error = f"{detail}; {proc_error}"[:500] if proc_error else detail[:500]
     node_phases = {
-        name: result.outcomes.get(name, oc.skipped("It never became ready to run.")).to_dict()
+        name: result.outcomes.get(
+            name, oc.skipped("It never became ready to run.")
+        ).to_dict()
         for name in graph.nodes
     }
-    node_phases.update({stage: phase.to_dict() for stage, phase in terminal_phases.items() if stage in TERMINAL_STAGES})
+    node_phases.update(
+        {
+            stage: phase.to_dict()
+            for stage, phase in terminal_phases.items()
+            if stage in TERMINAL_STAGES
+        }
+    )
     _merge_file_metadata(store, item_id, {"node_phases": node_phases})
 
     store.update_item(
@@ -279,7 +350,10 @@ def _processing_outcome(result: ExecutionResult) -> tuple[str, str | None]:
     document_meta = getattr(document_read, "metadata", None) or {}
     if document_meta.get("extraction_partial") and status == "done":
         status = "partial"
-        proc_error = str(document_meta.get("extraction_warning") or "Document extraction was incomplete")[:500]
+        proc_error = str(
+            document_meta.get("extraction_warning")
+            or "Document extraction was incomplete"
+        )[:500]
     if status in ("failed", "partial") and result.failed:
         msgs = []
         for nt in result.failed:
@@ -654,7 +728,9 @@ async def _run_intents_stage(
         if not intents:
             return oc.not_applicable("You have no intents for it to look for.")
         if not pool:
-            return oc.no_model("background", "No model was available to match your intents.")
+            return oc.no_model(
+                "background", "No model was available to match your intents."
+            )
         matches = await run_intents(intents, item_type, content, pool=pool)
     except Exception as error:
         logger.debug("intent stage failed for %s", item_id, exc_info=True)
@@ -696,7 +772,9 @@ def _embed(store, item_id: str, embedder) -> PhaseOutcome:
     Chunks are ADDITIVE — the item row keeps its own vector; the chunk index is what
     gives retrieval reach into content deep in a long document."""
     if not embedder:
-        return oc.no_model("embedding", "No embedding model was available to index this item.")
+        return oc.no_model(
+            "embedding", "No embedding model was available to index this item."
+        )
     try:
         from gideon.cognition.knowledge.embedder import floats_to_bytes
 
@@ -891,15 +969,30 @@ def _run_dedup_stage(store, item_id: str, embedder) -> tuple[PhaseOutcome, dict 
     TIER-1 exact dedup (URL/byte-hash, create-time in store.py) is unaffected.
     """
     if not embedder:
-        return oc.no_model("embedding", "No embedding model was available for duplicate comparison."), None
+        return (
+            oc.no_model(
+                "embedding",
+                "No embedding model was available for duplicate comparison.",
+            ),
+            None,
+        )
     try:
         if not getattr(embedder, "is_available", lambda: True)():
-            return oc.no_model("embedding", "The embedding model is not ready for duplicate comparison."), None
+            return (
+                oc.no_model(
+                    "embedding",
+                    "The embedding model is not ready for duplicate comparison.",
+                ),
+                None,
+            )
         from gideon.cognition.knowledge import dedup as dedup_mod
 
         item = store.get_item(item_id)
         if not item:
-            return oc.not_applicable("The item was removed before duplicate comparison."), None
+            return (
+                oc.not_applicable("The item was removed before duplicate comparison."),
+                None,
+            )
         from gideon.cognition.knowledge.embedder import bytes_to_floats
 
         row = store.db.execute(

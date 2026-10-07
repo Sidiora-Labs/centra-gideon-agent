@@ -18,13 +18,15 @@ _NOTE_TAG = re.compile(r"<(?=\s*/?\s*system-note\b)", re.IGNORECASE)
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
 
 
-
 def system_note_text(note: str) -> str:
     """Fence runtime instructions and keep embedded fence tags inside the note."""
     text = _NOTE_TAG.sub("&lt;", note)
-    return ("<system-note>\nThe runtime added this note; the user did not write it. "
-            "Apply the instructions and reply to the user without mentioning the note.\n\n"
-            + text + "\n</system-note>")
+    return (
+        "<system-note>\nThe runtime added this note; the user did not write it. "
+        "Apply the instructions and reply to the user without mentioning the note.\n\n"
+        + text
+        + "\n</system-note>"
+    )
 
 
 def turn_note_message(note: str) -> dict:
@@ -52,9 +54,13 @@ class CacheBinding:
 
     def validate(self, *, policy_revision: int, covered_digest: str) -> None:
         if self.policy_revision != policy_revision:
-            raise ValueError("cached prompt policy revision does not match active policy")
+            raise ValueError(
+                "cached prompt policy revision does not match active policy"
+            )
         if self.covered_digest != covered_digest:
-            raise ValueError("cached prompt covered digest does not match active context")
+            raise ValueError(
+                "cached prompt covered digest does not match active context"
+            )
 
     def to_hint(self) -> dict[str, object]:
         return {
@@ -81,9 +87,14 @@ def _cache_boundary(messages: list[dict]) -> int:
 
 
 def mark_cacheable_prefix(
-    messages: list[dict], mode: PromptCache, *, generation: int = 0,
-    max_markers: int = 1, binding: CacheBinding | None = None,
-    policy_revision: int | None = None, covered_digest: str | None = None,
+    messages: list[dict],
+    mode: PromptCache,
+    *,
+    generation: int = 0,
+    max_markers: int = 1,
+    binding: CacheBinding | None = None,
+    policy_revision: int | None = None,
+    covered_digest: str | None = None,
 ) -> list[dict]:
     if not messages or mode is not PromptCache.EXPLICIT:
         return messages
@@ -93,9 +104,7 @@ def mark_cacheable_prefix(
             raise ValueError(
                 "cache binding requires active policy revision and covered digest"
             )
-        binding.validate(
-            policy_revision=policy_revision, covered_digest=covered_digest
-        )
+        binding.validate(policy_revision=policy_revision, covered_digest=covered_digest)
         if generation not in (0, binding.generation):
             raise ValueError("cache generation disagrees with cache binding")
         hint = binding.to_hint()
@@ -103,22 +112,28 @@ def mark_cacheable_prefix(
         boundaries = {_cache_boundary(messages)}
     else:
         eligible = [
-            index for index, message in enumerate(messages)
+            index
+            for index, message in enumerate(messages)
             if message.get("role") != "tool"
             and not message.get(_VOLATILE_HINT_KEY)
             and message.get("content")
         ]
         stable_system = next(
-            (index for index in reversed(eligible) if messages[index].get("role") == "system"),
+            (
+                index
+                for index in reversed(eligible)
+                if messages[index].get("role") == "system"
+            ),
             None,
         )
         boundaries = set(eligible[-max_markers:])
         if stable_system is not None:
             boundaries.add(stable_system)
             if len(boundaries) > max_markers:
-                boundaries.remove(min(index for index in boundaries if index != stable_system))
+                boundaries.remove(
+                    min(index for index in boundaries if index != stable_system)
+                )
     return [
-        dict(message, **{CACHE_HINT_KEY: hint})
-        if index in boundaries else message
+        dict(message, **{CACHE_HINT_KEY: hint}) if index in boundaries else message
         for index, message in enumerate(messages)
     ]

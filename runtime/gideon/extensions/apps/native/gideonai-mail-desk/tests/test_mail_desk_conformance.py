@@ -16,13 +16,11 @@ recovery, the reply-token approval) stays in this bundle's other test modules.
 from __future__ import annotations
 
 import pytest
-
-from gideon.sdk.channel import ChannelContractError, assert_channel_contract
-
+from mail_desk_fakes import FakeSmtpServer
 from mail_desk_runtime.delivery import MailDeskDelivery
 from mail_desk_runtime.transport import MailDeskTransport
 
-from mail_desk_fakes import FakeSmtpServer
+from gideon.sdk.channel import ChannelContractError, assert_channel_contract
 
 AGENT = "agent@example.com"
 

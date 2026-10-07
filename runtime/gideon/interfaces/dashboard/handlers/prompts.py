@@ -1,7 +1,7 @@
 """Prompts (Agent SOPs) and Skills API handlers."""
 
-import logging
 import json
+import logging
 import re
 import threading
 from pathlib import Path
@@ -349,7 +349,10 @@ async def api_prompt_create(request: web.Request) -> web.Response:
         msg = str(exc)
         status = 409 if "already exists" in msg else 400
         return web.json_response({"error": msg}, status=status)
-    prompt = {**_provider_prompt_to_listing(tpl), "content": redact_for_display(tpl.content)}
+    prompt = {
+        **_provider_prompt_to_listing(tpl),
+        "content": redact_for_display(tpl.content),
+    }
     return web.json_response({"ok": True, "name": tpl.name, "prompt": prompt})
 
 
@@ -388,7 +391,10 @@ async def api_prompt_save(request: web.Request) -> web.Response:
             return web.json_response({"error": "not found"}, status=404)
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
-    prompt = {**_provider_prompt_to_listing(tpl), "content": redact_for_display(tpl.content)}
+    prompt = {
+        **_provider_prompt_to_listing(tpl),
+        "content": redact_for_display(tpl.content),
+    }
     prompt["revision"] = revision_of(_prompt_revision_values(tpl))
     return web.json_response({"ok": True, "prompt": prompt})
 
@@ -871,7 +877,9 @@ async def api_snippet_save(request: web.Request) -> web.Response:
         if stored_snip is None:
             return web.json_response({"error": "not found"}, status=404)
         refusal = stale_write_refusal(
-            request, _snippet_revision_values(stored_snip), what=f"the {bare} prompt snippet"
+            request,
+            _snippet_revision_values(stored_snip),
+            what=f"the {bare} prompt snippet",
         )
         if refusal is not None:
             return refusal
@@ -1071,10 +1079,15 @@ async def api_skill_detail(request: web.Request) -> web.Response:
     """GET/PUT /api/skills/{name} — get or update a skill. (Listing is served by
     handlers/skills.py::api_skills_list; deletion by api_skills_delete.)"""
     import hashlib
-    from gideon.interfaces.dashboard.handlers.skills import _request_skill_root, _skill_root_read_only
-    from gideon.extensions.skills.loader import hold_library, overlay_identity
-    from gideon.extensions.skills import overlays
+
     from gideon.core.atomic_write import atomic_write
+    from gideon.extensions.skills import overlays
+    from gideon.extensions.skills.loader import hold_library, overlay_identity
+    from gideon.interfaces.dashboard.handlers.skills import (
+        _request_skill_root,
+        _skill_root_read_only,
+    )
+
     name = request.match_info["name"]
     root = _request_skill_root(request, name)
     if root is None:
@@ -1086,25 +1099,54 @@ async def api_skill_detail(request: web.Request) -> web.Response:
             return web.json_response({"error": "content must be a string"}, status=400)
         errors = validate_skill_md(body["content"])
         if errors:
-            return web.json_response({"error": f"SKILL.md validation failed: {'; '.join(errors)}"}, status=400)
+            return web.json_response(
+                {"error": f"SKILL.md validation failed: {'; '.join(errors)}"},
+                status=400,
+            )
     with hold_library():
         root = _request_skill_root(request, name)
         if root is None:
-            return web.json_response({"error": "Selected skill copy not found"}, status=404)
+            return web.json_response(
+                {"error": "Selected skill copy not found"}, status=404
+            )
         path = root / name / "SKILL.md"
         content = path.read_text(encoding="utf-8")
         identity = overlay_identity(root, name)
         active = overlays.applied(identity)
         own = overlays.without_copies(content, [a.block for a in active])
-        revision = hashlib.sha256((content + "\0" + json.dumps([a.to_dict() for a in active], sort_keys=True)).encode()).hexdigest()
+        revision = hashlib.sha256(
+            (
+                content
+                + "\0"
+                + json.dumps([a.to_dict() for a in active], sort_keys=True)
+            ).encode()
+        ).hexdigest()
         if body is not None:
             if _skill_root_read_only(root):
-                return web.json_response({"error": "This skill copy is read-only"}, status=403)
+                return web.json_response(
+                    {"error": "This skill copy is read-only"}, status=403
+                )
             if (request.headers.get("If-Match") or body.get("revision")) != revision:
-                return web.json_response({"error": "This skill changed. Reload before saving your edits."}, status=409)
-            atomic_write(path, overlays.without_copies(body["content"], [a.block for a in active]))
+                return web.json_response(
+                    {"error": "This skill changed. Reload before saving your edits."},
+                    status=409,
+                )
+            atomic_write(
+                path,
+                overlays.without_copies(body["content"], [a.block for a in active]),
+            )
             return web.json_response({"ok": True})
-        return web.json_response({"name": name, "content": own, "own_content": own, "loaded_content": overlays.render(own, [a.block for a in active]), "revision": revision, "refinements": [a.to_dict() for a in active], "recognized_copies": own != content})
+        return web.json_response(
+            {
+                "name": name,
+                "content": own,
+                "own_content": own,
+                "loaded_content": overlays.render(own, [a.block for a in active]),
+                "revision": revision,
+                "refinements": [a.to_dict() for a in active],
+                "recognized_copies": own != content,
+            }
+        )
 
 
 async def api_skills_create(request: web.Request) -> web.Response:
@@ -1135,7 +1177,9 @@ async def api_skills_create(request: web.Request) -> web.Response:
         if end >= 0:
             header, remainder = content[:end], content[end:]
             if re.search(r"(?m)^name:\s*.*$", header):
-                header = re.sub(r"(?m)^name:\s*.*$", f"name: {safe_name}", header, count=1)
+                header = re.sub(
+                    r"(?m)^name:\s*.*$", f"name: {safe_name}", header, count=1
+                )
             else:
                 header += f"\nname: {safe_name}"
             if not re.search(r"(?m)^source:\s*.*$", header):

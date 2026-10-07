@@ -348,9 +348,11 @@ from gideon.operations.durability.merge import _is_tombstone
 DELETED_HERE = "here"
 DELETED_THERE = "there"
 
+
 def deleted_row(entity_id: str, at: str) -> dict:
     """A delete, as a conflict records and shows it: the record's id and when it was deleted."""
     return {"id": entity_id, "deleted_at": at}
+
 
 @dataclass
 class Weighed:
@@ -365,11 +367,17 @@ class Weighed:
     #: A delete and an edit it never saw, in either direction, for review.
     conflicts: list[ConflictRecord] = field(default_factory=list)
 
+
 def held_by_the_delete(row: dict) -> set[str]:
     """The versions a peer's delete (*row*, a tombstone) says the deleting home held. A delete
     that names none saw no version of anything here."""
     held = row.get("held")
-    return {s for s in held if isinstance(s, str) and s} if isinstance(held, list) else set()
+    return (
+        {s for s in held if isinstance(s, str) and s}
+        if isinstance(held, list)
+        else set()
+    )
+
 
 def weigh_deletions(
     entry: inv.StateEntry,
@@ -413,7 +421,9 @@ def weigh_deletions(
                 out.applied[rid] = row
                 continue
             gone = deleted_row(rid, str(row.get("deleted_at", "")))
-            out.conflicts.append(_deletion_conflict(entry, rid, mine, gone, DELETED_THERE, now))
+            out.conflicts.append(
+                _deletion_conflict(entry, rid, mine, gone, DELETED_THERE, now)
+            )
             continue
         mark = removed.get(rid)
         if mark is None or rid in live:
@@ -423,8 +433,11 @@ def weigh_deletions(
             out.declined.add(rid)
             continue
         gone = deleted_row(rid, mark.at)
-        out.conflicts.append(_deletion_conflict(entry, rid, gone, theirs, DELETED_HERE, now))
+        out.conflicts.append(
+            _deletion_conflict(entry, rid, gone, theirs, DELETED_HERE, now)
+        )
     return out
+
 
 def _deletion_conflict(
     entry: inv.StateEntry, rid: str, local: dict, remote: dict, deleted: str, now: str

@@ -30,9 +30,15 @@ def _publish(agent_id: str, receipt: dict) -> dict:
 
 def capture(info, memory) -> dict:
     conversation_id = f"subagent:{info.id}"
-    receipt = {"status": "pending", "count": 0, "run_id": info.id,
-               "conversation_id": conversation_id, "parent_session": info.parent_session_key,
-               "agent": info.agent, "source": "delegated_result"}
+    receipt = {
+        "status": "pending",
+        "count": 0,
+        "run_id": info.id,
+        "conversation_id": conversation_id,
+        "parent_session": info.parent_session_key,
+        "agent": info.agent,
+        "source": "delegated_result",
+    }
     _publish(info.id, receipt)
     try:
         from gideon.cognition.memory_service import service_for
@@ -47,7 +53,9 @@ def capture(info, memory) -> dict:
             else:
                 text = f"Delegated task: {task[:500]}\nOutcome: {result[:2500]}"
                 stored = service_for(memory).write_episodic(
-                    text, conversation_id=conversation_id, tags=["delegated", info.agent or "agent"],
+                    text,
+                    conversation_id=conversation_id,
+                    tags=["delegated", info.agent or "agent"],
                     source="subagent",
                 )
                 receipt["status"] = "recorded" if stored else "unavailable"

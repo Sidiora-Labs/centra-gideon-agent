@@ -406,11 +406,16 @@ def _validate_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
     from gideon.assurance.validation import MCP_AUTOMATION_SCHEMAS, validate_tool_args
 
     schema = MCP_AUTOMATION_SCHEMAS.get(name)
-    return validate_tool_args(normalize_tool_booleans(args, schema), schema) if schema else args
+    return (
+        validate_tool_args(normalize_tool_booleans(args, schema), schema)
+        if schema
+        else args
+    )
 
 
 def _preflight_tool(name: str, args: dict[str, Any]) -> str:
     from gideon.integrations.mcp_shared import preflight_tool
+
     return preflight_tool(name, args, _validate_args)
 
 

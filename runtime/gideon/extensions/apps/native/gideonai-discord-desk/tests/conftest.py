@@ -8,7 +8,6 @@ Pointing that at a per-test tmp dir isolates all of them at once, so nothing tou
 the real ``~/.gideon`` (the lesson: patching ``config_dir`` alone misses
 import-bound stores — set the env)."""
 
-
 import sys
 from pathlib import Path
 

@@ -1,4 +1,5 @@
 """Cheap, metadata-only helpers for provider availability hooks."""
+
 from __future__ import annotations
 
 import importlib.util

@@ -27,18 +27,24 @@ from __future__ import annotations
 
 import contextvars
 import itertools
-import math
 import json
 import logging
+import math
 import threading
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
-from gideon.core.atomic_write import atomic_write
 from gideon.core import spend_day
-from gideon.security.guardrails.failure import NO_ROOM, SPENT, UNPRICED, UNMEASURED, BudgetExceededError
+from gideon.core.atomic_write import atomic_write
+from gideon.security.guardrails.failure import (
+    NO_ROOM,
+    SPENT,
+    UNMEASURED,
+    UNPRICED,
+    BudgetExceededError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +158,8 @@ class Hold:
 @dataclass(frozen=True)
 class Waiting:
     """The call must wait: the calls running now hold room it may need, or a call to its model
-    whose cost nothing knows yet is running. ``refusal`` is what it gets if it stops waiting."""
+    whose cost nothing knows yet is running. ``refusal`` is what it gets if it stops waiting.
+    """
 
     refusal: BudgetExceededError
 
@@ -248,7 +255,9 @@ class SpendMeter:
     def _save_day(self, data: dict, today: str) -> None:
         # Prune days older than the retention window before writing.
         try:
-            cutoff = datetime.strptime(today, spend_day.DAY_FORMAT).toordinal() - _PRUNE_DAYS
+            cutoff = (
+                datetime.strptime(today, spend_day.DAY_FORMAT).toordinal() - _PRUNE_DAYS
+            )
 
             def _keep(day_key: str) -> bool:
                 ordinal = _ordinal_of(day_key)
@@ -286,7 +295,12 @@ class SpendMeter:
             self._charge_locked(tokens, dollars, run_key, unpriced, today)
 
     def _charge_locked(
-        self, tokens: int, dollars: float, run_key: str | None, unpriced: int, today: str
+        self,
+        tokens: int,
+        dollars: float,
+        run_key: str | None,
+        unpriced: int,
+        today: str,
     ) -> None:
         tokens = max(0, int(tokens or 0))
         dollars = max(0.0, float(dollars or 0.0))
@@ -333,11 +347,17 @@ class SpendMeter:
         today = _today_key()
         with self._lock:
             seen = None if cost.unit_only else self._seen_today(today).get(cost.ref)
-            answer = seen.answer_tokens if seen is not None else ANSWER_TOKENS_BEFORE_FIRST_CALL
+            answer = (
+                seen.answer_tokens
+                if seen is not None
+                else ANSWER_TOKENS_BEFORE_FIRST_CALL
+            )
             tokens = max(0, int(cost.prompt_tokens)) + answer
             dollars: float | None = None
             if cost.rate is not None:
-                dollars = (cost.prompt_tokens * cost.rate[0] + answer * cost.rate[1]) / 1_000_000
+                dollars = (
+                    cost.prompt_tokens * cost.rate[0] + answer * cost.rate[1]
+                ) / 1_000_000
             if seen is not None:
                 tokens = max(tokens, seen.tokens)
                 if dollars is not None:
@@ -406,12 +426,16 @@ class SpendMeter:
                 return Waiting(tightest.refusal(NO_ROOM, cost.ref))
             held = dollars if (dollars is not None and not cost.free) else 0.0
             if all(room.fits() for room in rooms):
-                return self._hold_locked(cost.ref, run_key, tokens, held, answer, cost.unit_only)
+                return self._hold_locked(
+                    cost.ref, run_key, tokens, held, answer, cost.unit_only
+                )
             if first_call:
                 # What it may cost is a guess until one call has settled: it runs when nothing
                 # else holds room, rather than never while the ceiling is not reached.
                 if all(room.held <= 0.0 for room in rooms):
-                    return self._hold_locked(cost.ref, run_key, tokens, held, answer, cost.unit_only)
+                    return self._hold_locked(
+                        cost.ref, run_key, tokens, held, answer, cost.unit_only
+                    )
                 return Waiting(tightest.refusal(NO_ROOM, cost.ref))
             for room in rooms:
                 if not room.fits_alone():
@@ -419,7 +443,13 @@ class SpendMeter:
             return Waiting(tightest.refusal(NO_ROOM, cost.ref))
 
     def _hold_locked(
-        self, ref: str, run_key: str, tokens: int, dollars: float, answer_tokens: int, unit_only: bool = False
+        self,
+        ref: str,
+        run_key: str,
+        tokens: int,
+        dollars: float,
+        answer_tokens: int,
+        unit_only: bool = False,
     ) -> Hold:
         hold = Hold(
             id=next(self._hold_ids),
@@ -459,13 +489,26 @@ class SpendMeter:
             held = self._holds.pop(hold.id, None) if hold is not None else None
             if hold is not None and held is None:
                 return
-            if held is not None and tokens == 0 and dollars == 0.0 and not usage_reported:
-                tokens, answer_tokens, dollars = held.tokens, held.answer_tokens, held.dollars
+            if (
+                held is not None
+                and tokens == 0
+                and dollars == 0.0
+                and not usage_reported
+            ):
+                tokens, answer_tokens, dollars = (
+                    held.tokens,
+                    held.answer_tokens,
+                    held.dollars,
+                )
                 priced = priced or held.dollars > 0.0
-            if (tokens or dollars) and not (unit_only or (held is not None and held.unit_only)):
+            if (tokens or dollars) and not (
+                unit_only or (held is not None and held.unit_only)
+            ):
                 seen = self._seen_today(today).setdefault(ref, _Seen())
                 seen.tokens = max(seen.tokens, tokens)
-                seen.answer_tokens = max(seen.answer_tokens, max(0, int(answer_tokens or 0)))
+                seen.answer_tokens = max(
+                    seen.answer_tokens, max(0, int(answer_tokens or 0))
+                )
                 if priced:
                     seen.dollars = max(seen.dollars, dollars)
             try:
@@ -534,7 +577,9 @@ class SpendMeter:
             rt = self._run_totals.get(run_key)
             if rt is None:
                 return _ScopeTotal()
-            return _ScopeTotal(tokens=rt.tokens, dollars=rt.dollars, unpriced=rt.unpriced)
+            return _ScopeTotal(
+                tokens=rt.tokens, dollars=rt.dollars, unpriced=rt.unpriced
+            )
 
     def check_day(self, budget: Budget) -> tuple[BudgetVerdict, str]:
         """Verdict the CURRENT day total against ``budget`` (before a new charge).
@@ -559,12 +604,16 @@ class SpendMeter:
         """
         return self.check_day(Budget(max_tokens=budget.max_tokens))
 
-    def check_run_before_work(self, run_key: str, budget: Budget) -> tuple[BudgetVerdict, str]:
+    def check_run_before_work(
+        self, run_key: str, budget: Budget
+    ) -> tuple[BudgetVerdict, str]:
         """:meth:`check_day_before_work` for a run's ceiling: its token dimension only."""
         return self.check_run(run_key, Budget(max_tokens=budget.max_tokens))
 
     @staticmethod
-    def _verdict(total: _ScopeTotal, budget: Budget, *, scope: str) -> tuple[BudgetVerdict, str]:
+    def _verdict(
+        total: _ScopeTotal, budget: Budget, *, scope: str
+    ) -> tuple[BudgetVerdict, str]:
         if budget.is_unlimited:
             return BudgetVerdict.OK, ""
         verdict = BudgetVerdict.OK

@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # -- URL uses hostname for remote access, localhost for local-only --
 
 
@@ -20,7 +19,9 @@ import pytest
         ("", "localhost"),  # no URL → localhost-only default
     ],
 )
-async def test_dashboard_url_host_selection(dashboard_url: str, expected_host: str) -> None:
+async def test_dashboard_url_host_selection(
+    dashboard_url: str, expected_host: str
+) -> None:
     """!dashboard sends presigned link via DM, never in channel."""
     from slack_desk_runtime.handler import _handle_slash_command
 
@@ -42,7 +43,9 @@ async def test_dashboard_url_host_selection(dashboard_url: str, expected_host: s
         patch("slack_desk_runtime.allowlist.AppConfig.load", return_value=mock_cfg),
         patch("gideon.dashboard.origin.socket.gethostname", return_value="myhostname"),
         patch("gideon.dashboard.origin.socket.gethostbyname", return_value="10.0.0.1"),
-        patch("gideon.dashboard.origin.socket.getaddrinfo", side_effect=socket.gaierror),
+        patch(
+            "gideon.dashboard.origin.socket.getaddrinfo", side_effect=socket.gaierror
+        ),
         patch.dict(os.environ, {}, GIDEON_PORT=""),
         patch("slack_desk_runtime.allowlist.sel") as mock_sel,
     ):
@@ -62,7 +65,9 @@ async def test_dashboard_url_host_selection(dashboard_url: str, expected_host: s
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("duration_arg, expected_ttl", [("", 3600), ("2h", 7200), ("30m", 1800)])
+@pytest.mark.parametrize(
+    "duration_arg, expected_ttl", [("", 3600), ("2h", 7200), ("30m", 1800)]
+)
 async def test_dashboard_sel_log(duration_arg: str, expected_ttl: int) -> None:
     """!dashboard logs SEL with operation='slack.dashboard_token', caller, and ttl."""
     from slack_desk_runtime.handler import _handle_slash_command

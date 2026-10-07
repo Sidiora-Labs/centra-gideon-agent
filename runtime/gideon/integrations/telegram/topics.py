@@ -1,9 +1,12 @@
 """Persistent Telegram topic ownership and conversation restoration."""
 
 from __future__ import annotations
+
 import json
 from pathlib import Path
+
 from gideon.core.atomic_write import atomic_write
+
 from .api import TelegramError
 
 

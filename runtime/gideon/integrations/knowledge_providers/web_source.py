@@ -458,7 +458,9 @@ def apply_post_process(value: str, steps: list[dict], *, page_url: str) -> str:
                 out = out[start : int(end)] if end is not None else out[start:]
             elif name == "template":
                 out = str(step.get("string") or "").replace("{value}", out)
-        except Exception as exc:  # noqa: BLE001 — failed sanitization must not return raw input
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 — failed sanitization must not return raw input
             from gideon.integrations.web.extract import SanitizerUnavailable
 
             if isinstance(exc, SanitizerUnavailable):
@@ -1072,7 +1074,9 @@ class WebSourceProvider(KnowledgeSourceProvider):
             from gideon.integrations.web.extract import SanitizerUnavailable
 
             if isinstance(exc, SanitizerUnavailable):
-                return _Collected(error=str(exc), detector=detector, cursor_state=cursor_state)
+                return _Collected(
+                    error=str(exc), detector=detector, cursor_state=cursor_state
+                )
             raise
         return _Collected(
             items=items,
@@ -1354,7 +1358,9 @@ class WebSourceProvider(KnowledgeSourceProvider):
             from gideon.integrations.web.extract import SanitizerUnavailable
 
             if isinstance(exc, SanitizerUnavailable):
-                return _Collected(error=str(exc), detector=detector, cursor_state=cursor_state)
+                return _Collected(
+                    error=str(exc), detector=detector, cursor_state=cursor_state
+                )
             raise
         if items:
             return _Collected(

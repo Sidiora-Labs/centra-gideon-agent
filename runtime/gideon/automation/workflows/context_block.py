@@ -56,10 +56,9 @@ class ActiveRunPresentation:
 
 def active_workflows_block(*, project_id: str = "") -> str:
     try:
-        from gideon.automation.workflows import store
+        from gideon.automation.workflows import chat_runs, store
         from gideon.automation.workflows.models import RunStatus
 
-        from gideon.automation.workflows import chat_runs
         reader = chat_runs.current_reader()
         runs = [run for run in store.active_runs() if chat_runs.reads(run, **reader)]
     except Exception:

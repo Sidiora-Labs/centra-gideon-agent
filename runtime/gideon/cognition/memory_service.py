@@ -1108,7 +1108,9 @@ class MemoryService:
             return None
         return getattr(archive, "contradiction_judge", None)
 
-    def record_page(self, *, cursor=None, limit: int = 100, category: str | None = None):
+    def record_page(
+        self, *, cursor=None, limit: int = 100, category: str | None = None
+    ):
         page = getattr(self._provider, "record_page", None)
         if not callable(page):
             return None

@@ -35,12 +35,11 @@ from aiohttp.multipart import BodyPartReader
 from gideon.automation.workflows import service, store
 from gideon.automation.workflows.models import OriginKind
 from gideon.automation.workflows.review_service import apply_triage, review_findings
-from gideon.core.http_request import read_json_body
+from gideon.core.http_request import RequestValidationError, bool_field, read_json_body
+from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.handlers._shared import _is_restricted_session
 from gideon.interfaces.dashboard.sse import stream_response
 from gideon.security.safety_flags import strict_bool
-from gideon.core.http_request import bool_field, RequestValidationError
-from gideon.http_errors import json_error
 from gideon.security.sel import sel
 
 logger = logging.getLogger(__name__)
@@ -160,8 +159,18 @@ async def _json_body(request: web.Request) -> dict[str, Any] | web.Response:
             status=400,
         )
     try:
-        for field in ("save", "strict", "preview_only", "confirm_cascade", "redo_effects", "force",
-                      "skip_preflight", "dry_run", "round_resume", "always_allow"):
+        for field in (
+            "save",
+            "strict",
+            "preview_only",
+            "confirm_cascade",
+            "redo_effects",
+            "force",
+            "skip_preflight",
+            "dry_run",
+            "round_resume",
+            "always_allow",
+        ):
             if field in raw:
                 bool_field(raw, field, default=False)
     except RequestValidationError as error:
@@ -178,15 +187,26 @@ def _guard(request: web.Request, operation: str) -> web.Response | None:
     if operation == "workflow_run_start":
         from gideon.extensions.apps.app_work import from_request, run_refusal
         from gideon.security.session_credentials import work_of_request
+
         work = from_request(request)
         proof = work_of_request(request)
-        if work is not None and proof is not None and proof.memory_mode in {"persistent", "incognito"} and not run_refusal(work):
+        if (
+            work is not None
+            and proof is not None
+            and proof.memory_mode in {"persistent", "incognito"}
+            and not run_refusal(work)
+        ):
             return None
     state = request.app.get("state")
     if state is not None and _is_restricted_session(state, request):
         from gideon.security.session_credentials import work_of_request
+
         proof = work_of_request(request)
-        if operation.startswith("workflow_run_") and proof is not None and proof.memory_mode in {"temporary", "incognito"}:
+        if (
+            operation.startswith("workflow_run_")
+            and proof is not None
+            and proof.memory_mode in {"temporary", "incognito"}
+        ):
             return None
         _audit(request, operation, "denied")
         return web.json_response(
@@ -215,14 +235,25 @@ def _audit(
         logger.debug("workflow api audit skipped", exc_info=True)
 
 
-
 def _work_context(request: web.Request) -> dict[str, Any]:
-    from gideon.security.session_credentials import work_of_request
     from gideon.security.approval_answer import of_request, work_principal_of_request
+    from gideon.security.session_credentials import work_of_request
+
     proof = work_of_request(request)
     from gideon.extensions.apps.app_work import from_request
     from gideon.security.durable_work import accepted_origin_of_request
-    return {"private_origin": proof, "accepted_origin": accepted_origin_of_request(request), "origin_chat_key": proof.origin_session_key if proof is not None else "", "work_memory_mode": proof.memory_mode if proof is not None else None, "app_work": from_request(request), "session_key": proof.session_key if proof is not None else "", "work_principal": work_principal_of_request(request), "work_initiator": proof.initiator if proof is not None else of_request(request)}
+
+    return {
+        "private_origin": proof,
+        "accepted_origin": accepted_origin_of_request(request),
+        "origin_chat_key": proof.origin_session_key if proof is not None else "",
+        "work_memory_mode": proof.memory_mode if proof is not None else None,
+        "app_work": from_request(request),
+        "session_key": proof.session_key if proof is not None else "",
+        "work_principal": work_principal_of_request(request),
+        "work_initiator": proof.initiator if proof is not None else of_request(request),
+    }
+
 
 def _supervisor(request: web.Request) -> Any:
     """The workflow supervisor from app state, or None.
@@ -287,23 +318,60 @@ async def api_def_save(request: web.Request) -> web.Response:
             status=400,
         )
     expected_revision = body.get("expected_revision")
-    if expected_revision is not None and (not isinstance(expected_revision, int) or isinstance(expected_revision, bool) or expected_revision < 1):
-        return web.json_response({"error": {"code": "invalid_request", "message": "expected_revision must be a positive integer"}}, status=400)
+    if expected_revision is not None and (
+        not isinstance(expected_revision, int)
+        or isinstance(expected_revision, bool)
+        or expected_revision < 1
+    ):
+        return web.json_response(
+            {
+                "error": {
+                    "code": "invalid_request",
+                    "message": "expected_revision must be a positive integer",
+                }
+            },
+            status=400,
+        )
     create_only = body.get("create_only", False)
     if not isinstance(create_only, bool):
-        return web.json_response({"error": {"code": "invalid_request", "message": "create_only must be a boolean"}}, status=400)
+        return web.json_response(
+            {
+                "error": {
+                    "code": "invalid_request",
+                    "message": "create_only must be a boolean",
+                }
+            },
+            status=400,
+        )
     based_on_version = body.get("based_on_version")
-    if based_on_version is not None and (not isinstance(based_on_version, int) or isinstance(based_on_version, bool) or based_on_version < 1):
-        return web.json_response({"error": {"code": "invalid_request", "message": "based_on_version must be a positive integer"}}, status=400)
+    if based_on_version is not None and (
+        not isinstance(based_on_version, int)
+        or isinstance(based_on_version, bool)
+        or based_on_version < 1
+    ):
+        return web.json_response(
+            {
+                "error": {
+                    "code": "invalid_request",
+                    "message": "based_on_version must be a positive integer",
+                }
+            },
+            status=400,
+        )
     if not create_only:
         from gideon.stale_write import stale_write_refusal
+
         current = await service.get_def(str(body.get("name", "") or ""))
         if current.get("ok"):
-            refusal = stale_write_refusal(request, current.get("definition"), what="this workflow definition")
+            refusal = stale_write_refusal(
+                request, current.get("definition"), what="this workflow definition"
+            )
             if refusal is not None:
                 return refusal
             if expected_revision is None:
-                expected_revision = int((current.get("definition") or {}).get("version", 1) or 1)
+                expected_revision = int(
+                    (current.get("definition") or {}).get("version", 1) or 1
+                )
         elif expected_revision is not None:
             return _reply(current)
     from gideon.security.approval_answer import OWNER, of_request
@@ -323,9 +391,17 @@ async def api_def_save(request: web.Request) -> web.Response:
         workspace=(
             body.get("workspace") if isinstance(body.get("workspace"), dict) else None
         ),
-        runtime_hints=(body.get("runtime_hints") if isinstance(body.get("runtime_hints"), dict) else None),
-        defaults=(body.get("defaults") if isinstance(body.get("defaults"), dict) else None),
-        on_overlap=(str(body.get("on_overlap")) if body.get("on_overlap") is not None else None),
+        runtime_hints=(
+            body.get("runtime_hints")
+            if isinstance(body.get("runtime_hints"), dict)
+            else None
+        ),
+        defaults=(
+            body.get("defaults") if isinstance(body.get("defaults"), dict) else None
+        ),
+        on_overlap=(
+            str(body.get("on_overlap")) if body.get("on_overlap") is not None else None
+        ),
         expected_revision=expected_revision,
         create_only=create_only,
         based_on=str(body.get("based_on", "") or ""),
@@ -355,10 +431,24 @@ async def api_def_a2a_publish(request: web.Request) -> web.Response:
     if isinstance(body, web.Response):
         return body
     expected_revision = body.get("expected_revision")
-    if expected_revision is not None and (not isinstance(expected_revision, int) or isinstance(expected_revision, bool) or expected_revision < 1):
-        return web.json_response({"error": {"code": "invalid_request", "message": "expected_revision must be a positive integer"}}, status=400)
+    if expected_revision is not None and (
+        not isinstance(expected_revision, int)
+        or isinstance(expected_revision, bool)
+        or expected_revision < 1
+    ):
+        return web.json_response(
+            {
+                "error": {
+                    "code": "invalid_request",
+                    "message": "expected_revision must be a positive integer",
+                }
+            },
+            status=400,
+        )
     name = request.match_info.get("name", "")
-    result = await service.set_a2a_published(name, body.get("published") is True, expected_revision=expected_revision)
+    result = await service.set_a2a_published(
+        name, body.get("published") is True, expected_revision=expected_revision
+    )
     _audit(
         request,
         "workflow_def_a2a_publish",
@@ -599,25 +689,45 @@ async def api_def_version_diff(request: web.Request) -> web.Response:
 
 async def api_def_version_detail(request: web.Request) -> web.Response:
     """Return one immutable, secret-stripped workflow version for restore-as-new."""
-    from gideon.automation.workflows import versions
     from gideon.automation.workflows import secrets as workflow_secrets
+    from gideon.automation.workflows import versions
+
     name = request.match_info.get("name", "")
     raw_version = request.match_info.get("version", "")
     try:
         version = int(raw_version)
     except (TypeError, ValueError):
-        return web.json_response({"error": {"code": "invalid_request", "message": "version must be an integer"}}, status=400)
+        return web.json_response(
+            {
+                "error": {
+                    "code": "invalid_request",
+                    "message": "version must be an integer",
+                }
+            },
+            status=400,
+        )
     current = await service.get_def(name)
     if version < 1 or not current.get("ok"):
-        return web.json_response({"error": {"code": "not_found", "message": "workflow version not found"}}, status=404)
+        return web.json_response(
+            {"error": {"code": "not_found", "message": "workflow version not found"}},
+            status=404,
+        )
     record = versions.get_version(name, version)
-    if record is None and int((current.get("definition") or {}).get("version", 0) or 0) == version:
+    if (
+        record is None
+        and int((current.get("definition") or {}).get("version", 0) or 0) == version
+    ):
         definition = current["definition"]
     elif record is not None:
         definition = workflow_secrets.strip_secrets(record.spec)
     else:
-        return web.json_response({"error": {"code": "not_found", "message": "workflow version not found"}}, status=404)
-    return web.json_response({"name": name, "version": version, "definition": definition})
+        return web.json_response(
+            {"error": {"code": "not_found", "message": "workflow version not found"}},
+            status=404,
+        )
+    return web.json_response(
+        {"name": name, "version": version, "definition": definition}
+    )
 
 
 async def api_def_repin(request: web.Request) -> web.Response:
@@ -756,10 +866,11 @@ async def api_runs_list(request: web.Request) -> web.Response:
         offset=0,
     )
     from gideon.automation.workflows import chat_runs
+
     reader = chat_runs.request_reader(request)
     runs = [run for run in runs if chat_runs.reads(run, **reader)]
     total = len(runs)
-    runs = runs[offset:offset + limit]
+    runs = runs[offset : offset + limit]
     return web.json_response(
         {
             "runs": [{**r.to_dict(), "chat_owner": chat_runs.whose(r)} for r in runs],
@@ -780,21 +891,36 @@ async def api_batch_start(request: web.Request) -> web.Response:
         return body
     spec = body.get("run_once")
     if not isinstance(spec, dict):
-        return json_error("invalid_request", message="run_once must be an object", status=400)
+        return json_error(
+            "invalid_request", message="run_once must be an object", status=400
+        )
     from gideon.automation.workflows import batch_start
-    result = await batch_start.start(request.app["state"], _supervisor(request), spec=spec,
-        inputs=body.get("inputs") or {}, context=_work_context(request))
+
+    result = await batch_start.start(
+        request.app["state"],
+        _supervisor(request),
+        spec=spec,
+        inputs=body.get("inputs") or {},
+        context=_work_context(request),
+    )
     return _reply(result, status=202 if result.get("ok") else 200)
 
 
 async def api_batch_status(request: web.Request) -> web.Response:
     from gideon.automation.workflows import batch_start, chat_runs
+
     record = batch_start.read(request.match_info["name"])
     if record is None:
         return json_error("not_found", message="batch not found", status=404)
     reader = chat_runs.request_reader(request)
-    if not reader.get("owner") and (reader.get("origin_session_key") or reader.get("session_key")) != record["origin_chat_key"]:
-        return json_error("forbidden", message="batch belongs to another chat", status=403)
+    if (
+        not reader.get("owner")
+        and (reader.get("origin_session_key") or reader.get("session_key"))
+        != record["origin_chat_key"]
+    ):
+        return json_error(
+            "forbidden", message="batch belongs to another chat", status=403
+        )
     return web.json_response({"ok": True, **batch_start.state_of(record["name"])})
 
 
@@ -807,7 +933,9 @@ async def api_run_start(request: web.Request) -> web.Response:
         return body
     run_once = body.get("run_once")
     if run_once is not None and not isinstance(run_once, dict):
-        return json_error("invalid_request", message="run_once must be an object", status=400)
+        return json_error(
+            "invalid_request", message="run_once must be an object", status=400
+        )
     result = await service.start_run(
         run_once_definition=run_once,
         origin_kind=OriginKind.SUBAGENT_TOOL if run_once is not None else _api_origin(),
@@ -987,17 +1115,26 @@ async def api_run_drop(request: web.Request) -> web.Response:
                 },
                 status=413,
             )
-        from gideon.workspace.uploads.content_intake import approve_stream, IntakeRefused
         from gideon.cognition.knowledge.file_items import _owned_io
+        from gideon.workspace.uploads.content_intake import (
+            IntakeRefused,
+            approve_stream,
+        )
+
         async def chunks():
             yield bytes(data)
+
         snapshot = None
         try:
-            snapshot = await approve_stream(chunks(), part.filename or 'dropped',
-                part.headers.get('Content-Type', '') if part.headers else '', surface='workflow_drop')
+            snapshot = await approve_stream(
+                chunks(),
+                part.filename or "dropped",
+                part.headers.get("Content-Type", "") if part.headers else "",
+                surface="workflow_drop",
+            )
             data = await _owned_io(snapshot.read_bytes)
         except IntakeRefused as exc:
-            _audit(request, 'workflow_run_drop', 'denied', f'{run_id}:{exc.code}')
+            _audit(request, "workflow_run_drop", "denied", f"{run_id}:{exc.code}")
             return exc.response()
         finally:
             if snapshot is not None:
@@ -1264,7 +1401,22 @@ async def api_run_start_draft(request: web.Request) -> web.Response:
     if denied is not None:
         return denied
     run_id = request.match_info.get("run_id", "")
-    result = await service.start_draft(run_id, supervisor=_supervisor(request), **{key: value for key, value in _work_context(request).items() if key in {"session_key", "work_principal", "app_work", "work_memory_mode", "accepted_origin"}})
+    result = await service.start_draft(
+        run_id,
+        supervisor=_supervisor(request),
+        **{
+            key: value
+            for key, value in _work_context(request).items()
+            if key
+            in {
+                "session_key",
+                "work_principal",
+                "app_work",
+                "work_memory_mode",
+                "accepted_origin",
+            }
+        },
+    )
     _audit(
         request,
         "workflow_run_start",
@@ -1361,24 +1513,28 @@ async def api_run_resume(request: web.Request) -> web.Response:
     if denied is not None:
         return denied
     run_id = request.match_info.get("run_id", "")
-    from gideon.security.approval_answer import of_request, check
+    from gideon.security.approval_answer import check, of_request
 
     principal = of_request(request)
-    answer_denial = check(
-        principal, what=f"gate:{run_id}", asked_by=f"run:{run_id}"
-    )
+    answer_denial = check(principal, what=f"gate:{run_id}", asked_by=f"run:{run_id}")
     if answer_denial:
         return json_error("approval_owner_only", message=answer_denial, status=403)
     body = await _json_body(request)
     if isinstance(body, web.Response):
         return body
     if strict_bool(body.get("round_resume"), field="round_resume", default=False):
-        result = await service.resume_interrupted_round(run_id, supervisor=_supervisor(request))
+        result = await service.resume_interrupted_round(
+            run_id, supervisor=_supervisor(request)
+        )
     elif "round_budget" in body:
         limits = body["round_budget"]
         if not isinstance(limits, dict):
-            return json_error("budget_invalid", message="round_budget must be an object", status=400)
-        result = service.extend_round_budget(run_id, limits, supervisor=_supervisor(request))
+            return json_error(
+                "budget_invalid", message="round_budget must be an object", status=400
+            )
+        result = service.extend_round_budget(
+            run_id, limits, supervisor=_supervisor(request)
+        )
     else:
         result = service.resume_run(
             run_id,
@@ -1409,12 +1565,10 @@ async def api_run_confirm(request: web.Request) -> web.Response:
     if denied is not None:
         return denied
     run_id = request.match_info.get("run_id", "")
-    from gideon.security.approval_answer import of_request, check
+    from gideon.security.approval_answer import check, of_request
 
     principal = of_request(request)
-    answer_denial = check(
-        principal, what=f"gate:{run_id}", asked_by=f"run:{run_id}"
-    )
+    answer_denial = check(principal, what=f"gate:{run_id}", asked_by=f"run:{run_id}")
     if answer_denial:
         return json_error("approval_owner_only", message=answer_denial, status=403)
     body = await _json_body(request)
@@ -1480,7 +1634,9 @@ async def _reentry(request: web.Request, operation: str, fn: Any) -> web.Respons
         from gideon.interfaces.dashboard.auto_denials import unanswered_note
 
         denial = unanswered_note(request.app.get("state"), retry_note_id)
-        refs = denial.refs if denial is not None and isinstance(denial.refs, dict) else {}
+        refs = (
+            denial.refs if denial is not None and isinstance(denial.refs, dict) else {}
+        )
         fingerprint = refs.get("call_fingerprint")
         if (
             refs.get("run") != run_id
@@ -1513,6 +1669,7 @@ async def _reentry(request: web.Request, operation: str, fn: Any) -> web.Respons
 async def api_run_fork(request: web.Request) -> web.Response:
     from gideon.security.approval_answer import of_request
     from gideon.security.session_credentials import work_of_request
+
     denied = _guard(request, "workflow_run_fork")
     if denied is not None:
         return denied
@@ -1632,12 +1789,16 @@ async def api_run_events(request: web.Request) -> web.Response | web.StreamRespo
 def _private_run_route(handler):
     async def guarded(request):
         from gideon.automation.workflows import chat_runs
+
         run_id = request.match_info.get("run_id", "")
         run = store.get(run_id) if run_id else None
-        if run is not None and not chat_runs.reads(run, **chat_runs.request_reader(request)):
+        if run is not None and not chat_runs.reads(
+            run, **chat_runs.request_reader(request)
+        ):
             _audit(request, "workflow_run_read", "denied", run_id)
             return _fail({"code": "WF_RUN_NOT_FOUND", "message": f"no run {run_id!r}"})
         return await handler(request)
+
     return guarded
 
 
@@ -1656,50 +1817,104 @@ def register_workflow_routes(app: web.Application) -> None:
     app.router.add_get("/api/workflows/batches/{name}", api_batch_status)
     app.router.add_get("/api/workflows/runs", api_runs_list)
     app.router.add_post("/api/workflows/runs", api_run_start)
-    app.router.add_get("/api/workflows/runs/{run_id}", _private_run_route(api_run_status))
-    app.router.add_delete("/api/workflows/runs/{run_id}", _private_run_route(api_run_delete))
-    app.router.add_get("/api/workflows/runs/{run_id}/events", _private_run_route(api_run_events))
     app.router.add_get(
-        "/api/workflows/runs/{run_id}/continuations", _private_run_route(api_run_continuations)
+        "/api/workflows/runs/{run_id}", _private_run_route(api_run_status)
     )
-    app.router.add_get("/api/workflows/runs/{run_id}/workspace", _private_run_route(api_run_workspace))
-    app.router.add_get("/api/workflows/runs/{run_id}/drop", _private_run_route(api_run_drop_status))
-    app.router.add_post("/api/workflows/runs/{run_id}/drop", _private_run_route(api_run_drop))
-    app.router.add_get("/api/workflows/runs/{run_id}/outbox", _private_run_route(api_run_outbox))
-    app.router.add_get("/api/workflows/runs/{run_id}/introspect", _private_run_route(api_run_introspect))
+    app.router.add_delete(
+        "/api/workflows/runs/{run_id}", _private_run_route(api_run_delete)
+    )
     app.router.add_get(
-        "/api/workflows/runs/{run_id}/ledger-rails", _private_run_route(api_run_ledger_rails)
+        "/api/workflows/runs/{run_id}/events", _private_run_route(api_run_events)
     )
-    app.router.add_get("/api/workflows/runs/{run_id}/deliverable", _private_run_route(api_run_deliverable))
-    app.router.add_get("/api/workflows/runs/{run_id}/outputs/{node_id}", _private_run_route(api_run_output))
     app.router.add_get(
-        "/api/workflows/runs/{run_id}/nodes/{node_id}/inspect", _private_run_route(api_run_node_inspect)
+        "/api/workflows/runs/{run_id}/continuations",
+        _private_run_route(api_run_continuations),
     )
-    app.router.add_post("/api/workflows/runs/{run_id}/edit", _private_run_route(api_run_edit))
-    app.router.add_put(
-        "/api/workflows/runs/{run_id}/policy-overrides", _private_run_route(api_run_policy_overrides)
+    app.router.add_get(
+        "/api/workflows/runs/{run_id}/workspace", _private_run_route(api_run_workspace)
     )
-    app.router.add_post("/api/workflows/runs/{run_id}/cancel", _private_run_route(api_run_cancel))
-    app.router.add_post("/api/workflows/runs/{run_id}/pause", _private_run_route(api_run_pause))
-    app.router.add_post("/api/workflows/runs/{run_id}/start", _private_run_route(api_run_start_draft))
-    app.router.add_post("/api/workflows/runs/{run_id}/resume", _private_run_route(api_run_resume))
-    app.router.add_post("/api/workflows/runs/{run_id}/confirm", _private_run_route(api_run_confirm))
-    app.router.add_post("/api/workflows/runs/{run_id}/steer", _private_run_route(api_run_steer))
-    app.router.add_get("/api/workflows/runs/{run_id}/steering", _private_run_route(api_run_steering))
-    app.router.add_get("/api/workflows/runs/{run_id}/review", _private_run_route(api_run_review))
+    app.router.add_get(
+        "/api/workflows/runs/{run_id}/drop", _private_run_route(api_run_drop_status)
+    )
     app.router.add_post(
-        "/api/workflows/runs/{run_id}/review/triage", _private_run_route(api_run_review_triage)
+        "/api/workflows/runs/{run_id}/drop", _private_run_route(api_run_drop)
     )
-    app.router.add_post("/api/workflows/runs/{run_id}/rewind", _private_run_route(api_run_rewind))
-    app.router.add_post("/api/workflows/runs/{run_id}/run-from", _private_run_route(api_run_from))
-    app.router.add_post("/api/workflows/runs/{run_id}/fork", _private_run_route(api_run_fork))
+    app.router.add_get(
+        "/api/workflows/runs/{run_id}/outbox", _private_run_route(api_run_outbox)
+    )
+    app.router.add_get(
+        "/api/workflows/runs/{run_id}/introspect",
+        _private_run_route(api_run_introspect),
+    )
+    app.router.add_get(
+        "/api/workflows/runs/{run_id}/ledger-rails",
+        _private_run_route(api_run_ledger_rails),
+    )
+    app.router.add_get(
+        "/api/workflows/runs/{run_id}/deliverable",
+        _private_run_route(api_run_deliverable),
+    )
+    app.router.add_get(
+        "/api/workflows/runs/{run_id}/outputs/{node_id}",
+        _private_run_route(api_run_output),
+    )
+    app.router.add_get(
+        "/api/workflows/runs/{run_id}/nodes/{node_id}/inspect",
+        _private_run_route(api_run_node_inspect),
+    )
+    app.router.add_post(
+        "/api/workflows/runs/{run_id}/edit", _private_run_route(api_run_edit)
+    )
+    app.router.add_put(
+        "/api/workflows/runs/{run_id}/policy-overrides",
+        _private_run_route(api_run_policy_overrides),
+    )
+    app.router.add_post(
+        "/api/workflows/runs/{run_id}/cancel", _private_run_route(api_run_cancel)
+    )
+    app.router.add_post(
+        "/api/workflows/runs/{run_id}/pause", _private_run_route(api_run_pause)
+    )
+    app.router.add_post(
+        "/api/workflows/runs/{run_id}/start", _private_run_route(api_run_start_draft)
+    )
+    app.router.add_post(
+        "/api/workflows/runs/{run_id}/resume", _private_run_route(api_run_resume)
+    )
+    app.router.add_post(
+        "/api/workflows/runs/{run_id}/confirm", _private_run_route(api_run_confirm)
+    )
+    app.router.add_post(
+        "/api/workflows/runs/{run_id}/steer", _private_run_route(api_run_steer)
+    )
+    app.router.add_get(
+        "/api/workflows/runs/{run_id}/steering", _private_run_route(api_run_steering)
+    )
+    app.router.add_get(
+        "/api/workflows/runs/{run_id}/review", _private_run_route(api_run_review)
+    )
+    app.router.add_post(
+        "/api/workflows/runs/{run_id}/review/triage",
+        _private_run_route(api_run_review_triage),
+    )
+    app.router.add_post(
+        "/api/workflows/runs/{run_id}/rewind", _private_run_route(api_run_rewind)
+    )
+    app.router.add_post(
+        "/api/workflows/runs/{run_id}/run-from", _private_run_route(api_run_from)
+    )
+    app.router.add_post(
+        "/api/workflows/runs/{run_id}/fork", _private_run_route(api_run_fork)
+    )
 
     app.router.add_get("/api/workflows/surfacing", api_defs_surfacing)
     app.router.add_get("/api/workflows", api_defs_list)
     app.router.add_post("/api/workflows", api_def_save)
     app.router.add_get("/api/workflows/{name}/versions", api_def_versions)
     app.router.add_get("/api/workflows/{name}/versions/diff", api_def_version_diff)
-    app.router.add_get("/api/workflows/{name}/versions/{version}", api_def_version_detail)
+    app.router.add_get(
+        "/api/workflows/{name}/versions/{version}", api_def_version_detail
+    )
     app.router.add_post("/api/workflows/{name}/versions/repin", api_def_repin)
     app.router.add_get("/api/workflows/{name}/ledger", api_def_ledger)
     app.router.add_post("/api/workflows/{name}/refine", api_def_refine)

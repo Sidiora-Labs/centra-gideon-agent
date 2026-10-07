@@ -24,7 +24,8 @@ import json
 import logging
 import tarfile
 from pathlib import Path
-from gideon.operations.durability.home_paths import guard_path, LinkInTheWay
+
+from gideon.operations.durability.home_paths import LinkInTheWay, guard_path
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,9 @@ def write_sidecar(archive: Path, manifest: dict) -> None:
     try:
         destination = guard_path(sidecar_path(archive))
         atomic_write(
-            destination, json.dumps(manifest, indent=2, sort_keys=True) + "\n", mode=0o600
+            destination,
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            mode=0o600,
         )
     except (OSError, LinkInTheWay, ValueError):
         logger.debug("archive: could not write manifest sidecar for %s", archive.name)
@@ -85,7 +88,14 @@ def _manifest_from_tar(archive: Path) -> dict | None:
                 if handle is None:
                     return None
                 return json.loads(handle.read().decode("utf-8"))
-    except (tarfile.TarError, OSError, json.JSONDecodeError, UnicodeDecodeError, LinkInTheWay, ValueError):
+    except (
+        tarfile.TarError,
+        OSError,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+        LinkInTheWay,
+        ValueError,
+    ):
         logger.debug("archive: no readable manifest in %s", archive.name, exc_info=True)
     return None
 

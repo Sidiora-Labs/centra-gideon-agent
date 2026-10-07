@@ -98,7 +98,7 @@ def _slide(slide: Any, where: str, report: LossReport) -> Slide:
     image = re.search(r"(?:^|\n)\[image: ([^\]\n]+)\]\s*$", notes)
     artifact_slug = image.group(1).strip() if image else ""
     if image:
-        notes = notes[:image.start()].rstrip()
+        notes = notes[: image.start()].rstrip()
     _report_shapes(slide, where, report, artifact_slug)
     _report_background(slide, where, report)
     return Slide(
@@ -188,7 +188,9 @@ def _run_styles(para: Any) -> list[str]:
     return found
 
 
-def _report_shapes(slide: Any, where: str, report: LossReport, artifact_slug: str = "") -> None:
+def _report_shapes(
+    slide: Any, where: str, report: LossReport, artifact_slug: str = ""
+) -> None:
     """Everything on the slide that is not the title, the body, or empty.
 
     An EMPTY placeholder is skipped: a layout ships them (a Title Slide has a subtitle
@@ -202,8 +204,11 @@ def _report_shapes(slide: Any, where: str, report: LossReport, artifact_slug: st
     if body is not None:
         carried.add(int(body.placeholder_format.idx))
     for shape in slide.shapes:
-        if (artifact_slug and shape.shape_type == MSO_SHAPE_TYPE.PICTURE
-                and shape.name == f"Gideon image artifact {artifact_slug}"):
+        if (
+            artifact_slug
+            and shape.shape_type == MSO_SHAPE_TYPE.PICTURE
+            and shape.name == f"Gideon image artifact {artifact_slug}"
+        ):
             continue
         text = str(shape.text_frame.text or "").strip() if shape.has_text_frame else ""
         if shape.is_placeholder:

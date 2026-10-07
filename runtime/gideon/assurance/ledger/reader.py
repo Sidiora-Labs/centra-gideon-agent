@@ -13,9 +13,9 @@ from typing import Any
 from gideon.assurance.ledger.kinds import (
     LEDGER_KINDS,
     STEP_CACHED,
+    STEP_CANCELLED,
     STEP_COMPLETED,
     STEP_FAILED,
-    STEP_CANCELLED,
 )
 from gideon.assurance.ledger.writer import EVENTS_FILE, JOURNAL_FILE, LedgerStore
 

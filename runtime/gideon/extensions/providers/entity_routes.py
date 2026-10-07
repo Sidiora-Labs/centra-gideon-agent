@@ -202,12 +202,17 @@ def quiet_window_moments(settings: dict) -> "tuple[object, object] | None":
 
     if not settings.get("quiet_hours_enabled"):
         return None
-    start, end = (_parse_hhmm(settings.get(key, "")) for key in ("quiet_hours_start", "quiet_hours_end"))
+    start, end = (
+        _parse_hhmm(settings.get(key, ""))
+        for key in ("quiet_hours_start", "quiet_hours_end")
+    )
     if start is None or end is None or start == end:
         return None
     today = datetime.now().replace(second=0, microsecond=0)
-    return (today.replace(hour=start // 60, minute=start % 60),
-            today.replace(hour=end // 60, minute=end % 60))
+    return (
+        today.replace(hour=start // 60, minute=start % 60),
+        today.replace(hour=end // 60, minute=end % 60),
+    )
 
 
 def notification_posture(kind: str, *, now: "object | None" = None) -> str:

@@ -26,6 +26,7 @@ _CLOCK = ReportClock(USAGE_RECAP_JOB_NAME, USAGE_RECAP_JOB_NAME, "usage-recap")
 
 def previous_month(now: datetime | None = None) -> str:
     from gideon.core.spend_day import zone
+
     reference = now or datetime.now(tz=zone())
     year, offset = divmod(reference.year * 12 + reference.month - 2, 12)
     return f"{year:04d}-{offset + 1:02d}"

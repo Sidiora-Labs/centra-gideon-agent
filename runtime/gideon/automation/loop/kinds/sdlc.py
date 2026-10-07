@@ -51,7 +51,12 @@ def _pool_cap(loop: Loop) -> int:
         return _POOL_CAP
     from gideon.extensions.providers.use_cases import active_model_refs
     from gideon.integrations.llm.registry import endpoint_on_this_machine
-    ref = loop.model if ":" in (loop.model or "") else next(iter(active_model_refs("loops")), "")
+
+    ref = (
+        loop.model
+        if ":" in (loop.model or "")
+        else next(iter(active_model_refs("loops")), "")
+    )
     return 1 if ref and endpoint_on_this_machine(ref.partition(":")[0]) else _POOL_CAP
 
 
@@ -175,7 +180,9 @@ class CodeKind(LoopKindStrategy):
             if svc.get_by_session(task_session_key(loop.id, tid)) is not None
         ]
 
-    async def parallel_restart_ownership(self, loop: Loop, state, svc) -> tuple[str, bool]:
+    async def parallel_restart_ownership(
+        self, loop: Loop, state, svc
+    ) -> tuple[str, bool]:
         """Recompute queued worker ownership before a previously-run loop is re-armed.
 
         The task row and a surviving worktree identify unfinished work, not whether its
@@ -200,21 +207,32 @@ class CodeKind(LoopKindStrategy):
             nudge = svc.get_by_session(key)
             active = getattr(nudge, "active", None) if nudge is not None else False
             if not isinstance(active, bool):
-                return f"Task {task_id} has an unreadable worker state; inspect it before resuming.", True
+                return (
+                    f"Task {task_id} has an unreadable worker state; inspect it before resuming.",
+                    True,
+                )
             status = str(getattr(task.status, "value", task.status))
             try:
                 has_worktree = os.path.isdir(
-                    worktree.worktree_path(loop.workspace_dir, task_id, loop.tasks_project_id)
+                    worktree.worktree_path(
+                        loop.workspace_dir, task_id, loop.tasks_project_id
+                    )
                 ) or worktree.branch_exists(loop.workspace_dir, task_id)
             except (OSError, ValueError):
-                return f"Task {task_id} has an unsafe or unreadable worktree state; inspect it before resuming.", True
+                return (
+                    f"Task {task_id} has an unsafe or unreadable worktree state; inspect it before resuming.",
+                    True,
+                )
             has_owner = status == "in_progress" or active or has_worktree
             if not has_owner:
                 continue
             pending = True
             if session is not None:
                 if not isinstance(getattr(session, "running", None), bool):
-                    return f"Task {task_id} has an unreadable session state; inspect it before resuming.", True
+                    return (
+                        f"Task {task_id} has an unreadable session state; inspect it before resuming.",
+                        True,
+                    )
                 continue
             if manager.recorded_session_process(key) is not False:
                 return (
@@ -241,7 +259,9 @@ class CodeKind(LoopKindStrategy):
         store.update_status(loop.id, LoopStatus.NEEDS_INPUT)
         ctx.publish(loop.id, "needs_input", {"loop_id": loop.id, "reason": reason})
 
-    async def _stand_down_stage_worker(self, loop: Loop, workspace: str, ctx, *, clean_first: bool) -> bool:
+    async def _stand_down_stage_worker(
+        self, loop: Loop, workspace: str, ctx, *, clean_first: bool
+    ) -> bool:
         from gideon.automation.loop import manager, store, worktree
 
         main_key = manager.session_key(loop.id)
@@ -286,7 +306,9 @@ class CodeKind(LoopKindStrategy):
         updated = await ctx.svc.update(nudge.id, active=True)
         if updated is None or getattr(updated, "active", None) is not True:
             self._hold_for_writer_recovery(
-                loop, ctx, "The stage worker could not be safely re-armed after task drain."
+                loop,
+                ctx,
+                "The stage worker could not be safely re-armed after task drain.",
             )
             return False
         store.merge_kind_config(loop.id, {"parallel_stage_stood_down": False})
@@ -1470,9 +1492,7 @@ class CodeKind(LoopKindStrategy):
 
         # The stage worker owns the shared checkout. Stop its nudge and wait for
         # the current turn to drain before creating any task worktrees.
-        if not await self._stand_down_stage_worker(
-            loop, ws, ctx, clean_first=False
-        ):
+        if not await self._stand_down_stage_worker(loop, ws, ctx, clean_first=False):
             return True
 
         for tid in list((loop.kind_config or {}).get("queued_task_ids", []) or []):
@@ -1497,7 +1517,10 @@ class CodeKind(LoopKindStrategy):
                     await teardown_task_worker(ctx.svc, loop.id, tid)
                     if await self._reap_merge_done(loop, tid, task, ws, ctx):
                         return True
-                elif task is not None and str(getattr(task.status, "value", task.status)) == "in_progress":
+                elif (
+                    task is not None
+                    and str(getattr(task.status, "value", task.status)) == "in_progress"
+                ):
                     if manager.recorded_session_process(skey) is not False:
                         self._hold_for_writer_recovery(
                             loop,

@@ -87,8 +87,8 @@ def mutate(identifier, body, *, operation="save", provider=None):
         data = _validate_document(current)
         return _apply_mutation(identifier, body, operation, provider, data)
 
-    from gideon.core.config.transactions import ConfigWriteError, mutate_config
     from gideon.core.config.secret_refs import ConfigSecretReferenceError
+    from gideon.core.config.transactions import ConfigWriteError, mutate_config
 
     try:
         data = mutate_config(apply, path=config_path())
@@ -97,7 +97,9 @@ def mutate(identifier, body, *, operation="save", provider=None):
     except ConfigPreserveError as error:
         raise ConnectionError("Provider configuration is unreadable", 503) from error
     except ConfigWriteError as error:
-        raise ConnectionError("Provider configuration is temporarily unavailable", 503) from error
+        raise ConnectionError(
+            "Provider configuration is temporarily unavailable", 503
+        ) from error
     except ConfigSecretReferenceError as error:
         raise ConnectionError("Provider configuration is invalid", 503) from error
 

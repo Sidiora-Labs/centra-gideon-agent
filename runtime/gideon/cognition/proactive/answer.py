@@ -108,8 +108,8 @@ def write_reply_row(
     ``answered_by`` is who answered (`approval_answer.Principal.label`): you, or you on a channel.
     """
     from gideon.assurance.ledger.kinds import TRIAGE_REPLY
-    from gideon.cognition.proactive.surface import TRIAGE_NODE_ID
     from gideon.automation.workflows.journal import Journal
+    from gideon.cognition.proactive.surface import TRIAGE_NODE_ID
 
     try:
         Journal(run_id=run_id).write(
@@ -125,7 +125,9 @@ def write_reply_row(
             answered_by=answered_by,
         )
     except Exception:  # noqa: BLE001
-        logger.warning("proactive: reply row not written for %s/%s", run_id, ordinal, exc_info=True)
+        logger.warning(
+            "proactive: reply row not written for %s/%s", run_id, ordinal, exc_info=True
+        )
         return False
     return True
 
@@ -153,9 +155,16 @@ def persist_rule(door: Door, pattern: str, approve: bool) -> tuple[str, str]:
             raise RuntimeError("no memory store is reachable from here")
         svc = door.memory()
         err = svc.set_semantic(rule.key, rule_to_value(rule), 1.0, "user_explicit")
-    except Exception as exc:  # noqa: BLE001 - said on the answer; the answer itself stands
-        logger.warning("proactive: the rule for %s could not be remembered", pattern, exc_info=True)
-        return rule.key, f"the pattern could not be remembered ({type(exc).__name__}: {exc})"
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - said on the answer; the answer itself stands
+        logger.warning(
+            "proactive: the rule for %s could not be remembered", pattern, exc_info=True
+        )
+        return (
+            rule.key,
+            f"the pattern could not be remembered ({type(exc).__name__}: {exc})",
+        )
     if err is not None:
         _code, message = err
         return rule.key, message
@@ -264,7 +273,9 @@ async def dispatch_approved(
         return "", f"{proposal.action_type} on {action.source_id}"
     if result.deferred:
         deferred = result.deferred[0]
-        return deferred.reason, not_done_note(deferred.reason, deferred.detail, answered=True)
+        return deferred.reason, not_done_note(
+            deferred.reason, deferred.detail, answered=True
+        )
     return (
         _NOTHING_RETURNED,
         "Not done: the action stage returned nothing. Open the item to do it yourself.",
@@ -274,8 +285,8 @@ async def dispatch_approved(
 def run_ledger(run_id: str) -> Callable[[str, dict], None]:
     """The auto-execute stage's `LedgerFn`, bound to the digest's run so an approved action lands
     in ITS journal."""
-    from gideon.cognition.proactive.surface import TRIAGE_NODE_ID
     from gideon.automation.workflows.journal import Journal
+    from gideon.cognition.proactive.surface import TRIAGE_NODE_ID
 
     journal = Journal(run_id=run_id)
 
@@ -315,7 +326,6 @@ async def answer(run_id: str, text: str, *, door: Door) -> Answered:
     the reply names: an answered one acks, an unknown one says so, and the rest are answered, each
     leaving its ``triage_reply`` row. One SEL row records the reply.
     """
-    from gideon.security import approval_answer
     from gideon.cognition.proactive import digest_state
     from gideon.cognition.proactive.approval import HELP_TEXT, ReplyAction, parse_reply
     from gideon.cognition.proactive.surface import (
@@ -323,6 +333,7 @@ async def answer(run_id: str, text: str, *, door: Door) -> Answered:
         OUTCOME_ANSWER_EXECUTED,
         STATE_READY,
     )
+    from gideon.security import approval_answer
     from gideon.security.sel import sel
 
     # A reply approves (or declines) what the digest's run proposed, so only you give one
@@ -335,14 +346,18 @@ async def answer(run_id: str, text: str, *, door: Door) -> Answered:
 
     try:
         view = await asyncio.to_thread(digest_state.current_view)
-    except Exception as exc:  # noqa: BLE001 - a digest that cannot be read is answered by nothing
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - a digest that cannot be read is answered by nothing
         logger.warning("proactive: reply read failed", exc_info=True)
         return Answered(outcome=UNREADABLE, error=f"{type(exc).__name__}: {exc}")
 
     if view.get("state") != STATE_READY or str(view.get("run_id", "")) != run_id:
         # An ordinal numbers ONE window. Acting on a stale digest's "3" would address whatever
         # happens to be third today: a wrong-target execution.
-        return Answered(outcome=EXPIRED, current_run_id=str(view.get("run_id", "") or ""))
+        return Answered(
+            outcome=EXPIRED, current_run_id=str(view.get("run_id", "") or "")
+        )
 
     ordinals = [str(row.get("ordinal", "")) for row in (view.get("pending") or [])]
     # Every number the digest gives, a proposal it carried from an earlier one among them: what
@@ -358,7 +373,11 @@ async def answer(run_id: str, text: str, *, door: Door) -> Answered:
         row = pending_row(view, ordinal)
         if row is None:
             results.append(
-                {"ordinal": ordinal, "outcome": "unknown", "detail": "not pending in this digest"}
+                {
+                    "ordinal": ordinal,
+                    "outcome": "unknown",
+                    "detail": "not pending in this digest",
+                }
             )
             continue
         # What the result is about, so a door that says it in words names the item it answered.
@@ -379,7 +398,10 @@ async def answer(run_id: str, text: str, *, door: Door) -> Answered:
         rule_key, rule_error = "", ""
         if parsed.persists_rule:
             rule_key, rule_error = await asyncio.to_thread(
-                persist_rule, door, str(row.get("pattern_key", "") or ""), parsed.approves
+                persist_rule,
+                door,
+                str(row.get("pattern_key", "") or ""),
+                parsed.approves,
             )
         reason, detail = "", ""
         if parsed.approves:

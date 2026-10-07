@@ -66,7 +66,11 @@ def _is_number(text: str) -> bool:
 def _quoted(text: str) -> str | None:
     """*text* behind a quote, when the module's rule writes it so; otherwise ``None``."""
     probe = text.lstrip(_BOM)
-    if not probe.startswith(_FORMULA_LEADS) or _is_number(probe) or not probe.strip("-"):
+    if (
+        not probe.startswith(_FORMULA_LEADS)
+        or _is_number(probe)
+        or not probe.strip("-")
+    ):
         return None
     return "'" + text
 
@@ -78,7 +82,9 @@ def _cell(value: object) -> object:
     ``repr`` of a float, the ``str`` of anything else), so a value this returns unchanged is
     written exactly as the standard library writes it.
     """
-    text = "" if value is None else repr(value) if isinstance(value, float) else str(value)
+    text = (
+        "" if value is None else repr(value) if isinstance(value, float) else str(value)
+    )
     quoted = _quoted(text)
     return value if quoted is None else quoted
 
@@ -92,12 +98,16 @@ def render_csv(model: object) -> bytes:
     if not isinstance(model, SheetModel):
         raise TypeError("csv writer expects a SheetModel; prose documents have no rows")
     if len(model.sheets) != 1:
-        raise ValueError("csv writer cannot represent multiple sheets; provide one sheet")
+        raise ValueError(
+            "csv writer cannot represent multiple sheets; provide one sheet"
+        )
 
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     if model.sheets:
-        writer.writerows([_cell(value) for value in row] for row in model.sheets[0].rows)
+        writer.writerows(
+            [_cell(value) for value in row] for row in model.sheets[0].rows
+        )
     return output.getvalue().encode("utf-8")
 
 

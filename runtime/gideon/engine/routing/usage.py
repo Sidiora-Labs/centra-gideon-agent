@@ -9,8 +9,8 @@ from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any, Callable
 
-from gideon.core.atomic_write import atomic_write
 from gideon.core import spend_day
+from gideon.core.atomic_write import atomic_write
 from gideon.engine.routing.rates import resolve_effective_price
 from gideon.engine.routing.stats import ref_of
 
@@ -190,7 +190,10 @@ def fold_turn_row(
 
 
 def audit_census(
-    rows: list[dict[str, Any]], *, ledgered_audit_ids: set[str] | frozenset[str] = frozenset(), zone: tzinfo | None = None
+    rows: list[dict[str, Any]],
+    *,
+    ledgered_audit_ids: set[str] | frozenset[str] = frozenset(),
+    zone: tzinfo | None = None,
 ) -> dict[str, Any]:
     zone = spend_day.zone() if zone is None else zone
     calls = 0
@@ -249,7 +252,14 @@ def _dedup_ledger(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[tuple[str, str]] = set()
     out = []
     for row in rows:
-        key = next(((field, str(row[field])) for field in ("audit_id", "import_record_id") if row.get(field)), None)
+        key = next(
+            (
+                (field, str(row[field]))
+                for field in ("audit_id", "import_record_id")
+                if row.get(field)
+            ),
+            None,
+        )
         if key is not None and key in seen:
             continue
         if key is not None:
@@ -274,7 +284,14 @@ def fold_files(
     ledgered_audit_ids = frozenset(
         value
         for row in ledger_rows
-        for value in [str(row.get("audit_id", "") or "").strip(), *[str(item).strip() for item in (row.get("audit_ids") or []) if isinstance(item, str)]]
+        for value in [
+            str(row.get("audit_id", "") or "").strip(),
+            *[
+                str(item).strip()
+                for item in (row.get("audit_ids") or [])
+                if isinstance(item, str)
+            ],
+        ]
         if value
     )
     fold.update(
@@ -343,8 +360,15 @@ def _unallocated(prior: dict, reconstructable: dict) -> dict:
     for day, models in (prior.get("days") or {}).items():
         for ref, purposes in models.items():
             for purpose, cell in purposes.items():
-                raw = (((reconstructable.get("days") or {}).get(day) or {}).get(ref) or {}).get(purpose) or {}
-                residual = {key: max(0, float(cell.get(key, 0) or 0) - float(raw.get(key, 0) or 0)) for key in out}
+                raw = (
+                    ((reconstructable.get("days") or {}).get(day) or {}).get(ref) or {}
+                ).get(purpose) or {}
+                residual = {
+                    key: max(
+                        0, float(cell.get(key, 0) or 0) - float(raw.get(key, 0) or 0)
+                    )
+                    for key in out
+                }
                 _add(out, residual)
     return out
 
@@ -354,7 +378,9 @@ def refresh(
 ) -> dict[str, Any]:
     prior = load_usage(home)
     zone = spend_day.zone()
-    result = fold_files(home=home, audit_path=audit_path, ledger_path=ledger_path, zone=zone)
+    result = fold_files(
+        home=home, audit_path=audit_path, ledger_path=ledger_path, zone=zone
+    )
     # Before calendar metadata existed this native fold used UTC dates.
     old_zone = str(prior.get("calendar_timezone") or "UTC")
     archives = list(prior.get("calendar_archives") or [])
@@ -362,9 +388,21 @@ def refresh(
     _add(unallocated, prior.get("unallocated_total") or {})
     if prior.get("days") and old_zone != str(zone):
         from gideon.core.timezones import zone_or_raise
-        old_rows = fold_files(home=home, audit_path=audit_path, ledger_path=ledger_path, zone=zone_or_raise(old_zone))
+
+        old_rows = fold_files(
+            home=home,
+            audit_path=audit_path,
+            ledger_path=ledger_path,
+            zone=zone_or_raise(old_zone),
+        )
         _add(unallocated, _unallocated(prior, old_rows))
-        archives.append({"timezone": old_zone, "days": prior["days"], "unallocated_total": prior.get("unallocated_total") or {}})
+        archives.append(
+            {
+                "timezone": old_zone,
+                "days": prior["days"],
+                "unallocated_total": prior.get("unallocated_total") or {},
+            }
+        )
     else:
         result["days"] = _merge_days(prior.get("days") or {}, result.get("days") or {})
     result["calendar_archives"] = archives

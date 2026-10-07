@@ -14,13 +14,11 @@ stay in this suite's other test modules.
 from __future__ import annotations
 
 import pytest
-
-from gideon.sdk.channel import ChannelContractError, assert_channel_contract
-
 from discord_desk.delivery import _EDIT_MIN_INTERVAL, DiscordDeskDelivery
 from discord_desk.transport import DiscordDeskTransport
-
 from test_result_delivery import FakeAPI
+
+from gideon.sdk.channel import ChannelContractError, assert_channel_contract
 
 
 def _wired() -> tuple[DiscordDeskTransport, DiscordDeskDelivery, FakeAPI, dict]:
@@ -34,7 +32,12 @@ def _wired() -> tuple[DiscordDeskTransport, DiscordDeskDelivery, FakeAPI, dict]:
     delivery = DiscordDeskDelivery(api, "42")
     clock = {"t": 0.0}
     delivery._now = lambda: clock["t"]  # type: ignore[method-assign]
-    return DiscordDeskTransport({"bot_token": "conformance.token"}), delivery, api, clock
+    return (
+        DiscordDeskTransport({"bot_token": "conformance.token"}),
+        delivery,
+        api,
+        clock,
+    )
 
 
 def test_discord_desk_transport_meets_the_channel_contract():

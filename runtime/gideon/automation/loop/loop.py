@@ -155,6 +155,7 @@ def held_reason(status: str) -> str:
     if status != LoopStatus.RUNNING.value:
         return ""
     from gideon.security.guardrails.incident import incident_active
+
     return INCIDENT_HOLD if incident_active() else ""
 
 

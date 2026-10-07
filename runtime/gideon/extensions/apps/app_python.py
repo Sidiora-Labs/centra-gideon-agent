@@ -62,7 +62,10 @@ from pathlib import Path
 
 from gideon._app_python_child import PATH_ENV
 from gideon.extensions.apps import manager as _manager
-from gideon.extensions.apps.manager import APP_MANIFEST_FILENAME, INSTALLED_META_FILENAME
+from gideon.extensions.apps.manager import (
+    APP_MANIFEST_FILENAME,
+    INSTALLED_META_FILENAME,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +113,9 @@ def root() -> Path:
             "The app package directory must be a real directory in the active home."
         )
     if prefix.parent.resolve() != home:
-        raise PackageInstallError("The app package directory is outside the active home.")
+        raise PackageInstallError(
+            "The app package directory is outside the active home."
+        )
     return prefix
 
 
@@ -127,7 +132,14 @@ def site_dirs() -> list[Path]:
     scheme = sysconfig.get_preferred_scheme("prefix")
     if scheme == "osx_framework_library":
         scheme = "posix_prefix"
-    keys = ("installed_base", "base", "installed_platbase", "platbase", "prefix", "exec_prefix")
+    keys = (
+        "installed_base",
+        "base",
+        "installed_platbase",
+        "platbase",
+        "prefix",
+        "exec_prefix",
+    )
     paths = sysconfig.get_paths(scheme=scheme, vars={key: base for key in keys})
     out: list[Path] = []
     for key in ("purelib", "platlib"):
@@ -229,7 +241,9 @@ def _index(
     for dist in importlib.metadata.distributions(path=paths):
         try:
             name = dist.metadata["Name"]
-        except Exception:  # noqa: BLE001 — unreadable metadata is not a distribution we can use
+        except (
+            Exception
+        ):  # noqa: BLE001 — unreadable metadata is not a distribution we can use
             name = None
         if name:
             out.setdefault(canonicalize_name(name), []).append(dist)
@@ -242,7 +256,8 @@ def _index(
 
 def _installed_at(dist: importlib.metadata.Distribution) -> int:
     """When pip installed *dist*: its RECORD's modification time, which pip writes last.
-    ``0`` for a distribution with no readable RECORD, so it never outranks one that has one."""
+    ``0`` for a distribution with no readable RECORD, so it never outranks one that has one.
+    """
     for entry in dist.files or []:
         if entry.name == "RECORD" and entry.parent.name.endswith(".dist-info"):
             try:
@@ -262,7 +277,8 @@ class _Env:
     @classmethod
     def read(cls) -> _Env:
         return cls(
-            base=_index(_base_paths()), apps=_index(_existing_site_dirs(), newest_first=True)
+            base=_index(_base_paths()),
+            apps=_index(_existing_site_dirs(), newest_first=True),
         )
 
     def find(self, key: str) -> tuple[importlib.metadata.Distribution | None, bool]:
@@ -297,18 +313,23 @@ class _Env:
 
 
 def _satisfies(req, version: str) -> bool:
-    if req.url:  # a direct reference names a source, not a version: installed is satisfied
+    if (
+        req.url
+    ):  # a direct reference names a source, not a version: installed is satisfied
         return True
     try:
         return req.specifier.contains(version, prereleases=True)
-    except Exception:  # noqa: BLE001 — an unparseable installed version satisfies nothing
+    except (
+        Exception
+    ):  # noqa: BLE001 — an unparseable installed version satisfies nothing
         return False
 
 
 def _closure(requirements: Iterable[str], env: _Env) -> tuple[set[str], list[str]]:
     """Walk *requirements*' closure the way imports resolve it — the gateway's own distribution
     first, then the app packages. Returns ``(app-package names the closure reaches, requirement
-    strings nothing satisfies)``. Markers are evaluated for this interpreter, extras followed."""
+    strings nothing satisfies)``. Markers are evaluated for this interpreter, extras followed.
+    """
     from packaging.requirements import InvalidRequirement, Requirement
     from packaging.utils import canonicalize_name
 
@@ -370,8 +391,12 @@ def _read_declared(tree: Path) -> Declared | None:
         return None
     try:
         manifest = AppManifest.from_json_file(manifest_file)
-    except Exception:  # noqa: BLE001 — an unreadable manifest declares nothing we can honour
-        logger.debug("app packages: unreadable manifest %s", manifest_file, exc_info=True)
+    except (
+        Exception
+    ):  # noqa: BLE001 — an unreadable manifest declares nothing we can honour
+        logger.debug(
+            "app packages: unreadable manifest %s", manifest_file, exc_info=True
+        )
         return None
     return Declared(
         name=manifest.name or tree.name,
@@ -445,7 +470,9 @@ def _locked() -> Iterator[None]:
         if _lock_depth == 0:
             here = root()
             here.mkdir(parents=True, exist_ok=True)
-            handle = open(here / _LOCK_FILENAME, "w")  # noqa: SIM115 — held across the yield
+            handle = open(
+                here / _LOCK_FILENAME, "w"
+            )  # noqa: SIM115 — held across the yield
             fcntl.flock(handle, fcntl.LOCK_EX)
             _lock_file = handle
         _lock_depth += 1
@@ -481,14 +508,22 @@ def ensure(app: str, requirements: list[str], *, label: str) -> list[str]:
     adds modules nothing has imported yet, and :func:`activate` makes them importable in place.
     """
     if not requirements or not unmet(requirements):
-        return []  # the common case, answered without the lock or the directory existing
+        return (
+            []
+        )  # the common case, answered without the lock or the directory existing
     with _locked():
         env = _Env.read()
         if not _closure(requirements, env)[1]:
-            return []  # another install provided them while this one waited for the lock
+            return (
+                []
+            )  # another install provided them while this one waited for the lock
         others = [d for d in installed_apps() if d.name != app]
         before = env.app_versions()
-        _pip_install(Declared(name=app, label=label, requirements=list(requirements)), others, env)
+        _pip_install(
+            Declared(name=app, label=label, requirements=list(requirements)),
+            others,
+            env,
+        )
         activate()
         after = _Env.read()
         missing = _closure(requirements, after)[1]
@@ -500,7 +535,11 @@ def ensure(app: str, requirements: list[str], *, label: str) -> list[str]:
             )
         now = after.app_versions()
         replaced = sorted(
-            f"{key} {version} → {now[key]}" if key in now else f"{key} {version} (removed)"
+            (
+                f"{key} {version} → {now[key]}"
+                if key in now
+                else f"{key} {version} (removed)"
+            )
             for key, version in before.items()
             if now.get(key) != version
         )
@@ -521,7 +560,8 @@ def broken_apps() -> list[tuple[Declared, list[str]]]:
 def install_everything() -> None:
     """One pip run over every installed app's requirements — the boot-time rebuild after a new
     image's Python, a changed core dependency or a restored snapshot. Raises
-    :class:`PackageInstallError`, attributed to the first app still missing something."""
+    :class:`PackageInstallError`, attributed to the first app still missing something.
+    """
     with _locked():
         broken = broken_apps()
         if not broken:
@@ -558,7 +598,9 @@ def _parseable(declared: Declared) -> list[str]:
         try:
             Requirement(spec)
         except InvalidRequirement:
-            logger.warning("app %s: ignoring unparseable python dependency %r", declared.name, spec)
+            logger.warning(
+                "app %s: ignoring unparseable python dependency %r", declared.name, spec
+            )
             continue
         kept.append(spec)
     return kept
@@ -572,7 +614,9 @@ def _pip_install(target: Declared, others: list[Declared], env: _Env) -> None:
     here.mkdir(parents=True, exist_ok=True)
     scratch_root = _manager.config_dir() / "tmp"
     scratch_root.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="gideon-app-python-", dir=scratch_root) as scratch:
+    with tempfile.TemporaryDirectory(
+        prefix="gideon-app-python-", dir=scratch_root
+    ) as scratch:
         constraints = Path(scratch) / "constraints.txt"
         constraints.write_text("\n".join(env.pins()) + "\n", encoding="utf-8")
         try:
@@ -595,15 +639,20 @@ def _pip_install(target: Declared, others: list[Declared], env: _Env) -> None:
                 f"Couldn't install {target.label}'s Python packages: {exc}."
             ) from exc
         logger.info(
-            "app %s: installing python packages %s into %s", target.name, requirements, here
+            "app %s: installing python packages %s into %s",
+            target.name,
+            requirements,
+            here,
         )
         try:
-            proc = subprocess.run(  # noqa: S603 — requirements come from scanned manifests
-                argv,
-                capture_output=True,
-                text=True,
-                timeout=_PIP_TIMEOUT,
-                env={**_pip_env(), "TMPDIR": scratch},
+            proc = (
+                subprocess.run(  # noqa: S603 — requirements come from scanned manifests
+                    argv,
+                    capture_output=True,
+                    text=True,
+                    timeout=_PIP_TIMEOUT,
+                    env={**_pip_env(), "TMPDIR": scratch},
+                )
             )
         except subprocess.TimeoutExpired as exc:
             raise PackageInstallError(
@@ -686,7 +735,9 @@ _NO_MATCH_RE = re.compile(r"No matching distribution found for (\S+)")
 _BUILD_RE = re.compile(
     r"Failed (?:building wheel for|to build) (?!installable\b)([A-Za-z0-9][A-Za-z0-9._-]*)"
 )
-_CONFLICT_BLOCK_RE = re.compile(r"The conflict is caused by:\n(.*?)(?:\n\s*\n|\Z)", re.S)
+_CONFLICT_BLOCK_RE = re.compile(
+    r"The conflict is caused by:\n(.*?)(?:\n\s*\n|\Z)", re.S
+)
 _CONSTRAINT_LINE_RE = re.compile(r"The user requested \(constraint\) (\S+?)==(\S+)")
 _REQUESTED_LINE_RE = re.compile(r"The user requested (.+)")
 
@@ -701,7 +752,9 @@ def _machine() -> str:
     return f"Python {sys.version_info.major}.{sys.version_info.minor} on {sysconfig.get_platform()}"
 
 
-def explain_failure(output: str, target: Declared, others: list[Declared]) -> tuple[str, bool]:
+def explain_failure(
+    output: str, target: Declared, others: list[Declared]
+) -> tuple[str, bool]:
     """The sentence a user reads for pip's *output*, and whether the log is worth handing on.
 
     Scans the WHOLE output, not its tail: pip reports an unreachable index as retry warnings at
@@ -714,7 +767,11 @@ def explain_failure(output: str, target: Declared, others: list[Declared]) -> tu
     if oserror is not None:
         code, where = int(oserror.group(1)), oserror.group(2) or str(root())
         if code in (_EACCES, _EROFS):
-            why = "permission denied" if code == _EACCES else "the file system is read-only"
+            why = (
+                "permission denied"
+                if code == _EACCES
+                else "the file system is read-only"
+            )
             return (
                 f"Couldn't install {label}'s Python packages: Gideon can't write to "
                 f"{where} ({why}). The folder Gideon keeps its data in ({home}) has to be "
@@ -796,7 +853,11 @@ def _conflict(output: str, target: Declared, others: list[Declared]) -> str:
         if requested is not None:
             spec = _normalized(requested.group(1))
             owner = next(
-                (d.label for d in others if spec in {_normalized(s) for s in d.requirements}),
+                (
+                    d.label
+                    for d in others
+                    if spec in {_normalized(s) for s in d.requirements}
+                ),
                 None,
             )
             if owner is not None and spec not in mine:
@@ -805,7 +866,10 @@ def _conflict(output: str, target: Declared, others: list[Declared]) -> str:
                 parts.append(f"{target.label} requires {spec}")
             continue
         parts.append(line)
-    return "; ".join(parts[:6]) or "its packages need versions that conflict with packages in use"
+    return (
+        "; ".join(parts[:6])
+        or "its packages need versions that conflict with packages in use"
+    )
 
 
 # ── collecting garbage ──────────────────────────────────────────────────────────────
@@ -839,13 +903,17 @@ def collect() -> list[str]:
         # is never deleted.
         keep = frozenset(path for dist in kept for path in _record_paths(dist))
         for dist in doomed:
-            label = f"{dist.metadata['Name']} {dist.version}"  # read before it is deleted
+            label = (
+                f"{dist.metadata['Name']} {dist.version}"  # read before it is deleted
+            )
             if _remove_distribution(dist, here, keep=keep):
                 removed.append(label)
         _drop_other_python_versions()
     if removed:
         importlib.invalidate_caches()
-        logger.info("app packages: removed %d no app still needs: %s", len(removed), removed)
+        logger.info(
+            "app packages: removed %d no app still needs: %s", len(removed), removed
+        )
     return removed
 
 
@@ -857,20 +925,26 @@ def _record_paths(dist: importlib.metadata.Distribution) -> list[str]:
     for entry in dist.files or []:
         lexical = os.path.normpath(os.path.abspath(str(dist.locate_file(entry))))
         out.append(
-            os.path.join(os.path.realpath(os.path.dirname(lexical)), os.path.basename(lexical))
+            os.path.join(
+                os.path.realpath(os.path.dirname(lexical)), os.path.basename(lexical)
+            )
         )
     return out
 
 
 def _remove_distribution(
-    dist: importlib.metadata.Distribution, here: Path, *, keep: frozenset[str] = frozenset()
+    dist: importlib.metadata.Distribution,
+    here: Path,
+    *,
+    keep: frozenset[str] = frozenset(),
 ) -> bool:
     """Delete *dist*'s files as its RECORD lists them — each one only if it resolves inside
     *here* (a RECORD entry is data, and ``../`` or a symlinked directory must not walk out), and
     none that *keep* names."""
     if dist.files is None:
         logger.warning(
-            "app packages: %s has no RECORD, so it is left in place", dist.metadata["Name"]
+            "app packages: %s has no RECORD, so it is left in place",
+            dist.metadata["Name"],
         )
         return False
     real_root = os.path.realpath(here)
@@ -907,6 +981,13 @@ def _drop_other_python_versions() -> None:
         if not version_dir.name.startswith("python") or not lib.is_dir():
             continue
         for sibling in lib.iterdir():
-            if sibling.is_dir() and sibling.name.startswith("python") and sibling != version_dir:
+            if (
+                sibling.is_dir()
+                and sibling.name.startswith("python")
+                and sibling != version_dir
+            ):
                 shutil.rmtree(sibling, ignore_errors=True)
-                logger.info("app packages: removed %s (another Python version's layout)", sibling)
+                logger.info(
+                    "app packages: removed %s (another Python version's layout)",
+                    sibling,
+                )

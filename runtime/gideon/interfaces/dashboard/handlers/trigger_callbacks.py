@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import stat
 import time
 from contextlib import contextmanager
-import fcntl
 from pathlib import Path
 
 from aiohttp import web
@@ -49,7 +49,9 @@ def _callback_store_lock():
     path = _store_path()
     lock = path.with_name(path.name + ".lock")
     lock.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(lock, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    descriptor = os.open(
+        lock, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600
+    )
     try:
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             raise OSError("callback lock is not a regular file")
@@ -151,7 +153,10 @@ async def api_hook_allow(request: web.Request) -> web.Response:
     current = callback_revision(request.match_info["hook_id"])
     if current is None or not isinstance(seen, str) or current[1] != seen:
         return web.json_response(
-            {"error": "callback_changed", "message": "Review the current callback again before allowing it."},
+            {
+                "error": "callback_changed",
+                "message": "Review the current callback again before allowing it.",
+            },
             status=409,
         )
     try:
@@ -159,11 +164,15 @@ async def api_hook_allow(request: web.Request) -> web.Response:
             current = callback_revision(request.match_info["hook_id"])
             if current is None or current[1] != seen:
                 return web.json_response(
-                    {"error": "callback_changed", "message": "Review the current callback again before allowing it."},
+                    {
+                        "error": "callback_changed",
+                        "message": "Review the current callback again before allowing it.",
+                    },
                     status=409,
                 )
             _CALLBACK_GRANTS.give(
-                f"callback:{request.match_info['hook_id']}", current[0],
+                f"callback:{request.match_info['hook_id']}",
+                current[0],
                 principal=principal.label,
             )
     except OSError:

@@ -674,16 +674,26 @@ class SidecarInstall:
         self.app = app
         self.requirements = sorted(requirements or [])
         if len(self.requirements) > 50:
-            raise ValueError("sidecar engine packages may contain at most 50 requirements")
+            raise ValueError(
+                "sidecar engine packages may contain at most 50 requirements"
+            )
         from packaging.requirements import InvalidRequirement, Requirement
 
         for requirement in self.requirements:
-            if not isinstance(requirement, str) or not requirement.strip() or len(requirement) > 500:
-                raise ValueError("sidecar engine requirements must be non-empty and bounded")
+            if (
+                not isinstance(requirement, str)
+                or not requirement.strip()
+                or len(requirement) > 500
+            ):
+                raise ValueError(
+                    "sidecar engine requirements must be non-empty and bounded"
+                )
             try:
                 Requirement(requirement)
             except InvalidRequirement as exc:
-                raise ValueError("sidecar engine package is not a valid PEP 508 requirement") from exc
+                raise ValueError(
+                    "sidecar engine package is not a valid PEP 508 requirement"
+                ) from exc
         self.venv = venv if venv is not None else sidecar_venv_dir(app)
         self.cache_root = cache_root
         self.model = model
@@ -781,7 +791,11 @@ class SidecarInstall:
             from gideon.operations._installer import NoInstallerError
 
             step.status = "error"
-            detail = exc.problem if isinstance(exc, NoInstallerError) and exc.problem else str(exc)
+            detail = (
+                exc.problem
+                if isinstance(exc, NoInstallerError) and exc.problem
+                else str(exc)
+            )
             step.detail = detail[:200]
             self.error = detail[:200]
             self.reason, self.remediation = _classify_install_failure(exc, step.name)
@@ -797,7 +811,9 @@ class SidecarInstall:
         if python.is_file():
             return "skipped", "venv already present"
         self.venv.parent.mkdir(parents=True, exist_ok=True)
-        self._run([sys.executable, "-m", "venv", "--without-pip", str(self.venv)], timeout=300)
+        self._run(
+            [sys.executable, "-m", "venv", "--without-pip", str(self.venv)], timeout=300
+        )
         if not python.is_file():
             raise RuntimeError(f"venv creation produced no interpreter at {python}")
         (self.venv / _MARKER).write_text(
@@ -867,7 +883,9 @@ class SidecarInstall:
                 for line in proc.stdout:
                     self._note(line)
 
-        reader = threading.Thread(target=collect, name=f"sidecar-install-{self.app}-log", daemon=True)
+        reader = threading.Thread(
+            target=collect, name=f"sidecar-install-{self.app}-log", daemon=True
+        )
         reader.start()
         try:
             try:
@@ -953,7 +971,10 @@ def _classify_install_failure(exc: Exception, step: str) -> tuple[str, str]:
     from gideon.operations._installer import NoInstallerError
 
     if isinstance(exc, NoInstallerError) and exc.fix:
-        return "pip_failed", f"{exc.fix[0].upper()}{exc.fix[1:]}, then re-run the install."
+        return (
+            "pip_failed",
+            f"{exc.fix[0].upper()}{exc.fix[1:]}, then re-run the install.",
+        )
     text = str(exc).lower()
     if isinstance(exc, subprocess.TimeoutExpired) or "timed out" in text:
         return (
@@ -980,4 +1001,6 @@ def _classify_install_failure(exc: Exception, step: str) -> tuple[str, str]:
             "Check that python -m venv works, then re-run the install.",
         )
     return "install_failed", "Re-run the install; it resumes from the failed step."
-from gideon.operations.child_output import ChildOutput, STDERR, STDOUT, relay
+
+
+from gideon.operations.child_output import STDERR, STDOUT, ChildOutput, relay

@@ -45,11 +45,16 @@ class ProviderSettings:
     @staticmethod
     def load(extension_name: str) -> dict[str, Any]:
         from gideon.core.config.secret_refs import app_owner, resolve
-        return resolve(ProviderSettings.load_stored(extension_name), owner=app_owner(extension_name))
+
+        return resolve(
+            ProviderSettings.load_stored(extension_name),
+            owner=app_owner(extension_name),
+        )
 
     @staticmethod
     def save(extension_name: str, config: dict[str, Any]) -> None:
         from gideon.core.config.secret_refs import app_owner, store
+
         path = ProviderSettings.config_path(extension_name)
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         path.parent.chmod(0o700)
@@ -62,13 +67,13 @@ class ProviderSettings:
 
         extension = get_provider_registry().get(extension_name)
         if extension is not None and any(
-            provider.provider_config.type == "channel"
-            for provider in extension.chain()
+            provider.provider_config.type == "channel" for provider in extension.chain()
         ):
             from gideon.integrations.channel_transports import request_reconcile
 
             request_reconcile()
         from gideon.core.config.secret_refs import purge_unused
+
         purge_unused(owner, stored)
 
     @staticmethod

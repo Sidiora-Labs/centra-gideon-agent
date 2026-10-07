@@ -44,7 +44,9 @@ def _isolate_migration_marker(tmp_path_factory, monkeypatch):
     app data dir). Migration tests re-patch _migration_marker_path themselves."""
     marker = tmp_path_factory.mktemp("gid-migmark") / ".core_migration_done"
     marker.touch()
-    monkeypatch.setattr("slack_desk_runtime.settings._migration_marker_path", lambda: marker)
+    monkeypatch.setattr(
+        "slack_desk_runtime.settings._migration_marker_path", lambda: marker
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -78,7 +80,9 @@ def _reset_trust_mode():
 def _enterprise_bypass(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set a default validated team_id so _route_message doesn't reject messages."""
     monkeypatch.setattr("slack_desk_runtime.enterprise._validated_team_id", "TTEST")
-    monkeypatch.setattr("slack_desk_runtime.enterprise._validated_enterprise_id", "ETEST")
+    monkeypatch.setattr(
+        "slack_desk_runtime.enterprise._validated_enterprise_id", "ETEST"
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -99,7 +103,12 @@ def _reset_slack_desk_allowlist():
     channels) that otherwise leak across test files and skew message-routing tests."""
     import slack_desk_runtime.handler as h
 
-    saved = (h._owner_id, set(h._allowed_users), set(h._tracking_channels), set(h._open_channels))
+    saved = (
+        h._owner_id,
+        set(h._allowed_users),
+        set(h._tracking_channels),
+        set(h._open_channels),
+    )
     h._owner_id = ""
     h._allowed_users = set()
     h._tracking_channels = set()

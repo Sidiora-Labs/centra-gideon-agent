@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import hashlib
+import os
 
 from gideon.core import file_roots
 from gideon.workspace.artifacts.models import MAX_CONTENT_BYTES

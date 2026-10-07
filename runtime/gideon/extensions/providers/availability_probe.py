@@ -79,11 +79,17 @@ def _answer(ext: "RegisteredProvider") -> dict[str, Any]:
         if probe is None:
             return {**line, "state": AVAILABLE, "reason": ""}
         ok, reason = probe()
-    except BaseException as exc:  # noqa: BLE001 — a hook may raise anything, SystemExit included
+    except (
+        BaseException
+    ) as exc:  # noqa: BLE001 — a hook may raise anything, SystemExit included
         return {**line, "state": UNKNOWN, "reason": _raised(exc)}
     if ok:
         return {**line, "state": AVAILABLE, "reason": str(reason or "")}
-    return {**line, "state": UNAVAILABLE, "reason": str(reason or "") or UNAVAILABLE_WITHOUT_REASON}
+    return {
+        **line,
+        "state": UNAVAILABLE,
+        "reason": str(reason or "") or UNAVAILABLE_WITHOUT_REASON,
+    }
 
 
 def _raised(exc: BaseException) -> str:
@@ -123,7 +129,9 @@ def main(names: list[str]) -> int:
         )
     answers: queue.Queue[dict[str, Any]] = queue.Queue()
     for ext in records:
-        threading.Thread(target=lambda e=ext: answers.put(_answer(e)), daemon=True).start()
+        threading.Thread(
+            target=lambda e=ext: answers.put(_answer(e)), daemon=True
+        ).start()
     for _ in records:
         _emit(channel, answers.get())
     channel.close()

@@ -1,4 +1,5 @@
 """Bounded PEP 440 parsing and ordering for app and release versions."""
+
 from packaging.version import Version
 
 _MAX_LENGTH = 128

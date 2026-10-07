@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/providers", handle_list_extensions)
-    app.router.add_post("/api/providers/{name}/availability", handle_refresh_availability)
+    app.router.add_post(
+        "/api/providers/{name}/availability", handle_refresh_availability
+    )
     app.on_startup.append(_warm_availability)
     app.on_cleanup.append(_shutdown_availability)
     app.router.add_get("/api/providers/{name}", handle_get_extension)
@@ -43,7 +45,9 @@ async def handle_list_extensions(request: web.Request) -> web.Response:
     extensions = registry.list_extensions()
     request_app = request.get("app", "")
     if request_app:
-        extensions = [extension for extension in extensions if extension.name == request_app]
+        extensions = [
+            extension for extension in extensions if extension.name == request_app
+        ]
     if type_filter:
         extensions = [e for e in extensions if e.provider_config.type == type_filter]
 
@@ -130,7 +134,9 @@ async def handle_refresh_availability(request: web.Request) -> web.Response:
     name = request.match_info["name"]
     request_app = request.get("app", "")
     if request_app and request_app != name:
-        return json_error("forbidden", message="provider is outside this app's authority", status=403)
+        return json_error(
+            "forbidden", message="provider is outside this app's authority", status=403
+        )
     ext = get_provider_registry().get(name)
     if ext is None:
         return json_error("not_found", message="provider not found", status=404)
@@ -301,7 +307,9 @@ async def handle_disable(request: web.Request) -> web.Response:
         from gideon.extensions.apps.app_manager import disable as disable_app
 
         if not disable_app(app_name, caller=request.get("user", "provider-route")):
-            return web.json_response({"error": f"Failed to disable {name!r}"}, status=400)
+            return web.json_response(
+                {"error": f"Failed to disable {name!r}"}, status=400
+            )
     else:
         registry.disable(name)
     return web.json_response({"name": name, "enabled": False})
@@ -311,7 +319,11 @@ def _installed_app_for_provider(ext):
     """Resolve a registered provider back to an installed manifest before lifecycle delegation."""
     manifest = getattr(ext, "manifest", None)
     app_name = str(getattr(manifest, "name", "") or "")
-    if not app_name or ext.name != app_name or not getattr(manifest, "all_providers", None):
+    if (
+        not app_name
+        or ext.name != app_name
+        or not getattr(manifest, "all_providers", None)
+    ):
         return None
     try:
         from gideon.extensions.apps.app_manager import _manifest_of
@@ -329,5 +341,7 @@ def _installed_app_for_provider(ext):
             return None
         return app_name
     except Exception:
-        logger.debug("provider %s app lifecycle mapping failed", ext.name, exc_info=True)
+        logger.debug(
+            "provider %s app lifecycle mapping failed", ext.name, exc_info=True
+        )
         return None

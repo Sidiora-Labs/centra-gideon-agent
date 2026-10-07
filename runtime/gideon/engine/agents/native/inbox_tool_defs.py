@@ -45,7 +45,10 @@ def inbox_tool_definitions(provider: str, s: dict[str, Any]) -> list[ToolDefinit
                 **s,
                 "properties": {
                     "message": {"type": "string"},
-                    "kind": {"type": "string", "enum": ["notification", "question", "fyi"]},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["notification", "question", "fyi"],
+                    },
                     "context": {"type": "string"},
                 },
                 "required": ["message"],
@@ -98,10 +101,12 @@ def inbox_item_text(n: int, item: Any) -> str:
     """One open Inbox item for the model: what it is, then who raised it and its text, fenced.
 
     The text is someone else's words (a channel message, an email), so it and the sender's name
-    are fenced as untrusted data; the item's id, kind, status and time are the store's own."""
+    are fenced as untrusted data; the item's id, kind, status and time are the store's own.
+    """
     from datetime import datetime
 
     from gideon.security.security import fence_untrusted
+
     def clip_words(text, cap):
         text = str(text or "")
         return text if len(text) <= cap else text[:cap].rsplit(" ", 1)[0] + "…"
@@ -125,8 +130,14 @@ def inbox_item_text(n: int, item: Any) -> str:
         )
         if part
     )
-    who = str(item.sender_name or item.sender_id or item.channel_name or "unknown")[:200]
-    where = f" in {str(item.channel_name)[:200]}" if item.channel_name and item.channel_name != who else ""
+    who = str(item.sender_name or item.sender_id or item.channel_name or "unknown")[
+        :200
+    ]
+    where = (
+        f" in {str(item.channel_name)[:200]}"
+        if item.channel_name and item.channel_name != who
+        else ""
+    )
     files = len(getattr(item, "attachments", []) or [])
     held = f"\n({files} attached file{'' if files == 1 else 's'})" if files else ""
     body = f"From: {who}{where}\n{clip_words(item.message, _INBOX_TEXT_CHARS)}{held}"
@@ -148,10 +159,14 @@ def inbox_list_text(items: list[Any], limit: int, *, everyone: bool) -> str:
     (:data:`_LEFT_OUT`)."""
     whose = "" if everyone else " that this conversation reads"
     if not items:
-        return f"Nothing{whose} is waiting in the Inbox" + ("." if everyone else f"; {_LEFT_OUT}.")
+        return f"Nothing{whose} is waiting in the Inbox" + (
+            "." if everyone else f"; {_LEFT_OUT}."
+        )
     shown = items[:limit]
     noun = "item" if len(items) == 1 else "items"
-    count = f"{len(items)}" if len(shown) == len(items) else f"{len(shown)} of {len(items)}"
+    count = (
+        f"{len(items)}" if len(shown) == len(items) else f"{len(shown)} of {len(items)}"
+    )
     head = f"{count} open {noun} in the Inbox{whose}, newest first"
     lines = [f"{head}:" if everyone else f"{head} ({_LEFT_OUT}):"]
     lines.extend(inbox_item_text(n, item) for n, item in enumerate(shown, 1))

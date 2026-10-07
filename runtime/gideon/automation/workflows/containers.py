@@ -159,7 +159,10 @@ class BoardRow:
         return {
             **{key: getattr(self, key) for key in ("run_id", "title")},
             "state": self.state.value,
-            **{key: getattr(self, key) for key in ("origin", "project_id", "source", "kind")},
+            **{
+                key: getattr(self, key)
+                for key in ("origin", "project_id", "source", "kind")
+            },
             "claim": self.claim.to_dict() if self.claim else None,
             **{
                 key: getattr(self, key)

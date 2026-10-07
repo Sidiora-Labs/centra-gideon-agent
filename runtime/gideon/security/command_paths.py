@@ -126,7 +126,9 @@ def sensitive_command_paths(
         for token in tokens:
             if token.startswith("-") or "=" in token:
                 continue
-            if (base / token).exists() and sensitive.contains(str((base / token).resolve())):
+            if (base / token).exists() and sensitive.contains(
+                str((base / token).resolve())
+            ):
                 return True
     except (OSError, RuntimeError, ValueError):
         return True

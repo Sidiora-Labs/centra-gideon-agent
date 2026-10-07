@@ -80,12 +80,21 @@ def core_tool_work_asks(title: str, tool_kind: str, tool_input: object) -> bool:
     from gideon.assurance.validation import ValidationError
     from gideon.integrations import mcp_core
     from gideon.integrations.tool_providers.base import WORK_ASKS_META_KEY
+
     name, args, exact = _core_call(title, tool_kind, tool_input)
     if not exact or not name:
         return False
     import importlib
-    owners = [mcp_core] + [importlib.import_module(path) for path in mcp_core._AGGREGATED_CATEGORY_MODULES]
-    matches = [(owner, item) for owner in owners for item in owner._list_tools() if item.get("name") == name]
+
+    owners = [mcp_core] + [
+        importlib.import_module(path) for path in mcp_core._AGGREGATED_CATEGORY_MODULES
+    ]
+    matches = [
+        (owner, item)
+        for owner in owners
+        for item in owner._list_tools()
+        if item.get("name") == name
+    ]
     if len(matches) != 1:
         return False
     owner, tool = matches[0]
@@ -107,9 +116,7 @@ def _session_environment(
 
     values = {"GIDEON_HOME": str(config_dir())}
     values.update(
-        current_leaf_lineage()
-        if leaf_context is None
-        else leaf_lineage(leaf_context)
+        current_leaf_lineage() if leaf_context is None else leaf_lineage(leaf_context)
     )
     try:
         values["GIDEON_PORT"] = str(gateway_base.resolve_port())
@@ -118,6 +125,7 @@ def _session_environment(
     if session_key:
         values["GIDEON_SESSION_KEY"] = str(session_key)
         from gideon.security.session_credentials import credential_for
+
         proof = credential_for(str(session_key))
         if proof:
             values["GIDEON_SESSION_PROOF"] = proof

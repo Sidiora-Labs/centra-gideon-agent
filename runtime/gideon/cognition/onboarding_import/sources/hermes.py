@@ -6,7 +6,10 @@ import os
 from pathlib import Path
 
 from gideon.cognition.onboarding_import.model import ScanResult
-from gideon.cognition.onboarding_import.transcripts import scan_hermes_cli, scan_transcripts
+from gideon.cognition.onboarding_import.transcripts import (
+    scan_hermes_cli,
+    scan_transcripts,
+)
 
 NAME = "hermes"
 DISPLAY_NAME = "Hermes"
@@ -29,11 +32,17 @@ def resolve_root() -> Path:
 
 def scan(root: Path | str | None = None) -> ScanResult:
     base = resolve_root() if root is None else Path(root).expanduser()
-    result = ScanResult(source=NAME, display_name=DISPLAY_NAME, root=str(base), present=base.is_dir())
+    result = ScanResult(
+        source=NAME, display_name=DISPLAY_NAME, root=str(base), present=base.is_dir()
+    )
     if not result.present:
         return result
-    scan_transcripts(base, result, source=NAME, pattern="exports/**/*.jsonl", format="hermes")
-    scan_transcripts(base, result, source=NAME, pattern="sessions/**/*.jsonl", format="hermes")
+    scan_transcripts(
+        base, result, source=NAME, pattern="exports/**/*.jsonl", format="hermes"
+    )
+    scan_transcripts(
+        base, result, source=NAME, pattern="sessions/**/*.jsonl", format="hermes"
+    )
     if root is None:
         scan_hermes_cli(result)
     result.note_withheld()

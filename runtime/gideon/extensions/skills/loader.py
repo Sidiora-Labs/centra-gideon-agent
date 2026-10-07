@@ -192,9 +192,12 @@ def _ensure_builtin_skills(base: Path) -> None:
 def hold_library():
     """Serialize skill and refinement mutations across threads and processes."""
     import fcntl
+
     from gideon.core.concurrency import lock_path
 
-    descriptor = os.open(lock_path("skills-library"), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    descriptor = os.open(
+        lock_path("skills-library"), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600
+    )
     with os.fdopen(descriptor, "a+b") as stream:
         fcntl.flock(stream, fcntl.LOCK_EX)
         try:
@@ -477,7 +480,11 @@ class ProcedureLibrary:
         results: list[tuple[str, Path]] = []
         if self._agent_dir is not None and self._agent_dir.is_dir():
             results.extend(iter_skill_files(self._agent_dir))
-        results.extend((name, path) for name, path in iter_skill_files(self._dir) if self._sees(name))
+        results.extend(
+            (name, path)
+            for name, path in iter_skill_files(self._dir)
+            if self._sees(name)
+        )
         if self._scoped:
             return results
         from gideon.extensions.skills.marketplace import _skill_discovery_paths
@@ -491,7 +498,11 @@ class ProcedureLibrary:
                         seen.add(name)
         for root in _outside_skill_dirs():
             for name, path in iter_skill_files(root):
-                if not path.resolve().is_relative_to(root) or name in seen or not self._sees(name):
+                if (
+                    not path.resolve().is_relative_to(root)
+                    or name in seen
+                    or not self._sees(name)
+                ):
                     continue
                 results.append((name, path))
                 seen.add(name)
@@ -580,7 +591,9 @@ class ProcedureLibrary:
         from gideon.extensions.skills.marketplace import _skill_discovery_paths
 
         agent_dirs = [self._agent_dir] if self._agent_dir is not None else []
-        return agent_dirs + [self._dir] + _skill_discovery_paths() + _outside_skill_dirs()
+        return (
+            agent_dirs + [self._dir] + _skill_discovery_paths() + _outside_skill_dirs()
+        )
 
     def skill_file(self, name: str) -> Path | None:
         """The ``SKILL.md`` this loader resolves *name* to, or None.
@@ -616,8 +629,9 @@ class ProcedureLibrary:
         skill_file = self.skill_file(name)
         if skill_file is None:
             return None
-        from gideon.extensions.skills import overlays
         from gideon.core.atomic_write import atomic_write
+        from gideon.extensions.skills import overlays
+
         root = skill_file.parent
         for _ in name.split("/"):
             root = root.parent
@@ -625,7 +639,11 @@ class ProcedureLibrary:
         with hold_library():
             content = skill_file.read_text(encoding="utf-8")
             own = overlays.own_text(identity, content)
-            if own != content and root.resolve() not in {p.resolve() for p in _outside_skill_dirs()} and root.resolve() != _BUILTIN_SKILLS_DIR.resolve():
+            if (
+                own != content
+                and root.resolve() not in {p.resolve() for p in _outside_skill_dirs()}
+                and root.resolve() != _BUILTIN_SKILLS_DIR.resolve()
+            ):
                 atomic_write(skill_file, own)
             return overlays.render_with_overlay(identity, own)
 
@@ -742,8 +760,9 @@ class ProcedureLibrary:
             skill_file = self._dir / name / "SKILL.md"
             if not skill_file.exists():
                 return False
-            from gideon.extensions.skills import overlays
             from gideon.core.atomic_write import atomic_write
+            from gideon.extensions.skills import overlays
+
             content = overlays.own_text(overlay_identity(self._dir, name), content)
             atomic_write(skill_file, content)
             logger.info("Updated skill: %s", name)
@@ -1203,5 +1222,9 @@ class ProcedureLibrary:
 def narrowed(loader: ProcedureLibrary, allows) -> ProcedureLibrary:
     view = copy.copy(loader)
     inherited = loader._allows
-    view._allows = (lambda name: inherited(name) and allows(name)) if inherited is not None else allows
+    view._allows = (
+        (lambda name: inherited(name) and allows(name))
+        if inherited is not None
+        else allows
+    )
     return view

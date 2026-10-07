@@ -16,6 +16,7 @@ class TestYoloExpiry:
     @pytest.fixture(autouse=True)
     def _reset_yolo(self):
         from slack_desk_runtime.handler import disable_yolo
+
         disable_yolo()
         yield
         disable_yolo()
@@ -102,6 +103,7 @@ class TestYoloFromConfigGuard:
     @pytest.fixture(autouse=True)
     def _reset_yolo(self):
         from slack_desk_runtime.handler import disable_yolo
+
         disable_yolo()
         yield
         disable_yolo()
@@ -117,7 +119,11 @@ class TestYoloFromConfigGuard:
     def test_enable_with_ttl_noop_when_config_active(self) -> None:
         """Bug 1: !yolo on must not overwrite config-permanent yolo."""
         import slack_desk_runtime.handler as h
-        from slack_desk_runtime.handler import enable_yolo_with_ttl, is_yolo_mode, set_yolo_mode
+        from slack_desk_runtime.handler import (
+            enable_yolo_with_ttl,
+            is_yolo_mode,
+            set_yolo_mode,
+        )
 
         set_yolo_mode(True)
         enable_yolo_with_ttl(h._YOLO_TTL_SECS)
@@ -159,6 +165,7 @@ class TestYoloFromConfigSlackDeskGuards:
     @pytest.fixture(autouse=True)
     def _reset_yolo(self):
         from slack_desk_runtime.handler import disable_yolo
+
         disable_yolo()
         yield
         disable_yolo()
@@ -179,13 +186,19 @@ class TestYoloFromConfigSlackDeskGuards:
 
         from slack_desk_runtime.events import _handle_yolo
 
-        with patch("slack_desk_runtime.events.sel") as mock_sel, patch("slack_desk_runtime.events.is_owner", return_value=True):
+        with (
+            patch("slack_desk_runtime.events.sel") as mock_sel,
+            patch("slack_desk_runtime.events.is_owner", return_value=True),
+        ):
             await _handle_yolo(orch, "UOWNER", "on", respond)
 
         respond.assert_awaited_once()
         assert "permanently ON" in respond.call_args[0][0]
         mock_sel.return_value.log_api_access.assert_called_once()
-        assert mock_sel.return_value.log_api_access.call_args.kwargs["outcome"] == "noop_config_permanent"
+        assert (
+            mock_sel.return_value.log_api_access.call_args.kwargs["outcome"]
+            == "noop_config_permanent"
+        )
 
     @pytest.mark.asyncio
     async def test_handler_yolo_on_noop_when_config_permanent(self) -> None:
@@ -201,12 +214,21 @@ class TestYoloFromConfigSlackDeskGuards:
         slack_desk = AsyncMock()
         sessions = MagicMock()
 
-        with patch("slack_desk_runtime.handler.sel") as mock_sel, patch("slack_desk_runtime.handler.is_owner", return_value=True):
-            result = await _handle_slash_command("!yolo on", slack_desk, sessions, "C123", "ts1", "ts2", "key1", "UOWNER")
+        with (
+            patch("slack_desk_runtime.handler.sel") as mock_sel,
+            patch("slack_desk_runtime.handler.is_owner", return_value=True),
+        ):
+            result = await _handle_slash_command(
+                "!yolo on", slack_desk, sessions, "C123", "ts1", "ts2", "key1", "UOWNER"
+            )
 
         assert result is not None
         slack_desk.post_message.assert_awaited()
         msg = slack_desk.post_message.call_args[0][1]
         assert "permanently ON" in msg
-        sel_call = [c for c in mock_sel.return_value.log_api_access.call_args_list if c.kwargs.get("outcome") == "noop_config_permanent"]
+        sel_call = [
+            c
+            for c in mock_sel.return_value.log_api_access.call_args_list
+            if c.kwargs.get("outcome") == "noop_config_permanent"
+        ]
         assert len(sel_call) == 1

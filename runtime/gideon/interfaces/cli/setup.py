@@ -9,7 +9,6 @@ from pathlib import Path
 from gideon.cognition.orchestrator_skill import generate_orchestrator_skill
 from gideon.core.config import AppConfig
 from gideon.core.config import loader as config_loader
-from gideon.core.config.transactions import mutate_config
 from gideon.core.config.loader import (
     _WORKSPACE_DIR_NAME,
     DASHBOARD_PORT,
@@ -17,6 +16,7 @@ from gideon.core.config.loader import (
     _workspace_dir_file,
     env_path,
 )
+from gideon.core.config.transactions import mutate_config
 from gideon.core.constants import DATA_WARNING
 from gideon.core.env import browser_available
 from gideon.extensions.app_cli import run_app_setup_steps
@@ -142,7 +142,11 @@ def _setup(
     """
     if credential:
         cred_name = credential.partition("=")[0]
-        if not cred_name or not cred_name.replace("_", "a").isalnum() or cred_name[0].isdigit():
+        if (
+            not cred_name
+            or not cred_name.replace("_", "a").isalnum()
+            or cred_name[0].isdigit()
+        ):
             from gideon.interfaces.cli.commands import CliRefusal
 
             raise CliRefusal("a credential name is letters, digits and underscores")
@@ -254,6 +258,7 @@ def _setup_noninteractive(
     if provider:
         cfg_file = config_path()
         try:
+
             def set_provider(data: dict) -> None:
                 data.setdefault("agent", {})["provider"] = provider
 
@@ -465,6 +470,7 @@ def _maybe_setup_dashboard_url() -> None:
         return
 
     try:
+
         def set_dashboard_url(data: dict) -> None:
             data.setdefault("dashboard", {})["url"] = answer
 

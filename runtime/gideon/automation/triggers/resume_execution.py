@@ -67,9 +67,11 @@ class ResumeExecution:
             report = (
                 "event gate woken"
                 if result.get("woken")
-                else "gate answered"
-                if result.get("gate_answered", True)
-                else "pause cleared"
+                else (
+                    "gate answered"
+                    if result.get("gate_answered", True)
+                    else "pause cleared"
+                )
             )
             return self.outcome(Outcome.RAN.value, "", report)
         if code in self.transient_codes:
@@ -157,7 +159,10 @@ class ResumeExecution:
             declared_token = str(target.get("resume_token") or "")
             if declared_token:
                 matching = [item for item in pending if item.token == declared_token]
-                if len(matching) != 1 or Ask.from_dict(matching[0].ask).kind != AskKind.EVENT:
+                if (
+                    len(matching) != 1
+                    or Ask.from_dict(matching[0].ask).kind != AskKind.EVENT
+                ):
                     return self.outcome(
                         Outcome.REFUSED.value,
                         "the declared resume token does not name one pending event gate",
@@ -214,4 +219,8 @@ class ResumeExecution:
         try:
             return self.invoke()
         finally:
-            executor.release_claim_for(self.trigger_id, base_dir=self.base_dir, holder=str(self.payload.get("claim_holder") or ""))
+            executor.release_claim_for(
+                self.trigger_id,
+                base_dir=self.base_dir,
+                holder=str(self.payload.get("claim_holder") or ""),
+            )

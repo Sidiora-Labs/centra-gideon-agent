@@ -59,7 +59,10 @@ class Delivery:
             if value:
                 metadata[key] = value
         return dict(
-            kind=self.kind, title=self.title, body=self.body, meta=metadata,
+            kind=self.kind,
+            title=self.title,
+            body=self.body,
+            meta=metadata,
             destination=self.destination,
         )
 
@@ -140,9 +143,7 @@ class NotificationAttempt:
                 from gideon.integrations.inbox import emit_attention_item
                 from gideon.workspace import notification_kinds
 
-                registered_kind = notification_kinds.kind_for_legacy(
-                    self.delivery.kind
-                )
+                registered_kind = notification_kinds.kind_for_legacy(self.delivery.kind)
 
                 item_id = emit_attention_item(
                     self.state,

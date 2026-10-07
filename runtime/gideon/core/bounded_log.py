@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime
 from typing import Any, TypeVar
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 def instant(value: Any) -> float:
@@ -19,13 +19,14 @@ def instant(value: Any) -> float:
     if not isinstance(value, str) or not value.strip():
         return -math.inf
     try:
-        return datetime.fromisoformat(value.strip().replace('Z', '+00:00')).timestamp()
+        return datetime.fromisoformat(value.strip().replace("Z", "+00:00")).timestamp()
     except (TypeError, ValueError, OverflowError, OSError):
         return -math.inf
 
 
 def in_time_order(rows: Iterable[T], *, at: str | Callable[[T], Any]) -> list[T]:
     """Order oldest first; records at the same time keep their existing order."""
+
     def key(row: T) -> float:
         if callable(at):
             try:
@@ -33,4 +34,5 @@ def in_time_order(rows: Iterable[T], *, at: str | Callable[[T], Any]) -> list[T]
             except (AttributeError, KeyError, TypeError, ValueError):
                 return -math.inf
         return instant(row.get(at)) if isinstance(row, Mapping) else -math.inf
+
     return sorted(rows, key=key)

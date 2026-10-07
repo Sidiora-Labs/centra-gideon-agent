@@ -44,7 +44,9 @@ ENV_DISABLE_LIVE_WRITES = "GIDEON_DISABLE_LIVE_WRITES"
 #: The ONLY spellings that disable a guard. Mirrors core ``guardrails.flags``: every
 #: other value (unknown token, empty string, typo) parses as ENABLED, because for a
 #: guard, ambiguity must fail safe.
-_EXPLICIT_FALSE = frozenset({"0", "false", "no", "off", "disable", "disabled", "n", "f"})
+_EXPLICIT_FALSE = frozenset(
+    {"0", "false", "no", "off", "disable", "disabled", "n", "f"}
+)
 
 
 def guard_flag(value: object) -> bool:

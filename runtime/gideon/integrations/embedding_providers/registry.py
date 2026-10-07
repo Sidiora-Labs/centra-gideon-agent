@@ -53,6 +53,7 @@ def _registered(name: str) -> EmbeddingProvider | None:
 def _ensure_scanned() -> None:
     global _scanned_generation, _revision, _refresh_requested
     from gideon.extensions.providers import media_scanners
+
     with _scan_guard:
         try:
             generation = media_scanners.generation()
@@ -61,14 +62,23 @@ def _ensure_scanned() -> None:
             if generation != media_scanners.generation():
                 return
         except Exception:
-            logger.debug("embedding scanner pass failed; keeping last good adapters", exc_info=True)
+            logger.debug(
+                "embedding scanner pass failed; keeping last good adapters",
+                exc_info=True,
+            )
             return
-        incoming = {provider.name: provider for provider in fresh if getattr(provider, "name", "")}
+        incoming = {
+            provider.name: provider
+            for provider in fresh
+            if getattr(provider, "name", "")
+        }
         with _catalog_guard:
             for name, provider in incoming.items():
                 held = _providers.get(name)
                 owned = held is not None and _scanned.get(name) is held
-                if held is None or (owned and (_refresh_requested or type(held) is not type(provider))):
+                if held is None or (
+                    owned and (_refresh_requested or type(held) is not type(provider))
+                ):
                     _providers[name] = _scanned[name] = provider
                     _revision += 1
             for name in set(_scanned).difference(incoming):
@@ -101,6 +111,7 @@ def active_binding_key() -> tuple:
         return (specification, id(provider))
     try:
         from gideon.integrations.llm.registry import get_default_registry
+
         registry = get_default_registry()
         entry = registry.get_entry(name)
         return (specification, id(entry), id(registry.capability_of(entry.type)))
@@ -246,8 +257,10 @@ class _ModelBinding:
         return rows[0] if rows else None
 
     def many(self, texts: list[str]) -> list[list[float] | None]:
-        rows = run_embed_sync(partial(self.request_many, texts), timeout=max(60.0, len(texts)*5.0))
-        return (rows + [None]*len(texts))[:len(texts)]
+        rows = run_embed_sync(
+            partial(self.request_many, texts), timeout=max(60.0, len(texts) * 5.0)
+        )
+        return (rows + [None] * len(texts))[: len(texts)]
 
     def one(self, text: str) -> list[float] | None:
         try:
@@ -330,9 +343,7 @@ def _resolve_embed_fn() -> Callable[[str], list[float] | None] | None:
     return _llm_embed_fn(selection.provider_name, selection.model_id)
 
 
-def _resolve_embed_many_fn() -> (
-    Callable[[list[str]], list[list[float] | None]] | None
-):
+def _resolve_embed_many_fn() -> Callable[[list[str]], list[list[float] | None]] | None:
     specification = _active_embedding_spec()
     if specification is None:
         return None
@@ -343,7 +354,11 @@ def _resolve_embed_many_fn() -> (
         if model_provider is None:
             return None
         operation = getattr(model_provider, "embed", None)
-        return _ModelBinding(model_provider, operation, selection.model_id).many if callable(operation) else None
+        return (
+            _ModelBinding(model_provider, operation, selection.model_id).many
+            if callable(operation)
+            else None
+        )
     operation = getattr(provider, "embed_batch", None)
     if not callable(operation):
         return None
@@ -409,7 +424,9 @@ async def embed_for(provider_name: str, model_id: str, text: str) -> list[float]
     if not callable(operation):
         await model_provider.shutdown()
         return None
-    return await _ModelBinding(model_provider, operation, selection.model_id).request(text)
+    return await _ModelBinding(model_provider, operation, selection.model_id).request(
+        text
+    )
 
 
 async def embed_active(text: str) -> list[float] | None:

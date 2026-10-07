@@ -15,9 +15,9 @@ import time
 from unittest.mock import patch
 
 import pytest
+from slack_desk_runtime.handler import _handle_cron_command, _relative_next_run
 
 from gideon.sdk.channel import Trigger, TriggerStore
-from slack_desk_runtime.handler import _handle_cron_command, _relative_next_run
 
 
 @pytest.fixture()
@@ -25,15 +25,23 @@ def store(tmp_path):
     return TriggerStore(base_dir=tmp_path)
 
 
-def _seed(store, *, enabled: bool = True, message: str = "do something important",
-          next_fire_at: str = "", trigger_id: str = "clock:test-job") -> Trigger:
+def _seed(
+    store,
+    *,
+    enabled: bool = True,
+    message: str = "do something important",
+    next_fire_at: str = "",
+    trigger_id: str = "clock:test-job",
+) -> Trigger:
     trigger = Trigger(
         id=trigger_id,
         name="test-job",
         kind="clock",
         enabled=enabled,
         spec={"kind": "cron", "expr": "0 13 * * *"},
-        workflow={"inline": {"provider": "invoke-agent", "config": {"task_template": message}}},
+        workflow={
+            "inline": {"provider": "invoke-agent", "config": {"task_template": message}}
+        },
         next_fire_at=next_fire_at,
     )
     store.upsert(trigger)
@@ -97,7 +105,8 @@ class TestHandleCronList:
 
     def test_a_broken_row_is_listed_with_its_reason(self, store) -> None:
         """🔴 Better than the legacy list, which could not represent a broken row at all — silently
-        omitting an automation the user created is how "where did my automation go" happens."""
+        omitting an automation the user created is how "where did my automation go" happens.
+        """
         store.upsert(Trigger(id="clock:broken", name="broken", kind="clock", spec={}))
         result = _handle_cron_command("cron list", store, "C123", "t123")
         assert result is not None
@@ -112,7 +121,8 @@ class TestHandleCronList:
                 return_value=("[URL_REDACTED]", True),
             ) as mock_url,
             patch(
-                "slack_desk_runtime.handler.redact_credentials", return_value=("[REDACTED]", True)
+                "slack_desk_runtime.handler.redact_credentials",
+                return_value=("[REDACTED]", True),
             ) as mock_cred,
         ):
             result = _handle_cron_command("cron list", store, "C123", "t123")
@@ -145,14 +155,21 @@ class TestHandleCronMutations:
         assert store.get("clock:test-job") is None
 
     def test_an_unknown_id_is_reported(self, store) -> None:
-        assert "not found" in (_handle_cron_command("cron remove nope", store, "C", "t") or "")
-        assert "not found" in (_handle_cron_command("cron pause nope", store, "C", "t") or "")
+        assert "not found" in (
+            _handle_cron_command("cron remove nope", store, "C", "t") or ""
+        )
+        assert "not found" in (
+            _handle_cron_command("cron pause nope", store, "C", "t") or ""
+        )
 
     def test_resuming_a_broken_row_names_the_parse_error(self, store) -> None:
         """The store REFUSES to enable a row that failed to parse and says why — strictly more
-        useful than "not found", and the row does exist, so that message was wrong as well."""
+        useful than "not found", and the row does exist, so that message was wrong as well.
+        """
         store.upsert(
-            Trigger(id="clock:broken", name="broken", kind="clock", spec={}, enabled=False)
+            Trigger(
+                id="clock:broken", name="broken", kind="clock", spec={}, enabled=False
+            )
         )
         result = _handle_cron_command("cron resume clock:broken", store, "C", "t") or ""
         assert "parse error" in result
@@ -178,7 +195,9 @@ class TestHandleCronMutations:
 
         assert "Removed 1" in result
         assert store.get("clock:theirs") is None
-        assert store.get("clock:mine") is not None, "the user's own automation must survive"
+        assert (
+            store.get("clock:mine") is not None
+        ), "the user's own automation must survive"
 
     def test_remove_all_with_nothing_agent_created(self, store) -> None:
         _seed(store, trigger_id="clock:mine")

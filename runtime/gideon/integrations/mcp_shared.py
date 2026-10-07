@@ -323,14 +323,25 @@ def leaf_tool_denial(name: str, arguments: dict | None = None) -> str:
     from gideon.security.guardrails.policy import profile_for_session, tool_grant_denial
 
     profile = profile_for_session(os.environ.get("GIDEON_SESSION_KEY", ""))
-    from gideon.integrations.mcp_core import _aggregated_list_tools
     from gideon.engine.agents.native.tools import _describe_mcp_tool
+    from gideon.integrations.mcp_core import _aggregated_list_tools
+
     try:
-        definitions = [_describe_mcp_tool(raw, "gideon-core", trusted_definition=True) for raw in _aggregated_list_tools() if raw.get("name") == name]
+        definitions = [
+            _describe_mcp_tool(raw, "gideon-core", trusted_definition=True)
+            for raw in _aggregated_list_tools()
+            if raw.get("name") == name
+        ]
         declared = definitions[0].risk_level if len(definitions) == 1 else ""
     except Exception:
         declared = ""
-    denial = tool_grant_denial(name, profile.tool_grants, profile.tool_allowlist, declared=declared, tool_input=arguments)
+    denial = tool_grant_denial(
+        name,
+        profile.tool_grants,
+        profile.tool_allowlist,
+        declared=declared,
+        tool_input=arguments,
+    )
     if denial:
         return denial
 
@@ -342,8 +353,12 @@ def leaf_tool_denial(name: str, arguments: dict | None = None) -> str:
             f"{name!r} is an orchestration tool and is denied to a batch leaf at every depth "
             "— a leaf that can fan out again spawns without a budget"
         )
-    from gideon.engine.task_modes import classify_invocation, READ_ONLY
-    if leaf_value(LEAF_READ_ONLY_KEY) == "1" and classify_invocation(name, "", arguments, declared=declared) != READ_ONLY:
+    from gideon.engine.task_modes import READ_ONLY, classify_invocation
+
+    if (
+        leaf_value(LEAF_READ_ONLY_KEY) == "1"
+        and classify_invocation(name, "", arguments, declared=declared) != READ_ONLY
+    ):
         return (
             f"{name!r} is a write tool and this leaf is capability=research (read-only) "
             "— declare capability=mutating on the leaf if it must write"
@@ -354,6 +369,7 @@ def leaf_tool_denial(name: str, arguments: dict | None = None) -> str:
 def preflight_tool(name: str, args: dict[str, Any], validate_fn) -> str:
     """Check native lineage and owned argument rules without invoking or logging."""
     from gideon.assurance.validation import ValidationError
+
     if reason := leaf_tool_denial(name, args):
         return reason
     try:
@@ -405,7 +421,8 @@ def call_tool_with_logging(
     result = inner_fn(name, args)
     outcome = (
         "failed"
-        if result.startswith("Error:") or getattr(result, "agent_error", None) is not None
+        if result.startswith("Error:")
+        or getattr(result, "agent_error", None) is not None
         else "completed"
     )
     sel().log_tool_invocation(

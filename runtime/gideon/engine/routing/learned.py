@@ -65,7 +65,9 @@ def _bands(
 
 
 def _cost_order(
-    band: list[int], refs: list[str], cost_of: Callable[[str], float] | None,
+    band: list[int],
+    refs: list[str],
+    cost_of: Callable[[str], float] | None,
     latency: dict[int, float] | None = None,
 ) -> list[int]:
     slots = sorted(band)
@@ -84,12 +86,18 @@ def _cost_order(
         price_low, price_high = min(prices.values()), max(prices.values())
         time_low = min(observed[index] for index in prices)
         time_high = max(observed[index] for index in prices)
+
         def rank(index: int) -> tuple[float, int]:
             price_range = price_high - price_low
             time_range = time_high - time_low
-            price_score = (prices[index] - price_low) / price_range if price_range else 0.0
-            time_score = (observed[index] - time_low) / time_range if time_range else 0.0
+            price_score = (
+                (prices[index] - price_low) / price_range if price_range else 0.0
+            )
+            time_score = (
+                (observed[index] - time_low) / time_range if time_range else 0.0
+            )
             return (0.7 * price_score + 0.3 * time_score, index)
+
         ranked = iter(sorted(prices, key=rank))
     else:
         ranked = iter(sorted(prices, key=lambda index: (prices[index], index)))

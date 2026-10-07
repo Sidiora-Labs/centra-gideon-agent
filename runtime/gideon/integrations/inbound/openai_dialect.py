@@ -551,7 +551,9 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
         )
 
     tag, persistent = session_tag_from(body, request, client)
-    key = session_key_for(client_id, tag, conversation_round=getattr(client, "conversation_round", 0))
+    key = session_key_for(
+        client_id, tag, conversation_round=getattr(client, "conversation_round", 0)
+    )
     stream = body.get("stream") is True
 
     state = request.app.get("state")
@@ -561,7 +563,11 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
         )
 
     restore_session = request.app.get(RESTORE_SESSION_KEY)
-    session = restore_session(state, key) if persistent and restore_session is not None else None
+    session = (
+        restore_session(state, key)
+        if persistent and restore_session is not None
+        else None
+    )
     if session is None:
         session = state.get_or_create_session(key, agent=agent)
     if getattr(session, "agent", "") != agent:
@@ -585,17 +591,27 @@ async def handle_chat_completions(request: web.Request) -> web.StreamResponse:
         )
 
     from gideon.engine.turn_source import arrived_on
-
     from gideon.security.approval_answer import bridge, ingress_record, principal_record
+
     principal = bridge(client_id)
     accepted = ingress_record(principal, key, prompt)
     stamped = getattr(session, "_initiator", None)
     if stamped is not None and stamped != principal_record(principal):
         _finish(session, key)
-        return openai_error("This conversation belongs to another principal.", code="scope_violation", status=403)
+        return openai_error(
+            "This conversation belongs to another principal.",
+            code="scope_violation",
+            status=403,
+        )
     if stamped is None:
         session._initiator = accepted["principal"]
-    session.append("user", prompt, "msg msg-u", source=arrived_on(key, client_id), meta={"ingress": accepted})
+    session.append(
+        "user",
+        prompt,
+        "msg msg-u",
+        source=arrived_on(key, client_id),
+        meta={"ingress": accepted},
+    )
     persist_turn = request.app.get(PERSIST_TURN_KEY)
     if persist_turn is not None:
         persist_turn(state, session, force=True)
@@ -1186,7 +1202,13 @@ async def _read_json(request: web.Request) -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-def register_routes(app: web.Application, *, turn_runner: Any, persist_turn: Any = None, restore_session: Any = None) -> None:
+def register_routes(
+    app: web.Application,
+    *,
+    turn_runner: Any,
+    persist_turn: Any = None,
+    restore_session: Any = None,
+) -> None:
     """Mount `/v1/*`. ``turn_runner`` is INJECTED, never imported.
 
     Registered UNCONDITIONALLY and refusing per request, like the capture proxy and

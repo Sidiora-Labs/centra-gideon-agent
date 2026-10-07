@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from gideon.core.turn_streams import closing_stream
-
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
+from gideon.core.turn_streams import closing_stream
 from gideon.integrations.acp import translate
 from gideon.integrations.acp.errors import (
     AcpCommandsUnsupported,
@@ -58,6 +57,7 @@ _ACP_TRACE = os.environ.get("GIDEON_ACP_TRACE") == "1"
 def _acp_trace(direction: str, text: str) -> None:
     if _ACP_TRACE:
         from gideon.security.security import redact_credentials
+
         logger.info("ACP-TRACE %s %s", direction, redact_credentials(text)[0][:600])
 
 
@@ -225,6 +225,7 @@ class AcpClient:
 
     def rekey(self, session_key: str, channel_id: str | None = None) -> None:
         from gideon.security.session_credentials import forget_pid, publish_pid
+
         if self._pid:
             forget_pid(self._pid)
             publish_pid(session_key, self._pid)
@@ -381,7 +382,12 @@ class AcpClient:
         await self._transport.spawn()
         router = FrameRouter(self._transport.readline)
         self._connection = AcpConnection(
-            None, router, dialect=self._dialect, transport=self._transport, session_meta=self._session_meta, session_key=self._session_key
+            None,
+            router,
+            dialect=self._dialect,
+            transport=self._transport,
+            session_meta=self._session_meta,
+            session_key=self._session_key,
         )
         router.start()
 
@@ -447,10 +453,12 @@ class AcpClient:
     async def _initialize_session(self) -> None:
         assert self._connection is not None
         from .elicitation import attended_owner
+
         await self._connection.initialize(
             {
                 "clientCapabilities": self._dialect.client_capabilities(
-                    attended=not self._unattended and attended_owner(self._session_key)),
+                    attended=not self._unattended and attended_owner(self._session_key)
+                ),
                 "protocolVersion": self._dialect.protocol_version(),
                 "clientInfo": self._dialect.client_info(
                     client_name=CLIENT_NAME, client_version=CLIENT_VERSION
@@ -534,14 +542,18 @@ class AcpClient:
     async def stream_events(
         self, message: str, timeout: float = _DEFAULT_PROMPT_TIMEOUT
     ) -> AsyncIterator[AcpEvent]:
-        async with closing_stream(self._events(message, timeout, command=False)) as events:
+        async with closing_stream(
+            self._events(message, timeout, command=False)
+        ) as events:
             async for event in events:
                 yield event
 
     async def stream_command(
         self, command: str, timeout: float = _DEFAULT_PROMPT_TIMEOUT
     ) -> AsyncIterator[AcpEvent]:
-        async with closing_stream(self._events(command, timeout, command=True)) as events:
+        async with closing_stream(
+            self._events(command, timeout, command=True)
+        ) as events:
             async for event in events:
                 yield event
 
@@ -599,7 +611,11 @@ class AcpClient:
         await self._session.approve_tool(request_id, option_id)
 
     def deny_outcome(self, request_id: str | int) -> dict:
-        return self._session.deny_outcome(request_id) if self._session else {"ends_turn": True, "offered": []}
+        return (
+            self._session.deny_outcome(request_id)
+            if self._session
+            else {"ends_turn": True, "offered": []}
+        )
 
     def permission_answer(self, request_id: str | int) -> dict | None:
         return self._session.permission_answer(request_id) if self._session else None

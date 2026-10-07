@@ -50,14 +50,22 @@ def decision_of(answer: object) -> ToolDecision:
     return ToolDecision(approved, "approved" if approved else "rejected", YOU)
 
 
-def stands(grant: str, *, caller: str, subject: str = "", level: str = LEVEL_AUTO,
-           audit: bool = True) -> bool:
+def stands(
+    grant: str,
+    *,
+    caller: str,
+    subject: str = "",
+    level: str = LEVEL_AUTO,
+    audit: bool = True,
+) -> bool:
     try:
         from gideon.security.guardrails.ceiling import approval_permits_now
 
         permitted = approval_permits_now(level)
     except Exception:
-        logger.warning("could not read the operator ceiling; refusing %s", grant, exc_info=True)
+        logger.warning(
+            "could not read the operator ceiling; refusing %s", grant, exc_info=True
+        )
         permitted = False
     if permitted:
         return True
@@ -94,7 +102,11 @@ def agent_mode_now(agent_name: str = "") -> str:
 
         cfg = AppConfig.load()
         profile = cfg.agents.get(agent_name) if agent_name else None
-        return str((getattr(profile, "approval_mode", "") if profile else "") or cfg.agent.approval_mode or "")
+        return str(
+            (getattr(profile, "approval_mode", "") if profile else "")
+            or cfg.agent.approval_mode
+            or ""
+        )
     except Exception:
         logger.warning("could not read agent approval mode; asking", exc_info=True)
         return ""

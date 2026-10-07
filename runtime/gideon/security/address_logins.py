@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 
-
 _ADDRESS_LOGIN_RE = re.compile(
     r"(?<![A-Za-z0-9_.+-])"
     r"(?P<login>[A-Za-z0-9._+-]+:[^@\s]+)@"

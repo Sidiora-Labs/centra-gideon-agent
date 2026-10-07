@@ -151,7 +151,9 @@ class ToolProvider(ABC):
         """List all tools available from this provider."""
         ...
 
-    async def preflight(self, tool_name: str, arguments: dict[str, Any]) -> ToolResult | None:
+    async def preflight(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> ToolResult | None:
         """Pure optional argument checks; no tool effects or approval requests."""
         return None
 

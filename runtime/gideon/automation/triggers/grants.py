@@ -97,6 +97,7 @@ def _owner_recorded(trigger: Any, revision: str) -> bool:
         provider, _ = _action(trigger)
         if provider == "run-workflow":
             from gideon.automation.workflows.automation_versions import grant_content
+
             caps = getattr(trigger, "capabilities", {}) or {}
             seal = caps.get(SEAL_KEY) or {}
             revision = grant_content(revision, seal.get("workflows"))
@@ -126,27 +127,48 @@ def is_granted(trigger: Any) -> bool:
     )
 
 
-
 def hook_trigger(hook: Any) -> Any:
     from types import SimpleNamespace
+
     return SimpleNamespace(
-        id="lifecycle:" + str(hook.id), kind="lifecycle",
+        id="lifecycle:" + str(hook.id),
+        kind="lifecycle",
         workflow={"provider": str(hook.provider), "config": dict(hook.provider_config)},
         capabilities=dict(getattr(hook, "capabilities", {}) or {}),
-        spec={"event": str(hook.event), "matcher": str(hook.matcher), "timeout": hook.timeout},
-        gates={}, enabled=hook.enabled,
+        spec={
+            "event": str(hook.event),
+            "matcher": str(hook.matcher),
+            "timeout": hook.timeout,
+        },
+        gates={},
+        enabled=hook.enabled,
     )
 
 
 def _loaded_trigger(trigger_id: str) -> Any:
     from gideon.automation.triggers.store import TriggerStore
+
     if trigger_id.startswith("lifecycle:"):
-        from gideon.engine.hooks import get_global_hook_store
         from types import SimpleNamespace
+
+        from gideon.engine.hooks import get_global_hook_store
+
         hooks = get_global_hook_store()
-        hook = next((hook for hook in hooks._read_records() if hook.id == trigger_id.removeprefix("lifecycle:")), None) if hooks else None
+        hook = (
+            next(
+                (
+                    hook
+                    for hook in hooks._read_records()
+                    if hook.id == trigger_id.removeprefix("lifecycle:")
+                ),
+                None,
+            )
+            if hooks
+            else None
+        )
         return SimpleNamespace(trigger=hook_trigger(hook), ok=True) if hook else None
     return TriggerStore().get(trigger_id)
+
 
 def agent_start_approval(
     trigger_id: str, action_config: dict[str, Any]
@@ -223,23 +245,37 @@ def question(trigger: Any) -> GrantQuestion | None:
     if not provider or not revision or (granted and provider != "run-workflow"):
         return None
     shown = None
-    sentence = f"Allow this trigger to use {provider} with its current action and reach?"
+    sentence = (
+        f"Allow this trigger to use {provider} with its current action and reach?"
+    )
     if provider == "run-workflow":
-        from gideon.automation.workflows.automation_versions import definitions_lock, snapshot
+        from gideon.automation.workflows.automation_versions import (
+            definitions_lock,
+            snapshot,
+        )
+
         _, action = _action(trigger)
         try:
             with definitions_lock():
-                shown = snapshot(str((action.get("config") or {}).get("workflow") or ""))
+                shown = snapshot(
+                    str((action.get("config") or {}).get("workflow") or "")
+                )
         except Exception:
             return None
-        if granted and shown == (getattr(trigger, "capabilities", {}).get(SEAL_KEY) or {}).get("workflows"):
+        if granted and shown == (
+            getattr(trigger, "capabilities", {}).get(SEAL_KEY) or {}
+        ).get("workflows"):
             return None
-        versions = ", ".join(f"{name} v{entry['version']}" for name, entry in shown["workflows"].items())
+        versions = ", ".join(
+            f"{name} v{entry['version']}" for name, entry in shown["workflows"].items()
+        )
         sentence = f"{'Use' if granted else 'Allow this trigger to run'} these workflow versions: {versions}?"
     return GrantQuestion(provider, revision, sentence, shown)
 
 
-def grant(trigger: Any, *, confirmed_revision: str, principal: Any, shown: Any = None) -> bool:
+def grant(
+    trigger: Any, *, confirmed_revision: str, principal: Any, shown: Any = None
+) -> bool:
     from gideon.security.approval_answer import OWNER
 
     provider = required_provider(trigger)
@@ -255,13 +291,22 @@ def grant(trigger: Any, *, confirmed_revision: str, principal: Any, shown: Any =
         return False
     try:
         if provider == "run-workflow":
-            from gideon.automation.workflows.automation_versions import definitions_lock, snapshot, grant_content
+            from gideon.automation.workflows.automation_versions import (
+                definitions_lock,
+                grant_content,
+                snapshot,
+            )
+
             _, action = _action(trigger)
             name = str((action.get("config") or {}).get("workflow") or "")
             with definitions_lock():
                 if not isinstance(shown, dict) or shown != snapshot(name, keeping=True):
                     return False
-                _book().give(trigger_id, grant_content(revision, shown), principal=str(principal.label))
+                _book().give(
+                    trigger_id,
+                    grant_content(revision, shown),
+                    principal=str(principal.label),
+                )
         else:
             _book().give(trigger_id, revision, principal=str(principal.label))
     except Exception:
@@ -281,7 +326,8 @@ def grant(trigger: Any, *, confirmed_revision: str, principal: Any, shown: Any =
     if provider == "run-workflow":
         updated[SEAL_KEY]["workflows"] = json.loads(json.dumps(shown))
     trigger.capabilities = updated
-    from gideon.security.durable_work import seal_trigger_acceptance, TRIGGER_ORIGIN_KEY
+    from gideon.security.durable_work import TRIGGER_ORIGIN_KEY, seal_trigger_acceptance
+
     receipt = seal_trigger_acceptance(trigger, principal)
     if receipt is None:
         return False
@@ -323,9 +369,7 @@ def narrow(trigger: Any, before: Any) -> list[str]:
         and _owner_recorded(trigger, current_revision)
     )
     unchanged = bool(
-        prior_is_owner_granted
-        and current_revision
-        and current_revision == old_revision
+        prior_is_owner_granted and current_revision and current_revision == old_revision
     )
     if candidate_is_owner_granted or unchanged:
         if unchanged and not candidate_is_owner_granted:

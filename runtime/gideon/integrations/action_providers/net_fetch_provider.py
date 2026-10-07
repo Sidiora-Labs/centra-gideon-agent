@@ -159,8 +159,11 @@ class NetFetchActionProvider(ActionProvider):
         origin = str(getattr(decision, "host", "") or "")
         reason = str(getattr(decision, "reason", "") or "egress blocked")
         from gideon.security.net.guard import (
-            EGRESS_OFF_NOTHING_SENT, allow_host_step, where_egress_is_off,
+            EGRESS_OFF_NOTHING_SENT,
+            allow_host_step,
+            where_egress_is_off,
         )
+
         destination = origin or "the host"
         action = allow_host_step(destination)
         configured = len(getattr(policy, "allow_hosts", ()) or ())

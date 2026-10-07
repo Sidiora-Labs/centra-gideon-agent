@@ -240,6 +240,7 @@ DOWNLOAD_AGAIN = "then start the download again"
 
 def _download_address(url: str) -> str:
     from urllib.parse import urlsplit, urlunsplit
+
     parts = urlsplit(url)
     host = parts.hostname or ""
     if ":" in host:
@@ -251,8 +252,9 @@ def _download_address(url: str) -> str:
 
 def check(url: str, *, then: str = DOWNLOAD_AGAIN) -> None:
     """Guard one library request using current configured and trusted-run policy."""
-    from gideon.security.net.policy import CONNECTOR
     from gideon.security.net.guard import refusal_for
+    from gideon.security.net.policy import CONNECTOR
+
     policy = egress_policy_for(CONNECTOR)
     decision = evaluate(url, policy)
     address = _download_address(url)
@@ -272,8 +274,10 @@ def open_url(url: str, *, timeout_s: float, then: str = DOWNLOAD_AGAIN):
     evaluated IP. Environment proxy settings retain urllib's existing behavior.
     """
     import urllib.request
+
     class AskTheGuardFirst(urllib.request.BaseHandler):
         def default_open(self, request):
             check(request.full_url, then=then)
             return None
+
     return urllib.request.build_opener(AskTheGuardFirst()).open(url, timeout=timeout_s)

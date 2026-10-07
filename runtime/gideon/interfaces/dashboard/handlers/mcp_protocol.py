@@ -42,6 +42,16 @@ async def prompt_get(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid JSON"}, status=400)
     name = body.get("name") if isinstance(body, dict) else None
     arguments = body.get("arguments") or {} if isinstance(body, dict) else {}
-    if not isinstance(name, str) or not name or not isinstance(arguments, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in arguments.items()):
-        return web.json_response({"error": "name and string arguments required"}, status=400)
+    if (
+        not isinstance(name, str)
+        or not name
+        or not isinstance(arguments, dict)
+        or any(
+            not isinstance(k, str) or not isinstance(v, str)
+            for k, v in arguments.items()
+        )
+    ):
+        return web.json_response(
+            {"error": "name and string arguments required"}, status=400
+        )
     return await _call(request, "prompts/get", name=name, arguments=arguments)

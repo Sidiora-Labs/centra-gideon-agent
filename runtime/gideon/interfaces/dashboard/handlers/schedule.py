@@ -23,8 +23,10 @@ from gideon.interfaces.dashboard.handlers._shared import (
     _session_has_persisted_history,
 )
 from gideon.interfaces.dashboard.state import ConsoleState
-
-from gideon.security.session_credentials import memory_tool_endpoint, admitted_memory_tool
+from gideon.security.session_credentials import (
+    admitted_memory_tool,
+    memory_tool_endpoint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +38,7 @@ def _sel():
     return _pkg.sel()
 
 
-@memory_tool_endpoint('memory_remember')
+@memory_tool_endpoint("memory_remember")
 async def api_lessons_create(request: web.Request) -> web.Response:
     """POST /api/lessons — add a lesson to memory.db ``lesson.*``."""
     state: ConsoleState = request.app["state"]
@@ -170,7 +172,7 @@ async def api_lessons_create(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
-@memory_tool_endpoint('memory_forget')
+@memory_tool_endpoint("memory_forget")
 async def api_lessons_delete(request: web.Request) -> web.Response:
     """DELETE /api/lessons — remove lessons by substring."""
     state: ConsoleState = request.app["state"]
@@ -204,7 +206,7 @@ async def api_lessons_delete(request: web.Request) -> web.Response:
     return web.json_response({"ok": ok})
 
 
-@memory_tool_endpoint('memory_list')
+@memory_tool_endpoint("memory_list")
 async def api_lessons(request: web.Request) -> web.Response:
     state: ConsoleState = request.app["state"]
     if _blocks_reads_session(state, request):

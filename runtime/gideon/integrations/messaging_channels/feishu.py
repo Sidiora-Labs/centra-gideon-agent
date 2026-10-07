@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from gideon.integrations.channel_transports.base import ChannelCapabilities, OutboundMessage
+from gideon.integrations.channel_transports.base import (
+    ChannelCapabilities,
+    OutboundMessage,
+)
 from gideon.integrations.messaging_channels.base import MessagingTransport
 
 
@@ -57,7 +60,10 @@ class FeishuTransport(MessagingTransport):
             return
         is_dm = str(getattr(message, "chat_type", "")) == "p2p"
         policy = self.config.get("group_policy", "mention")
-        if not is_dm and (policy == "off" or (policy == "mention" and not getattr(message, "mentioned_bot", False))):
+        if not is_dm and (
+            policy == "off"
+            or (policy == "mention" and not getattr(message, "mentioned_bot", False))
+        ):
             return
         chat = str(getattr(message, "chat_id", "") or "")
         sender = str(getattr(message, "sender_id", "") or "")
@@ -66,11 +72,17 @@ class FeishuTransport(MessagingTransport):
         await self._inbound(
             chat,
             sender,
-            str(getattr(message, "body_text", "") or getattr(message, "content_text", "") or ""),
+            str(
+                getattr(message, "body_text", "")
+                or getattr(message, "content_text", "")
+                or ""
+            ),
             message_id=str(getattr(message, "message_id", "") or ""),
             is_dm=is_dm,
             thread=thread,
-            metadata={"sender_name": str(getattr(message, "sender_name", "") or sender)},
+            metadata={
+                "sender_name": str(getattr(message, "sender_name", "") or sender)
+            },
         )
 
     async def _receive(self) -> None:
@@ -91,7 +103,9 @@ class FeishuTransport(MessagingTransport):
             thread = thread[len(prefix) :]
         if thread:
             options = {"reply_to": thread, "reply_in_thread": True}
-        outcome = await self.channel.send(message.channel_id, {"text": message.text}, options)
+        outcome = await self.channel.send(
+            message.channel_id, {"text": message.text}, options
+        )
         if not outcome.success:
             raise ConnectionError(f"Feishu rejected message: {outcome.error}")
         return True

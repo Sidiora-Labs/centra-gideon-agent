@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from gideon.core.turn_streams import closing_stream
-
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
 from gideon.core._sdk_deps import require_sdk
+from gideon.core.turn_streams import closing_stream
 from gideon.integrations.llm.base import (
     EVENT_TEXT_CHUNK,
     EVENT_THINKING_CHUNK,
@@ -104,7 +103,8 @@ class _ChatDecoder:
             reported_cached = wire_value(details, "cached_tokens")
             cached = (
                 min(prompt, max(0, reported_cached))
-                if type(reported_cached) is int else 0
+                if type(reported_cached) is int
+                else 0
             )
             self.usage.input_tokens = prompt - cached
             self.usage.cache_read_tokens = cached
@@ -143,7 +143,9 @@ class _ChatDecoder:
         return None
 
     def finish(self) -> list[LLMEvent]:
-        return self._segments(self._splitter.flush()) + self._flush_calls(self.stop_reason)
+        return self._segments(self._splitter.flush()) + self._flush_calls(
+            self.stop_reason
+        )
 
 
 class OpenAIProvider(ConversationProtocol):
@@ -207,11 +209,19 @@ class OpenAIProvider(ConversationProtocol):
             for item in models:
                 if item.id != self._model:
                     continue
-                for field in ("context_length", "context_window", "max_model_len", "n_ctx", "max_input_tokens"):
+                for field in (
+                    "context_length",
+                    "context_window",
+                    "max_model_len",
+                    "n_ctx",
+                    "max_input_tokens",
+                ):
                     reported = declared_context_window(item.extra.get(field))
                     if reported is not None:
                         self._served_context_window = reported
-                        register_served_context_window(item.id, reported, endpoint=self._base_url or "")
+                        register_served_context_window(
+                            item.id, reported, endpoint=self._base_url or ""
+                        )
                         break
         except Exception:
             logger.debug("Default chat model discovery failed", exc_info=True)
@@ -300,7 +310,9 @@ class OpenAIProvider(ConversationProtocol):
     async def stream(self, message: str) -> AsyncIterator[LLMEvent]:
         messages = self._begin_message(message, _MAX_HISTORY)
         request = self._request(messages, model=self._model)
-        async with closing_stream(self._run_turn(request, self._model, remember=True)) as _owned_events:
+        async with closing_stream(
+            self._run_turn(request, self._model, remember=True)
+        ) as _owned_events:
             async for event in _owned_events:
                 yield event
 
@@ -316,7 +328,9 @@ class OpenAIProvider(ConversationProtocol):
         request = self._request(
             messages, model=selected, tools=tools, reasoning_effort=reasoning_effort
         )
-        async with closing_stream(self._run_turn(request, selected, remember=False)) as _owned_events:
+        async with closing_stream(
+            self._run_turn(request, selected, remember=False)
+        ) as _owned_events:
             async for event in _owned_events:
                 yield event
 

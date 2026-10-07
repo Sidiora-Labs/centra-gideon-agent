@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from gideon.security.safety_flags import yes_or_no
-
 import json
 import logging
 from dataclasses import dataclass, field
@@ -12,6 +10,7 @@ from typing import Any
 from gideon.automation.workflows import store
 from gideon.automation.workflows.models import valid_name
 from gideon.core.atomic_write import atomic_write
+from gideon.security.safety_flags import yes_or_no
 
 logger = logging.getLogger(__name__)
 SOURCE_USER = "user"
@@ -78,7 +77,9 @@ class VersionRecord:
             if isinstance(operation, dict)
         ]
         fields["run_ids"] = list(map(str, d.get("run_ids") or []))
-        fields["owner_calls"] = d.get("owner_calls") if isinstance(d.get("owner_calls"), dict) else None
+        fields["owner_calls"] = (
+            d.get("owner_calls") if isinstance(d.get("owner_calls"), dict) else None
+        )
         return cls(**fields)
 
 

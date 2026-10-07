@@ -79,7 +79,12 @@ async def api_voice_synthesize(request: web.Request) -> web.Response:
     if request_id is not None and (
         not isinstance(request_id, str) or not request_id or len(request_id) > 128
     ):
-        return web.json_response({"error": "request_id must be a non-empty string of at most 128 characters"}, status=400)
+        return web.json_response(
+            {
+                "error": "request_id must be a non-empty string of at most 128 characters"
+            },
+            status=400,
+        )
     if not text:
         return web.json_response({"error": "text required"}, status=400)
 
@@ -166,7 +171,9 @@ async def api_voice_synthesize(request: web.Request) -> web.Response:
                         "session": session_name,
                         "audio": base64.b64encode(final_bytes).decode(),
                         "chunks": len(chunk_paths),
-                        **({"request_id": request_id} if request_id is not None else {}),
+                        **(
+                            {"request_id": request_id} if request_id is not None else {}
+                        ),
                     },
                 )
 

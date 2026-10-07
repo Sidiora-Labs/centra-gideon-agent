@@ -529,7 +529,12 @@ def _list_tools() -> list[dict[str, Any]]:
                     "data": {
                         "description": _genui_authoring_description(),
                         "anyOf": [
-                            {"type": "object", "properties": {"genui": _genui_prepared_schema()}, "required": ["genui"], "additionalProperties": False},
+                            {
+                                "type": "object",
+                                "properties": {"genui": _genui_prepared_schema()},
+                                "required": ["genui"],
+                                "additionalProperties": False,
+                            },
                             {"not": {"type": "object", "required": ["genui"]}},
                         ],
                     },
@@ -722,11 +727,15 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
                 from gideon.workspace.artifacts import source_files
 
                 try:
-                    _source_content, source_revision = source_files.read(got.source_path)
+                    _source_content, source_revision = source_files.read(
+                        got.source_path
+                    )
                 except ValueError:
                     _audit("denied", got.slug, "artifact source no longer admitted")
                     return "Error: artifact source is no longer admitted"
-                return _json.dumps({"content": content, "source_revision": source_revision})
+                return _json.dumps(
+                    {"content": content, "source_revision": source_revision}
+                )
             return content
 
         if name == "artifact_update":
@@ -856,8 +865,8 @@ def _image_generate(
 
     from gideon.integrations.image_gen.provider import ImageGenError
     from gideon.integrations.image_gen.registry import active_image_gen
-    from gideon.security.guardrails.media_call import MediaCall, metered_media_call
     from gideon.security.guardrails.failure import BudgetExceededError
+    from gideon.security.guardrails.media_call import MediaCall, metered_media_call
 
     resolved = active_image_gen()
     if resolved is None:
@@ -897,17 +906,27 @@ def _image_generate(
                 src_path = tf.name
             try:
                 results = _run_async(
-                    metered_media_call(call, lambda: provider.edit(
-                        prompt, source_image=src_path, model=model_id, size=size
-                    ), session_key=sk or "", billed=lambda rows: len(rows))
+                    metered_media_call(
+                        call,
+                        lambda: provider.edit(
+                            prompt, source_image=src_path, model=model_id, size=size
+                        ),
+                        session_key=sk or "",
+                        billed=lambda rows: len(rows),
+                    )
                 )
             finally:
                 with __import__("contextlib").suppress(OSError):
                     Path(src_path).unlink()
         else:
-            results = _run_async(metered_media_call(
-                call, lambda: provider.generate(prompt, model=model_id, size=size),
-                session_key=sk or "", billed=lambda rows: len(rows)))
+            results = _run_async(
+                metered_media_call(
+                    call,
+                    lambda: provider.generate(prompt, model=model_id, size=size),
+                    session_key=sk or "",
+                    billed=lambda rows: len(rows),
+                )
+            )
     except BudgetExceededError as e:
         _audit("denied", edit_slug, e.sentence())
         return f"Error: {e.sentence()}"
@@ -998,8 +1017,8 @@ def _video_generate(
     """
     from gideon.integrations.video_gen.provider import VideoGenError
     from gideon.integrations.video_gen.registry import active_video_gen
-    from gideon.security.guardrails.media_call import MediaCall, metered_media_call
     from gideon.security.guardrails.failure import BudgetExceededError
+    from gideon.security.guardrails.media_call import MediaCall, metered_media_call
 
     resolved = active_video_gen()
     if resolved is None:
@@ -1022,10 +1041,18 @@ def _video_generate(
             metered_media_call(
                 MediaCall(provider.name, model_id, "second", duration_seconds),
                 lambda: provider.generate(
-                    prompt, model=model_id, duration_seconds=duration_seconds,
-                    aspect_ratio=aspect_ratio), session_key=sk or "",
-                billed=lambda rows: (sum(row.duration_s for row in rows)
-                    if rows and all(row.duration_s and row.duration_s > 0 for row in rows) else None),
+                    prompt,
+                    model=model_id,
+                    duration_seconds=duration_seconds,
+                    aspect_ratio=aspect_ratio,
+                ),
+                session_key=sk or "",
+                billed=lambda rows: (
+                    sum(row.duration_s for row in rows)
+                    if rows
+                    and all(row.duration_s and row.duration_s > 0 for row in rows)
+                    else None
+                ),
             )
         )
     except BudgetExceededError as e:
@@ -1085,8 +1112,8 @@ def regenerate_image_at_slug(
     """
     from gideon.integrations.image_gen.provider import ImageGenError
     from gideon.integrations.image_gen.registry import active_image_gen
-    from gideon.security.guardrails.media_call import MediaCall, metered_media_call
     from gideon.security.guardrails.failure import BudgetExceededError
+    from gideon.security.guardrails.media_call import MediaCall, metered_media_call
 
     prompt = (prompt or "").strip()
     if not prompt:
@@ -1098,9 +1125,15 @@ def regenerate_image_at_slug(
     try:
         results = _run_async(
             metered_media_call(
-                MediaCall(provider.name, model_id, "image", 1, size=(size or "").strip()),
-                lambda: provider.generate(prompt, model=model_id, size=(size or "").strip()),
-                session_key=session_id or "", billed=lambda rows: len(rows))
+                MediaCall(
+                    provider.name, model_id, "image", 1, size=(size or "").strip()
+                ),
+                lambda: provider.generate(
+                    prompt, model=model_id, size=(size or "").strip()
+                ),
+                session_key=session_id or "",
+                billed=lambda rows: len(rows),
+            )
         )
     except BudgetExceededError as e:
         return False, e.sentence()
@@ -1194,6 +1227,7 @@ def _validate_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
 def _preflight_tool(name: str, args: dict[str, Any]) -> str:
     from gideon.integrations.mcp_shared import preflight_tool
+
     return preflight_tool(name, args, _validate_args)
 
 
@@ -1239,8 +1273,11 @@ def _deck_source_notes(slide: dict[str, Any]) -> str:
     sources = slide.get("sources")
     if not isinstance(sources, list):
         return ""
-    urls = [url for url in sources if isinstance(url, str)
-            and url.startswith(("https://", "http://"))]
+    urls = [
+        url
+        for url in sources
+        if isinstance(url, str) and url.startswith(("https://", "http://"))
+    ]
     return "Sources:\n" + "\n".join(f"- {url}" for url in urls) if urls else ""
 
 
@@ -1308,10 +1345,12 @@ def _document_create(
                         title=str(sl.get("title") or ""),
                         bullets=[_bullet(b) for b in (sl.get("body") or [])],
                         notes="\n".join(
-                            part for part in (
+                            part
+                            for part in (
                                 str(sl.get("notes") or ""),
                                 _deck_source_notes(sl),
-                            ) if part
+                            )
+                            if part
                         ),
                         artifact_slug=str(sl.get("artifact_slug") or ""),
                         layout=str(sl.get("layout") or ""),
@@ -1325,7 +1364,9 @@ def _document_create(
             return "Error: provide markdown or slides."
         if source and model.slides:
             first = model.slides[0]
-            first.notes = (first.notes + "\n" if first.notes else "") + f"Source: {source}"
+            first.notes = (
+                first.notes + "\n" if first.notes else ""
+            ) + f"Source: {source}"
         model.template_slug = str(args.get("template") or "").strip()
     elif name == "sheet_create":
         sheets = args.get("sheets")
@@ -1339,7 +1380,9 @@ def _document_create(
             model = SheetModel.from_rows({"Sheet1": [list(r) for r in rows]})
         elif csv_text.strip():
             import csv
+
             from gideon.cognition.knowledge.readers import delimited_rows
+
             try:
                 parsed = delimited_rows(csv_text)
             except csv.Error as exc:

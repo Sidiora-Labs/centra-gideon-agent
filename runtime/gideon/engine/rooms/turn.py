@@ -146,7 +146,15 @@ class RoomTurns:
             return existing
         lock = self.store.acquire_turn(room_id)
         try:
-            record, created = self.store.begin_turn(room_id, content, request_id, pending_queue=[turn.member.id for turn in plan_member_turns(room, content, config.round_budget)])
+            record, created = self.store.begin_turn(
+                room_id,
+                content,
+                request_id,
+                pending_queue=[
+                    turn.member.id
+                    for turn in plan_member_turns(room, content, config.round_budget)
+                ],
+            )
             if not created:
                 lock.close()
                 return record
@@ -170,7 +178,9 @@ class RoomTurns:
             raise ValueError("room has no round to continue")
         lock = self.store.acquire_turn(room_id)
         try:
-            record = self.store.update_turn(room_id, current["id"], status="queued", error=None)
+            record = self.store.update_turn(
+                room_id, current["id"], status="queued", error=None
+            )
             return self._launch(room, "", record, lock)
         except BaseException:
             lock.close()
@@ -218,7 +228,11 @@ class RoomTurns:
             self.store.update_turn(room_id, turn_id, status="cancelled")
             raise
         except Exception as exc:
-            error = "Room turn exceeded the 15 minute limit" if isinstance(exc, TimeoutError) else str(exc)
+            error = (
+                "Room turn exceeded the 15 minute limit"
+                if isinstance(exc, TimeoutError)
+                else str(exc)
+            )
             self.store.fail_member(room_id, turn_id, redact_field(error)[:1000])
         finally:
             self._active.discard(room_id)
@@ -265,7 +279,14 @@ class RoomTurns:
                     if callable(announce_failover):
                         announce_failover()
                     async for event in provider.stream(
-                        turn.prompt(member_feed(messages, read_from, member.id, remembers=bool(resumed or not is_new))[0])
+                        turn.prompt(
+                            member_feed(
+                                messages,
+                                read_from,
+                                member.id,
+                                remembers=bool(resumed or not is_new),
+                            )[0]
+                        )
                     ):
                         if not AppConfig.load().rooms.enabled:
                             await provider.cancel()
@@ -292,7 +313,9 @@ class RoomTurns:
                                 source="room",
                                 session_key=key,
                                 agent=member.agent,
-                                provider=str(getattr(provider, "provider_id", "") or "native"),
+                                provider=str(
+                                    getattr(provider, "provider_id", "") or "native"
+                                ),
                                 model="",
                                 estimate_if_missing=True,
                             )
@@ -337,7 +360,9 @@ class RoomTurns:
                     if not answer.strip():
                         raise ValueError("Member returned no reply")
                     saved = True
-                    self.store.finish_member(room_id, turn_id, read_boundary=read_boundary)
+                    self.store.finish_member(
+                        room_id, turn_id, read_boundary=read_boundary
+                    )
                 except asyncio.CancelledError:
                     await provider.cancel()
                     raise

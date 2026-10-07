@@ -348,7 +348,11 @@ def surface_skills(
 
     cache.flush()
     standout = _semantic_standout(
-        [(s.get("key", ""), score) for s, _kw, score in candidates if score is not None],
+        [
+            (s.get("key", ""), score)
+            for s, _kw, score in candidates
+            if score is not None
+        ],
         semantic_threshold,
     )
 

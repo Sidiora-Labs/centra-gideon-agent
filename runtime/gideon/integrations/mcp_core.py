@@ -32,8 +32,8 @@ import os
 import platform
 import subprocess
 import tempfile
-import urllib.parse
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -755,6 +755,7 @@ def _internal_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
     if sk:
         headers["X-Session-Key"] = sk
         from gideon.security.session_credentials import credential_for, inherited_proof
+
         proof = credential_for(sk) or inherited_proof(sk)
         if proof:
             headers["X-Session-Proof"] = proof
@@ -775,8 +776,11 @@ def _refused(exc: urllib.error.HTTPError) -> dict:
         return {"error": f"HTTP {exc.code}: {text or exc.reason}"}
     error = body.get("error")
     if isinstance(error, dict):
-        return {**body, "error": str(error.get("message") or error.get("code")),
-                "error_detail": error}
+        return {
+            **body,
+            "error": str(error.get("message") or error.get("code")),
+            "error_detail": error,
+        }
     return {**body, "error": str(error) if error else f"HTTP {exc.code}: {text}"}
 
 
@@ -813,6 +817,7 @@ def _resolve_session_key() -> str:
     if current:
         return current
     from gideon.security.session_credentials import inherited_binding
+
     binding = inherited_binding()
     if binding is not None:
         return str(binding.get("session_key", ""))
@@ -874,7 +879,9 @@ def _delete(path: str, body: dict | None = None) -> dict:
         req = urllib.request.Request(
             f"{_api_base()}{path}",
             data=data,
-            headers=_internal_headers({"Content-Type": "application/json"} if data else None),
+            headers=_internal_headers(
+                {"Content-Type": "application/json"} if data else None
+            ),
             method="DELETE",
         )
         with open_loopback(req, timeout=10) as resp:
@@ -958,8 +965,11 @@ def _skill_library():
     grants = skill_list.held()
     if grants is not None:
         from gideon.engine.agents.loop_skills import names
+
         grants = grants.beside(names(_CURRENT_SESSION_KEY.get(), grants.agent))
-    library = ProcedureLibrary(agent=grants.agent if grants is not None and grants.agent else None)
+    library = ProcedureLibrary(
+        agent=grants.agent if grants is not None and grants.agent else None
+    )
     return grants, grants.library(library) if grants is not None else library
 
 
@@ -984,7 +994,11 @@ def _load_skill_resource(args: dict[str, Any]) -> str:
     if not skill_name or not rel_path:
         return "Error: both skill and path are required."
     grants, loader = _skill_library()
-    if grants is not None and not grants.allows(skill_name) and loader.skill_file(skill_name) is None:
+    if (
+        grants is not None
+        and not grants.allows(skill_name)
+        and loader.skill_file(skill_name) is None
+    ):
         return f"Error: {grants.refusal(skill_name)}"
     try:
         read = loader.read_resource(skill_name, rel_path)
@@ -1020,6 +1034,7 @@ def _load_skill_resource(args: dict[str, Any]) -> str:
 
 def _preflight_tool(name: str, args: dict[str, Any]) -> str:
     from gideon.integrations.mcp_shared import preflight_tool
+
     return preflight_tool(name, args, _validate_args)
 
 
@@ -1044,7 +1059,11 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
         from gideon.extensions.skills.loader import ProcedureLibrary
 
         grants, loader = _skill_library()
-        if grants is not None and not grants.allows(skill_name) and loader.skill_file(skill_name) is None:
+        if (
+            grants is not None
+            and not grants.allows(skill_name)
+            and loader.skill_file(skill_name) is None
+        ):
             return f"Error: {grants.refusal(skill_name)}"
         content = loader.load_skill(skill_name)
         if content is None:

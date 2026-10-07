@@ -11,7 +11,10 @@ from typing import Any
 import httpx
 
 from gideon.extensions.providers.settings import ProviderSettings
-from gideon.integrations.channel_transports.base import ChannelCapabilities, OutboundMessage
+from gideon.integrations.channel_transports.base import (
+    ChannelCapabilities,
+    OutboundMessage,
+)
 from gideon.integrations.messaging_channels.base import MessagingTransport
 
 
@@ -84,7 +87,9 @@ class MoChatTransport(MessagingTransport):
         atomic_write(path, json.dumps(self.cursors, sort_keys=True) + "\n")
 
     async def _receive(self) -> None:
-        await asyncio.gather(*(self._watch(kind, target) for kind, target in self.targets))
+        await asyncio.gather(
+            *(self._watch(kind, target) for kind, target in self.targets)
+        )
 
     async def _watch(self, kind: str, target: str) -> None:
         while True:
@@ -100,10 +105,17 @@ class MoChatTransport(MessagingTransport):
                         },
                     )
                     for event in payload.get("events", []):
-                        if isinstance(event, dict) and event.get("type") == "message.add":
-                            await self._inbound_event(kind, target, event.get("payload") or {})
+                        if (
+                            isinstance(event, dict)
+                            and event.get("type") == "message.add"
+                        ):
+                            await self._inbound_event(
+                                kind, target, event.get("payload") or {}
+                            )
                     cursor = payload.get("cursor")
-                    if isinstance(cursor, int) and cursor >= self.cursors.get(target, 0):
+                    if isinstance(cursor, int) and cursor >= self.cursors.get(
+                        target, 0
+                    ):
                         self.cursors[target] = cursor
                         await asyncio.to_thread(self._save_cursors)
                 else:
@@ -122,7 +134,9 @@ class MoChatTransport(MessagingTransport):
                 self._detail = "MoChat request failed; retrying"
                 await asyncio.sleep(3)
 
-    async def _inbound_event(self, kind: str, target: str, payload: dict[str, Any]) -> None:
+    async def _inbound_event(
+        self, kind: str, target: str, payload: dict[str, Any]
+    ) -> None:
         sender = str(payload.get("author") or "")
         if not sender or sender == self.config.get("agent_user_id"):
             return
@@ -152,11 +166,19 @@ class MoChatTransport(MessagingTransport):
 
     async def send(self, message: OutboundMessage) -> bool:
         target = message.channel_id
-        kind = next((kind for kind, value in self.targets if value == target), "session")
+        kind = next(
+            (kind for kind, value in self.targets if value == target), "session"
+        )
         if kind == "panel":
-            await self._post("/api/claw/groups/panels/send", {"panelId": target, "content": message.text})
+            await self._post(
+                "/api/claw/groups/panels/send",
+                {"panelId": target, "content": message.text},
+            )
         else:
-            await self._post("/api/claw/sessions/send", {"sessionId": target, "content": message.text})
+            await self._post(
+                "/api/claw/sessions/send",
+                {"sessionId": target, "content": message.text},
+            )
         return True
 
 

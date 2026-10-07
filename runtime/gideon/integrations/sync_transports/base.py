@@ -96,7 +96,6 @@ class SyncTransportProvider(ABC):
         """Cheap reachability + auth probe. Never raises — a failure is a ``ConnectionResult``
         with ``ok=False`` and a human ``detail``."""
 
-
     def remove(self, keys: list[str]) -> int:
         """Remove explicitly retired objects when this provider supports removal."""
         raise NotImplementedError("this transport retains historical copies")

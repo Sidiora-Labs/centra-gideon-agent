@@ -123,18 +123,20 @@ def merge_configuration(
 def write_configuration(
     path: Path, values: dict[str, Any], error_type: type[Exception]
 ) -> None:
-    from gideon import __version__
-    from gideon.core.config.validation import consume_retired_keys
-
     from copy import deepcopy
+
+    from gideon import __version__
     from gideon.core.config.transactions import mutate_config
+    from gideon.core.config.validation import consume_retired_keys
 
     def merge_fresh(document: dict[str, Any]) -> None:
         def merge(old: Any, new: Any) -> Any:
             if isinstance(old, dict) and isinstance(new, dict):
                 result = deepcopy(old)
                 for key, value in new.items():
-                    result[key] = merge(result[key], value) if key in result else deepcopy(value)
+                    result[key] = (
+                        merge(result[key], value) if key in result else deepcopy(value)
+                    )
                 return result
             return deepcopy(new)
 

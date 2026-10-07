@@ -68,7 +68,11 @@ def owner_only_path_reason(
         return ""
     candidate = Path(raw)
     if not candidate.is_absolute():
-        candidate = Path(cwd).expanduser() / candidate if cwd is not None else Path.cwd() / candidate
+        candidate = (
+            Path(cwd).expanduser() / candidate
+            if cwd is not None
+            else Path.cwd() / candidate
+        )
     root = gideon_home(home)
     reserved = owner_only_paths(root)
     for value in (candidate, candidate.resolve(strict=False)):
@@ -93,10 +97,14 @@ def owner_only_command_reason(
     expanded = source.replace("${GIDEON_HOME}", str(root)).replace(
         "$GIDEON_HOME", str(root)
     )
-    expanded = expanded.replace("${HOME}", str(Path.home())).replace("$HOME", str(Path.home()))
+    expanded = expanded.replace("${HOME}", str(Path.home())).replace(
+        "$HOME", str(Path.home())
+    )
     if any(str(path) in expanded for path in owner_only_paths(root)):
         return OWNER_ONLY_OPERATION_MESSAGE
-    current = Path(cwd).expanduser().resolve(strict=False) if cwd is not None else Path.cwd()
+    current = (
+        Path(cwd).expanduser().resolve(strict=False) if cwd is not None else Path.cwd()
+    )
     lexer = shlex.shlex(expanded, posix=True, punctuation_chars=";&|<>\n")
     lexer.whitespace_split = True
     lexer.commenters = ""
@@ -111,7 +119,9 @@ def owner_only_command_reason(
         next_base = base
         if len(parts) >= 2 and parts[0] == "cd":
             target = Path(os.path.expanduser(parts[1]))
-            next_base = (target if target.is_absolute() else base / target).resolve(strict=False)
+            next_base = (target if target.is_absolute() else base / target).resolve(
+                strict=False
+            )
         for token in parts:
             for match in _PATH_TOKEN.finditer(token):
                 value = match.group(0).rstrip(",:)]}")

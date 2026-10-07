@@ -114,10 +114,18 @@ def share_info(art: Artifact, key: str) -> dict | None:
     if not art.readonly or SHARE_TAG not in art.tags or art.source != SHARE_SOURCE:
         return None
     key_digest = hashlib.sha256(key.encode()).hexdigest()
-    event = next((e for e in art.events if e.type == "created" and (
-        e.metadata.get("shared_session_sha256") == key_digest
-        or e.metadata.get("shared_session") == key
-    )), None)
+    event = next(
+        (
+            e
+            for e in art.events
+            if e.type == "created"
+            and (
+                e.metadata.get("shared_session_sha256") == key_digest
+                or e.metadata.get("shared_session") == key
+            )
+        ),
+        None,
+    )
     if event is None:
         return None
     return {
@@ -140,10 +148,13 @@ def snapshot_turns(markdown: str, *, limit: int = 4) -> list[dict[str, str]]:
 
     def flush() -> None:
         if role and quoted:
-            turns.append({
-                "id": str(len(turns)), "role": role,
-                "text": "\n".join(quoted).strip(),
-            })
+            turns.append(
+                {
+                    "id": str(len(turns)),
+                    "role": role,
+                    "text": "\n".join(quoted).strip(),
+                }
+            )
 
     for line in markdown.splitlines():
         if line.startswith("## "):

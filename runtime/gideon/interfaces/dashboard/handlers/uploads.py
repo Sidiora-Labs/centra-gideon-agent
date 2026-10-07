@@ -31,7 +31,6 @@ _VALID_TARGETS = ("attachment", "knowledge", "workspace", "voice_profile")
 _VOICE_SLOTS = ("ref_audio", "consent")
 
 
-
 def _store(request: web.Request) -> UploadStore:
     st = request.app.get("upload_store")
     if st is None:
@@ -204,8 +203,12 @@ async def api_uploads_complete(request: web.Request) -> web.Response:
 
     snapshot = None
     try:
-        snapshot = await approve_path(final_path, sess.mime or None,
-                                      filename=sess.filename, surface='resumable_upload')
+        snapshot = await approve_path(
+            final_path,
+            sess.mime or None,
+            filename=sess.filename,
+            surface="resumable_upload",
+        )
         result = await _finalize_target(request, sess, snapshot)
         return web.json_response(result)
     except IntakeRefused as exc:
@@ -213,7 +216,9 @@ async def api_uploads_complete(request: web.Request) -> web.Response:
     except UploadError as exc:
         return web.json_response({"error": exc.message}, status=exc.status)
     except FileExistsError:
-        return web.json_response({"error": f"already exists: {sess.filename}"}, status=409)
+        return web.json_response(
+            {"error": f"already exists: {sess.filename}"}, status=409
+        )
     except Exception:
         logger.exception("finalize failed for %s target=%s", sid, sess.target)
         return web.json_response({"error": "failed to finalize upload"}, status=500)
@@ -248,9 +253,9 @@ async def _finalize_target(request: web.Request, sess, snapshot) -> dict:
         return {"paths": [str(dest)]}
 
     if sess.target == "knowledge":
+        from gideon.cognition.knowledge.file_items import store_approved_file
         from gideon.cognition.knowledge.media import classify
         from gideon.interfaces.dashboard.handlers.knowledge import _store as _kn_store
-        from gideon.cognition.knowledge.file_items import store_approved_file
 
         if classify(sess.filename, sess.mime or None) is None:
             raise UploadError(f"unsupported file type: {sess.filename}", 415)
@@ -283,10 +288,17 @@ async def _finalize_target(request: web.Request, sess, snapshot) -> dict:
             vprof.require_profile(profile_id)
             suffix = Path(sess.filename).suffix
             from gideon.cognition.knowledge.file_items import _owned_io
+
             async with snapshot.reader_path() as approved_path:
-                attach = vprof.attach_consent_audio if sess.target_key == 'consent' else vprof.attach_ref_audio
+                attach = (
+                    vprof.attach_consent_audio
+                    if sess.target_key == "consent"
+                    else vprof.attach_ref_audio
+                )
+
                 def persist_audio():
                     return attach(profile_id, approved_path, suffix=suffix)
+
                 profile = await _owned_io(persist_audio)
         except vprof.VoiceProfileError as exc:
             raise UploadError(exc.message, exc.status) from exc

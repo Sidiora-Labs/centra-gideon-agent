@@ -11,7 +11,9 @@ from gideon.core.http_request import read_json_body
 
 
 def _error(code: str, message: str, status: int) -> web.Response:
-    return web.json_response({"error": {"code": code, "message": message}}, status=status)
+    return web.json_response(
+        {"error": {"code": code, "message": message}}, status=status
+    )
 
 
 async def _body(request: web.Request) -> dict:
@@ -33,7 +35,9 @@ async def campaigns_create(request: web.Request) -> web.Response:
         body = await _body(request)
         name = str(body.get("workflow_name") or "")
         if not (await service.get_def(name)).get("ok"):
-            return _error("workflow_not_found", "Select an existing workflow definition.", 404)
+            return _error(
+                "workflow_not_found", "Select an existing workflow definition.", 404
+            )
         result = campaigns.create(body)
     except (ValueError, TypeError) as exc:
         return _error("invalid_campaign", str(exc), 400)
@@ -43,7 +47,11 @@ async def campaigns_create(request: web.Request) -> web.Response:
 
 async def campaigns_detail(request: web.Request) -> web.Response:
     result = campaigns.detail(request.match_info["campaign_id"])
-    return web.json_response(result) if result is not None else _error("not_found", "Campaign not found.", 404)
+    return (
+        web.json_response(result)
+        if result is not None
+        else _error("not_found", "Campaign not found.", 404)
+    )
 
 
 async def campaigns_advance(request: web.Request) -> web.Response:
@@ -52,7 +60,8 @@ async def campaigns_advance(request: web.Request) -> web.Response:
         return denied
     try:
         result = await campaigns.advance(
-            request.match_info["campaign_id"], supervisor=_supervisor(request),
+            request.match_info["campaign_id"],
+            supervisor=_supervisor(request),
             session_key=request.headers.get("X-Session-Key", ""),
         )
     except KeyError:
@@ -69,13 +78,17 @@ async def campaigns_observe(request: web.Request) -> web.Response:
         return denied
     try:
         body = await _body(request)
-        if not isinstance(body.get("score"), (int, float)) or isinstance(body["score"], bool):
+        if not isinstance(body.get("score"), (int, float)) or isinstance(
+            body["score"], bool
+        ):
             raise ValueError("score must be numeric")
         if not isinstance(body.get("valid"), bool):
             raise ValueError("valid must be a boolean")
         result = campaigns.observe(
-            request.match_info["campaign_id"], int(request.match_info["ordinal"]),
-            score=float(body["score"]), valid=body["valid"],
+            request.match_info["campaign_id"],
+            int(request.match_info["ordinal"]),
+            score=float(body["score"]),
+            valid=body["valid"],
             observation=str(body.get("observation") or ""),
         )
     except KeyError:
@@ -112,7 +125,9 @@ async def replay_capture(request: web.Request) -> web.Response:
 
 async def replay_compare(request: web.Request) -> web.Response:
     try:
-        result = replay.compare(request.match_info["replay_id"], request.query.get("candidate_run", ""))
+        result = replay.compare(
+            request.match_info["replay_id"], request.query.get("candidate_run", "")
+        )
     except KeyError:
         return _error("not_found", "Recording or workflow run not found.", 404)
     return web.json_response(result)
@@ -122,8 +137,13 @@ def register_experiment_routes(app: web.Application) -> None:
     app.router.add_get("/api/experiments/campaigns", campaigns_list)
     app.router.add_post("/api/experiments/campaigns", campaigns_create)
     app.router.add_get("/api/experiments/campaigns/{campaign_id}", campaigns_detail)
-    app.router.add_post("/api/experiments/campaigns/{campaign_id}/advance", campaigns_advance)
+    app.router.add_post(
+        "/api/experiments/campaigns/{campaign_id}/advance", campaigns_advance
+    )
     app.router.add_post("/api/experiments/campaigns/{campaign_id}/stop", campaigns_stop)
-    app.router.add_post("/api/experiments/campaigns/{campaign_id}/attempts/{ordinal}/observation", campaigns_observe)
+    app.router.add_post(
+        "/api/experiments/campaigns/{campaign_id}/attempts/{ordinal}/observation",
+        campaigns_observe,
+    )
     app.router.add_post("/api/experiments/runs/{run_id}/record", replay_capture)
     app.router.add_get("/api/experiments/replays/{replay_id}", replay_compare)

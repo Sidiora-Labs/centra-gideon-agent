@@ -502,7 +502,9 @@ def _resolve_trigger_run(entity_id: str, state) -> InvestigateContext | None:
         try:
             from gideon.automation.schedule_history import ExecutionJournal
 
-            rows, total = ExecutionJournal(config_dir()).list_for_job_sync(trig.id, 0, 5)
+            rows, total = ExecutionJournal(config_dir()).list_for_job_sync(
+                trig.id, 0, 5
+            )
             lines.extend(["", f"Recorded event fires: {total}"])
             for row in rows:
                 lines.append(
@@ -613,7 +615,10 @@ def _resolve_knowledge_item(entity_id: str, state) -> InvestigateContext | None:
         lines.append(f"Processing error: {item['processing_error']}")
     from gideon.cognition.knowledge.pipeline.outcomes import told
 
-    lines.extend(f"Step {step}" for step in told((item.get("file_metadata") or {}).get("node_phases")))
+    lines.extend(
+        f"Step {step}"
+        for step in told((item.get("file_metadata") or {}).get("node_phases"))
+    )
     if item.get("summary"):
         lines.append(f"\nSummary: {item['summary']}")
     insights = item.get("insights")

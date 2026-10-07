@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from gideon.core.turn_streams import closing_stream
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from gideon.core.turn_streams import closing_stream
+
 if TYPE_CHECKING:
-    from gideon.engine.agents.tool_list import AgentTools
     from gideon.engine.agents.skill_list import AgentSkills
+    from gideon.engine.agents.tool_list import AgentTools
     from gideon.integrations.llm.events import AgentEvent
 
 

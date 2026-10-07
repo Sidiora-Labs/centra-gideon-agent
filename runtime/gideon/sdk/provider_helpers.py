@@ -212,7 +212,8 @@ class BrandedCatalog(ModelCatalog):
 
 def register_branded_app(
     spec: BrandedProviderSpec,
-    *, capabilities_of: Callable[[dict[str, Any]], list[str]] | None = None,
+    *,
+    capabilities_of: Callable[[dict[str, Any]], list[str]] | None = None,
 ) -> tuple[Callable, Callable, Callable]:
     """Wire a branded/generic protocol provider app into the default registry and
     return its ``(_factory, create_provider, create_catalog)`` trio.
@@ -248,16 +249,20 @@ def register_branded_app(
         ):
             options["temperature"] = float(_temperature)
         configured_max_tokens = options.pop("max_tokens", None)
-        if isinstance(configured_max_tokens, int) and not isinstance(
-            configured_max_tokens, bool
-        ) and configured_max_tokens > 0:
+        if (
+            isinstance(configured_max_tokens, int)
+            and not isinstance(configured_max_tokens, bool)
+            and configured_max_tokens > 0
+        ):
             ceiling = spec.max_tokens
             eff_spec = BrandedProviderSpec(
                 **{
                     **spec.__dict__,
-                    "max_tokens": configured_max_tokens
-                    if ceiling is None
-                    else min(ceiling, configured_max_tokens),
+                    "max_tokens": (
+                        configured_max_tokens
+                        if ceiling is None
+                        else min(ceiling, configured_max_tokens)
+                    ),
                 }
             )
         else:

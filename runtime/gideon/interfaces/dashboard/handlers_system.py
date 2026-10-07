@@ -74,6 +74,7 @@ async def api_healthz(request: web.Request) -> web.Response:
     Used by container/compose healthchecks. No secret values returned.
     """
     from gideon.engine.gateway_base import home_fingerprint, process_facts
+
     facts = process_facts(os.getpid())
     return web.json_response(
         {

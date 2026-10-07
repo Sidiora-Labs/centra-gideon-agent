@@ -155,7 +155,10 @@ class DesignKind(LoopKindStrategy):
             has_doc = bool(
                 store.read_deliverable(cid).strip()
             ) or self._has_design_artifact(cid)
-            visual_focus = (loop.kind_config or {}).get("design_focus") in ("interface", "visualization")
+            visual_focus = (loop.kind_config or {}).get("design_focus") in (
+                "interface",
+                "visualization",
+            )
             preview_ok = not visual_focus or self._has_reviewed_previews(cid)
             if has_doc and preview_ok:
                 for k in keys:
@@ -470,7 +473,10 @@ class DesignKind(LoopKindStrategy):
                 "Then end the turn.",
             ]
         )
-        if (loop.kind_config or {}).get("design_focus") in ("interface", "visualization"):
+        if (loop.kind_config or {}).get("design_focus") in (
+            "interface",
+            "visualization",
+        ):
             nudge += (
                 "\nFor this specialist focus, open the actual saved React artifact in the "
                 "design Canvas and refine it from the rendered preview. Record the artifact "

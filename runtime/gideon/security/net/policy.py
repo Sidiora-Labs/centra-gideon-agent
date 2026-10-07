@@ -107,7 +107,9 @@ METADATA_SERVICE_HOSTS: tuple[str, ...] = (
     "100.100.100.200",
 )
 MCP_SERVER = EgressPolicy(
-    name="mcp_server", allow_private=True, deny_hosts=METADATA_SERVICE_HOSTS,
+    name="mcp_server",
+    allow_private=True,
+    deny_hosts=METADATA_SERVICE_HOSTS,
 )
 SYNC = EgressPolicy(
     name="sync",
@@ -136,7 +138,9 @@ FETCH_ACTION = EgressPolicy(
 )
 
 LISTING = EgressPolicy(
-    name="listing", allow_schemes=("https",), deny_hosts=METADATA_SERVICE_HOSTS,
+    name="listing",
+    allow_schemes=("https",),
+    deny_hosts=METADATA_SERVICE_HOSTS,
     timeout_s=120.0,
 )
 
@@ -204,8 +208,11 @@ def egress_policy_for_profile(base: EgressPolicy, tier: str) -> "EgressPolicy | 
         return base
     return base.with_overrides(
         allow_only=True,
-        allow_hosts=(base.allow_hosts if base.allow_only else
-                     tuple(dict.fromkeys([*base.allow_hosts, *tier_policy.allow_hosts]))),
+        allow_hosts=(
+            base.allow_hosts
+            if base.allow_only
+            else tuple(dict.fromkeys([*base.allow_hosts, *tier_policy.allow_hosts]))
+        ),
         max_bytes=min(base.max_bytes, tier_policy.max_bytes),
         timeout_s=min(base.timeout_s, tier_policy.timeout_s),
     )

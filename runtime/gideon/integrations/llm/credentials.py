@@ -54,7 +54,9 @@ class CredentialStore:
                 value = row.get("value")
                 env_name = row.get("value_env")
                 if isinstance(env_name, str) and env_name:
-                    value = os.environ.get(env_name) or environment.get(env_name) or value
+                    value = (
+                        os.environ.get(env_name) or environment.get(env_name) or value
+                    )
                 if not value:
                     value = environment.get(name)
                 if isinstance(value, str) and value:
@@ -66,13 +68,17 @@ class CredentialStore:
                     row.pop("value_env", None)
                     row["value_ref"] = name
                     changed = True
-                elif row.get("value_ref") == name and _core_credentials.get_credential(name, self._home):
+                elif row.get("value_ref") == name and _core_credentials.get_credential(
+                    name, self._home
+                ):
                     continue
                 else:
                     unresolved = True
             if changed and not unresolved:
                 payload = json.dumps(migrated, indent=2, sort_keys=True) + "\n"
-                atomic_write(self._credentials_path, payload, fsync=True, mode=self.FILE_MODE)
+                atomic_write(
+                    self._credentials_path, payload, fsync=True, mode=self.FILE_MODE
+                )
                 descriptors = migrated
             self._descriptors, self._env = descriptors, environment
 
@@ -98,9 +104,19 @@ class CredentialStore:
             reference = descriptor.get("value_env")
             candidates: tuple[tuple[CredentialSource, object], ...] = (
                 ("file", _core_credentials.get_credential(name, self._home)),
-                ("env", os.environ.get(reference) if isinstance(reference, str) and reference else None),
+                (
+                    "env",
+                    (
+                        os.environ.get(reference)
+                        if isinstance(reference, str) and reference
+                        else None
+                    ),
+                ),
                 ("file", descriptor.get("value")),
-                ("file", self._env.get(reference) if isinstance(reference, str) else None),
+                (
+                    "file",
+                    self._env.get(reference) if isinstance(reference, str) else None,
+                ),
                 ("file", self._env.get(name)),
             )
             for origin, value in candidates:
@@ -117,12 +133,16 @@ class CredentialStore:
                     if isinstance(value, str) and value:
                         _core_credentials.save_credential(name, value, self._home)
                     if not _core_credentials.get_credential(name, self._home):
-                        raise OSError("credential backend did not verify the stored value")
+                        raise OSError(
+                            "credential backend did not verify the stored value"
+                        )
                     row.pop("value_env", None)
                     row.pop("value", None)
                     row["value_ref"] = name
             payload = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
-            atomic_write(self._credentials_path, payload, fsync=True, mode=self.FILE_MODE)
+            atomic_write(
+                self._credentials_path, payload, fsync=True, mode=self.FILE_MODE
+            )
             self._descriptors = snapshot
 
     def put(self, name: str, descriptor: dict[str, object]) -> None:
@@ -185,9 +205,7 @@ class CredentialStore:
         return accepted
 
     def _load_env_file(self) -> dict[str, str]:
-        return _core_credentials.parse_dotenv(
-            self._private_text(self._env_path) or ""
-        )
+        return _core_credentials.parse_dotenv(self._private_text(self._env_path) or "")
 
     def _enforce_perms(self, path: Path) -> None:
         try:

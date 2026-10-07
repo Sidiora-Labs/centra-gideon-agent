@@ -68,7 +68,9 @@ def _merged_by_record(entry: inv.StateEntry) -> bool:
     )
 
 
-def _compared_shas(entry: inv.StateEntry, export_dir: Path, rels: list[str]) -> list[list[str]]:
+def _compared_shas(
+    entry: inv.StateEntry, export_dir: Path, rels: list[str]
+) -> list[list[str]]:
     """``[id, sha]`` of what two homes compare of each of *entry*'s records in the export, from
     its shards *rels*, sorted. Raises when one can't be read or parsed."""
     rows: list[dict] = []
@@ -77,14 +79,18 @@ def _compared_shas(entry: inv.StateEntry, export_dir: Path, rels: list[str]) -> 
             if line.strip():
                 rows.append(json.loads(line))
     return sorted(
-        [conflicts_mod.row_id(r), conflicts_mod.row_sha(conflicts_mod.compared(entry, r))]
+        [
+            conflicts_mod.row_id(r),
+            conflicts_mod.row_sha(conflicts_mod.compared(entry, r)),
+        ]
         for r in rows
     )
 
 
 def export_digest(export_dir: Path) -> str:
     """One sha over what the export at *export_dir* holds (see the module docstring). ``""`` when
-    its manifest can't be read: nothing matches that, so such an export is always sent."""
+    its manifest can't be read: nothing matches that, so such an export is always sent.
+    """
     export_dir = Path(export_dir)
     try:
         manifest = json.loads((export_dir / _MANIFEST).read_text(encoding="utf-8"))
@@ -112,7 +118,9 @@ def export_digest(export_dir: Path) -> str:
         except (OSError, ValueError, TypeError, AttributeError):
             return ""  # a shard that doesn't read: the export is sent, as an unreadable one is
     for record in manifest.get("databases") or []:
-        held.append(["database", str(record.get("path", "")), str(record.get("sha256", ""))])
+        held.append(
+            ["database", str(record.get("path", "")), str(record.get("sha256", ""))]
+        )
     return hashlib.sha256(canonical_json(held).encode("utf-8")).hexdigest()
 
 
@@ -141,7 +149,10 @@ def superseded(
             continue
         stamp = landed.get(seq + 1, "")
         replaced = _when(stamp) if stamp else None
-        if replaced is None or (moment - replaced).total_seconds() >= KEEP_PREVIOUS_SECS:
+        if (
+            replaced is None
+            or (moment - replaced).total_seconds() >= KEEP_PREVIOUS_SECS
+        ):
             out.append(seq)
     return out
 

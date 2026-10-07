@@ -145,7 +145,11 @@ class WakeupFactory:
         claim_holder = str(getattr(getattr(fire, "claim", None), "holder", "") or "")
         target = resume_target_of(trigger)
         if target:
-            return self.resume(trigger_id, "", dict(trigger_id=trigger_id, claim_holder=claim_holder, **target))
+            return self.resume(
+                trigger_id,
+                "",
+                dict(trigger_id=trigger_id, claim_holder=claim_holder, **target),
+            )
         fields = {
             "trigger_id": trigger_id,
             "kind": str(getattr(trigger, "kind", "") or ""),

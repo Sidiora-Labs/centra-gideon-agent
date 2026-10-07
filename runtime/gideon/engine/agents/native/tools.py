@@ -11,7 +11,6 @@ from functools import partial
 from typing import Any
 
 from gideon.core.errors import AgentError
-
 from gideon.integrations.tool_providers.base import (
     ToolDefinition,
     ToolProvider,
@@ -32,9 +31,7 @@ def tool_definitions_to_openai_schema(tools: list[ToolDefinition]) -> list[dict]
         provider_tool_name_map,
     )
 
-    last_definition = {
-        definition.name: index for index, definition in enumerate(tools)
-    }
+    last_definition = {definition.name: index for index, definition in enumerate(tools)}
     tools = [
         definition
         for index, definition in enumerate(tools)
@@ -58,15 +55,23 @@ def tool_definitions_to_openai_schema(tools: list[ToolDefinition]) -> list[dict]
     ]
 
 
-def _describe_mcp_tool(raw: dict, provider: str, *, trusted_definition: bool = False) -> ToolDefinition:
-    from gideon.integrations.tool_providers.base import RiskLevel, risk_from_annotations, WORK_ASKS_META_KEY
+def _describe_mcp_tool(
+    raw: dict, provider: str, *, trusted_definition: bool = False
+) -> ToolDefinition:
+    from gideon.integrations.tool_providers.base import (
+        WORK_ASKS_META_KEY,
+        RiskLevel,
+        risk_from_annotations,
+    )
 
     name = str(raw.get("name", ""))
     declared = str(raw.get("risk_level", "")).lower()
     if declared == "safe" and not trusted_definition:
         declared = ""
     if declared not in {"safe", "caution", "destructive"}:
-        hints = raw.get("annotations") if isinstance(raw.get("annotations"), dict) else {}
+        hints = (
+            raw.get("annotations") if isinstance(raw.get("annotations"), dict) else {}
+        )
         declared = risk_from_annotations(hints, trusted=trusted_definition).value
     parameters = next(
         (
@@ -82,9 +87,13 @@ def _describe_mcp_tool(raw: dict, provider: str, *, trusted_definition: bool = F
         parameters=parameters or _object_schema(),
         provider=provider,
         requires_approval=True,
-        work_asks=trusted_definition and isinstance(raw.get("_meta"), dict) and raw["_meta"].get(WORK_ASKS_META_KEY) is True,
+        work_asks=trusted_definition
+        and isinstance(raw.get("_meta"), dict)
+        and raw["_meta"].get(WORK_ASKS_META_KEY) is True,
         risk_level=RiskLevel(declared),
-        annotations=dict(raw["annotations"]) if isinstance(raw.get("annotations"), dict) else {},
+        annotations=(
+            dict(raw["annotations"]) if isinstance(raw.get("annotations"), dict) else {}
+        ),
     )
 
 
@@ -119,14 +128,40 @@ class InProcessMcpToolProvider(ToolProvider):
                 None, discover
             )
             self._tools = [
-                _describe_mcp_tool(item, self.name, trusted_definition=self._module in {"gideon.integrations.computer_use.tools", "gideon.integrations.mcp_core", "gideon.integrations.mcp_automation", "gideon.integrations.mcp_artifacts", "gideon.integrations.mcp_workflows", "gideon.integrations.mcp_prompts", "gideon.integrations.mcp_memory", "gideon.integrations.mcp_subagents", "gideon.integrations.mcp_code_map"}) for item in declarations or ()
+                _describe_mcp_tool(
+                    item,
+                    self.name,
+                    trusted_definition=self._module
+                    in {
+                        "gideon.integrations.computer_use.tools",
+                        "gideon.integrations.mcp_core",
+                        "gideon.integrations.mcp_automation",
+                        "gideon.integrations.mcp_artifacts",
+                        "gideon.integrations.mcp_workflows",
+                        "gideon.integrations.mcp_prompts",
+                        "gideon.integrations.mcp_memory",
+                        "gideon.integrations.mcp_subagents",
+                        "gideon.integrations.mcp_code_map",
+                    },
+                )
+                for item in declarations or ()
             ]
         return self._tools
 
-    async def preflight(self, tool_name: str, arguments: dict[str, Any]) -> ToolResult | None:
-        from gideon.integrations.tool_providers.arguments import argument_refusal, refused_result
-        definition = next((tool for tool in await self.list_tools() if tool.name == tool_name), None)
-        reason = argument_refusal(tool_name, arguments, definition.parameters if definition else {})
+    async def preflight(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> ToolResult | None:
+        from gideon.integrations.tool_providers.arguments import (
+            argument_refusal,
+            refused_result,
+        )
+
+        definition = next(
+            (tool for tool in await self.list_tools() if tool.name == tool_name), None
+        )
+        reason = argument_refusal(
+            tool_name, arguments, definition.parameters if definition else {}
+        )
         if reason:
             return refused_result(reason)
         module = self._import_module()
@@ -137,6 +172,7 @@ class InProcessMcpToolProvider(ToolProvider):
         reason = await asyncio.get_event_loop().run_in_executor(None, bound)
         if reason:
             from gideon.integrations.tool_providers.arguments import refused_result
+
             return refused_result(str(reason))
         return None
 

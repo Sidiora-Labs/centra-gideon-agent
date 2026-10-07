@@ -42,7 +42,9 @@ async def complete_text(
 
             reader = await image_reader()
             if not reader.ref:
-                logger.info("knowledge node: image input skipped because no reader is bound")
+                logger.info(
+                    "knowledge node: image input skipped because no reader is bound"
+                )
                 return ""
             messages = _build_messages(prompt, images)
             if not any(
@@ -53,7 +55,9 @@ async def complete_text(
                 return ""
             image_provider = await resolve_image_reader()
         except Exception:
-            logger.warning("knowledge node image-reader resolution failed", exc_info=True)
+            logger.warning(
+                "knowledge node image-reader resolution failed", exc_info=True
+            )
             return ""
     else:
         messages = _build_messages(prompt, images)

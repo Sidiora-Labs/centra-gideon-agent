@@ -27,14 +27,15 @@ it), else ``consumed``. A prefix the remote can't actually serve yet (a partial 
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
 from gideon.core.atomic_write import atomic_write_bytes
+from gideon.core.record_ids import is_safe_record_id
 from gideon.integrations.sync_transports.base import SyncTransportProvider
 from gideon.operations.durability import inventory as inv
 from gideon.operations.durability import reconcile
@@ -45,10 +46,9 @@ from gideon.operations.durability.cursor import (
     PREREQ_ABSENT,
     Cursor,
 )
+from gideon.operations.durability.home_paths import LinkInTheWay, home_path
 from gideon.operations.durability.registry import Registry, shard_prefix
-from gideon.operations.durability.shards import import_shards, declared_paths
-from gideon.operations.durability.home_paths import home_path, LinkInTheWay
-from gideon.core.record_ids import is_safe_record_id
+from gideon.operations.durability.shards import declared_paths, import_shards
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ def _materialize(objs, prefix: str, dest: Path) -> int:
     for obj in objs:
         if not isinstance(obj.key, str) or not obj.key.startswith(prefix):
             raise ValueError("object key does not belong to the selected export")
-        rel = obj.key[len(prefix):]
+        rel = obj.key[len(prefix) :]
         target = home_path(dest, rel)
         selected.append((target, obj.data))
     for target, data in selected:
@@ -210,10 +210,16 @@ def _pull_one_seq(
                     home,
                     entry,
                     rows,
-                    ancestors=ancestors.of(peer_id, entry.id) if ancestors is not None else {},
-                    published=ancestors.published(entry.id) if ancestors is not None else {},
+                    ancestors=(
+                        ancestors.of(peer_id, entry.id) if ancestors is not None else {}
+                    ),
+                    published=(
+                        ancestors.published(entry.id) if ancestors is not None else {}
+                    ),
                     history=ancestors.held(entry.id) if ancestors is not None else {},
-                    deleted=ancestors.deleted(entry.id) if ancestors is not None else {},
+                    deleted=(
+                        ancestors.deleted(entry.id) if ancestors is not None else {}
+                    ),
                     peer_id=peer_id,
                     agreed_there=imported.agreements.get(self_id, {}).get(entry.id, {}),
                     queue=queue,
@@ -228,7 +234,9 @@ def _pull_one_seq(
                     ancestors.took_deletion(entry.id, res.deleted_there)
                 if res.verdict == PREREQ_ABSENT:
                     held = True
-                    out.detail = res.detail or "a local landing prerequisite is unavailable"
+                    out.detail = (
+                        res.detail or "a local landing prerequisite is unavailable"
+                    )
                     out.refused[entry.path] = out.detail
                 elif res.verdict == PAYLOAD_BAD:
                     poison = True

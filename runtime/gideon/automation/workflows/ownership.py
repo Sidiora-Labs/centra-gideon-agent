@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from gideon.security.safety_flags import yes_or_no
-
 import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from gideon.security.safety_flags import yes_or_no
 
 OWNED_PREFIX = "workflow:"
 OWNED_APP = "workflow"
@@ -119,7 +119,14 @@ def stamp_run_mode(extra: dict[str, Any], mode: MemoryMode) -> dict[str, Any]:
 
 def inherited_extra(parent: Any) -> dict[str, Any]:
     """Preserve private ownership identifiers; these labels do not recreate native authority."""
-    fields = (RUN_MODE_KEY, "chat_owner", "private_scope_origin", "private_scope_id", "work_principal", "work_initiator")
+    fields = (
+        RUN_MODE_KEY,
+        "chat_owner",
+        "private_scope_origin",
+        "private_scope_id",
+        "work_principal",
+        "work_initiator",
+    )
     return {key: parent.extra[key] for key in fields if key in parent.extra}
 
 
@@ -192,7 +199,8 @@ def skips_node(node_config: dict[str, Any], mode: MemoryMode) -> tuple[bool, str
                 lambda: f"{mode.value} run: skipping `{provider}` (memory writes are suppressed)",
             ),
             (
-                lambda: config.get("persists_memory") is not None and yes_or_no(config.get("persists_memory")) is not False,
+                lambda: config.get("persists_memory") is not None
+                and yes_or_no(config.get("persists_memory")) is not False,
                 lambda: f"{mode.value} run: node declares persists_memory",
             ),
         )

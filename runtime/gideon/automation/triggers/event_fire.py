@@ -47,7 +47,9 @@ class EventRouter:
     def matching(self, event: Any) -> list[Any]:
         from gideon.automation.triggers.provider import armable
 
-        return [trigger for trigger in armable(self.store) if self.accepts(event, trigger)]
+        return [
+            trigger for trigger in armable(self.store) if self.accepts(event, trigger)
+        ]
 
     def emit(self, event: Any) -> None:
         if not self.enabled:
@@ -135,12 +137,25 @@ class EventRouter:
             from gideon.automation.triggers import claims
             from gideon.automation.triggers.service import to_iso
 
-            if not claims.acquire_claim(decision.claim, overlap=trigger.overlap, base_dir=self.store.base_dir):
-                await record_suppression(trigger, outcome="skipped_overlap", reason="another run acquired the event claim", now=now, base_dir=self.store.base_dir, event=event)
+            if not claims.acquire_claim(
+                decision.claim, overlap=trigger.overlap, base_dir=self.store.base_dir
+            ):
+                await record_suppression(
+                    trigger,
+                    outcome="skipped_overlap",
+                    reason="another run acquired the event claim",
+                    now=now,
+                    base_dir=self.store.base_dir,
+                    event=event,
+                )
                 continue
             current = self.store.get(trigger.id)
             if current is None or not current.ok or current.trigger.kind != "event":
-                claims.release_claim(trigger.id, base_dir=self.store.base_dir, holder=decision.claim.holder)
+                claims.release_claim(
+                    trigger.id,
+                    base_dir=self.store.base_dir,
+                    holder=decision.claim.holder,
+                )
                 continue
             live = current.trigger
             live.run_count = int(live.run_count or 0) + 1
@@ -158,7 +173,9 @@ class EventRouter:
             except Exception:
                 logger.exception("event trigger %s dispatch failed", live.id)
             finally:
-                claims.release_claim(live.id, base_dir=self.store.base_dir, holder=decision.claim.holder)
+                claims.release_claim(
+                    live.id, base_dir=self.store.base_dir, holder=decision.claim.holder
+                )
             fired += 1
             self._record_rate(now)
         return fired
@@ -283,8 +300,8 @@ def emit(event: Any) -> None:
 def spool_matching(store: Any, event: Any) -> bool:
     """Durably retain only an event for which a current canonical row subscribes."""
     from gideon.automation.event_triggers import EventOccurrence, EventTriggerEngine
-    from gideon.automation.triggers.provider import armable
     from gideon.automation.triggers.dispatch import Envelope, spool_fire
+    from gideon.automation.triggers.provider import armable
 
     if not any(
         trigger.kind == "event"

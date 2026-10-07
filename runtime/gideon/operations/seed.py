@@ -151,6 +151,7 @@ class SeedDestination:
         if not target.exists():
             return target
         from gideon.engine.gateway_base import CLAIM_FILE
+
         entries = [entry for entry in target.iterdir() if entry.name != CLAIM_FILE]
         if not entries:
             return target

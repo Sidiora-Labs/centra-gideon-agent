@@ -40,8 +40,8 @@ import json
 import logging
 import shutil
 import subprocess
-import threading
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from functools import wraps
@@ -61,7 +61,8 @@ from gideon.extensions.apps.manager import (
     apps_dir,
 )
 from gideon.extensions.apps.manifest import AppManifest
-from gideon.extensions.apps.staging import UnsafeBundleError, survey as survey_app_tree
+from gideon.extensions.apps.staging import UnsafeBundleError
+from gideon.extensions.apps.staging import survey as survey_app_tree
 from gideon.security.sel import sel
 from gideon.security.signing import SignatureInfo, SignatureState, verify_bundle
 from gideon.security.supply_chain import ScanReport, TrustTier, Verdict, default_scanner
@@ -93,6 +94,7 @@ def release_app_state_lock() -> None:
 
 def _serialized_app_state(fn):
     """Keep code swaps/removal out of a live sidecar engine write."""
+
     @wraps(fn)
     def wrapped(*args, **kwargs):
         nested = bool(getattr(_APP_STATE_LOCAL, "depth", 0))
@@ -306,12 +308,13 @@ def _run_hook(cmd: str, *, cwd: Path, timeout: int, env_name: str) -> None:
     if not cmd.strip():
         return
     from gideon.security.protected_folders import protected_delete, refusal
+
     protected = protected_delete(cmd, cwd=str(cwd))
     if protected:
         raise AppLifecycleError(refusal(protected, where=f"an app's {env_name} hook"))
     try:
-        from gideon.security.sandbox import build_child_env
         from gideon.extensions.apps import app_python
+        from gideon.security.sandbox import build_child_env
 
         env = build_child_env(site="app-setup-hook")
         env.update(app_python.app_packages_env())
@@ -436,7 +439,9 @@ def _install_python_deps(manifest: AppManifest) -> list[str]:
     from gideon.extensions.apps import app_python
 
     try:
-        return app_python.ensure(manifest.name, reqs, label=manifest.displayName or manifest.name)
+        return app_python.ensure(
+            manifest.name, reqs, label=manifest.displayName or manifest.name
+        )
     except app_python.PackageInstallError as exc:
         raise AppLifecycleError(str(exc), log_excerpt=exc.log_excerpt) from exc
 
@@ -669,8 +674,12 @@ def _remove_app_skills(manifest: AppManifest, name: str) -> None:
 
 
 def preview(
-    source: str | Path, *, name: str = "", action: str = "install",
-    origin: str = "local", caller: str = "dashboard",
+    source: str | Path,
+    *,
+    name: str = "",
+    action: str = "install",
+    origin: str = "local",
+    caller: str = "dashboard",
 ) -> InstallResult:
     """Stage an app and return the disclosure bound to the exact staged bytes."""
     src = Path(source)
@@ -682,6 +691,7 @@ def preview(
         survey_app_tree(src).copy_to(staged)
         manifest = _load_staged_manifest(staged, action=action)
         from gideon.extensions.apps import disclosure
+
         review = disclosure.describe(manifest)
         previous = _manifest_of(name) if action == "update" and name else None
         previous_review = disclosure.describe(previous) if previous else None
@@ -689,29 +699,49 @@ def preview(
         report = default_scanner.scan(staged, tier)
         report.signature = signature
         if signature.is_invalid or report.verdict is Verdict.DANGEROUS:
-            return InstallResult(ok=False, name=manifest.name, scan=report,
+            return InstallResult(
+                ok=False,
+                name=manifest.name,
+                scan=report,
                 error="Review refused by signature or security scan",
-                review=review, previous_review=previous_review,
-                review_digest=disclosure.bundle_digest(staged))
+                review=review,
+                previous_review=previous_review,
+                review_digest=disclosure.bundle_digest(staged),
+            )
         import sys as _sys
+
         platform_cfg = manifest.platform
         if platform_cfg is not None and (
             platform_cfg.installMode == "client"
             or not platform_cfg.supports_platform(_sys.platform)
         ):
             ci = platform_cfg.clientInstall.to_dict()
-            return InstallResult(ok=False, name=manifest.name, scan=report,
-                needs_client_install=True, client_install=ci or {},
-                error=(f"'{manifest.name}' installs on your local machine, not this server"
-                       if platform_cfg.installMode == "client"
-                       else f"'{manifest.name}' does not support this server's platform ({_sys.platform})"),
-                review=review, previous_review=previous_review,
-                review_digest=disclosure.bundle_digest(staged))
+            return InstallResult(
+                ok=False,
+                name=manifest.name,
+                scan=report,
+                needs_client_install=True,
+                client_install=ci or {},
+                error=(
+                    f"'{manifest.name}' installs on your local machine, not this server"
+                    if platform_cfg.installMode == "client"
+                    else f"'{manifest.name}' does not support this server's platform ({_sys.platform})"
+                ),
+                review=review,
+                previous_review=previous_review,
+                review_digest=disclosure.bundle_digest(staged),
+            )
         changed = action == "install" or disclosure.changed(previous_review, review)
-        return InstallResult(ok=False, name=manifest.name, scan=report,
+        return InstallResult(
+            ok=False,
+            name=manifest.name,
+            scan=report,
             needs_consent=changed or report.verdict is Verdict.WARNING,
-            error="", review=review, previous_review=previous_review,
-            review_digest=disclosure.bundle_digest(staged))
+            error="",
+            review=review,
+            previous_review=previous_review,
+            review_digest=disclosure.bundle_digest(staged),
+        )
     except (AppLifecycleError, UnsafeBundleError, OSError) as exc:
         return InstallResult(ok=False, name=name, error=str(exc))
     finally:
@@ -760,12 +790,18 @@ def install(
         return InstallResult(ok=False, error=str(exc))
     name = manifest.name
     from gideon.extensions.apps import disclosure
+
     current_review = disclosure.describe(manifest)
     current_digest = disclosure.bundle_digest(staged)
     if review_digest is not None and review_digest != current_digest:
-        return InstallResult(ok=False, name=name, needs_consent=True,
-                             error="The staged app changed after review. Review it again.",
-                             review=current_review, review_digest=current_digest)
+        return InstallResult(
+            ok=False,
+            name=name,
+            needs_consent=True,
+            error="The staged app changed after review. Review it again.",
+            review=current_review,
+            review_digest=current_digest,
+        )
 
     try:
         signature, tier = _signature_gate(staged, origin)
@@ -818,7 +854,8 @@ def install(
                 hooks=[
                     {"name": h["name"], "event": h["event"], "provider": h["provider"]}
                     for h in manifest.extra.get("hooks", [])
-                    if isinstance(h, dict) and all(k in h for k in ("name", "event", "provider"))
+                    if isinstance(h, dict)
+                    and all(k in h for k in ("name", "event", "provider"))
                 ],
             )
 
@@ -873,7 +910,9 @@ def install(
         if restart_packages:
             from gideon.extensions.apps.app_runtime import note_restart
 
-            note_restart(name, [f"Python packages replaced: {', '.join(restart_packages)}"])
+            note_restart(
+                name, [f"Python packages replaced: {', '.join(restart_packages)}"]
+            )
         shutil.move(str(staged), str(dest))
 
         data_fact, parked = _restore_preserved_data(name, dest)
@@ -935,7 +974,9 @@ def install(
             ),
         )
         return InstallResult(
-            ok=True, name=name, scan=report,
+            ok=True,
+            name=name,
+            scan=report,
             restart_required=bool(restart_packages or app_runtime.restart_reason(name)),
             restart_packages=restart_packages,
             restart_reason=app_runtime.restart_reason(name),
@@ -1096,8 +1137,12 @@ def _copy_live_tree(
                     raise _LiveTreeChanged("app data/ changed while settling")
                 try:
                     shutil.copytree(
-                        source, destination, symlinks=True, dirs_exist_ok=True,
-                        copy_function=sqlite_files.copy_file, ignore=sqlite_files.sidecars_in
+                        source,
+                        destination,
+                        symlinks=True,
+                        dirs_exist_ok=True,
+                        copy_function=sqlite_files.copy_file,
+                        ignore=sqlite_files.sidecars_in,
                     )
                 except shutil.Error as exc:
                     failures = exc.args[0] if exc.args else []
@@ -1135,10 +1180,14 @@ def _carry_sidecar_venv(rollback: Path, live: Path) -> None:
     old_venv = rollback / "venv"
     new_venv = live / "venv"
     if old_venv.is_symlink():
-        raise AppLifecycleError("cannot update an app with a linked sidecar engine directory")
+        raise AppLifecycleError(
+            "cannot update an app with a linked sidecar engine directory"
+        )
     if old_venv.exists():
         if new_venv.exists() or new_venv.is_symlink():
-            raise AppLifecycleError("the staged app bundle cannot replace its sidecar engine")
+            raise AppLifecycleError(
+                "the staged app bundle cannot replace its sidecar engine"
+            )
         shutil.move(str(old_venv), str(new_venv))
 
 
@@ -1250,15 +1299,23 @@ def update(
 
     live = app_dir(name)
     from gideon.extensions.apps import disclosure
+
     current_review = disclosure.describe(manifest)
     previous_manifest = _manifest_of(name)
-    previous_review = disclosure.describe(previous_manifest) if previous_manifest else None
+    previous_review = (
+        disclosure.describe(previous_manifest) if previous_manifest else None
+    )
     current_digest = disclosure.bundle_digest(staged)
     if review_digest is not None and review_digest != current_digest:
-        return InstallResult(ok=False, name=name, needs_consent=True,
-                             error="The staged app changed after review. Review it again.",
-                             review=current_review, previous_review=previous_review,
-                             review_digest=current_digest)
+        return InstallResult(
+            ok=False,
+            name=name,
+            needs_consent=True,
+            error="The staged app changed after review. Review it again.",
+            review=current_review,
+            previous_review=previous_review,
+            review_digest=current_digest,
+        )
     rollback = _rollback_dir(name)
     try:
         if manifest.name != name:
@@ -1339,7 +1396,9 @@ def update(
         if restart_packages:
             from gideon.extensions.apps.app_runtime import note_restart
 
-            note_restart(name, [f"Python packages replaced: {', '.join(restart_packages)}"])
+            note_restart(
+                name, [f"Python packages replaced: {', '.join(restart_packages)}"]
+            )
 
         old_data = live / _APP_DATA_DIRNAME
         if old_data.is_dir():
@@ -1408,7 +1467,9 @@ def update(
         if any((live / "ui").rglob("*.js")) or any((live / "ui").rglob("*.mjs")):
             app_runtime.note_restart(
                 name,
-                ["The browser can retain nested app UI modules; reload the console to refresh them."],
+                [
+                    "The browser can retain nested app UI modules; reload the console to refresh them."
+                ],
             )
         _audit(
             "update",
@@ -1418,7 +1479,9 @@ def update(
             detail=_scan_detail(report, consent=confirm),
         )
         return InstallResult(
-            ok=True, name=name, scan=report,
+            ok=True,
+            name=name,
+            scan=report,
             restart_required=bool(restart_packages or app_runtime.restart_reason(name)),
             restart_packages=restart_packages,
             restart_reason=app_runtime.restart_reason(name),
@@ -1666,8 +1729,16 @@ def enable(name: str, *, caller: str = "app_manager") -> bool:
     except Exception as exc:
         meta.enabled = False
         _write_installed(name, meta)
-        _audit("enable", "error", name, caller=caller, error="Native app memory activation requires owner review")
-        logger.warning("app %s: native memory activation failed: %s", name, type(exc).__name__)
+        _audit(
+            "enable",
+            "error",
+            name,
+            caller=caller,
+            error="Native app memory activation requires owner review",
+        )
+        logger.warning(
+            "app %s: native memory activation failed: %s", name, type(exc).__name__
+        )
         return False
     if manifest is not None:
         from gideon.extensions.apps import app_runtime
@@ -1701,8 +1772,16 @@ def disable(name: str, *, caller: str = "app_manager") -> bool:
 
         revoke_app_namespace(name)
     except Exception as exc:
-        _audit("disable", "error", name, caller=caller, error="Native app memory grant could not be revoked")
-        logger.warning("app %s: native memory revocation failed: %s", name, type(exc).__name__)
+        _audit(
+            "disable",
+            "error",
+            name,
+            caller=caller,
+            error="Native app memory grant could not be revoked",
+        )
+        logger.warning(
+            "app %s: native memory revocation failed: %s", name, type(exc).__name__
+        )
         return False
     manifest = _manifest_of(name)
     from gideon.extensions.apps import app_runtime
@@ -1960,8 +2039,16 @@ def force_uninstall(name: str, *, caller: str = "app_manager") -> bool:
 
         revoke_app_namespace(name)
     except Exception as exc:
-        _audit("force_uninstall", "error", name, caller=caller, error="Native app memory grant could not be revoked")
-        logger.warning("app %s: native memory revocation failed: %s", name, type(exc).__name__)
+        _audit(
+            "force_uninstall",
+            "error",
+            name,
+            caller=caller,
+            error="Native app memory grant could not be revoked",
+        )
+        logger.warning(
+            "app %s: native memory revocation failed: %s", name, type(exc).__name__
+        )
         return False
     manifest = _manifest_of(name)
     from gideon.extensions.apps import app_runtime

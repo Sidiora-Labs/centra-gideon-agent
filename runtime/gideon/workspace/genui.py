@@ -16,8 +16,8 @@ small (every component costs prompt space) so the two stay legibly in step.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -120,8 +120,15 @@ CORE_COMPONENTS: tuple[GenUiComponent, ...] = (
         "Forms",
         "Action button — click sends its label as the turn",
         (
-            GenUiArg("label", "string", True, "visible text AND the message the transcript shows"),
-            GenUiArg("action", "string", True, "the action name the agent/run receives"),
+            GenUiArg(
+                "label",
+                "string",
+                True,
+                "visible text AND the message the transcript shows",
+            ),
+            GenUiArg(
+                "action", "string", True, "the action name the agent/run receives"
+            ),
             GenUiArg("tone", "string", note="primary (default) | danger"),
         ),
     ),
@@ -130,7 +137,12 @@ CORE_COMPONENTS: tuple[GenUiComponent, ...] = (
         "Forms",
         "Named text fields + one submit action",
         (
-            GenUiArg("fields", "string[]", True, "field names; values are sent as {name: value}"),
+            GenUiArg(
+                "fields",
+                "string[]",
+                True,
+                "field names; values are sent as {name: value}",
+            ),
             GenUiArg("action", "string", True),
             GenUiArg("submit", "string", note='submit button label (default "Submit")'),
             GenUiArg("title", "string"),
@@ -215,10 +227,10 @@ def uispec_library_prompt() -> str:
     """Separate JSON UISpec protocol for records supplied to visualize."""
     lines = [
         'Structured UISpec: emit a <widget kind="uispec"> block only for an explicit',
-        'data.generative_ui v1 envelope with a complete real recordId and bindings.',
-        'Return exactly the supplied JSON envelope. Do not invent, change, or complete records.',
-        'Template names and required binding keys/types follow. Actions without an',
-        'authorized product capability render unavailable; do not promise delivery.',
+        "data.generative_ui v1 envelope with a complete real recordId and bindings.",
+        "Return exactly the supplied JSON envelope. Do not invent, change, or complete records.",
+        "Template names and required binding keys/types follow. Actions without an",
+        "authorized product capability render unavailable; do not promise delivery.",
     ]
     for entry in uispec_catalog():
         fields = ", ".join(f"{key}: {kind}" for key, kind in entry["bindings"].items())
@@ -228,13 +240,26 @@ def uispec_library_prompt() -> str:
 
 def validate_uispec_envelope(value: Any) -> dict[str, Any] | None:
     """Bound authoring input; tree construction and action checks remain in the FE."""
-    if not isinstance(value, dict) or set(value) != {"schemaVersion", "template", "recordId", "bindings"}:
+    if not isinstance(value, dict) or set(value) != {
+        "schemaVersion",
+        "template",
+        "recordId",
+        "bindings",
+    }:
         return None
     if type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1:
         return None
-    entry = next((item for item in uispec_catalog() if item["template"] == value["template"]), None)
+    entry = next(
+        (item for item in uispec_catalog() if item["template"] == value["template"]),
+        None,
+    )
     record_id, bindings = value["recordId"], value["bindings"]
-    if not entry or not isinstance(record_id, str) or not 0 < len(record_id) <= 128 or not isinstance(bindings, dict):
+    if (
+        not entry
+        or not isinstance(record_id, str)
+        or not 0 < len(record_id) <= 128
+        or not isinstance(bindings, dict)
+    ):
         return None
     if set(bindings) != set(entry["bindings"]):
         return None
@@ -251,15 +276,43 @@ def validate_uispec_envelope(value: Any) -> dict[str, Any] | None:
         if isinstance(item, list):
             return len(item) <= 128 and all(bounded(part, depth + 1) for part in item)
         if isinstance(item, dict):
-            return len(item) <= 32 and all(isinstance(key, str) and key not in {"__proto__", "constructor", "prototype"} and bounded(part, depth + 1) for key, part in item.items())
+            return len(item) <= 32 and all(
+                isinstance(key, str)
+                and key not in {"__proto__", "constructor", "prototype"}
+                and bounded(part, depth + 1)
+                for key, part in item.items()
+            )
         return False
 
     for key, kind in entry["bindings"].items():
         bound = bindings[key]
-        actual = "array" if isinstance(bound, list) else "null" if bound is None else "boolean" if isinstance(bound, bool) else "number" if isinstance(bound, (int, float)) else "string" if isinstance(bound, str) else "object" if isinstance(bound, dict) else "invalid"
+        actual = (
+            "array"
+            if isinstance(bound, list)
+            else (
+                "null"
+                if bound is None
+                else (
+                    "boolean"
+                    if isinstance(bound, bool)
+                    else (
+                        "number"
+                        if isinstance(bound, (int, float))
+                        else (
+                            "string"
+                            if isinstance(bound, str)
+                            else "object" if isinstance(bound, dict) else "invalid"
+                        )
+                    )
+                )
+            )
+        )
         if actual != kind or not bounded(bound):
             return None
-        if (key.endswith(".src") or key == "src") and (not isinstance(bound, str) or not bound.lower().startswith(("https://", "http://"))):
+        if (key.endswith(".src") or key == "src") and (
+            not isinstance(bound, str)
+            or not bound.lower().startswith(("https://", "http://"))
+        ):
             return None
     if len(json.dumps(value, ensure_ascii=False)) > 65536:
         return None

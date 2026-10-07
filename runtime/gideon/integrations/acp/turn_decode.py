@@ -68,16 +68,35 @@ class TurnDecoder:
         metadata = result.get("_meta")
         usage = metadata.get("gideon_usage") if isinstance(metadata, dict) else None
         if isinstance(usage, dict):
-            names = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens")
-            valid = all(type(usage.get(name, 0)) is int and 0 <= usage.get(name, 0) <= 2**53 for name in names)
+            names = (
+                "input_tokens",
+                "output_tokens",
+                "cache_read_tokens",
+                "cache_creation_tokens",
+            )
+            valid = all(
+                type(usage.get(name, 0)) is int and 0 <= usage.get(name, 0) <= 2**53
+                for name in names
+            )
             cost = usage.get("cost_usd", 0)
-            valid = valid and type(cost) in (int, float) and math.isfinite(cost) and cost >= 0
-            valid = valid and all(type(usage.get(name, False)) is bool for name in ("usage_reported", "cost_reported"))
+            valid = (
+                valid
+                and type(cost) in (int, float)
+                and math.isfinite(cost)
+                and cost >= 0
+            )
+            valid = valid and all(
+                type(usage.get(name, False)) is bool
+                for name in ("usage_reported", "cost_reported")
+            )
             if valid:
                 for name in names:
                     setattr(terminal, name, usage.get(name, 0))
                 terminal.cost_usd = float(cost)
-                terminal.tool_meta = {name: usage.get(name, False) for name in ("usage_reported", "cost_reported")}
+                terminal.tool_meta = {
+                    name: usage.get(name, False)
+                    for name in ("usage_reported", "cost_reported")
+                }
         events.append(terminal)
         return events
 
@@ -90,12 +109,18 @@ class TurnDecoder:
     def permission(self, message) -> list[AcpEvent]:
         owner = self.session
         event = translate.build_permission_event(
-            message, owner._dialect, owner._tool_call_inputs,
-            owner._tool_call_seen, owner._offered_options,
+            message,
+            owner._dialect,
+            owner._tool_call_inputs,
+            owner._tool_call_seen,
+            owner._offered_options,
         )
         from gideon.security.security import redact_field
+
         owner._asked_steps[str(event.request_id)] = redact_field(event.title)[:300]
-        event.tool_meta["deny_consequence"] = owner.deny_outcome(event.request_id)["consequence"]
+        event.tool_meta["deny_consequence"] = owner.deny_outcome(event.request_id)[
+            "consequence"
+        ]
         return [event]
 
     def update(self, message) -> list[AcpEvent]:

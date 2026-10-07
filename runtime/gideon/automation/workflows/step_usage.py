@@ -42,7 +42,11 @@ class CallLog:
         _append_once(self.models, model)
 
     def event(
-        self, call_id: str, event: Any, *, cost_usd: float | None = None,
+        self,
+        call_id: str,
+        event: Any,
+        *,
+        cost_usd: float | None = None,
         cost_reported: bool | None = None,
     ) -> bool:
         if not self.accepting:
@@ -54,7 +58,11 @@ class CallLog:
         tokens = int(getattr(event, "input_tokens", 0) or 0) + int(
             getattr(event, "output_tokens", 0) or 0
         )
-        cost = float(getattr(event, "cost_usd", 0.0) or 0.0) if cost_usd is None else float(cost_usd)
+        cost = (
+            float(getattr(event, "cost_usd", 0.0) or 0.0)
+            if cost_usd is None
+            else float(cost_usd)
+        )
         has_cost = (cost > 0.0) if cost_reported is None else cost_reported
         tokens_known = reported or tokens != 0
         cost_known = reported or has_cost
@@ -108,11 +116,18 @@ def guarded_call_started(call_id: str, provider: str, model: str) -> None:
 
 
 def guarded_call_event(
-    call_id: str, event: Any, *, cost_usd: float | None = None,
+    call_id: str,
+    event: Any,
+    *,
+    cost_usd: float | None = None,
     cost_reported: bool | None = None,
 ) -> bool:
     log = _ACTIVE.get()
-    return log.event(call_id, event, cost_usd=cost_usd, cost_reported=cost_reported) if log is not None else False
+    return (
+        log.event(call_id, event, cost_usd=cost_usd, cost_reported=cost_reported)
+        if log is not None
+        else False
+    )
 
 
 def guarded_call_ended(call_id: str, *, completed: bool) -> None:
@@ -138,8 +153,14 @@ class StepUsage:
             "tokens": None if self.tokens is None else int(self.tokens),
             "model": self.model,
             "provider": self.provider,
-            "cost_usd": None if self.cost_usd is None else round(float(self.cost_usd), 6),
-            **({"model_substituted": list(self.substitutions)} if self.substitutions else {}),
+            "cost_usd": (
+                None if self.cost_usd is None else round(float(self.cost_usd), 6)
+            ),
+            **(
+                {"model_substituted": list(self.substitutions)}
+                if self.substitutions
+                else {}
+            ),
         }
 
     def billable(self, estimate: int = 0) -> int:
@@ -190,11 +211,15 @@ def subagent_usage(info: Any) -> StepUsage:
     for record in getattr(info, "model_substitutions", []) or []:
         if not isinstance(record, dict):
             continue
-        requested = str(record.get("requested", "") or record.get("requested_model", "") or "")
+        requested = str(
+            record.get("requested", "") or record.get("requested_model", "") or ""
+        )
         served = str(record.get("served", "") or record.get("served_model", "") or "")
         reason = str(record.get("why", "") or record.get("reason", "") or "")
         if requested or served:
-            substitutions.append(f"{requested} → {served}" + (f": {reason}" if reason else ""))
+            substitutions.append(
+                f"{requested} → {served}" + (f": {reason}" if reason else "")
+            )
     return StepUsage(
         tokens=int(getattr(info, "input_tokens", 0) or 0)
         + int(getattr(info, "output_tokens", 0) or 0),

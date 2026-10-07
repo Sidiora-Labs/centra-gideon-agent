@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
-from collections.abc import Callable
 import contextlib
+import inspect
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -196,6 +196,7 @@ class _ReconciliationPass:
     async def execute(self):
         owner = self.supervisor
         from gideon.automation.workflows import private_runs
+
         await private_runs.reconcile(owner)
         for identity, controller in list(owner._controllers.items()):
             if controller.run.is_terminal:
@@ -275,7 +276,11 @@ class WorkflowWatchdog:
     @property
     def event_loop(self) -> asyncio.AbstractEventLoop | None:
         loop = self._event_loop
-        return loop if loop is not None and not loop.is_closed() and loop.is_running() else None
+        return (
+            loop
+            if loop is not None and not loop.is_closed() and loop.is_running()
+            else None
+        )
 
     def run_threadsafe(self, work: Callable[[], Any]) -> Any:
         """Run a service mutation on the controller's owning loop from a worker thread."""
@@ -292,17 +297,23 @@ class WorkflowWatchdog:
                 close = getattr(result, "close", None)
                 if callable(close):
                     close()
-                raise RuntimeError("awaitable workflow call must be awaited on the supervisor loop")
+                raise RuntimeError(
+                    "awaitable workflow call must be awaited on the supervisor loop"
+                )
             return result
+
         async def execute():
             result = work()
             return await result if inspect.isawaitable(result) else result
+
         return asyncio.run_coroutine_threadsafe(execute(), home).result()
 
     def _take_over_from(self, controller: RunController) -> None:
         self._controllers.pop(controller.run.id, None)
         controller.let_go()
-        logger.warning("workflow run %s: adopting after its controller stopped", controller.run.id)
+        logger.warning(
+            "workflow run %s: adopting after its controller stopped", controller.run.id
+        )
 
     def register(self, controller: RunController) -> None:
         self._controllers[controller.run.id] = controller
@@ -319,7 +330,11 @@ class WorkflowWatchdog:
         home = self.event_loop
         current = asyncio.get_running_loop()
         if home is not None and home is not current:
-            return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self.launch(run, spec, depth=depth), home))
+            return await asyncio.wrap_future(
+                asyncio.run_coroutine_threadsafe(
+                    self.launch(run, spec, depth=depth), home
+                )
+            )
         self._event_loop = current
         found = self.controller(run.id)
         if found is None:

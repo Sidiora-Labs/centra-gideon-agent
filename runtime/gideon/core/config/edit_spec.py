@@ -18,56 +18,148 @@ class SecurityControl:
 
 
 SECURITY_CONTROLS: dict[str, SecurityControl] = {
-    "agent.yolo": SecurityControl("Enable automatic approval of agent actions.", "true"),
-    "agent.approval_mode": SecurityControl("Allow more agent actions without asking.", "approval"),
-    "agent.approval_timeout_minutes": SecurityControl("Keep approval requests open for longer before denying them.", "higher"),
-    "agent.soft_stop_budget_secs": SecurityControl("Give agent work longer before a soft stop takes effect.", "higher"),
-    "agent.max_subagents": SecurityControl("Allow an agent to start more concurrent subagents.", "higher"),
-    "agent.subagent_timeout_secs": SecurityControl("Allow each subagent to run longer.", "higher"),
-    "agent.spawn_min_memory_gb": SecurityControl("Allow agent work to start with less available memory.", "lower"),
+    "agent.yolo": SecurityControl(
+        "Enable automatic approval of agent actions.", "true"
+    ),
+    "agent.approval_mode": SecurityControl(
+        "Allow more agent actions without asking.", "approval"
+    ),
+    "agent.approval_timeout_minutes": SecurityControl(
+        "Keep approval requests open for longer before denying them.", "higher"
+    ),
+    "agent.soft_stop_budget_secs": SecurityControl(
+        "Give agent work longer before a soft stop takes effect.", "higher"
+    ),
+    "agent.max_subagents": SecurityControl(
+        "Allow an agent to start more concurrent subagents.", "higher"
+    ),
+    "agent.subagent_timeout_secs": SecurityControl(
+        "Allow each subagent to run longer.", "higher"
+    ),
+    "agent.spawn_min_memory_gb": SecurityControl(
+        "Allow agent work to start with less available memory.", "lower"
+    ),
     "agent.sandbox": SecurityControl("Disable the agent sandbox.", "sandbox"),
-    "agent.subagent_cwd_allowed_roots": SecurityControl("Allow agents to access more directories.", "added"),
-    "auth.require_totp": SecurityControl("Stop requiring a second factor at sign in.", "false"),
+    "agent.subagent_cwd_allowed_roots": SecurityControl(
+        "Allow agents to access more directories.", "added"
+    ),
+    "auth.require_totp": SecurityControl(
+        "Stop requiring a second factor at sign in.", "false"
+    ),
     "auth.login_enabled": SecurityControl("Enable password sign in.", "true"),
-    "auth.session_ttl": SecurityControl("Keep sign in sessions valid for longer.", "longer"),
-    "auth.lockout_threshold": SecurityControl("Allow more failed sign in attempts.", "higher"),
-    "auth.lockout_window": SecurityControl("Shorten the sign in lockout period.", "shorter"),
-    "security.egress": SecurityControl("Allow connections to more network destinations.", "egress"),
-    "security.credential_keychain": SecurityControl("Stop using the operating system credential store.", "false"),
-    "security.denied_commands": SecurityControl("Allow commands that were previously denied.", "removed"),
-    "security.mcp_elicitation_servers": SecurityControl("Allow more MCP servers to interrupt for input.", "added"),
-    "security.mcp_read_only_servers": SecurityControl("Allow more MCP servers to make changes.", "removed"),
-    "security.outside_home": SecurityControl("Allow more paths outside the Gideon home.", "added"),
+    "auth.session_ttl": SecurityControl(
+        "Keep sign in sessions valid for longer.", "longer"
+    ),
+    "auth.lockout_threshold": SecurityControl(
+        "Allow more failed sign in attempts.", "higher"
+    ),
+    "auth.lockout_window": SecurityControl(
+        "Shorten the sign in lockout period.", "shorter"
+    ),
+    "security.egress": SecurityControl(
+        "Allow connections to more network destinations.", "egress"
+    ),
+    "security.credential_keychain": SecurityControl(
+        "Stop using the operating system credential store.", "false"
+    ),
+    "security.denied_commands": SecurityControl(
+        "Allow commands that were previously denied.", "removed"
+    ),
+    "security.mcp_elicitation_servers": SecurityControl(
+        "Allow more MCP servers to interrupt for input.", "added"
+    ),
+    "security.mcp_read_only_servers": SecurityControl(
+        "Allow more MCP servers to make changes.", "removed"
+    ),
+    "security.outside_home": SecurityControl(
+        "Allow more paths outside the Gideon home.", "added"
+    ),
     "sandbox.nofile": SecurityControl("Raise the process file limit.", "higher"),
     "sandbox.max_pids": SecurityControl("Allow more processes to run.", "higher"),
-    "sandbox.max_rss_mb": SecurityControl("Allow more memory use by sandboxed processes.", "higher"),
-    "sandbox.cgroup_scopes": SecurityControl("Disable resource isolation for child processes.", "false"),
-    "sandbox.env_passthrough": SecurityControl("Expose more environment variables to child processes.", "added"),
-    "guardrails.budgets.max_tokens_per_run": SecurityControl("Raise the per-run token limit.", "higher"),
-    "guardrails.budgets.max_tokens_per_day": SecurityControl("Raise the daily token limit.", "higher"),
-    "guardrails.budgets.max_dollars_per_day": SecurityControl("Raise the daily spending limit.", "higher"),
-    "guardrails.loop_breaker.circuit_threshold": SecurityControl("Raise the circuit-breaker threshold.", "higher"),
-    "guardrails.breaker.failure_threshold": SecurityControl("Allow more failures before the circuit breaker opens.", "higher"),
-    "guardrails.breaker.recovery_secs": SecurityControl("Reduce the time a tripped circuit breaker remains open.", "lower"),
-    "guardrails.autonomy.clean_approvals": SecurityControl("Require fewer successful approvals before granting autonomy.", "lower"),
-    "guardrails.autonomy.min_days": SecurityControl("Require fewer days of history before granting autonomy.", "lower"),
-    "guardrails.autonomy.max_rejections": SecurityControl("Allow more rejected actions before autonomy is suspended.", "higher"),
-    "guardrails.autonomy.cooldown_days": SecurityControl("Shorten the cooldown before autonomy is restored.", "lower"),
-    "guardrails.autonomy.evidence_window_days": SecurityControl("Use a shorter evidence window for autonomy decisions.", "lower"),
-    "guardrails.scan_mode": SecurityControl("Use a less restrictive content scan mode.", "scan"),
-    "external_access.enabled": SecurityControl("Enable external access to Gideon.", "true"),
-    "external_access.openai.enabled": SecurityControl("Enable the OpenAI external API.", "true"),
-    "external_access.mcp.enabled": SecurityControl("Enable the external MCP API.", "true"),
-    "external_access.a2a.enabled": SecurityControl("Enable the external agent API.", "true"),
-    "external_access.capture.enabled": SecurityControl("Enable external capture routes.", "true"),
-    "external_access.bridge.enabled": SecurityControl("Enable external bridge routes.", "true"),
-    "external_access.rate_rps": SecurityControl("Raise the external request rate limit.", "higher"),
-    "external_access.rate_burst": SecurityControl("Raise the external request burst limit.", "higher"),
-    "external_access.rate_concurrent": SecurityControl("Raise the external concurrent request limit.", "higher"),
-    "external_access.auto_disable_after_breaches": SecurityControl("Allow more breaches before external access is disabled.", "higher"),
-    "external_access.capture_retention_days": SecurityControl("Retain external request records for longer.", "higher"),
-    "external_access.capture.retention_days": SecurityControl("Retain external request records for longer.", "higher"),
-    "external_access.capture.upstream_allowlist": SecurityControl("Allow external capture to contact more destinations.", "added"),
+    "sandbox.max_rss_mb": SecurityControl(
+        "Allow more memory use by sandboxed processes.", "higher"
+    ),
+    "sandbox.cgroup_scopes": SecurityControl(
+        "Disable resource isolation for child processes.", "false"
+    ),
+    "sandbox.env_passthrough": SecurityControl(
+        "Expose more environment variables to child processes.", "added"
+    ),
+    "guardrails.budgets.max_tokens_per_run": SecurityControl(
+        "Raise the per-run token limit.", "higher"
+    ),
+    "guardrails.budgets.max_tokens_per_day": SecurityControl(
+        "Raise the daily token limit.", "higher"
+    ),
+    "guardrails.budgets.max_dollars_per_day": SecurityControl(
+        "Raise the daily spending limit.", "higher"
+    ),
+    "guardrails.loop_breaker.circuit_threshold": SecurityControl(
+        "Raise the circuit-breaker threshold.", "higher"
+    ),
+    "guardrails.breaker.failure_threshold": SecurityControl(
+        "Allow more failures before the circuit breaker opens.", "higher"
+    ),
+    "guardrails.breaker.recovery_secs": SecurityControl(
+        "Reduce the time a tripped circuit breaker remains open.", "lower"
+    ),
+    "guardrails.autonomy.clean_approvals": SecurityControl(
+        "Require fewer successful approvals before granting autonomy.", "lower"
+    ),
+    "guardrails.autonomy.min_days": SecurityControl(
+        "Require fewer days of history before granting autonomy.", "lower"
+    ),
+    "guardrails.autonomy.max_rejections": SecurityControl(
+        "Allow more rejected actions before autonomy is suspended.", "higher"
+    ),
+    "guardrails.autonomy.cooldown_days": SecurityControl(
+        "Shorten the cooldown before autonomy is restored.", "lower"
+    ),
+    "guardrails.autonomy.evidence_window_days": SecurityControl(
+        "Use a shorter evidence window for autonomy decisions.", "lower"
+    ),
+    "guardrails.scan_mode": SecurityControl(
+        "Use a less restrictive content scan mode.", "scan"
+    ),
+    "external_access.enabled": SecurityControl(
+        "Enable external access to Gideon.", "true"
+    ),
+    "external_access.openai.enabled": SecurityControl(
+        "Enable the OpenAI external API.", "true"
+    ),
+    "external_access.mcp.enabled": SecurityControl(
+        "Enable the external MCP API.", "true"
+    ),
+    "external_access.a2a.enabled": SecurityControl(
+        "Enable the external agent API.", "true"
+    ),
+    "external_access.capture.enabled": SecurityControl(
+        "Enable external capture routes.", "true"
+    ),
+    "external_access.bridge.enabled": SecurityControl(
+        "Enable external bridge routes.", "true"
+    ),
+    "external_access.rate_rps": SecurityControl(
+        "Raise the external request rate limit.", "higher"
+    ),
+    "external_access.rate_burst": SecurityControl(
+        "Raise the external request burst limit.", "higher"
+    ),
+    "external_access.rate_concurrent": SecurityControl(
+        "Raise the external concurrent request limit.", "higher"
+    ),
+    "external_access.auto_disable_after_breaches": SecurityControl(
+        "Allow more breaches before external access is disabled.", "higher"
+    ),
+    "external_access.capture_retention_days": SecurityControl(
+        "Retain external request records for longer.", "higher"
+    ),
+    "external_access.capture.retention_days": SecurityControl(
+        "Retain external request records for longer.", "higher"
+    ),
+    "external_access.capture.upstream_allowlist": SecurityControl(
+        "Allow external capture to contact more destinations.", "added"
+    ),
 }
 
 
@@ -85,7 +177,9 @@ def security_loosening(field: str, current: Any, new: Any) -> str:
     elif mode == "false":
         loosened = new is False and current is not False
     elif mode == "higher":
-        numeric = lambda value: isinstance(value, (int, float)) and not isinstance(value, bool)
+        numeric = lambda value: isinstance(value, (int, float)) and not isinstance(
+            value, bool
+        )
         if not numeric(current) or not numeric(new):
             loosened = True
         elif field in {
@@ -107,7 +201,9 @@ def security_loosening(field: str, current: Any, new: Any) -> str:
         else:
             loosened = new > current
     elif mode == "lower":
-        numeric = lambda value: isinstance(value, (int, float)) and not isinstance(value, bool)
+        numeric = lambda value: isinstance(value, (int, float)) and not isinstance(
+            value, bool
+        )
         if not numeric(current) or not numeric(new):
             loosened = True
         elif field == "agent.spawn_min_memory_gb" and (current == 0 or new == 0):
@@ -116,20 +212,28 @@ def security_loosening(field: str, current: Any, new: Any) -> str:
             loosened = new < current
     elif mode == "longer":
         units = {"m": 1, "h": 60, "d": 1440}
+
         def minutes(value: Any) -> int | None:
-            if not isinstance(value, str) or not re.fullmatch(r"\d+[mhd]", value.strip()):
+            if not isinstance(value, str) or not re.fullmatch(
+                r"\d+[mhd]", value.strip()
+            ):
                 return None
             text = value.strip()
             return int(text[:-1]) * units[text[-1]]
+
         old, updated = minutes(current), minutes(new)
         loosened = old is None or (updated is not None and updated > old)
     elif mode == "shorter":
         units = {"m": 1, "h": 60, "d": 1440}
+
         def minutes(value: Any) -> int | None:
-            if not isinstance(value, str) or not re.fullmatch(r"\d+[mhd]", value.strip()):
+            if not isinstance(value, str) or not re.fullmatch(
+                r"\d+[mhd]", value.strip()
+            ):
                 return None
             text = value.strip()
             return int(text[:-1]) * units[text[-1]]
+
         old, updated = minutes(current), minutes(new)
         loosened = old is None or (updated is not None and updated < old)
     elif mode == "approval":
@@ -141,7 +245,11 @@ def security_loosening(field: str, current: Any, new: Any) -> str:
         if not isinstance(current, list) or not isinstance(new, list):
             loosened = True
         else:
-            loosened = bool(set(new) - set(current)) if mode == "added" else bool(set(current) - set(new))
+            loosened = (
+                bool(set(new) - set(current))
+                if mode == "added"
+                else bool(set(current) - set(new))
+            )
     elif mode == "scan":
         rank = {"block": 0, "redact": 1, "warn": 2}
         loosened = current not in rank or new not in rank or rank[new] > rank[current]
@@ -149,9 +257,15 @@ def security_loosening(field: str, current: Any, new: Any) -> str:
         if not isinstance(current, dict) or not isinstance(new, dict):
             loosened = True
         else:
-            loosened = bool(new.get("allow_private")) and not bool(current.get("allow_private"))
-            loosened |= bool(set(new.get("allow_hosts", [])) - set(current.get("allow_hosts", [])))
-            loosened |= bool(set(current.get("deny_hosts", [])) - set(new.get("deny_hosts", [])))
+            loosened = bool(new.get("allow_private")) and not bool(
+                current.get("allow_private")
+            )
+            loosened |= bool(
+                set(new.get("allow_hosts", [])) - set(current.get("allow_hosts", []))
+            )
+            loosened |= bool(
+                set(current.get("deny_hosts", [])) - set(new.get("deny_hosts", []))
+            )
     else:
         loosened = False
     return control.consent if loosened else ""
@@ -231,15 +345,26 @@ class EditCandidate:
         return self.value
 
     def channel_ids(self):
-        if not isinstance(self.value, list) or any(not isinstance(item, str) for item in self.value):
+        if not isinstance(self.value, list) or any(
+            not isinstance(item, str) for item in self.value
+        ):
             self.deny("must be a list of channel ids")
         if len(self.value) > 100:
             self.deny("must have at most 100 channel ids")
         result = []
         for item in self.value:
             value = item.strip()
-            if not value or len(value) > 256 or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
-                self.deny("each channel id must be a non-empty, single-line value of at most 256 characters")
+            if (
+                not value
+                or len(value) > 256
+                or any(
+                    char.isspace() or ord(char) < 32 or ord(char) == 127
+                    for char in value
+                )
+            ):
+                self.deny(
+                    "each channel id must be a non-empty, single-line value of at most 256 characters"
+                )
             if value not in result:
                 result.append(value)
         return result

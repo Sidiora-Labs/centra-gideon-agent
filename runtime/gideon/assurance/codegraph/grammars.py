@@ -82,7 +82,9 @@ def pack_version() -> str:
 def platform_key() -> str:
     """This machine's name in the pack's manifest (``macos-arm64``, ``linux-x86_64``, ...)."""
     machine = platform.machine().lower()
-    arch = {"amd64": "x86_64", "x64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
+    arch = {"amd64": "x86_64", "x64": "x86_64", "arm64": "aarch64"}.get(
+        machine, machine
+    )
     if sys.platform == "darwin":
         return f"macos-{'arm64' if arch == 'aarch64' else arch}"
     if sys.platform.startswith("linux"):
@@ -112,11 +114,14 @@ def manifest_path() -> Path:
         )
     from gideon.core.config.loader import config_dir
     from gideon.operations.durability.home_paths import home_path
+
     home = config_dir()
     path = Path(urllib.request.url2pathname(parsed.path))
     expected = home_path(home, "cache/tree-sitter-language-pack/parsers.json")
     if parsed.netloc or path != expected:
-        raise GrammarUnavailable("The code map grammar manifest must be in Gideon's own cache.")
+        raise GrammarUnavailable(
+            "The code map grammar manifest must be in Gideon's own cache."
+        )
     return expected
 
 
@@ -127,10 +132,12 @@ def bundle_path(folder: Path) -> Path:
 
 from contextlib import contextmanager
 
+
 @contextmanager
 def _locked(manifest: Path):
     from gideon.operations.durability.home_paths import home_path, open_lock
     from gideon.operations.durability.record_files import _lock, _unlock
+
     manifest.parent.mkdir(parents=True, exist_ok=True)
     lock = home_path(manifest.parent, ".grammar-fetch.lock")
     with open_lock(lock) as handle:
@@ -159,7 +166,9 @@ def ensure(language: str) -> None:
         # The pack knows its languages without a manifest: a language it has no grammar for is
         # answered here, with nothing fetched to say no.
         if not pack.has_language(language):
-            raise GrammarUnavailable(f"The language pack has no grammar for {language}.")
+            raise GrammarUnavailable(
+                f"The language pack has no grammar for {language}."
+            )
         fetched = bundle_path(manifest_file.parent)
         if _unpacked(pack, language) and not fetched.exists():
             return
@@ -209,6 +218,7 @@ def _egress_settings() -> tuple[Any, ...]:
 
     policy = egress_policy_for(CONNECTOR)
     from gideon.security.net.policy import egress_policy_for_run
+
     return (str(manifest_path()), policy, egress_policy_for_run(CONNECTOR))
 
 
@@ -222,12 +232,16 @@ def _unpacked(pack: Any, language: str) -> bool:
     try:
         pack.get_parser(language)
     except Exception:  # noqa: BLE001 — not on this machine yet: the caller fetches it
-        logger.debug("grammars: no grammar for %s on this machine yet", language, exc_info=True)
+        logger.debug(
+            "grammars: no grammar for %s on this machine yet", language, exc_info=True
+        )
         return False
     return language in pack.downloaded_languages()
 
 
-def _manifest_or_remember_why_not(version: str, settings: tuple[Any, ...]) -> dict[str, Any]:
+def _manifest_or_remember_why_not(
+    version: str, settings: tuple[Any, ...]
+) -> dict[str, Any]:
     try:
         return _manifest(version)
     except GrammarUnavailable as exc:
@@ -241,12 +255,18 @@ def _manifest(version: str) -> dict[str, Any]:
     if key in _manifests:
         return _manifests[key]
     url = f"{RELEASES}/v{version}/parsers.json"
-    body = _get(url, max_bytes=MANIFEST_MAX_BYTES, timeout_s=60.0, what="the grammar list")
+    body = _get(
+        url, max_bytes=MANIFEST_MAX_BYTES, timeout_s=60.0, what="the grammar list"
+    )
     try:
         manifest = json.loads(body)
     except ValueError as exc:
-        raise GrammarUnavailable(f"The grammar list from {url} is not JSON ({exc}).") from exc
-    if not isinstance(manifest, dict) or not isinstance(manifest.get("platforms"), dict):
+        raise GrammarUnavailable(
+            f"The grammar list from {url} is not JSON ({exc})."
+        ) from exc
+    if not isinstance(manifest, dict) or not isinstance(
+        manifest.get("platforms"), dict
+    ):
         raise GrammarUnavailable(f"The grammar list from {url} has no bundles in it.")
     _manifests[key] = manifest
     return manifest
@@ -262,13 +282,23 @@ def _fetch_bundle(manifest: dict[str, Any], manifest_file: Path) -> None:
     if not isinstance(entry, dict):
         raise GrammarUnavailable(f"The language pack publishes no grammars for {key}.")
     url, digest, size = entry.get("url"), entry.get("sha256"), entry.get("size")
-    if not (isinstance(url, str) and urllib.parse.urlparse(url).scheme in BUNDLE_SCHEMES):
-        raise GrammarUnavailable(f"The grammar list gives no https address for {key}'s grammars.")
+    if not (
+        isinstance(url, str) and urllib.parse.urlparse(url).scheme in BUNDLE_SCHEMES
+    ):
+        raise GrammarUnavailable(
+            f"The grammar list gives no https address for {key}'s grammars."
+        )
     if not (isinstance(digest, str) and _SHA256.fullmatch(digest)):
-        raise GrammarUnavailable(f"The grammar list gives no digest for {key}'s grammars.")
+        raise GrammarUnavailable(
+            f"The grammar list gives no digest for {key}'s grammars."
+        )
     if not (type(size) is int and 0 < size <= BUNDLE_MAX_BYTES):
-        raise GrammarUnavailable(f"The grammar list gives no usable size for {key}'s grammars.")
-    body = _get(url, max_bytes=size + 1, timeout_s=BUNDLE_TIMEOUT_S, what="the grammars")
+        raise GrammarUnavailable(
+            f"The grammar list gives no usable size for {key}'s grammars."
+        )
+    body = _get(
+        url, max_bytes=size + 1, timeout_s=BUNDLE_TIMEOUT_S, what="the grammars"
+    )
     if len(body) != size:
         raise GrammarUnavailable(
             f"The grammars from {url} were {len(body)} bytes, and the grammar list says {size}."
@@ -280,6 +310,7 @@ def _fetch_bundle(manifest: dict[str, Any], manifest_file: Path) -> None:
         )
     folder = manifest_file.parent
     from gideon.operations.durability.home_paths import home_path
+
     bundle = home_path(folder, bundle_path(folder).name)
     atomic_write_bytes(bundle, body)
     local = {
@@ -294,16 +325,21 @@ def _get(url: str, *, max_bytes: int, timeout_s: float, what: str) -> bytes:
     from gideon.security.net import CONNECTOR, EgressBlocked, egress_policy_for, fetch
     from gideon.security.net.guard import refusal_for
 
-    policy = egress_policy_for(CONNECTOR).with_overrides(max_bytes=max_bytes, timeout_s=timeout_s)
+    policy = egress_policy_for(CONNECTOR).with_overrides(
+        max_bytes=max_bytes, timeout_s=timeout_s
+    )
     try:
         response = _run(fetch(url, policy=policy))
     except EgressBlocked as exc:
         then = "and the code map fetches it the next time it needs a grammar"
         raise GrammarUnavailable(
-            f"The code map could not fetch {what}. " + refusal_for(url, exc.decision, then=then)
+            f"The code map could not fetch {what}. "
+            + refusal_for(url, exc.decision, then=then)
         ) from exc
     except Exception as exc:  # noqa: BLE001 — the network's failure, told as a reason
-        raise GrammarUnavailable(f"The code map could not fetch {what} from {url}: {exc}") from exc
+        raise GrammarUnavailable(
+            f"The code map could not fetch {what} from {url}: {exc}"
+        ) from exc
     if response.status != 200:
         raise GrammarUnavailable(
             f"The code map could not fetch {what}: {url} answered {response.status}."

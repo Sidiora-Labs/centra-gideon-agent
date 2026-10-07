@@ -352,8 +352,7 @@ async def api_approvals(request: web.Request) -> web.Response:
 async def api_approval_resolve(request: web.Request) -> web.Response:
     """POST /api/approvals/{id}/{action} — approve or reject."""
     state: ConsoleState = request.app["state"]
-    from gideon.security.approval_answer import of_request
-    from gideon.security.approval_answer import check
+    from gideon.security.approval_answer import check, of_request
 
     principal = of_request(request)
     approval_id = request.match_info["id"]
@@ -403,7 +402,12 @@ async def api_approval_resolve(request: web.Request) -> web.Response:
         )
     if result == "expired":
         return web.json_response(
-            {"error": {"code": "approval_expired", "message": "This approval request expired."}},
+            {
+                "error": {
+                    "code": "approval_expired",
+                    "message": "This approval request expired.",
+                }
+            },
             status=410,
         )
     if result == "missing":

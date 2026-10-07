@@ -65,6 +65,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from gideon.core.periodic_sweep import PeriodicSweep
 from gideon.extensions.apps.backend_runtime import _TERM_TIMEOUT, BackendSupervisor
 from gideon.extensions.apps.background import (
     BACKGROUND_TASKS_PERMISSION,
@@ -73,7 +74,6 @@ from gideon.extensions.apps.background import (
 )
 from gideon.extensions.apps.manager import app_dir
 from gideon.extensions.apps.manifest import AppManifest
-from gideon.core.periodic_sweep import PeriodicSweep
 
 logger = logging.getLogger(__name__)
 
@@ -334,12 +334,23 @@ class WorkerSupervisor:
             code = rec.proc.poll() if rec.proc is not None else None
             if code is not None and rec.output is not None:
                 rec.output.ended(code)
-            rows.append({
-                "name": rec.worker, "running": running,
-                "state": rec.state.value if running or rec.state is not WorkerState.RUNNING else "exited",
-                "reason": rec.reason,
-                "exit": rec.output.report() if not running and rec.output is not None else None,
-            })
+            rows.append(
+                {
+                    "name": rec.worker,
+                    "running": running,
+                    "state": (
+                        rec.state.value
+                        if running or rec.state is not WorkerState.RUNNING
+                        else "exited"
+                    ),
+                    "reason": rec.reason,
+                    "exit": (
+                        rec.output.report()
+                        if not running and rec.output is not None
+                        else None
+                    ),
+                }
+            )
         return rows
 
     def list_running(self) -> list[SupervisedWorker]:
@@ -464,7 +475,9 @@ class WorkerSupervisor:
                 "app %s worker %s failed to launch: %s", rec.app, rec.worker, exc
             )
             return False
-        rec.output = ChildOutput(app=rec.app, process=f"worker {rec.worker}", pid=proc.pid, env=env)
+        rec.output = ChildOutput(
+            app=rec.app, process=f"worker {rec.worker}", pid=proc.pid, env=env
+        )
         relay(proc, rec.output)
         rec.proc = proc
         rec.pid = proc.pid

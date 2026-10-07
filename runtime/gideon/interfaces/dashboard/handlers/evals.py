@@ -69,10 +69,12 @@ async def api_evals_judge_bench(request: web.Request) -> web.Response:
             status=500,
         )
     if view is None:
-        return web.json_response({
-            "state": "not_run",
-            "next_action": "Run `gideon judge-bench` to produce one.",
-        })
+        return web.json_response(
+            {
+                "state": "not_run",
+                "next_action": "Run `gideon judge-bench` to produce one.",
+            }
+        )
     _audit(request, "evals_judge_bench", "read", f"bench_id={view.get('bench_id')}")
     return web.json_response(view)
 
@@ -183,10 +185,12 @@ async def api_evals_ablation(request: web.Request) -> web.Response:
             status=500,
         )
     if view is None:
-        return web.json_response({
-            "state": "not_run",
-            "next_action": "Register a component in `evals/ablation_registry.json` and run `gideon ablation --force`.",
-        })
+        return web.json_response(
+            {
+                "state": "not_run",
+                "next_action": "Register a component in `evals/ablation_registry.json` and run `gideon ablation --force`.",
+            }
+        )
     _audit(
         request,
         "evals_ablation",
@@ -198,10 +202,15 @@ async def api_evals_ablation(request: web.Request) -> web.Response:
 
 def _learning_benchmark_next_action() -> str:
     import shlex
+
     from gideon.core.config.loader import config_dir, default_config_dir
 
     home = config_dir()
-    prefix = f"GIDEON_HOME={shlex.quote(str(home))} " if home.resolve() != default_config_dir().resolve() else ""
+    prefix = (
+        f"GIDEON_HOME={shlex.quote(str(home))} "
+        if home.resolve() != default_config_dir().resolve()
+        else ""
+    )
     command = f"{prefix}python tooling/scripts/learning_benchmark.py"
     return f"Run `{command} --preflight` and then `{command} --run`."
 
@@ -238,10 +247,12 @@ async def api_evals_learning_benchmark(request: web.Request) -> web.Response:
             status=500,
         )
     if report is None:
-        return web.json_response({
-            "state": "not_run",
-            "next_action": _learning_benchmark_next_action(),
-        })
+        return web.json_response(
+            {
+                "state": "not_run",
+                "next_action": _learning_benchmark_next_action(),
+            }
+        )
     _audit(
         request, "evals_learning_benchmark", "read", f"run_id={report.get('run_id')}"
     )
@@ -289,10 +300,12 @@ async def api_evals_retrieval(request: web.Request) -> web.Response:
         kind: data.get("run") or "" for kind, data in (view.get("stores") or {}).items()
     }
     if not any(runs.values()):
-        return web.json_response({
-            "state": "not_run",
-            "next_action": "Run `gideon retrieval-eval` to score both stores.",
-        })
+        return web.json_response(
+            {
+                "state": "not_run",
+                "next_action": "Run `gideon retrieval-eval` to score both stores.",
+            }
+        )
     _audit(request, "evals_retrieval", "read", f"runs={runs}")
     return web.json_response(view)
 

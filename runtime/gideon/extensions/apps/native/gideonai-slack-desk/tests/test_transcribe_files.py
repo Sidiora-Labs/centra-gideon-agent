@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # events.py: _transcribe_files
 # ---------------------------------------------------------------------------
@@ -31,7 +30,9 @@ class TestTranscribeFiles:
         ]
 
         with patch(
-            "gideon.sdk.channel.transcribe_audio", new_callable=AsyncMock, return_value="Hello"
+            "gideon.sdk.channel.transcribe_audio",
+            new_callable=AsyncMock,
+            return_value="Hello",
         ):
             result = await _transcribe_files(mock_orch, files)
         assert result == ["Hello"]
@@ -44,7 +45,11 @@ class TestTranscribeFiles:
         mock_orch.slack_desk = AsyncMock()
 
         files = [
-            {"mimetype": "image/png", "url_private": "https://x.com/img.png", "name": "pic.png"}
+            {
+                "mimetype": "image/png",
+                "url_private": "https://x.com/img.png",
+                "name": "pic.png",
+            }
         ]
 
         result = await _transcribe_files(mock_orch, files)
@@ -80,7 +85,9 @@ class TestTranscribeFiles:
         ]
 
         with patch(
-            "gideon.transcribe.transcribe_audio", new_callable=AsyncMock, return_value=None
+            "gideon.transcribe.transcribe_audio",
+            new_callable=AsyncMock,
+            return_value=None,
         ):
             result = await _transcribe_files(mock_orch, files)
         assert result == []
@@ -91,7 +98,9 @@ class TestTranscribeFiles:
 
         mock_orch = MagicMock()
         mock_orch.slack_desk = AsyncMock()
-        mock_orch.slack_desk.download_file = AsyncMock(side_effect=Exception("download failed"))
+        mock_orch.slack_desk.download_file = AsyncMock(
+            side_effect=Exception("download failed")
+        )
 
         files = [
             {

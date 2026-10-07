@@ -34,15 +34,23 @@ async def api_chat_session_channel_link(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid handoff destination"}, status=400)
     provider = body.get("provider", "")
     raw_channel = body.get("channel", "dm")
-    if not isinstance(provider, str) or not isinstance(raw_channel, str) or not provider.strip():
-        return web.json_response({"error": "provider required for channel destination"}, status=400)
+    if (
+        not isinstance(provider, str)
+        or not isinstance(raw_channel, str)
+        or not provider.strip()
+    ):
+        return web.json_response(
+            {"error": "provider required for channel destination"}, status=400
+        )
     provider = provider.strip()
     delivery = state.delivery_for(provider)
     if delivery is None:
         return web.json_response({"error": "channel unavailable"}, status=503)
     if raw_channel and raw_channel != "dm":
         if not delivery.is_tracked_channel(raw_channel):
-            return web.json_response({"error": "channel destination is not authorized"}, status=403)
+            return web.json_response(
+                {"error": "channel destination is not authorized"}, status=403
+            )
         target_channel = raw_channel
     else:
         from gideon.core.config.credentials import owner_id_for
@@ -50,11 +58,24 @@ async def api_chat_session_channel_link(request: web.Request) -> web.Response:
         owner = owner_id_for(provider)
         target_channel = str(await delivery.open_dm(owner) or "") if owner else ""
         if not target_channel:
-            return web.json_response({"error": "owner destination unavailable"}, status=503)
+            return web.json_response(
+                {"error": "owner destination unavailable"}, status=503
+            )
     existing_ts, existing_chan = state.sessions.get_channel_link(session_key)
-    if existing_ts and existing_chan == target_channel and state.channel_provider_for(session_key) == provider:
-        return web.json_response({"ok": True, "already_linked": True,
-                                  "provider": provider, "thread_ts": existing_ts, "channel": target_channel})
+    if (
+        existing_ts
+        and existing_chan == target_channel
+        and state.channel_provider_for(session_key) == provider
+    ):
+        return web.json_response(
+            {
+                "ok": True,
+                "already_linked": True,
+                "provider": provider,
+                "thread_ts": existing_ts,
+                "channel": target_channel,
+            }
+        )
     title = redact_and_truncate(session.title or name, max_chars=200)
     opening = f"\U0001f9f5 *{title}*\nSession linked from dashboard."
     thread_ts = await delivery.deliver_text(target_channel, opening)
@@ -65,7 +86,9 @@ async def api_chat_session_channel_link(request: web.Request) -> web.Response:
         save_session_to_history(state, session)
     except Exception:
         logger.warning("Could not persist linked chat provider identity", exc_info=True)
-        return web.json_response({"error": "failed to persist channel link"}, status=500)
+        return web.json_response(
+            {"error": "failed to persist channel link"}, status=500
+        )
     state.link_channel(name, thread_ts, target_channel, provider)
 
     for m in session.messages[-5:]:
@@ -87,7 +110,12 @@ async def api_chat_session_channel_link(request: web.Request) -> web.Response:
     )
     state.push_sessions_update()
     return web.json_response(
-        {"ok": True, "provider": provider, "thread_ts": thread_ts, "channel": target_channel}
+        {
+            "ok": True,
+            "provider": provider,
+            "thread_ts": thread_ts,
+            "channel": target_channel,
+        }
     )
 
 
@@ -149,7 +177,9 @@ async def api_chat_session_handoff(request: web.Request) -> web.Response:
             from gideon.core.config.credentials import owner_id_for
 
             if not owner_id_for(provider):
-                return web.json_response({"error": "owner destination unavailable"}, status=503)
+                return web.json_response(
+                    {"error": "owner destination unavailable"}, status=503
+                )
     else:
         delivery = state.channel_delivery
         if not delivery:
@@ -162,7 +192,9 @@ async def api_chat_session_handoff(request: web.Request) -> web.Response:
         from gideon.core.config.credentials import owner_id_for
 
         if not owner_id_for(provider):
-            return web.json_response({"error": "owner destination unavailable"}, status=503)
+            return web.json_response(
+                {"error": "owner destination unavailable"}, status=503
+            )
 
     try:
         save_session_to_history(state, session)

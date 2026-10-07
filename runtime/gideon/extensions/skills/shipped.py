@@ -92,11 +92,19 @@ class SyncReport:
     """What one :func:`sync` did, by skill name."""
 
     installed: list[str] = field(default_factory=list)  # new to the library
-    replaced: list[str] = field(default_factory=list)  # Gideon's own copy, now this version
-    recorded: list[str] = field(default_factory=list)  # an unrecorded copy that IS this version
+    replaced: list[str] = field(
+        default_factory=list
+    )  # Gideon's own copy, now this version
+    recorded: list[str] = field(
+        default_factory=list
+    )  # an unrecorded copy that IS this version
     kept: list[str] = field(default_factory=list)  # the owner's copy, kept
-    removed: list[str] = field(default_factory=list)  # Gideon's own copy of a retired skill
-    refused: list[str] = field(default_factory=list)  # refused by the safety scan, not installed
+    removed: list[str] = field(
+        default_factory=list
+    )  # Gideon's own copy of a retired skill
+    refused: list[str] = field(
+        default_factory=list
+    )  # refused by the safety scan, not installed
 
 
 def project_root() -> Path | None:
@@ -110,9 +118,13 @@ def project_root() -> Path | None:
 
 
 def _roots() -> list[Path]:
-    from gideon.extensions.skills.loader import _project_skills_dir, _BUILTIN_SKILLS_DIR
+    from gideon.extensions.skills.loader import _BUILTIN_SKILLS_DIR, _project_skills_dir
 
-    return [root for root in (_project_skills_dir(), _BUILTIN_SKILLS_DIR) if root is not None]
+    return [
+        root
+        for root in (_project_skills_dir(), _BUILTIN_SKILLS_DIR)
+        if root is not None
+    ]
 
 
 #: Each shipped folder's file digests, with the signature they were taken at: each file's path,
@@ -123,7 +135,8 @@ _DIGESTS: dict[Path, tuple[tuple[tuple[str, int, int, int], ...], dict[str, str]
 
 def _shipped_files(folder: Path) -> dict[str, str]:
     """The files of a shipped folder and their digests, as an install writes them: tooling no skill
-    runs (``supply_chain.never_installed``) and a stray install record are not among them."""
+    runs (``supply_chain.never_installed``) and a stray install record are not among them.
+    """
     from gideon.security.supply_chain import _SKIP_DIR_NAMES
 
     def never_installed(part):
@@ -132,7 +145,9 @@ def _shipped_files(folder: Path) -> dict[str, str]:
     found: list[tuple[str, os.stat_result]] = []
     for path in sorted(folder.rglob("*")):
         rel = path.relative_to(folder)
-        if rel.as_posix() == ".gideon-lock.json" or any(never_installed(p) for p in rel.parts):
+        if rel.as_posix() == ".gideon-lock.json" or any(
+            never_installed(p) for p in rel.parts
+        ):
             continue
         try:
             info = path.stat()
@@ -145,7 +160,9 @@ def _shipped_files(folder: Path) -> dict[str, str]:
     if cached is not None and cached[0] == signature:
         return cached[1]
     wanted = {rel for rel, _ in found}
-    sha256 = {rel: digest for rel, digest in file_digests(folder).items() if rel in wanted}
+    sha256 = {
+        rel: digest for rel, digest in file_digests(folder).items() if rel in wanted
+    }
     _DIGESTS[folder] = (signature, sha256)
     return sha256
 
@@ -184,23 +201,31 @@ def _scan(skill: ShippedSkill) -> Any:
     return scan_dir(skill.folder, TrustTier.BUILTIN)
 
 
-def _install(base: Path, skill: ShippedSkill, report: SyncReport, outcome: list[str]) -> None:
+def _install(
+    base: Path, skill: ShippedSkill, report: SyncReport, outcome: list[str]
+) -> None:
     """Write *skill* into the library, exactly, with its record: scanned first at the tier of what
     Gideon ships, and not installed when the scan finds it dangerous."""
     from gideon.security.supply_chain import Verdict
 
     scan = _scan(skill)
     if scan.verdict is Verdict.DANGEROUS:
-        logger.error("Shipped skill %s refused by the safety scan; not installed", skill.name)
+        logger.error(
+            "Shipped skill %s refused by the safety scan; not installed", skill.name
+        )
         report.refused.append(skill.name)
         return
-    files = [read_skill_file_entry(skill.folder / rel, rel) for rel in sorted(skill.sha256)]
+    files = [
+        read_skill_file_entry(skill.folder / rel, rel) for rel in sorted(skill.sha256)
+    ]
     parent, _, leaf = skill.name.rpartition("/")
     target_base = base / parent if parent else base
     try:
         install_skill_files(files, leaf, target_base)
     except (ValueError, OSError):
-        logger.warning("Shipped skill %s could not be installed", skill.name, exc_info=True)
+        logger.warning(
+            "Shipped skill %s could not be installed", skill.name, exc_info=True
+        )
         return
     write_install_record(
         target_base / leaf,
@@ -269,7 +294,8 @@ def _bring_in_step(base: Path, skill: ShippedSkill, report: SyncReport) -> None:
 
 def _retired(base: Path, ships: dict[str, ShippedSkill]) -> list[str]:
     """The library's skills that look like ones Gideon shipped and no longer ships: a record
-    of Gideon's, or a name a version that kept no record shipped. Read without the lock."""
+    of Gideon's, or a name a version that kept no record shipped. Read without the lock.
+    """
     if not base.is_dir():
         return []
     out: list[str] = []
@@ -368,7 +394,8 @@ def _audit(report: SyncReport) -> None:
 
 def _declined() -> dict[str, str]:
     """The version of each skill the owner chose to keep hers over. Fails open: an unreadable
-    store declines nothing, so an offer she dismissed shows again rather than one hiding."""
+    store declines nothing, so an offer she dismissed shows again rather than one hiding.
+    """
     from gideon.extensions.providers.entity_routes import _load_entity_settings
 
     stored = (_load_entity_settings(_CHOICES) or {}).get("declined")
@@ -413,7 +440,9 @@ class Offers:
         record = _record(copy)
         if isinstance(record, DamagedInstallRecord):
             return None
-        if record is not None and (record.source != SOURCE or record.digest == skill.digest):
+        if record is not None and (
+            record.source != SOURCE or record.digest == skill.digest
+        ):
             return None
         current = current or _current(copy)
         if current == skill.digest:
@@ -464,6 +493,7 @@ def keep_own(name: str, digest: str, *, base: Path | None = None) -> None:
     is not offered again, and a later one is. Raises :class:`NotShipped` or
     :class:`VersionChanged`, recording nothing then."""
     from gideon.extensions.skills.loader import skills_dir
+
     base = base or skills_dir()
     with hold_library():
         _offered(name, digest)
@@ -475,4 +505,72 @@ def keep_own(name: str, digest: str, *, base: Path | None = None) -> None:
 
 
 # Digests of native shipped folders before install records were introduced.
-EARLIER_VERSIONS: dict[str, frozenset[str]] = {'artifacts': frozenset({'d047ee2d0c1897bd3fd92a6f9c31d7ebc5c93c3dd484d6d0b239ea9308f84684'}), 'best-of-n': frozenset({'fd824911dc11caff012c1743ab0f14e5a3f4aa623e17df1d09b0eca64cedf95b'}), 'check-work': frozenset({'1589e61399c4878f8a31957d808e48aa68238980ada545a76ac6ea73fff2e367', 'e5339779d880072ad610b30a221d6474bf73edce7f934f5301696ad617211790'}), 'delegation': frozenset({'f8291c31f0de3d3078d4788a39adc5f0aaeae6fedddc92142d487aad545f6bd9'}), 'document-authoring': frozenset({'57a2daf79fecbce9eced5b107f1e0617c3e66d7c7197f2105ab956d8d5a13963'}), 'editorial-document': frozenset({'a423c2ae8a06287308d4e5ce864999c967ac2528400745ebabeec655247498cc', '73ea9d2d980271f95f49a6590e65d84e4cc7a604bc7b66c81df4cf37c5ef0068'}), 'gideon-api': frozenset({'b593a1157edf8ada121b325c4d393b88481b52d7955ef45fdcc5cdb999b6551c', 'd0312a784010f658f489361aeda831f459ccc052e83324f46d67872bcc2af617'}), 'gideon-features': frozenset({'78eb939b948e8ed405defe6c49b5ece8641cae3c2d8ab5ee29d2d2acc71cd591'}), 'grill': frozenset({'d4ba110beb24ed06f43c13cf1aea0fd1063497ca04111d636374d932c9eba96e', 'd49030300b75a1b0deb02b0bcba0629c1cd8015b3d07a6863e5fefcea33047a5'}), 'infographic-syntax': frozenset({'722f2fd83b557fbdc31d5680948da8da2e46aef740f2405d84f7cae4b8fd7423'}), 'knowledge-grounding': frozenset({'4c87a948d8851315f03edff860c1c4795b5fc87264e0d11961ce10ab56a2a0a1'}), 'loop-worker': frozenset({'52577052fa8d22614573d5cc138a47d09f7a1ebf348dc01775dac33be89436d7'}), 'memory-discipline': frozenset({'d451ebfcfe442451e8d54aeba05c994177396c614f9f26cf21574b56e7349e3d'}), 'research-campaign': frozenset({'f158b565f69e7db221c00d7d39625edae1f356b88be008daad6a67177dcd039f'}), 'task-and-project': frozenset({'166bc1cb18487869b64d7fa2431a3cb3d4a796411c0fe132b1e1364174e3c71b'}), 'visual-output': frozenset({'779a0abb9473e589a54ea8fa850de1b836055bbb84afde58d4371e5b13e261ff', '0e96dc130d0ecc49eab478b6b62e22705343e868f4f8387994a97d968b14429d', '65325f9da45dff32fccfad24a7a92e337dcde0a78d00cd7217462f40bda09db1'}), 'web-verify': frozenset({'78215bb9570dd2b4839bb8cfae60756dc165f3c52003e155cca17836b0f99eb2'})}
+EARLIER_VERSIONS: dict[str, frozenset[str]] = {
+    "artifacts": frozenset(
+        {"d047ee2d0c1897bd3fd92a6f9c31d7ebc5c93c3dd484d6d0b239ea9308f84684"}
+    ),
+    "best-of-n": frozenset(
+        {"fd824911dc11caff012c1743ab0f14e5a3f4aa623e17df1d09b0eca64cedf95b"}
+    ),
+    "check-work": frozenset(
+        {
+            "1589e61399c4878f8a31957d808e48aa68238980ada545a76ac6ea73fff2e367",
+            "e5339779d880072ad610b30a221d6474bf73edce7f934f5301696ad617211790",
+        }
+    ),
+    "delegation": frozenset(
+        {"f8291c31f0de3d3078d4788a39adc5f0aaeae6fedddc92142d487aad545f6bd9"}
+    ),
+    "document-authoring": frozenset(
+        {"57a2daf79fecbce9eced5b107f1e0617c3e66d7c7197f2105ab956d8d5a13963"}
+    ),
+    "editorial-document": frozenset(
+        {
+            "a423c2ae8a06287308d4e5ce864999c967ac2528400745ebabeec655247498cc",
+            "73ea9d2d980271f95f49a6590e65d84e4cc7a604bc7b66c81df4cf37c5ef0068",
+        }
+    ),
+    "gideon-api": frozenset(
+        {
+            "b593a1157edf8ada121b325c4d393b88481b52d7955ef45fdcc5cdb999b6551c",
+            "d0312a784010f658f489361aeda831f459ccc052e83324f46d67872bcc2af617",
+        }
+    ),
+    "gideon-features": frozenset(
+        {"78eb939b948e8ed405defe6c49b5ece8641cae3c2d8ab5ee29d2d2acc71cd591"}
+    ),
+    "grill": frozenset(
+        {
+            "d4ba110beb24ed06f43c13cf1aea0fd1063497ca04111d636374d932c9eba96e",
+            "d49030300b75a1b0deb02b0bcba0629c1cd8015b3d07a6863e5fefcea33047a5",
+        }
+    ),
+    "infographic-syntax": frozenset(
+        {"722f2fd83b557fbdc31d5680948da8da2e46aef740f2405d84f7cae4b8fd7423"}
+    ),
+    "knowledge-grounding": frozenset(
+        {"4c87a948d8851315f03edff860c1c4795b5fc87264e0d11961ce10ab56a2a0a1"}
+    ),
+    "loop-worker": frozenset(
+        {"52577052fa8d22614573d5cc138a47d09f7a1ebf348dc01775dac33be89436d7"}
+    ),
+    "memory-discipline": frozenset(
+        {"d451ebfcfe442451e8d54aeba05c994177396c614f9f26cf21574b56e7349e3d"}
+    ),
+    "research-campaign": frozenset(
+        {"f158b565f69e7db221c00d7d39625edae1f356b88be008daad6a67177dcd039f"}
+    ),
+    "task-and-project": frozenset(
+        {"166bc1cb18487869b64d7fa2431a3cb3d4a796411c0fe132b1e1364174e3c71b"}
+    ),
+    "visual-output": frozenset(
+        {
+            "779a0abb9473e589a54ea8fa850de1b836055bbb84afde58d4371e5b13e261ff",
+            "0e96dc130d0ecc49eab478b6b62e22705343e868f4f8387994a97d968b14429d",
+            "65325f9da45dff32fccfad24a7a92e337dcde0a78d00cd7217462f40bda09db1",
+        }
+    ),
+    "web-verify": frozenset(
+        {"78215bb9570dd2b4839bb8cfae60756dc165f3c52003e155cca17836b0f99eb2"}
+    ),
+}

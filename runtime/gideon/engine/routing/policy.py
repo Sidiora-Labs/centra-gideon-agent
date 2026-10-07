@@ -185,7 +185,10 @@ def model_of(ref: str) -> str:
 
 def _local_provider_keys() -> set[str]:
     try:
-        from gideon.integrations.llm.registry import get_default_registry, serving_is_local
+        from gideon.integrations.llm.registry import (
+            get_default_registry,
+            serving_is_local,
+        )
 
         return {
             _norm(entry.name)
@@ -198,6 +201,7 @@ def _local_provider_keys() -> set[str]:
 
 def is_local_ref(ref: str, *, local_keys: set[str] | None = None) -> bool:
     from gideon.integrations.llm.registry import served_on_this_machine
+
     return served_on_this_machine(provider_of(ref), model_of(ref))
 
 

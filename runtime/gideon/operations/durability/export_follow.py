@@ -1,4 +1,5 @@
 """Keep credential-bearing configuration exports current after local writes."""
+
 from __future__ import annotations
 
 import logging
@@ -61,7 +62,9 @@ class ExportFollower:
             rel = Path(path).resolve().relative_to(self._root).as_posix()
         except (OSError, ValueError):
             return None
-        if not any(rel == e.path or rel.startswith(f"{e.path}/") for e in self._followed):
+        if not any(
+            rel == e.path or rel.startswith(f"{e.path}/") for e in self._followed
+        ):
             return None
         if inv.is_ignored(rel):
             return None
@@ -70,7 +73,8 @@ class ExportFollower:
 
     def notify(self, path: Path | str) -> bool:
         """A write landed at *path*: re-export its store now, when it is one that follows.
-        Returns whether it is. Never raises: this runs in the writer's path, after the write."""
+        Returns whether it is. Never raises: this runs in the writer's path, after the write.
+        """
         if self._stopped.is_set():
             return False
         entry = self.entry_of(path)
@@ -80,24 +84,34 @@ class ExportFollower:
             self._pending.add(entry.id)
         try:
             self.flush()
-        except Exception:  # noqa: BLE001 — a re-export must never fail the write that asked
+        except (
+            Exception
+        ):  # noqa: BLE001 — a re-export must never fail the write that asked
             logger.warning(
-                "durability: could not re-export after a write to %s", path, exc_info=True
+                "durability: could not re-export after a write to %s",
+                path,
+                exc_info=True,
             )
         return True
 
     def catch_up(self) -> None:
         """Re-export every followed store, off the caller's thread: what the gateway's start changed
-        before this follower was listening (it moves plaintext credentials into the store)."""
+        before this follower was listening (it moves plaintext credentials into the store).
+        """
         with self._lock:
             self._pending.update(e.id for e in self._followed)
         self._later(0.0, self._flush_quietly)
 
     def flush(self) -> list[str]:
         """Re-export every store that is waiting, now. Returns the ids it re-exported: none when
-        there is no export to keep up, or when the hourly job holds it (tried again shortly)."""
+        there is no export to keep up, or when the hourly job holds it (tried again shortly).
+        """
         from gideon.core.concurrency import single_flight
-        from gideon.operations.durability.shards import default_shard_dir, export_shards, is_an_export
+        from gideon.operations.durability.shards import (
+            default_shard_dir,
+            export_shards,
+            is_an_export,
+        )
 
         if self._stopped.is_set():
             return []
@@ -160,8 +174,12 @@ class ExportFollower:
             return
         try:
             self.flush()
-        except Exception:  # noqa: BLE001 — off the writer's thread, with no caller to tell
-            logger.warning("durability: a re-export after a write failed", exc_info=True)
+        except (
+            Exception
+        ):  # noqa: BLE001 — off the writer's thread, with no caller to tell
+            logger.warning(
+                "durability: a re-export after a write failed", exc_info=True
+            )
 
     def _retry(self) -> None:
         with self._lock:
@@ -185,10 +203,16 @@ _install_lock = threading.Lock()
 def install(*, home: Path) -> ExportFollower:
     """Install a follower for the active home, stopping any prior home's follower."""
     global _installed
-    from gideon.core.atomic_write import register_post_write_hook, unregister_post_write_hook
+    from gideon.core.atomic_write import (
+        register_post_write_hook,
+        unregister_post_write_hook,
+    )
 
     with _install_lock:
-        if _installed is not None and _installed._home.absolute() == Path(home).absolute():
+        if (
+            _installed is not None
+            and _installed._home.absolute() == Path(home).absolute()
+        ):
             return _installed
         previous = _installed
         if previous is not None:

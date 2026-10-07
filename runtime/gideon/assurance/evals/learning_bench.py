@@ -154,7 +154,8 @@ class TaskPreflight:
 def preflight(*, loader=None) -> list[TaskPreflight]:
     """Check scenario, fixture, skill availability and suppression without calling a model.
 
-    Suppression uses skills_bench.verify_suppression. Failed checks are returned as blockers."""
+    Suppression uses skills_bench.verify_suppression. Failed checks are returned as blockers.
+    """
     from gideon.assurance.evals import skills_bench
 
     if loader is None:  # pragma: no cover - the default wiring

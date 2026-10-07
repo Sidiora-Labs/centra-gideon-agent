@@ -18,7 +18,9 @@ from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from gideon.security.net.policy import (
-    METADATA_SERVICE_HOSTS, EgressPolicy, egress_policy_for_run,
+    METADATA_SERVICE_HOSTS,
+    EgressPolicy,
+    egress_policy_for_run,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,7 +73,9 @@ class GuardDecision:
 
 EGRESS_SETTINGS = "Settings → Security → Network egress"
 EGRESS_OFF_REASON = "egress is off for this run (safety profile egress tier 'off')"
-EGRESS_OFF_NOTHING_SENT = "This run's safety settings give it no network access, so nothing was sent."
+EGRESS_OFF_NOTHING_SENT = (
+    "This run's safety settings give it no network access, so nothing was sent."
+)
 
 
 def allow_host_step(host: str) -> str:
@@ -225,8 +229,12 @@ def evaluate(
     narrowed = egress_policy_for_run(policy)
     if narrowed is None:
         return GuardDecision(
-            allow=False, url=url, host=host, reason=EGRESS_OFF_REASON,
-            category="egress_off", risk_level="destructive",
+            allow=False,
+            url=url,
+            host=host,
+            reason=EGRESS_OFF_REASON,
+            category="egress_off",
+            risk_level="destructive",
             recovery_hints=[EGRESS_OFF_NOTHING_SENT, where_egress_is_off()],
         )
     policy = narrowed
@@ -237,7 +245,11 @@ def evaluate(
             url=url,
             host=host,
             reason=f"host {host!r} is on the egress deny list",
-            category="metadata" if host_matches(host, METADATA_SERVICE_HOSTS) else "deny_list",
+            category=(
+                "metadata"
+                if host_matches(host, METADATA_SERVICE_HOSTS)
+                else "deny_list"
+            ),
             risk_level="destructive",
         )
     operator_allowed = host_matches(host, policy.allow_hosts)

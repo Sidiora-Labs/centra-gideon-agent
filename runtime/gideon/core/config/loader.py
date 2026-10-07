@@ -39,6 +39,7 @@ from gideon.core.config.learning import (
     _judge_axis,
     _stagnation_window,
 )
+from gideon.core.config.pricing import ModelPricesConfig, price_overrides
 from gideon.core.config.safety import (
     AuthConfigSection,
     AutonomyConfig,
@@ -51,14 +52,12 @@ from gideon.core.config.safety import (
     SecurityConfig,
 )
 from gideon.core.config.validation import _validate_config_data
+from gideon.hypermid.config import ContextConfig
 from gideon.integrations.voice.duplex import (
     DEFAULT_CONFIRMATION_PHRASES,
     DEFAULT_EXIT_PHRASES,
     DEFAULT_PUSH_TO_TALK_CHORD,
 )
-from gideon.hypermid.config import ContextConfig
-
-from gideon.core.config.pricing import ModelPricesConfig, price_overrides
 
 logger = logging.getLogger(__name__)
 
@@ -228,12 +227,15 @@ def _vault_mode(memory_data: dict) -> str:
 
 
 _BOT_NAME_MAX = 50
+
+
 def _sanitize_bot_name(raw: str) -> str:
     import unicodedata
 
     prepared = unicodedata.normalize("NFC", raw.strip()) if isinstance(raw, str) else ""
     return "".join(
-        char for char in prepared
+        char
+        for char in prepared
         if char in " _-." or unicodedata.category(char)[0] in "LMN"
     )[:_BOT_NAME_MAX]
 
@@ -2355,7 +2357,10 @@ class InboxConfig:
     )
     sort_messages: bool = field(
         default=True,
-        metadata=_meta("Sort New Messages", "Sort new inbox messages with the background model in bounded batches. Off leaves them unsorted."),
+        metadata=_meta(
+            "Sort New Messages",
+            "Sort new inbox messages with the background model in bounded batches. Off leaves them unsorted.",
+        ),
     )
     test_mode: bool = field(
         default=False,
@@ -2858,11 +2863,15 @@ class ConfigPreserveError(RuntimeError):
 
 @dataclass
 class AppConfig:
-    _loaded_values: dict | None = field(default=None, init=False, repr=False, compare=False)
+    _loaded_values: dict | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
     _loaded_missing: bool = field(default=False, init=False, repr=False, compare=False)
     model_prices: "ModelPricesConfig" = field(
         default_factory=lambda: ModelPricesConfig(),
-        metadata=_meta("Model Prices", "Overrides for model prices in the unit each model bills."),
+        metadata=_meta(
+            "Model Prices", "Overrides for model prices in the unit each model bills."
+        ),
     )
     agent: AgentConfig = field(
         default_factory=AgentConfig,
@@ -3149,7 +3158,9 @@ class AppConfig:
         values = resolve_config_secrets(values)
         _validate_config_data(values)
         configuration = decode_configuration(values, cls)
-        configuration.model_prices = ModelPricesConfig(price_overrides(values.get("model_prices")))
+        configuration.model_prices = ModelPricesConfig(
+            price_overrides(values.get("model_prices"))
+        )
         stored_hypermid = values.get("hypermid")
         if isinstance(stored_hypermid, dict) and stored_hypermid:
             try:
@@ -3188,10 +3199,18 @@ class AppConfig:
             _keychain_credentials,
             is_config_secret_reference_key,
         )
-        layers = (_dotenv_credentials(), _keychain_credentials(),
-                 {key: os.environ[key] for key in _CREDENTIAL_KEYS if os.environ.get(key)})
-        return {key: value for layer in layers for key, value in layer.items()
-                if not is_config_secret_reference_key(key)}
+
+        layers = (
+            _dotenv_credentials(),
+            _keychain_credentials(),
+            {key: os.environ[key] for key in _CREDENTIAL_KEYS if os.environ.get(key)},
+        )
+        return {
+            key: value
+            for layer in layers
+            for key, value in layer.items()
+            if not is_config_secret_reference_key(key)
+        }
 
     def create_provider_factory(self) -> Callable:
         from gideon.extensions.providers import provider_bridge

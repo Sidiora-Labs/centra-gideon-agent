@@ -154,12 +154,12 @@ def widens(current: Any, new: Any) -> bool:
 
 
 def agent_tools(agent: str | None, cfg: Any) -> AgentTools:
+    from gideon.core.config.loader import resolve_config_dir
     from gideon.engine.agents.defaults import (
         default_agent_name,
         is_reserved_agent,
         normalize_agent_name,
     )
-    from gideon.core.config.loader import resolve_config_dir
 
     wanted = (agent or "").strip()
     key = normalize_agent_name(wanted) if wanted else default_agent_name(cfg)

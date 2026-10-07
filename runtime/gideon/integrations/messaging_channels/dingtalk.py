@@ -9,7 +9,10 @@ from typing import Any
 
 import httpx
 
-from gideon.integrations.channel_transports.base import ChannelCapabilities, OutboundMessage
+from gideon.integrations.channel_transports.base import (
+    ChannelCapabilities,
+    OutboundMessage,
+)
 from gideon.integrations.messaging_channels.base import MessagingTransport
 
 _OAUTH = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
@@ -39,7 +42,10 @@ class DingTalkTransport(MessagingTransport):
             raise ConnectionError("DingTalk HTTP client is closed")
         response = await self.http.post(
             _OAUTH,
-            json={"appKey": self.config["client_id"], "appSecret": self.config["client_secret"]},
+            json={
+                "appKey": self.config["client_id"],
+                "appSecret": self.config["client_secret"],
+            },
         )
         response.raise_for_status()
         body = response.json()
@@ -47,7 +53,9 @@ class DingTalkTransport(MessagingTransport):
         if not token:
             raise PermissionError("DingTalk did not issue an access token")
         self.token = token
-        self.token_deadline = time.time() + max(30, int(body.get("expireIn", 7200)) - 60)
+        self.token_deadline = time.time() + max(
+            30, int(body.get("expireIn", 7200)) - 60
+        )
         return token
 
     async def _open(self) -> None:
@@ -80,26 +88,42 @@ class DingTalkTransport(MessagingTransport):
                 )
                 chat_type = str(raw.get("conversationType") or "1")
                 chat = (
-                    "group:" + str(raw.get("conversationId") or raw.get("openConversationId") or "")
+                    "group:"
+                    + str(
+                        raw.get("conversationId") or raw.get("openConversationId") or ""
+                    )
                     if chat_type == "2"
                     else sender
                 )
-                text = str(getattr(getattr(parsed, "text", None), "content", "") or "").strip()
+                text = str(
+                    getattr(getattr(parsed, "text", None), "content", "") or ""
+                ).strip()
                 if not text:
                     text = str((raw.get("text") or {}).get("content") or "").strip()
                 if not text:
-                    text = str(((raw.get("extensions") or {}).get("content") or {}).get("recognition") or "")
+                    text = str(
+                        ((raw.get("extensions") or {}).get("content") or {}).get(
+                            "recognition"
+                        )
+                        or ""
+                    )
                 await transport._inbound(
                     chat,
                     sender,
                     text,
                     message_id=str(raw.get("msgId") or raw.get("messageId") or ""),
                     is_dm=chat_type != "2",
-                    metadata={"sender_name": str(getattr(parsed, "sender_nick", None) or sender)},
+                    metadata={
+                        "sender_name": str(
+                            getattr(parsed, "sender_nick", None) or sender
+                        )
+                    },
                 )
                 return AckMessage.STATUS_OK, "OK"
 
-        self.stream = DingTalkStreamClient(Credential(self.config["client_id"], self.config["client_secret"]))
+        self.stream = DingTalkStreamClient(
+            Credential(self.config["client_id"], self.config["client_secret"])
+        )
         self.stream.register_callback_handler(ChatbotMessage.TOPIC, Handler())
         self._connected = True
         self._detail = "Connected"

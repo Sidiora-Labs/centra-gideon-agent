@@ -66,7 +66,11 @@ async def sweep(state, *, now: datetime | None = None) -> int:
     from gideon.extensions.providers.entity_routes import notification_posture
     from gideon.workspace import notification_kinds
 
-    current = now.astimezone() if now is not None and now.tzinfo else datetime.now().astimezone()
+    current = (
+        now.astimezone()
+        if now is not None and now.tzinfo
+        else datetime.now().astimezone()
+    )
     owner = current_username()
     all_tasks = []
     offset = 0
@@ -92,7 +96,9 @@ async def sweep(state, *, now: datetime | None = None) -> int:
         due = _due_day(getattr(task, "due", ""))
         if due is None or today > due + timedelta(days=STALE_DAYS):
             continue
-        due_at = datetime.combine(due - timedelta(days=1), time(hour=LEAD_HOUR), tzinfo=current.tzinfo)
+        due_at = datetime.combine(
+            due - timedelta(days=1), time(hour=LEAD_HOUR), tzinfo=current.tzinfo
+        )
         if current < due_at or notified.get(task.id) == due.isoformat():
             continue
         posture = notification_posture(notification_kinds.TASK_DUE, now=current)

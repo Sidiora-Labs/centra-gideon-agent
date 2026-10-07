@@ -10,7 +10,6 @@ Covers:
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from slack_desk_runtime.format import (
     LINK_DASHBOARD_ACTION,
     build_link_dashboard_button,
@@ -57,10 +56,17 @@ class TestFooterBlocksLinkDashboard:
     ) -> list[dict]:
         """Build footer blocks using the real production helper."""
         footer_blocks: list[dict] = [
-            {"type": "context", "elements": [{"type": "mrkdwn", "text": "Finished in 5s"}]}
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": "Finished in 5s"}],
+            }
         ]
         return _append_footer_actions(
-            footer_blocks, options, thread_ts, linked_session_key, dashboard_state,
+            footer_blocks,
+            options,
+            thread_ts,
+            linked_session_key,
+            dashboard_state,
         )
 
     def test_button_added_when_in_thread_not_linked_with_dashboard(self) -> None:
@@ -88,9 +94,7 @@ class TestFooterBlocksLinkDashboard:
 
     def test_button_appended_to_existing_actions_block(self) -> None:
         """When OPTIONS are present, button is appended to the existing actions block."""
-        blocks = self._build_footer(
-            "1234.0", None, MagicMock(), options=["A", "B"]
-        )
+        blocks = self._build_footer("1234.0", None, MagicMock(), options=["A", "B"])
         actions = [b for b in blocks if b.get("type") == "actions"]
         assert len(actions) == 1
         action_ids = [e["action_id"] for e in actions[0]["elements"]]
@@ -138,7 +142,9 @@ def link_orch(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_link_dashboard_creates_session_and_imports(link_orch: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_link_dashboard_creates_session_and_imports(
+    link_orch: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from slack_desk_runtime import interactions
 
     mock_sel_inst = MagicMock()
@@ -204,7 +210,9 @@ async def test_link_dashboard_no_thread_ts_returns(link_orch: MagicMock) -> None
 
 
 @pytest.mark.asyncio
-async def test_link_dashboard_no_dashboard_state_returns(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_link_dashboard_no_dashboard_state_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from slack_desk_runtime import interactions
 
     orch = MagicMock()
@@ -254,7 +262,9 @@ async def test_link_dashboard_skips_link_command_messages(link_orch: MagicMock) 
 
 
 @pytest.mark.asyncio
-async def test_link_dashboard_unauthorized_user(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_link_dashboard_unauthorized_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from slack_desk_runtime import interactions
 
     orch = _make_orch_for_link()

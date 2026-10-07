@@ -1,8 +1,8 @@
 """Tests for _handle_session_end in slack/interactions.py."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from slack_desk_runtime.interactions import _handle_session_end
 
 
@@ -35,7 +35,9 @@ async def test_session_end_calls_remove(_mock_owner):
 @patch("slack_desk_runtime.interactions.is_owner", return_value=True)
 async def test_session_end_remove_exception_swallowed(_mock_owner):
     """If remove() raises, the handler doesn't propagate."""
-    orch = _make_orch(find_key="dashboard:chat-1-100", remove_side_effect=RuntimeError("gone"))
+    orch = _make_orch(
+        find_key="dashboard:chat-1-100", remove_side_effect=RuntimeError("gone")
+    )
     with patch("slack_desk_runtime.interactions._orch", orch):
         await _handle_session_end(
             payload={},

@@ -39,9 +39,9 @@ are future flywheel/knowledge infra); the two-lane mechanism is here for them.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -600,7 +600,9 @@ def _job_rebuild_memory_fts() -> str:
     journal = MemoryJournal()
     indexed = journal.rebuild_index()
     if reason := journal.search_degraded():
-        raise RuntimeError(f"Keyword search remains unavailable: {reason}. The memory database was preserved.")
+        raise RuntimeError(
+            f"Keyword search remains unavailable: {reason}. The memory database was preserved."
+        )
     return f"FTS index rebuilt: {indexed} file(s)"
 
 

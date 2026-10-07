@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import inspect
+import json
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -302,7 +302,8 @@ def _arity(name: str) -> str:
     positional = [
         parameter
         for parameter in list(_PIPE_SIGNATURES[name].parameters.values())[1:]
-        if parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
+        if parameter.kind
+        in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
     ]
     required = sum(parameter.default is parameter.empty for parameter in positional)
     count = len(positional)
@@ -335,7 +336,8 @@ def parse_pipe(raw_pipe: str) -> tuple[str, list[Any]]:
         _PIPE_SIGNATURES[name].bind(None, *args)
     except TypeError as exc:
         raise BindingError(
-            f"bad arguments for pipe {name!r}", remediation=f"`{name}` takes {_arity(name)}"
+            f"bad arguments for pipe {name!r}",
+            remediation=f"`{name}` takes {_arity(name)}",
         ) from exc
     return name, args
 
@@ -617,7 +619,8 @@ class BindingPlan:
                 raise BindingError(str(exc), self.expression, exc.remediation) from exc
             except TypeError as exc:
                 raise BindingError(
-                    f"bad arguments for pipe {name!r}", self.expression,
+                    f"bad arguments for pipe {name!r}",
+                    self.expression,
                     f"`{name}` takes {_arity(name)}",
                 ) from exc
         return value

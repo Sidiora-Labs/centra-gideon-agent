@@ -52,7 +52,9 @@ def configuration_home(override: str | None, default: Path, logger) -> Path:
     return default.expanduser().resolve() if system else candidate
 
 
-def active_home(override: str | None = None, default: Path | None = None, logger=None) -> Path:
+def active_home(
+    override: str | None = None, default: Path | None = None, logger=None
+) -> Path:
     """Return Gideon's configured home at call time without filesystem writes."""
     import logging
 

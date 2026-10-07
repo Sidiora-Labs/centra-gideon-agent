@@ -41,16 +41,18 @@ from gideon.security.security import (
 
 logger = logging.getLogger(__name__)
 
-_LIVE_CHANNEL_CONFIG_APPS = frozenset({
-    "matrix-channel",
-    "wecom-channel",
-    "dingtalk-channel",
-    "qq-channel",
-    "feishu-channel",
-    "mochat-channel",
-    "whatsapp-channel",
-    "weixin-channel",
-})
+_LIVE_CHANNEL_CONFIG_APPS = frozenset(
+    {
+        "matrix-channel",
+        "wecom-channel",
+        "dingtalk-channel",
+        "qq-channel",
+        "feishu-channel",
+        "mochat-channel",
+        "whatsapp-channel",
+        "weixin-channel",
+    }
+)
 
 
 def _redact(text: str) -> str:
@@ -170,7 +172,9 @@ def _reconcile_app_crons(request: web.Request) -> None:
         state = request.app.get("state")
         reconcile_app_hooks(getattr(state, "_hook_store", None))
     except Exception:
-        logger.debug("app hook reconcile after lifecycle transition failed", exc_info=True)
+        logger.debug(
+            "app hook reconcile after lifecycle transition failed", exc_info=True
+        )
     try:
         state = request.app.get("state")
         if state is not None and getattr(state, "no_crons", False):
@@ -188,8 +192,8 @@ def _reconcile_app_crons(request: web.Request) -> None:
 
 def _app_status(name: str) -> dict[str, Any]:
     """Runtime status for an app: enabled + backend running/port."""
-    from gideon.extensions.apps.backend_runtime import get_backend_supervisor
     from gideon.extensions.apps.app_runtime import restart_reason, ui_revision
+    from gideon.extensions.apps.backend_runtime import get_backend_supervisor
     from gideon.extensions.apps.worker_runtime import get_worker_supervisor
     from gideon.integrations.local_models.sidecar import get_runner
 
@@ -201,7 +205,11 @@ def _app_status(name: str) -> dict[str, Any]:
         "backendPort": rb.port if rb else None,
         "backendExit": supervisor.last_exit(name) if rb is None else None,
         "workers": get_worker_supervisor().statuses(name),
-        "engine": {"running": engine.is_alive(), "exit": engine.last_exit()} if engine is not None else None,
+        "engine": (
+            {"running": engine.is_alive(), "exit": engine.last_exit()}
+            if engine is not None
+            else None
+        ),
         "restartRequired": bool(restart_reason(name)),
         "restartReason": restart_reason(name),
         "uiRevision": ui_revision(name),
@@ -309,7 +317,12 @@ async def api_apps_list(request: web.Request) -> web.Response:
                 ),
                 "sidecarDependencies": (
                     (manifest.get("dependencies") or {}).get("sidecarDependencies", [])
-                    if isinstance((manifest.get("dependencies") or {}).get("sidecarDependencies", []), list)
+                    if isinstance(
+                        (manifest.get("dependencies") or {}).get(
+                            "sidecarDependencies", []
+                        ),
+                        list,
+                    )
                     else []
                 ),
                 "requires": (
@@ -323,7 +336,9 @@ async def api_apps_list(request: web.Request) -> web.Response:
                     {"name": h["name"], "event": h["event"], "provider": h["provider"]}
                     for h in manifest.get("hooks", [])
                     if isinstance(h, dict)
-                    and all(isinstance(h.get(k), str) for k in ("name", "event", "provider"))
+                    and all(
+                        isinstance(h.get(k), str) for k in ("name", "event", "provider")
+                    )
                 ],
                 "tags": [str(t) for t in manifest.get("tags", []) if t],
                 "quality": _quality_wire(manifest.get("quality")),
@@ -332,7 +347,8 @@ async def api_apps_list(request: web.Request) -> web.Response:
                 "updateAvailable": name in updates_by_name,
                 "latestVersion": updates_by_name.get(name, {}).get("latestVersion", ""),
                 "latestSource": updates_by_name.get(name, {}).get("latestSource", ""),
-                "updateSource": updates_by_name.get(name, {}).get("latestSource") or update_source_for(app),
+                "updateSource": updates_by_name.get(name, {}).get("latestSource")
+                or update_source_for(app),
                 **_app_status(name),
             }
         )
@@ -526,114 +542,241 @@ async def api_app_get(request: web.Request) -> web.Response:
     )
 
 
-async def _app_review_request(request: web.Request, *, update_name: str = "") -> web.Response:
-    from gideon.extensions.apps import app_manager, source as app_source
+async def _app_review_request(
+    request: web.Request, *, update_name: str = ""
+) -> web.Response:
+    from gideon.extensions.apps import app_manager
+    from gideon.extensions.apps import source as app_source
+
     try:
         body = await read_json_body(request)
     except Exception:
-        return web.json_response({"error": {"code": "invalid_json", "message": "Invalid JSON"}}, status=400)
+        return web.json_response(
+            {"error": {"code": "invalid_json", "message": "Invalid JSON"}}, status=400
+        )
     for field in ("name", "source"):
         if field in body and not isinstance(body[field], str):
-            return web.json_response({"error": {"code": "field_not_a_string", "field": field}}, status=400)
+            return web.json_response(
+                {"error": {"code": "field_not_a_string", "field": field}}, status=400
+            )
     if body.get("registry") is not None and not isinstance(body.get("registry"), str):
-        return web.json_response({"error": {"code": "field_not_a_string", "field": "registry"}}, status=400)
+        return web.json_response(
+            {"error": {"code": "field_not_a_string", "field": "registry"}}, status=400
+        )
     src = body.get("source", "").strip()
     name = update_name or body.get("name", "").strip()
     if not src:
-        return web.json_response({"error": {"code": "field_required", "field": "source"}}, status=400)
+        return web.json_response(
+            {"error": {"code": "field_required", "field": "source"}}, status=400
+        )
     registry = body.get("registry")
     try:
-        resolved = await asyncio.to_thread(app_source.resolve, src, registry=registry or None)
+        resolved = await asyncio.to_thread(
+            app_source.resolve, src, registry=registry or None
+        )
     except app_source.SourceError as exc:
-        return web.json_response({"error": {"code": getattr(exc, "code", "source_refused"), "message": str(exc)}}, status=400)
+        return web.json_response(
+            {
+                "error": {
+                    "code": getattr(exc, "code", "source_refused"),
+                    "message": str(exc),
+                }
+            },
+            status=400,
+        )
     try:
-        result = await asyncio.to_thread(app_manager.preview, resolved.path, name=name,
-            action="update" if (update_name or (name and app_manager._read_installed(name))) else "install", origin=resolved.origin,
-            caller=request.get("user", "dashboard"))
-        payload = result.to_dict(); payload["registry"] = registry
-        _sel_log("apps.preview", "ok" if result.review else "refused", result.name or src, request, error=result.error)
+        result = await asyncio.to_thread(
+            app_manager.preview,
+            resolved.path,
+            name=name,
+            action=(
+                "update"
+                if (update_name or (name and app_manager._read_installed(name)))
+                else "install"
+            ),
+            origin=resolved.origin,
+            caller=request.get("user", "dashboard"),
+        )
+        payload = result.to_dict()
+        payload["registry"] = registry
+        _sel_log(
+            "apps.preview",
+            "ok" if result.review else "refused",
+            result.name or src,
+            request,
+            error=result.error,
+        )
         return web.json_response(payload, status=200 if result.review else 400)
     finally:
-        if resolved.cleanup: app_source._rmtree(resolved.cleanup_path)
-
+        if resolved.cleanup:
+            app_source._rmtree(resolved.cleanup_path)
 
 
 async def api_app_preview(request: web.Request) -> web.Response:
     return await _app_review_request(request)
 
 
-
 async def api_app_install(request: web.Request) -> web.Response:
-    from gideon.extensions.apps import app_manager, source as app_source
+    from gideon.extensions.apps import app_manager
+    from gideon.extensions.apps import source as app_source
+
     try:
         body = await read_json_body(request)
     except Exception:
-        return web.json_response({"error": {"code": "invalid_json", "message": "Invalid JSON"}}, status=400)
+        return web.json_response(
+            {"error": {"code": "invalid_json", "message": "Invalid JSON"}}, status=400
+        )
     for field in ("name", "source", "review_digest"):
         if field in body and not isinstance(body[field], str):
-            return web.json_response({"error": {"code": "field_not_a_string", "field": field}}, status=400)
+            return web.json_response(
+                {"error": {"code": "field_not_a_string", "field": field}}, status=400
+            )
     if body.get("registry") is not None and not isinstance(body.get("registry"), str):
-        return web.json_response({"error": {"code": "field_not_a_string", "field": "registry"}}, status=400)
+        return web.json_response(
+            {"error": {"code": "field_not_a_string", "field": "registry"}}, status=400
+        )
     src = body.get("source", "").strip()
     if not src:
-        return web.json_response({"error": {"code": "field_required", "field": "source"}}, status=400)
-    name = body.get("name", "").strip(); digest = body.get("review_digest"); registry = body.get("registry")
+        return web.json_response(
+            {"error": {"code": "field_required", "field": "source"}}, status=400
+        )
+    name = body.get("name", "").strip()
+    digest = body.get("review_digest")
+    registry = body.get("registry")
     try:
-        resolved = await asyncio.to_thread(app_source.resolve, src, registry=registry or None)
+        resolved = await asyncio.to_thread(
+            app_source.resolve, src, registry=registry or None
+        )
     except app_source.SourceError as exc:
-        return web.json_response({"error": {"code": getattr(exc, "code", "source_refused"), "message": str(exc)}}, status=400)
+        return web.json_response(
+            {
+                "error": {
+                    "code": getattr(exc, "code", "source_refused"),
+                    "message": str(exc),
+                }
+            },
+            status=400,
+        )
     try:
         if not digest:
-            result = await asyncio.to_thread(app_manager.preview, resolved.path, name=name,
-                origin=resolved.origin, caller=request.get("user", "dashboard"))
-            payload = result.to_dict(); payload["registry"] = registry
+            result = await asyncio.to_thread(
+                app_manager.preview,
+                resolved.path,
+                name=name,
+                origin=resolved.origin,
+                caller=request.get("user", "dashboard"),
+            )
+            payload = result.to_dict()
+            payload["registry"] = registry
             return web.json_response(payload, status=409 if result.review else 400)
-        result = await asyncio.to_thread(app_manager.install, resolved.path,
-            origin=resolved.origin, confirm=True, review_digest=digest,
-            caller=request.get("user", "dashboard"), source_ref=src)
+        result = await asyncio.to_thread(
+            app_manager.install,
+            resolved.path,
+            origin=resolved.origin,
+            confirm=True,
+            review_digest=digest,
+            caller=request.get("user", "dashboard"),
+            source_ref=src,
+        )
     finally:
-        if resolved.cleanup: app_source._rmtree(resolved.cleanup_path)
-    payload = result.to_dict(); payload["registry"] = registry
-    _sel_log("apps.install", "ok" if result.ok else "refused", result.name or src, request, error=result.error)
-    if result.ok: _reconcile_app_crons(request)
-    return web.json_response(payload, status=201 if result.ok else (409 if result.needs_consent else 400))
+        if resolved.cleanup:
+            app_source._rmtree(resolved.cleanup_path)
+    payload = result.to_dict()
+    payload["registry"] = registry
+    _sel_log(
+        "apps.install",
+        "ok" if result.ok else "refused",
+        result.name or src,
+        request,
+        error=result.error,
+    )
+    if result.ok:
+        _reconcile_app_crons(request)
+    return web.json_response(
+        payload, status=201 if result.ok else (409 if result.needs_consent else 400)
+    )
 
 
 async def api_app_update(request: web.Request) -> web.Response:
-    from gideon.extensions.apps import app_manager, source as app_source
+    from gideon.extensions.apps import app_manager
+    from gideon.extensions.apps import source as app_source
+
     name = request.match_info["name"]
     try:
         body = await read_json_body(request)
     except Exception:
-        return web.json_response({"error": {"code": "invalid_json", "message": "Invalid JSON"}}, status=400)
+        return web.json_response(
+            {"error": {"code": "invalid_json", "message": "Invalid JSON"}}, status=400
+        )
     for field in ("name", "source", "review_digest"):
         if field in body and not isinstance(body[field], str):
-            return web.json_response({"error": {"code": "field_not_a_string", "field": field}}, status=400)
+            return web.json_response(
+                {"error": {"code": "field_not_a_string", "field": field}}, status=400
+            )
     if body.get("registry") is not None and not isinstance(body.get("registry"), str):
-        return web.json_response({"error": {"code": "field_not_a_string", "field": "registry"}}, status=400)
+        return web.json_response(
+            {"error": {"code": "field_not_a_string", "field": "registry"}}, status=400
+        )
     src = body.get("source", "").strip()
     if not src:
-        return web.json_response({"error": {"code": "field_required", "field": "source"}}, status=400)
-    digest = body.get("review_digest"); registry = body.get("registry")
+        return web.json_response(
+            {"error": {"code": "field_required", "field": "source"}}, status=400
+        )
+    digest = body.get("review_digest")
+    registry = body.get("registry")
     try:
-        resolved = await asyncio.to_thread(app_source.resolve, src, registry=registry or None)
+        resolved = await asyncio.to_thread(
+            app_source.resolve, src, registry=registry or None
+        )
     except app_source.SourceError as exc:
-        return web.json_response({"error": {"code": getattr(exc, "code", "source_refused"), "message": str(exc)}}, status=400)
+        return web.json_response(
+            {
+                "error": {
+                    "code": getattr(exc, "code", "source_refused"),
+                    "message": str(exc),
+                }
+            },
+            status=400,
+        )
     try:
         if not digest:
-            result = await asyncio.to_thread(app_manager.preview, resolved.path, name=name,
-                action="update", origin=resolved.origin, caller=request.get("user", "dashboard"))
-            payload = result.to_dict(); payload["registry"] = registry
+            result = await asyncio.to_thread(
+                app_manager.preview,
+                resolved.path,
+                name=name,
+                action="update",
+                origin=resolved.origin,
+                caller=request.get("user", "dashboard"),
+            )
+            payload = result.to_dict()
+            payload["registry"] = registry
             return web.json_response(payload, status=409 if result.review else 400)
-        result = await asyncio.to_thread(app_manager.update, resolved.path, name,
-            origin=resolved.origin, confirm=True, review_digest=digest,
-            caller=request.get("user", "dashboard"))
+        result = await asyncio.to_thread(
+            app_manager.update,
+            resolved.path,
+            name,
+            origin=resolved.origin,
+            confirm=True,
+            review_digest=digest,
+            caller=request.get("user", "dashboard"),
+        )
     finally:
-        if resolved.cleanup: app_source._rmtree(resolved.cleanup_path)
-    payload = result.to_dict(); payload["registry"] = registry
-    _sel_log("apps.update", "ok" if result.ok else "refused", name, request, error=result.error)
-    if result.ok: _reconcile_app_crons(request)
-    return web.json_response(payload, status=200 if result.ok else (409 if result.needs_consent else 400))
+        if resolved.cleanup:
+            app_source._rmtree(resolved.cleanup_path)
+    payload = result.to_dict()
+    payload["registry"] = registry
+    _sel_log(
+        "apps.update",
+        "ok" if result.ok else "refused",
+        name,
+        request,
+        error=result.error,
+    )
+    if result.ok:
+        _reconcile_app_crons(request)
+    return web.json_response(
+        payload, status=200 if result.ok else (409 if result.needs_consent else 400)
+    )
 
 
 async def api_app_enable(request: web.Request) -> web.Response:
@@ -820,7 +963,10 @@ async def api_app_config_put(request: web.Request) -> web.Response:
         if extension is not None and extension.enabled:
             registry.disable(name)
             if not registry.enable(name):
-                return web.json_response({"error": extension.error or "Channel could not restart"}, status=500)
+                return web.json_response(
+                    {"error": extension.error or "Channel could not restart"},
+                    status=500,
+                )
     from gideon.integrations.channel_transports import request_reconcile
 
     request_reconcile()
@@ -911,14 +1057,21 @@ async def api_app_agent_run(request: web.Request) -> web.Response:
     except (TypeError, ValueError):
         max_turns = 0
 
-    from gideon.extensions.apps.app_work import AppWork
     from gideon.extensions.apps.agent_tiers import AGENT_TIERS, capability_class
+    from gideon.extensions.apps.app_work import AppWork
+
     work = AppWork.for_app(name)
     requested = body.get("tier", work.tier)
     if requested not in AGENT_TIERS:
-        return json_error("agent_tier_unknown", message="tier must be text, read or tools", status=400)
+        return json_error(
+            "agent_tier_unknown", message="tier must be text, read or tools", status=400
+        )
     if work.child(requested).tier != requested:
-        return json_error("agent_tier_exceeded", message="requested work exceeds the app agent tier", status=403)
+        return json_error(
+            "agent_tier_exceeded",
+            message="requested work exceeds the app agent tier",
+            status=403,
+        )
     work = work.child(requested)
     info = state.subagents.spawn(
         task,

@@ -5,7 +5,6 @@ scoring assertions. Each scenario gets a fresh memory directory with
 optional profile seeding.
 """
 
-from gideon.core.turn_streams import closing_stream
 import json
 import logging
 import os
@@ -25,6 +24,7 @@ from gideon.assurance.eval.scenario import (
     Turn,
 )
 from gideon.cognition.memory import MemoryJournal
+from gideon.core.turn_streams import closing_stream
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
@@ -425,12 +425,27 @@ class EvalRunner:
                         source="eval_runner",
                     )
                 elif event.kind == EVENT_PERMISSION_REQUEST:
+                    from gideon.security.protected_folders import (
+                        call_protected_delete,
+                        provider_working_folder,
+                    )
                     from gideon.security.security import is_sensitive_path
 
-                    from gideon.security.protected_folders import call_protected_delete, provider_working_folder
-                    if call_protected_delete(getattr(event, "risk_level", ""), event.title, event.tool_kind, event.tool_input, cwd=provider_working_folder(provider)):
+                    if call_protected_delete(
+                        getattr(event, "risk_level", ""),
+                        event.title,
+                        event.tool_kind,
+                        event.tool_input,
+                        cwd=provider_working_folder(provider),
+                    ):
                         await provider.reject_tool(event.request_id)
-                        sel().log_tool_invocation(session_key=session_key, tool_name=event.title, outcome="denied", source="eval_runner", metadata={"reason": "protected_delete"})
+                        sel().log_tool_invocation(
+                            session_key=session_key,
+                            tool_name=event.title,
+                            outcome="denied",
+                            source="eval_runner",
+                            metadata={"reason": "protected_delete"},
+                        )
                         continue
                     safety = self._classify_safe_tool(event)
                     if safety == "exact":
@@ -454,7 +469,9 @@ class EvalRunner:
                             )
                             await provider.approve_tool(event.request_id)
                         else:
-                            outcome = "rejected_sensitive" if target else "rejected_no_path"
+                            outcome = (
+                                "rejected_sensitive" if target else "rejected_no_path"
+                            )
                             logger.warning(
                                 "Rejected tool (path check failed): %s", event.title
                             )

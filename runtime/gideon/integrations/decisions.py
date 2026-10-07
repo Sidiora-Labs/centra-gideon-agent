@@ -19,9 +19,13 @@ def validate_choice(answer: Any, options: dict[str, Any]) -> str:
         values = [*probabilities.values(), answer["confidence"]]
         chosen = answer["choice"]
         valid = (
-            isinstance(chosen, str) and chosen in options
+            isinstance(chosen, str)
+            and chosen in options
             and set(probabilities) == set(options)
-            and all(type(v) in (int, float) and math.isfinite(v) and 0 <= v <= 1 for v in values)
+            and all(
+                type(v) in (int, float) and math.isfinite(v) and 0 <= v <= 1
+                for v in values
+            )
             and abs(sum(probabilities.values()) - 1) < 0.02
             and probabilities[chosen] >= max(probabilities.values())
         )
@@ -39,7 +43,10 @@ def _service_name(purpose: str) -> str:
 
 
 def decision_target(
-    body: dict, *, purpose: str = "genui", api_key: str = "",
+    body: dict,
+    *,
+    purpose: str = "genui",
+    api_key: str = "",
 ) -> tuple[str, str, dict]:
     _service_name(purpose)
     if not api_key:
@@ -50,18 +57,28 @@ def decision_target(
 async def request_decision(body: dict, *, purpose: str = "genui") -> dict:
     service = _service_name(purpose)
     url, key, payload = decision_target(
-        body, purpose=purpose, api_key=os.environ.get("OPENROUTER_API_KEY", ""),
+        body,
+        purpose=purpose,
+        api_key=os.environ.get("OPENROUTER_API_KEY", ""),
     )
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=35)) as client:
-        async with client.post(url, json=payload, headers={"Authorization": f"Bearer {key}",
-                               "X-Title": "Gideon"}, allow_redirects=False) as response:
+        async with client.post(
+            url,
+            json=payload,
+            headers={"Authorization": f"Bearer {key}", "X-Title": "Gideon"},
+            allow_redirects=False,
+        ) as response:
             if response.status != 200:
-                raise RuntimeError(f"{service} decision service rejected the request ({response.status})")
+                raise RuntimeError(
+                    f"{service} decision service rejected the request ({response.status})"
+                )
             chunks, size = [], 0
             async for chunk in response.content.iter_chunked(65536):
                 size += len(chunk)
                 if size > 2 * 1024 * 1024:
-                    raise RuntimeError(f"{service} decision response exceeded its limit")
+                    raise RuntimeError(
+                        f"{service} decision response exceeded its limit"
+                    )
                 chunks.append(chunk)
             result = json.loads(b"".join(chunks))
             if not isinstance(result, dict):

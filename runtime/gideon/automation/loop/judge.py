@@ -29,7 +29,6 @@ addition to the contract is evidence: `_observe_ground_truth` is unchanged, and
 
 from __future__ import annotations
 
-from gideon.core.turn_streams import closing_stream
 import json
 import logging
 import re
@@ -40,6 +39,7 @@ from gideon.automation.workflows.judge_contract import (
     evidence_hash_of,
     verdict_for_cycle,
 )
+from gideon.core.turn_streams import closing_stream
 
 logger = logging.getLogger(__name__)
 

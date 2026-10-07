@@ -62,7 +62,9 @@ def build_options_blocks(choices: list[str]) -> list[dict]:
     ]
 
 
-def build_options_selected_blocks(choices: list[str], selected_indices: list[int] | int) -> list[dict]:
+def build_options_selected_blocks(
+    choices: list[str], selected_indices: list[int] | int
+) -> list[dict]:
     """Render OPTIONS as static text with selected choices highlighted."""
     if isinstance(selected_indices, int):
         selected_indices = [selected_indices]
@@ -294,6 +296,7 @@ SLACK_MSG_LIMIT = 3900
 SLACK_BLOCK_SECTION_LIMIT = 3000
 TRUNCATION_NOTICE = "\n\n⚠️ _Response truncated (Slack message limit)_"
 CONTINUATION = "\n\n_(continued…)_"
+
 
 def split_message(text: str, limit: int = SLACK_MSG_LIMIT) -> list[str]:
     """Split text into chunks that fit within Slack's message limit.

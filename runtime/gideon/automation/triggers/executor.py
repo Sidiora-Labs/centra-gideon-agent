@@ -36,7 +36,9 @@ def _release_claim(trigger_id: str, *, base_dir: Any = None, holder: str = "") -
     return False
 
 
-def release_claim_for(trigger_id: str, *, base_dir: Any = None, holder: str = "") -> bool:
+def release_claim_for(
+    trigger_id: str, *, base_dir: Any = None, holder: str = ""
+) -> bool:
     try:
         return _release_claim(trigger_id, base_dir=base_dir, holder=holder)
     except Exception:

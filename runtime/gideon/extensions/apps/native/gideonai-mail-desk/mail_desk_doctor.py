@@ -14,12 +14,12 @@ credential-presence check. Both probes are blocking socket calls; the doctor run
 bounds them with a timeout.
 """
 
-from gideon.sdk.channel import AppConfig
-from gideon.sdk.cli import DoctorLine
-
 from mail_desk_runtime.imap_client import probe_login as imap_probe
 from mail_desk_runtime.settings import CRED_IMAP_PASS, CRED_SMTP_PASS, MailDeskSettings
 from mail_desk_runtime.smtp_client import probe_login as smtp_probe
+
+from gideon.sdk.channel import AppConfig
+from gideon.sdk.cli import DoctorLine
 
 
 def probe() -> list[DoctorLine]:
@@ -27,7 +27,8 @@ def probe() -> list[DoctorLine]:
     if not settings.inbound_configured and not settings.outbound_configured:
         return [
             DoctorLine(
-                "status", "info",
+                "status",
+                "info",
                 "not configured — run 'gideon setup' to connect a mailbox",
             )
         ]
@@ -43,7 +44,8 @@ def probe() -> list[DoctorLine]:
     lines.extend(_smtp_lines(settings, smtp_pass))
     lines.append(
         DoctorLine(
-            "trust", "info",
+            "trust",
+            "info",
             "unknown senders are refused until paired — 'gideon pair mail-desk'",
         )
     )
@@ -58,14 +60,19 @@ def _imap_lines(settings: MailDeskSettings, password: str) -> list[DoctorLine]:
         return [
             DoctorLine("imap", "ok", where),
             DoctorLine(
-                "imap password", "fail",
+                "imap password",
+                "fail",
                 f"missing from the credential store ({CRED_IMAP_PASS}) — run "
                 "'gideon setup'",
             ),
         ]
     ok, detail = imap_probe(
-        settings.imap_host, settings.imap_port, settings.imap_user, password,
-        settings.folder, use_ssl=settings.imap_use_ssl,
+        settings.imap_host,
+        settings.imap_port,
+        settings.imap_user,
+        password,
+        settings.folder,
+        use_ssl=settings.imap_use_ssl,
     )
     return [
         DoctorLine("imap", "ok", where),
@@ -81,12 +88,16 @@ def _smtp_lines(settings: MailDeskSettings, password: str) -> list[DoctorLine]:
         return [
             DoctorLine("smtp", "ok", where),
             DoctorLine(
-                "smtp password", "fail",
+                "smtp password",
+                "fail",
                 f"missing from the credential store ({CRED_SMTP_PASS} or {CRED_IMAP_PASS})",
             ),
         ]
     ok, detail = smtp_probe(
-        settings.smtp_host, settings.smtp_port, settings.smtp_user, password,
+        settings.smtp_host,
+        settings.smtp_port,
+        settings.smtp_user,
+        password,
         security=settings.smtp_security,
     )
     return [

@@ -40,8 +40,9 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from gideon.engine.home_gateway import open_loopback
 from typing import Any
+
+from gideon.engine.home_gateway import open_loopback
 
 CLI_SESSION_PREFIX = "inbound:cli:"
 
@@ -72,7 +73,12 @@ def probe_gateway(
     announce: bool = False,
 ) -> bool:
     """A mismatch is a refusal, never permission to launch another gateway."""
-    from gideon.engine.home_gateway import require_home_gateway, NoGatewayRunning, HomeGatewayMismatch
+    from gideon.engine.home_gateway import (
+        HomeGatewayMismatch,
+        NoGatewayRunning,
+        require_home_gateway,
+    )
+
     try:
         require_home_gateway(port, timeout=timeout)
         return True
@@ -91,8 +97,8 @@ def mint_local_token(port: int, *, timeout: float = 5.0) -> str:
     correct limit, not a gap: the secret IS the proof that the caller owns the home.
     """
     from gideon.core.config.loader import config_dir
-
     from gideon.engine.home_gateway import require_home_gateway
+
     require_home_gateway(port, timeout=timeout)
     secret_path = config_dir() / ".local_secret"
     try:
@@ -362,7 +368,9 @@ class _Collector:
         elif kind == "chat_message" and str(data.get("role", "")) == "error":
             self.errors.append(str(data.get("content", "")))
         elif kind == "chat_done":
-            self.outcome = str(data.get("outcome") or data.get("last_turn_outcome") or "")
+            self.outcome = str(
+                data.get("outcome") or data.get("last_turn_outcome") or ""
+            )
             self.done = True
 
     def result_text(self) -> str:
@@ -372,27 +380,40 @@ class _Collector:
 @contextlib.asynccontextmanager
 async def _turn_socket(port: int, token: str, session_key: str, prompt: str):
     import aiohttp
+
     base = f"http://127.0.0.1:{port}"
+
     async def refuse_redirect(session, context, params):
         raise RunError("gateway callbacks must not redirect")
+
     trace = aiohttp.TraceConfig()
     trace.on_request_redirect.append(refuse_redirect)
     try:
-        async with aiohttp.ClientSession(trust_env=False, trace_configs=[trace]) as http:
+        async with aiohttp.ClientSession(
+            trust_env=False, trace_configs=[trace]
+        ) as http:
             headers = _bearer_headers(token)
             async with http.ws_connect(base + "/api/ws", headers=headers) as ws:
-                async with http.post(base + "/api/chat?ws=1", allow_redirects=False,
-                                     json={"message": prompt, "session": session_key},
-                                     headers=headers) as response:
+                async with http.post(
+                    base + "/api/chat?ws=1",
+                    allow_redirects=False,
+                    json={"message": prompt, "session": session_key},
+                    headers=headers,
+                ) as response:
                     if response.status != 200:
-                        raise RunError(f"POST /api/chat failed: HTTP {response.status} {await response.text()}")
+                        raise RunError(
+                            f"POST /api/chat failed: HTTP {response.status} {await response.text()}"
+                        )
                 yield http, ws
     except aiohttp.ClientError as error:
-        raise RunError(f"the turn's connection to the gateway on port {port} failed: {error}") from error
+        raise RunError(
+            f"the turn's connection to the gateway on port {port} failed: {error}"
+        ) from error
 
 
 async def _read_turn(ws, collector: _Collector, timeout: float | None) -> None:
     import aiohttp
+
     deadline = None if timeout is None else time.monotonic() + timeout
     while not collector.done:
         remaining = None if deadline is None else deadline - time.monotonic()
@@ -407,22 +428,35 @@ async def _read_turn(ws, collector: _Collector, timeout: float | None) -> None:
                 envelope = json.loads(message.data)
                 if isinstance(envelope, dict):
                     collector.feed(envelope)
-        elif message.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.ERROR):
+        elif message.type in (
+            aiohttp.WSMsgType.CLOSED,
+            aiohttp.WSMsgType.CLOSE,
+            aiohttp.WSMsgType.ERROR,
+        ):
             raise RunError("gateway closed the websocket before the turn finished")
 
 
 _STOP_WAIT_SECS = 30.0
 
 
-async def _ask_to_stop(http, port: int, session_key: str, *, headers: dict[str, str]) -> None:
+async def _ask_to_stop(
+    http, port: int, session_key: str, *, headers: dict[str, str]
+) -> None:
     from urllib.parse import quote
-    path = f"http://127.0.0.1:{port}/api/chat/sessions/{quote(session_key, safe='')}/stop"
-    async with http.post(path, json={}, headers=headers, allow_redirects=False) as response:
+
+    path = (
+        f"http://127.0.0.1:{port}/api/chat/sessions/{quote(session_key, safe='')}/stop"
+    )
+    async with http.post(
+        path, json={}, headers=headers, allow_redirects=False
+    ) as response:
         if response.status != 200:
             raise RunError(f"the gateway did not stop the turn: HTTP {response.status}")
 
 
-async def _consume(port: int, token: str, collector: _Collector, prompt: str, timeout: float) -> None:
+async def _consume(
+    port: int, token: str, collector: _Collector, prompt: str, timeout: float
+) -> None:
     async with _turn_socket(port, token, collector.session_key, prompt) as (_http, ws):
         await _read_turn(ws, collector, timeout)
 
@@ -478,9 +512,9 @@ def _run_one(args) -> int:
             return 2
     print(grant_notice(session_key, task_mode), file=sys.stderr, flush=True)
 
+    from gideon.engine.gateway_base import GatewayBaseUnresolved
     from gideon.interfaces.cli.server import resolve_client_port
 
-    from gideon.engine.gateway_base import GatewayBaseUnresolved
     try:
         port = resolve_client_port(getattr(args, "port", None))
     except GatewayBaseUnresolved:

@@ -40,9 +40,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from gideon.core.periodic_sweep import PeriodicSweep
 from gideon.extensions.apps.manager import app_dir
 from gideon.extensions.apps.manifest import AppManifest
-from gideon.core.periodic_sweep import PeriodicSweep
 
 if TYPE_CHECKING:
     from gideon.integrations.sandbox_providers import SandboxSpec

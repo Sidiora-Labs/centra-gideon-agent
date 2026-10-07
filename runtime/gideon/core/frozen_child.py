@@ -1,5 +1,7 @@
 """Explicit package-owned child commands for the frozen desktop runtime."""
+
 from __future__ import annotations
+
 import os
 import runpy
 import sys

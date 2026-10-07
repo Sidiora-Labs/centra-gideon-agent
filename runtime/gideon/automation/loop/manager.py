@@ -196,6 +196,7 @@ def _arm_worker_approval_posture(state, session, loop: Loop) -> None:
     """Reset reusable worker approval state from the loop's current persisted mode."""
     posture = kinds.worker_approval_posture(loop)
     from gideon.automation.loop import run_grants
+
     run_grants.register_worker(state, session, loop)
     session._trust = posture.trust or run_grants.refresh(state, session)
     session._trust_reads = False
@@ -204,7 +205,10 @@ def _arm_worker_approval_posture(state, session, loop: Loop) -> None:
     session.acp_mode = posture.acp_mode
     try:
         from gideon.interfaces.dashboard.chat_utils import _history_key_for
-        state.sessions.set_approval_policy(_history_key_for(session.key), posture.approval_policy)
+
+        state.sessions.set_approval_policy(
+            _history_key_for(session.key), posture.approval_policy
+        )
     except Exception:
         logger.warning(
             "loop: failed to set approval posture for %s", session.key, exc_info=True
@@ -220,6 +224,7 @@ async def start(state, svc, loop_id: str) -> Loop:
     ``resume`` — both transition to RUNNING + (re)arm on a fresh/idempotent worker.
     """
     from gideon.automation.loop import run_grants
+
     run_grants.revoke(state, loop_id)
     loop = store.get(loop_id)
     if loop is None:
@@ -245,9 +250,7 @@ async def start(state, svc, loop_id: str) -> Loop:
             logger.debug("seed_phase_tasks failed for %s", loop_id, exc_info=True)
 
     restart_reason = ""
-    parallel_pending = bool(
-        (loop.kind_config or {}).get("parallel_stage_stood_down")
-    )
+    parallel_pending = bool((loop.kind_config or {}).get("parallel_stage_stood_down"))
     ownership = getattr(strat, "parallel_restart_ownership", None)
     if callable(ownership):
         restart_reason, has_parallel_ownership = await ownership(loop, state, svc)
@@ -293,6 +296,7 @@ async def start(state, svc, loop_id: str) -> Loop:
     )
     store.set_session_key(loop_id, session.key)
     from gideon.engine.agents.loop_skills import bind
+
     bind(session.key, loop.id, session.agent or strat.default_agent)
 
     extra_roots = [str(d)] if d is not None else []
@@ -380,8 +384,11 @@ async def rearm_nudge_message(svc, loop_id: str) -> None:
 def worker_session_keys(state, loop_id: str) -> list[str]:
     """The stage worker and parallel task workers belonging to one loop."""
     main = session_key(loop_id)
-    return [key for key in (getattr(state, "_sessions", None) or {})
-            if key == main or key.startswith(f"{main}-")]
+    return [
+        key
+        for key in (getattr(state, "_sessions", None) or {})
+        if key == main or key.startswith(f"{main}-")
+    ]
 
 
 async def halt_turn(state, key: str) -> bool:
@@ -401,7 +408,9 @@ async def halt_turn(state, key: str) -> bool:
         await sessions.stop_turn(dashboard_session_key(key), force=False)
         return True
     except Exception:
-        logger.warning("loop: stopping the worker turn failed for %s", key, exc_info=True)
+        logger.warning(
+            "loop: stopping the worker turn failed for %s", key, exc_info=True
+        )
         return False
 
 
@@ -420,6 +429,7 @@ async def pause(state, svc, loop_id: str) -> Loop:
     its task-workers burning cycles + editing worktrees while the user thinks it's
     paused."""
     from gideon.automation.loop import run_grants
+
     run_grants.revoke(state, loop_id)
     main = svc.get_by_session(session_key(loop_id))
     if main is not None:
@@ -434,6 +444,7 @@ async def pause(state, svc, loop_id: str) -> Loop:
 async def stop(state, svc, loop_id: str) -> Loop:
     """Stop (terminal): tear down + drop the STOP sentinel."""
     from gideon.automation.loop import run_grants
+
     run_grants.revoke(state, loop_id)
     await _teardown(svc, loop_id)
     loop_files.write_stop_sentinel(loop_id)
@@ -605,7 +616,8 @@ async def spawn_task_worker(
     state, svc, loop: Loop, task, worktree_dir: str
 ) -> str | None:
     """Start a dedicated worker session for ``task`` in its own ``worktree_dir``.
-    Returns the session key, or None. Idempotent (a live task session is returned as-is)."""
+    Returns the session key, or None. Idempotent (a live task session is returned as-is).
+    """
     cfg = AppConfig.load().loops
     skey = task_session_key(loop.id, task.id)
     existing = state._sessions.get(skey)
@@ -621,6 +633,7 @@ async def spawn_task_worker(
         app="loop",
     )
     from gideon.engine.agents.loop_skills import bind
+
     bind(session.key, loop.id, session.agent or (strat.default_agent if strat else ""))
     if loop.provider:
         session.acp_provider = loop.provider

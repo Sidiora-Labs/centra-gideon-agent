@@ -435,14 +435,13 @@ def run_parse_script(
     credential, no gateway secret, no inherited environment beyond
     :func:`~gideon.security.sandbox.build_child_env`'s allowlist.
     """
+    from gideon.core.python_children import require
     from gideon.security.sandbox import (
         PROFILE_TOOL,
         build_child_env,
         spawn_shim_argv,
         wrap_argv,
     )
-
-    from gideon.core.python_children import require
 
     require("run Python parse scripts")
     script = Path(script)

@@ -91,8 +91,13 @@ class NudgeTurn:
 
     def still_armed(self) -> bool:
         from gideon.security.guardrails.incident import incident_active
+
         key = str(getattr(self.session, "key", "") or "")
-        if incident_active() or not key or self.state._sessions.get(key) is not self.session:
+        if (
+            incident_active()
+            or not key
+            or self.state._sessions.get(key) is not self.session
+        ):
             return False
         service = self.driver.runtime.autonudge_svc
         row = service.get_by_session(key) if service is not None else None
@@ -102,13 +107,14 @@ class NudgeTurn:
         self.session._suppress_autonudge_rearm = False
         try:
             from gideon.automation.triggers.nudge import get_instance
-
             from gideon.security.guardrails.incident import incident_active
+
             service = get_instance()
             if service is not None:
                 service.notify_turn_complete(
                     self.session.key,
-                    errored=getattr(self.session, "_last_turn_errored", False) and not incident_active(),
+                    errored=getattr(self.session, "_last_turn_errored", False)
+                    and not incident_active(),
                 )
         except Exception:
             self.driver.logger.debug(
@@ -201,6 +207,7 @@ class NudgeDispatch:
 
     async def fire(self, loop: Any) -> bool:
         from gideon.security.guardrails.incident import incident_active
+
         if incident_active():
             return False
         runtime, state = self.runtime, self.runtime.dashboard_state

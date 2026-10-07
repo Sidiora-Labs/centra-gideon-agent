@@ -267,15 +267,27 @@ class SkillCommit:
         marketplace = api._ImportedSkillsMarketplace(source)
         try:
             install_scanned(
-                marketplace, f"import:{item.source}", item.key, target,
-                accepted_warnings=item.accepted_warnings or None
+                marketplace,
+                f"import:{item.source}",
+                item.key,
+                target,
+                accepted_warnings=item.accepted_warnings or None,
             )
         except SkillInstallRefused as exc:
             band = "dangerous" if exc.dangerous else "warning"
-            rules = ", ".join(sorted({finding.rule for finding in exc.report.findings
-                                      if finding.severity.value == band}))
+            rules = ", ".join(
+                sorted(
+                    {
+                        finding.rule
+                        for finding in exc.report.findings
+                        if finding.severity.value == band
+                    }
+                )
+            )
             if exc.dangerous:
-                refusal = f"the skill supply-chain scan refuses it as dangerous: {rules}"
+                refusal = (
+                    f"the skill supply-chain scan refuses it as dangerous: {rules}"
+                )
             elif item.accepted_warnings:
                 refusal = f"its security scan finds warnings other than the ones you accepted, so it was not installed: {rules}. Scan again to read them"
             else:

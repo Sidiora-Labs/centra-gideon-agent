@@ -27,7 +27,8 @@ CONTENTS = "contents"
 @dataclass(frozen=True)
 class Hit:
     """One protected folder a command would delete: which one (*kind*), where it is (*folder*),
-    and how (*how*). For :data:`HOLDER`, *deleted* is the folder holding it that goes."""
+    and how (*how*). For :data:`HOLDER`, *deleted* is the folder holding it that goes.
+    """
 
     kind: str
     folder: str
@@ -39,7 +40,8 @@ class Hit:
 class ProtectedDelete:
     """What one command would delete of the protected folders; false when nothing.
 
-    ``unread``: a delete in it removes a path this reading cannot name, so it may be any of them."""
+    ``unread``: a delete in it removes a path this reading cannot name, so it may be any of them.
+    """
 
     hits: tuple[Hit, ...] = ()
     unread: bool = False
@@ -56,7 +58,9 @@ class ProtectedDelete:
 NOTHING = ProtectedDelete()
 
 
-def protected_delete(command: str, *, cwd: str, tmpdir: str | None = None) -> ProtectedDelete:
+def protected_delete(
+    command: str, *, cwd: str, tmpdir: str | None = None
+) -> ProtectedDelete:
     """What *command* would delete of the protected folders, run in the folder *cwd* (``""``: this
     process's own, the one a command given no folder runs in). *tmpdir* is what its shell has as
     ``TMPDIR`` (``None``: this process's, which the shells Gideon starts inherit)."""
@@ -119,7 +123,9 @@ def _folders(cwd: str) -> tuple[_Folder, ...]:
     homes = home_folders()
     return (
         _Folder(ROOT, "/", ("/",)),
-        _Folder(HOME, homes[0] if homes else "", tuple(f for h in homes for f in _forms(h))),
+        _Folder(
+            HOME, homes[0] if homes else "", tuple(f for h in homes for f in _forms(h))
+        ),
         _Folder(WORKING, _norm(cwd), _forms(cwd)),
     )
 
@@ -162,7 +168,8 @@ def _resolve(
 def _physical(absolute: str) -> str:
     """Where the entry *absolute* names lies once links are followed: the folder holding it
     resolved, and the entry itself as named, since a delete removes a link rather than what it
-    points at, unless a trailing slash or a last ``.`` or ``..`` makes the path the folder."""
+    points at, unless a trailing slash or a last ``.`` or ``..`` makes the path the folder.
+    """
     last = absolute.rstrip("/").rsplit("/", 1)[-1]
     if absolute.endswith("/") or last in (".", ".."):
         return _forms(absolute)[-1]
@@ -184,7 +191,9 @@ def _hits_of_path(absolute: str, folders: tuple[_Folder, ...]) -> list[Hit]:
     return hits
 
 
-def _hits_of_glob(absolute: str, glob_at: int, folders: tuple[_Folder, ...]) -> list[Hit] | None:
+def _hits_of_glob(
+    absolute: str, glob_at: int, folders: tuple[_Folder, ...]
+) -> list[Hit] | None:
     """What a glob deletes: each protected folder, and each folder holding one, that its expansion
     can be, and everything in a protected folder when its last part matches every name there.
     ``None`` when its expansion can climb out of where it is written (a ``..`` after a glob, or a
@@ -237,7 +246,9 @@ def _pattern_parts(absolute: str, glob_at: int) -> list[_Part] | None:
     climbs = [
         text
         for text, pattern in parts[:-1]
-        if pattern and text.startswith(".") and fnmatch.fnmatchcase("..", _for_fnmatch(text))
+        if pattern
+        and text.startswith(".")
+        and fnmatch.fnmatchcase("..", _for_fnmatch(text))
     ]
     return None if climbs else parts
 
@@ -295,7 +306,11 @@ def _strongest(hits: list[Hit]) -> tuple[Hit, ...]:
         return (root,)  # everything on this computer goes with it
     # A holder that is itself a protected folder is that folder going: it is named as such.
     gone = {h.folder.casefold() for h in best.values() if h.how == ITSELF}
-    kept = [h for h in best.values() if not (h.how == HOLDER and h.deleted.casefold() in gone)]
+    kept = [
+        h
+        for h in best.values()
+        if not (h.how == HOLDER and h.deleted.casefold() in gone)
+    ]
     return tuple(sorted(kept, key=lambda h: _ORDER.index(h.kind)))
 
 
@@ -351,7 +366,11 @@ def sentence(found: ProtectedDelete) -> str:
     said = clause(found)
     if not said:
         return ""
-    return "This" + said[2:] + "." if said.startswith("it ") else said[0].upper() + said[1:] + "."
+    return (
+        "This" + said[2:] + "."
+        if said.startswith("it ")
+        else said[0].upper() + said[1:] + "."
+    )
 
 
 def refusal(found: ProtectedDelete, *, where: str) -> str:
@@ -400,8 +419,11 @@ def provider_working_folder(provider: object) -> str | None:
     return None
 
 
-def call_protected_delete(declared: object, title: str, kind: str, arguments: object, *, cwd: str | None = "") -> ProtectedDelete:
+def call_protected_delete(
+    declared: object, title: str, kind: str, arguments: object, *, cwd: str | None = ""
+) -> ProtectedDelete:
     from gideon.engine.task_modes import shell_command
+
     command = shell_command(title, kind, arguments, declared=declared)
     if not command:
         return NOTHING

@@ -56,7 +56,8 @@ class EpisodeIndex:
             vector = api.np.frombuffer(record["embedding"], dtype=api.np.float32)
             if (
                 fingerprint is not None
-                and (record["embedding_provider"], record["embedding_model"]) == fingerprint
+                and (record["embedding_provider"], record["embedding_model"])
+                == fingerprint
                 and len(vector) == dimension
             ):
                 index.add(vector.reshape(1, -1))
@@ -373,9 +374,7 @@ class EpisodeRecall:
         fingerprint = store._embedding_context()[1]
         bundle = store._faiss_bundle
         compatible_index = (
-            bundle is not None
-            and fingerprint is not None
-            and bundle[3] == fingerprint
+            bundle is not None and fingerprint is not None and bundle[3] == fingerprint
         )
         indexed = (
             embedding is not None
@@ -540,7 +539,11 @@ class EpisodeRecall:
         return list(map(dict, rows))
 
     def context(self, embedding, text, cap, citations):
-        if embedding is None and text and self.store._embedding_context()[0] is not None:
+        if (
+            embedding is None
+            and text
+            and self.store._embedding_context()[0] is not None
+        ):
             embedding = self.store._try_embed(text)
         rows = self.store.search_episodic(
             query_embedding=embedding, query_text=text, limit=self.store._episodic_limit

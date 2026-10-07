@@ -1,12 +1,12 @@
 """Prompt optimizer endpoint — rewrites vague prompts before sending to agent."""
 
-from gideon.core.turn_streams import closing_stream
 import asyncio
 import logging
 
 from aiohttp import web
 
 from gideon.core.http_request import read_json_body
+from gideon.core.turn_streams import closing_stream
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,

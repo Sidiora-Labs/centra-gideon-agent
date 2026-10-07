@@ -431,6 +431,7 @@ def named_source_notes(store, name: str) -> list[dict]:
     """
     import os
     from pathlib import Path
+
     from gideon.automation.triggers.pathguard import canonicalize, is_within
     from gideon.integrations.knowledge_providers.dir_source import DirSourceProvider
     from gideon.security.security import is_sensitive_path
@@ -455,7 +456,9 @@ def named_source_notes(store, name: str) -> list[dict]:
         if absolute:
             if real == root or not is_within(real, root):
                 continue
-            note = store.find_source_item(source["id"], Path(os.path.relpath(real, root)).as_posix())
+            note = store.find_source_item(
+                source["id"], Path(os.path.relpath(real, root)).as_posix()
+            )
             candidates = [note] if note else []
         else:
             # SQL sees only exact/suffix GUIDs, not user-supplied patterns.
@@ -469,13 +472,19 @@ def named_source_notes(store, name: str) -> list[dict]:
             for row in rows:
                 guid = str(row["guid"] or "")
                 resolved = canonicalize(str(Path(root) / guid))
-                if resolved and is_within(resolved, root) and not is_sensitive_path(resolved):
+                if (
+                    resolved
+                    and is_within(resolved, root)
+                    and not is_sensitive_path(resolved)
+                ):
                     note = store.get_item(row["id"])
                     if note:
                         candidates.append(note)
         for note in candidates:
             if not note.get("is_archived"):
-                found.append({**note, "source_name": source.get("name") or "Watched folder"})
+                found.append(
+                    {**note, "source_name": source.get("name") or "Watched folder"}
+                )
                 if len(found) >= 6:
                     return found
     return found

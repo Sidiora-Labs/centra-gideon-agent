@@ -17,7 +17,9 @@ _WINDOWS: dict[str, int] | None = None
 _SERVED_WINDOWS: dict[tuple[str, str], int] = {}
 
 
-def register_served_context_window(model_id: str, capacity: object, *, endpoint: str = "") -> bool:
+def register_served_context_window(
+    model_id: str, capacity: object, *, endpoint: str = ""
+) -> bool:
     declared = declared_context_window(capacity)
     if not model_id or declared is None:
         return False
@@ -29,7 +31,8 @@ def served_context_window(model_id: str | None, *, endpoint: str = "") -> int | 
     if not model_id:
         return None
     if ":" in model_id and not endpoint:
-        from gideon.integrations.llm.registry import serving_entry, serving_endpoint
+        from gideon.integrations.llm.registry import serving_endpoint, serving_entry
+
         entry = serving_entry(model_id.partition(":")[0])
         if entry is not None:
             endpoint = serving_endpoint(entry)
@@ -125,7 +128,12 @@ def model_context_window(
     if declared is not None:
         return declared
     if model_id and ":" in model_id and not endpoint:
-        from gideon.integrations.llm.registry import serving_entry, serving_endpoint, endpoint_on_this_machine
+        from gideon.integrations.llm.registry import (
+            endpoint_on_this_machine,
+            serving_endpoint,
+            serving_entry,
+        )
+
         entry = serving_entry(model_id.partition(":")[0])
         if entry is not None:
             endpoint = serving_endpoint(entry)

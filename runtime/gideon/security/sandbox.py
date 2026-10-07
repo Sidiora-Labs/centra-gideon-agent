@@ -281,9 +281,7 @@ def build_child_env(
     installer_names = (
         _PIP_CHILD_SETTINGS
         if installer_name == "pip"
-        else _NPM_CHILD_SETTINGS
-        if installer_name == "npm"
-        else frozenset()
+        else _NPM_CHILD_SETTINGS if installer_name == "npm" else frozenset()
     )
     names = CHILD_ENV_BASE_NAMES | _declared_env_passthrough(site) | installer_names
     env = {
@@ -335,7 +333,9 @@ def build_child_env(
             host = parsed.hostname or ""
             if parsed.port:
                 host = f"{host}:{parsed.port}"
-            clean = urlunsplit((parsed.scheme, host, parsed.path, parsed.query, parsed.fragment))
+            clean = urlunsplit(
+                (parsed.scheme, host, parsed.path, parsed.query, parsed.fragment)
+            )
             env[name] = clean if "://" in value else clean.removeprefix("http://")
             key = (site, name)
             if key not in _URL_CREDENTIAL_WARNING_SITES:
@@ -508,7 +508,9 @@ def _ssh_supports_accept_new() -> bool:
     return (major, minor) >= (7, 5)
 
 
-def _build_launcher_script(sandbox_level: str = "strict", *, network: bool = True) -> str:
+def _build_launcher_script(
+    sandbox_level: str = "strict", *, network: bool = True
+) -> str:
     """Build a Python launcher script for the Linux namespace sandbox.
 
     The launcher is executed as a subprocess.  It:
@@ -887,9 +889,18 @@ def namespace_argv(
 
     if getattr(sys, "frozen", False):
         from gideon.core.config.loader import config_dir
-        return [sys.executable, "-m", "gideon.security.namespace_child", sandbox_level,
-                str(Path.home()), str(config_dir()), *([] if network else ["--no-network"]),
-                "--", *real_argv]
+
+        return [
+            sys.executable,
+            "-m",
+            "gideon.security.namespace_child",
+            sandbox_level,
+            str(Path.home()),
+            str(config_dir()),
+            *([] if network else ["--no-network"]),
+            "--",
+            *real_argv,
+        ]
 
     script = _build_launcher_script(sandbox_level, network=network)
     fd, path = _sandbox_temp_file(suffix=".py", prefix="gideon_sandbox_")
@@ -907,7 +918,9 @@ _SEATBELT_PROFILE = """\
 """
 
 
-def _build_seatbelt_profile(sandbox_level: str = "strict", *, network: bool = True) -> str:
+def _build_seatbelt_profile(
+    sandbox_level: str = "strict", *, network: bool = True
+) -> str:
     """Build a Seatbelt .sb profile denying reads of sensitive dirs."""
     home = str(Path.home())
     from gideon.security.owner_only import prepare_owner_only_paths
@@ -1050,7 +1063,9 @@ def _cannot_take_the_network(mode: str) -> str:
     backend = detect_backend(config_mode=mode)
     if backend == "sandbox-exec" or (backend == "namespace" and _probe_unshare_net()):
         return ""
-    return "this host cannot apply an OS sandbox that removes the command's network access"
+    return (
+        "this host cannot apply an OS sandbox that removes the command's network access"
+    )
 
 
 def _network_audit(argv: list[str], reason: str, *, launched: bool) -> None:
@@ -1060,8 +1075,12 @@ def _network_audit(argv: list[str], reason: str, *, launched: bool) -> None:
 
         program = os.path.basename(argv[0]) if argv else ""
         sel().log_api_access(
-            caller=run_of_this_call(), operation="egress_launch" if launched else "command_refused",
-            outcome="denied", source="net", resources=f"network ({program})", error=reason,
+            caller=run_of_this_call(),
+            operation="egress_launch" if launched else "command_refused",
+            outcome="denied",
+            source="net",
+            resources=f"network ({program})",
+            error=reason,
         )
     except Exception:
         logger.debug("command egress audit failed", exc_info=True)
@@ -1071,8 +1090,10 @@ def _require_no_network(argv: list[str], mode: str, reason: str) -> None:
     if cannot := _cannot_take_the_network(mode):
         from gideon.security.net.guard import where_egress_is_narrowed
 
-        sentence = (f"This command was not run: {reason}, so it may run only with no network access, "
-                    f"and {cannot}. {where_egress_is_narrowed()}")
+        sentence = (
+            f"This command was not run: {reason}, so it may run only with no network access, "
+            f"and {cannot}. {where_egress_is_narrowed()}"
+        )
         _network_audit(argv, sentence, launched=False)
         raise SandboxEnforcementUnavailable(sentence)
 
@@ -1106,7 +1127,10 @@ def wrap_argv(
 
 
 def wrap_program_argv(
-    argv: list[str], mode: str = "auto", *, cwd: str | os.PathLike[str] | None = None,
+    argv: list[str],
+    mode: str = "auto",
+    *,
+    cwd: str | os.PathLike[str] | None = None,
     network: bool = True,
 ) -> tuple[list[str], str | None]:
     if not network:
@@ -1121,7 +1145,11 @@ def egress_bound_argv(argv: list[str], *, run: str) -> tuple[list[str], str | No
     from gideon.security.net.policy import egress_held_to, no_network_for_commands
 
     with egress_held_to(run):
-        return wrap_argv(argv, "standard") if no_network_for_commands() else (list(argv), None)
+        return (
+            wrap_argv(argv, "standard")
+            if no_network_for_commands()
+            else (list(argv), None)
+        )
 
 
 def no_network_note(run: str | None = None) -> str:
@@ -1140,7 +1168,10 @@ def remove_wrap(cleanup: str | None) -> None:
 
 
 def _wrapped(
-    argv: list[str], mode: str = "auto", *, cwd: str | os.PathLike[str] | None = None,
+    argv: list[str],
+    mode: str = "auto",
+    *,
+    cwd: str | os.PathLike[str] | None = None,
     network: bool = True,
 ) -> tuple[list[str], str | None]:
     """Wrap a command argv with OS-level sandbox if available.
@@ -1169,7 +1200,10 @@ def _wrapped(
         reason = owner_only_command_reason(argument, cwd=cwd)
         if reason:
             raise PermissionError(reason)
-        if (argument == "--command" or (argument.startswith("-") and argument.endswith("c"))) and index + 1 < len(argv):
+        if (
+            argument == "--command"
+            or (argument.startswith("-") and argument.endswith("c"))
+        ) and index + 1 < len(argv):
             reason = owner_only_command_reason(argv[index + 1], cwd=cwd)
             if reason:
                 raise PermissionError(reason)

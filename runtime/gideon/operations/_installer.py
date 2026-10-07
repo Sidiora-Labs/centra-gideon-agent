@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
-import os
-import tomllib
 import logging
+import os
 import shutil
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,7 +60,11 @@ def require_own_installer() -> str:
             "Run `gideon update` from a terminal where uv works."
         )
     problem, fix = missing_pip()
-    raise NoInstallerError(f"Nothing was changed: {problem}; {fix}, then run `gideon update`.", problem=problem, fix=fix)
+    raise NoInstallerError(
+        f"Nothing was changed: {problem}; {fix}, then run `gideon update`.",
+        problem=problem,
+        fix=fix,
+    )
 
 
 def installer_env() -> dict[str, str]:
@@ -143,7 +147,15 @@ def checkout_install_argv(package_root: str | Path) -> list[str]:
         NoInstallerError: that tool is not there (:func:`require_own_installer`).
     """
     if require_own_installer() == "uv":
-        argv = ["uv", "sync", "--locked", "--inexact", "--python", sys.executable, "--quiet"]
+        argv = [
+            "uv",
+            "sync",
+            "--locked",
+            "--inexact",
+            "--python",
+            sys.executable,
+            "--quiet",
+        ]
         for extra in _installed_extras(_declared_extras(Path(package_root))):
             argv += ["--extra", extra]
         return argv
@@ -157,11 +169,17 @@ def _declared_extras(package_root: Path) -> set[str]:
     from packaging.utils import canonicalize_name
 
     try:
-        project = tomllib.loads((package_root / "pyproject.toml").read_text(encoding="utf-8"))
+        project = tomllib.loads(
+            (package_root / "pyproject.toml").read_text(encoding="utf-8")
+        )
     except (OSError, ValueError):
         return set()
     table = project.get("project", {}).get("optional-dependencies", {})
-    return {canonicalize_name(name) for name in table} if isinstance(table, dict) else set()
+    return (
+        {canonicalize_name(name) for name in table}
+        if isinstance(table, dict)
+        else set()
+    )
 
 
 def _installed_extras(declared: set[str]) -> list[str]:
@@ -180,7 +198,9 @@ def _installed_extras(declared: set[str]) -> list[str]:
     if dist is None:
         return []
     own = canonicalize_name(dist.metadata["Name"] or "gideon-agent-harness")
-    extras = {canonicalize_name(e) for e in dist.metadata.get_all("Provides-Extra") or []}
+    extras = {
+        canonicalize_name(e) for e in dist.metadata.get_all("Provides-Extra") or []
+    }
     needs: dict[str, list[Requirement]] = {}
     for line in dist.requires or []:
         try:
@@ -220,7 +240,6 @@ def _installed(name: str) -> bool:
     return True
 
 
-
 INSTALLER_CACHE_DIRNAME = "installer-cache"
 
 
@@ -232,7 +251,9 @@ def installer_cache_env() -> dict[str, str]:
     scratch = root / "tmp"
     scratch.mkdir(mode=0o700, parents=True, exist_ok=True)
     return {
-        "PIP_NO_CACHE_DIR": "1", "UV_NO_CACHE": "1",
+        "PIP_NO_CACHE_DIR": "1",
+        "UV_NO_CACHE": "1",
         "NODE_DISABLE_COMPILE_CACHE": "1",
-        "npm_config_cache": str(root / "npm"), "TMPDIR": str(scratch),
+        "npm_config_cache": str(root / "npm"),
+        "TMPDIR": str(scratch),
     }

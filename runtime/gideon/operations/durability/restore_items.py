@@ -58,6 +58,7 @@ def copy_tree_no_overwrite(
         elif target is not None and item.is_file() and not target.exists():
             if entry_path and item.suffix == ".json":
                 from gideon.workspace.snapshot import _copy_json_with_arrival_policy
+
                 _copy_json_with_arrival_policy(item, target, f"{entry_path}/{inner}")
                 copied += 1
             elif sqlite_files.bring_in(item, target):
@@ -66,7 +67,11 @@ def copy_tree_no_overwrite(
 
 
 def merged_or_brought_in(
-    snap: Path, home: Path, rel: str, left: list[str], merge: Callable[[Path, Path], object]
+    snap: Path,
+    home: Path,
+    rel: str,
+    left: list[str],
+    merge: Callable[[Path, Path], object],
 ) -> str:
     """The archive's file *rel* (in its unpacked copy *snap*) into the home: merged into the one
     the home has (*merge*), ``"merged"``, or brought in where it has none, ``"copied"``. ``""``
@@ -76,14 +81,20 @@ def merged_or_brought_in(
     if dst is not None and dst.is_file():
         merge(snap / rel, dst)
         return "merged"
-    return "copied" if dst is not None and sqlite_files.bring_in(snap / rel, dst) else ""
+    return (
+        "copied" if dst is not None and sqlite_files.bring_in(snap / rel, dst) else ""
+    )
 
 
 def said(what: str, left: list[str], since: int) -> None:
     """Say how the part *what* of a restore went: done, or what it put on *left* after its first
     *since*."""
     done = len(left) == since
-    print(f"  ✅ {what}" if done else f"  ⚠️  {what}: left unchanged: {', '.join(left[since:])}")
+    print(
+        f"  ✅ {what}"
+        if done
+        else f"  ⚠️  {what}: left unchanged: {', '.join(left[since:])}"
+    )
 
 
 def left_unchanged_line(left: list[str], what: str = "Merge") -> str:

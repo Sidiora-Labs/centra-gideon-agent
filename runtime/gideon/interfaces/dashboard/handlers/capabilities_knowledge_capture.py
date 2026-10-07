@@ -5,12 +5,12 @@ import asyncio
 from aiohttp import web
 
 from gideon.core.http_request import read_json_body
-from gideon.workspace.uploads.content_intake import approve_stream, IntakeRefused
 from gideon.interfaces.dashboard.handlers._shared import (
     _blocks_reads_session,
     _is_restricted_session,
 )
 from gideon.workspace.capabilities.knowledge.capture import CaptureError, CaptureInbox
+from gideon.workspace.uploads.content_intake import IntakeRefused, approve_stream
 
 
 def _inbox(request, allowed=()):
@@ -77,24 +77,26 @@ async def audio(request):
     field = await reader.next()
     if field is None or field.name != "audio":
         raise CaptureError("First multipart field must be audio")
+
     async def chunks():
         size = 0
         while chunk := await field.read_chunk():
             size += len(chunk)
             if size > 20 * 1024 * 1024:
-                raise CaptureError('Audio exceeds 20 MiB', 413)
+                raise CaptureError("Audio exceeds 20 MiB", 413)
             yield chunk
-    filename = field.filename or 'recording.webm'
-    mime = field.headers.get('Content-Type', '')
-    snapshot = await approve_stream(chunks(), filename, mime, surface='capture_audio')
+
+    filename = field.filename or "recording.webm"
+    mime = field.headers.get("Content-Type", "")
+    snapshot = await approve_stream(chunks(), filename, mime, surface="capture_audio")
     try:
         if await reader.next() is not None:
-            raise CaptureError('Only the audio field is accepted')
-        return await inbox.save_audio(request.headers.get('X-Capture-Request-ID'),
-                                      snapshot, filename, mime)
+            raise CaptureError("Only the audio field is accepted")
+        return await inbox.save_audio(
+            request.headers.get("X-Capture-Request-ID"), snapshot, filename, mime
+        )
     finally:
         snapshot.close()
-
 
 
 @endpoint

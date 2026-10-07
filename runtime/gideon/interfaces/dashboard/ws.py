@@ -90,7 +90,10 @@ async def api_ws(request: web.Request) -> web.WebSocketResponse:
     await ws.prepare(request)
 
     from gideon.security.approval_answer import OWNER, of_request
-    state.register_ws(ws, app=request.get("app", ""), owner=of_request(request).kind == OWNER)
+
+    state.register_ws(
+        ws, app=request.get("app", ""), owner=of_request(request).kind == OWNER
+    )
 
     try:
         app = request.get("app", "")
@@ -108,7 +111,8 @@ async def api_ws(request: web.Request) -> web.WebSocketResponse:
         )
         for chat_session in state._sessions.values():
             if chat_session._routing_suggestion is not None and (
-                not app or (
+                not app
+                or (
                     getattr(chat_session, "created_by_app", "") == app
                     and state._app_may_see_event(app, "routing_suggestion")
                 )
@@ -152,7 +156,9 @@ async def api_ws(request: web.Request) -> web.WebSocketResponse:
                                     session = a.parent_session_key.removeprefix(
                                         "dashboard:"
                                     )
-                                    if request.get("app") and not state._app_owns_session(
+                                    if request.get(
+                                        "app"
+                                    ) and not state._app_owns_session(
                                         request["app"], session
                                     ):
                                         continue

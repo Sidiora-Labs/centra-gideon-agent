@@ -23,6 +23,7 @@ def config_dir() -> Path:
 
 def _locks_dir() -> Path:
     from gideon.operations.durability.home_paths import home_path
+
     directory = home_path(config_dir(), "locks")
     directory.mkdir(parents=True, exist_ok=True)
     return directory
@@ -59,6 +60,7 @@ class _ExecutionLease:
 @contextmanager
 def single_flight(job_key: str) -> Iterator[bool]:
     from gideon.operations.durability.home_paths import open_lock
+
     with open_lock(lock_path(job_key)) as stream:
         lease = _ExecutionLease(stream)
         try:

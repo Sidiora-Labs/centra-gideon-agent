@@ -17,7 +17,9 @@ _TTL_SECS = 600.0
 _LIST_TIMEOUT_SECS = 8.0
 IMAGE_USE_CASE = "image_modality"
 NO_IMAGE_MODEL = "No image model is set up."
-BOUND_IMAGE_MODEL_UNAVAILABLE = "The image model chosen in Settings → Models can't run right now."
+BOUND_IMAGE_MODEL_UNAVAILABLE = (
+    "The image model chosen in Settings → Models can't run right now."
+)
 
 _tags_memo: dict[tuple[str, str], tuple[float, frozenset[str]]] = {}
 
@@ -55,7 +57,9 @@ async def image_input(served_ref: str) -> ImageInput:
         if not registry.capability_of(entry.type).supports_vision:
             return ImageInput(False, f"{model} can't take images.", model)
     except Exception:
-        logger.debug("image input: no capability record for %r", entry_name, exc_info=True)
+        logger.debug(
+            "image input: no capability record for %r", entry_name, exc_info=True
+        )
         return ImageInput(False, f"{model} can't take images.", model)
 
     tags = await _model_tags(registry, entry, model)
@@ -83,7 +87,9 @@ async def image_reader() -> ImageReader:
 
 async def resolve_image_reader(**kwargs: Any) -> ModelProvider:
     """Build only the named provider selected by :func:`image_reader`."""
-    from gideon.extensions.providers.provider_bridge import resolve_provider_for_use_case
+    from gideon.extensions.providers.provider_bridge import (
+        resolve_provider_for_use_case,
+    )
     from gideon.integrations.llm.registry import ProviderResolutionError
 
     reader = await image_reader()
@@ -111,12 +117,16 @@ async def _model_tags(registry, entry, model: str) -> frozenset[str]:
     catalog = registry.build_catalog(entry)
     if catalog is not None:
         try:
-            rows = await asyncio.wait_for(catalog.list_models(), timeout=_LIST_TIMEOUT_SECS)
+            rows = await asyncio.wait_for(
+                catalog.list_models(), timeout=_LIST_TIMEOUT_SECS
+            )
             row = next((item for item in rows if model in (item.id, item.name)), None)
             if row is not None and row.capabilities:
                 tags = frozenset(row.capabilities)
         except Exception:
-            logger.debug("image input catalog listing failed for %r", entry.name, exc_info=True)
+            logger.debug(
+                "image input catalog listing failed for %r", entry.name, exc_info=True
+            )
     if tags is None:
         tags = frozenset(infer_capabilities(model))
     _tags_memo[key] = (now, tags)

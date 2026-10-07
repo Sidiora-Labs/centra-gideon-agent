@@ -124,7 +124,9 @@ def resolve(source: str, *, registry: str | None = None) -> ResolvedSource:
     multi-app git repo — a multi-app repo given WITHOUT that suffix raises
     with the ``#app`` form and the app names it found. Raises
     :class:`SourceError` on a missing path or a failed clone."""
-    if not isinstance(source, str) or (registry is not None and not isinstance(registry, str)):
+    if not isinstance(source, str) or (
+        registry is not None and not isinstance(registry, str)
+    ):
         raise SourceError("source and registry must be strings")
     s = source.strip()
     if not s:
@@ -161,7 +163,9 @@ def resolve(source: str, *, registry: str | None = None) -> ResolvedSource:
     return ResolvedSource(path=path, origin="local", cleanup=False)
 
 
-def _listing_fetch_policy(source: str, base: str, registry: str | None) -> EgressPolicy | None:
+def _listing_fetch_policy(
+    source: str, base: str, registry: str | None
+) -> EgressPolicy | None:
     from gideon.extensions.apps import catalog
     from gideon.security.net.git import preflight
 
@@ -176,12 +180,21 @@ def _listing_fetch_policy(source: str, base: str, registry: str | None) -> Egres
     if decision.allow:
         return policy
     if decision.category == "unresolvable":
-        raise SourceError(catalog.listing_unreachable(decision.host, "it does not resolve"))
-    raise SourceRefused(catalog.listing_address_refusal(decision) or "This app's download address is not permitted.")
+        raise SourceError(
+            catalog.listing_unreachable(decision.host, "it does not resolve")
+        )
+    raise SourceRefused(
+        catalog.listing_address_refusal(decision)
+        or "This app's download address is not permitted."
+    )
 
 
 def _clone_git(url: str, *, policy: EgressPolicy | None = None) -> ResolvedSource:
-    from gideon.security.net.git import GitEgressRefused, GitHostUnreachable, run_git_guarded
+    from gideon.security.net.git import (
+        GitEgressRefused,
+        GitHostUnreachable,
+        run_git_guarded,
+    )
 
     tmp = Path(tempfile.mkdtemp(prefix="gideon-app-clone-"))
     clone = ["clone", "--depth", "1", "--", url, str(tmp)]
@@ -217,10 +230,15 @@ def _clone_git(url: str, *, policy: EgressPolicy | None = None) -> ResolvedSourc
     _rmtree(tmp / ".git")
     return ResolvedSource(path=tmp, origin="external", cleanup=True)
 
+
 def _confined_subdirectory(root: Path, subdir: str) -> Path | None:
     """Resolve a URL-selected app folder without following any clone symlink."""
     parts = Path(subdir).parts
-    if not parts or Path(subdir).is_absolute() or any(part in {"", ".", ".."} for part in parts):
+    if (
+        not parts
+        or Path(subdir).is_absolute()
+        or any(part in {"", ".", ".."} for part in parts)
+    ):
         return None
     current = root
     try:

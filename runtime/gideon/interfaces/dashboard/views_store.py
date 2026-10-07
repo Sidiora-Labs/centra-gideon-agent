@@ -400,6 +400,7 @@ def update_view(view_id: str, patch: dict) -> DashboardView:
     """Update a user view's metadata. Presets refuse edit (they are code-locked)."""
     if _is_preset(view_id):
         raise PresetLockedError(f"'{view_id}' is a preset and cannot be edited")
+
     def update(data: dict) -> DashboardView:
         for view in data["views"]:
             if view.get("id") == view_id:
@@ -419,6 +420,7 @@ def delete_view(view_id: str) -> None:
     """Delete a user view. Presets refuse deletion."""
     if _is_preset(view_id):
         raise PresetLockedError(f"'{view_id}' is a preset and cannot be deleted")
+
     def delete(data: dict) -> None:
         before = len(data["views"])
         data["views"] = [v for v in data["views"] if v.get("id") != view_id]
@@ -457,6 +459,7 @@ def add_tile(
         size = "m"
     if added_by not in _ADDED_BY:
         added_by = "user"
+
     def add(data: dict) -> None:
         if not _is_preset(view_id) and not any(
             view.id == view_id for view in _views_from_data(data)
@@ -488,6 +491,7 @@ def set_tile_refresh(view_id: str, ref: str, patch: dict) -> DashboardTile:
     the write so what the caller reads back is what a refresh will actually honor.
     """
     ref = ref.strip()
+
     def refresh(data: dict) -> DashboardTile:
         tiles = data["overlay"].get(view_id)
         if not isinstance(tiles, list):
@@ -520,6 +524,7 @@ def resolve_tile(view_id: str, ref: str, keep: bool) -> DashboardView:
     unpin a user tile). Both are the human's decision — the agent only proposes.
     """
     ref = ref.strip()
+
     def resolve(data: dict) -> None:
         tiles = data["overlay"].get(view_id)
         if not isinstance(tiles, list):
@@ -579,6 +584,7 @@ def set_composition(view_id: str, patch: dict) -> dict:
         {"revision", "tiles"},
     ):
         raise ValueError("Observed revision and select or tiles are required")
+
     def change(data: dict) -> None:
         if type(patch["revision"]) is not int or patch["revision"] != data.get(
             "composition_revision", 0

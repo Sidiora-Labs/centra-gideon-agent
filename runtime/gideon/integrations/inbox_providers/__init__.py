@@ -43,7 +43,10 @@ def source_catalog(
     fallback: MessageSourceProvider | None = None,
 ) -> list[tuple[MessageSourceProvider, bool]]:
     """Return a fresh list of active source instances and their polling posture."""
-    from gideon.integrations.inbox_providers.registry import get_source, list_source_names
+    from gideon.integrations.inbox_providers.registry import (
+        get_source,
+        list_source_names,
+    )
 
     sources: dict[str, MessageSourceProvider] = {}
     for name in list_source_names():

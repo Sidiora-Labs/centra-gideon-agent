@@ -25,7 +25,11 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from gideon.core.constants import DASHBOARD_SESSION_PREFIX
-from gideon.security.guardrails.autonomy import RUNG_AUTO_WITH_UNDO, RUNG_AUTONOMOUS, RUNG_ONE_TAP
+from gideon.security.guardrails.autonomy import (
+    RUNG_AUTO_WITH_UNDO,
+    RUNG_AUTONOMOUS,
+    RUNG_ONE_TAP,
+)
 from gideon.security.guardrails.budgets import Budget
 
 logger = logging.getLogger(__name__)
@@ -178,7 +182,11 @@ def _persisted_attended_loop_worker(session_key: str) -> bool:
             if getattr(loop, "attended", None) is not True:
                 continue
             main_key = manager.session_key(loop.id)
-            if key == planner_session_key(loop.id) or key == main_key or key.startswith(f"{main_key}-"):
+            if (
+                key == planner_session_key(loop.id)
+                or key == main_key
+                or key.startswith(f"{main_key}-")
+            ):
                 return True
     except Exception:
         logger.debug(
@@ -291,7 +299,13 @@ def tool_grant_posture(
 
 
 def tool_grant_denial(
-    name: str, tier: str, tool_allowlist: tuple[str, ...] = (), *, declared: object = None, tool_kind: str = "", tool_input: object = None
+    name: str,
+    tier: str,
+    tool_allowlist: tuple[str, ...] = (),
+    *,
+    declared: object = None,
+    tool_kind: str = "",
+    tool_input: object = None,
 ) -> str:
     """Why ``name`` is denied by the effective tool grant, or ``""`` when allowed."""
     if tier == TOOL_CUSTOM and not any(pattern.strip() for pattern in tool_allowlist):
@@ -308,8 +322,12 @@ def tool_grant_denial(
         return f"{name!r} is not allowed by the custom tool grant"
 
     if declared is not None:
-        from gideon.engine.task_modes import classify_invocation, READ_ONLY
-        if classify_invocation(name, tool_kind, tool_input, declared=declared) != READ_ONLY:
+        from gideon.engine.task_modes import READ_ONLY, classify_invocation
+
+        if (
+            classify_invocation(name, tool_kind, tool_input, declared=declared)
+            != READ_ONLY
+        ):
             return f"{name!r} is write-class and the tool grant is read-only"
         return ""
     from gideon.automation.workflows.batch_compile import is_write_tool
@@ -319,7 +337,9 @@ def tool_grant_denial(
     return ""
 
 
-def rung_ceiling_for_profile(profile: SafetyProfile, *, unattended: bool = False) -> str:
+def rung_ceiling_for_profile(
+    profile: SafetyProfile, *, unattended: bool = False
+) -> str:
     """The highest autonomy rung a run under ``profile`` may reach (AUTONOMY-GUARDRAILS
     §5.2, layered per PLATFORM-HARDENING-FLOORS §5).
 

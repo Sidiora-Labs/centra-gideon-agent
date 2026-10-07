@@ -118,7 +118,10 @@ async def api_reindex_start(request: web.Request) -> web.Response:
     if error is not None:
         status = 409 if "not ready" in error.lower() else 400
         return web.json_response(
-            {"error": error, "code": "model_not_ready" if status == 409 else "reindex_unavailable"},
+            {
+                "error": error,
+                "code": "model_not_ready" if status == 409 else "reindex_unavailable",
+            },
             status=status,
         )
     return web.json_response(job.to_dict(), status=202)

@@ -172,19 +172,30 @@ def evaluate(*, notify: bool = False, state: object = None) -> list[dict]:
             }
         )
         if notify:
-            _maybe_notify(contract, available, backlog, state, chosen=chosen, problem=problem)
+            _maybe_notify(
+                contract, available, backlog, state, chosen=chosen, problem=problem
+            )
     return rows
 
 
 def _maybe_notify(
-    contract: DegradedContract, available: bool, backlog: int, state: object,
-    *, chosen: bool, problem: Optional[str],
+    contract: DegradedContract,
+    available: bool,
+    backlog: int,
+    state: object,
+    *,
+    chosen: bool,
+    problem: Optional[str],
 ) -> None:
     prev = _last_available.get(contract.surface)
     _last_available[contract.surface] = available
     if prev is None or prev == available:
         return
-    drained = _fire_drain(contract, state) if available and contract.drain is not None else None
+    drained = (
+        _fire_drain(contract, state)
+        if available and contract.drain is not None
+        else None
+    )
     notify_fn = getattr(state, "notify", None)
     if not callable(notify_fn):
         return
@@ -200,12 +211,19 @@ def _maybe_notify(
             _announced_down[contract.surface] = chosen
         elif contract.surface in _announced_down:
             was_chosen = _announced_down.pop(contract.surface)
-            tail = f" · {drained} item(s) re-enriched" if drained else (
-                f" · {backlog} item(s) awaiting re-enrichment" if backlog else ""
+            tail = (
+                f" · {drained} item(s) re-enriched"
+                if drained
+                else (f" · {backlog} item(s) awaiting re-enrichment" if backlog else "")
             )
             notify_fn(
-                "info", f"{label} recovered" if was_chosen else f"{label} is ready",
-                f"A {needs} model is available again{tail}." if was_chosen else f"A {needs} model is chosen{tail}.",
+                "info",
+                f"{label} recovered" if was_chosen else f"{label} is ready",
+                (
+                    f"A {needs} model is available again{tail}."
+                    if was_chosen
+                    else f"A {needs} model is chosen{tail}."
+                ),
             )
     except Exception:
         logger.debug("degraded: notify failed for %s", contract.surface, exc_info=True)
@@ -339,7 +357,9 @@ async def _memory_staging_drain(state: Optional[object] = None) -> int:
     return len(ids)
 
 
-_INSIGHTS_OUTCOME_SQL = "CASE WHEN json_valid(file_metadata) THEN file_metadata ELSE '{}' END"
+_INSIGHTS_OUTCOME_SQL = (
+    "CASE WHEN json_valid(file_metadata) THEN file_metadata ELSE '{}' END"
+)
 _HEURISTIC_ITEMS_SQL = (
     "SELECT id FROM items WHERE processing_status NOT IN ('queued', 'processing') "
     "AND (COALESCE(processing_error, '') LIKE '%model unavailable%' OR "

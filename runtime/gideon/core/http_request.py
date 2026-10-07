@@ -32,7 +32,9 @@ def bool_field(body: dict[str, Any], field: str, *, default: bool) -> bool: ...
 def bool_field(body: dict[str, Any], field: str, *, default: None) -> bool | None: ...
 
 
-def bool_field(body: dict[str, Any], field: str, *, default: bool | None) -> bool | None:
+def bool_field(
+    body: dict[str, Any], field: str, *, default: bool | None
+) -> bool | None:
     if field not in body or (default is None and body[field] is None):
         return default
     return _boolean(field, body[field])
@@ -40,7 +42,9 @@ def bool_field(body: dict[str, Any], field: str, *, default: bool | None) -> boo
 
 def require_bool(body: dict[str, Any], field: str) -> bool:
     if field not in body:
-        raise RequestValidationError("field_required", f"{field} is required (true or false).")
+        raise RequestValidationError(
+            "field_required", f"{field} is required (true or false)."
+        )
     return _boolean(field, body[field])
 
 
@@ -51,8 +55,14 @@ def optional_bool(body: dict[str, Any], field: str) -> bool | _Missing:
 def _boolean(field: str, value: Any) -> bool:
     if isinstance(value, bool):
         return value
-    kinds = {type(None): "null", str: "a string", int: "a number", float: "a number",
-             list: "an array", dict: "an object"}
+    kinds = {
+        type(None): "null",
+        str: "a string",
+        int: "a number",
+        float: "a number",
+        list: "an array",
+        dict: "an object",
+    }
     raise RequestValidationError(
         "field_not_a_boolean",
         f"{field} must be true or false (a JSON boolean), not {kinds.get(type(value), type(value).__name__)}.",

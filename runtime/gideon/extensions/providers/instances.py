@@ -70,7 +70,10 @@ def list_instances(extension_name: str) -> list[ExtensionInstance]:
             inst = ExtensionInstance.from_dict(data)
             inst.extension_name = extension_name
             from gideon.core.config.secret_refs import instance_owner, resolve
-            inst.config = resolve(inst.config, owner=instance_owner(extension_name, inst.id))
+
+            inst.config = resolve(
+                inst.config, owner=instance_owner(extension_name, inst.id)
+            )
             results.append(inst)
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to read instance %s: %s", f, exc)
@@ -87,7 +90,10 @@ def get_instance(extension_name: str, instance_id: str) -> ExtensionInstance | N
         inst = ExtensionInstance.from_dict(data)
         inst.extension_name = extension_name
         from gideon.core.config.secret_refs import instance_owner, resolve
-        inst.config = resolve(inst.config, owner=instance_owner(extension_name, instance_id))
+
+        inst.config = resolve(
+            inst.config, owner=instance_owner(extension_name, instance_id)
+        )
         return inst
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Failed to read instance %s: %s", path, exc)
@@ -111,6 +117,7 @@ def create_instance(
         enabled=True,
     )
     from gideon.core.config.secret_refs import instance_owner, store
+
     owner = instance_owner(extension_name, iid)
     inst.config = store(config, owner=owner)
     path = _instances_dir(extension_name) / f"{iid}.json"
@@ -118,6 +125,7 @@ def create_instance(
     path.parent.chmod(0o700)
     atomic_write(path, json.dumps(inst.to_dict(), indent=2) + "\n", mode=0o600)
     from gideon.core.config.secret_refs import purge_unused
+
     purge_unused(owner, inst.config)
     return inst
 
@@ -146,10 +154,12 @@ def update_instance(
     if enabled is not None:
         inst.enabled = enabled
     from gideon.core.config.secret_refs import instance_owner, store
+
     owner = instance_owner(extension_name, instance_id)
     inst.config = store(inst.config, owner=owner, previous=prior_stored)
     atomic_write(path, json.dumps(inst.to_dict(), indent=2) + "\n", mode=0o600)
     from gideon.core.config.secret_refs import purge_unused
+
     purge_unused(owner, inst.config)
     return inst
 
@@ -161,5 +171,6 @@ def delete_instance(extension_name: str, instance_id: str) -> bool:
         return False
     path.unlink()
     from gideon.core.config.secret_refs import instance_owner, purge
+
     purge([instance_owner(extension_name, instance_id).prefix])
     return True

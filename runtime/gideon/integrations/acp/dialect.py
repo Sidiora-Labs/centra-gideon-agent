@@ -46,7 +46,6 @@ def _preference(option: dict, *, always: bool) -> int:
     return 0 if first in label else 1 if second in label else 2
 
 
-
 def _option_words(option: dict) -> list[str]:
     text = f"{option.get('id', '')} {option.get('label', '')} {option.get('name', '')}"
     return re.findall(r"[a-z]+", re.sub(r"([a-z])([A-Z])", r"\1 \2", text).lower())
@@ -57,16 +56,24 @@ def is_refusal_option(option: dict) -> bool:
     if kind:
         return kind.startswith(("reject", "deny", "declin", "refus"))
     words = _option_words(option)
-    return (any(word.startswith(("reject", "deny", "denied", "declin", "refus")) for word in words)
-            and not any(word.startswith(("allow", "approv", "accept", "yes", "grant")) for word in words))
+    return any(
+        word.startswith(("reject", "deny", "denied", "declin", "refus"))
+        for word in words
+    ) and not any(
+        word.startswith(("allow", "approv", "accept", "yes", "grant")) for word in words
+    )
 
 
 def refusal_rank(option: dict) -> tuple[bool, bool, bool]:
     words = _option_words(option)
     continues = any(word.startswith(("continu", "proceed", "skip")) for word in words)
-    ends = not continues and any(word.startswith(("cancel", "abort", "interrupt", "stop", "halt", "terminat")) for word in words)
+    ends = not continues and any(
+        word.startswith(("cancel", "abort", "interrupt", "stop", "halt", "terminat"))
+        for word in words
+    )
     remembered = "always" in str(option.get("kind") or option.get("id") or "").lower()
     return ends, remembered, not continues
+
 
 def _choose_option(offered: list[dict], *, approve: bool, always: bool = False):
     choices = []
@@ -78,7 +85,17 @@ def _choose_option(offered: list[dict], *, approve: bool, always: bool = False):
         else:
             eligible = is_refusal_option(option)
         if eligible:
-            choices.append((_preference(option, always=always) if approve else refusal_rank(option), index, option))
+            choices.append(
+                (
+                    (
+                        _preference(option, always=always)
+                        if approve
+                        else refusal_rank(option)
+                    ),
+                    index,
+                    option,
+                )
+            )
     if choices:
         selected = min(choices, key=lambda row: row[:2])[2].get("id", "")
         return selected if approve else str(selected or "")
@@ -110,7 +127,11 @@ class ACPDialect:
         return dict(name=client_name, version=client_version)
 
     def client_capabilities(self, *, attended: bool) -> dict:
-        return {"elicitation": {"form": {}}} if attended and self.asks_through_elicitation else {}
+        return (
+            {"elicitation": {"form": {}}}
+            if attended and self.asks_through_elicitation
+            else {}
+        )
 
     def mid_turn_prompt_request(
         self, *, session_id: str, text: str

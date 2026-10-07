@@ -48,7 +48,10 @@ async def api_heartbeat_task_allow(request: web.Request) -> web.Response:
         request.match_info["task_id"], seen=seen, principal=principal.label
     ):
         return web.json_response(
-            {"error": "task_changed", "message": "The task changed or its grant could not be saved. Review the current task again."},
+            {
+                "error": "task_changed",
+                "message": "The task changed or its grant could not be saved. Review the current task again.",
+            },
             status=409,
         )
     try:

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from gideon.integrations.channel_transports import (
@@ -91,6 +91,7 @@ class ChannelManager:
             return None
         description = await _TransportProbe(selected).describe()
         from gideon.integrations.channel_trust import owner_ref
+
         description.update(owner_ref(name))
         from gideon.extensions.providers.registry import get_provider_registry
 

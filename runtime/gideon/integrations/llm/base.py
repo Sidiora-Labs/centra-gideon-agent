@@ -1,21 +1,20 @@
 """Provider contracts and fallback routing shared by inference integrations."""
 
 from abc import ABC, abstractmethod
-
-from gideon.core.turn_streams import closing_stream
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from gideon.core.turn_streams import closing_stream
 from gideon.integrations.llm.events import (
     EVENT_AGENT_SWITCHED,
     EVENT_CLEAR_STATUS,
     EVENT_COMPACTION_STATUS,
     EVENT_COMPLETE,
-    EVENT_SPENT,
-    EVENT_PERMISSION_REQUEST,
     EVENT_MODEL_SUBSTITUTION,
+    EVENT_PERMISSION_REQUEST,
+    EVENT_SPENT,
     EVENT_TEXT_CHUNK,
     EVENT_THINKING_CHUNK,
     EVENT_TOOL_CALL,
@@ -145,7 +144,9 @@ class ModelProvider(ABC):
         return False
 
     async def stream_command(self, command: str) -> AsyncIterator[LLMEvent]:
-        async with closing_stream(_forward_events(self.stream(command))) as _owned_events:
+        async with closing_stream(
+            _forward_events(self.stream(command))
+        ) as _owned_events:
             async for event in _owned_events:
                 yield event
 
@@ -181,6 +182,8 @@ class ModelProvider(ABC):
         model: str | None = None,
         reasoning_effort: str = "",
     ) -> AsyncIterator[LLMEvent]:
-        async with closing_stream(_forward_events(self.stream(_last_user_text(messages)))) as _owned_events:
+        async with closing_stream(
+            _forward_events(self.stream(_last_user_text(messages)))
+        ) as _owned_events:
             async for event in _owned_events:
                 yield event

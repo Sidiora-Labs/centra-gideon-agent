@@ -58,6 +58,7 @@ class ClockCadence:
 
     def cron(self) -> float:
         from croniter import croniter
+
         from gideon.automation.triggers.cron_clock import next_fire
 
         expression = str(self.spec.get("expr") or "").strip()
@@ -213,8 +214,11 @@ def needs_arming(trigger: Any) -> bool:
 
 def cadence_fingerprint(spec: dict[str, Any]) -> dict[str, Any]:
     """Normalize absent optional cadence fields without hiding schedule changes."""
-    result = {key: value for key, value in spec.items()
-              if value is not None and value != "" and value != []}
+    result = {
+        key: value
+        for key, value in spec.items()
+        if value is not None and value != "" and value != []
+    }
     # Native arming applies jitter here, so strict changes the slot only with jitter.
     if _positive(spec.get("jitter_secs")) <= 0:
         result.pop("strict", None)
@@ -266,7 +270,9 @@ def _cron_fires_on_date(expr: str, day: date, tz_name: str) -> bool:
             return False
     except Exception:
         return True
-    return datetime.fromtimestamp(first, tz=zone).strftime("%Y-%m-%d") == day.isoformat()
+    return (
+        datetime.fromtimestamp(first, tz=zone).strftime("%Y-%m-%d") == day.isoformat()
+    )
 
 
 class ClockDiagnostics:

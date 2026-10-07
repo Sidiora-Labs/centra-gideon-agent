@@ -42,10 +42,15 @@ def _bounds(request: web.Request):
     if not window:
         return since, until
     if window not in usage_fold.WINDOW_DAYS:
-        return json_error("bad_request", message="window must be day, week or month", status=400)
+        return json_error(
+            "bad_request", message="window must be day, week or month", status=400
+        )
     if since or until:
-        return json_error("bad_request", message="give a window or since/until, not both", status=400)
+        return json_error(
+            "bad_request", message="give a window or since/until, not both", status=400
+        )
     from gideon.core import spend_day
+
     zone = spend_day.zone()
     first = usage_fold.window_dates(window, today=spend_day.today(zone))[0]
     return spend_day.start_of(first, zone), ""

@@ -104,10 +104,22 @@ class TriggerPublication:
             for card in TriggerReviewStore().list(pending_only=True):
                 identity = str(card.get("id") or "")
                 emit_attention_item(
-                    state, source="system", kind="agent_request", item_kind="needs_input",
+                    state,
+                    source="system",
+                    kind="agent_request",
+                    item_kind="needs_input",
                     title=f"Review {card.get('trigger_name') or 'automation'}",
-                    body="The previous run was interrupted." if card.get("reason") == "interrupted" else review.body(),
-                    refs={"trigger_review": identity, "trigger": card.get("trigger_id"), "review_id": identity, "statusUrl": "#/triggers"},
+                    body=(
+                        "The previous run was interrupted."
+                        if card.get("reason") == "interrupted"
+                        else review.body()
+                    ),
+                    refs={
+                        "trigger_review": identity,
+                        "trigger": card.get("trigger_id"),
+                        "review_id": identity,
+                        "statusUrl": "#/triggers",
+                    },
                     dedup_key=f"trigger_review:{identity}",
                 )
         except Exception:
@@ -283,11 +295,14 @@ class FireLedger:
         late: str = "",
     ) -> str | None:
         try:
-            from gideon.automation.schedule_history import ExecutionRecord, action_summary
+            from gideon.automation.schedule_history import (
+                ExecutionRecord,
+                action_summary,
+            )
             from gideon.automation.triggers import autopause
             from gideon.automation.triggers.models import TriggerState
-            from gideon.automation.triggers.store import TriggerStore
             from gideon.automation.triggers.routing import routed
+            from gideon.automation.triggers.store import TriggerStore
             from gideon.core.config.loader import config_dir
 
             identity = trigger_id(trigger)

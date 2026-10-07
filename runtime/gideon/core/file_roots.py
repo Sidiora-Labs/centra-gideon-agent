@@ -21,7 +21,9 @@ def control_character_in(text: str) -> str:
 def _is_system_root(path: str) -> bool:
     from gideon.security.security import _SYSTEM_SUBTREES
 
-    return path == "/" or any(path == root or path.startswith(root + os.sep) for root in _SYSTEM_SUBTREES)
+    return path == "/" or any(
+        path == root or path.startswith(root + os.sep) for root in _SYSTEM_SUBTREES
+    )
 
 
 def dashboard_roots() -> list[tuple[str, str]]:
@@ -43,7 +45,10 @@ def dashboard_roots() -> list[tuple[str, str]]:
     def add_workspace(label: str, value: str) -> None:
         resolved = os.path.realpath(os.path.expanduser(value))
         if _is_system_root(resolved):
-            logger.warning("dashboard: refusing system-root workspace %r as a browsable root", resolved)
+            logger.warning(
+                "dashboard: refusing system-root workspace %r as a browsable root",
+                resolved,
+            )
             return
         candidates.append((label, resolved))
 
@@ -103,7 +108,10 @@ def admit(raw: str, roots: Iterable[str]) -> str | None:
     if not isinstance(raw, str) or control_character_in(raw):
         return None
     from gideon.engine.hooks import validate_file_path
-    from gideon.security.security import HOME_SECRET_FILE_BASENAMES, OWN_SECRET_BASENAMES
+    from gideon.security.security import (
+        HOME_SECRET_FILE_BASENAMES,
+        OWN_SECRET_BASENAMES,
+    )
 
     canonical = validate_file_path(raw)
     if canonical is None or not within(canonical, roots):
@@ -113,7 +121,9 @@ def admit(raw: str, roots: Iterable[str]) -> str | None:
         return None
     blocked = set(OWN_SECRET_BASENAMES) | set(HOME_SECRET_FILE_BASENAMES)
     folded = basename.casefold()
-    if folded in {name.casefold() for name in blocked} or folded.endswith((".key", ".pem", ".secret")):
+    if folded in {name.casefold() for name in blocked} or folded.endswith(
+        (".key", ".pem", ".secret")
+    ):
         return None
     try:
         target = os.stat(canonical)

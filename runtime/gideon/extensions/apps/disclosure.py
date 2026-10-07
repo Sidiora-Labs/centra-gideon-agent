@@ -107,7 +107,10 @@ def _crons(manifest: AppManifest) -> list[dict[str, Any]]:
                 "message": cron.message,
                 "agentTier": manifest.permissions.agent_tier,
                 "scheduled": bool(
-                    manifest.permissions.cron and manifest.permissions.agent_tier and has_schedule and cron.name
+                    manifest.permissions.cron
+                    and manifest.permissions.agent_tier
+                    and has_schedule
+                    and cron.name
                 ),
             }
         )

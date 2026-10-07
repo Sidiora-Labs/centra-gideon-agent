@@ -22,12 +22,24 @@ def linked_chat(state, thread: str, provider: str = ""):
     name = key.removeprefix("dashboard:")
     session = state._sessions.get(name)
     if session is None:
-        from gideon.interfaces.dashboard.chat_persistence import _rehydrate_session_from_history
+        from gideon.interfaces.dashboard.chat_persistence import (
+            _rehydrate_session_from_history,
+        )
         from gideon.interfaces.dashboard.chat_utils import resolve_history_key
 
-        history_key = resolve_history_key(state.conversation_log, name) if state.conversation_log else None
-        metadata = state.conversation_log.get_metadata(history_key) if history_key else {}
-        if not metadata or metadata.get("memory_mode", "persistent") != "persistent" or metadata.get("lifecycle") == "archived":
+        history_key = (
+            resolve_history_key(state.conversation_log, name)
+            if state.conversation_log
+            else None
+        )
+        metadata = (
+            state.conversation_log.get_metadata(history_key) if history_key else {}
+        )
+        if (
+            not metadata
+            or metadata.get("memory_mode", "persistent") != "persistent"
+            or metadata.get("lifecycle") == "archived"
+        ):
             return None
         session = _rehydrate_session_from_history(state, name)
     if session is None or session.lifecycle == "archived":
@@ -47,7 +59,9 @@ def link(state, name: str, thread: str, channel: str, provider: str):
         return
     session = state._sessions.get(name)
     if session is None:
-        from gideon.interfaces.dashboard.chat_persistence import _rehydrate_session_from_history
+        from gideon.interfaces.dashboard.chat_persistence import (
+            _rehydrate_session_from_history,
+        )
 
         session = _rehydrate_session_from_history(state, name)
     if session is None or session.lifecycle == "archived":
@@ -61,7 +75,9 @@ def link(state, name: str, thread: str, channel: str, provider: str):
         previous = state._sessions.get(previous_key.removeprefix("dashboard:"))
         if previous is not None:
             previous._channel_linked = False
-            previous._channel_thread_ts = previous._channel_id = previous._channel_provider = ""
+            previous._channel_thread_ts = previous._channel_id = (
+                previous._channel_provider
+            ) = ""
     if old_thread:
         state._channel_to_session.pop((old_provider, old_thread), None)
         if state._channel_to_session.get(old_thread) == name:
@@ -74,11 +90,19 @@ def link(state, name: str, thread: str, channel: str, provider: str):
         state._channel_to_session[(provider, thread)] = name
     state.push_sessions_update()
     previous_destination = (old_thread, old_channel, old_provider)
-    if old_thread and old_channel and old_provider and provider and previous_destination != (thread, channel, provider):
+    if (
+        old_thread
+        and old_channel
+        and old_provider
+        and provider
+        and previous_destination != (thread, channel, provider)
+    ):
         _notify_former_owner_dm(state, previous_destination, provider)
 
 
-def _notify_former_owner_dm(state, previous: tuple[str, str, str], provider: str) -> None:
+def _notify_former_owner_dm(
+    state, previous: tuple[str, str, str], provider: str
+) -> None:
     from gideon.integrations.channel_transports import get_transport
 
     thread, channel, was_on = previous
@@ -98,7 +122,9 @@ def _notify_former_owner_dm(state, previous: tuple[str, str, str], provider: str
     if was_on == provider:
         message = f"This chat continues in another {shown} conversation now. Messages here no longer reach it."
     else:
-        message = f"This chat continues on {shown} now. Messages here no longer reach it."
+        message = (
+            f"This chat continues on {shown} now. Messages here no longer reach it."
+        )
 
     async def send() -> None:
         from gideon.core.config.credentials import owner_id_for
@@ -110,7 +136,10 @@ def _notify_former_owner_dm(state, previous: tuple[str, str, str], provider: str
                 if direct and direct == channel:
                     await delivery.deliver_text(channel, message, thread)
         except Exception:
-            logger.info("Former channel conversation notice could not be delivered", exc_info=True)
+            logger.info(
+                "Former channel conversation notice could not be delivered",
+                exc_info=True,
+            )
 
     try:
         task = asyncio.get_running_loop().create_task(send())

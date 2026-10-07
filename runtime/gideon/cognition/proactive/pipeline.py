@@ -311,8 +311,8 @@ async def run_triage(
     with meanwhile. Neither reaches a model or the auto-execution stage: a carried proposal was
     offered to you, and it waits for your answer. *now* dates them (the clock, when absent).
     """
-    from gideon.security.guardrails.audit import caller_scope
     from gideon.integrations.llm_helpers import expecting
+    from gideon.security.guardrails.audit import caller_scope
 
     completion = completion or _default_completion
     deliver = deliver or make_notify_deliver(run_id=run_id, trigger_id=trigger_id)
@@ -328,7 +328,12 @@ async def run_triage(
             manifest=manifest,
             gate=GateResult(),
             carry=place(
-                (), handled=handled, window=manifest, gate=GateResult(), proposals=(), now=now
+                (),
+                handled=handled,
+                window=manifest,
+                gate=GateResult(),
+                proposals=(),
+                now=now,
             ),
             short_circuited=True,
             notes=("empty window: no model call, no delivery",),
@@ -442,7 +447,12 @@ async def run_triage(
     # item the fresh look already judged, and numbered after the window so the window's own
     # numbers are what they would be with nothing carried.
     carry = place(
-        waiting, handled=handled, window=manifest, gate=gate, proposals=batch.proposals, now=now
+        waiting,
+        handled=handled,
+        window=manifest,
+        gate=gate,
+        proposals=batch.proposals,
+        now=now,
     )
 
     # Stages 4-5. Ranking and rendering are deterministic; delivery is the singular gate.

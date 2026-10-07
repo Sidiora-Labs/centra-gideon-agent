@@ -22,9 +22,17 @@ def receipts(loop_id: str) -> dict[str, dict]:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return {slug: entry for slug, entry in value.items()
-            if isinstance(slug, str) and isinstance(entry, dict)
-            and type(entry.get("version")) is int} if isinstance(value, dict) else {}
+    return (
+        {
+            slug: entry
+            for slug, entry in value.items()
+            if isinstance(slug, str)
+            and isinstance(entry, dict)
+            and type(entry.get("version")) is int
+        }
+        if isinstance(value, dict)
+        else {}
+    )
 
 
 def record(loop_id: str, slug: str, version: int, approved: bool) -> None:
@@ -45,4 +53,6 @@ def all_current_reviewed(loop_id: str, artifacts: list) -> bool:
     if not visual:
         return False
     current = receipts(loop_id)
-    return all(current.get(art.slug, {}).get("version") == art.version for art in visual)
+    return all(
+        current.get(art.slug, {}).get("version") == art.version for art in visual
+    )

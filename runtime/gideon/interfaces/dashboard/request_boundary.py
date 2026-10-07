@@ -54,8 +54,8 @@ from typing import Any, Awaitable, Callable
 
 from aiohttp import web
 
-from gideon.http_errors import json_error
 from gideon.core.http_request import RequestValidationError
+from gideon.http_errors import json_error
 
 logger = logging.getLogger(__name__)
 

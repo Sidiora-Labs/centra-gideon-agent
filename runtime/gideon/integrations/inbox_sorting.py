@@ -36,8 +36,8 @@ from typing import Any
 
 from gideon import shutdown_event
 from gideon.integrations.inbox import (
-    STATUS_OPEN,
     SOURCE_DECLARABLE_KINDS,
+    STATUS_OPEN,
     Classification,
     Confidence,
     InboxItem,
@@ -100,9 +100,12 @@ def sorting_hold() -> str:
         if not AppConfig.load().inbox.sort_messages:
             return "Sorting is off in Settings › Inbox, so new messages stay unsorted."
     except Exception:  # noqa: BLE001 — an unread switch is not an on switch
-        logger.warning("inbox sorting: the configuration could not be read", exc_info=True)
+        logger.warning(
+            "inbox sorting: the configuration could not be read", exc_info=True
+        )
         return "Sorting waits: the configuration could not be read."
     from gideon.security.session_credentials import current_work, memory_reach
+
     if current_work() is not None:
         reach = memory_reach()
         if not reach.background_allowed:
@@ -173,12 +176,16 @@ def parse_verdicts(raw: str, count: int) -> dict[int, tuple[str, str]]:
 
 def verdicts_problem(raw: str, count: int) -> str:
     """What makes a sorting answer unusable, ``""`` when it sorts at least one of the *count*
-    messages sent. One that sorts only some is used: the rest fail with :data:`LEFT_OUT`."""
-    return "" if parse_verdicts(raw, count) else "no verdict for any message it was sent"
+    messages sent. One that sorts only some is used: the rest fail with :data:`LEFT_OUT`.
+    """
+    return (
+        "" if parse_verdicts(raw, count) else "no verdict for any message it was sent"
+    )
 
 
 def _failure(exc: BaseException) -> str:
     from gideon.extensions.providers.failure_copy import relayed_failure_copy
+
     return "The background model could not sort it. " + relayed_failure_copy(exc)
 
 
@@ -256,6 +263,17 @@ class InboxSorter:
             return await self._sort(batch)
 
     async def _sort(self, batch: list[InboxItem]) -> int:
+        from copy import deepcopy
+
+        from gideon.extensions.providers.prompt_use_cases import active_prompt_ref
+        from gideon.extensions.providers.provider_bridge import (
+            ProviderResolutionError as NoModelBound,
+        )
+        from gideon.integrations.llm.registry import (
+            ProviderResolutionError as NoModelBuilt,
+        )
+        from gideon.integrations.llm_helpers import one_shot_completion
+        from gideon.integrations.prompt_providers.runtime import render_use_case_prompt
         from gideon.security.guardrails.audit import caller_scope
         from gideon.security.guardrails.failure import (
             BudgetExceededError,
@@ -265,13 +283,7 @@ class InboxSorter:
             SecretLeakBlocked,
         )
         from gideon.security.guardrails.rungs import ensure_core_action_types
-        from gideon.integrations.llm.registry import ProviderResolutionError as NoModelBuilt
-        from gideon.integrations.llm_helpers import one_shot_completion
-        from gideon.integrations.prompt_providers.runtime import render_use_case_prompt
-        from gideon.extensions.providers.prompt_use_cases import active_prompt_ref
-        from gideon.extensions.providers.provider_bridge import ProviderResolutionError as NoModelBound
 
-        from copy import deepcopy
         expected = {item.id: deepcopy(item.to_dict()) for item in batch}
         # `inbox.classify` is a declared action type (it labels her own rows, autonomously).
         ensure_core_action_types()
@@ -308,10 +320,14 @@ class InboxSorter:
                 return await self._sort(batch[:half]) + await self._sort(batch[half:])
             return self._settle_rows(batch, {}, _failure(exc), producer, expected)
         except Exception as exc:  # noqa: BLE001 — a failed call is the rows' to say
-            logger.warning("inbox sorting call failed for %d message(s)", len(batch), exc_info=True)
+            logger.warning(
+                "inbox sorting call failed for %d message(s)", len(batch), exc_info=True
+            )
             return self._settle_rows(batch, {}, _failure(exc), producer, expected)
         verdicts = parse_verdicts(raw, len(batch))
-        return self._settle_rows(batch, verdicts, LEFT_OUT if verdicts else UNREADABLE, producer, expected)
+        return self._settle_rows(
+            batch, verdicts, LEFT_OUT if verdicts else UNREADABLE, producer, expected
+        )
 
     def _settle_rows(
         self,
@@ -354,7 +370,9 @@ def _announce(item: InboxItem) -> None:
         return
     try:
         state.broadcast_ws("inbox_item_updated", redact_item(item.to_dict()))
-    except Exception:  # noqa: BLE001 — a frame that did not go out is caught up by a reload
+    except (
+        Exception
+    ):  # noqa: BLE001 — a frame that did not go out is caught up by a reload
         logger.debug("inbox sorting: could not announce %s", item.id, exc_info=True)
 
 

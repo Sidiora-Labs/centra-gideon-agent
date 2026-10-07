@@ -159,7 +159,13 @@ def associate_review(trigger: Any, review_id: str) -> bool:
     park = load(trigger.id)
     card = TriggerReviewStore().get(review_id)
     revision = action_revision(trigger)
-    if park is None or card is None or card.get("status") != "running" or card.get("trigger_id") != f"store:{trigger.id}" or card.get("action_revision") != revision:
+    if (
+        park is None
+        or card is None
+        or card.get("status") != "running"
+        or card.get("trigger_id") != f"store:{trigger.id}"
+        or card.get("action_revision") != revision
+    ):
         return False
     park.review_id, park.action_revision = review_id, revision
     _save(park)

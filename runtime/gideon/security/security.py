@@ -136,9 +136,7 @@ def _external_cli_sensitive_paths() -> list[str]:
             ("config.yml", "config.yaml"),
         ),
     )
-    return [
-        str(directory / name) for directory, names in roots for name in names
-    ]
+    return [str(directory / name) for directory, names in roots for name in names]
 
 
 _READ_CMDS = (
@@ -710,8 +708,11 @@ def redact_credentials(text: str) -> tuple[str, list[str]]:
     warnings.extend(address_warnings)
 
     def _tag_credential(m: "re.Match[str]") -> str:
-        warnings.append("Redacted scoped gateway credential" if m.group().startswith("gwsp_")
-                        else f"Redacted credential pattern: {m.group()[:20]}...")
+        warnings.append(
+            "Redacted scoped gateway credential"
+            if m.group().startswith("gwsp_")
+            else f"Redacted credential pattern: {m.group()[:20]}..."
+        )
         return "[REDACTED: credential]"
 
     result = _CREDENTIAL_PATTERNS.sub(_tag_credential, result)
@@ -849,7 +850,11 @@ def keep_masked_spans(submitted: str, stored: str) -> str:
 def keep_masked_values(submitted: Any, stored: Any) -> Any:
     """Restore masks recursively, matching moved list entries only when unambiguous."""
     if isinstance(submitted, str):
-        return keep_masked_spans(submitted, stored) if isinstance(stored, str) else submitted
+        return (
+            keep_masked_spans(submitted, stored)
+            if isinstance(stored, str)
+            else submitted
+        )
     if isinstance(submitted, dict):
         base = stored if isinstance(stored, dict) else {}
         return {
@@ -945,7 +950,6 @@ SUSPICIOUS_BASH_PATTERNS: list[str] = [
     "wget --post-file",
     "nc * < ",
 ]
-
 
 
 BASELINE_DENYLIST_FILE = "baseline_denylist.json"
@@ -1154,7 +1158,9 @@ def verify_baseline_denylist() -> dict:
     }
 
 
-def denied_command_reason(command: str, *, cwd: str | None = None, protected_checked: bool = False) -> str | None:
+def denied_command_reason(
+    command: str, *, cwd: str | None = None, protected_checked: bool = False
+) -> str | None:
     """Return the denied pattern a command matches, or None.
 
     Matches ``command`` against :func:`denied_command_patterns` (built-in +
@@ -1163,6 +1169,7 @@ def denied_command_reason(command: str, *, cwd: str | None = None, protected_che
     patterns = denied_command_patterns()
     if not protected_checked:
         from gideon.security.protected_folders import protected_delete, sentence
+
         found = protected_delete(command, cwd=cwd or "")
         if found:
             return f"protected_delete: {sentence(found)}"
@@ -1475,6 +1482,7 @@ def audit_bash_command(command: str) -> str | None:
         elif pat in lower:
             return f"Suspicious command detected: matches '{pattern}'"
     from gideon.security.protected_folders import protected_delete, sentence
+
     found = protected_delete(command, cwd="")
     if found:
         return "Suspicious command detected: " + sentence(found)

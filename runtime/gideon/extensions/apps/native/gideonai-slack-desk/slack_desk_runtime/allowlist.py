@@ -16,18 +16,19 @@ gateway restarts.
 import logging
 from typing import TYPE_CHECKING
 
-from gideon.sdk.channel import AppConfig
+from slack_desk_runtime.handler import is_tracked_channel
+
 from gideon.sdk.channel import (
+    AppConfig,
     dashboard_origin,
     devspaces_proxy_url,
     is_local_bind,
+    owner_sign_in_token,
     parse_dashboard_url,
     resolve_bind_host,
     resolve_dashboard_host,
+    sel,
 )
-from gideon.sdk.channel import owner_sign_in_token
-from gideon.sdk.channel import sel
-from slack_desk_runtime.handler import is_tracked_channel
 
 if TYPE_CHECKING:
     from slack_desk_runtime.client import SlackDeskClientOps
@@ -119,9 +120,15 @@ async def prompt_track_channel(
         deny_label = "🚫 Ignore"
 
     await _send_prompt(
-        slack_desk, owner_id, text, approve_label, deny_label,
-        ACTION_TRACK_APPROVE, ACTION_TRACK_DENY,
-        f"{channel_id}:{channel_name}", "Track channel — prompt",
+        slack_desk,
+        owner_id,
+        text,
+        approve_label,
+        deny_label,
+        ACTION_TRACK_APPROVE,
+        ACTION_TRACK_DENY,
+        f"{channel_id}:{channel_name}",
+        "Track channel — prompt",
     )
 
 
@@ -162,7 +169,9 @@ async def send_dashboard_link(
     host = resolve_dashboard_host(local_only, configured_host)
 
     origin = dashboard_origin(cfg.dashboard.url)
-    url = f"{origin}/?token={token}" if origin else f"http://{host}:{port}/?token={token}"
+    url = (
+        f"{origin}/?token={token}" if origin else f"http://{host}:{port}/?token={token}"
+    )
 
     # Dev proxy: also provide proxy URL
     proxy_line = ""
@@ -220,14 +229,20 @@ def persist_allowed_user(user_id: str, name: str = "", *, remove: bool = False) 
 
         apply_trust_action("deny" if remove else "allow", "slack", user_id, name)
     except Exception:
-        logger.warning("channel_trust write-through failed for user %s", user_id, exc_info=True)
+        logger.warning(
+            "channel_trust write-through failed for user %s", user_id, exc_info=True
+        )
 
 
-def persist_tracking_channel(channel_id: str, name: str = "", *, remove: bool = False) -> None:
+def persist_tracking_channel(
+    channel_id: str, name: str = "", *, remove: bool = False
+) -> None:
     """Add or remove *channel_id* in the app store's ``tracking_channels``."""
     from slack_desk_runtime.settings import persist_list_entry, reload_settings
 
-    persist_list_entry("tracking_channels", "channel_id", channel_id, remove=remove, name=name)
+    persist_list_entry(
+        "tracking_channels", "channel_id", channel_id, remove=remove, name=name
+    )
     reload_settings()
     # EA-7 write-through — same reason as persist_allowed_user above.
     try:
@@ -239,7 +254,9 @@ def persist_tracking_channel(channel_id: str, name: str = "", *, remove: bool = 
             track("slack", channel_id, name)
     except Exception:
         logger.warning(
-            "channel_trust write-through failed for channel %s", channel_id, exc_info=True
+            "channel_trust write-through failed for channel %s",
+            channel_id,
+            exc_info=True,
         )
 
 

@@ -394,7 +394,9 @@ async def best_of_n(
     winner_idx = _select_winner(survivors, judgments)
     winner = next(c["text"] for c in survivors if c["idx"] == winner_idx)
     failed = len(candidates) - len(survivors)
-    repeated = sum(c["error"] == "duplicate candidate after resample" for c in candidates)
+    repeated = sum(
+        c["error"] == "duplicate candidate after resample" for c in candidates
+    )
     if not judgments:
         note = "unjudged: the judge was unavailable — showing the lowest-temperature candidate"
         if repeated:

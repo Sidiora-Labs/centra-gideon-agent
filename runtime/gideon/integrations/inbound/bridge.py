@@ -236,7 +236,9 @@ async def _toggle_automation(state: Any, params: dict) -> dict:
     target = params.get("enabled")
     from gideon.security.safety_flags import yes_or_no
 
-    enabled = (not loaded.trigger.enabled) if "enabled" not in params else yes_or_no(target)
+    enabled = (
+        (not loaded.trigger.enabled) if "enabled" not in params else yes_or_no(target)
+    )
     if enabled is None:
         raise ValueError("enabled must be a boolean")
     updated = store.set_enabled(trigger_id, enabled)
@@ -393,7 +395,9 @@ def pending_count() -> int:
     return len(_pending)
 
 
-def _mint_confirmation(action: Action, params: dict, *, asked_by: str = "bridge:surface") -> str:
+def _mint_confirmation(
+    action: Action, params: dict, *, asked_by: str = "bridge:surface"
+) -> str:
     _reap()
     token = secrets.token_urlsafe(32)
     _pending[token] = {
@@ -456,11 +460,27 @@ def _admit(
             BRIDGE_SURFACE,
             route=route,
             status=401,
-            refused=refusal if client_reason in {"bearer token matches no registered client", "no bearer token presented"} else client_reason,
+            refused=(
+                refusal
+                if client_reason
+                in {
+                    "bearer token matches no registered client",
+                    "no bearer token presented",
+                }
+                else client_reason
+            ),
         )
         return (
             json_error("unauthorized", message=refusal, status=401),
-            refusal if client_reason in {"bearer token matches no registered client", "no bearer token presented"} else client_reason,
+            (
+                refusal
+                if client_reason
+                in {
+                    "bearer token matches no registered client",
+                    "no bearer token presented",
+                }
+                else client_reason
+            ),
             None,
         )
     return None, "", client
@@ -622,7 +642,8 @@ async def handle_action(request: web.Request) -> web.Response:
     state = request.app["state"]
     if action.requires_confirmation:
         token = _mint_confirmation(
-            action, params,
+            action,
+            params,
             asked_by=f"bridge:{client.client_id if client is not None else 'surface'}",
         )
         try:
@@ -684,20 +705,26 @@ async def handle_confirm(request: web.Request) -> web.Response:
             refused="action no longer exists",
         )
         return json_error("unknown_action", status=410)
+    from gideon.security.approval_answer import bridge as bridge_principal
     from gideon.security.approval_answer import (
-        bridge as bridge_principal,
         check,
         of_request,
     )
 
-    principal = bridge_principal(client.client_id) if client is not None else of_request(request)
+    principal = (
+        bridge_principal(client.client_id)
+        if client is not None
+        else of_request(request)
+    )
     why = check(
         principal,
         what=f"bridge:{token[:16]}",
         asked_by=str(intent.get("asked_by") or "bridge:unknown"),
     )
     if why:
-        audit(BRIDGE_SURFACE, route="/confirm", status=403, refused="approval owner only")
+        audit(
+            BRIDGE_SURFACE, route="/confirm", status=403, refused="approval owner only"
+        )
         return json_error("approval_owner_only", message=why, status=403)
     if not _bound(client, action.name):
         return _refuse_unbound(client, action, "/confirm")

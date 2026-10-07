@@ -880,7 +880,9 @@ class KnowledgeStore:
             self.db.execute("ROLLBACK")
             raise
 
-    _LEGACY_SKIP_LINE = re.compile(r"(?:;\s*|\s+)?Skipped \(optional steps unavailable\):.*$", re.S)
+    _LEGACY_SKIP_LINE = re.compile(
+        r"(?:;\s*|\s+)?Skipped \(optional steps unavailable\):.*$", re.S
+    )
 
     def _migrate_phase_outcomes(self) -> None:
         """Upgrade recorded status words without inventing historical reasons."""
@@ -901,16 +903,28 @@ class KnowledgeStore:
                     metadata = json.loads(row["file_metadata"] or "{}")
                 except (TypeError, ValueError):
                     metadata = None
-                phases = metadata.get("node_phases") if isinstance(metadata, dict) else None
+                phases = (
+                    metadata.get("node_phases") if isinstance(metadata, dict) else None
+                )
                 if isinstance(phases, dict):
                     metadata["node_phases"] = {
                         step: legacy(value) if isinstance(value, str) else value
                         for step, value in phases.items()
                     }
-                error = self._LEGACY_SKIP_LINE.sub("", row["processing_error"] or "").strip()
+                error = self._LEGACY_SKIP_LINE.sub(
+                    "", row["processing_error"] or ""
+                ).strip()
                 self.db.execute(
                     "UPDATE items SET file_metadata = ?, processing_error = ? WHERE id = ?",
-                    (json.dumps(metadata) if isinstance(metadata, dict) else row["file_metadata"], error or None, row["id"]),
+                    (
+                        (
+                            json.dumps(metadata)
+                            if isinstance(metadata, dict)
+                            else row["file_metadata"]
+                        ),
+                        error or None,
+                        row["id"],
+                    ),
                 )
             self.db.execute("COMMIT")
         except Exception:
@@ -1728,8 +1742,12 @@ class KnowledgeStore:
         if anchor is None:
             return []
         item_type = anchor["item_type"] if not isinstance(anchor, tuple) else anchor[0]
-        provider = anchor["embedding_provider"] if not isinstance(anchor, tuple) else anchor[1]
-        model = anchor["embedding_model"] if not isinstance(anchor, tuple) else anchor[2]
+        provider = (
+            anchor["embedding_provider"] if not isinstance(anchor, tuple) else anchor[1]
+        )
+        model = (
+            anchor["embedding_model"] if not isinstance(anchor, tuple) else anchor[2]
+        )
         if not provider or not model:
             return []
         rows = self.db.execute(
@@ -1807,7 +1825,11 @@ class KnowledgeStore:
             return []
         anchor = dict(anchor_row)
         anchor["embedding"] = bytes_to_floats(anchor.get("embedding") or b"")
-        if not anchor["embedding"] or not anchor.get("embedding_provider") or not anchor.get("embedding_model"):
+        if (
+            not anchor["embedding"]
+            or not anchor.get("embedding_provider")
+            or not anchor.get("embedding_model")
+        ):
             return []
         anchor_name = anchor.get("title") or anchor.get("file_path") or ""
 
@@ -4264,9 +4286,15 @@ class KnowledgeStore:
                         )
                     fresh = self.get_item(r["id"]) or {}
                     metadata = fresh.get("file_metadata") or {}
-                    phases = metadata.get("node_phases") if isinstance(metadata, dict) else None
+                    phases = (
+                        metadata.get("node_phases")
+                        if isinstance(metadata, dict)
+                        else None
+                    )
                     if isinstance(phases, dict) and "embed" in phases:
-                        from gideon.cognition.knowledge.pipeline.outcomes import done as embedding_done
+                        from gideon.cognition.knowledge.pipeline.outcomes import (
+                            done as embedding_done,
+                        )
 
                         phases["embed"] = embedding_done().to_dict()
                         self.update_item(r["id"], file_metadata=metadata, touch=False)

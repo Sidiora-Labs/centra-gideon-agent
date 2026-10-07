@@ -27,7 +27,12 @@ from gideon.cognition.proactive.autoexec import (
     render_auto_lines,
     stopped_note,
 )
-from gideon.cognition.proactive.carry import CARRY_RULE, CarryResult, carried_note, dropped_note
+from gideon.cognition.proactive.carry import (
+    CARRY_RULE,
+    CarryResult,
+    carried_note,
+    dropped_note,
+)
 from gideon.cognition.proactive.manifest import (
     MATERIALITY_ERROR,
     SOURCE_RUN,
@@ -57,7 +62,9 @@ def _invert(ts: str) -> str:
     return "".join(chr(0x10FFFD - ord(c)) if ord(c) < 0x10FFFD else c for c in ts)
 
 
-def rank_items(items: tuple[CollectedItem, ...] | list[CollectedItem]) -> tuple[CollectedItem, ...]:
+def rank_items(
+    items: tuple[CollectedItem, ...] | list[CollectedItem],
+) -> tuple[CollectedItem, ...]:
     """Materiality-first ordering. Ordinals are untouched — ranking reorders, never renumbers."""
     return tuple(sorted(items, key=_item_sort_key))
 
@@ -150,7 +157,9 @@ def render_digest(
     carried_by_item = {c.proposal.item_id: c for c in carried}
     expired = carry.expired if carry is not None else ()
     proposal_ids = {p.item_id for p in ranked_proposals} | set(carried_by_item)
-    acted_on = {a.proposal.item_id for a in auto.executed} if auto is not None else set()
+    acted_on = (
+        {a.proposal.item_id for a in auto.executed} if auto is not None else set()
+    )
     deferred = auto.deferred if auto is not None else ()
     not_done = {d.proposal.item_id: not_done_note(d.reason, d.detail) for d in deferred}
     stopped = (
@@ -177,7 +186,9 @@ def render_digest(
             lines.append(f"  {stopped}")
         if degraded and not ranked_proposals:
             # What was carried is listed; that this window got no proposals is still said.
-            lines.append("  (no new proposals this run — the proposal stage was refused)")
+            lines.append(
+                "  (no new proposals this run — the proposal stage was refused)"
+            )
         for p in (*ranked_proposals, *ranked_carried):
             about = numbered.by_ordinal(p.item_id)
             subject = about.title if about is not None else f"item {p.item_id}"
@@ -196,7 +207,9 @@ def render_digest(
             lines.append(f"  {CARRY_RULE}")
         sections.append("\n".join(lines))
     elif degraded:
-        sections.append("Needs you:\n  (no proposals this run — the proposal stage was refused)")
+        sections.append(
+            "Needs you:\n  (no proposals this run — the proposal stage was refused)"
+        )
 
     if expired:
         lines = ["No longer offered:"]
@@ -212,7 +225,9 @@ def render_digest(
     rest = [
         i
         for i in ranked
-        if i.source != SOURCE_RUN and i.ordinal not in proposal_ids and i.ordinal not in acted_on
+        if i.source != SOURCE_RUN
+        and i.ordinal not in proposal_ids
+        and i.ordinal not in acted_on
     ]
     if rest:
         lines = ["Also waiting:"]

@@ -34,7 +34,9 @@ def seal(content: str | bytes) -> str:
 class GrantBook:
     """A private ``key -> content seal`` book; unreadable books grant nothing."""
 
-    def __init__(self, name: str, *, home: str | os.PathLike[str] | None = None) -> None:
+    def __init__(
+        self, name: str, *, home: str | os.PathLike[str] | None = None
+    ) -> None:
         if not _BOOK_NAME.fullmatch(name):
             raise ValueError("invalid grant book name")
         self.name = name
@@ -110,7 +112,9 @@ class GrantBook:
             info = None
         if info is not None and not stat.S_ISREG(info.st_mode):
             raise GrantBookError("grant book is not a regular file")
-        atomic_json_write(path, {"version": 1, "grants": grants}, replace_fallback=False)
+        atomic_json_write(
+            path, {"version": 1, "grants": grants}, replace_fallback=False
+        )
         os.chmod(path, 0o600)
 
     def holds(self, key: str, content: str | bytes) -> bool:
@@ -118,9 +122,7 @@ class GrantBook:
         entry = self._read().get(key)
         return bool(entry and entry.get("seal") == seal(content))
 
-    def give(
-        self, key: str, content: str | bytes, *, principal: str = ""
-    ) -> None:
+    def give(self, key: str, content: str | bytes, *, principal: str = "") -> None:
         """Record owner consent; callers must establish owner authority and ask first."""
         if not isinstance(key, str) or not key:
             raise ValueError("grant key is required")

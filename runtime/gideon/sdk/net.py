@@ -11,7 +11,6 @@ from gideon.integrations.inbound.a2a import (  # noqa: F401
     outbound_policy as a2a_outbound_policy,
 )
 from gideon.integrations.web.fetch import record_seen_urls, web_extract, web_fetch
-from gideon.security.net.guard import egress_refusal
 from gideon.security.net import (
     CONNECTOR,
     SYNC,
@@ -26,6 +25,7 @@ from gideon.security.net import (
     open_url,
     sync_egress_policy,
 )
+from gideon.security.net.guard import egress_refusal
 
 __all__ = [
     "fetch",

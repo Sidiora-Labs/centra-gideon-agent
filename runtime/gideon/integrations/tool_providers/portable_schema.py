@@ -7,9 +7,9 @@ with no safe portable representation. Input schemas are never mutated.
 
 from __future__ import annotations
 
-import dataclasses
-import copy
 import base64
+import copy
+import dataclasses
 import hashlib
 import json
 import logging
@@ -66,14 +66,22 @@ def provider_tool_name_map(
         if len(raw) <= 38:
             candidate = "g_s" + encoded
         else:
-            digest = base64.b32encode(hashlib.sha256(raw).digest()).decode("ascii").rstrip("=")
+            digest = (
+                base64.b32encode(hashlib.sha256(raw).digest())
+                .decode("ascii")
+                .rstrip("=")
+            )
             candidate = "g_h" + digest
         if candidate in occupied:
             salt = 1
             while True:
-                digest = base64.b32encode(
-                    hashlib.sha256(raw + b"\0" + str(salt).encode("ascii")).digest()
-                ).decode("ascii").rstrip("=")
+                digest = (
+                    base64.b32encode(
+                        hashlib.sha256(raw + b"\0" + str(salt).encode("ascii")).digest()
+                    )
+                    .decode("ascii")
+                    .rstrip("=")
+                )
                 candidate = "g_h" + digest
                 if candidate not in occupied:
                     break
@@ -81,6 +89,8 @@ def provider_tool_name_map(
         mapping[name] = candidate
         occupied.add(candidate)
     return {name: wire for name, wire in mapping.items() if name != wire}
+
+
 _NUMERIC_BOUNDS = _TYPE_SPECIFIC - {"properties", "required", "items", "pattern"}
 
 #: Keywords that only NARROW what validates, or only annotate. Dropping one never changes what the
@@ -169,7 +179,9 @@ class _Walk:
         self.issues.append(SchemaIssue(path, rule, detail))
         raise _Unportable
 
-    def node(self, raw: Any, path: str, depth: int, chain: tuple[str, ...]) -> dict[str, Any]:
+    def node(
+        self, raw: Any, path: str, depth: int, chain: tuple[str, ...]
+    ) -> dict[str, Any]:
         """The portable form of one schema node.
 
         A node with no portable form records its issue and yields a placeholder, so the walk goes
@@ -186,18 +198,26 @@ class _Walk:
                 raise  # the budget is spent: stop walking, the verdict is already decided
             return {"type": "string"}
 
-    def _node(self, raw: Any, path: str, depth: int, chain: tuple[str, ...]) -> dict[str, Any]:
+    def _node(
+        self, raw: Any, path: str, depth: int, chain: tuple[str, ...]
+    ) -> dict[str, Any]:
         self._nodes += 1
         if depth > _MAX_DEPTH or self._nodes > _MAX_NODES:
-            self.refuse(path, "node_not_schema", "the schema is too deep or too large to carry")
+            self.refuse(
+                path, "node_not_schema", "the schema is too deep or too large to carry"
+            )
         if not isinstance(raw, dict):
-            self.refuse(path, "node_not_schema", f"a schema must be an object, not {raw!r}")
+            self.refuse(
+                path, "node_not_schema", f"a schema must be an object, not {raw!r}"
+            )
         node = dict(raw)
         if "$ref" in node:
             merged, name = self._resolve(node, path, chain)
             return self.node(merged, path, depth + 1, (*chain, name))
         node = self._collapse_combinators(node, path)
-        if "$ref" in node:  # a merged `allOf`/`anyOf` branch brought a reference with it
+        if (
+            "$ref" in node
+        ):  # a merged `allOf`/`anyOf` branch brought a reference with it
             return self.node(node, path, depth + 1, chain)
         if "anyOf" in node:
             return self._any_of(node, path, depth, chain)
@@ -209,13 +229,17 @@ class _Walk:
         ref = node.get("$ref")
         match = _DEF_REF.match(ref) if isinstance(ref, str) else None
         if match is None or match.group(2) not in self._defs:
-            self.refuse(path, "keyword_unsupported", f"`$ref` {ref!r} does not resolve locally")
+            self.refuse(
+                path, "keyword_unsupported", f"`$ref` {ref!r} does not resolve locally"
+            )
         name = match.group(2)
         if name in chain:
             self.refuse(path, "keyword_unsupported", f"`$ref` {ref!r} is recursive")
         target = self._defs[name]
         if not isinstance(target, dict):
-            self.refuse(path, "node_not_schema", f"`$ref` {ref!r} is not a schema object")
+            self.refuse(
+                path, "node_not_schema", f"`$ref` {ref!r} is not a schema object"
+            )
         self.repair(path, "keyword_unsupported", "`$ref` is not portable", "inlined it")
         siblings = {k: v for k, v in node.items() if k != "$ref"}
         # A shallow merge is enough: the walk never mutates a node it was handed (every level
@@ -227,40 +251,62 @@ class _Walk:
         if "oneOf" in node:
             if "anyOf" in node:
                 self.refuse(
-                    path, "keyword_unsupported", "`oneOf` beside `anyOf` has no portable form"
+                    path,
+                    "keyword_unsupported",
+                    "`oneOf` beside `anyOf` has no portable form",
                 )
             node["anyOf"] = node.pop("oneOf")
             self.repair(
-                path, "keyword_unsupported", "`oneOf` is not portable", "widened it to `anyOf`"
+                path,
+                "keyword_unsupported",
+                "`oneOf` is not portable",
+                "widened it to `anyOf`",
             )
         if "allOf" in node:
             branches = node.pop("allOf")
             if not (isinstance(branches, list) and len(branches) == 1):
                 self.refuse(
-                    path, "keyword_unsupported", "`allOf` of several schemas is not portable"
+                    path,
+                    "keyword_unsupported",
+                    "`allOf` of several schemas is not portable",
                 )
             if not isinstance(branches[0], dict):
-                self.refuse(path, "node_not_schema", "the `allOf` branch is not a schema object")
-            self.repair(path, "keyword_unsupported", "`allOf` is not portable", "merged its branch")
+                self.refuse(
+                    path, "node_not_schema", "the `allOf` branch is not a schema object"
+                )
+            self.repair(
+                path,
+                "keyword_unsupported",
+                "`allOf` is not portable",
+                "merged its branch",
+            )
             node = {**branches[0], **node}
         if "anyOf" not in node:
             return node
         branches = node["anyOf"]
         if not isinstance(branches, list) or not branches:
-            self.refuse(path, "node_not_schema", "`anyOf` must be a non-empty list of schemas")
-        kept = [b for b in branches if not (isinstance(b, dict) and b.get("type") == "null")]
+            self.refuse(
+                path, "node_not_schema", "`anyOf` must be a non-empty list of schemas"
+            )
+        kept = [
+            b for b in branches if not (isinstance(b, dict) and b.get("type") == "null")
+        ]
         if len(kept) < len(branches):
             self.repair(
                 path, "type_invalid", "a `null` branch is not portable",
                 "dropped it (the argument can be omitted instead)",
             )  # fmt: skip
         if not kept:
-            self.refuse(path, "type_invalid", "an `anyOf` of only `null` accepts no value")
+            self.refuse(
+                path, "type_invalid", "an `anyOf` of only `null` accepts no value"
+            )
         if len(kept) > 1:
             node["anyOf"] = kept
             return node
         if not isinstance(kept[0], dict):
-            self.refuse(path, "node_not_schema", "the `anyOf` branch is not a schema object")
+            self.refuse(
+                path, "node_not_schema", "the `anyOf` branch is not a schema object"
+            )
         rest = {k: v for k, v in node.items() if k != "anyOf"}
         return {**kept[0], **rest}
 
@@ -289,7 +335,9 @@ class _Walk:
         if isinstance(declared, list):
             non_null = [t for t in declared if t != "null"]
             if len(non_null) != 1 or not isinstance(non_null[0], str):
-                self.refuse(path, "type_invalid", f"a type list {declared!r} is not portable")
+                self.refuse(
+                    path, "type_invalid", f"a type list {declared!r} is not portable"
+                )
             node["type"] = non_null[0]
             self.repair(
                 path, "type_invalid", f"a type list {declared!r} is not portable",
@@ -299,21 +347,32 @@ class _Walk:
             inferred = _infer_type(node)
             if inferred is None:
                 self.refuse(
-                    path, "type_missing", "declares no `type`, so it has no portable schema"
+                    path,
+                    "type_missing",
+                    "declares no `type`, so it has no portable schema",
                 )
             node["type"] = inferred
-            self.repair(path, "type_missing", "declares no `type`", f"inferred {inferred!r}")
+            self.repair(
+                path, "type_missing", "declares no `type`", f"inferred {inferred!r}"
+            )
         if not isinstance(node["type"], str) or node["type"] not in _TYPES:
-            self.refuse(path, "type_invalid", f"`type` {node['type']!r} is not portable")
+            self.refuse(
+                path, "type_invalid", f"`type` {node['type']!r} is not portable"
+            )
         if "const" in node:
             const = node.pop("const")
             if node["type"] != "string" or not isinstance(const, str) or not const:
                 self.refuse(
-                    path, "keyword_unsupported", f"a non-string `const` {const!r} is not portable"
+                    path,
+                    "keyword_unsupported",
+                    f"a non-string `const` {const!r} is not portable",
                 )
             node["enum"] = [const]
             self.repair(
-                path, "keyword_unsupported", "`const` is not portable", "made it a one-value enum"
+                path,
+                "keyword_unsupported",
+                "`const` is not portable",
+                "made it a one-value enum",
             )
         return node
 
@@ -323,7 +382,9 @@ class _Walk:
         kind = node["type"]
         allowed = _ANY_NODE | _BY_TYPE[kind]
         raw_props = node.get("properties")
-        declared_props: dict[str, Any] = raw_props if isinstance(raw_props, dict) else {}
+        declared_props: dict[str, Any] = (
+            raw_props if isinstance(raw_props, dict) else {}
+        )
         has_properties = bool(declared_props)
         for key in node:
             if key in allowed:
@@ -337,7 +398,11 @@ class _Walk:
             if key in _MAP_KEYWORDS and kind == "object" and not has_properties:
                 continue  # a map: reported once, as the object with no properties, below
             if key in _NO_PORTABLE_FORM:
-                self.refuse(_at(path, key), "keyword_unsupported", f"`{key}` has no portable form")
+                self.refuse(
+                    _at(path, key),
+                    "keyword_unsupported",
+                    f"`{key}` has no portable form",
+                )
             if key in _TYPE_SPECIFIC:
                 self.repair(
                     _at(path, key), "keyword_misplaced", f"`{key}` does not apply to a {kind}",
@@ -345,7 +410,10 @@ class _Walk:
                 )  # fmt: skip
                 continue
             self.repair(
-                _at(path, key), "keyword_unsupported", f"`{key}` is not portable", "dropped it"
+                _at(path, key),
+                "keyword_unsupported",
+                f"`{key}` is not portable",
+                "dropped it",
             )
 
         out: dict[str, Any] = {"type": kind}
@@ -408,11 +476,15 @@ class _Walk:
         elif kind == "object":
             if raw_props is not None and not isinstance(raw_props, dict):
                 self.refuse(
-                    _at(path, "properties"), "node_not_schema", "`properties` must be an object"
+                    _at(path, "properties"),
+                    "node_not_schema",
+                    "`properties` must be an object",
                 )
             if has_properties:
                 out["properties"] = {
-                    name: self.node(sub, f"{_at(path, 'properties')}.{name}", depth + 1, chain)
+                    name: self.node(
+                        sub, f"{_at(path, 'properties')}.{name}", depth + 1, chain
+                    )
                     for name, sub in declared_props.items()
                 }
             elif path or any(k in node for k in _MAP_KEYWORDS):
@@ -437,7 +509,10 @@ class _Walk:
         """The portable enum, or ``None`` to drop the keyword."""
         if kind != "string":
             self.repair(
-                path, "enum_invalid", f"an `enum` on a {kind} is not portable", "dropped it"
+                path,
+                "enum_invalid",
+                f"an `enum` on a {kind} is not portable",
+                "dropped it",
             )
             return None
         if not isinstance(raw, list) or not raw:
@@ -446,12 +521,22 @@ class _Walk:
         for value in raw:
             if value is None or value == "":
                 self.repair(
-                    path, "enum_invalid", f"enum value {value!r} is not portable", "dropped it"
+                    path,
+                    "enum_invalid",
+                    f"enum value {value!r} is not portable",
+                    "dropped it",
                 )
             elif not isinstance(value, str):
-                self.refuse(path, "enum_invalid", f"enum value {value!r} is not a string")
+                self.refuse(
+                    path, "enum_invalid", f"enum value {value!r} is not a string"
+                )
             elif value in values:
-                self.repair(path, "enum_invalid", f"enum value {value!r} is repeated", "dropped it")
+                self.repair(
+                    path,
+                    "enum_invalid",
+                    f"enum value {value!r} is repeated",
+                    "dropped it",
+                )
             else:
                 values.append(value)
         if not values:
@@ -460,10 +545,17 @@ class _Walk:
 
     def _required(self, raw: Any, props: dict[str, Any], path: str) -> list[str]:
         if isinstance(raw, str):
-            self.repair(path, "required_invalid", "`required` must be a list", "wrapped the name")
+            self.repair(
+                path,
+                "required_invalid",
+                "`required` must be a list",
+                "wrapped the name",
+            )
             raw = [raw]
         if not isinstance(raw, list):
-            self.repair(path, "required_invalid", "`required` must be a list", "dropped it")
+            self.repair(
+                path, "required_invalid", "`required` must be a list", "dropped it"
+            )
             return []
         kept: list[str] = []
         for name in raw:
@@ -473,7 +565,9 @@ class _Walk:
                     f"{name!r} is required but is not a declared property", "dropped it",
                 )  # fmt: skip
             elif name in kept:
-                self.repair(path, "required_invalid", f"{name!r} is listed twice", "dropped it")
+                self.repair(
+                    path, "required_invalid", f"{name!r} is listed twice", "dropped it"
+                )
             else:
                 kept.append(name)
         return kept
@@ -513,16 +607,23 @@ def conform_parameters(parameters: Any) -> Conformance:
     try:
         for key in ("anyOf", "oneOf", "allOf", "not", "enum"):
             if key in parameters:
-                walk.refuse("", "root_combinator", f"`{key}` at the top level is not portable")
+                walk.refuse(
+                    "", "root_combinator", f"`{key}` at the top level is not portable"
+                )
         root = dict(parameters)
         declared = root.get("type")
         if declared is None and "$ref" not in root:
             root["type"] = "object"
             walk.repair(
-                "", "root_not_object", "the root declares no `type`", "declared it an object"
+                "",
+                "root_not_object",
+                "the root declares no `type`",
+                "declared it an object",
             )
         elif declared is not None and declared != "object":
-            walk.refuse("", "root_not_object", f"the root must be an object, not {declared!r}")
+            walk.refuse(
+                "", "root_not_object", f"the root must be an object, not {declared!r}"
+            )
         conformed = walk.node(root, "", 0, ())
         blocked = any(not issue.repair for issue in walk.issues)
         if not blocked and conformed.get("type") != "object":
@@ -566,8 +667,14 @@ def _repair_known_builtin_shapes(
     """Restore the declared element shapes of legacy built-in tool schemas."""
     native_definition = provider == "native"
     gateway_definition = provider == "openai-compatible" and (
-        (name == "project_run_create" and description.startswith("Create a project RUN"))
-        or (name == "task_create" and description.startswith("Create a task in the user's task system."))
+        (
+            name == "project_run_create"
+            and description.startswith("Create a project RUN")
+        )
+        or (
+            name == "task_create"
+            and description.startswith("Create a task in the user's task system.")
+        )
         or (name == "task_update" and description.startswith("Update a task."))
     )
     if not (native_definition or gateway_definition):
@@ -579,10 +686,18 @@ def _repair_known_builtin_shapes(
     if name == "project_run_create":
         for field in ("sub_goals", "deliverables", "scope", "rubric"):
             item = properties.get(field)
-            if isinstance(item, dict) and item.get("type") == "array" and "items" not in item:
+            if (
+                isinstance(item, dict)
+                and item.get("type") == "array"
+                and "items" not in item
+            ):
                 item["items"] = {"type": "string"}
         item = properties.get("stage_plan")
-        if isinstance(item, dict) and item.get("type") == "array" and "items" not in item:
+        if (
+            isinstance(item, dict)
+            and item.get("type") == "array"
+            and "items" not in item
+        ):
             item["items"] = {
                 "type": "object",
                 "properties": {
@@ -606,9 +721,18 @@ def _repair_known_builtin_shapes(
                             "properties": {
                                 "title": {"type": "string"},
                                 "description": {"type": "string"},
-                                "action_plan": {"type": "array", "items": {"type": "string"}},
-                                "exit_criteria": {"type": "array", "items": {"type": "string"}},
-                                "depends_on": {"type": "array", "items": {"type": "integer"}},
+                                "action_plan": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "exit_criteria": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "depends_on": {
+                                    "type": "array",
+                                    "items": {"type": "integer"},
+                                },
                             },
                         },
                     },
@@ -661,12 +785,16 @@ def offered_tool_definitions(
         verdict = conform_parameters(parameters)
         if not verdict.issues:
             offered.append(
-                tool if parameters == tool.parameters else dataclasses.replace(
-                    tool, parameters=parameters
-                )
+                tool
+                if parameters == tool.parameters
+                else dataclasses.replace(tool, parameters=parameters)
             )
             continue
-        key = (provider, tool.name, json.dumps([dataclasses.astuple(i) for i in verdict.issues]))
+        key = (
+            provider,
+            tool.name,
+            json.dumps([dataclasses.astuple(i) for i in verdict.issues]),
+        )
         first = key not in _reported
         _reported.add(key)
         if verdict.parameters is None:
@@ -691,7 +819,9 @@ def offered_tool_definitions(
     return offered
 
 
-def offered_tool_payload(tools: Sequence[dict[str, Any]], *, provider: str) -> list[dict[str, Any]]:
+def offered_tool_payload(
+    tools: Sequence[dict[str, Any]], *, provider: str
+) -> list[dict[str, Any]]:
     """Normalize an OpenAI-compatible tool payload at a provider submission boundary."""
     definitions = [
         ToolDefinition(
@@ -730,14 +860,24 @@ def offered_tool_payload(tools: Sequence[dict[str, Any]], *, provider: str) -> l
 # ── a provider refusing a tool definition ────────────────────────────────────
 
 #: A path into one function declaration: ``function_declarations[15].parameters.properties[x]``.
-_DECLARATION_PATH = re.compile(r"function_declarations\[(\d+)\]((?:\.\w+(?:\[[^\]]*\])?)*)")
+_DECLARATION_PATH = re.compile(
+    r"function_declarations\[(\d+)\]((?:\.\w+(?:\[[^\]]*\])?)*)"
+)
 #: A path into the request's ``tools`` array: ``tools[3].function…`` / ``tools.3.custom…``.
 _TOOLS_PATH = re.compile(r"\btools(?:\[(\d+)\]|\.(\d+)(?=\.))")
 _FIRST_PROPERTY = re.compile(r"\.properties\[([^\]]+)\]")
 #: A rejection that names the function outright: ``Invalid schema for function 'x'``.
-_NAMED_FUNCTION = re.compile(r"\b(?:function|tool)\s+['\"]([^'\"]+)['\"]", re.IGNORECASE)
+_NAMED_FUNCTION = re.compile(
+    r"\b(?:function|tool)\s+['\"]([^'\"]+)['\"]", re.IGNORECASE
+)
 #: Words that make a ``tools[i]`` mention a DEFINITION error rather than, say, a tool choice.
-_DEFINITION_WORDS = ("parameters", "input_schema", "inputschema", "schema", "properties")
+_DEFINITION_WORDS = (
+    "parameters",
+    "input_schema",
+    "inputschema",
+    "schema",
+    "properties",
+)
 
 
 def _declares(entry: dict[str, Any], prop: str) -> bool:
@@ -745,7 +885,9 @@ def _declares(entry: dict[str, Any], prop: str) -> bool:
     return prop.strip("'\"") in (params.get("properties") or {})
 
 
-def tools_named_in_rejection(message: str, tools: Sequence[dict[str, Any]]) -> list[str]:
+def tools_named_in_rejection(
+    message: str, tools: Sequence[dict[str, Any]]
+) -> list[str]:
     """The tools of THIS request that a provider's rejection points at, in request order.
 
     ``tools`` is the exact ``tools=`` payload the request carried, so an index in the error maps
@@ -788,7 +930,9 @@ def tools_named_in_rejection(message: str, tools: Sequence[dict[str, Any]]) -> l
 
 def _listed(names: Sequence[str]) -> str:
     quoted = [f'"{n}"' for n in names]
-    return quoted[0] if len(quoted) == 1 else ", ".join(quoted[:-1]) + " and " + quoted[-1]
+    return (
+        quoted[0] if len(quoted) == 1 else ", ".join(quoted[:-1]) + " and " + quoted[-1]
+    )
 
 
 class ToolSchemaRejected(Exception):

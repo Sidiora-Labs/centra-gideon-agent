@@ -382,26 +382,50 @@ class _StepExecution:
         )
 
 
-async def run_step(command: str, cwd: str | Path, *, env=None, runner=None,
-                   timeout: float = STEP_TIMEOUT_SECS, durable_session: str = "",
-                   run_id: str = "") -> tuple[bool, str]:
+async def run_step(
+    command: str,
+    cwd: str | Path,
+    *,
+    env=None,
+    runner=None,
+    timeout: float = STEP_TIMEOUT_SECS,
+    durable_session: str = "",
+    run_id: str = "",
+) -> tuple[bool, str]:
     if runner is not None:
-        return await _run_step_bound(command, cwd, env=env, runner=runner, timeout=timeout,
-                                     durable_session=durable_session)
+        return await _run_step_bound(
+            command,
+            cwd,
+            env=env,
+            runner=runner,
+            timeout=timeout,
+            durable_session=durable_session,
+        )
     arguments = shlex.split(command or "")
     if not arguments:
         return False, "empty command"
-    from gideon.security.sandbox import egress_bound_argv, remove_wrap, no_network_note
-    from gideon.security.net.policy import run_of_this_call
     from gideon.security.guardrails.policy import unattended_dispatch_key
-    key = unattended_dispatch_key(f"workflow:{run_id}") if run_id else (run_of_this_call() or unattended_dispatch_key("workflow:step"))
+    from gideon.security.net.policy import run_of_this_call
+    from gideon.security.sandbox import egress_bound_argv, no_network_note, remove_wrap
+
+    key = (
+        unattended_dispatch_key(f"workflow:{run_id}")
+        if run_id
+        else (run_of_this_call() or unattended_dispatch_key("workflow:step"))
+    )
     try:
         argv, cleanup = egress_bound_argv(arguments, run=key)
     except PermissionError as error:
         return False, str(error)
     try:
-        success, detail = await _run_step_bound(command, cwd, env=env, timeout=timeout,
-                                               durable_session=durable_session, _argv=argv)
+        success, detail = await _run_step_bound(
+            command,
+            cwd,
+            env=env,
+            timeout=timeout,
+            durable_session=durable_session,
+            _argv=argv,
+        )
         if not success and (note := no_network_note(key)):
             detail = f"{detail}\n{note}"
         return success, detail

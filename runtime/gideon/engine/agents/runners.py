@@ -677,7 +677,11 @@ def runtime_id_for_agent(agent: str | None) -> str:
 def guard_unattended_spawn(runtime_id: str, *, unattended: bool) -> None:
     if runtime_id:
         definition = definition_for_runtime(runtime_id)
-        if definition is not None and definition.source == "user" and not owner_grant_allowed(definition):
+        if (
+            definition is not None
+            and definition.source == "user"
+            and not owner_grant_allowed(definition)
+        ):
             raise RunnerConsentRequiredError(
                 f"Runner {definition.display_name!r} is waiting for owner approval of its current definition."
             )
@@ -693,9 +697,7 @@ def guard_unattended_spawn(runtime_id: str, *, unattended: bool) -> None:
             _require_verified_runtime(runtime_id)
 
 
-def owner_grant_allowed(
-    definition: RunnerDefinition, *, tenant: Any = None
-) -> bool:
+def owner_grant_allowed(definition: RunnerDefinition, *, tenant: Any = None) -> bool:
     """Consult the durable exact-definition grant only for custom catalog entries."""
     if definition.source != "user":
         return True
@@ -704,7 +706,11 @@ def owner_grant_allowed(
 
         return allowed(definition, tenant)
     except Exception:
-        logger.warning("custom runner grant lookup failed; refusing %s", definition.id, exc_info=True)
+        logger.warning(
+            "custom runner grant lookup failed; refusing %s",
+            definition.id,
+            exc_info=True,
+        )
         return False
 
 

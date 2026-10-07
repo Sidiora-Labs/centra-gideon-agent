@@ -1,4 +1,5 @@
 """Bounded static content scan entry point, without gateway startup."""
+
 import json
 import sys
 
@@ -12,13 +13,15 @@ def main() -> int:
     window = sys.stdin.buffer.read(WHOLE_FILE_BYTES + 2)
     if len(window) > WHOLE_FILE_BYTES + 1:
         return 2
-    text = window.decode('utf-8', errors='replace')
+    text = window.decode("utf-8", errors="replace")
     scanner = SkillScanner()
-    dangerous = any(scanner.scan_text(text, surface=surface).verdict is Verdict.DANGEROUS
-                    for surface in ('script', 'manifest'))
-    sys.stdout.write(json.dumps({'dangerous': dangerous}) + '\n')
+    dangerous = any(
+        scanner.scan_text(text, surface=surface).verdict is Verdict.DANGEROUS
+        for surface in ("script", "manifest")
+    )
+    sys.stdout.write(json.dumps({"dangerous": dangerous}) + "\n")
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

@@ -84,6 +84,7 @@ def is_secret_binding(value: Any) -> bool:
 
 def strip_secrets(spec: Any) -> Any:
     from gideon.security.security import redact_values_for_display
+
     return redact_values_for_display(_CredentialDocument().read(spec))
 
 
@@ -104,25 +105,34 @@ def reinject_secrets(incoming: Any, stored: Any) -> Any:
     return restore_hidden_values(incoming, stored)[0]
 
 
-def restore_hidden_values(incoming: Any, stored: Any) -> tuple[Any, list[dict[str, str]]]:
+def restore_hidden_values(
+    incoming: Any, stored: Any
+) -> tuple[Any, list[dict[str, str]]]:
     """Restore presence flags against the exact named base document, at every depth.
 
     Paths use the workflow engine's root/children/body/cases/default grammar where possible.
     A true flag with no matching stored value is returned as an issue; it is never written.
     """
     from gideon.security.security import keep_masked_values
+
     incoming = keep_masked_values(incoming, stored)
     unmatched: list[dict[str, str]] = []
 
     def step_path(path: str, key: str, index: int | None = None) -> str:
         if path == "root":
-            if key == "children" and index is not None: return f"root.children[{index}]"
-            if key in {"body", "default"}: return f"root.{key}"
-            if key == "cases" and index is not None: return f"root.cases[{index}]"
+            if key == "children" and index is not None:
+                return f"root.children[{index}]"
+            if key in {"body", "default"}:
+                return f"root.{key}"
+            if key == "cases" and index is not None:
+                return f"root.cases[{index}]"
         if path.startswith("root"):
-            if key == "children" and index is not None: return f"{path}.children[{index}]"
-            if key in {"body", "default"}: return f"{path}.{key}"
-            if key == "cases" and index is not None: return f"{path}.cases[{index}]"
+            if key == "children" and index is not None:
+                return f"{path}.children[{index}]"
+            if key in {"body", "default"}:
+                return f"{path}.{key}"
+            if key == "cases" and index is not None:
+                return f"{path}.cases[{index}]"
         return path
 
     def visit(value: Any, base: Any, path: str = "") -> Any:
@@ -140,13 +150,36 @@ def restore_hidden_values(incoming: Any, stored: Any) -> tuple[Any, list[dict[st
                             unmatched.append({"path": node_path, "key": original_key})
                     continue
                 if key == "children" and isinstance(child, list):
-                    result[key] = [visit(item, (base_map.get(key) or [])[idx] if isinstance(base_map.get(key), list) and idx < len(base_map[key]) else None,
-                                         step_path(path or "root", key, idx)) for idx, item in enumerate(child)]
+                    result[key] = [
+                        visit(
+                            item,
+                            (
+                                (base_map.get(key) or [])[idx]
+                                if isinstance(base_map.get(key), list)
+                                and idx < len(base_map[key])
+                                else None
+                            ),
+                            step_path(path or "root", key, idx),
+                        )
+                        for idx, item in enumerate(child)
+                    ]
                 elif key in {"body", "default"}:
-                    result[key] = visit(child, base_map.get(key), step_path(path or "root", key))
+                    result[key] = visit(
+                        child, base_map.get(key), step_path(path or "root", key)
+                    )
                 elif key == "cases" and isinstance(child, dict):
-                    result[key] = {label: visit(item, (base_map.get(key) or {}).get(label) if isinstance(base_map.get(key), dict) else None,
-                                                step_path(path or "root", key, label)) for label, item in child.items()}
+                    result[key] = {
+                        label: visit(
+                            item,
+                            (
+                                (base_map.get(key) or {}).get(label)
+                                if isinstance(base_map.get(key), dict)
+                                else None
+                            ),
+                            step_path(path or "root", key, label),
+                        )
+                        for label, item in child.items()
+                    }
                 elif key == "root":
                     result[key] = visit(child, base_map.get(key), "root")
                 elif key in {"inputs", "defaults"}:
@@ -156,7 +189,10 @@ def restore_hidden_values(incoming: Any, stored: Any) -> tuple[Any, list[dict[st
             return result
         if isinstance(value, list):
             base_list = base if isinstance(base, list) else []
-            return [visit(child, base_list[idx] if idx < len(base_list) else None, path) for idx, child in enumerate(value)]
+            return [
+                visit(child, base_list[idx] if idx < len(base_list) else None, path)
+                for idx, child in enumerate(value)
+            ]
         return value
 
     return visit(incoming, stored), unmatched

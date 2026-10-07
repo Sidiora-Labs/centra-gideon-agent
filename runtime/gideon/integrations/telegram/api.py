@@ -1,15 +1,18 @@
 """Bounded Telegram Bot API requests with credential-safe errors."""
 
 from __future__ import annotations
+
 import asyncio
 import json
 import logging
-import re
 import os
+import re
 import shutil
 from pathlib import Path
 from urllib.parse import quote, urlsplit
+
 import httpx
+
 from gideon.security.guardrails.writes import live_writes_disabled
 
 MAX_DOWNLOAD = 20 * 1024 * 1024
@@ -227,6 +230,7 @@ class TelegramAPI:
 
     async def upload_album(self, channel, paths, **options):
         from contextlib import ExitStack
+
         from gideon.engine.hooks import validate_file_path
 
         if not 2 <= len(paths) <= 10:

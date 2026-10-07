@@ -15,7 +15,9 @@ class Place:
 
 def places() -> tuple[Place, ...]:
     return (
-        Place("agent-skills", "Shared agent skills", Path.home() / ".agents" / "skills"),
+        Place(
+            "agent-skills", "Shared agent skills", Path.home() / ".agents" / "skills"
+        ),
     )
 
 
@@ -40,6 +42,11 @@ def allowed_paths() -> list[tuple[str, str]]:
 def place_rows() -> list[dict[str, object]]:
     permitted = allowed_ids()
     return [
-        {"id": place.id, "label": place.label, "path": str(place.path), "allowed": place.id in permitted}
+        {
+            "id": place.id,
+            "label": place.label,
+            "path": str(place.path),
+            "allowed": place.id in permitted,
+        }
         for place in places()
     ]

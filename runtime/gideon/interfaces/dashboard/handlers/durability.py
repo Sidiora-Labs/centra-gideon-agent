@@ -85,21 +85,26 @@ async def _read_upload_file(
             status=400,
         )
 
-    from gideon.workspace.uploads.content_intake import approve_stream, IntakeRefused
+    from gideon.workspace.uploads.content_intake import IntakeRefused, approve_stream
+
     async def chunks():
         while chunk := await part.read_chunk(65536):
             yield chunk
+
     snapshot = None
     try:
-        snapshot = await approve_stream(chunks(), part.filename or 'import.zip',
-                                        'application/zip', surface='archive_import')
+        snapshot = await approve_stream(
+            chunks(),
+            part.filename or "import.zip",
+            "application/zip",
+            surface="archive_import",
+        )
         return await snapshot.stage_file(), None
     except IntakeRefused as exc:
         return None, exc.response()
     finally:
         if snapshot is not None:
             snapshot.close()
-
 
 
 def _reject_app(request: web.Request) -> web.Response | None:
@@ -157,15 +162,29 @@ async def api_durability_archive(request: web.Request) -> web.Response:
             )
         verified = service.last_verified()
         plan = retention.plan_retention(
-            snapshots, verified=verified["archive"], daily=daily, weekly=weekly, monthly=monthly
+            snapshots,
+            verified=verified["archive"],
+            daily=daily,
+            weekly=weekly,
+            monthly=monthly,
         )
         keep_names = {s.name for s in plan.keep}
         drill = service.last_drill()
-        drill["on_disk"] = drill.get("archive") in {s.name for s in snapshots} if drill.get("archive") else None
+        drill["on_disk"] = (
+            drill.get("archive") in {s.name for s in snapshots}
+            if drill.get("archive")
+            else None
+        )
+
         def verdict(name):
             if drill.get("archive") == name:
                 return drill
-            return {"ran": True, "ok": True, **verified} if verified["archive"] == name else None
+            return (
+                {"ran": True, "ok": True, **verified}
+                if verified["archive"] == name
+                else None
+            )
+
         return {
             "directory": str(directory),
             "archives": [
@@ -320,6 +339,7 @@ async def api_durability_import(request: web.Request) -> web.Response:
 
     try:
         from gideon.cognition.knowledge.file_items import _owned_io
+
         ok, error, manifest = await _owned_io(validate_import_zip, zip_path)
         if not ok:
             _audit_api(request, "durability.import", "denied", error)
@@ -341,7 +361,14 @@ async def api_durability_import(request: web.Request) -> web.Response:
             f"mode={mode},items={len(summary.get('items', []))}",
         )
         return web.json_response(
-            {"ok": True, "applied": True, "partial": bool(summary.get("partial")), "left_unchanged": summary.get("left_unchanged", []), "summary": summary, "manifest": manifest}
+            {
+                "ok": True,
+                "applied": True,
+                "partial": bool(summary.get("partial")),
+                "left_unchanged": summary.get("left_unchanged", []),
+                "summary": summary,
+                "manifest": manifest,
+            }
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("durability import failed")

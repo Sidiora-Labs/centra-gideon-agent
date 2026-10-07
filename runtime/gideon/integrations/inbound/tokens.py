@@ -16,9 +16,9 @@ import os
 import threading
 import time
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
-from datetime import datetime
 
 from gideon.security.auth.lifetimes import MAX_SESSION_TTL_SECS, parse_lifetime
 
@@ -62,7 +62,10 @@ def _read() -> dict[str, Any]:
     rows = data.get("tokens") if isinstance(data, dict) else None
     if not isinstance(rows, dict):
         raise RegistryUnavailable(f"{path} has no token registry")
-    return {"version": 1, "tokens": {str(k): v for k, v in rows.items() if isinstance(v, dict)}}
+    return {
+        "version": 1,
+        "tokens": {str(k): v for k, v in rows.items() if isinstance(v, dict)},
+    }
 
 
 def _write(data: dict[str, Any]) -> None:
@@ -71,7 +74,9 @@ def _write(data: dict[str, Any]) -> None:
     path = registry_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(path, json.dumps(data, sort_keys=True, indent=2) + "\n", mode=0o600)
+        atomic_write(
+            path, json.dumps(data, sort_keys=True, indent=2) + "\n", mode=0o600
+        )
     except OSError as exc:
         raise RegistryUnavailable(f"{path} cannot be written") from exc
 
@@ -82,7 +87,9 @@ def _transaction() -> Iterator[dict[str, Any]]:
     with _LOCK:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            lock_fd = os.open(path.parent / f".{_FILE}.lock", os.O_CREAT | os.O_RDWR, 0o600)
+            lock_fd = os.open(
+                path.parent / f".{_FILE}.lock", os.O_CREAT | os.O_RDWR, 0o600
+            )
             os.fchmod(lock_fd, 0o600)
             with os.fdopen(lock_fd, "a", encoding="utf-8") as lock:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
@@ -111,7 +118,9 @@ def _state(row: dict[str, Any], now: float) -> str:
         return EXPIRED
 
 
-def _surface_row(digest: str, row: dict[str, Any], surface: str, now: float) -> dict[str, Any] | None:
+def _surface_row(
+    digest: str, row: dict[str, Any], surface: str, now: float
+) -> dict[str, Any] | None:
     if row.get("kind") != "surface" or row.get("surface") != surface:
         return None
     return {
@@ -131,7 +140,9 @@ def _surface_row(digest: str, row: dict[str, Any], surface: str, now: float) -> 
     }
 
 
-def _record_surface(data: dict[str, Any], surface: str, digest: str, now: float) -> dict[str, Any]:
+def _record_surface(
+    data: dict[str, Any], surface: str, digest: str, now: float
+) -> dict[str, Any]:
     rows = data["tokens"]
     row = rows.get(digest)
     if isinstance(row, dict):
@@ -152,14 +163,20 @@ def _record_surface(data: dict[str, Any], surface: str, digest: str, now: float)
     }
     rows[digest] = record
     for other_digest, other in list(rows.items()):
-        if other_digest == digest or other.get("kind") != "surface" or other.get("surface") != surface:
+        if (
+            other_digest == digest
+            or other.get("kind") != "surface"
+            or other.get("surface") != surface
+        ):
             continue
         if _state(other, now) == LIVE:
             other["replaced_at"] = now
     return record
 
 
-def issue_surface_token(surface: str, token: str, ttl: str = "90d", *, now: float | None = None) -> dict[str, Any]:
+def issue_surface_token(
+    surface: str, token: str, ttl: str = "90d", *, now: float | None = None
+) -> dict[str, Any]:
     seconds = parse_lifetime(ttl, units="dh")
     if seconds is None:
         raise ValueError("integration token lifetime must be between 1d and 90d")
@@ -167,24 +184,48 @@ def issue_surface_token(surface: str, token: str, ttl: str = "90d", *, now: floa
     digest = token_hash(token)
     with _transaction() as data:
         row = {
-            "kind": "surface", "surface": surface, "issued_at": now,
-            "expires_at": now + seconds, "revoked_at": 0.0,
-            "replaced_at": 0.0, "last_seen": 0.0, "found": False,
+            "kind": "surface",
+            "surface": surface,
+            "issued_at": now,
+            "expires_at": now + seconds,
+            "revoked_at": 0.0,
+            "replaced_at": 0.0,
+            "last_seen": 0.0,
+            "found": False,
         }
         prior = data["tokens"].get(digest)
         if isinstance(prior, dict) and _state(prior, now) != LIVE:
             raise ValueError("an ended integration token cannot be reissued")
         data["tokens"][digest] = row
         for old_digest, old in list(data["tokens"].items()):
-            if old_digest != digest and old.get("kind") == "surface" and old.get("surface") == surface and _state(old, now) == LIVE:
+            if (
+                old_digest != digest
+                and old.get("kind") == "surface"
+                and old.get("surface") == surface
+                and _state(old, now) == LIVE
+            ):
                 old["replaced_at"] = now
-    _signin(f"surface-{surface}", "surface_token", "session_signed_in", {
-        "surface": surface, "issued_at": now, "expires_at": now + seconds,
-    })
-    return {"surface": surface, "issued_at": now, "expires_at": now + seconds, "state": LIVE}
+    _signin(
+        f"surface-{surface}",
+        "surface_token",
+        "session_signed_in",
+        {
+            "surface": surface,
+            "issued_at": now,
+            "expires_at": now + seconds,
+        },
+    )
+    return {
+        "surface": surface,
+        "issued_at": now,
+        "expires_at": now + seconds,
+        "state": LIVE,
+    }
 
 
-def surface_token(surface: str, token: str, *, now: float | None = None) -> dict[str, Any]:
+def surface_token(
+    surface: str, token: str, *, now: float | None = None
+) -> dict[str, Any]:
     now = time.time() if now is None else float(now)
     digest = token_hash(token)
     with _transaction() as data:
@@ -200,7 +241,10 @@ def surface_usable(surface: str, token: str, *, now: float | None = None) -> boo
         note_use(token, now=now)
         return True
     except RegistryUnavailable:
-        logger.warning("inbound token registry is unavailable; refusing surface token", exc_info=True)
+        logger.warning(
+            "inbound token registry is unavailable; refusing surface token",
+            exc_info=True,
+        )
         return False
 
 
@@ -209,7 +253,11 @@ def revoke_surface_token(surface: str, token: str, *, now: float | None = None) 
     digest = token_hash(token)
     with _transaction() as data:
         row = data["tokens"].get(digest)
-        if not isinstance(row, dict) or row.get("kind") != "surface" or row.get("surface") != surface:
+        if (
+            not isinstance(row, dict)
+            or row.get("kind") != "surface"
+            or row.get("surface") != surface
+        ):
             row = _record_surface(data, surface, digest, now)
         if row.get("revoked_at"):
             return False
@@ -232,7 +280,9 @@ def surface_rows(*, now: float | None = None) -> list[dict[str, Any]]:
     return rows
 
 
-def revoke_surface_id(surface: str, issued_at: float, *, now: float | None = None) -> bool:
+def revoke_surface_id(
+    surface: str, issued_at: float, *, now: float | None = None
+) -> bool:
     now = time.time() if now is None else float(now)
     with _transaction() as data:
         for row in data["tokens"].values():
@@ -248,24 +298,45 @@ def revoke_surface_id(surface: str, issued_at: float, *, now: float | None = Non
     return False
 
 
-def record_client(token_digest: str, client_id: str, label: str, surfaces: list[str], ttl: str, *, now: float) -> float:
+def record_client(
+    token_digest: str,
+    client_id: str,
+    label: str,
+    surfaces: list[str],
+    ttl: str,
+    *,
+    now: float,
+) -> float:
     seconds = parse_ttl(ttl)
     if seconds is None:
         raise ValueError("integration token lifetime must be between 1d and 90d")
     expiry = now + seconds
     with _transaction() as data:
         data["tokens"][token_digest] = {
-            "kind": "client", "client_id": client_id, "label": label,
-            "surfaces": list(surfaces), "issued_at": now, "expires_at": expiry,
+            "kind": "client",
+            "client_id": client_id,
+            "label": label,
+            "surfaces": list(surfaces),
+            "issued_at": now,
+            "expires_at": expiry,
             "revoked_at": 0.0,
         }
-    _signin(f"client-{client_id}", "client", "session_signed_in", {
-        "client_id": client_id, "surfaces": list(surfaces), "expires_at": expiry,
-    })
+    _signin(
+        f"client-{client_id}",
+        "client",
+        "session_signed_in",
+        {
+            "client_id": client_id,
+            "surfaces": list(surfaces),
+            "expires_at": expiry,
+        },
+    )
     return expiry
 
 
-def client_state(token_digest: str, *, now: float | None = None) -> tuple[str, dict[str, Any] | None]:
+def client_state(
+    token_digest: str, *, now: float | None = None
+) -> tuple[str, dict[str, Any] | None]:
     now = time.time() if now is None else float(now)
     try:
         row = _read()["tokens"].get(token_digest)
@@ -288,7 +359,9 @@ def note_use(token: str, *, now: float | None = None) -> None:
         logger.debug("integration token last use could not be recorded", exc_info=True)
 
 
-def validate_client(client: Any, *, now: float | None = None) -> tuple[str, dict[str, Any] | None]:
+def validate_client(
+    client: Any, *, now: float | None = None
+) -> tuple[str, dict[str, Any] | None]:
     """Resolve old client records once, preserving their original 90-day boundary."""
     now = time.time() if now is None else float(now)
     digest = str(getattr(client, "token_hash", "") or "")
@@ -303,21 +376,32 @@ def validate_client(client: Any, *, now: float | None = None) -> tuple[str, dict
                 except (TypeError, ValueError):
                     issued = 0.0
                 try:
-                    issued_at = datetime.fromisoformat(str(client.created_at)).timestamp()
+                    issued_at = datetime.fromisoformat(
+                        str(client.created_at)
+                    ).timestamp()
                 except (TypeError, ValueError, AttributeError):
                     issued_at = 0.0
-                expiry = issued if issued > 0 else (
-                    issued_at + INTEGRATION_TTL_SECS if issued_at else 0.0
+                expiry = (
+                    issued
+                    if issued > 0
+                    else (issued_at + INTEGRATION_TTL_SECS if issued_at else 0.0)
                 )
                 row = {
-                    "kind": "client", "client_id": client.client_id,
-                    "label": client.label, "surfaces": list(client.surfaces),
-                "issued_at": issued_at, "expires_at": expiry, "revoked_at": 0.0,
+                    "kind": "client",
+                    "client_id": client.client_id,
+                    "label": client.label,
+                    "surfaces": list(client.surfaces),
+                    "issued_at": issued_at,
+                    "expires_at": expiry,
+                    "revoked_at": 0.0,
                 }
                 data["tokens"][digest] = row
             if row.get("client_id") != client.client_id:
                 return "unknown", None
-            if _state(row, now) == LIVE and now - float(row.get("last_seen") or 0) >= 300:
+            if (
+                _state(row, now) == LIVE
+                and now - float(row.get("last_seen") or 0) >= 300
+            ):
                 row["last_seen"] = now
             return _state(row, now), dict(row)
     except RegistryUnavailable:
@@ -331,21 +415,23 @@ def client_rows(clients: Any, *, now: float | None = None) -> list[dict[str, Any
         state, record = validate_client(client, now=now)
         if record is None:
             continue
-        rows.append({
-            "id": f"integration-client-{client.client_id}",
-            "label": client.label,
-            "name": client.label,
-            "kind": "integration",
-            "issuer": "integration",
-            "current": False,
-            "ip": "",
-            "minted_at": float(record.get("issued_at") or 0),
-            "surface": ", ".join(client.surfaces),
-            "issued_at": float(record.get("issued_at") or 0),
-            "expires_at": float(record.get("expires_at") or 0),
-            "last_seen": 0.0,
-            "state": state,
-        })
+        rows.append(
+            {
+                "id": f"integration-client-{client.client_id}",
+                "label": client.label,
+                "name": client.label,
+                "kind": "integration",
+                "issuer": "integration",
+                "current": False,
+                "ip": "",
+                "minted_at": float(record.get("issued_at") or 0),
+                "surface": ", ".join(client.surfaces),
+                "issued_at": float(record.get("issued_at") or 0),
+                "expires_at": float(record.get("expires_at") or 0),
+                "last_seen": 0.0,
+                "state": state,
+            }
+        )
     return rows
 
 
@@ -400,6 +486,10 @@ def refusal(surface: str, token: str) -> str | None:
     state = _state(row, time.time())
     if row.get("kind") == "surface" and row.get("surface") == surface and state != LIVE:
         return f"{surface} integration token {state}; create a new token with `gideon inbound token create {surface} --rotate`"
-    if row.get("kind") == "client" and surface in row.get("surfaces", []) and state != LIVE:
+    if (
+        row.get("kind") == "client"
+        and surface in row.get("surfaces", [])
+        and state != LIVE
+    ):
         return client_sentence(row, state)
     return None

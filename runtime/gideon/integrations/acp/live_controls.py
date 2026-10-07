@@ -61,6 +61,8 @@ async def apply_live_control(
     try:
         reply = await connection.request(request.method, request.params, timeout=15.0)
     except (AcpError, asyncio.TimeoutError, OSError) as exc:
-        raise LiveControlRefused(f"The agent did not confirm the {axis} change") from exc
+        raise LiveControlRefused(
+            f"The agent did not confirm the {axis} change"
+        ) from exc
     if reply.error:
         raise LiveControlRefused(f"The agent refused the {axis} change")

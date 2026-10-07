@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from gideon.security.safety_flags import yes_or_no
-
 import asyncio
 import hashlib
 import json
@@ -15,6 +13,7 @@ from enum import Enum
 from typing import Any
 
 from gideon.automation.workflows import store
+from gideon.security.safety_flags import yes_or_no
 
 logger = logging.getLogger(__name__)
 
@@ -211,16 +210,23 @@ class _TeardownInvocation:
         return cls(arguments, environment), ""
 
     async def run(self, timeout: float) -> tuple[bool, str]:
-        from gideon.security.sandbox import egress_bound_argv, remove_wrap, no_network_note
-        from gideon.security.net.policy import run_of_this_call
         from gideon.security.guardrails.policy import unattended_dispatch_key
+        from gideon.security.net.policy import run_of_this_call
+        from gideon.security.sandbox import (
+            egress_bound_argv,
+            no_network_note,
+            remove_wrap,
+        )
+
         key = run_of_this_call() or unattended_dispatch_key("workflow:teardown")
         try:
             argv, cleanup = egress_bound_argv(self.argv, run=key)
         except PermissionError as error:
             return False, str(error)
         try:
-            success, detail = await _TeardownInvocation(argv, self.environment)._run_bound(timeout)
+            success, detail = await _TeardownInvocation(
+                argv, self.environment
+            )._run_bound(timeout)
             if not success and (note := no_network_note(key)):
                 detail = f"{detail}\n{note}"
             return success, detail

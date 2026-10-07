@@ -59,7 +59,11 @@ class _Invocation:
         return cls(
             dict(
                 task=task,
-                parent_run=("workflow:" + str(ctx.payload["run_id"])) if ctx.event == "workflow_node" and ctx.payload.get("run_id") else "",
+                parent_run=(
+                    ("workflow:" + str(ctx.payload["run_id"]))
+                    if ctx.event == "workflow_node" and ctx.payload.get("run_id")
+                    else ""
+                ),
                 parent_session_key=str(
                     (ctx.payload or {}).get("session_key", "") or ""
                 ),
@@ -128,12 +132,15 @@ class InvokeAgentActionProvider(ActionProvider):
                 )
         if trigger_start_approval is not None:
             from gideon.security.durable_work import accepted_trigger_origin
+
             accepted_origin = getattr(ctx, "accepted_origin", None)
             if accepted_origin is None:
                 # Direct native invocation still derives provenance from the actual sealed row.
                 accepted_origin = accepted_trigger_origin(trigger_id)
             if accepted_origin is None:
-                return ActionResult(False, error="invoke-agent: no current authenticated trigger origin")
+                return ActionResult(
+                    False, error="invoke-agent: no current authenticated trigger origin"
+                )
         else:
             accepted_origin = None
         invocation = _Invocation.prepare(
@@ -144,17 +151,26 @@ class InvokeAgentActionProvider(ActionProvider):
         )
         if accepted_origin is not None:
             invocation.arguments["accepted_origin"] = accepted_origin
-        from gideon.extensions.apps.app_work import for_job, held, of_session
         from gideon.extensions.apps.agent_tiers import capability_class
-        inherited = held() or of_session(invocation.arguments.get("parent_session_key", ""))
+        from gideon.extensions.apps.app_work import for_job, held, of_session
+
+        inherited = held() or of_session(
+            invocation.arguments.get("parent_session_key", "")
+        )
         job_work = for_job(trigger_id) if trigger_start_approval is not None else None
         work = inherited or job_work
         if inherited is not None and job_work is not None:
-            work = inherited.child(job_work.tier) if inherited.app == job_work.app else inherited.child("")
+            work = (
+                inherited.child(job_work.tier)
+                if inherited.app == job_work.app
+                else inherited.child("")
+            )
         if work is not None:
             work = work.child()
             if not work.tier:
-                return ActionResult(False, error="invoke-agent: app may run no agent work now")
+                return ActionResult(
+                    False, error="invoke-agent: app may run no agent work now"
+                )
             invocation.arguments["app_work"] = work
             invocation.arguments["capability_class"] = capability_class(work.tier)
             invocation.arguments["approval_mode"] = ""
@@ -168,7 +184,9 @@ class InvokeAgentActionProvider(ActionProvider):
 
         try:
             info = services.subagents.spawn(**invocation.arguments)
-            return agent_launch(services.subagents, info, f"spawned agent for: {task[:80]}")
+            return agent_launch(
+                services.subagents, info, f"spawned agent for: {task[:80]}"
+            )
         except Exception as error:
             return ActionResult(False, error=f"invoke-agent: spawn failed: {error}")
         finally:

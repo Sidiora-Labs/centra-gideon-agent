@@ -1,8 +1,10 @@
 """Owner-configured Telegram triggers and ephemeral conversation context."""
 
 from __future__ import annotations
-import json
+
 import hashlib
+import json
+
 from gideon.extensions.apps.app_config import read_config
 
 
@@ -122,6 +124,7 @@ def turn_context(thread):
     skill = topic_config.get("skill", "") if isinstance(topic_config, dict) else ""
     if not skill:
         from gideon.extensions.providers.settings import ProviderSettings
+
         from .topics import TopicStore
 
         key = hashlib.sha256(str(config.get("bot_token", "")).encode()).hexdigest()[:16]

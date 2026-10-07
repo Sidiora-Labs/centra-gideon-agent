@@ -65,7 +65,11 @@ def stamp_turn_telemetry(messages: list[dict], line: str) -> bool:
     if not text:
         return False
     latest_user = next(
-        (index for index in range(len(messages) - 1, -1, -1) if messages[index].get("role") == "user"),
+        (
+            index
+            for index in range(len(messages) - 1, -1, -1)
+            if messages[index].get("role") == "user"
+        ),
         -1,
     )
     if latest_user < 0:
@@ -84,7 +88,11 @@ def stamp_turn_telemetry(messages: list[dict], line: str) -> bool:
     if not isinstance(metadata, dict):
         metadata = {}
     existing = metadata.get(TURN_TELEMETRY_KEY)
-    if isinstance(existing, dict) and isinstance(existing.get("line"), str) and existing["line"].strip():
+    if (
+        isinstance(existing, dict)
+        and isinstance(existing.get("line"), str)
+        and existing["line"].strip()
+    ):
         return False
     metadata[TURN_TELEMETRY_KEY] = {"line": text}
     assistant["meta"] = metadata
@@ -123,20 +131,41 @@ class _SessionLinks:
     def link(self, key, thread, channel, provider=""):
         previous = self.entries.get(key) or {}
         destination = (thread, channel, provider)
-        if (previous.get("thread_ts", ""), previous.get("channel_id", ""), previous.get("channel_provider", "")) == destination:
+        if (
+            previous.get("thread_ts", ""),
+            previous.get("channel_id", ""),
+            previous.get("channel_provider", ""),
+        ) == destination:
             return False
         if thread:
             for other, entry in self.entries.items():
-                if other != key and other.startswith("dashboard:") and (entry.get("thread_ts"), entry.get("channel_provider", "")) == (thread, provider):
+                if (
+                    other != key
+                    and other.startswith("dashboard:")
+                    and (entry.get("thread_ts"), entry.get("channel_provider", ""))
+                    == (thread, provider)
+                ):
                     entry.update(thread_ts="", channel_id="", channel_provider="")
-        self.merge(key, {"thread_ts": thread, "channel_id": channel, "channel_provider": provider if thread and channel else ""}, {"sid": ""})
+        self.merge(
+            key,
+            {
+                "thread_ts": thread,
+                "channel_id": channel,
+                "channel_provider": provider if thread and channel else "",
+            },
+            {"sid": ""},
+        )
         self.index_threads()
         return True
 
     def for_thread(self, thread, provider=None):
-        matches = [key for key, entry in self.entries.items()
-                   if thread and entry.get("thread_ts") == thread
-                   and (provider is None or entry.get("channel_provider", "") == provider)]
+        matches = [
+            key
+            for key, entry in self.entries.items()
+            if thread
+            and entry.get("thread_ts") == thread
+            and (provider is None or entry.get("channel_provider", "") == provider)
+        ]
         dashboards = [key for key in matches if key.startswith("dashboard:")]
         candidates = dashboards or matches
         return candidates[0] if len(candidates) == 1 else None
@@ -250,7 +279,11 @@ class SessionMap:
         return len(expired)
 
     def set_channel_link(
-        self, key: str, thread_ts: str, channel_id: str | None, channel_provider: str = ""
+        self,
+        key: str,
+        thread_ts: str,
+        channel_id: str | None,
+        channel_provider: str = "",
     ) -> None:
         if self._links.link(key, thread_ts, channel_id, channel_provider):
             self._save()
@@ -263,7 +296,9 @@ class SessionMap:
         value = (self._data.get(key) or {}).get("channel_provider", "")
         return value if isinstance(value, str) else ""
 
-    def get_session_for_thread(self, thread_ts: str, provider: str | None = None) -> str | None:
+    def get_session_for_thread(
+        self, thread_ts: str, provider: str | None = None
+    ) -> str | None:
         return self._links.for_thread(thread_ts, provider)
 
     def find_key_by_sid(self, session_id: str) -> str | None:

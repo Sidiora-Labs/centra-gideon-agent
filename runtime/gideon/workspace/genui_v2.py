@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import math
-from pathlib import Path
 import re
+from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
-
 
 _CATALOG_PATH = Path(__file__).with_name("genui_v2_catalog.json")
 _SCHEMA: dict[str, Any] = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
@@ -98,7 +97,11 @@ def validate_candidate(value: Any) -> dict[str, Any] | None:
     identity, kind, props = value["id"], value["type"], value["props"]
     if not isinstance(identity, str) or _IDENTIFIER.fullmatch(identity) is None:
         return None
-    if not isinstance(kind, str) or kind not in _COMPONENTS or kind in _LAYOUT_COMPONENTS:
+    if (
+        not isinstance(kind, str)
+        or kind not in _COMPONENTS
+        or kind in _LAYOUT_COMPONENTS
+    ):
         return None
     if not isinstance(props, dict) or not _PROP_VALIDATORS[kind].is_valid(props):
         return None

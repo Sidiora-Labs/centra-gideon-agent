@@ -21,14 +21,29 @@ def safe_text(text: str) -> str:
 
 
 def cause_line(stderr: str) -> str:
-    lines = [line.strip().lstrip("×✖✗•·│├└╰─▶>|*- ") for line in safe_text(stderr).splitlines()]
-    lines = [line for line in lines if line and not re.match(
-        r'^(File ".*", line \d+|at \S|Traceback \(|During handling|The above exception|hint:|help:|note:|[\^~]+$)',
-        line, re.I,
-    )]
-    errors = [line for line in lines if re.match(
-        r"^([A-Za-z_][\w.]*(Error|Exception|Exit)\b|(error|fatal|panic|failed)\b)", line, re.I
-    )]
+    lines = [
+        line.strip().lstrip("×✖✗•·│├└╰─▶>|*- ")
+        for line in safe_text(stderr).splitlines()
+    ]
+    lines = [
+        line
+        for line in lines
+        if line
+        and not re.match(
+            r'^(File ".*", line \d+|at \S|Traceback \(|During handling|The above exception|hint:|help:|note:|[\^~]+$)',
+            line,
+            re.I,
+        )
+    ]
+    errors = [
+        line
+        for line in lines
+        if re.match(
+            r"^([A-Za-z_][\w.]*(Error|Exception|Exit)\b|(error|fatal|panic|failed)\b)",
+            line,
+            re.I,
+        )
+    ]
     return ((errors or lines or [""])[-1])[:200]
 
 
@@ -42,10 +57,15 @@ class StartFailure:
 
 def exited(server: str, returncode: int, stderr: str) -> StartFailure:
     detail = safe_text(stderr).strip()
-    how = f"exited with code {returncode}" if returncode >= 0 else f"was ended by signal {-returncode}"
+    how = (
+        f"exited with code {returncode}"
+        if returncode >= 0
+        else f"was ended by signal {-returncode}"
+    )
     cause = cause_line(detail)
     return StartFailure(
-        f"{server} {how} before it answered" + (f": {cause.rstrip('.')}." if cause else ", and wrote no reason."),
+        f"{server} {how} before it answered"
+        + (f": {cause.rstrip('.')}." if cause else ", and wrote no reason."),
         detail,
     )
 
@@ -53,20 +73,39 @@ def exited(server: str, returncode: int, stderr: str) -> StartFailure:
 def closed(server: str, stderr: str) -> StartFailure:
     detail = safe_text(stderr).strip()
     cause = cause_line(detail)
-    return StartFailure(f"{server} closed its connection before it answered" + (f": {cause}." if cause else "."), detail)
+    return StartFailure(
+        f"{server} closed its connection before it answered"
+        + (f": {cause}." if cause else "."),
+        detail,
+    )
 
 
 def did_not_answer(server: str, waited: float, stderr: str = "") -> StartFailure:
-    return StartFailure(f"{server} did not answer within {waited:g} seconds, so Gideon stopped it.", safe_text(stderr).strip())
+    return StartFailure(
+        f"{server} did not answer within {waited:g} seconds, so Gideon stopped it.",
+        safe_text(stderr).strip(),
+    )
 
 
-def still_starting(server: str, waited: float, stderr: str = "", *, allowance: float, earlier: bool = False) -> StartFailure:
+def still_starting(
+    server: str,
+    waited: float,
+    stderr: str = "",
+    *,
+    allowance: float,
+    earlier: bool = False,
+) -> StartFailure:
     text = (
         f"{server} is still finishing an earlier start, so it was not started a second time."
-        if earlier else
-        f"{server} has not answered after {waited:g} seconds and is still starting. Gideon lets its first start finish for up to {allowance / 60:g} minutes."
+        if earlier
+        else f"{server} has not answered after {waited:g} seconds and is still starting. Gideon lets its first start finish for up to {allowance / 60:g} minutes."
     )
-    return StartFailure(text + " Gideon checks it again when that start ends.", safe_text(stderr).strip(), False, True)
+    return StartFailure(
+        text + " Gideon checks it again when that start ends.",
+        safe_text(stderr).strip(),
+        False,
+        True,
+    )
 
 
 def stopped_trying(server: str, last: str) -> str:

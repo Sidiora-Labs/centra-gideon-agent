@@ -64,7 +64,9 @@ _UNKNOWN_MATERIALITY_RANK = MATERIALITY_ORDER[MATERIALITY_RESPONSE]
 
 def materiality_rank(value: str) -> int:
     """Sort key for a materiality weight; unknown values sort with `response`."""
-    return MATERIALITY_ORDER.get((value or "").strip().lower(), _UNKNOWN_MATERIALITY_RANK)
+    return MATERIALITY_ORDER.get(
+        (value or "").strip().lower(), _UNKNOWN_MATERIALITY_RANK
+    )
 
 
 @dataclass(frozen=True)
@@ -97,7 +99,9 @@ class CollectedItem:
         decisions never hit and every window pays full price.
         """
         raw = f"{self.source}\x1f{self.source_id}"
-        return hashlib.md5(raw.encode("utf-8", "replace"), usedforsecurity=False).hexdigest()[:12]
+        return hashlib.md5(
+            raw.encode("utf-8", "replace"), usedforsecurity=False
+        ).hexdigest()[:12]
 
 
 @dataclass(frozen=True)
@@ -226,7 +230,9 @@ def build_manifest(
             continue
         seen.add(fp)
         kept.append(replace(item, ordinal=str(len(kept) + 1)))
-    return Manifest(items=tuple(kept), window_start=window_start, duplicates=tuple(dupes))
+    return Manifest(
+        items=tuple(kept), window_start=window_start, duplicates=tuple(dupes)
+    )
 
 
 def render_manifest_lines(manifest: Manifest) -> str:

@@ -35,14 +35,13 @@ engine's trust plumbing, so this module explains the trade and the engine makes 
 
 from __future__ import annotations
 
-from gideon.automation.workflows.confirmation import requires_hitl
-
 import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from gideon.automation.workflows.confirmation import requires_hitl
 from gideon.integrations.tool_providers.base import RiskLevel
 
 logger = logging.getLogger(__name__)

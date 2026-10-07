@@ -25,7 +25,9 @@ def _tail(word: Word, start: int) -> Word:
     """The part of *word* from index *start*, as a word of its own."""
     at = word.glob_at - start if word.glob_at >= start else -1
     if start and word.leading:
-        return Word(word.text[start:], at, True)  # the variable it began with is cut off
+        return Word(
+            word.text[start:], at, True
+        )  # the variable it began with is cut off
     return Word(word.text[start:], at, word.opaque, word.leading)
 
 
@@ -40,7 +42,8 @@ def _scan(
     stop_at_operand: bool = False,
 ) -> _Scan:
     """Read *args*: every ``-`` word before ``--`` is an option, wherever it is (or, with
-    *stop_at_operand*, until the first operand: a program another one starts begins there)."""
+    *stop_at_operand*, until the first operand: a program another one starts begins there).
+    """
     operands: list[Word] = []
     values: dict[str, list[Word]] = {}
     seen: set[str] = set()

@@ -25,8 +25,7 @@ class RecommendationRecords:
         self.lock_path = self.home / ".recommendation-decisions.lock"
         self.home.mkdir(parents=True, exist_ok=True)
         with self.transaction() as db:
-            db.execute(
-                """CREATE TABLE IF NOT EXISTS recommendation_decisions (
+            db.execute("""CREATE TABLE IF NOT EXISTS recommendation_decisions (
                     source_kind TEXT NOT NULL,
                     source_id TEXT NOT NULL,
                     source_list_id TEXT NOT NULL,
@@ -39,10 +38,8 @@ class RecommendationRecords:
                     request_id TEXT NOT NULL UNIQUE,
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY(source_kind, source_list_id, source_id)
-                )"""
-            )
-            db.execute(
-                """CREATE TABLE IF NOT EXISTS pending_recommendation_decisions (
+                )""")
+            db.execute("""CREATE TABLE IF NOT EXISTS pending_recommendation_decisions (
                     source_kind TEXT NOT NULL,
                     source_id TEXT NOT NULL,
                     source_list_id TEXT NOT NULL,
@@ -54,8 +51,7 @@ class RecommendationRecords:
                     request_id TEXT NOT NULL UNIQUE,
                     created_at TEXT NOT NULL,
                     PRIMARY KEY(source_kind, source_list_id, source_id)
-                )"""
-            )
+                )""")
         self._async_lock = asyncio.Lock()
 
     @asynccontextmanager
@@ -173,10 +169,20 @@ class RecommendationRecords:
         return cls.decode(row)
 
     @classmethod
-    def stage(cls, db, *, source_kind: str, source_id: str,
-              source_list_id: str, source_revision: str, source_title: str,
-              source_evidence: str, decision: str, edited_prompt: str,
-              request_id: str):
+    def stage(
+        cls,
+        db,
+        *,
+        source_kind: str,
+        source_id: str,
+        source_list_id: str,
+        source_revision: str,
+        source_title: str,
+        source_evidence: str,
+        decision: str,
+        edited_prompt: str,
+        request_id: str,
+    ):
         now = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         db.execute(
             """INSERT INTO pending_recommendation_decisions (
@@ -184,9 +190,18 @@ class RecommendationRecords:
                 source_title, source_evidence, decision, edited_prompt,
                 request_id, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (source_kind, source_id, source_list_id, source_revision,
-             source_title, json.dumps(source_evidence, ensure_ascii=False),
-             decision, edited_prompt, request_id, now),
+            (
+                source_kind,
+                source_id,
+                source_list_id,
+                source_revision,
+                source_title,
+                json.dumps(source_evidence, ensure_ascii=False),
+                decision,
+                edited_prompt,
+                request_id,
+                now,
+            ),
         )
         return cls.pending(db, source_kind, source_list_id, source_id)
 

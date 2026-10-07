@@ -65,23 +65,40 @@ class _WorkflowStart:
                 kind=models.OriginKind.HOOK, trigger_id=self.trigger_id
             ),
             parent_run_id=self.parent_run_id or None,
-            extra={**(engine.overlap.queued_extra() if queued else {}), **({"owner_workflow_versions": self.bounds} if self.bounds is not None else {})},
+            extra={
+                **(engine.overlap.queued_extra() if queued else {}),
+                **(
+                    {"owner_workflow_versions": self.bounds}
+                    if self.bounds is not None
+                    else {}
+                ),
+            },
         )
         from gideon.extensions.apps import app_work as app_scopes
+
         inherited = app_scopes.held()
-        parent = app_scopes.of_run_id(self.parent_run_id) if self.parent_run_id else None
+        parent = (
+            app_scopes.of_run_id(self.parent_run_id) if self.parent_run_id else None
+        )
         work = inherited or parent
         if inherited is not None and parent is not None:
-            work = inherited.child(parent.tier) if inherited.app == parent.app else inherited.child("")
+            work = (
+                inherited.child(parent.tier)
+                if inherited.app == parent.app
+                else inherited.child("")
+            )
         fields["extra"] = app_scopes.stamp(fields["extra"], work)
         refusal = app_scopes.run_refusal(work)
         if refusal:
             raise ValueError(refusal)
         run = engine.store.create(models.WorkflowRun(**fields))
         from gideon.security.durable_work import bind_run_origin
+
         if self.accepted_origin is not None:
             if not bind_run_origin(run, self.accepted_origin):
-                raise ValueError("authenticated work origin does not match the workflow's app or privacy scope")
+                raise ValueError(
+                    "authenticated work origin does not match the workflow's app or privacy scope"
+                )
             engine.store.save(run)
         engine.store.write_spec(run.id, spec)
         if self.caller_key:
@@ -162,7 +179,9 @@ class _OverlapPlan:
                 started=False,
                 behind=[previous.id for previous in self.active],
             )
-            return _with_completion(clock.result(True, outcome="queued", stdout=json.dumps(body)), run.id)
+            return _with_completion(
+                clock.result(True, outcome="queued", stdout=json.dumps(body)), run.id
+            )
         if self.action == Act.CANCEL_THEN_START:
             for previous in self.active:
                 self.engine.store.request_cancel(previous.id)
@@ -233,7 +252,9 @@ class RunWorkflowActionProvider(ActionProvider):
                 error=f"workflow engine unavailable: {error}",
                 stderr="could not import the v2 workflow engine",
             )
-        request = _WorkflowStart(name, config, str(getattr(ctx, "trigger_id", "") or ""))
+        request = _WorkflowStart(
+            name, config, str(getattr(ctx, "trigger_id", "") or "")
+        )
         if request.caller_key:
             previous = engine.dedupe.lookup(request.caller_key)
             if previous:
@@ -252,15 +273,22 @@ class RunWorkflowActionProvider(ActionProvider):
             )
         spec = _spec_of(definition)
         from gideon.automation.workflows import automation_versions as consent
+
         bounds = None
-        parent_run_id = str((getattr(ctx, "payload", {}) or {}).get("run_id") or "") if getattr(ctx, "event", "") == "workflow_node" else ""
+        parent_run_id = (
+            str((getattr(ctx, "payload", {}) or {}).get("run_id") or "")
+            if getattr(ctx, "event", "") == "workflow_node"
+            else ""
+        )
         try:
             if parent_run_id:
                 bounds = consent.run_bounds(parent_run_id)
             elif request.trigger_id:
                 bounds = consent.trigger_bounds(request.trigger_id, name)
             else:
-                raise consent.VersionConsentError("no owner-granted trigger or ancestor workflow")
+                raise consent.VersionConsentError(
+                    "no owner-granted trigger or ancestor workflow"
+                )
             if bounds is not None:
                 spec, bounds = consent.selection(name, bounds)
                 definition = spec
@@ -364,7 +392,11 @@ def _with_completion(result: ActionResult, run_id: str) -> ActionResult:
     services = get_action_services()
     supervisor = getattr(services, "workflows", None) if services else None
     if supervisor is None:
-        return ActionResult(False, error="workflow supervisor unavailable to observe completion", work_id=run_id)
+        return ActionResult(
+            False,
+            error="workflow supervisor unavailable to observe completion",
+            work_id=run_id,
+        )
     result.work_id = run_id
     result.completion = lambda: workflow_result(supervisor, run_id)
     return result

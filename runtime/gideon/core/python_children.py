@@ -1,4 +1,5 @@
 """Refuse Python interpreter children when the desktop executable is frozen."""
+
 import sys
 
 INSTALL_COMMAND = "uv tool install --python 3.13 gideon-agent-harness"
@@ -21,7 +22,6 @@ def require(cannot: str) -> None:
         raise NeedsInterpreter(refusal(cannot))
 
 
-
 def app_refusal(manifest) -> str:
     """Reject only app capabilities that need an unsupported interpreter child."""
     if available():
@@ -34,7 +34,10 @@ def app_refusal(manifest) -> str:
     requirements = manifest.dependencies.pythonDependencies
     if requirements:
         from gideon.extensions.apps.app_python import unmet
+
         missing = unmet(requirements)
         if missing:
-            needs.append("install this app's Python packages (" + ", ".join(missing) + ")")
+            needs.append(
+                "install this app's Python packages (" + ", ".join(missing) + ")"
+            )
     return refusal(" and ".join(needs)) if needs else ""

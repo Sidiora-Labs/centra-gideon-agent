@@ -56,7 +56,8 @@ def run_command(image: str = "gideon:local", *, volumes_from: str = "") -> str:
     environment = (
         "--env-file <(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "
         f"{shlex.quote(volumes_from)}) -e GIDEON_CONTAINER_IMAGE={shlex.quote(image)} "
-        if volumes_from else ""
+        if volumes_from
+        else ""
     )
     return (
         f"docker run -d --name {shlex.quote(_name())} --restart unless-stopped "

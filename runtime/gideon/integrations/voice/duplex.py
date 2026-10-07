@@ -2,9 +2,9 @@
 
 import json
 import re
-from pathlib import Path
 from collections import deque
 from collections.abc import Iterator
+from pathlib import Path
 
 TAIL_WINDOW_WORDS = 6
 
@@ -26,7 +26,9 @@ def _shipped_phrases(table: object, key: str) -> tuple[str, ...]:
 
 
 _SHIPPED_TABLE = json.loads(_PHRASE_TABLE.read_text(encoding="utf-8"))
-DEFAULT_CONFIRMATION_PHRASES: tuple[str, ...] = _shipped_phrases(_SHIPPED_TABLE, "confirmation")
+DEFAULT_CONFIRMATION_PHRASES: tuple[str, ...] = _shipped_phrases(
+    _SHIPPED_TABLE, "confirmation"
+)
 DEFAULT_EXIT_PHRASES: tuple[str, ...] = _shipped_phrases(_SHIPPED_TABLE, "exit")
 
 
@@ -62,7 +64,9 @@ _CODE_BLOCK_SPOKEN = " code block. "
 def _words(text: str) -> list[str]:
     """Word tokens, lowercased with apostrophes removed; punctuation and markup discarded."""
 
-    folded = (_APOSTROPHE_RE.sub("", m.group(0)).lower() for m in _WORD_RE.finditer(text))
+    folded = (
+        _APOSTROPHE_RE.sub("", m.group(0)).lower() for m in _WORD_RE.finditer(text)
+    )
     return [w for w in folded if w]
 
 
@@ -112,7 +116,9 @@ def _spells_phrase_in_tail(
     return False
 
 
-def _phrase_in_tail(text: str, phrases: object, tail_words: int, *, split_words: bool) -> bool:
+def _phrase_in_tail(
+    text: str, phrases: object, tail_words: int, *, split_words: bool
+) -> bool:
     """True when any phrase is spelled by a run of words inside the trailing window."""
 
     if not isinstance(phrases, (list, tuple, set, frozenset)):
@@ -122,7 +128,9 @@ def _phrase_in_tail(text: str, phrases: object, tail_words: int, *, split_words:
         return False
     return any(
         isinstance(phrase, str)
-        and _spells_phrase_in_tail(tokens, _words(phrase), tail_words, split_words=split_words)
+        and _spells_phrase_in_tail(
+            tokens, _words(phrase), tail_words, split_words=split_words
+        )
         for phrase in phrases
     )
 

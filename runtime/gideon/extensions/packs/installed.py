@@ -17,16 +17,16 @@ only after a commit fully succeeds, so it never describes a rolled-back pack.
 
 from __future__ import annotations
 
-import json
-import logging
 import errno
 import fcntl
+import json
+import logging
 import os
 import stat
 import threading
 import time
-from dataclasses import asdict, dataclass, field
 from contextlib import contextmanager
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -57,7 +57,8 @@ class InstalledPackLedgerError(OSError):
 @contextmanager
 def _ledger_lock(path: Path) -> Iterator[None]:
     lock_path = path.with_name(f"{path.name}.lock")
-    from gideon.operations.durability.home_paths import guard_path, LinkInTheWay
+    from gideon.operations.durability.home_paths import LinkInTheWay, guard_path
+
     try:
         guard_path(path)
         guard_path(lock_path)
@@ -73,14 +74,22 @@ def _ledger_lock(path: Path) -> Iterator[None]:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(
             lock_path,
-            os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+            os.O_RDWR
+            | os.O_CREAT
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
             0o600,
         )
         opened = os.fstat(fd)
         current = lock_path.lstat()
-        if (not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1
-                or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)):
-            raise InstalledPackLedgerError("installed-pack ledger lock is linked or changed")
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise InstalledPackLedgerError(
+                "installed-pack ledger lock is linked or changed"
+            )
         os.fchmod(fd, 0o600)
         deadline = time.monotonic() + _LEDGER_LOCK_TIMEOUT
         while True:
@@ -89,9 +98,13 @@ def _ledger_lock(path: Path) -> Iterator[None]:
                 break
             except OSError as exc:
                 if exc.errno not in (errno.EAGAIN, errno.EACCES):
-                    raise InstalledPackLedgerError("could not lock installed-pack ledger") from exc
+                    raise InstalledPackLedgerError(
+                        "could not lock installed-pack ledger"
+                    ) from exc
                 if time.monotonic() >= deadline:
-                    raise InstalledPackLedgerError("installed-pack ledger lock timed out") from exc
+                    raise InstalledPackLedgerError(
+                        "installed-pack ledger lock timed out"
+                    ) from exc
                 time.sleep(0.02)
         yield
     finally:
@@ -104,7 +117,8 @@ def _ledger_lock(path: Path) -> Iterator[None]:
 
 
 def _read_ledger(path: Path) -> dict[str, Any]:
-    from gideon.operations.durability.home_paths import guard_path, LinkInTheWay
+    from gideon.operations.durability.home_paths import LinkInTheWay, guard_path
+
     try:
         guard_path(path, read=True)
     except (LinkInTheWay, ValueError) as error:
@@ -114,7 +128,9 @@ def _read_ledger(path: Path) -> dict[str, Any]:
     try:
         mode = path.lstat().st_mode
         if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
-            raise InstalledPackLedgerError("installed-pack ledger is not a regular file")
+            raise InstalledPackLedgerError(
+                "installed-pack ledger is not a regular file"
+            )
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         if isinstance(exc, InstalledPackLedgerError):
@@ -144,7 +160,9 @@ def installed_ledger(home: Path | None = None) -> Iterator[dict[str, Any]]:
             raise
         else:
             if current != original:
-                atomic_write(path, json.dumps(current, indent=2, ensure_ascii=False) + "\n")
+                atomic_write(
+                    path, json.dumps(current, indent=2, ensure_ascii=False) + "\n"
+                )
 
 
 @dataclass

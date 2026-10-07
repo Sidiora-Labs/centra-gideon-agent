@@ -16,7 +16,10 @@ import httpx
 
 from gideon.core.atomic_write import atomic_write
 from gideon.extensions.providers.settings import ProviderSettings
-from gideon.integrations.channel_transports.base import ChannelCapabilities, OutboundMessage
+from gideon.integrations.channel_transports.base import (
+    ChannelCapabilities,
+    OutboundMessage,
+)
 from gideon.integrations.messaging_channels.base import MessagingTransport
 
 
@@ -71,12 +74,15 @@ class WeixinTransport(MessagingTransport):
                     "base_url": self.base_url,
                 },
                 ensure_ascii=False,
-            ) + "\n",
+            )
+            + "\n",
         )
         path.chmod(0o600)
 
     def _headers(self, authenticated: bool = True) -> dict[str, str]:
-        uin = base64.b64encode(str(int.from_bytes(os.urandom(4), "big")).encode()).decode()
+        uin = base64.b64encode(
+            str(int.from_bytes(os.urandom(4), "big")).encode()
+        ).decode()
         headers = {
             "X-WECHAT-UIN": uin,
             "Content-Type": "application/json",
@@ -100,11 +106,15 @@ class WeixinTransport(MessagingTransport):
         expected = configured.hostname or ""
         if parsed.scheme != "https" or not host:
             return ""
-        if host == expected or (expected == "ilinkai.weixin.qq.com" and host.endswith(".weixin.qq.com")):
+        if host == expected or (
+            expected == "ilinkai.weixin.qq.com" and host.endswith(".weixin.qq.com")
+        ):
             return candidate
         return ""
 
-    async def _get(self, endpoint: str, params: dict[str, Any], *, base: str = "") -> dict[str, Any]:
+    async def _get(
+        self, endpoint: str, params: dict[str, Any], *, base: str = ""
+    ) -> dict[str, Any]:
         if self.http is None:
             raise ConnectionError("WeChat client is closed")
         response = await self.http.get(
@@ -132,8 +142,12 @@ class WeixinTransport(MessagingTransport):
     async def _open(self) -> None:
         self.base_url = self._trusted_base(str(self.config["base_url"]))
         if not self.base_url:
-            raise ValueError("WeChat base URL must be an allowed HTTPS operator endpoint")
-        self.http = httpx.AsyncClient(timeout=httpx.Timeout(50, connect=15), follow_redirects=False)
+            raise ValueError(
+                "WeChat base URL must be an allowed HTTPS operator endpoint"
+            )
+        self.http = httpx.AsyncClient(
+            timeout=httpx.Timeout(50, connect=15), follow_redirects=False
+        )
         try:
             stored = json.loads(self._state_path().read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -141,11 +155,15 @@ class WeixinTransport(MessagingTransport):
         self.token = str(self.config.get("token") or stored.get("token") or "")
         self.cursor = str(stored.get("cursor") or "")
         contexts = stored.get("context_tokens") or {}
-        self.context_tokens = {
-            str(key): str(value)
-            for key, value in contexts.items()
-            if isinstance(contexts, dict) and key and value
-        } if isinstance(contexts, dict) else {}
+        self.context_tokens = (
+            {
+                str(key): str(value)
+                for key, value in contexts.items()
+                if isinstance(contexts, dict) and key and value
+            }
+            if isinstance(contexts, dict)
+            else {}
+        )
         if stored.get("base_url"):
             self.base_url = self._trusted_base(str(stored["base_url"])) or self.base_url
         self._connected = bool(self.token)
@@ -168,16 +186,24 @@ class WeixinTransport(MessagingTransport):
                 if status == "confirmed":
                     token = str(state.get("bot_token") or "")
                     if not token:
-                        raise PermissionError("WeChat pairing confirmed without a token")
+                        raise PermissionError(
+                            "WeChat pairing confirmed without a token"
+                        )
                     self.token = token
-                    self.base_url = self._trusted_base(str(state.get("baseurl") or "")) or self.base_url
+                    self.base_url = (
+                        self._trusted_base(str(state.get("baseurl") or ""))
+                        or self.base_url
+                    )
                     self.pairing_qr = ""
                     self._connected = True
                     self._detail = "Connected"
                     await asyncio.to_thread(self._save)
                     return
                 if status == "scaned_but_redirect":
-                    poll_base = self._trusted_base(str(state.get("redirect_host") or "")) or poll_base
+                    poll_base = (
+                        self._trusted_base(str(state.get("redirect_host") or ""))
+                        or poll_base
+                    )
                 if status == "expired":
                     self.pairing_qr = ""
                     break
@@ -188,7 +214,9 @@ class WeixinTransport(MessagingTransport):
             try:
                 if not self.token:
                     await self._pair()
-                data = await self._post("ilink/bot/getupdates", {"get_updates_buf": self.cursor})
+                data = await self._post(
+                    "ilink/bot/getupdates", {"get_updates_buf": self.cursor}
+                )
                 code = data.get("errcode") or data.get("ret") or 0
                 if code == -14:
                     self.token = ""
@@ -234,7 +262,9 @@ class WeixinTransport(MessagingTransport):
             if kind == 1:
                 parts.append(str((item.get("text_item") or {}).get("text") or ""))
             elif kind == 3:
-                parts.append(str((item.get("voice_item") or {}).get("text") or "[voice]"))
+                parts.append(
+                    str((item.get("voice_item") or {}).get("text") or "[voice]")
+                )
             elif kind in (2, 4, 5):
                 parts.append({2: "[image]", 4: "[file]", 5: "[video]"}[kind])
         text = "\n".join(part for part in parts if part).strip()
@@ -253,7 +283,9 @@ class WeixinTransport(MessagingTransport):
             raise ConnectionError("WeChat is not paired")
         context = self.context_tokens.get(message.channel_id)
         if not context:
-            raise LookupError("WeChat requires an inbound context token before replying")
+            raise LookupError(
+                "WeChat requires an inbound context token before replying"
+            )
         for offset in range(0, len(message.text), 4000):
             body = {
                 "from_user_id": "",
@@ -263,7 +295,10 @@ class WeixinTransport(MessagingTransport):
                 "message_state": 2,
                 "context_token": context,
                 "item_list": [
-                    {"type": 1, "text_item": {"text": message.text[offset : offset + 4000]}}
+                    {
+                        "type": 1,
+                        "text_item": {"text": message.text[offset : offset + 4000]},
+                    }
                 ],
             }
             result = await self._post("ilink/bot/sendmessage", {"msg": body})

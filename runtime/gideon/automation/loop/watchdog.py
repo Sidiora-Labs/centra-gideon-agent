@@ -254,6 +254,7 @@ class LoopWatchdog:
             self._consec_errors[loop_id] = 0
             return
         from gideon.security.guardrails.incident import incident_active
+
         if incident_active():
             return
         n = self._consec_errors.get(loop_id, 0) + 1
@@ -1007,18 +1008,30 @@ class LoopWatchdog:
 
         self._held &= live_ids
         from gideon.security.guardrails.incident import incident_active
+
         incident = incident_active()
 
         for loop in running:
             cid = loop.id
             session = self._state._sessions.get(manager.session_key(cid))
 
-            if not loop.attended and loop.started_at and time.time() - loop.started_at > cfg.trust_ttl_secs:
+            if (
+                not loop.attended
+                and loop.started_at
+                and time.time() - loop.started_at > cfg.trust_ttl_secs
+            ):
                 from gideon.interfaces.dashboard.chat_utils import _history_key_for
+
                 for key, worker in self._state._sessions.items():
-                    if key == manager.session_key(cid) or key.startswith(manager.session_key(cid) + "-") or key == f"loop-plan-{cid}":
+                    if (
+                        key == manager.session_key(cid)
+                        or key.startswith(manager.session_key(cid) + "-")
+                        or key == f"loop-plan-{cid}"
+                    ):
                         worker._trust = False
-                        self._state.sessions.set_approval_policy(_history_key_for(key), "")
+                        self._state.sessions.set_approval_policy(
+                            _history_key_for(key), ""
+                        )
                 loop_files.write_question(
                     cid,
                     "Auto-approval expired after the trust window. "

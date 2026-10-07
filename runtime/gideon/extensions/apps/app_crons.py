@@ -40,7 +40,9 @@ _JOB_POSTURE = ("approval_mode", "capability")
 
 def app_of(trigger_id: str) -> str:
     pieces = trigger_id.split(":")
-    return pieces[1] if len(pieces) == 3 and pieces[0] == "app" and all(pieces[1:]) else ""
+    return (
+        pieces[1] if len(pieces) == 3 and pieces[0] == "app" and all(pieces[1:]) else ""
+    )
 
 
 def posture_refusal(trigger_id: str, workflow: object) -> str:
@@ -48,10 +50,11 @@ def posture_refusal(trigger_id: str, workflow: object) -> str:
         return ""
     action = workflow.get("inline", workflow)
     config = action.get("config") if isinstance(action, dict) else None
-    if isinstance(config, dict) and any(str(config.get(key) or "").strip() for key in _JOB_POSTURE):
+    if isinstance(config, dict) and any(
+        str(config.get(key) or "").strip() for key in _JOB_POSTURE
+    ):
         return "An app's scheduled agent runs at its current declared tier; its job cannot set approval_mode or capability."
     return ""
-
 
 
 def _desired_app_crons() -> dict[str, dict]:
@@ -155,7 +158,11 @@ def reconcile_app_crons(store: Any) -> None:
             if cur.name == cur.id:
                 cur.name = params["name"]
                 changed = True
-            action = cur.workflow.get("inline", cur.workflow) if isinstance(cur.workflow, dict) else {}
+            action = (
+                cur.workflow.get("inline", cur.workflow)
+                if isinstance(cur.workflow, dict)
+                else {}
+            )
             config = action.get("config") if isinstance(action, dict) else None
             if isinstance(config, dict):
                 for key in _JOB_POSTURE:

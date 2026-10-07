@@ -11,8 +11,8 @@ from typing import Any
 
 from gideon.integrations.inbox import (
     Classification,
-    InboxState,
     InboxItem,
+    InboxState,
     InboxStore,
     ItemKind,
     ItemStatus,
@@ -100,7 +100,11 @@ def hold_from_someone_new(
     store = _store_from_state(state)
     inbox_state = _state_from_state(state)
     mute_key = thread_mute_key(source, channel_id, thread_id or message_id or item_id)
-    if item_id in store.items or item_id in inbox_state.dismissed or mute_key in inbox_state.muted_threads:
+    if (
+        item_id in store.items
+        or item_id in inbox_state.dismissed
+        or mute_key in inbox_state.muted_threads
+    ):
         return None
 
     from gideon.security.security import redact_credentials, redact_exfiltration_urls
@@ -220,8 +224,13 @@ async def open_inbox_items(reader, *, kind=""):
     if state is None or not reader.admitted:
         return None
     from gideon.integrations.inbox import owner_username
+
     store = _store_from_state(state)
     store.flush()
     store.load()
-    items = [item for item in store.open_items(owner_username()) if reader.reads(item) and (not kind or item.item_kind == kind)]
+    items = [
+        item
+        for item in store.open_items(owner_username())
+        if reader.reads(item) and (not kind or item.item_kind == kind)
+    ]
     return sorted(items, key=lambda item: item.created_at, reverse=True)

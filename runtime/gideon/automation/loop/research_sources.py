@@ -28,9 +28,17 @@ def _read(loop_id: str) -> list[dict[str, str]]:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
-    return [entry for entry in value if isinstance(entry, dict)
+    return (
+        [
+            entry
+            for entry in value
+            if isinstance(entry, dict)
             and isinstance(entry.get("url"), str)
-            and isinstance(entry.get("domain"), str)] if isinstance(value, list) else []
+            and isinstance(entry.get("domain"), str)
+        ]
+        if isinstance(value, list)
+        else []
+    )
 
 
 def record(session_key: str, url: str, readable_chars: int) -> None:
@@ -76,6 +84,8 @@ def unmet_reason(loop_id: str, kind_config: dict | None) -> str | None:
     have = coverage(loop_id)
     if have["pages"] >= min_pages and have["domains"] >= min_domains:
         return None
-    return ("Research readable-source coverage unmet: "
-            f"{have['pages']}/{min_pages} distinct pages and "
-            f"{have['domains']}/{min_domains} sites.")
+    return (
+        "Research readable-source coverage unmet: "
+        f"{have['pages']}/{min_pages} distinct pages and "
+        f"{have['domains']}/{min_domains} sites."
+    )

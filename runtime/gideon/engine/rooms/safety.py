@@ -173,7 +173,14 @@ class RoomApprover:
         self.state = state
 
     async def approve(self, key: str, event, profile: SafetyProfile) -> bool:
-        if tool_grant_denial(event.title, profile.tool_grants, profile.tool_allowlist, declared=getattr(event, "risk_level", ""), tool_kind=event.tool_kind, tool_input=event.tool_input):
+        if tool_grant_denial(
+            event.title,
+            profile.tool_grants,
+            profile.tool_allowlist,
+            declared=getattr(event, "risk_level", ""),
+            tool_kind=event.tool_kind,
+            tool_input=event.tool_input,
+        ):
             return False
         return await self.state.request_approval(
             f"room-{uuid4().hex}",
@@ -181,7 +188,8 @@ class RoomApprover:
             event.title,
             tool_input=json.dumps(event.tool_input),
             tool_purpose=event.tool_purpose,
-            risk_level=getattr(event, "risk_level", ""), tool_kind=event.tool_kind,
+            risk_level=getattr(event, "risk_level", ""),
+            tool_kind=event.tool_kind,
             tool_annotations=getattr(event, "tool_annotations", {}),
             session=key,
         )

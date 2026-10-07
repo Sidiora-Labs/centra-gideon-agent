@@ -14,12 +14,12 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from gideon.core.atomic_write import atomic_write
 from gideon.cognition.knowledge.embed_batch import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_RETRY_BUDGET,
     embed_texts,
 )
+from gideon.core.atomic_write import atomic_write
 
 logger = logging.getLogger(__name__)
 TOOL_VECTORS_FILE = "tool_embeddings.json"
@@ -127,7 +127,9 @@ class ToolVectors:
                 if (vector := _unpack(blob)) is not None
             }
 
-    def vectors(self, path: Path, model: str, texts: Iterable[str]) -> dict[str, list[float]]:
+    def vectors(
+        self, path: Path, model: str, texts: Iterable[str]
+    ) -> dict[str, list[float]]:
         with self._lock:
             self._load(path)
             return {
@@ -222,7 +224,9 @@ class ToolVectors:
                     ),
                 )
             except OSError:
-                logger.warning("tool vectors could not save %s", job.path, exc_info=True)
+                logger.warning(
+                    "tool vectors could not save %s", job.path, exc_info=True
+                )
 
 
 _INDEX = ToolVectors()

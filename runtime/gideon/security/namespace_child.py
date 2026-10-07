@@ -1,7 +1,8 @@
 """Run the package's fixed namespace launcher through the frozen child interface."""
+
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 
 def main():
@@ -10,7 +11,11 @@ def main():
     if len(arguments) > 3 and arguments[3] == "--no-network":
         network = False
         arguments = [*arguments[:3], *arguments[4:]]
-    if len(arguments) < 5 or arguments[0] not in {"owner", "standard", "cc", "strict"} or arguments[3] != "--":
+    if (
+        len(arguments) < 5
+        or arguments[0] not in {"owner", "standard", "cc", "strict"}
+        or arguments[3] != "--"
+    ):
         raise SystemExit("Invalid namespace child arguments")
     level, account_home, gideon_home = arguments[:3]
     if not Path(account_home).is_absolute() or not Path(gideon_home).is_absolute():

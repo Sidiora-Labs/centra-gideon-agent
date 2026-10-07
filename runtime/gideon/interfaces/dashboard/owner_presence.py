@@ -65,11 +65,16 @@ def require_owner_presence(
     security log, the refusals included.
     """
     from gideon.security.approval_answer import OWNER, UNKNOWN, of_request
+
     principal = of_request(request)
     if request.get("_session_work_proof") or principal.kind not in {OWNER, UNKNOWN}:
         _audit(request, action, "denied", error="not an owner principal")
         return json_error("owner_required", status=403)
-    if principal.kind != OWNER and not _auth_is_off(request) and not _local_secret_presented(request):
+    if (
+        principal.kind != OWNER
+        and not _auth_is_off(request)
+        and not _local_secret_presented(request)
+    ):
         return json_error("owner_required", status=403)
     if identity is not None:
         return _check_identity(request, action, identity)
@@ -83,6 +88,7 @@ def require_owner_presence(
 def presence_proof(request: web.Request) -> str:
     """How *request* shows the owner is here now (a ``PROOF_*``), or ``""`` when it does not."""
     from gideon.security.approval_answer import OWNER, UNKNOWN, of_request
+
     principal = of_request(request)
     if request.get("_session_work_proof") or principal.kind not in {OWNER, UNKNOWN}:
         return ""
@@ -101,7 +107,9 @@ def presence_proof(request: web.Request) -> str:
 
     if record.issuer == "ready" and is_loopback(request.remote or ""):
         return PROOF_STARTED_BY
-    signed_in = float(record.minted_at or (record.device.minted_at if record.device else 0.0))
+    signed_in = float(
+        record.minted_at or (record.device.minted_at if record.device else 0.0)
+    )
     if signed_in and 0 <= time.time() - signed_in <= PRESENCE_WINDOW_SECS:
         return PROOF_RECENT_SIGN_IN
     return ""
@@ -111,7 +119,9 @@ def presence_proof(request: web.Request) -> str:
 SIGN_IN_SECTION = "auth"
 
 
-def loosens_sign_in(path_key: str, spec: Mapping[str, Any], *, current: Any, new: Any) -> bool:
+def loosens_sign_in(
+    path_key: str, spec: Mapping[str, Any], *, current: Any, new: Any
+) -> bool:
     """Whether writing *new* over *current* at *path_key* makes signing in less strict.
 
     A field of the sign-in section whose security control the write loosens: password sign-in
@@ -161,7 +171,11 @@ def _sign_in_again(request: web.Request, action: str) -> web.Response:
     from gideon.interfaces.dashboard.token_auth import _login_offered
 
     record = _session_record(request)
-    signed_in = float(record.minted_at or (record.device.minted_at if record.device else 0.0)) if record is not None else 0.0
+    signed_in = (
+        float(record.minted_at or (record.device.minted_at if record.device else 0.0))
+        if record is not None
+        else 0.0
+    )
     password = _login_offered()
     _audit(
         request,
@@ -185,7 +199,9 @@ def _sign_in_again(request: web.Request, action: str) -> web.Response:
     return response
 
 
-def _check_identity(request: web.Request, action: str, identity: Identity) -> web.Response | None:
+def _check_identity(
+    request: web.Request, action: str, identity: Identity
+) -> web.Response | None:
     """The owner's password, and their code when one is set up, checked now.
 
     The lockout is the sign-in page's own (per address, in memory), so guessing through a session
@@ -194,18 +210,22 @@ def _check_identity(request: web.Request, action: str, identity: Identity) -> we
     the password and is not counted as a guess; both are then checked together, and a wrong one
     is refused with one sentence that does not say which.
     """
-    from gideon.security.auth import credentials as creds
     from gideon.interfaces.dashboard.handlers import auth as auth_h
+    from gideon.security.auth import credentials as creds
 
     ip = auth_h._client_ip(request)
     remaining = auth_h._lockout_remaining(ip, auth_h._auth_cfg())
     if remaining:
         _audit(request, action, "denied", error=f"locked out, retry_after={remaining}s")
-        return json_error("auth_locked_out", status=429, headers={"Retry-After": str(remaining)})
+        return json_error(
+            "auth_locked_out", status=429, headers={"Retry-After": str(remaining)}
+        )
     if not identity.password:
         _audit(request, action, "denied", error="no password")
         return json_error(
-            "auth_password_required", message=f"{action} needs your current password.", status=400
+            "auth_password_required",
+            message=f"{action} needs your current password.",
+            status=400,
         )
     second = second_factor_enrolled()
     if second and not identity.code.strip():
@@ -215,15 +235,21 @@ def _check_identity(request: web.Request, action: str, identity: Identity) -> we
             message="Enter the code from your authenticator app too.",
             status=401,
         )
-    password_ok = creds.verify_password(str(creds.status()["username"]), identity.password)
+    password_ok = creds.verify_password(
+        str(creds.status()["username"]), identity.password
+    )
     code_ok = _code_verifies(identity.code) if second else True
     if not (password_ok and code_ok):
         auth_h._record_failure(ip)
-        _audit(request, action, "denied", error="the password or the code did not verify")
+        _audit(
+            request, action, "denied", error="the password or the code did not verify"
+        )
         return json_error(
             "auth_invalid_credentials",
             message=(
-                "That password or code isn’t right." if second else "That password isn’t right."
+                "That password or code isn’t right."
+                if second
+                else "That password isn’t right."
             ),
             status=401,
         )
@@ -278,8 +304,12 @@ def _session_record(request: web.Request) -> Any:
 
     try:
         return load_session_records().get(nonce)
-    except Exception:  # noqa: BLE001 — an unreadable store proves nothing: refuse, and say so
-        logger.warning("could not read the session store to check a sign-in", exc_info=True)
+    except (
+        Exception
+    ):  # noqa: BLE001 — an unreadable store proves nothing: refuse, and say so
+        logger.warning(
+            "could not read the session store to check a sign-in", exc_info=True
+        )
         return None
 
 
@@ -299,5 +329,9 @@ def _audit(
             error=error,
             **({"metadata": {"proof": proof}} if proof else {}),
         )
-    except Exception:  # noqa: BLE001 — the check stands; say the row could not be written
-        logger.warning("could not write the owner-presence row to the security log", exc_info=True)
+    except (
+        Exception
+    ):  # noqa: BLE001 — the check stands; say the row could not be written
+        logger.warning(
+            "could not write the owner-presence row to the security log", exc_info=True
+        )

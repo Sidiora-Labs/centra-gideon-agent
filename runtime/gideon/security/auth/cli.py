@@ -18,12 +18,12 @@ import getpass
 import os
 import sys
 
+from gideon.interfaces.dashboard.token_auth import parse_config_duration
 from gideon.security.auth import credentials as creds
 from gideon.security.auth.lifetimes import (
     DEFAULT_BROWSER_SESSION_TTL_SECS,
     MAX_SESSION_TTL_SECS,
 )
-from gideon.interfaces.dashboard.token_auth import parse_config_duration
 
 
 def _print_status() -> int:
@@ -218,7 +218,12 @@ def _revoke_cmd(args) -> int:
         )
         return 2
 
-    from gideon.engine.home_gateway import require_home_gateway, NoGatewayRunning, HomeGatewayMismatch
+    from gideon.engine.home_gateway import (
+        HomeGatewayMismatch,
+        NoGatewayRunning,
+        require_home_gateway,
+    )
+
     try:
         port = require_home_gateway(getattr(args, "port", None) or None)
     except NoGatewayRunning:
@@ -251,9 +256,10 @@ def _revoke_via_gateway(port: int) -> bool:
     import json as _json
     import urllib.error
     import urllib.request
-    from gideon.engine.home_gateway import require_home_gateway, open_loopback
 
     from gideon.core.config.loader import config_dir
+    from gideon.engine.home_gateway import open_loopback, require_home_gateway
+
     require_home_gateway(port)
 
     try:
@@ -270,9 +276,7 @@ def _revoke_via_gateway(port: int) -> bool:
         data=b"{}",
     )
     try:
-        with open_loopback(
-            req, timeout=5
-        ) as resp:  # nosec B310 - fixed loopback URL
+        with open_loopback(req, timeout=5) as resp:  # nosec B310 - fixed loopback URL
             return bool(_json.loads(resp.read()).get("ok"))
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError):
         return False

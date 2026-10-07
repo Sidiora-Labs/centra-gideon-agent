@@ -72,7 +72,12 @@ INTENT_MESSAGE_CONTENT = 1 << 15
 #: The exact bitfield we IDENTIFY with (37377 = 1 + 512 + 4096 + 32768). Pinned by a
 #: test, including a dedicated guard on the DIRECT_MESSAGES bit — dropping it yields
 #: 33281, a bot that silently never receives a DM and so can never be paired.
-INTENTS = INTENT_GUILDS | INTENT_GUILD_MESSAGES | INTENT_DIRECT_MESSAGES | INTENT_MESSAGE_CONTENT
+INTENTS = (
+    INTENT_GUILDS
+    | INTENT_GUILD_MESSAGES
+    | INTENT_DIRECT_MESSAGES
+    | INTENT_MESSAGE_CONTENT
+)
 
 # Discord's documented wait before re-IDENTIFYing after INVALID_SESSION (1-5s).
 # Fixed rather than random so a test can assert it; the jitter Discord asks for is
@@ -144,7 +149,9 @@ class DiscordDeskGateway:
                 raise
             except Exception as exc:
                 logger.warning(
-                    "discord gateway: connection error (%s) — reconnecting in %ss", exc, backoff
+                    "discord gateway: connection error (%s) — reconnecting in %ss",
+                    exc,
+                    backoff,
                 )
                 await self._sleep(backoff)
                 backoff = min(backoff * 2, MAX_RECONNECT_BACKOFF)
@@ -165,7 +172,9 @@ class DiscordDeskGateway:
             hello = await self._recv()
             if hello is None or hello.get("op") != OP_HELLO:
                 raise RuntimeError(f"expected HELLO (op {OP_HELLO}), got {hello}")
-            self.heartbeat_interval = float(hello.get("d", {}).get("heartbeat_interval", 41250)) / 1000.0
+            self.heartbeat_interval = (
+                float(hello.get("d", {}).get("heartbeat_interval", 41250)) / 1000.0
+            )
             self._heartbeat_task = asyncio.ensure_future(self._heartbeat_loop())
 
             if self.session_id:
@@ -219,27 +228,35 @@ class DiscordDeskGateway:
         await self._ws.send(json.dumps(payload))
 
     async def _send_identify(self) -> None:
-        await self._send({
-            "op": OP_IDENTIFY,
-            "d": {
-                "token": self._token,
-                "intents": INTENTS,
-                "properties": {"os": "linux", "browser": "gideon", "device": "gideon"},
-            },
-        })
+        await self._send(
+            {
+                "op": OP_IDENTIFY,
+                "d": {
+                    "token": self._token,
+                    "intents": INTENTS,
+                    "properties": {
+                        "os": "linux",
+                        "browser": "gideon",
+                        "device": "gideon",
+                    },
+                },
+            }
+        )
         logger.info("discord gateway: IDENTIFY sent (intents=%d)", INTENTS)
 
     async def _send_resume(self) -> None:
-        await self._send({
-            "op": OP_RESUME,
-            "d": {
-                "token": self._token,
-                "session_id": self.session_id,
-                # `seq` is the last sequence we PROCESSED — Discord replays from
-                # there, so a stale value silently loses events.
-                "seq": self.sequence,
-            },
-        })
+        await self._send(
+            {
+                "op": OP_RESUME,
+                "d": {
+                    "token": self._token,
+                    "session_id": self.session_id,
+                    # `seq` is the last sequence we PROCESSED — Discord replays from
+                    # there, so a stale value silently loses events.
+                    "seq": self.sequence,
+                },
+            }
+        )
         logger.info("discord gateway: RESUME sent (seq=%s)", self.sequence)
 
     # ── heartbeat ──
@@ -267,7 +284,9 @@ class DiscordDeskGateway:
         reconnect + RESUME (no events lost)."""
         if self._ack_pending:
             self.zombie_reconnects += 1
-            logger.warning("discord gateway: heartbeat unacked — zombie connection, resuming")
+            logger.warning(
+                "discord gateway: heartbeat unacked — zombie connection, resuming"
+            )
             await self._close_ws(code=4000, reason="zombie connection")
             return False
         self._ack_pending = True
@@ -334,12 +353,16 @@ class DiscordDeskGateway:
         invalid-session loop and, eventually, a token reset."""
         resumable = bool(frame.get("d"))
         if not resumable:
-            logger.info("discord gateway: INVALID_SESSION (not resumable) — fresh IDENTIFY")
+            logger.info(
+                "discord gateway: INVALID_SESSION (not resumable) — fresh IDENTIFY"
+            )
             self.session_id = ""
             self.resume_url = ""
             self.sequence = None
         else:
-            logger.info("discord gateway: INVALID_SESSION (resumable) — retrying resume")
+            logger.info(
+                "discord gateway: INVALID_SESSION (resumable) — retrying resume"
+            )
         await self._sleep(INVALID_SESSION_WAIT)
         await self._close_ws(code=4000, reason="invalid session")
 
@@ -361,12 +384,16 @@ class DiscordDeskGateway:
         if data is None:
             data = {}
         if not isinstance(data, dict):
-            logger.warning("discord gateway: %s dispatch with non-object payload dropped", event)
+            logger.warning(
+                "discord gateway: %s dispatch with non-object payload dropped", event
+            )
             return
         try:
             if event == "READY":
                 self.session_id = str(data.get("session_id", ""))
-                self.resume_url = str(data.get("resume_gateway_url", "")) or self._gateway_url
+                self.resume_url = (
+                    str(data.get("resume_gateway_url", "")) or self._gateway_url
+                )
                 logger.info("discord gateway: READY (session=%s)", self.session_id)
                 if self._on_ready is not None:
                     await self._on_ready(data)

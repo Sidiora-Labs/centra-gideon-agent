@@ -78,9 +78,13 @@ class Plan:
 
 
 def offer(item: ImportItem, plan: Plan) -> dict:
-    return {**item.to_dict(), "state": plan.state.value,
-            "destination": plan.destination, "detail": plan.detail,
-            "preselected": item.preselect and plan.state is ItemState.NEW}
+    return {
+        **item.to_dict(),
+        "state": plan.state.value,
+        "destination": plan.destination,
+        "detail": plan.detail,
+        "preselected": item.preselect and plan.state is ItemState.NEW,
+    }
 
 
 def fingerprint_of(source: str, category: ImportCategory | str, key: str) -> str:
@@ -202,11 +206,21 @@ class ScanResult:
     def to_dict(self) -> dict:
         result = RecordProjection.render("scan", self)
         if self.secrets_skipped:
-            result["not_imported"].append({"what": "Credential values or files", "count": self.secrets_skipped,
-                                            "why": "Credentials are not imported"})
+            result["not_imported"].append(
+                {
+                    "what": "Credential values or files",
+                    "count": self.secrets_skipped,
+                    "why": "Credentials are not imported",
+                }
+            )
         if self.redactions:
-            result["not_imported"].append({"what": "Credential-like strings", "count": self.redactions,
-                                            "why": "Removed from imported text"})
+            result["not_imported"].append(
+                {
+                    "what": "Credential-like strings",
+                    "count": self.redactions,
+                    "why": "Removed from imported text",
+                }
+            )
         return result
 
 

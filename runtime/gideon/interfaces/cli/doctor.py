@@ -336,6 +336,7 @@ def _doctor_external_vector_store() -> list[str]:
 
 def _doctor_backups() -> None:
     import asyncio
+
     from gideon.operations.resilience.doctor import (
         DoctorContext,
         _probe_backups,
@@ -398,17 +399,25 @@ def _doctor_pip() -> list[str]:
 
 def _doctor_core_server() -> list[str]:
     from gideon.operations.resilience.core_server import (
-        agent_config_path, read_core_server, core_server_detail,
+        agent_config_path,
+        core_server_detail,
+        read_core_server,
     )
 
     reading = read_core_server(agent_config_path())
     detail = core_server_detail(reading)
     print("\nMCP Tools")
-    print(f"  @gideon-core: {'❌' if reading.unreadable or reading.needs_setting_up else '—' if not reading.found else '✅'} {detail}")
+    print(
+        f"  @gideon-core: {'❌' if reading.unreadable or reading.needs_setting_up else '—' if not reading.found else '✅'} {detail}"
+    )
     if reading.found and not reading.unreadable:
-        print(f"  offered: {reading.in_tools}; runs without asking: {reading.in_allowed} (owner settings)")
+        print(
+            f"  offered: {reading.in_tools}; runs without asking: {reading.in_allowed} (owner settings)"
+        )
     if reading.unreadable or reading.needs_setting_up:
-        print("  Repair the server entry explicitly in Settings → Doctor → Tools; tool permissions remain yours.")
+        print(
+            "  Repair the server entry explicitly in Settings → Doctor → Tools; tool permissions remain yours."
+        )
         return [detail]
     return []
 
@@ -697,7 +706,7 @@ def _doctor() -> None:
 
     if _port:
         try:
-            from gideon.engine.home_gateway import require_home_gateway, open_loopback
+            from gideon.engine.home_gateway import open_loopback, require_home_gateway
 
             require_home_gateway(_port, timeout=2)
             req = urllib.request.Request(f"http://127.0.0.1:{_port}/api/status")

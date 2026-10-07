@@ -7,9 +7,8 @@ import logging
 import os
 import re
 import uuid
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from collections.abc import Callable
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal
 
@@ -131,7 +130,9 @@ class KeychainNamespace:
     scope: Literal["default", "own", "unnamed", "unreadable"]
 
 
-def keychain_namespace(home: Path | None = None, *, mint: bool = False) -> KeychainNamespace:
+def keychain_namespace(
+    home: Path | None = None, *, mint: bool = False
+) -> KeychainNamespace:
     try:
         base = Path(home) if home is not None else _loader.resolve_config_dir()
         if base.resolve() == _loader.default_config_dir().resolve():
@@ -173,8 +174,10 @@ def keychain_namespace_summary(namespace: KeychainNamespace) -> str:
         return f"{namespace.service} — this home's own"
     if namespace.scope == "unnamed":
         return "none yet — named when this home first stores a secret in the keychain"
-    return (f"unreadable — restore the id in {KEYCHAIN_NAMESPACE_FILE}, or remove the file "
-            "to start a new empty namespace; no keychain is used here")
+    return (
+        f"unreadable — restore the id in {KEYCHAIN_NAMESPACE_FILE}, or remove the file "
+        "to start a new empty namespace; no keychain is used here"
+    )
 
 
 def _usable_keyring() -> object | None:
@@ -221,14 +224,22 @@ def requested_credential_backend() -> CredentialBackend:
 
 def credential_backend() -> CredentialBackend:
     requested = requested_credential_backend()
-    return requested if requested == "keychain" and keychain_available() and keychain_namespace().scope != "unreadable" else "dotenv"
+    return (
+        requested
+        if requested == "keychain"
+        and keychain_available()
+        and keychain_namespace().scope != "unreadable"
+        else "dotenv"
+    )
 
 
 def credential_backend_warning() -> str:
     if requested_credential_backend() != "keychain" or credential_backend() != "dotenv":
         return ""
     if keychain_available():
-        return "keychain requested but " + keychain_namespace_summary(keychain_namespace())
+        return "keychain requested but " + keychain_namespace_summary(
+            keychain_namespace()
+        )
     return "keychain requested but no usable OS keyring backend is available — credentials stay in .env at mode 0600 (never plaintext elsewhere)"
 
 
@@ -362,7 +373,9 @@ def _dotenv_names() -> list[str]:
 def save_credential(key: str, value: str, home: Path | None = None) -> None:
     stored = credential_backend() == "keychain" and _keychain_save(key, value, home)
     if not stored:
-        DotenvDocument(Path(home) / ".env" if home is not None else _loader.env_path()).upsert(key, value)
+        DotenvDocument(
+            Path(home) / ".env" if home is not None else _loader.env_path()
+        ).upsert(key, value)
     if not is_config_secret_reference_key(key):
         from gideon.integrations.channel_transports import request_reconcile
 
@@ -370,7 +383,9 @@ def save_credential(key: str, value: str, home: Path | None = None) -> None:
 
 
 def get_credential(key: str, home: Path | None = None) -> str:
-    document = DotenvDocument(Path(home) / ".env" if home is not None else _loader.env_path())
+    document = DotenvDocument(
+        Path(home) / ".env" if home is not None else _loader.env_path()
+    )
     return _keychain_get(key, home) or document.values().get(key, "")
 
 
@@ -382,10 +397,11 @@ def owner_id_credential(provider: str) -> str:
     """
     raw = str(provider or "").strip()
     if not raw or any(
-        not (char.isascii() and (char.isalnum() or char in "-_"))
-        for char in raw
+        not (char.isascii() and (char.isalnum() or char in "-_")) for char in raw
     ):
-        raise ValueError("provider must contain only letters, digits, hyphens, or underscores")
+        raise ValueError(
+            "provider must contain only letters, digits, hyphens, or underscores"
+        )
     normalized = "_".join(f"{byte:02X}" for byte in raw.encode("ascii"))
     return f"GIDEON_OWNER_ID_{normalized}"
 
@@ -435,8 +451,12 @@ def credential_names() -> list[str]:
 
 
 def delete_credential(key: str, home: Path | None = None) -> bool:
-    document = DotenvDocument(Path(home) / ".env" if home is not None else _loader.env_path())
-    existed = bool(_keychain_get(key, home)) or key in document.names() or key in os.environ
+    document = DotenvDocument(
+        Path(home) / ".env" if home is not None else _loader.env_path()
+    )
+    existed = (
+        bool(_keychain_get(key, home)) or key in document.names() or key in os.environ
+    )
     if _usable_keyring() is not None:
         _keychain_delete(key, home)
     document.remove((key,))

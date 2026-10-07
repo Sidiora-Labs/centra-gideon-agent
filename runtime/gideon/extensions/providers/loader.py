@@ -104,7 +104,11 @@ def _load_ext_module(ext: "RegisteredProvider", module_path: str) -> Any:
 
         root = ext_dir.resolve(strict=True)
         candidate = ext_dir / module_path.replace(".", "/")
-        for location in (candidate.with_suffix(".py"), candidate, candidate / "__init__.py"):
+        for location in (
+            candidate.with_suffix(".py"),
+            candidate,
+            candidate / "__init__.py",
+        ):
             if location.exists() and root not in location.resolve(strict=True).parents:
                 raise ImportError("App package resolves outside its code directory")
         with loading(ext.name, ext_dir):

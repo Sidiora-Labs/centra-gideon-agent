@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
-import re
 from typing import Any
 
 from gideon.core.config import config_dir
@@ -17,7 +17,6 @@ from gideon.hypermid.foundation import Scope
 from gideon.hypermid.handlers import HypermidHandlers, service_for
 from gideon.hypermid.lifecycle import HypermidLifecycle, LocalEnrollment
 from gideon.hypermid.models import JsonValue
-
 
 _MAX_PLAN_BYTES = 8 * 1024 * 1024
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
@@ -90,9 +89,7 @@ async def run_security_command(
         plan = _plan_file(args.plan)
         expected_operation = f"security.{args.action}.apply"
         if plan.get("operation") != expected_operation:
-            raise ValueError(
-                f"reviewed plan operation must be {expected_operation}"
-            )
+            raise ValueError(f"reviewed plan operation must be {expected_operation}")
         plan_id = _text(plan.get("plan_id"), "reviewed plan id")
         plan_digest = _digest(args.plan_digest, "reviewed plan digest")
         if plan.get("plan_digest") != plan_digest:

@@ -43,8 +43,8 @@ envelope (``{"error": {"code", "message"}}``) so a caller branches on a stable c
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 from pathlib import Path
 
 from aiohttp import web
@@ -80,7 +80,9 @@ async def api_packs_installed(request: web.Request) -> web.Response:
             if Path(staged_id).name != staged_id:
                 continue
             try:
-                raw = json.loads((staged_dir / f"{staged_id}.json").read_text(encoding="utf-8"))
+                raw = json.loads(
+                    (staged_dir / f"{staged_id}.json").read_text(encoding="utf-8")
+                )
             except (OSError, json.JSONDecodeError):
                 continue
             if not isinstance(raw, dict):

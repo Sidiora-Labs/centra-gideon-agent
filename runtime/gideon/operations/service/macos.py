@@ -18,6 +18,7 @@ from gideon.operations.service.environment import (
     status_environment_lines,
 )
 
+
 class _HomePath(os.PathLike[str]):
     """Resolve a LaunchAgent path against the current macOS user home."""
 
@@ -231,7 +232,15 @@ def environment_status() -> str:
     except (OSError, plistlib.InvalidFileException, ValueError):
         return ""
     env = data.get("EnvironmentVariables", {})
-    values = {str(key): str(value) for key, value in env.items()} if isinstance(env, dict) else {}
+    values = (
+        {str(key): str(value) for key, value in env.items()}
+        if isinstance(env, dict)
+        else {}
+    )
     excluded = data.get("GideonEnvironmentExcluded", [])
-    names = tuple(sorted(str(name) for name in excluded)) if isinstance(excluded, list) else ()
+    names = (
+        tuple(sorted(str(name) for name in excluded))
+        if isinstance(excluded, list)
+        else ()
+    )
     return status_environment_lines(ServiceEnvironment(values, names))

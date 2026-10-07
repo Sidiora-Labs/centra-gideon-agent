@@ -160,7 +160,11 @@ async def handle_list_instances(request: web.Request) -> web.Response:
 
     if name == _mcp.MCP_TOOLS_EXTENSION:
         return web.json_response(
-            {"instances": [_mcp_instance_wire(i, schema) for i in _mcp.list_instances()]}
+            {
+                "instances": [
+                    _mcp_instance_wire(i, schema) for i in _mcp.list_instances()
+                ]
+            }
         )
 
     instances = list_instances(name)
@@ -225,7 +229,9 @@ async def handle_create_instance(request: web.Request) -> web.Response:
         except ValueError as exc:
             return json_error("bad_request", message=str(exc), status=400)
         _rebuild_agent_config_safe()
-        return web.json_response({"instance": _mcp_instance_wire(inst, schema)}, status=201)
+        return web.json_response(
+            {"instance": _mcp_instance_wire(inst, schema)}, status=201
+        )
 
     inst = create_instance(name, display_name=display_name, config=config)
     _refresh_instance_provider_safe(name)

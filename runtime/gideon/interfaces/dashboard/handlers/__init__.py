@@ -150,8 +150,8 @@ from gideon.interfaces.dashboard.handlers.durability import (
 from gideon.interfaces.dashboard.handlers.external_access import (
     api_external_access,
     api_external_access_client,
-    api_external_access_client_toggle,
     api_external_access_client_persistent_sessions,
+    api_external_access_client_toggle,
 )
 from gideon.interfaces.dashboard.handlers.files import (
     _validate_dashboard_path,
@@ -211,8 +211,8 @@ from gideon.interfaces.dashboard.handlers.mcp import (
     api_mcp_probe_cached,
     api_mcp_probe_one,
     api_mcp_remove,
-    api_mcp_server_detail,
     api_mcp_server_allow,
+    api_mcp_server_detail,
     api_mcp_servers,
     api_mcp_sync,
     api_mcp_toggle,
@@ -365,9 +365,9 @@ from gideon.interfaces.dashboard.handlers.updates import (
     api_update_apply,
     api_update_auto,
     api_update_cancel,
-    api_update_dismiss,
     api_update_check,
     api_update_dev_mode,
+    api_update_dismiss,
     api_update_simulate,
     get_update_info,
     install_log_ring_handler,

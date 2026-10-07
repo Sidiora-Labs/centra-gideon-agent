@@ -270,7 +270,9 @@ class TaskWrite:
                 or isinstance(operation.get("index"), bool)
                 or set(body) - {"checklist_toggle", "provider"}
             ):
-                return json_error("invalid_request", message="invalid checklist operation", status=400)
+                return json_error(
+                    "invalid_request", message="invalid checklist operation", status=400
+                )
             try:
                 task = await registry.toggle_checklist_item(
                     task_id or "",
@@ -281,7 +283,9 @@ class TaskWrite:
             except ValueError as exc:
                 return json_error("invalid_request", message=str(exc), status=400)
             if task is None:
-                return json_error("not_found", message="task or checklist item not found", status=404)
+                return json_error(
+                    "not_found", message="task or checklist item not found", status=404
+                )
             siblings = {task.id: task}
             return web.json_response(_with_block_reason(task, siblings))
         if create:
@@ -295,14 +299,34 @@ class TaskWrite:
         if expected_revision is not None and (
             not isinstance(expected_revision, str) or not expected_revision
         ):
-            return json_error("invalid_request", message="expected_revision must be a nonempty string", status=400)
+            return json_error(
+                "invalid_request",
+                message="expected_revision must be a nonempty string",
+                status=400,
+            )
         whole_task_fields = {
-            "title", "description", "assignee", "priority", "labels", "due",
-            "due_reminder", "task_list_id", "exit_criteria", "action_plan",
-            "notes", "research_notes", "execution_notes",
-            "agent_instructions_template", "dependencies", "depends_on",
+            "title",
+            "description",
+            "assignee",
+            "priority",
+            "labels",
+            "due",
+            "due_reminder",
+            "task_list_id",
+            "exit_criteria",
+            "action_plan",
+            "notes",
+            "research_notes",
+            "execution_notes",
+            "agent_instructions_template",
+            "dependencies",
+            "depends_on",
         }
-        if not create and expected_revision is None and whole_task_fields.intersection(body):
+        if (
+            not create
+            and expected_revision is None
+            and whole_task_fields.intersection(body)
+        ):
             return json_error(
                 "revision_required",
                 message="editing a task requires its current revision",
@@ -312,7 +336,9 @@ class TaskWrite:
         updated_task = None
         try:
             registry.validate_provider(provider)
-            if (not create and expected_revision is None) or (create and provider == "native"):
+            if (not create and expected_revision is None) or (
+                create and provider == "native"
+            ):
                 _attach_project_general_list(body)
             if create:
                 created_task = await registry.create_task(
@@ -329,12 +355,18 @@ class TaskWrite:
                 if refusal:
                     return json_error("engine_owned_field", message=refusal, status=409)
                 updated_task = await registry.update_task(
-                    task_id, provider_name=provider,
-                    expected_revision=expected_revision, **body
+                    task_id,
+                    provider_name=provider,
+                    expected_revision=expected_revision,
+                    **body,
                 )
         except TaskRevisionConflict as exc:
-            return json_error("version_conflict", message=str(exc), status=409,
-                              current_revision=exc.current_revision)
+            return json_error(
+                "version_conflict",
+                message=str(exc),
+                status=409,
+                current_revision=exc.current_revision,
+            )
         except reconcile.DependencyCycleError as exc:
             return json_error(
                 "invalid_request", message=str(exc), status=400, cycle=exc.cycle

@@ -31,7 +31,10 @@ def relaunch_argv():
         if value == "--seed":
             skip = True
             continue
-        if value.startswith("--seed=") or value in {"--seed-replace", "--seed-local-model"}:
+        if value.startswith("--seed=") or value in {
+            "--seed-replace",
+            "--seed-local-model",
+        }:
             continue
         arguments.append(value)
     return [*cli_argv(), *arguments]
@@ -65,14 +68,19 @@ def reexec(request: RestartRequest) -> None:
     child_env = dict(os.environ)
     if getattr(sys, "frozen", False):
         from gideon.core.frozen_child import restore_environment
+
         restore_environment(child_env)
     if request.auth_mode:
         child_env["GIDEON_AUTH_MODE"] = request.auth_mode
     sys.stdout.flush()
     sys.stderr.flush()
     try:
-        os.execve(request.executable, [request.executable, *request.arguments], child_env)
+        os.execve(
+            request.executable, [request.executable, *request.arguments], child_env
+        )
     except OSError as exc:
-        sys.stderr.write(f"Gideon could not restart: {exc}. Reopen the desktop app or start the gateway again.\n")
+        sys.stderr.write(
+            f"Gideon could not restart: {exc}. Reopen the desktop app or start the gateway again.\n"
+        )
         sys.stderr.flush()
         raise SystemExit(1) from None

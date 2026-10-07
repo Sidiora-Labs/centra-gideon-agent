@@ -7,8 +7,10 @@ import inspect
 from collections import OrderedDict
 from typing import Any
 
-from gideon.integrations.channel_transports.base import OutboundMessage
-from gideon.integrations.channel_transports.base import ChannelCapabilities
+from gideon.integrations.channel_transports.base import (
+    ChannelCapabilities,
+    OutboundMessage,
+)
 from gideon.integrations.messaging_channels.base import MessagingTransport
 
 
@@ -58,7 +60,9 @@ class WeComTransport(MessagingTransport):
             if not isinstance(body, dict):
                 return
             sender = body.get("from", {})
-            sender_id = str(sender.get("userid") or "") if isinstance(sender, dict) else ""
+            sender_id = (
+                str(sender.get("userid") or "") if isinstance(sender, dict) else ""
+            )
             chat = str(body.get("chatid") or sender_id)
             message_id = str(body.get("msgid") or "")
             if not chat or not sender_id or not message_id or message_id in self.seen:
@@ -115,7 +119,9 @@ class WeComTransport(MessagingTransport):
             raise LookupError("WeCom requires an inbound conversation before replying")
         from wecom_aibot_sdk import generate_req_id
 
-        await self.client.reply_stream(frame, generate_req_id("stream"), message.text, finish=True)
+        await self.client.reply_stream(
+            frame, generate_req_id("stream"), message.text, finish=True
+        )
         return True
 
 

@@ -50,9 +50,9 @@ from gideon.interfaces.dashboard.session_store import (
     forget_session,
     nonces_for_device,
     nonces_for_session,
-    session_id,
     sanitize_device_kind,
     sanitize_device_name,
+    session_id,
 )
 from gideon.interfaces.dashboard.token_auth import (
     DEFAULT_BROWSER_SESSION_TTL_SECS,
@@ -161,7 +161,11 @@ async def api_devices_pair_start(request: web.Request) -> web.Response:
         _audit("device_pair_started", "denied", error="origin rejected")
         return json_error(ERR_ORIGIN, status=403)
 
-    from gideon.interfaces.dashboard.owner_presence import ACTION_PAIR_DEVICE, require_owner_presence
+    from gideon.interfaces.dashboard.owner_presence import (
+        ACTION_PAIR_DEVICE,
+        require_owner_presence,
+    )
+
     refused = require_owner_presence(request, ACTION_PAIR_DEVICE)
     if refused is not None:
         return refused
@@ -271,8 +275,11 @@ async def api_devices_pair_complete(request: web.Request) -> web.Response:
         cfg.session_ttl, default_secs=DEFAULT_BROWSER_SESSION_TTL_SECS
     )
     token = generate_token(
-        PAIRED_DEVICE_USER, ttl_seconds=ttl, kind="device",
-        label=name or _derive_device_name(request), client_ip=ip,
+        PAIRED_DEVICE_USER,
+        ttl_seconds=ttl,
+        kind="device",
+        label=name or _derive_device_name(request),
+        client_ip=ip,
     )
     nonce = _nonce_of(token)
 
@@ -448,7 +455,9 @@ async def api_devices_list(request: web.Request) -> web.Response:
         name = device.name if device is not None else record.label
         kind = device.kind if device is not None else record.kind
         minted_at = device.minted_at if device is not None else record.minted_at
-        last_seen = max(record.last_seen, device.last_seen if device is not None else 0.0)
+        last_seen = max(
+            record.last_seen, device.last_seen if device is not None else 0.0
+        )
         row = {
             "id": device_id,
             "name": name,
@@ -485,7 +494,9 @@ async def api_devices_list(request: web.Request) -> web.Response:
         rows.extend(inbound_tokens.surface_rows())
         rows.extend(inbound_tokens.client_rows(inbound_clients.load_clients()))
     except inbound_tokens.RegistryUnavailable:
-        _audit("devices_listed", "denied", error="integration token registry unavailable")
+        _audit(
+            "devices_listed", "denied", error="integration token registry unavailable"
+        )
         return json_error("integration_token_registry_unavailable", status=503)
     rows.sort(key=lambda r: float(r["minted_at"] or 0.0), reverse=True)
     _audit("devices_listed", "ok", resources=f"devices={len(rows)}")

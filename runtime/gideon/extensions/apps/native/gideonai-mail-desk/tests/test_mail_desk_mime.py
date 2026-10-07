@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 
+from mail_desk_fakes import build_message, raw_message
 from mail_desk_runtime.mime import (
     MAX_BODY_CHARS,
     InboundMail,
@@ -24,7 +25,6 @@ from mail_desk_runtime.mime import (
     sender_display_name,
     strip_quoted_reply,
 )
-from mail_desk_fakes import build_message, raw_message
 
 
 def _b64(text: str) -> str:
@@ -66,8 +66,8 @@ class TestSenderAddressIsTheOnlyTrustKey:
     """``From`` display names are attacker-controlled; only the address may key trust."""
 
     def test_display_name_plus_address_yields_the_address(self):
-        assert sender_address('Bob Smith <bob@example.com>') == "bob@example.com"
-        assert sender_display_name('Bob Smith <bob@example.com>') == "Bob Smith"
+        assert sender_address("Bob Smith <bob@example.com>") == "bob@example.com"
+        assert sender_display_name("Bob Smith <bob@example.com>") == "Bob Smith"
 
     def test_bare_address(self):
         assert sender_address("bob@example.com") == "bob@example.com"
@@ -84,7 +84,8 @@ class TestSenderAddressIsTheOnlyTrustKey:
 
     def test_encoded_display_name_carrying_an_address_is_not_the_address(self):
         """Measured: an RFC-2047 display name decodes to arbitrary text under
-        policy.default, so the encoded form is the sharper version of the same attack."""
+        policy.default, so the encoded form is the sharper version of the same attack.
+        """
         raw = raw_message(
             f"From: =?utf-8?B?{_b64('allowed@example.com')}?= <evil@attacker.test>\r\n"
             "Subject: hi"
@@ -122,7 +123,9 @@ class TestParseInboundFailsClosed:
         assert parse_inbound(raw_message("Subject: no sender"), 1) is None
 
     def test_malformed_from_returns_none(self):
-        assert parse_inbound(raw_message("From: not-an-address\r\nSubject: x"), 1) is None
+        assert (
+            parse_inbound(raw_message("From: not-an-address\r\nSubject: x"), 1) is None
+        )
 
     def test_unparseable_bytes_return_none_or_no_sender(self):
         """Garbage must never raise out of the parse — it either yields None (no usable
@@ -131,9 +134,12 @@ class TestParseInboundFailsClosed:
 
     def test_valid_message_maps_every_field(self):
         raw = build_message(
-            from_addr="Bob <bob@example.com>", subject="Hi there",
-            message_id="<m1@example.com>", plain="the body",
-            in_reply_to="<p1@example.com>", references="<r0@example.com> <p1@example.com>",
+            from_addr="Bob <bob@example.com>",
+            subject="Hi there",
+            message_id="<m1@example.com>",
+            plain="the body",
+            in_reply_to="<p1@example.com>",
+            references="<r0@example.com> <p1@example.com>",
         )
         mail = parse_inbound(raw, 42)
         assert mail is not None
@@ -175,7 +181,8 @@ class TestBodyExtraction:
 
     def test_attachment_parts_are_not_body_text(self):
         raw = build_message(
-            plain="just this", attachments=[("notes.txt", "text/plain", b"attached text")]
+            plain="just this",
+            attachments=[("notes.txt", "text/plain", b"attached text")],
         )
         mail = parse_inbound(raw, 1)
         assert mail is not None
@@ -201,7 +208,9 @@ class TestQuotedReplyTrimming:
         assert strip_quoted_reply(body) == "Yes, do it."
 
     def test_strips_outlook_original_message_block(self):
-        body = "Approved.\n\n-----Original Message-----\nFrom: agent@example.com\nblah\n"
+        body = (
+            "Approved.\n\n-----Original Message-----\nFrom: agent@example.com\nblah\n"
+        )
         assert strip_quoted_reply(body) == "Approved."
 
     def test_strips_signature_delimiter(self):
@@ -232,7 +241,10 @@ class TestThreadRoot:
         assert mail.thread_root == "<m1@x>"
 
     def test_root_falls_back_to_in_reply_to(self):
-        assert InboundMail(message_id="<m2@x>", in_reply_to="<m1@x>").thread_root == "<m1@x>"
+        assert (
+            InboundMail(message_id="<m2@x>", in_reply_to="<m1@x>").thread_root
+            == "<m1@x>"
+        )
 
     def test_root_of_a_first_message_is_its_own_id(self):
         assert InboundMail(message_id="<m1@x>").thread_root == "<m1@x>"
@@ -271,8 +283,12 @@ class TestReplySubject:
 class TestBuildOutbound:
     def test_sets_the_threading_headers(self):
         msg = build_outbound(
-            from_addr="agent@example.com", to_addr="bob@example.com", subject="Re: hi",
-            body="reply text", in_reply_to="<p@x>", references="<r@x> <p@x>",
+            from_addr="agent@example.com",
+            to_addr="bob@example.com",
+            subject="Re: hi",
+            body="reply text",
+            in_reply_to="<p@x>",
+            references="<r@x> <p@x>",
         )
         assert msg["To"] == "bob@example.com"
         assert msg["In-Reply-To"] == "<p@x>"
@@ -288,26 +304,36 @@ class TestBuildOutbound:
 
     def test_html_alternative_when_requested(self):
         msg = build_outbound(
-            from_addr="a@x.com", to_addr="b@x.com", subject="s", body="plain",
+            from_addr="a@x.com",
+            to_addr="b@x.com",
+            subject="s",
+            body="plain",
             html_body="<p>rich</p>",
         )
         types = {p.get_content_type() for p in msg.walk() if not p.is_multipart()}
         assert types == {"text/plain", "text/html"}
 
     def test_plain_only_when_no_html(self):
-        msg = build_outbound(from_addr="a@x.com", to_addr="b@x.com", subject="s", body="p")
+        msg = build_outbound(
+            from_addr="a@x.com", to_addr="b@x.com", subject="s", body="p"
+        )
         assert msg.get_content_type() == "text/plain"
 
     def test_attachment_becomes_a_mime_part(self):
         msg = build_outbound(
-            from_addr="a@x.com", to_addr="b@x.com", subject="s", body="p",
+            from_addr="a@x.com",
+            to_addr="b@x.com",
+            subject="s",
+            body="p",
             attachments=[("report.pdf", "application/pdf", b"%PDF-1.4")],
         )
         names = [p.get_filename() for p in msg.walk() if p.get_filename()]
         assert names == ["report.pdf"]
 
     def test_no_threading_headers_on_a_fresh_message(self):
-        msg = build_outbound(from_addr="a@x.com", to_addr="b@x.com", subject="s", body="p")
+        msg = build_outbound(
+            from_addr="a@x.com", to_addr="b@x.com", subject="s", body="p"
+        )
         assert msg["In-Reply-To"] is None
         assert msg["References"] is None
 

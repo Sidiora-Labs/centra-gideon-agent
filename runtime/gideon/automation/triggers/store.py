@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import fcntl
-import json
 import hashlib
-from datetime import datetime, timezone
+import json
 import logging
 import os
 import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -101,8 +101,12 @@ class TriggerDocument:
             self.observed_mtime = self.path.stat().st_mtime
             content = self.path.read_bytes()
             envelope = json.loads(content.decode("utf-8"))
-            records = envelope.get("triggers") if isinstance(envelope, dict) else envelope
-            if not isinstance(records, list) or any(not isinstance(item, dict) for item in records):
+            records = (
+                envelope.get("triggers") if isinstance(envelope, dict) else envelope
+            )
+            if not isinstance(records, list) or any(
+                not isinstance(item, dict) for item in records
+            ):
                 raise ValueError("triggers.json has an invalid record envelope")
             return records
         except (OSError, ValueError) as exc:
@@ -110,27 +114,41 @@ class TriggerDocument:
             copied = None
             if content is not None:
                 try:
-                    copied = next(self.path.parent.glob(f"{self.path.name}.broken-*-{digest}"), None)
+                    copied = next(
+                        self.path.parent.glob(f"{self.path.name}.broken-*-{digest}"),
+                        None,
+                    )
                     if copied is None:
                         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-                        copied = self.path.with_name(f"{self.path.name}.broken-{stamp}-{digest}")
-                        fd = os.open(copied, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                        copied = self.path.with_name(
+                            f"{self.path.name}.broken-{stamp}-{digest}"
+                        )
+                        fd = os.open(
+                            copied, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+                        )
                         with os.fdopen(fd, "wb") as stream:
                             stream.write(content)
                             stream.flush()
                             os.fsync(stream.fileno())
                 except OSError:
                     copied = None
-            kept = f" A copy is kept at {copied}." if copied else " Its contents have not been changed."
+            kept = (
+                f" A copy is kept at {copied}."
+                if copied
+                else " Its contents have not been changed."
+            )
             self.unreadable = {
                 "file": str(self.path),
-                "said": f"{self.path} could not be read, so its automations cannot be listed or changed." + kept,
+                "said": f"{self.path} could not be read, so its automations cannot be listed or changed."
+                + kept,
                 "remedy": "Repair the file or restore a readable copy, then reload this page.",
             }
             identity = (str(self.path), digest)
             if identity not in _REPORTED_UNREADABLE:
                 _REPORTED_UNREADABLE.add(identity)
-                logger.warning("%s %s", self.unreadable["said"], self.unreadable["remedy"])
+                logger.warning(
+                    "%s %s", self.unreadable["said"], self.unreadable["remedy"]
+                )
             if strict:
                 raise ValueError("triggers.json is unreadable or malformed") from exc
             return []

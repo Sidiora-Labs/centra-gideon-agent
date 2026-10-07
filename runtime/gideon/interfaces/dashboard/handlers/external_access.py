@@ -190,9 +190,7 @@ async def api_external_access(request: web.Request) -> web.Response:
 
 
 def _integration_token_rows() -> list[dict]:
-    from gideon.integrations.inbound import tokens
-    from gideon.integrations.inbound import clients
-    from gideon.integrations.inbound import auth
+    from gideon.integrations.inbound import auth, clients, tokens
 
     for surface in auth.surfaces():
         current = auth.load_surface_token(surface)
@@ -249,7 +247,11 @@ async def api_external_access_client(request: web.Request) -> web.Response:
         )
     persistent = body.get("persistent_sessions", False)
     if type(persistent) is not bool:
-        return json_error("invalid_request", message="persistent_sessions must be a JSON boolean", status=400)
+        return json_error(
+            "invalid_request",
+            message="persistent_sessions must be a JSON boolean",
+            status=400,
+        )
     if persistent and "openai" not in requested:
         return _no_conversation_to_keep()
     tools = body.get("tools")
@@ -270,23 +272,29 @@ async def api_external_access_client(request: web.Request) -> web.Response:
     ttl = str(body.get("ttl", "90d") or "90d")
     if clients_mod_ttl_invalid(ttl):
         return json_error(
-            "invalid_request", message="ttl must be a positive duration no longer than 90d", status=400
+            "invalid_request",
+            message="ttl must be a positive duration no longer than 90d",
+            status=400,
         )
-    from gideon.interfaces.dashboard.owner_presence import ACTION_INTEGRATION_TOKEN, require_owner_presence
+    from gideon.interfaces.dashboard.owner_presence import (
+        ACTION_INTEGRATION_TOKEN,
+        require_owner_presence,
+    )
+
     refused = require_owner_presence(request, ACTION_INTEGRATION_TOKEN)
     if refused is not None:
         return refused
     try:
         client, token = clients_mod.create_client(
-        label,
-        surfaces=requested,
-        agent=str(body.get("agent", "") or ""),
-        tools=[str(t) for t in tools] if isinstance(tools, list) else None,
-        scope=scope if isinstance(scope, dict) else None,
-        upstream=upstream,
-        rate_overrides=rate_overrides if isinstance(rate_overrides, dict) else None,
-        ttl=ttl,
-        persistent_sessions=persistent,
+            label,
+            surfaces=requested,
+            agent=str(body.get("agent", "") or ""),
+            tools=[str(t) for t in tools] if isinstance(tools, list) else None,
+            scope=scope if isinstance(scope, dict) else None,
+            upstream=upstream,
+            rate_overrides=rate_overrides if isinstance(rate_overrides, dict) else None,
+            ttl=ttl,
+            persistent_sessions=persistent,
         )
     except ValueError as exc:
         return json_error("invalid_request", message=str(exc), status=400)
@@ -313,13 +321,22 @@ def clients_mod_ttl_invalid(ttl: str) -> bool:
 
 
 def _no_conversation_to_keep() -> web.Response:
-    return json_error("invalid_request", message="Only an OpenAI-compatible client has a conversation to keep.", status=400)
+    return json_error(
+        "invalid_request",
+        message="Only an OpenAI-compatible client has a conversation to keep.",
+        status=400,
+    )
 
 
-async def api_external_access_client_persistent_sessions(request: web.Request) -> web.Response:
+async def api_external_access_client_persistent_sessions(
+    request: web.Request,
+) -> web.Response:
     from gideon.integrations.inbound import clients as clients_mod
     from gideon.interfaces.dashboard.owner_presence import require_owner_presence
-    refused = require_owner_presence(request, "change an integration's conversation setting")
+
+    refused = require_owner_presence(
+        request, "change an integration's conversation setting"
+    )
     if refused is not None:
         return refused
     try:
@@ -327,7 +344,11 @@ async def api_external_access_client_persistent_sessions(request: web.Request) -
     except Exception:
         body = None
     if not isinstance(body, dict) or type(body.get("persistent_sessions")) is not bool:
-        return json_error("invalid_request", message="persistent_sessions must be a JSON boolean", status=400)
+        return json_error(
+            "invalid_request",
+            message="persistent_sessions must be a JSON boolean",
+            status=400,
+        )
     persistent = body["persistent_sessions"]
     client_id = str(request.match_info.get("client_id", "") or "")
     current = clients_mod.load_clients().get(client_id)
@@ -335,10 +356,18 @@ async def api_external_access_client_persistent_sessions(request: web.Request) -
         return json_error("not_found", message="Unknown client", status=404)
     if persistent and not current.may_use("openai"):
         return _no_conversation_to_keep()
-    client = clients_mod.set_persistent_sessions(client_id, persistent, actor=str(request.get("user") or "owner"))
+    client = clients_mod.set_persistent_sessions(
+        client_id, persistent, actor=str(request.get("user") or "owner")
+    )
     if client is None:
         return json_error("not_found", message="Unknown client", status=404)
-    return web.json_response({"ok": True, "client_id": client_id, "persistent_sessions": client.persistent_sessions})
+    return web.json_response(
+        {
+            "ok": True,
+            "client_id": client_id,
+            "persistent_sessions": client.persistent_sessions,
+        }
+    )
 
 
 async def api_external_access_client_toggle(request: web.Request) -> web.Response:

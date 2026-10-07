@@ -171,8 +171,11 @@ class IdeaSyncActionProvider(ActionProvider):
                 json.loads(prior[0])["expected_hash"] if prior else state["hash"]
             )
             from gideon.cognition.knowledge.file_items import _owned_io
-            result = await _owned_io(self.schedules.ideas.sync,
-                identity, {"request_id": request, "expected_hash": expected_hash}
+
+            result = await _owned_io(
+                self.schedules.ideas.sync,
+                identity,
+                {"request_id": request, "expected_hash": expected_hash},
             )
             if result["outcome"] in ("conflict", "owner_deleted", "collection_deleted"):
                 return ActionResult(

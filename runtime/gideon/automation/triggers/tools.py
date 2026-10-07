@@ -480,16 +480,21 @@ def update(store: Any, *, trigger_id: str, patch: dict[str, Any]) -> ToolResult:
         if name in accepted:
             parsed = yes_or_no(accepted[name])
             if parsed is None:
-                return ToolResult(False, f"Error: nothing was changed: {name} must be a boolean.")
+                return ToolResult(
+                    False, f"Error: nothing was changed: {name} must be a boolean."
+                )
             accepted[name] = parsed
     if "workflow" in accepted:
         from gideon.automation.triggers.action_edit import edited_workflow
 
         try:
-            accepted["workflow"] = edited_workflow(row.trigger.workflow, accepted["workflow"])
+            accepted["workflow"] = edited_workflow(
+                row.trigger.workflow, accepted["workflow"]
+            )
         except ValueError as exc:
             return ToolResult(False, f"Error: nothing was changed: {exc}.")
         from gideon.extensions.apps.app_crons import posture_refusal
+
         problem = posture_refusal(trigger_id, accepted["workflow"])
         if problem:
             return ToolResult(False, f"Error: nothing was changed: {problem}")

@@ -5,7 +5,6 @@ import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from slack_desk_runtime.blocks import (
     review_draft_blocks,
     review_edit_modal,
@@ -108,11 +107,19 @@ class TestReviewDraftStorage:
         assert _review_drafts_pop("missing") == ("", "")
 
     def test_expired_entry_returns_empty(self) -> None:
-        _review_drafts["k1"] = ("old", REQUESTER, time.monotonic() - _REVIEW_DRAFT_TTL - 1)
+        _review_drafts["k1"] = (
+            "old",
+            REQUESTER,
+            time.monotonic() - _REVIEW_DRAFT_TTL - 1,
+        )
         assert _review_drafts_get("k1") == ("", "")
 
     def test_expired_entry_popped_returns_empty(self) -> None:
-        _review_drafts["k1"] = ("old", REQUESTER, time.monotonic() - _REVIEW_DRAFT_TTL - 1)
+        _review_drafts["k1"] = (
+            "old",
+            REQUESTER,
+            time.monotonic() - _REVIEW_DRAFT_TTL - 1,
+        )
         assert _review_drafts_pop("k1") == ("", "")
 
     def test_evicts_oldest_at_capacity(self) -> None:
@@ -137,9 +144,15 @@ class TestPostEphemeral:
         client = RealSlackDeskClient.__new__(RealSlackDeskClient)
         client._web = mock_web
         blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "hi"}}]
-        await client.post_ephemeral("C1", "U1", "fallback", blocks=blocks, thread_ts="ts1")
+        await client.post_ephemeral(
+            "C1", "U1", "fallback", blocks=blocks, thread_ts="ts1"
+        )
         mock_web.chat_postEphemeral.assert_awaited_once_with(
-            channel="C1", user="U1", text="fallback", blocks=blocks, thread_ts="ts1",
+            channel="C1",
+            user="U1",
+            text="fallback",
+            blocks=blocks,
+            thread_ts="ts1",
         )
 
     @pytest.mark.asyncio
@@ -152,7 +165,9 @@ class TestPostEphemeral:
         client._web = mock_web
         await client.post_ephemeral("C1", "U1", "text")
         mock_web.chat_postEphemeral.assert_awaited_once_with(
-            channel="C1", user="U1", text="text",
+            channel="C1",
+            user="U1",
+            text="text",
         )
 
 
@@ -197,8 +212,10 @@ def mock_orch():
 @pytest.fixture
 def owner_patch():
     """Patch is_owner to return True for OWNER_ID only."""
+
     def _is_owner(uid: str) -> bool:
         return uid == OWNER_ID
+
     with patch("slack_desk_runtime.interactions.is_owner", side_effect=_is_owner):
         yield
 
@@ -262,15 +279,23 @@ class TestHandleReviewApprove:
         assert _has_sel_call(sel_mock, "allowed")
 
     @pytest.mark.asyncio
-    async def test_requester_can_approve_own_draft(self, mock_orch, owner_patch, sel_mock) -> None:
+    async def test_requester_can_approve_own_draft(
+        self, mock_orch, owner_patch, sel_mock
+    ) -> None:
         _review_drafts_set("C1|ts1|abc", "safe text", REQUESTER_ID)
-        await _handle_review_approve(_make_payload(user_id=REQUESTER_ID), _make_action())
+        await _handle_review_approve(
+            _make_payload(user_id=REQUESTER_ID), _make_action()
+        )
         mock_orch.slack_desk.post_message.assert_awaited_once()
         assert _has_sel_call(sel_mock, "allowed")
 
     @pytest.mark.asyncio
     async def test_stranger_denied_and_notified(
-        self, mock_orch, owner_patch, sel_mock, auth_err_mock,
+        self,
+        mock_orch,
+        owner_patch,
+        sel_mock,
+        auth_err_mock,
     ) -> None:
         _review_drafts_set("C1|ts1|abc", "text", REQUESTER_ID)
         await _handle_review_approve(_make_payload(user_id=STRANGER), _make_action())
@@ -286,7 +311,9 @@ class TestHandleReviewApprove:
 
 class TestHandleReviewCancel:
     @pytest.mark.asyncio
-    async def test_requester_can_cancel_own_draft(self, mock_orch, owner_patch, sel_mock) -> None:
+    async def test_requester_can_cancel_own_draft(
+        self, mock_orch, owner_patch, sel_mock
+    ) -> None:
         _review_drafts_set("C1|ts1|abc", "text", REQUESTER_ID)
         await _handle_review_cancel(_make_payload(user_id=REQUESTER_ID), _make_action())
         assert _review_drafts_get("C1|ts1|abc") == ("", "")
@@ -294,7 +321,11 @@ class TestHandleReviewCancel:
 
     @pytest.mark.asyncio
     async def test_stranger_denied_and_draft_preserved(
-        self, mock_orch, owner_patch, sel_mock, auth_err_mock,
+        self,
+        mock_orch,
+        owner_patch,
+        sel_mock,
+        auth_err_mock,
     ) -> None:
         _review_drafts_set("C1|ts1|abc", "text", REQUESTER_ID)
         await _handle_review_cancel(_make_payload(user_id=STRANGER), _make_action())
@@ -310,7 +341,9 @@ class TestHandleReviewCancel:
 
 class TestHandleReviewEdit:
     @pytest.mark.asyncio
-    async def test_requester_opens_modal(self, mock_orch, owner_patch, sel_mock) -> None:
+    async def test_requester_opens_modal(
+        self, mock_orch, owner_patch, sel_mock
+    ) -> None:
         _review_drafts_set("C1|ts1|abc", "draft", REQUESTER_ID)
         payload = _make_payload(user_id=REQUESTER_ID, trigger_id="T123")
         await _handle_review_edit(payload, _make_action())
@@ -320,7 +353,11 @@ class TestHandleReviewEdit:
 
     @pytest.mark.asyncio
     async def test_stranger_denied_and_notified(
-        self, mock_orch, owner_patch, sel_mock, auth_err_mock,
+        self,
+        mock_orch,
+        owner_patch,
+        sel_mock,
+        auth_err_mock,
     ) -> None:
         _review_drafts_set("C1|ts1|abc", "draft", REQUESTER_ID)
         payload = _make_payload(user_id=STRANGER, trigger_id="T123")
@@ -333,32 +370,47 @@ class TestHandleReviewEdit:
 class TestHandleReviewEditSubmit:
     @pytest.mark.asyncio
     async def test_requester_submit_posts_redacted(
-        self, mock_orch, owner_patch, sel_mock,
+        self,
+        mock_orch,
+        owner_patch,
+        sel_mock,
     ) -> None:
         _review_drafts_set("C1|ts1|abc", "original", REQUESTER_ID)
-        payload = _make_payload(user_id=REQUESTER_ID, view={
-            "private_metadata": "C1|ts1|abc",
-            "state": {"values": {
-                "pc_review_edit_block": {
-                    "pc_review_edit_input": {"value": "edited text"}
-                }
-            }},
-        })
+        payload = _make_payload(
+            user_id=REQUESTER_ID,
+            view={
+                "private_metadata": "C1|ts1|abc",
+                "state": {
+                    "values": {
+                        "pc_review_edit_block": {
+                            "pc_review_edit_input": {"value": "edited text"}
+                        }
+                    }
+                },
+            },
+        )
         await _handle_review_edit_submit(payload)
         mock_orch.slack_desk.post_message.assert_awaited_once()
         assert _review_drafts_get("C1|ts1|abc") == ("", "")
 
     @pytest.mark.asyncio
-    async def test_stranger_submit_denied(self, mock_orch, owner_patch, sel_mock) -> None:
+    async def test_stranger_submit_denied(
+        self, mock_orch, owner_patch, sel_mock
+    ) -> None:
         _review_drafts_set("C1|ts1|abc", "original", REQUESTER_ID)
-        payload = _make_payload(user_id=STRANGER, view={
-            "private_metadata": "C1|ts1|abc",
-            "state": {"values": {
-                "pc_review_edit_block": {
-                    "pc_review_edit_input": {"value": "hacked text"}
-                }
-            }},
-        })
+        payload = _make_payload(
+            user_id=STRANGER,
+            view={
+                "private_metadata": "C1|ts1|abc",
+                "state": {
+                    "values": {
+                        "pc_review_edit_block": {
+                            "pc_review_edit_input": {"value": "hacked text"}
+                        }
+                    }
+                },
+            },
+        )
         await _handle_review_edit_submit(payload)
         mock_orch.slack_desk.post_message.assert_not_awaited()
         assert _has_sel_call(sel_mock, "denied")
@@ -368,7 +420,9 @@ class TestHandleReviewEditSubmit:
 
 class TestHandleReviewRevise:
     @pytest.mark.asyncio
-    async def test_requester_opens_modal(self, mock_orch, owner_patch, sel_mock) -> None:
+    async def test_requester_opens_modal(
+        self, mock_orch, owner_patch, sel_mock
+    ) -> None:
         _review_drafts_set("C1|ts1|abc", "draft", REQUESTER_ID)
         payload = _make_payload(user_id=REQUESTER_ID, trigger_id="T123")
         await _handle_review_revise(payload, _make_action())
@@ -378,7 +432,11 @@ class TestHandleReviewRevise:
 
     @pytest.mark.asyncio
     async def test_stranger_denied_and_notified(
-        self, mock_orch, owner_patch, sel_mock, auth_err_mock,
+        self,
+        mock_orch,
+        owner_patch,
+        sel_mock,
+        auth_err_mock,
     ) -> None:
         _review_drafts_set("C1|ts1|abc", "draft", REQUESTER_ID)
         payload = _make_payload(user_id=STRANGER, trigger_id="T123")
@@ -391,17 +449,25 @@ class TestHandleReviewRevise:
 class TestHandleReviewReviseSubmit:
     @pytest.mark.asyncio
     async def test_requester_submit_spawns_handle_message(
-        self, mock_orch, owner_patch, sel_mock,
+        self,
+        mock_orch,
+        owner_patch,
+        sel_mock,
     ) -> None:
         _review_drafts_set("C1|ts1|abc", "original draft", REQUESTER_ID)
-        payload = _make_payload(user_id=REQUESTER_ID, view={
-            "private_metadata": "C1|ts1|abc",
-            "state": {"values": {
-                "pc_review_revise_block": {
-                    "pc_review_revise_input": {"value": "make it shorter"}
-                }
-            }},
-        })
+        payload = _make_payload(
+            user_id=REQUESTER_ID,
+            view={
+                "private_metadata": "C1|ts1|abc",
+                "state": {
+                    "values": {
+                        "pc_review_revise_block": {
+                            "pc_review_revise_input": {"value": "make it shorter"}
+                        }
+                    }
+                },
+            },
+        )
 
         # Deterministic: capture fire-and-forget tasks and await them, avoiding
         # a time-based sleep heuristic.
@@ -413,11 +479,15 @@ class TestHandleReviewReviseSubmit:
             background_tasks.append(task)
             return task
 
-        with patch(
-            "slack_desk_runtime.interactions.handle_message", new_callable=AsyncMock,
-        ) as mock_hm, patch(
-            "slack_desk_runtime.interactions.asyncio.create_task",
-            side_effect=_track_task,
+        with (
+            patch(
+                "slack_desk_runtime.interactions.handle_message",
+                new_callable=AsyncMock,
+            ) as mock_hm,
+            patch(
+                "slack_desk_runtime.interactions.asyncio.create_task",
+                side_effect=_track_task,
+            ),
         ):
             await _handle_review_revise_submit(payload)
             await asyncio.gather(*background_tasks)
@@ -425,17 +495,25 @@ class TestHandleReviewReviseSubmit:
 
     @pytest.mark.asyncio
     async def test_stranger_submit_denied_draft_preserved(
-        self, mock_orch, owner_patch, sel_mock,
+        self,
+        mock_orch,
+        owner_patch,
+        sel_mock,
     ) -> None:
         _review_drafts_set("C1|ts1|abc", "draft", REQUESTER_ID)
-        payload = _make_payload(user_id=STRANGER, view={
-            "private_metadata": "C1|ts1|abc",
-            "state": {"values": {
-                "pc_review_revise_block": {
-                    "pc_review_revise_input": {"value": "exfiltrate"}
-                }
-            }},
-        })
+        payload = _make_payload(
+            user_id=STRANGER,
+            view={
+                "private_metadata": "C1|ts1|abc",
+                "state": {
+                    "values": {
+                        "pc_review_revise_block": {
+                            "pc_review_revise_input": {"value": "exfiltrate"}
+                        }
+                    }
+                },
+            },
+        )
         await _handle_review_revise_submit(payload)
         # Draft should NOT be popped since handler returns early
         assert _review_drafts_get("C1|ts1|abc") == ("draft", REQUESTER_ID)

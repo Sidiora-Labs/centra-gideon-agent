@@ -3,11 +3,12 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from slack_desk_runtime.format import OPTIONS_CHECKBOXES_ACTION, OPTIONS_SUBMIT_ACTION
 
 
-def _make_payload(selected_values: list[str], all_choices: list[str], thread_ts: str = "t1") -> dict:
+def _make_payload(
+    selected_values: list[str], all_choices: list[str], thread_ts: str = "t1"
+) -> dict:
     """Build a minimal Slack interaction payload for options submit."""
     return {
         "user": {"id": "U123"},
@@ -78,6 +79,7 @@ class TestHandleOptionsSubmit:
     @pytest.mark.asyncio
     async def test_denied_user_returns_early(self, orch, monkeypatch):
         from slack_desk_runtime import interactions
+
         monkeypatch.setattr(interactions, "_orch", orch)
         monkeypatch.setattr(interactions, "is_allowed_user", lambda uid: False)
 
@@ -92,11 +94,14 @@ class TestHandleOptionsSubmit:
         import asyncio as _aio
 
         from slack_desk_runtime import interactions
+
         monkeypatch.setattr(interactions, "_orch", orch)
         monkeypatch.setattr(interactions, "is_allowed_user", lambda uid: True)
 
         payload = _make_payload(["A", "C"], ["A", "B", "C"])
-        with patch.object(interactions, "handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch.object(
+            interactions, "handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             await interactions._handle_options_submit(payload, "CH1", "msg1")
             await _aio.sleep(0)  # let create_task run
 
@@ -114,11 +119,14 @@ class TestHandleOptionsSubmit:
             # Should trigger handle_message with action_context, ts preserved
             mock_hm.assert_called_once()
             assert mock_hm.call_args[1].get("team_id") == "T123"
-            assert "OPTIONS multi-select" in mock_hm.call_args[1].get("action_context", "")
+            assert "OPTIONS multi-select" in mock_hm.call_args[1].get(
+                "action_context", ""
+            )
 
     @pytest.mark.asyncio
     async def test_ignores_empty_selection(self, orch, monkeypatch):
         from slack_desk_runtime import interactions
+
         monkeypatch.setattr(interactions, "_orch", orch)
         monkeypatch.setattr(interactions, "is_allowed_user", lambda uid: True)
 
@@ -131,6 +139,7 @@ class TestHandleOptionsSubmit:
     @pytest.mark.asyncio
     async def test_no_orch_returns_early(self, monkeypatch):
         from slack_desk_runtime import interactions
+
         monkeypatch.setattr(interactions, "_orch", None)
 
         payload = _make_payload(["A"], ["A", "B"])
@@ -140,6 +149,7 @@ class TestHandleOptionsSubmit:
     @pytest.mark.asyncio
     async def test_single_selection(self, orch, monkeypatch):
         from slack_desk_runtime import interactions
+
         monkeypatch.setattr(interactions, "_orch", orch)
         monkeypatch.setattr(interactions, "is_allowed_user", lambda uid: True)
 
@@ -153,6 +163,7 @@ class TestHandleOptionsSubmit:
     @pytest.mark.asyncio
     async def test_duplicate_choices_deduped(self, orch, monkeypatch):
         from slack_desk_runtime import interactions
+
         monkeypatch.setattr(interactions, "_orch", orch)
         monkeypatch.setattr(interactions, "is_allowed_user", lambda uid: True)
 
@@ -165,9 +176,7 @@ class TestHandleOptionsSubmit:
             blocks = call_args.kwargs["blocks"]
             # selected_blocks is the last block (replaces the OPTIONS actions block)
             selected_text = next(
-                b["elements"][0]["text"]
-                for b in blocks
-                if b.get("type") == "context"
+                b["elements"][0]["text"] for b in blocks if b.get("type") == "context"
             )
             # First A is bold, second A is strikethrough
             assert "*A*" in selected_text
@@ -178,12 +187,15 @@ class TestHandleOptionsSubmit:
         import asyncio as _aio
 
         from slack_desk_runtime import interactions
+
         monkeypatch.setattr(interactions, "_orch", orch)
         monkeypatch.setattr(interactions, "is_allowed_user", lambda uid: True)
         orch.slack_desk.update_message = AsyncMock(side_effect=Exception("API error"))
 
         payload = _make_payload(["A"], ["A", "B"])
-        with patch.object(interactions, "handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch.object(
+            interactions, "handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             await interactions._handle_options_submit(payload, "CH1", "msg1")
             await _aio.sleep(0)  # let create_task run
             # Should fall back: post_blocks called, delete_message called
@@ -196,13 +208,16 @@ class TestHandleOptionsSubmit:
     async def test_post_blocks_failure_aborts(self, orch, monkeypatch):
         """When update fails AND post_blocks fallback also returns None, abort."""
         from slack_desk_runtime import interactions
+
         monkeypatch.setattr(interactions, "_orch", orch)
         monkeypatch.setattr(interactions, "is_allowed_user", lambda uid: True)
         orch.slack_desk.update_message = AsyncMock(side_effect=Exception("API error"))
         orch.slack_desk.post_blocks = AsyncMock(return_value=None)
 
         payload = _make_payload(["A"], ["A", "B"])
-        with patch.object(interactions, "handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch.object(
+            interactions, "handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             await interactions._handle_options_submit(payload, "CH1", "msg1")
             mock_hm.assert_not_called()
 
@@ -212,6 +227,7 @@ class TestHandleOptionsSubmit:
         actions block is replaced; surrounding sections and footer context stay.
         """
         from slack_desk_runtime import interactions
+
         monkeypatch.setattr(interactions, "_orch", orch)
         monkeypatch.setattr(interactions, "is_allowed_user", lambda uid: True)
 
@@ -230,7 +246,12 @@ class TestHandleOptionsSubmit:
             "type": "context",
             "elements": [{"type": "mrkdwn", "text": "_cron: saved-triage_"}],
         }
-        payload["message"]["blocks"] = [section_top, section_mid, actions_block, ctx_footer]
+        payload["message"]["blocks"] = [
+            section_top,
+            section_mid,
+            actions_block,
+            ctx_footer,
+        ]
 
         with patch.object(interactions, "handle_message", new_callable=AsyncMock):
             await interactions._handle_options_submit(payload, "CH1", "msg1")
@@ -246,8 +267,7 @@ class TestHandleOptionsSubmit:
             assert actions_block not in new_blocks
             # Selected-options context block is inserted in its place
             assert any(
-                b.get("type") == "context"
-                and "*A*" in b["elements"][0].get("text", "")
+                b.get("type") == "context" and "*A*" in b["elements"][0].get("text", "")
                 for b in new_blocks
             )
 
@@ -258,6 +278,7 @@ class TestCheckboxDispatch:
     @pytest.mark.asyncio
     async def test_checkbox_toggle_is_noop(self, orch, monkeypatch):
         from slack_desk_runtime import interactions
+
         monkeypatch.setattr(interactions, "_orch", orch)
         monkeypatch.setattr(interactions, "is_allowed_user", lambda uid: True)
 
@@ -269,7 +290,9 @@ class TestCheckboxDispatch:
             "message": {"ts": "msg1", "thread_ts": "t1"},
             "actions": [{"action_id": OPTIONS_CHECKBOXES_ACTION, "type": "checkboxes"}],
         }
-        with patch.object(interactions, "_handle_options_submit", new_callable=AsyncMock) as mock_sub:
+        with patch.object(
+            interactions, "_handle_options_submit", new_callable=AsyncMock
+        ) as mock_sub:
             await interactions.dispatch(payload)
             mock_sub.assert_not_called()
 
@@ -297,7 +320,9 @@ class TestImportThreadToSession:
         ds._self_bot_id = "B1"
 
         with patch("gideon.sdk.channel.save_session_to_history"):
-            result = await interactions._import_thread_to_session(slack_desk, ds, "C1", "100.0")
+            result = await interactions._import_thread_to_session(
+                slack_desk, ds, "C1", "100.0"
+            )
 
         assert result is session
         assert session.append.call_count == 2
@@ -313,7 +338,9 @@ class TestImportThreadToSession:
         ds = MagicMock()
         ds.get_linked_session = MagicMock(return_value=None)
 
-        result = await interactions._import_thread_to_session(slack_desk, ds, "C1", "100.0")
+        result = await interactions._import_thread_to_session(
+            slack_desk, ds, "C1", "100.0"
+        )
         assert result is None
         ds.get_or_create_session.assert_not_called()
 
@@ -379,6 +406,8 @@ class TestOptionsSubmitDispatch:
         payload["channel"] = {"id": "CH1"}
         payload["actions"] = [{"action_id": OPTIONS_SUBMIT_ACTION, "type": "button"}]
 
-        with patch.object(interactions, "_handle_options_submit", new_callable=AsyncMock) as mock_sub:
+        with patch.object(
+            interactions, "_handle_options_submit", new_callable=AsyncMock
+        ) as mock_sub:
             await interactions.dispatch(payload)
             mock_sub.assert_called_once()

@@ -78,7 +78,12 @@ async def api_feedback_record(request: web.Request) -> web.Response:
         )
     if target_kind == "chat_message":
         return web.json_response(
-            {"error": {"code": "bad_request", "message": "use the session feedback route"}},
+            {
+                "error": {
+                    "code": "bad_request",
+                    "message": "use the session feedback route",
+                }
+            },
             status=400,
         )
     if not target_id:
@@ -107,7 +112,13 @@ async def api_feedback_record(request: web.Request) -> web.Response:
             "app_judgment" if target_kind not in fb.TARGET_KINDS else target_kind
         )
 
-    from gideon.integrations.inbox import FEEDBACK_TARGETS, InboxStore, judgment_producers, owner_username
+    from gideon.integrations.inbox import (
+        FEEDBACK_TARGETS,
+        InboxStore,
+        judgment_producers,
+        owner_username,
+    )
+
     if not source_app and target_kind in FEEDBACK_TARGETS:
         state = request.app.get("state")
         service = getattr(state, "_inbox_svc", None)
@@ -118,10 +129,28 @@ async def api_feedback_record(request: web.Request) -> web.Response:
             inbox.load()
         found = inbox.items.get(target_id)
         if found is None or not found.belongs_to(owner_username()):
-            return web.json_response({"error": {"code": "not_found", "message": "No Inbox item has that id."}}, status=404)
-        producer = judgment_producers(found.to_dict()).get(FEEDBACK_TARGETS[target_kind])
+            return web.json_response(
+                {
+                    "error": {
+                        "code": "not_found",
+                        "message": "No Inbox item has that id.",
+                    }
+                },
+                status=404,
+            )
+        producer = judgment_producers(found.to_dict()).get(
+            FEEDBACK_TARGETS[target_kind]
+        )
         if producer is None:
-            return web.json_response({"error": {"code": "feedback_no_judgment", "message": "No prompt made this Inbox judgment."}}, status=409)
+            return web.json_response(
+                {
+                    "error": {
+                        "code": "feedback_no_judgment",
+                        "message": "No prompt made this Inbox judgment.",
+                    }
+                },
+                status=409,
+            )
         producer_kind, producer_id = producer["producer_kind"], producer["producer_id"]
 
     snapshot = body.get("snapshot")
@@ -194,7 +223,8 @@ def _chat_feedback_target(request: web.Request) -> tuple[str, _ChatSession] | No
         m for m in messages if m.get("role") in ("user", "assistant", "streaming")
     ]
     if visible_index >= len(visible) or visible[visible_index].get("role") not in (
-        "assistant", "streaming"
+        "assistant",
+        "streaming",
     ):
         return None
     owner = state.owner_id or "local"
@@ -212,14 +242,19 @@ async def api_chat_message_feedback(request: web.Request) -> web.Response:
     if request.method == "GET":
         rec = fb.current_verdict("chat_message", target_id)
         return web.json_response(
-            {"verdict": rec.verdict if rec else None, "reason": rec.reason if rec else ""}
+            {
+                "verdict": rec.verdict if rec else None,
+                "reason": rec.reason if rec else "",
+            }
         )
     try:
         body = await read_json_body(request)
     except Exception:
         body = None
     if not isinstance(body, dict) or body.get("verdict") not in ("up", "down"):
-        return web.json_response({"error": "verdict must be 'up' or 'down'"}, status=400)
+        return web.json_response(
+            {"error": "verdict must be 'up' or 'down'"}, status=400
+        )
     rec = fb.record_feedback(
         target_kind="chat_message",
         target_id=target_id,
@@ -229,7 +264,9 @@ async def api_chat_message_feedback(request: web.Request) -> web.Response:
         state=request.app["state"],
     )
     if rec is None:
-        return web.json_response({"error": "feedback could not be recorded"}, status=500)
+        return web.json_response(
+            {"error": "feedback could not be recorded"}, status=500
+        )
     return web.json_response({"ok": True, "id": rec.id, "verdict": rec.verdict})
 
 

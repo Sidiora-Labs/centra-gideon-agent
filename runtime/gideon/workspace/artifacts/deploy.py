@@ -37,11 +37,11 @@ and the provider's directory-only ``list`` ignores it (same bargain as
 from __future__ import annotations
 
 import hmac
-import re
-import secrets
 import json
 import logging
 import mimetypes
+import re
+import secrets
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -70,13 +70,22 @@ SERVE_URL_PREFIX = "/artifacts/serve"
 
 CAPABILITY_BYTES = 32
 _CAPABILITY = re.compile(r"[A-Za-z0-9_-]{43}")
-SERVED_PATH = re.compile(rf"{SERVE_URL_PREFIX}/[a-z0-9-]{{1,80}}/{_CAPABILITY.pattern}(?:/.*)?")
+SERVED_PATH = re.compile(
+    rf"{SERVE_URL_PREFIX}/[a-z0-9-]{{1,80}}/{_CAPABILITY.pattern}(?:/.*)?"
+)
+
 
 def redacted_serve_path(path: str) -> str:
     """Remove deployment capabilities from diagnostic paths."""
     if path.startswith(SERVE_URL_PREFIX + "/"):
-        return SERVE_URL_PREFIX + "/" + path[len(SERVE_URL_PREFIX) + 1:].split("/", 1)[0] + "/[redacted]"
+        return (
+            SERVE_URL_PREFIX
+            + "/"
+            + path[len(SERVE_URL_PREFIX) + 1 :].split("/", 1)[0]
+            + "/[redacted]"
+        )
     return path
+
 
 DEFAULT_ENTRY = "index.html"
 
@@ -103,15 +112,39 @@ ARTIFACT_SERVE_CSP = (
 SERVE_HEADERS: dict[str, str] = {
     "Content-Security-Policy": ARTIFACT_SERVE_CSP,
     "Cross-Origin-Opener-Policy": "same-origin",
-    "Permissions-Policy": ", ".join(f"{feature}=()" for feature in (
-        "camera", "microphone", "geolocation", "clipboard-read", "clipboard-write",
-        "display-capture", "fullscreen", "payment", "usb", "serial", "hid",
-        "storage-access", "publickey-credentials-get", "publickey-credentials-create",
-        "accelerometer", "gyroscope", "magnetometer", "midi", "bluetooth",
-        "browsing-topics", "gamepad", "identity-credentials-get", "idle-detection",
-        "local-fonts", "otp-credentials", "screen-wake-lock", "window-management",
-        "xr-spatial-tracking",
-    )),
+    "Permissions-Policy": ", ".join(
+        f"{feature}=()"
+        for feature in (
+            "camera",
+            "microphone",
+            "geolocation",
+            "clipboard-read",
+            "clipboard-write",
+            "display-capture",
+            "fullscreen",
+            "payment",
+            "usb",
+            "serial",
+            "hid",
+            "storage-access",
+            "publickey-credentials-get",
+            "publickey-credentials-create",
+            "accelerometer",
+            "gyroscope",
+            "magnetometer",
+            "midi",
+            "bluetooth",
+            "browsing-topics",
+            "gamepad",
+            "identity-credentials-get",
+            "idle-detection",
+            "local-fonts",
+            "otp-credentials",
+            "screen-wake-lock",
+            "window-management",
+            "xr-spatial-tracking",
+        )
+    ),
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
@@ -119,6 +152,7 @@ SERVE_HEADERS: dict[str, str] = {
 
 
 SERVED_FILE_HEADERS = {**SERVE_HEADERS, "Access-Control-Allow-Origin": "*"}
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -138,10 +172,17 @@ class ArtifactDeployment:
         return f"{SERVE_URL_PREFIX}/{self.slug}/{self.capability}/"
 
     def admits(self, capability: str) -> bool:
-        return bool(self.capability) and hmac.compare_digest(self.capability.encode(), capability.encode())
+        return bool(self.capability) and hmac.compare_digest(
+            self.capability.encode(), capability.encode()
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        return {"slug": self.slug, "entry": self.entry, "created_at": self.created_at, "capability": self.capability}
+        return {
+            "slug": self.slug,
+            "entry": self.entry,
+            "created_at": self.created_at,
+            "capability": self.capability,
+        }
 
     def to_public(self) -> dict[str, Any]:
         return {
@@ -206,7 +247,11 @@ class ArtifactDeployStore:
             if not isinstance(entry, dict):
                 continue
             dep = ArtifactDeployment.from_dict(entry)
-            if dep.slug and is_valid_slug(dep.slug) and _CAPABILITY.fullmatch(dep.capability):
+            if (
+                dep.slug
+                and is_valid_slug(dep.slug)
+                and _CAPABILITY.fullmatch(dep.capability)
+            ):
                 out.append(dep)
         return out
 
@@ -258,7 +303,12 @@ class ArtifactDeployStore:
                 return existing
             if len(deployments) >= MAX_DEPLOYMENTS:
                 raise ValueError(f"too many deployed artifacts (max {MAX_DEPLOYMENTS})")
-            dep = ArtifactDeployment(slug=slug, entry=clean_entry, created_at=_now(), capability=secrets.token_urlsafe(CAPABILITY_BYTES))
+            dep = ArtifactDeployment(
+                slug=slug,
+                entry=clean_entry,
+                created_at=_now(),
+                capability=secrets.token_urlsafe(CAPABILITY_BYTES),
+            )
             deployments.append(dep)
             self._save(deployments)
             return dep

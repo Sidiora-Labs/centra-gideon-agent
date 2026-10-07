@@ -10,13 +10,13 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from gideon.core.token_estimate import NOMINAL_CHARS_PER_TOKEN
 from gideon.engine.agents.native.tool_vectors import (
     bound_embedder,
     default_path,
     tool_text,
     tool_vectors,
 )
-from gideon.core.token_estimate import NOMINAL_CHARS_PER_TOKEN
 
 logger = logging.getLogger(__name__)
 DEFAULT_K = 48
@@ -29,7 +29,10 @@ _STRUCTURAL_HINTS = (
         r"\bschedul|\bremind|\bcron\b|\bdaily\b|\bweekly\b|\bmonthly\b|\bhourly\b|\bevery\s+(day|week|weekday|hour|minute|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b(message|text|ping|notify)\s+me\b",
         ("schedule", "cron", "trigger", "onetime", "recurring", "automation_create"),
     ),
-    (r"\bwhen(ever)?\b[^.?!\n]{0,80}\b(lands?|arrives?|appears?|changes?|fails?|completes?)\b|\bautomat(e|es|ed|ion|ions|ically)\b", ("automation_create",)),
+    (
+        r"\bwhen(ever)?\b[^.?!\n]{0,80}\b(lands?|arrives?|appears?|changes?|fails?|completes?)\b|\bautomat(e|es|ed|ion|ions|ically)\b",
+        ("automation_create",),
+    ),
     (
         r"/|\.py\b|\.ts\b|\.md\b|\bfile\b|\bdirectory\b|\bfolder\b",
         (),
@@ -195,7 +198,9 @@ class ToolRetriever:
             name: tool_text(name, getattr(item, "description", "") or "")
             for name, item in self._by_name.items()
         }
-        self._chars = {name: _schema_chars(item) for name, item in self._by_name.items()}
+        self._chars = {
+            name: _schema_chars(item) for name, item in self._by_name.items()
+        }
 
     def warm(self) -> None:
         """Queue missing tool vectors on the index's background worker."""
@@ -248,7 +253,9 @@ class ToolRetriever:
     def _query_scores(self, text: str, names: set[str]) -> _QueryScores:
         return _QueryScores(text, self._semantic(text, names))
 
-    def _rank(self, query: _QueryScores, names, *, selection: bool) -> list[tuple[float, str]]:
+    def _rank(
+        self, query: _QueryScores, names, *, selection: bool
+    ) -> list[tuple[float, str]]:
         ranked = []
         for name in names:
             score = query.score(
@@ -292,9 +299,10 @@ class ToolRetriever:
         pool = self._pool(restrict)
         pool_names = {getattr(item, "name", "") for item in pool}
         total = len(pool)
-        within_budget = budget_chars is None or sum(
-            self._chars.get(name, 0) for name in pool_names
-        ) <= budget_chars
+        within_budget = (
+            budget_chars is None
+            or sum(self._chars.get(name, 0) for name in pool_names) <= budget_chars
+        )
         if total <= self._k and within_budget:
             self._carried = self._structural((query or "").strip())
             return pool

@@ -7,9 +7,7 @@ def hypermid_source(note, *, scope, observed_at_ms=None):
     """Convert an already-rendered vault note through Hypermid's source contract."""
     from gideon.hypermid.sources import source_record_from_note
 
-    return source_record_from_note(
-        note, scope=scope, observed_at_ms=observed_at_ms
-    )
+    return source_record_from_note(note, scope=scope, observed_at_ms=observed_at_ms)
 
 
 def contract():

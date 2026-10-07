@@ -34,7 +34,9 @@ PATH_ENV = "GIDEON_APP_PYTHON_PATH"
 
 def main(argv: list[str]) -> int:
     if not argv:
-        sys.stderr.write("usage: python -m gideon._app_python_child <script.py> [args...]\n")
+        sys.stderr.write(
+            "usage: python -m gideon._app_python_child <script.py> [args...]\n"
+        )
         return 2
     for directory in os.environ.get(PATH_ENV, "").split(os.pathsep):
         if directory:

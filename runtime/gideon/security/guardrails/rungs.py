@@ -53,13 +53,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from gideon.security.guardrails.autonomy import (
-    action_type,
     RUNG_AUTO_WITH_UNDO,
     RUNG_AUTONOMOUS,
     RUNG_DRAFT_ONLY,
     RUNG_ONE_TAP,
     RUNGS,
     ActionTypeSpec,
+    action_type,
     action_type_for_provider,
     register_action_type,
     resolve_rung,
@@ -388,7 +388,9 @@ def route_action_type(key: str, *, session_key: str = "") -> RungRoute:
 
     rung = resolve_rung(key)
     profile = profile_for_session(session_key)
-    ceiling = rung_ceiling_for_profile(profile, unattended=is_unattended_session(session_key))
+    ceiling = rung_ceiling_for_profile(
+        profile, unattended=is_unattended_session(session_key)
+    )
     # Asked only when the undo rung is in play: the composed rung is one of these two.
     undoable = RUNG_AUTO_WITH_UNDO not in (rung, ceiling) or can_be_undone(key)
     if ceiling == RUNG_AUTO_WITH_UNDO and not undoable:
@@ -525,7 +527,9 @@ def _did_nothing(route: RungRoute, result: Any) -> bool:
     return not (spec is not None and spec.runs_code)
 
 
-def record_execution(route: RungRoute, result: Any, *, label: str, refs: dict | None = None) -> str:
+def record_execution(
+    route: RungRoute, result: Any, *, label: str, refs: dict | None = None
+) -> str:
     """Record one governed action that ran, and keep the undo its rung promises.
 
     Called by both dispatch seams for every action that SUCCEEDED, whatever rung it ran at, so
@@ -560,17 +564,22 @@ def record_execution(route: RungRoute, result: Any, *, label: str, refs: dict | 
     """
     from gideon.automation.triggers.executor import classify
     from gideon.automation.triggers.models import Outcome
+
     reported = str(getattr(result, "outcome", "") or "")
     outcome, _ = classify(reported)
     definite = outcome in {Outcome.RAN.value, Outcome.SKIPPED_NOOP.value}
-    if (getattr(result, "success", False) is not True
-            or getattr(result, "blocked", False)
-            or getattr(result, "exit_code", 0) not in (0, None)
-            or not definite):
+    if (
+        getattr(result, "success", False) is not True
+        or getattr(result, "blocked", False)
+        or getattr(result, "exit_code", 0) not in (0, None)
+        or not definite
+    ):
         return ""
     if not route.governed or not route.executes or _did_nothing(route, result):
         return ""
-    handle = str(getattr(result, "reversal", "") or "") if route.records_reversal else ""
+    handle = (
+        str(getattr(result, "reversal", "") or "") if route.records_reversal else ""
+    )
     record_id = ""
     if handle:
         try:
@@ -580,7 +589,9 @@ def record_execution(route: RungRoute, result: Any, *, label: str, refs: dict | 
                 action_type=route.key, rung=route.rung, handle=handle, label=label
             )
         except Exception:  # noqa: BLE001
-            logger.warning("could not record a reversal handle for %s", route.key, exc_info=True)
+            logger.warning(
+                "could not record a reversal handle for %s", route.key, exc_info=True
+            )
     ran_at = route.rung
     if route.records_reversal and not record_id:
         ran_at = RUNG_AUTONOMOUS
@@ -606,8 +617,8 @@ def record_execution(route: RungRoute, result: Any, *, label: str, refs: dict | 
     # the no-handle case, applied one level down to a handle the store could not accept. Its
     # words never borrow another rung's label: "ran on its own" is what `autonomous` is called.
     try:
-        from gideon.workspace import notification_kinds
         from gideon.integrations.action_providers.services import get_action_services
+        from gideon.workspace import notification_kinds
 
         services = get_action_services()
         state = getattr(services, "state", None) if services is not None else None
@@ -633,6 +644,8 @@ def record_execution(route: RungRoute, result: Any, *, label: str, refs: dict | 
     return handle if record_id else ""
 
 
-def record_reversal(route: RungRoute, result: Any, *, label: str, refs: dict | None = None) -> str:
+def record_reversal(
+    route: RungRoute, result: Any, *, label: str, refs: dict | None = None
+) -> str:
     """Compatibility entry point using the same definitive execution and undo contract."""
     return record_execution(route, result, label=label, refs=refs)

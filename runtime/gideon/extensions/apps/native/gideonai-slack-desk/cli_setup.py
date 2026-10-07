@@ -80,7 +80,9 @@ def _setup_slash_command(ctx: SetupContext) -> None:
     if not raw:
         raw = current
     if not all(c.isalnum() or c in "-_" for c in raw):
-        ctx.print("  ⚠️  Command name should only contain letters, numbers, hyphens, or underscores.")
+        ctx.print(
+            "  ⚠️  Command name should only contain letters, numbers, hyphens, or underscores."
+        )
         raw = current
     if len(raw) > 32:
         ctx.print("  ⚠️  Command name too long (max 32 chars).")

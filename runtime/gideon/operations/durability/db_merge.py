@@ -31,8 +31,8 @@ from pathlib import Path
 
 from gideon.operations.durability import inventory as inv
 from gideon.operations.durability.cursor import CONSUMED, PAYLOAD_BAD, PREREQ_ABSENT
-from gideon.operations.durability.pull_engine import DbMerger
 from gideon.operations.durability.home_paths import LinkInTheWay
+from gideon.operations.durability.pull_engine import DbMerger
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +78,8 @@ def _apply_db_merge(entry_id: str, src: Path, dst: Path) -> None:
     onto a fresh machine); otherwise the merge functions ATTACH and INSERT OR IGNORE, so the
     live machine's own rows are never overwritten and — for memory.db — deletions survive.
     """
-    from gideon.workspace import snapshot
-
     from gideon.operations.durability.home_paths import guard_path
+    from gideon.workspace import snapshot
 
     src, dst = guard_path(src, read=True), guard_path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)

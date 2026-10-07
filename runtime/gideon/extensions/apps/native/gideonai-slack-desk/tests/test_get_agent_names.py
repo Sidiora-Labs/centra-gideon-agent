@@ -3,7 +3,6 @@
 import json
 
 import pytest
-
 from slack_desk_runtime.events import _get_agent_names
 
 

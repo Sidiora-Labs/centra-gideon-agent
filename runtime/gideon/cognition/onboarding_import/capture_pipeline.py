@@ -153,7 +153,11 @@ class SourceCapture:
                     key=filename,
                     title=f"{self.api.DISPLAY_NAME} settings",
                     payload=content,
-                    secrets_skipped=getattr(content, "withheld_count", 0) if withheld is None else withheld,
+                    secrets_skipped=(
+                        getattr(content, "withheld_count", 0)
+                        if withheld is None
+                        else withheld
+                    ),
                 )
             )
 
@@ -164,7 +168,11 @@ class SourceCapture:
         eligible = sorted(path for path in directory.iterdir() if path.is_dir())
         for skill in eligible:
             if (skill / "SKILL.md").is_file():
-                skipped = sum(1 for path in skill.rglob("*") if path.is_file() and self.api.refuses(path))
+                skipped = sum(
+                    1
+                    for path in skill.rglob("*")
+                    if path.is_file() and self.api.refuses(path)
+                )
                 self.result.secrets_skipped += skipped
                 self.result.items.append(
                     self.api.ImportItem(

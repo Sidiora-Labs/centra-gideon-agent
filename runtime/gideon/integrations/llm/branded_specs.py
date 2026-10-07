@@ -91,7 +91,11 @@ def build_protocol_provider(
     limit = spec.max_tokens
     if anthropic and limit is None:
         limit = 4096
-    if isinstance(max_tokens, int) and not isinstance(max_tokens, bool) and max_tokens > 0:
+    if (
+        isinstance(max_tokens, int)
+        and not isinstance(max_tokens, bool)
+        and max_tokens > 0
+    ):
         limit = max_tokens if limit is None else min(limit, max_tokens)
     return constructor(
         **{

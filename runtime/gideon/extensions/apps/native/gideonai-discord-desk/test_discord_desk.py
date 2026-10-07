@@ -4,7 +4,6 @@ Loads the transport from this bundle's own ``discord_desk`` package (app dir on
 sys.path) — the whole Discord integration lives in the bundle, importing core only
 through ``gideon.sdk.*``."""
 
-
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +17,6 @@ _APP_DIR = Path(__file__).resolve().parent
 if str(_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_APP_DIR))
 
-from discord_desk_setup import INVITE_PERMISSIONS, invite_url  # noqa: E402
 from discord_desk.gateway import INTENTS  # noqa: E402
 from discord_desk.settings import (  # noqa: E402
     CRED_BOT_TOKEN,
@@ -26,6 +24,7 @@ from discord_desk.settings import (  # noqa: E402
     _validate_activation,
 )
 from discord_desk.transport import DiscordDeskTransport, create_provider  # noqa: E402
+from discord_desk_setup import INVITE_PERMISSIONS, invite_url  # noqa: E402
 
 
 def test_discord_desk_capabilities():
@@ -43,7 +42,9 @@ def test_connected_derives_from_shared_creds(monkeypatch):
     propagates into the environment) must report ready even when THIS instance's
     config carries no token — otherwise the Channels surface lies 'offline'."""
     monkeypatch.setenv(CRED_BOT_TOKEN, "shared.token.value")
-    t = DiscordDeskTransport({})  # empty instance config — token only in the environment
+    t = DiscordDeskTransport(
+        {}
+    )  # empty instance config — token only in the environment
     assert t.connected is True
     assert asyncio.run(t.health())["state"] == "ready"
 

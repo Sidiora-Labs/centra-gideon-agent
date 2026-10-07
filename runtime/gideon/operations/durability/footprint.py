@@ -32,11 +32,15 @@ class ReclaimResult:
 
     @property
     def per_store_freed(self) -> dict[str, int]:
-        return {key: -delta for key, delta in self.per_store_net_change.items() if delta < 0}
+        return {
+            key: -delta for key, delta in self.per_store_net_change.items() if delta < 0
+        }
 
     @property
     def per_store_growth(self) -> dict[str, int]:
-        return {key: delta for key, delta in self.per_store_net_change.items() if delta > 0}
+        return {
+            key: delta for key, delta in self.per_store_net_change.items() if delta > 0
+        }
 
     def to_dict(self) -> dict:
         return {
@@ -54,14 +58,18 @@ class ReclaimResult:
 
     def describe(self) -> str:
         if self.freed_bytes:
-            text = f"Reclaimed {self.freed_bytes} bytes across {self.stores} database(s)."
+            text = (
+                f"Reclaimed {self.freed_bytes} bytes across {self.stores} database(s)."
+            )
         elif self.growth_bytes:
             text = (
                 f"No net space reclaimed: measured footprint grew {self.growth_bytes} "
                 f"bytes while compacting {self.stores} database(s)."
             )
         elif self.per_store_net_change:
-            text = f"No net footprint change after compacting {self.stores} database(s)."
+            text = (
+                f"No net footprint change after compacting {self.stores} database(s)."
+            )
         else:
             text = f"No footprint change across {self.stores} database(s)."
         if self.skipped:
@@ -86,7 +94,10 @@ def _safe_path(home: Path, relative: str) -> Path:
 
 def _store_bytes(path: Path) -> int:
     total = 0
-    for candidate in (path, *(Path(str(path) + ext) for ext in ("-wal", "-shm", "-journal"))):
+    for candidate in (
+        path,
+        *(Path(str(path) + ext) for ext in ("-wal", "-shm", "-journal")),
+    ):
         try:
             total += candidate.stat().st_size
         except FileNotFoundError:
@@ -95,8 +106,9 @@ def _store_bytes(path: Path) -> int:
 
 
 def reclaim_store(path: Path) -> None:
-    connection = sqlite3.connect(path.as_uri() + "?mode=rw", uri=True,
-                                 timeout=0.1, isolation_level=None)
+    connection = sqlite3.connect(
+        path.as_uri() + "?mode=rw", uri=True, timeout=0.1, isolation_level=None
+    )
     try:
         tables = connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' "
@@ -131,8 +143,10 @@ def reclaim(home: Path) -> ReclaimResult:
             continue
         except sqlite3.Error as exc:
             result.skipped[entry.id] = (
-                "database is busy" if getattr(exc, "sqlite_errorcode", 0) in
-                (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) else "database compaction failed"
+                "database is busy"
+                if getattr(exc, "sqlite_errorcode", 0)
+                in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+                else "database compaction failed"
             )
             continue
         except OSError:
@@ -169,7 +183,9 @@ def footprint_cmd(args) -> int:
         except (OSError, ValueError):
             continue
     if args.json:
-        print(json.dumps({"total_bytes": sum(sizes.values()), "per_store_bytes": sizes}))
+        print(
+            json.dumps({"total_bytes": sum(sizes.values()), "per_store_bytes": sizes})
+        )
     else:
         print(f"Declared databases occupy {sum(sizes.values())} bytes.")
         for key, size in sorted(sizes.items(), key=lambda row: (-row[1], row[0])):

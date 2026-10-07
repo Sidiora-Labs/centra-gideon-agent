@@ -10,10 +10,10 @@ owner id, with a pointer to the Channels-page Test action for the live
 same division as Telegram's).
 """
 
+from discord_desk.settings import CRED_BOT_TOKEN
+
 from gideon.sdk.channel import CRED_OWNER_ID, AppConfig, ProviderSettings
 from gideon.sdk.cli import DoctorLine
-
-from discord_desk.settings import CRED_BOT_TOKEN
 
 _APP = "gideonai-discord-desk"
 
@@ -23,7 +23,8 @@ def probe() -> list[DoctorLine]:
     if not creds.get(CRED_BOT_TOKEN):
         return [
             DoctorLine(
-                "status", "info",
+                "status",
+                "info",
                 "not configured (dashboard-only mode) — run 'gideon setup' to add a bot token",
             )
         ]
@@ -36,7 +37,9 @@ def probe() -> list[DoctorLine]:
         # Not fatal: the runtime never needs it (interactions carry their own token).
         # It only costs the setup step's invite URL, so warn rather than fail.
         lines.append(
-            DoctorLine("application id", "warn", "not set — no bot invite URL can be printed")
+            DoctorLine(
+                "application id", "warn", "not set — no bot invite URL can be printed"
+            )
         )
 
     owner = creds.get(CRED_OWNER_ID)
@@ -47,13 +50,15 @@ def probe() -> list[DoctorLine]:
 
     lines.append(
         DoctorLine(
-            "gateway", "info",
+            "gateway",
+            "info",
             "use the Channels page → Discord → Test for the live gateway hello probe",
         )
     )
     lines.append(
         DoctorLine(
-            "intent", "info",
+            "intent",
+            "info",
             "the MESSAGE CONTENT privileged intent must be enabled in the Developer "
             "Portal or inbound messages arrive with empty content",
         )

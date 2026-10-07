@@ -215,7 +215,12 @@ def create_client(
         expires_at=expires_at,
     )
     client.expires_at = token_lifetimes.record_client(
-        client.token_hash, client.client_id, client.label, client.surfaces, ttl, now=time.time()
+        client.token_hash,
+        client.client_id,
+        client.label,
+        client.surfaces,
+        ttl,
+        now=time.time(),
     )
     clients = load_clients()
     clients[client.client_id] = client
@@ -289,7 +294,6 @@ def set_persistent_sessions(
         f"by {actor}; its conversations start over (round {client.conversation_round})",
     )
     return client
-
 
 
 def lookup_by_token(token: str, surface: str) -> tuple[InboundClient | None, str]:

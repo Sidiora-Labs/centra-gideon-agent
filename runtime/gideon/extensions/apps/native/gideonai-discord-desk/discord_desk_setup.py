@@ -15,14 +15,14 @@ a bot with a valid token that was never invited, or invited without Send Message
 looks identical to a broken token from the dashboard.
 """
 
-from gideon.sdk.channel import owner_id_credential, owner_id_for
-from gideon.sdk.cli import SetupContext
-
 from discord_desk.settings import (
+    _VALID_ACTIVATIONS,
     ACTIVATION_ALWAYS,
     CRED_BOT_TOKEN,
-    _VALID_ACTIVATIONS,
 )
+
+from gideon.sdk.channel import owner_id_credential, owner_id_for
+from gideon.sdk.cli import SetupContext
 
 _APP = "gideonai-discord-desk"
 

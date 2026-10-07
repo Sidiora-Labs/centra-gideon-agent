@@ -42,12 +42,15 @@ class ConsolidationPolicyDenied(PermissionError):
 
 def retryable_extraction(error):
     import httpx
+
     from gideon.security.guardrails.failure import FailureMode, GuardError
 
     if isinstance(error, GuardError):
         return error.mode in {
-            FailureMode.PROVIDER_ERROR, FailureMode.TIMEOUT,
-            FailureMode.FIRST_TOKEN_TIMEOUT, FailureMode.CIRCUIT_OPEN,
+            FailureMode.PROVIDER_ERROR,
+            FailureMode.TIMEOUT,
+            FailureMode.FIRST_TOKEN_TIMEOUT,
+            FailureMode.CIRCUIT_OPEN,
         }
     return isinstance(error, (httpx.HTTPError, TimeoutError, ConnectionError, OSError))
 
@@ -110,7 +113,9 @@ class ConsolidationTasks:
             async with self.concurrent:
                 self.inflight.add(key)
                 try:
-                    return await owner._consolidate(key, include_history=include_history)
+                    return await owner._consolidate(
+                        key, include_history=include_history
+                    )
                 finally:
                     self.inflight.discard(key)
                     owner._running.discard(key)
@@ -136,7 +141,10 @@ class ConsolidationTasks:
                 if include_history:
                     owner._seal_if_complete(key)
                 current_count = len(owner._log._read_messages(key))
-                if current_count > initial_count and owner._log.unconsolidated_count(key) >= 1:
+                if (
+                    current_count > initial_count
+                    and owner._log.unconsolidated_count(key) >= 1
+                ):
                     self.start(key, include_history, destination, current_count)
 
         task.add_done_callback(settled)
@@ -158,9 +166,11 @@ class ConsolidationTasks:
             _, unfinished = await asyncio.wait(tasks, timeout=max(0.0, timeout))
         else:
             unfinished = set()
-        outcome = {"queued": len(self.tasks - self.inflight_tasks()),
-                   "in_flight": len(unfinished & self.inflight_tasks()),
-                   "deferred": len(self.deferred)}
+        outcome = {
+            "queued": len(self.tasks - self.inflight_tasks()),
+            "in_flight": len(unfinished & self.inflight_tasks()),
+            "deferred": len(self.deferred),
+        }
         for task in unfinished:
             task.cancel()
         if unfinished:
@@ -174,12 +184,20 @@ class ConsolidationTasks:
         return outcome
 
     def inflight_tasks(self):
-        return {task for task in self.tasks if task.get_name().removeprefix("memory-extract:") in self.inflight}
+        return {
+            task
+            for task in self.tasks
+            if task.get_name().removeprefix("memory-extract:") in self.inflight
+        }
 
     def idle(self, now):
         owner = self.owner
         for key, debt in list(self.debt.items()):
-            if debt["due"] is not None and debt["due"] <= time.monotonic() and key not in owner._running:
+            if (
+                debt["due"] is not None
+                and debt["due"] <= time.monotonic()
+                and key not in owner._running
+            ):
                 yield key
         for key, latest in list(owner._last_activity.items()):
             if key in self.debt or key in self.denied:
@@ -197,6 +215,7 @@ class ConsolidationTasks:
 def consolidation_problem(text):
     """Check the fields the native extraction consumers actually read."""
     import math
+
     from gideon.integrations.llm_helpers import parse_llm_json
 
     result = parse_llm_json(text)
@@ -220,16 +239,28 @@ def consolidation_problem(text):
                 continue
             if not isinstance(row, dict):
                 return field + " must contain objects"
-            required = {"semantic": "key", "episodic": "text", "lessons": "rule", "commitments": "text"}[field]
+            required = {
+                "semantic": "key",
+                "episodic": "text",
+                "lessons": "rule",
+                "commitments": "text",
+            }[field]
             if not isinstance(row.get(required), str) or not row[required].strip():
                 return field + " requires " + required
             if field == "semantic" and "value" not in row and not row.get("delete"):
                 return "semantic requires a value or deletion"
             for numeric in {"confidence", "importance", "weight"}.intersection(row):
                 value = row[numeric]
-                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                ):
                     return numeric + " must be finite numeric data"
-            if "tags" in row and (not isinstance(row["tags"], list) or any(not isinstance(tag, str) for tag in row["tags"])):
+            if "tags" in row and (
+                not isinstance(row["tags"], list)
+                or any(not isinstance(tag, str) for tag in row["tags"])
+            ):
                 return "tags must contain text"
             if "due_window" in row and not isinstance(row["due_window"], str):
                 return "due_window must be text"
@@ -247,14 +278,27 @@ def formation_problem(text, candidates):
     decisions = memory_formation.parse_decisions(result, candidates)
     rows = result.get("verdicts") if isinstance(result, dict) else None
     expected = {candidate.index for candidate in candidates}
-    if not isinstance(rows, list) or len(rows) != len(expected) or set(decisions) != expected:
+    if (
+        not isinstance(rows, list)
+        or len(rows) != len(expected)
+        or set(decisions) != expected
+    ):
         return "exactly one valid verdict for every candidate"
-    if any(not isinstance(row, dict) or isinstance(row.get("index"), bool) or not isinstance(row.get("index"), int) for row in rows):
+    if any(
+        not isinstance(row, dict)
+        or isinstance(row.get("index"), bool)
+        or not isinstance(row.get("index"), int)
+        for row in rows
+    ):
         return "integer candidate indices"
     for candidate in candidates:
         decision = decisions[candidate.index]
         admitted = memory_formation.adjudicate(candidate, decision)
-        if decision.verdict in {memory_formation.VERDICT_UPDATE, memory_formation.VERDICT_SUPERSEDE} and admitted.verdict == memory_formation.VERDICT_ADD:
+        if (
+            decision.verdict
+            in {memory_formation.VERDICT_UPDATE, memory_formation.VERDICT_SUPERSEDE}
+            and admitted.verdict == memory_formation.VERDICT_ADD
+        ):
             return "an existing target for update or supersede"
     return ""
 
@@ -375,7 +419,9 @@ class ConsolidationRound:
         self.owner._admit_consolidation(self.key)
         if not self.load():
             return True
-        result = await self.owner._call_llm(self.render(), validate=consolidation_problem)
+        result = await self.owner._call_llm(
+            self.render(), validate=consolidation_problem
+        )
         if not isinstance(result, dict) or not result:
             raise ConsolidationUnavailable("model returned no extraction object")
         self.owner._admit_consolidation(self.key)
@@ -565,7 +611,9 @@ class SemanticFormationBatch:
         prompt = memory_formation.build_decide_prompt(candidates)
         if not prompt:
             raise ConsolidationUnavailable("memory decision prompt unavailable")
-        answer = await owner._call_llm(prompt, validate=lambda text: formation_problem(text, candidates))
+        answer = await owner._call_llm(
+            prompt, validate=lambda text: formation_problem(text, candidates)
+        )
         verdicts = memory_formation.parse_decisions(answer, candidates)
         if any(candidate.index not in verdicts for candidate in candidates):
             raise ConsolidationUnavailable("model omitted memory formation decisions")
@@ -578,7 +626,9 @@ class SemanticFormationBatch:
             holder_attribution=owner._holder_attribution,
         )
         if report.rejected:
-            raise ConsolidationUnavailable("memory formation rejected extracted records")
+            raise ConsolidationUnavailable(
+                "memory formation rejected extracted records"
+            )
         logger.info("Memory formation for %s: %s", self.key, report.summary())
 
 

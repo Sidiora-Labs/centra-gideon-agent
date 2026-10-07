@@ -11,9 +11,9 @@ from gideon.interfaces.dashboard.chat_handlers import _accepted_chat_action
 from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 from gideon.interfaces.dashboard.chat_runner import run_chat
 from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
+from gideon.security.approval_answer import UNKNOWN, ingress_record, of_request
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
 from gideon.security.sel import sel
-from gideon.security.approval_answer import of_request, ingress_record, UNKNOWN
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +90,14 @@ async def api_chat_session_regenerate(request: web.Request) -> web.Response:
 
         actor = of_request(request)
         if actor.kind == UNKNOWN:
-            return web.json_response({"error": "authenticated initiator is required"}, status=403)
+            return web.json_response(
+                {"error": "authenticated initiator is required"}, status=403
+            )
         # Preserve the original row evidence; this execution has its own initiator.
         meta = msgs[u_idx].setdefault("meta", {})
-        meta["replay_ingress"] = ingress_record(actor, f"dashboard:{session.key}", user_msg)
+        meta["replay_ingress"] = ingress_record(
+            actor, f"dashboard:{session.key}", user_msg
+        )
         del session.messages[u_idx + 1 :]
         session._dirty = True
         session._pending_variants = variants
@@ -284,7 +288,9 @@ async def api_chat_session_edit_resend(request: web.Request) -> web.Response:
 
         actor = of_request(request)
         if actor.kind == UNKNOWN:
-            return web.json_response({"error": "authenticated initiator is required"}, status=403)
+            return web.json_response(
+                {"error": "authenticated initiator is required"}, status=403
+            )
         del session.messages[index:]
         session._dirty = True
 
@@ -299,9 +305,18 @@ async def api_chat_session_edit_resend(request: web.Request) -> web.Response:
                 _resend_ts = ""
         actor = of_request(request)
         if actor.kind == UNKNOWN:
-            return web.json_response({"error": "authenticated initiator is required"}, status=403)
-        session.append("user", _bc, "msg msg-u", ts=_resend_ts,
-                       meta={"ingress": ingress_record(actor, f"dashboard:{session.key}", content)})
+            return web.json_response(
+                {"error": "authenticated initiator is required"}, status=403
+            )
+        session.append(
+            "user",
+            _bc,
+            "msg msg-u",
+            ts=_resend_ts,
+            meta={
+                "ingress": ingress_record(actor, f"dashboard:{session.key}", content)
+            },
+        )
         if rewind and carried_rewound:
             session.messages[-1]["rewound"] = carried_rewound
 

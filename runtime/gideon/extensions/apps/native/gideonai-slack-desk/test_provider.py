@@ -17,7 +17,10 @@ _APP_DIR = Path(__file__).resolve().parent
 if str(_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_APP_DIR))
 
-from slack_desk_runtime.transport import SlackDeskTransport, create_provider  # noqa: E402
+from slack_desk_runtime.transport import (  # noqa: E402
+    SlackDeskTransport,
+    create_provider,
+)
 
 
 def test_slack_desk_capabilities():

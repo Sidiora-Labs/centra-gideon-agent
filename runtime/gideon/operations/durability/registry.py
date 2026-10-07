@@ -146,7 +146,11 @@ class Registry:
         """The sha of the canonical bytes — the ``expected_sha`` a CAS write compares
         against, and a cheap equality check between two registry states."""
         body = self.to_bytes()
-        return self._loaded_sha if self._loaded_sha and body == self._loaded_body else hashlib.sha256(body).hexdigest()
+        return (
+            self._loaded_sha
+            if self._loaded_sha and body == self._loaded_body
+            else hashlib.sha256(body).hexdigest()
+        )
 
     def seq_of(self, machine_id: str) -> int:
         e = self.machines.get(machine_id)

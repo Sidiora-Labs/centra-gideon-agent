@@ -41,8 +41,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from gideon.cognition.onboarding_import.floors import read_text_safely, refuses, safe_text
-from gideon.cognition.onboarding_import.model import ImportCategory, ImportItem, ScanResult
+from gideon.cognition.onboarding_import.floors import (
+    read_text_safely,
+    refuses,
+    safe_text,
+)
+from gideon.cognition.onboarding_import.model import (
+    ImportCategory,
+    ImportItem,
+    ScanResult,
+)
 from gideon.cognition.onboarding_import.sources.common import (
     GIVE_WAY_LINES,
     LOOK_BYTES,
@@ -68,12 +76,12 @@ from gideon.cognition.onboarding_import.sources.common import (
     not_imported_rows,
     on_this_machine,
     one_line,
+    one_walk,
     prompt_history,
     scan_skills,
     settings_not_imported,
     slug_name,
     text_item,
-    one_walk,
 )
 
 NAME = "claude_code"
@@ -141,7 +149,8 @@ def global_config_path(root: Path | None = None) -> Path:
 
 def config_dir_of(config_path: Path) -> Path:
     """The config directory that goes with a global config file: ``~/.claude`` for the
-    ``~/.claude.json`` beside it, the file's own directory for one inside a config directory."""
+    ``~/.claude.json`` beside it, the file's own directory for one inside a config directory.
+    """
     home = Path.home()
     if config_path.parent == home and config_path.name == _GLOBAL_CONFIG:
         return home / ".claude"
@@ -166,7 +175,8 @@ def _read_json_document(path: Path) -> dict[str, Any]:
 
 def encoded_project_dir(recorded: str) -> str:
     """The name Claude Code gives a project's directory under ``projects/``: every character that
-    is not a letter or a digit becomes ``-`` (``/Users/you/src/app`` → ``-Users-you-src-app``)."""
+    is not a letter or a digit becomes ``-`` (``/Users/you/src/app`` → ``-Users-you-src-app``).
+    """
     return re.sub(r"[^A-Za-z0-9]", "-", recorded)
 
 
@@ -271,7 +281,9 @@ def _listed(value: Any) -> set[str]:
     return {str(v) for v in value} if isinstance(value, list) else set()
 
 
-def _project_approvals(project: Project, user_settings: dict[str, Any]) -> tuple[set, set, bool]:
+def _project_approvals(
+    project: Project, user_settings: dict[str, Any]
+) -> tuple[set, set, bool]:
     """``(approved, turned_off, all_approved)`` for a project's own ``.mcp.json`` servers.
 
     Claude Code asks before it runs a server a repository brought with it, and keeps the answer
@@ -290,8 +302,12 @@ def _project_approvals(project: Project, user_settings: dict[str, Any]) -> tuple
     return approved, turned_off, every
 
 
-def mcp_servers(root: Path | None = None, *, config_path: Path | None = None,
-                resolve_values: bool = True) -> list[McpServer]:
+def mcp_servers(
+    root: Path | None = None,
+    *,
+    config_path: Path | None = None,
+    resolve_values: bool = True,
+) -> list[McpServer]:
     """Every MCP server Claude Code has configured, in all three of its scopes.
 
     THE reader of Claude Code's MCP configuration: the onboarding scan and the Tools page's Import
@@ -314,7 +330,12 @@ def mcp_servers(root: Path | None = None, *, config_path: Path | None = None,
     env = settings_env(base) if resolve_values else {}
     out: list[McpServer] = [
         McpServer(
-            source=NAME, name=name, scope=SCOPE_USER, project="", spec=spec, origin="User scope"
+            source=NAME,
+            name=name,
+            scope=SCOPE_USER,
+            project="",
+            spec=spec,
+            origin="User scope",
         )
         for name, spec in _servers_of(config.get(_MCP_TABLE))
     ]
@@ -382,10 +403,16 @@ def _project_server_note(reason: str, unresolved: list[str]) -> str:
 # ── the scan ──────────────────────────────────────────────────────────────────
 
 
-def scan(root: Path | str | None = None, *, look: bool = False,
-         resolve_mcp_values: bool = True, isolated_home: Path | None = None) -> ScanResult:
+def scan(
+    root: Path | str | None = None,
+    *,
+    look: bool = False,
+    resolve_mcp_values: bool = True,
+    isolated_home: Path | None = None,
+) -> ScanResult:
     """What Claude Code holds. To ``look`` is to read each conversation not read before only as far
-    as its first prompt (:func:`_scan_conversations`); otherwise every one is read in full."""
+    as its first prompt (:func:`_scan_conversations`); otherwise every one is read in full.
+    """
     explicit = Path(root).expanduser() if root is not None else None
     base = explicit if explicit is not None else resolve_root()
     result = ScanResult(
@@ -482,7 +509,9 @@ def _scan_instructions(
 
 
 #: One line of ``MEMORY.md``: ``- [Title](file.md) — hook``.
-_INDEX_LINE_RE = re.compile(r"^\s*[-*]\s*\[(?P<title>[^\]]+)\]\((?P<file>[^)\s]+\.md)\)")
+_INDEX_LINE_RE = re.compile(
+    r"^\s*[-*]\s*\[(?P<title>[^\]]+)\]\((?P<file>[^)\s]+\.md)\)"
+)
 
 
 def _memory_index(index: Path) -> tuple[dict[str, str], bool]:
@@ -560,12 +589,19 @@ def _scan_memories(base: Path, known: list[Project], result: ScanResult) -> None
             )
 
 
-def _scan_mcp(base: Path, explicit: Path | None, result: ScanResult, *,
-              resolve_values: bool = True) -> None:
+def _scan_mcp(
+    base: Path,
+    explicit: Path | None,
+    result: ScanResult,
+    *,
+    resolve_values: bool = True,
+) -> None:
     """Every server in every scope (:func:`mcp_servers`), definition whole: the MCP writer keeps
-    each ``env`` and ``headers`` value in the credential store, as Tools › Import does."""
-    for server in mcp_servers(base, config_path=global_config_path(explicit),
-                              resolve_values=resolve_values):
+    each ``env`` and ``headers`` value in the credential store, as Tools › Import does.
+    """
+    for server in mcp_servers(
+        base, config_path=global_config_path(explicit), resolve_values=resolve_values
+    ):
         user = server.scope == SCOPE_USER
         result.items.append(
             mcp_item(
@@ -624,7 +660,9 @@ _ARGUMENTS_RE = re.compile(r"\$ARGUMENTS\b")
 _POSITIONAL_RE = re.compile(r"\$([1-9])(?![0-9])")
 
 
-def command_prompt(body: str, *, argument_hint: str) -> tuple[str, list[dict[str, Any]]]:
+def command_prompt(
+    body: str, *, argument_hint: str
+) -> tuple[str, list[dict[str, Any]]]:
     """A command's body as a Gideon prompt: ``(content, variables)``.
 
     ``$ARGUMENTS`` becomes the ``{{arguments}}`` variable and ``$1``…``$9`` become ``{{arg1}}``…,
@@ -638,7 +676,8 @@ def command_prompt(body: str, *, argument_hint: str) -> tuple[str, list[dict[str
             {
                 "name": "arguments",
                 "type": "textarea",
-                "description": argument_hint or "What the command was given after its name.",
+                "description": argument_hint
+                or "What the command was given after its name.",
             }
         )
     for digit in sorted({m.group(1) for m in _POSITIONAL_RE.finditer(content)}):
@@ -661,7 +700,8 @@ def _scan_commands(base: Path, result: ScanResult) -> None:
         rel = path.relative_to(commands_root)
         name = slug_name("-".join((*rel.parent.parts, rel.stem)), lower=False)
         content, variables = command_prompt(
-            ProcedureLibrary.strip_frontmatter(text), argument_hint=meta.get("argument-hint", "")
+            ProcedureLibrary.strip_frontmatter(text),
+            argument_hint=meta.get("argument-hint", ""),
         )
         dropped = [
             label
@@ -696,7 +736,15 @@ def _scan_commands(base: Path, result: ScanResult) -> None:
 # ── conversations ─────────────────────────────────────────────────────────────
 
 #: Tool-input fields that say what a call did, in the order they are preferred.
-_TOOL_SUMMARY_FIELDS = ("description", "command", "file_path", "path", "pattern", "url", "query")
+_TOOL_SUMMARY_FIELDS = (
+    "description",
+    "command",
+    "file_path",
+    "path",
+    "pattern",
+    "url",
+    "query",
+)
 _TOOL_SUMMARY_CHARS = 160
 
 
@@ -727,7 +775,8 @@ def _tool_line(block: dict[str, Any]) -> str:
 
 class _Lines:
     """A Claude Code transcript, line by line: the ONE reading of its lines, whether it is read in
-    full (:func:`read_conversation`) or only as far as its first prompt (:func:`_reading`)."""
+    full (:func:`read_conversation`) or only as far as its first prompt (:func:`_reading`).
+    """
 
     def __init__(self) -> None:
         self.messages: list[dict[str, Any]] = []
@@ -750,7 +799,11 @@ class _Lines:
             return
         if kind not in ("user", "assistant"):
             return
-        if line.get("isSidechain") or line.get("isMeta") or line.get("isCompactSummary"):
+        if (
+            line.get("isSidechain")
+            or line.get("isMeta")
+            or line.get("isCompactSummary")
+        ):
             return
         self.cwd = self.cwd or str(line.get("cwd") or "")
         ts = str(line.get("timestamp") or "")
@@ -766,7 +819,11 @@ class _Lines:
             self.messages.append({"role": "user", "content": cleaned, "ts": ts})
             self.prompt = self.prompt or cleaned
             return
-        blocks = content if isinstance(content, list) else [{"type": "text", "text": content}]
+        blocks = (
+            content
+            if isinstance(content, list)
+            else [{"type": "text", "text": content}]
+        )
         for block in blocks:
             if not isinstance(block, dict):
                 continue
@@ -779,7 +836,9 @@ class _Lines:
                     last["content"] = f"{last['content']}\n\n{cleaned}"
                     last["ts"] = ts or last["ts"]
                 else:
-                    self.messages.append({"role": "assistant", "content": cleaned, "ts": ts})
+                    self.messages.append(
+                        {"role": "assistant", "content": cleaned, "ts": ts}
+                    )
             elif block.get("type") == "tool_use":
                 cleaned, n = safe_text(_tool_line(block))
                 self.redactions += n
@@ -876,7 +935,11 @@ def read_conversation(path: Path) -> tuple[dict[str, Any], int] | None:
         return None
     conversation = lines.conversation()
     if signature is not None:
-        READINGS.keep(path, signature, lines.transcript(path, whole=True) if conversation else None)
+        READINGS.keep(
+            path,
+            signature,
+            lines.transcript(path, whole=True) if conversation else None,
+        )
     return (conversation, lines.redactions) if conversation is not None else None
 
 

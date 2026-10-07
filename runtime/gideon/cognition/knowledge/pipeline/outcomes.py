@@ -54,7 +54,9 @@ class Fix:
     use_case: str = field(default="", compare=False)
 
     def to_dict(self) -> dict[str, str]:
-        return {"text": self.text, "href": self.href} if self.href else {"text": self.text}
+        return (
+            {"text": self.text, "href": self.href} if self.href else {"text": self.text}
+        )
 
 
 @dataclass(frozen=True)
@@ -92,7 +94,9 @@ def not_applicable(reason: str) -> PhaseOutcome:
     return PhaseOutcome(NOT_APPLICABLE, _sentence(reason))
 
 
-def skipped(reason: str, fix: tuple[Fix, ...] = (), needs: tuple[str, ...] = ()) -> PhaseOutcome:
+def skipped(
+    reason: str, fix: tuple[Fix, ...] = (), needs: tuple[str, ...] = ()
+) -> PhaseOutcome:
     said = _sentence(reason)
     return PhaseOutcome(SKIPPED, said, fix, needs, causes=(said,) if needs else ())
 
@@ -163,12 +167,16 @@ def waited_on(upstream: list[tuple[str, PhaseOutcome]]) -> PhaseOutcome:
     causes = _unique(c for _, o in upstream for c in o.causes)
     any_failed = any(o.status == FAILED for _, o in upstream)
     if len(names) == 1:
-        head = f"It needs {names[0]} first, which " + ("failed" if any_failed else "was skipped")
+        head = f"It needs {names[0]} first, which " + (
+            "failed" if any_failed else "was skipped"
+        )
     else:
         head = f"It needs {_one_of(names)} first, and " + (
             "neither ran" if len(names) == 2 else "none of them ran"
         )
-    reason = f"{head} because {_lower_first(' '.join(causes))}" if causes else f"{head}."
+    reason = (
+        f"{head} because {_lower_first(' '.join(causes))}" if causes else f"{head}."
+    )
     return PhaseOutcome(
         SKIPPED,
         _sentence(reason),
@@ -209,19 +217,25 @@ async def capability_ready(need: str) -> bool:
         from gideon.cognition.knowledge.pipeline.registry import unserved_reason_sync
 
         return not unserved_reason_sync(need)
-    except Exception:  # noqa: BLE001 — a probe fault reads as "not there", never as ready
+    except (
+        Exception
+    ):  # noqa: BLE001 — a probe fault reads as "not there", never as ready
         return False
 
 
 def told(node_phases: object) -> list[str]:
     """Each step of a persisted outcome map that was skipped or failed, as one line in words:
     "Vision skipped: No image model is set up. Fix: Choose a model for …". For a surface
-    that reads the item as text (Investigate), where the item page draws the same map."""
+    that reads the item as text (Investigate), where the item page draws the same map.
+    """
     if not isinstance(node_phases, dict):
         return []
     lines = []
     for step, outcome in node_phases.items():
-        if not isinstance(outcome, dict) or outcome.get("status") not in (SKIPPED, FAILED):
+        if not isinstance(outcome, dict) or outcome.get("status") not in (
+            SKIPPED,
+            FAILED,
+        ):
             continue
         line = f"{step_name(str(step))} {outcome['status']}"
         if outcome.get("reason"):

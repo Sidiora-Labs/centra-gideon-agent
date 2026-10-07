@@ -56,12 +56,21 @@ CHAT_SUBCATEGORIES: tuple[str, ...] = (
 )
 
 USE_CASE_NAMES: dict[str, str] = {
-    "chat": "Chat", "code_tools": "Code & tools", "reasoning": "Reasoning",
-    "background": "Background", "orchestration": "Orchestration", "loops": "Loops",
-    "embedding": "Embedding", "stt": "Speech-to-text", "tts": "Text-to-speech",
-    "diarization": "Speaker diarization", "image_modality": "Image · Modality",
-    "image_gen": "Image · Generation", "audio_modality": "Audio · Modality",
-    "audio_gen": "Audio · Generation", "video_modality": "Video · Modality",
+    "chat": "Chat",
+    "code_tools": "Code & tools",
+    "reasoning": "Reasoning",
+    "background": "Background",
+    "orchestration": "Orchestration",
+    "loops": "Loops",
+    "embedding": "Embedding",
+    "stt": "Speech-to-text",
+    "tts": "Text-to-speech",
+    "diarization": "Speaker diarization",
+    "image_modality": "Image · Modality",
+    "image_gen": "Image · Generation",
+    "audio_modality": "Audio · Modality",
+    "audio_gen": "Audio · Generation",
+    "video_modality": "Video · Modality",
     "video_gen": "Video · Generation",
 }
 
@@ -187,12 +196,14 @@ def _known_provider_names() -> set[str] | None:
 
 def model_ref_problem(ref: object) -> str | None:
     if not isinstance(ref, str):
-        return 'Each model in the chain is a "provider:model" string that names a model.'
+        return (
+            'Each model in the chain is a "provider:model" string that names a model.'
+        )
     if not ref.strip():
         return "One of the models in the chain is empty."
     provider, separator, model = ref.partition(":")
     if separator and not model.strip():
-        return f'“{ref}” names the provider {provider} and no model.'
+        return f"“{ref}” names the provider {provider} and no model."
     if separator and not provider.strip():
         return "A model reference must name its provider."
     return None
@@ -244,7 +255,11 @@ def load_active_models() -> dict[str, list[str]]:
     normalized: dict[str, list[str]] = {}
     for uc, refs in data.items():
         chain = [refs] if isinstance(refs, str) else refs
-        normalized[uc] = [ref for ref in chain if model_ref_problem(ref) is None] if isinstance(chain, list) else []
+        normalized[uc] = (
+            [ref for ref in chain if model_ref_problem(ref) is None]
+            if isinstance(chain, list)
+            else []
+        )
     return _prune_removed_providers(normalized)
 
 
@@ -352,8 +367,9 @@ def save_use_case_settings(use_case: str, settings: dict[str, Any]) -> None:
         try:
             listener(use_case)
         except Exception:
-            logging.getLogger(__name__).warning("Settings change listener failed", exc_info=True)
-
+            logging.getLogger(__name__).warning(
+                "Settings change listener failed", exc_info=True
+            )
 
 
 def _legacy_bindings_path() -> Path:

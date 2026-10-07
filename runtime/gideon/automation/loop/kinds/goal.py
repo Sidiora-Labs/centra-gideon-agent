@@ -412,7 +412,8 @@ def _deliverable_name(goal_type: str) -> str:
 
 class _GoalWalkthrough:
     """Goal-kind planning walkthrough with a fixed step list and pure briefs/parsers.
-    Projects approved artifacts into the loop spec (sub-goals → ``plan`` rows + ``kind_config.sub_goals``)."""
+    Projects approved artifacts into the loop spec (sub-goals → ``plan`` rows + ``kind_config.sub_goals``).
+    """
 
     step_mode = "fixed"
 

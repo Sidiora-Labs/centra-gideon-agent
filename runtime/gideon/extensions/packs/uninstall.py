@@ -102,7 +102,8 @@ def _safe_recorded_path(home: Path, recorded: str) -> Path | None:
         candidate.relative_to(root)
     except ValueError:
         return None
-    from gideon.operations.durability.home_paths import guard_path, LinkInTheWay
+    from gideon.operations.durability.home_paths import LinkInTheWay, guard_path
+
     try:
         guard_path(candidate)
     except (LinkInTheWay, ValueError):
@@ -126,7 +127,7 @@ def _could_be_imported_as(original: str, landed: str) -> bool:
     if landed == original:
         return True
     prefix = f"{original}-imported-"
-    suffix = landed[len(prefix):] if landed.startswith(prefix) else ""
+    suffix = landed[len(prefix) :] if landed.startswith(prefix) else ""
     return bool(suffix) and suffix.isdigit() and int(suffix) > 0
 
 
@@ -148,9 +149,11 @@ def _in_use(pack: Any, home: Path) -> list[InUse]:
     trigger_ids = set(pack.staged_triggers)
     for staged_id in pack.staged_triggers:
         staged_path = component_path("trigger", staged_id, home, pack.name)
-        if staged_path is None or _safe_recorded_path(
-            home, staged_path.relative_to(home).as_posix()
-        ) is None:
+        if (
+            staged_path is None
+            or _safe_recorded_path(home, staged_path.relative_to(home).as_posix())
+            is None
+        ):
             continue
         try:
             staged = json.loads(staged_path.read_text(encoding="utf-8"))
@@ -167,7 +170,9 @@ def _in_use(pack: Any, home: Path) -> list[InUse]:
     return uses
 
 
-def _classify(pack: Any, home: Path) -> tuple[UninstallPlan, dict[str, Path], list[dict[str, str]]]:
+def _classify(
+    pack: Any, home: Path
+) -> tuple[UninstallPlan, dict[str, Path], list[dict[str, str]]]:
     from gideon.extensions.packs.component_paths import component_path
     from gideon.extensions.packs.update import component_digest
 
@@ -178,12 +183,21 @@ def _classify(pack: Any, home: Path) -> tuple[UninstallPlan, dict[str, Path], li
         kind, separator, original_id = ref.partition(":")
         lock = pack.component_locks.get(ref)
         if not separator or not original_id or not lock or not lock.get("computedHash"):
-            plan.kept.append(KeptComponent(ref, "the install contents were not recorded, so it stays"))
+            plan.kept.append(
+                KeptComponent(
+                    ref, "the install contents were not recorded, so it stays"
+                )
+            )
             state.append({"ref": ref, "state": "unverifiable"})
             continue
         path = _safe_recorded_path(home, str(lock.get("path", "")))
         if path is None:
-            plan.kept.append(KeptComponent(ref, "its recorded location is linked, unsafe or outside the pack install path, so it stays"))
+            plan.kept.append(
+                KeptComponent(
+                    ref,
+                    "its recorded location is linked, unsafe or outside the pack install path, so it stays",
+                )
+            )
             state.append({"ref": ref, "state": "unsafe"})
             continue
         landed_id = _landed_id(kind, path)
@@ -194,7 +208,12 @@ def _classify(pack: Any, home: Path) -> tuple[UninstallPlan, dict[str, Path], li
             or expected is None
             or Path(os.path.normpath(expected)) != path
         ):
-            plan.kept.append(KeptComponent(ref, "its recorded location is not where this component installs, so it stays"))
+            plan.kept.append(
+                KeptComponent(
+                    ref,
+                    "its recorded location is not where this component installs, so it stays",
+                )
+            )
             state.append({"ref": ref, "state": "wrong_location"})
             continue
         if not os.path.lexists(path):
@@ -202,32 +221,44 @@ def _classify(pack: Any, home: Path) -> tuple[UninstallPlan, dict[str, Path], li
             state.append({"ref": ref, "state": "missing"})
             continue
         if path.is_symlink():
-            plan.kept.append(KeptComponent(ref, "its installed path is a symlink, so it stays"))
+            plan.kept.append(
+                KeptComponent(ref, "its installed path is a symlink, so it stays")
+            )
             state.append({"ref": ref, "state": "symlink"})
             continue
         from gideon.operations.durability.home_paths import LinkInTheWay
+
         try:
             digest = component_digest(path)
         except LinkInTheWay as link:
-            plan.kept.append(KeptComponent(ref, f"linked contents stay unchanged: {link}"))
+            plan.kept.append(
+                KeptComponent(ref, f"linked contents stay unchanged: {link}")
+            )
             state.append({"ref": ref, "state": "linked", "detail": str(link)})
             continue
         state.append({"ref": ref, "state": "present", "digest": digest})
         if digest != lock["computedHash"]:
-            plan.kept.append(KeptComponent(ref, "you edited it after it was installed, so it stays"))
+            plan.kept.append(
+                KeptComponent(ref, "you edited it after it was installed, so it stays")
+            )
             continue
         plan.removed.append(ref)
         targets[ref] = path
 
     plan.in_use = _in_use(pack, home)
     plan.servers = sorted(
-        {str(item.get("server_name")) for item in pack.connectors
-         if item.get("mode") == "configure" and item.get("server_name")}
+        {
+            str(item.get("server_name"))
+            for item in pack.connectors
+            if item.get("mode") == "configure" and item.get("server_name")
+        }
     )
     return plan, targets, state
 
 
-def _token(records: dict[str, Any], plan: UninstallPlan, state: list[dict[str, str]]) -> str:
+def _token(
+    records: dict[str, Any], plan: UninstallPlan, state: list[dict[str, str]]
+) -> str:
     payload = {
         "record": records.get(plan.pack),
         "removed": plan.removed,
@@ -237,13 +268,19 @@ def _token(records: dict[str, Any], plan: UninstallPlan, state: list[dict[str, s
         "servers": plan.servers,
         "state": state,
     }
-    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
-def _plan_locked(records: dict[str, Any], name: str, home: Path) -> tuple[UninstallPlan, dict[str, Path]]:
+def _plan_locked(
+    records: dict[str, Any], name: str, home: Path
+) -> tuple[UninstallPlan, dict[str, Path]]:
     pack = _installed_pack(records, name)
     if pack is None:
-        raise PackUninstallError("pack_not_installed", f"pack not installed: {name}", 404)
+        raise PackUninstallError(
+            "pack_not_installed", f"pack not installed: {name}", 404
+        )
     plan, targets, state = _classify(pack, home)
     plan.confirmation_token = _token(records, plan, state)
     return plan, targets
@@ -269,7 +306,9 @@ def _in_use_message(name: str, rows: list[InUse]) -> str:
         parts.append(f"agent{'s' if len(agents) != 1 else ''} {', '.join(agents)}")
         places.append("Agents")
     if automations:
-        parts.append(f"automation{'s' if len(automations) != 1 else ''} {', '.join(automations)}")
+        parts.append(
+            f"automation{'s' if len(automations) != 1 else ''} {', '.join(automations)}"
+        )
         places.append("Automations")
     return f"{name} is still in use: {' and '.join(parts)}. Remove them in {' and '.join(places)} before uninstalling."
 
@@ -312,7 +351,9 @@ def apply_uninstall(name: str, confirmation_token: str) -> UninstallPlan:
         with installed_ledger(home) as records:
             plan, targets = _plan_locked(records, name, home)
             if plan.in_use:
-                raise PackUninstallError("pack_in_use", _in_use_message(name, plan.in_use), 409)
+                raise PackUninstallError(
+                    "pack_in_use", _in_use_message(name, plan.in_use), 409
+                )
             if not confirmation_token or confirmation_token != plan.confirmation_token:
                 raise PackUninstallError(
                     "confirmation_required",
@@ -325,7 +366,11 @@ def apply_uninstall(name: str, confirmation_token: str) -> UninstallPlan:
             for ref, path in targets.items():
                 pack = _installed_pack(records, name)
                 lock = pack.component_locks.get(ref) if pack else None
-                from gideon.operations.durability.home_paths import guard_path, LinkInTheWay
+                from gideon.operations.durability.home_paths import (
+                    LinkInTheWay,
+                    guard_path,
+                )
+
                 try:
                     guard_path(path)
                     digest = component_digest(path)
@@ -344,10 +389,19 @@ def apply_uninstall(name: str, confirmation_token: str) -> UninstallPlan:
                     if kind in {"template", "agent"}:
                         _prune_empty(path.parent, path.parent.parent)
                 except OSError as exc:
-                    logger.warning("pack uninstall %s could not remove a component: %s", name, type(exc).__name__)
+                    logger.warning(
+                        "pack uninstall %s could not remove a component: %s",
+                        name,
+                        type(exc).__name__,
+                    )
                     failed.append(ref)
             if failed:
-                _audit("pack_uninstall", "incomplete", resources=name, error=", ".join(failed))
+                _audit(
+                    "pack_uninstall",
+                    "incomplete",
+                    resources=name,
+                    error=", ".join(failed),
+                )
                 raise PackUninstallError(
                     "pack_uninstall_incomplete",
                     f"could not safely remove {', '.join(failed)}; review the plan and try again",
@@ -356,5 +410,9 @@ def apply_uninstall(name: str, confirmation_token: str) -> UninstallPlan:
             _remove_staging(name, home)
             del records[name]
             plan.applied = True
-            _audit("pack_uninstall", "applied", resources=f"{name}@{plan.version} ({len(plan.removed)} removed, {len(plan.kept)} kept)")
+            _audit(
+                "pack_uninstall",
+                "applied",
+                resources=f"{name}@{plan.version} ({len(plan.removed)} removed, {len(plan.kept)} kept)",
+            )
             return plan

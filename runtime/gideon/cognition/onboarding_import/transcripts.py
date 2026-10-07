@@ -45,15 +45,33 @@ def _parts(value: object) -> tuple[str, list[dict], list[dict], int]:
                 texts.append(text)
             redactions += count
         elif kind == "tool_use":
-            arguments, count = _clean(json.dumps(part.get("input", {}), ensure_ascii=False))
-            calls.append({"id": str(part.get("id") or ""), "name": str(part.get("name") or "tool"), "arguments": arguments})
+            arguments, count = _clean(
+                json.dumps(part.get("input", {}), ensure_ascii=False)
+            )
+            calls.append(
+                {
+                    "id": str(part.get("id") or ""),
+                    "name": str(part.get("name") or "tool"),
+                    "arguments": arguments,
+                }
+            )
             redactions += count
         elif kind == "tool_result":
             content = part.get("content")
             if isinstance(content, list):
-                content = "\n".join(str(piece.get("text") or "") for piece in content if isinstance(piece, dict) and piece.get("type") == "text")
+                content = "\n".join(
+                    str(piece.get("text") or "")
+                    for piece in content
+                    if isinstance(piece, dict) and piece.get("type") == "text"
+                )
             text, count = _clean(content)
-            results.append({"role": "tool", "content": text, "tool_call_id": str(part.get("tool_use_id") or "")})
+            results.append(
+                {
+                    "role": "tool",
+                    "content": text,
+                    "tool_call_id": str(part.get("tool_use_id") or ""),
+                }
+            )
             redactions += count
     return "\n\n".join(texts), calls, results, redactions
 
@@ -70,10 +88,17 @@ def _timestamp(value: object) -> str:
 
 
 def _claude_event(event: dict) -> tuple[list[dict], int]:
-    if event.get("isMeta") or event.get("isCompactSummary") or event.get("isApiErrorMessage"):
+    if (
+        event.get("isMeta")
+        or event.get("isCompactSummary")
+        or event.get("isApiErrorMessage")
+    ):
         return [], 0
     message = event.get("message")
-    if not isinstance(message, dict) or message.get("role") not in ("user", "assistant"):
+    if not isinstance(message, dict) or message.get("role") not in (
+        "user",
+        "assistant",
+    ):
         return [], 0
     stamp = _timestamp(event.get("timestamp"))
     text, calls, results, redactions = _parts(message.get("content"))
@@ -113,7 +138,11 @@ def _hermes_event(event: dict) -> tuple[list[dict], int]:
                 except _UNPARSABLE:
                     clean_calls.append({"redacted": True})
         if text or clean_calls:
-            row = {"role": message["role"], "content": text, "ts": _timestamp(message.get("timestamp"))}
+            row = {
+                "role": message["role"],
+                "content": text,
+                "ts": _timestamp(message.get("timestamp")),
+            }
             if clean_calls:
                 row["tool_calls"] = clean_calls
             if message.get("tool_call_id"):
@@ -134,7 +163,9 @@ def _read_rows(lines: list[str], format: str) -> tuple[list[dict], int]:
             continue
         if not isinstance(event, dict):
             continue
-        converted, count = _claude_event(event) if format == "claude" else _hermes_event(event)
+        converted, count = (
+            _claude_event(event) if format == "claude" else _hermes_event(event)
+        )
         rows.extend(converted[: _MAX_MESSAGES - len(rows)])
         redactions += count
     return rows, redactions
@@ -144,12 +175,21 @@ def _add(result, source: str, key: str, rows: list[dict], redactions: int) -> No
     if not rows:
         return
     result.redactions += redactions
-    result.items.append(ImportItem(source=source, category=ImportCategory.CONVERSATIONS, key=key,
-                                   title=f"Conversation {Path(key).stem}", payload={"messages": rows},
-                                   redactions=redactions))
+    result.items.append(
+        ImportItem(
+            source=source,
+            category=ImportCategory.CONVERSATIONS,
+            key=key,
+            title=f"Conversation {Path(key).stem}",
+            payload={"messages": rows},
+            redactions=redactions,
+        )
+    )
 
 
-def scan_transcripts(base: Path, result, *, source: str, pattern: str, format: str) -> None:
+def scan_transcripts(
+    base: Path, result, *, source: str, pattern: str, format: str
+) -> None:
     for path in sorted(base.glob(pattern)):
         if not path.is_file():
             continue
@@ -158,9 +198,13 @@ def scan_transcripts(base: Path, result, *, source: str, pattern: str, format: s
             continue
         try:
             if path.stat().st_size > _MAX_SOURCE_BYTES:
-                result.notes.append(f"A {source} conversation exceeded the import size limit and was skipped.")
+                result.notes.append(
+                    f"A {source} conversation exceeded the import size limit and was skipped."
+                )
                 continue
-            rows, redactions = _read_rows(path.read_text(encoding="utf-8", errors="replace").splitlines(), format)
+            rows, redactions = _read_rows(
+                path.read_text(encoding="utf-8", errors="replace").splitlines(), format
+            )
         except OSError:
             result.notes.append(f"A {source} conversation could not be read.")
             continue
@@ -169,30 +213,58 @@ def scan_transcripts(base: Path, result, *, source: str, pattern: str, format: s
 
 def scan_hermes_cli(result) -> None:
     try:
-        listing = subprocess.run(["hermes", "sessions", "export", "--format", "jsonl", "--dry-run", "-"],
-                                 capture_output=True, text=True, timeout=15, check=True)
+        listing = subprocess.run(
+            ["hermes", "sessions", "export", "--format", "jsonl", "--dry-run", "-"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=True,
+        )
     except (OSError, subprocess.SubprocessError):
-        result.notes.append("Hermes conversation export is unavailable; export sessions to the Hermes exports folder to import them.")
+        result.notes.append(
+            "Hermes conversation export is unavailable; export sessions to the Hermes exports folder to import them."
+        )
         return
     header = re.search(r"Would export (\d+) session", listing.stdout)
     if not header:
         result.notes.append("Hermes returned an unrecognized session listing.")
         return
-    identifiers = [line.strip().split()[0] for line in listing.stdout.splitlines()
-                   if line.startswith("  ") and line.strip() and line.strip() != "..."]
+    identifiers = [
+        line.strip().split()[0]
+        for line in listing.stdout.splitlines()
+        if line.startswith("  ") and line.strip() and line.strip() != "..."
+    ]
     if len(identifiers) < int(header.group(1)):
-        result.notes.append(f"Hermes listed {len(identifiers)} of {header.group(1)} sessions; export the remaining sessions to files for import.")
+        result.notes.append(
+            f"Hermes listed {len(identifiers)} of {header.group(1)} sessions; export the remaining sessions to files for import."
+        )
     for identifier in dict.fromkeys(identifiers):
         if not re.fullmatch(r"[\w.:-]{1,160}", identifier):
             continue
         try:
-            exported = subprocess.run(["hermes", "sessions", "export", "--format", "jsonl", "--session-id", identifier, "-"],
-                                      capture_output=True, text=True, timeout=15, check=True)
+            exported = subprocess.run(
+                [
+                    "hermes",
+                    "sessions",
+                    "export",
+                    "--format",
+                    "jsonl",
+                    "--session-id",
+                    identifier,
+                    "-",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=True,
+            )
         except (OSError, subprocess.SubprocessError):
             result.notes.append("A Hermes session could not be exported.")
             continue
         if len(exported.stdout.encode("utf-8")) > _MAX_SOURCE_BYTES:
-            result.notes.append("A Hermes session exceeded the import size limit and was skipped.")
+            result.notes.append(
+                "A Hermes session exceeded the import size limit and was skipped."
+            )
             continue
         rows, redactions = _read_rows(exported.stdout.splitlines(), "hermes")
         _add(result, "hermes", identifier, rows, redactions)
@@ -205,44 +277,78 @@ def write_transcript(item: ImportItem, api):
     if not isinstance(rows, list) or not rows:
         try:
             if item.source == "claude_code":
-                from gideon.cognition.onboarding_import.sources.claude_code import read_for_import
+                from gideon.cognition.onboarding_import.sources.claude_code import (
+                    read_for_import,
+                )
 
                 read = read_for_import(item)
             elif item.source == "codex":
-                from gideon.cognition.onboarding_import.sources.codex import read_for_import
+                from gideon.cognition.onboarding_import.sources.codex import (
+                    read_for_import,
+                )
 
                 read = read_for_import(item)
             else:
                 read = None
         except Exception:
-            return api._result(item, api.WriteOutcome.REJECTED,
-                               detail="conversation could not be read completely")
+            return api._result(
+                item,
+                api.WriteOutcome.REJECTED,
+                detail="conversation could not be read completely",
+            )
         if read is not None:
             conversation, redactions = read
-            item = replace(item, payload=conversation,
-                           redactions=item.redactions + redactions)
+            item = replace(
+                item, payload=conversation, redactions=item.redactions + redactions
+            )
             rows = conversation.get("messages")
     if not isinstance(rows, list) or not rows:
-        return api._result(item, api.WriteOutcome.REJECTED, detail="conversation has no readable messages")
+        return api._result(
+            item,
+            api.WriteOutcome.REJECTED,
+            detail="conversation has no readable messages",
+        )
     key = f"imported_{item.source}_{item.fingerprint}"
     log = ConversationLog()
     path = log._path(key)
-    header = {"_type": "metadata", "created_at": rows[0].get("ts") or datetime.now(timezone.utc).isoformat(),
-              "last_consolidated": 0, "title": item.title, "import_source": item.source,
-              "import_key": item.key, "message_count": len(rows)}
-    content = "\n".join(json.dumps(row, ensure_ascii=False, sort_keys=True) for row in [header, *rows]) + "\n"
+    header = {
+        "_type": "metadata",
+        "created_at": rows[0].get("ts") or datetime.now(timezone.utc).isoformat(),
+        "last_consolidated": 0,
+        "title": item.title,
+        "import_source": item.source,
+        "import_key": item.key,
+        "message_count": len(rows),
+    }
+    content = (
+        "\n".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True)
+            for row in [header, *rows]
+        )
+        + "\n"
+    )
     destination = api._rel_to_home(path)
     if path.exists():
         try:
             with path.open(encoding="utf-8") as existing_file:
                 existing_header = json.loads(existing_file.readline())
-            same = (isinstance(existing_header, dict)
-                    and existing_header.get("import_source") == item.source
-                    and existing_header.get("import_key") == item.key)
+            same = (
+                isinstance(existing_header, dict)
+                and existing_header.get("import_source") == item.source
+                and existing_header.get("import_key") == item.key
+            )
         except (OSError, ValueError):
             same = False
-        return api._result(item, api.WriteOutcome.EXISTING if same else api.WriteOutcome.CONFLICT,
-                           destination, "already imported" if same else "this imported conversation has changed; the existing session was kept")
+        return api._result(
+            item,
+            api.WriteOutcome.EXISTING if same else api.WriteOutcome.CONFLICT,
+            destination,
+            (
+                "already imported"
+                if same
+                else "this imported conversation has changed; the existing session was kept"
+            ),
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(path, content)
     from gideon.cognition.session_search import note_changed

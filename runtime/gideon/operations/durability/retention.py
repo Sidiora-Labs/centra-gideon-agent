@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -146,14 +146,19 @@ def _hold_verified(
 
 
 def _plan(
-    ordered: list[Snapshot], kept: set[Path], verified: str | None, why: Callable[[Snapshot], str]
+    ordered: list[Snapshot],
+    kept: set[Path],
+    verified: str | None,
+    why: Callable[[Snapshot], str],
 ) -> Plan:
     held = _hold_verified(ordered, kept, verified)
     if held is not None:
         kept = kept | {held.path}
     keep = [s for s in ordered if s.path in kept]
     prune = [s for s in ordered if s.path not in kept]
-    return Plan(keep=keep, prune=prune, held=held, reasons={s.name: why(s) for s in prune})
+    return Plan(
+        keep=keep, prune=prune, held=held, reasons={s.name: why(s) for s in prune}
+    )
 
 
 def plan_retention(
@@ -190,7 +195,11 @@ def plan_retention(
     def why(snapshot: Snapshot) -> str:
         if not any(windows.values()):
             return NONE_KEPT
-        for attr, reason in (("day", SAME_DAY), ("week", SAME_WEEK), ("month", SAME_MONTH)):
+        for attr, reason in (
+            ("day", SAME_DAY),
+            ("week", SAME_WEEK),
+            ("month", SAME_MONTH),
+        ):
             if getattr(snapshot, attr) in windows[attr]:
                 return reason
         return AGED_OUT
@@ -240,7 +249,11 @@ def apply_retention(
     user exactly which files a real run would remove.
     """
     plan = plan_retention(
-        list_snapshots(directory), verified=verified, daily=daily, weekly=weekly, monthly=monthly
+        list_snapshots(directory),
+        verified=verified,
+        daily=daily,
+        weekly=weekly,
+        monthly=monthly,
     )
     if dry_run:
         removed, freed = [s.name for s in plan.prune], sum(s.size for s in plan.prune)

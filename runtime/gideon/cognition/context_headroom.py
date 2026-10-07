@@ -97,7 +97,9 @@ def attribute_components(
             raise ValueError(f"invalid cache region for component {component.name!r}")
         digest = hashlib.sha256(component.text.encode("utf-8")).hexdigest()
         coverage = covered.get(component.name, component.covered_digest or digest)
-        if len(coverage) != 64 or any(character not in "0123456789abcdef" for character in coverage):
+        if len(coverage) != 64 or any(
+            character not in "0123456789abcdef" for character in coverage
+        ):
             raise ValueError(f"invalid covered digest for component {component.name!r}")
         attributed.append(
             replace(
@@ -127,7 +129,9 @@ def validate_component_evidence(
             )
         covered = expected.get(component.name)
         if covered is not None and component.covered_digest != covered:
-            raise ValueError(f"covered digest mismatch for component {component.name!r}")
+            raise ValueError(
+                f"covered digest mismatch for component {component.name!r}"
+            )
 
 
 @dataclass(frozen=True)
@@ -292,7 +296,10 @@ async def resolve_window(model_ref: str) -> Window:
     ref = (model_ref or "").strip()
     try:
         from gideon.integrations.local_models.budgets import model_budget
-        from gideon.integrations.model_windows import model_context_window, served_context_window
+        from gideon.integrations.model_windows import (
+            model_context_window,
+            served_context_window,
+        )
 
         budget = await model_budget(ref)
         authority = None
@@ -374,7 +381,9 @@ class _ProjectionBudget:
             replace(
                 component,
                 text=projected.text,
-                content_digest=hashlib.sha256(projected.text.encode("utf-8")).hexdigest(),
+                content_digest=hashlib.sha256(
+                    projected.text.encode("utf-8")
+                ).hexdigest(),
             ),
             measured,
         )

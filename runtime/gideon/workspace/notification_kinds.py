@@ -384,7 +384,11 @@ _KINDS: tuple[NotificationKind, ...] = (
     ),
     # timeout (`ConsoleState._approval_futures`), not a durable inbox row. Claiming
     _built_in(
-        "approval", "requested", "Approval needed", "immediate", SEV_WARNING,
+        "approval",
+        "requested",
+        "Approval needed",
+        "immediate",
+        SEV_WARNING,
         decision=True,
     ),
     _built_in(
@@ -480,7 +484,15 @@ AUTONOMY_REVOCATION = "autonomy_revocation"
 GENERIC = GENERIC_KIND
 
 MCP_DESCRIPTION_CHANGED = "mcp_description_changed"
-register(NotificationKind(source="mcp", kind="description_changed", label="MCP tool description changed", default_mode="badge", production_owner="gideon.security.mcp_read_only_trust"))
+register(
+    NotificationKind(
+        source="mcp",
+        kind="description_changed",
+        label="MCP tool description changed",
+        default_mode="badge",
+        production_owner="gideon.security.mcp_read_only_trust",
+    )
+)
 _WIRE_TO_PAIR[MCP_DESCRIPTION_CHANGED] = ("mcp", "description_changed")
 
 WIRE_CONSTANTS: tuple[str, ...] = (

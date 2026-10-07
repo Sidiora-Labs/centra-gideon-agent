@@ -127,6 +127,7 @@ def _import(args: argparse.Namespace) -> int:
         return 1
 
     from gideon.operations.durability.home_paths import LinkInTheWay
+
     try:
         pa.projects_folder(config_dir())
     except LinkInTheWay as link:
@@ -161,7 +162,9 @@ def _import(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        created, written, left = pa.import_project(plan, extracted, store=store, home=config_dir())
+        created, written, left = pa.import_project(
+            plan, extracted, store=store, home=config_dir()
+        )
     except LinkInTheWay as link:
         print(f"❌ Left unchanged: {link}")
         return 1

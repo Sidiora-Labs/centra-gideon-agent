@@ -39,7 +39,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from gideon.integrations.inbox import STATUS_OPEN as OPEN_STATUSES, is_open_status
 from gideon.cognition.proactive.manifest import (
     MATERIALITY_ACTION,
     MATERIALITY_ERROR,
@@ -50,6 +49,8 @@ from gideon.cognition.proactive.manifest import (
     SOURCE_RUN,
     CollectedItem,
 )
+from gideon.integrations.inbox import STATUS_OPEN as OPEN_STATUSES
+from gideon.integrations.inbox import is_open_status
 
 if TYPE_CHECKING:
     from gideon.integrations.inbox_reach import Reader
@@ -118,7 +119,9 @@ def _inbox_item(item: Any, reader: Reader) -> CollectedItem | None:
     )
 
 
-def collect_inbox(store: Any, *, since_ts: float = 0.0, state: Any = None) -> list[CollectedItem]:
+def collect_inbox(
+    store: Any, *, since_ts: float = 0.0, state: Any = None
+) -> list[CollectedItem]:
     """Inbox rows still wanting attention that are about no chat (:func:`_digest_reads`, over the
     gateway's dashboard *state*), newest-first within the window.
 
@@ -154,7 +157,9 @@ def _channel_item(key: str, session: Any) -> CollectedItem | None:
     if not messages:
         return None
     last = messages[-1]
-    role = str(last.get("role", "") if isinstance(last, dict) else getattr(last, "role", ""))
+    role = str(
+        last.get("role", "") if isinstance(last, dict) else getattr(last, "role", "")
+    )
     if role == "assistant":
         return None
     last_activity = float(getattr(session, "last_activity_at", 0.0) or 0.0)
@@ -187,7 +192,9 @@ def collect_channels(state: Any, *, since_ts: float = 0.0) -> list[CollectedItem
             if collected is not None:
                 out.append(collected)
         except Exception:  # noqa: BLE001
-            logger.warning("triage: skipped an unreadable channel session", exc_info=True)
+            logger.warning(
+                "triage: skipped an unreadable channel session", exc_info=True
+            )
     return out
 
 
@@ -230,21 +237,25 @@ def _effects_that_landed(rows: list[dict[str, Any]]) -> int:
     for row in rows:
         record = EffectRecord.from_event(row)
         by_path.setdefault(record.instance_path, []).append(record)
-    return sum(1 for records in by_path.values() if committed_effect(records) is not None)
+    return sum(
+        1 for records in by_path.values() if committed_effect(records) is not None
+    )
 
 
 def _run_item(run: Any, store: Any) -> CollectedItem | None:
     """One run as the lane collects it: None for a run that has not ended, and for a digest."""
     from gideon.assurance.ledger import read_events
     from gideon.assurance.ledger.kinds import EFFECT
-    from gideon.cognition.proactive.surface import TRIAGE_WORKFLOW
     from gideon.automation.triggers.delivery import status_url
+    from gideon.cognition.proactive.surface import TRIAGE_WORKFLOW
 
     if str(getattr(run, "workflow_name", "") or "") == TRIAGE_WORKFLOW:
         # The digest reports what happened. Listing the one before it under "What your machine
         # did" would report the report.
         return None
-    status = str(getattr(getattr(run, "status", ""), "value", getattr(run, "status", "")))
+    status = str(
+        getattr(getattr(run, "status", ""), "value", getattr(run, "status", ""))
+    )
     effects = 0
     try:
         effects = _effects_that_landed(read_events(store, str(run.id), kinds={EFFECT}))
@@ -270,7 +281,9 @@ def _run_item(run: Any, store: Any) -> CollectedItem | None:
     )
 
 
-def collect_runs(*, since: str = "", limit: int = RUN_SCAN_LIMIT) -> list[CollectedItem]:
+def collect_runs(
+    *, since: str = "", limit: int = RUN_SCAN_LIMIT
+) -> list[CollectedItem]:
     """Recent background runs that ENDED in the window, weighted by the effects their ledger says
     landed.
 
@@ -282,7 +295,9 @@ def collect_runs(*, since: str = "", limit: int = RUN_SCAN_LIMIT) -> list[Collec
     """
     try:
         from gideon.automation.workflows import store as run_store
-    except Exception:  # noqa: BLE001 - engine absent (a bare library import) → no run lane
+    except (
+        Exception
+    ):  # noqa: BLE001 - engine absent (a bare library import) → no run lane
         logger.warning("triage: run lane unavailable", exc_info=True)
         return []
 
@@ -298,7 +313,9 @@ def collect_runs(*, since: str = "", limit: int = RUN_SCAN_LIMIT) -> list[Collec
     out: list[CollectedItem] = []
     for run in runs:
         try:
-            ended = str(getattr(run, "completed_at", "") or getattr(run, "created_at", "") or "")
+            ended = str(
+                getattr(run, "completed_at", "") or getattr(run, "created_at", "") or ""
+            )
             if since and ended and ended < since:
                 continue
             collected = _run_item(run, run_store)
@@ -334,7 +351,9 @@ def current_item(
 
             run = run_store.get(source_id)
             return _run_item(run, run_store) if run is not None else None
-    except Exception as exc:  # noqa: BLE001 - a lane that cannot be read is unknown, not empty
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - a lane that cannot be read is unknown, not empty
         raise LaneUnreadable(f"{source} lane unreadable: {type(exc).__name__}") from exc
     raise LaneUnreadable(f"{source} lane is not readable here")
 

@@ -85,7 +85,12 @@ def _definition(definition: Any) -> dict[str, Any]:
     adapter = definition.adapter
     adapter_argv = (
         resolve_acp_cli(
-            env_var=(adapter.env_var or "GIDEON_RUNNER_" + definition.id.upper().replace("-", "_") + "_ADAPTER_BIN"),
+            env_var=(
+                adapter.env_var
+                or "GIDEON_RUNNER_"
+                + definition.id.upper().replace("-", "_")
+                + "_ADAPTER_BIN"
+            ),
             bin_names=list(adapter.bin_names),
             npm_pkg=None,
         )
@@ -101,7 +106,11 @@ def _definition(definition: Any) -> dict[str, Any]:
     provider = None
     if entry is not None:
         options_text = json.dumps(
-            entry.options or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+            entry.options or {},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
         )
         provider = {
             "name": entry.name,
@@ -139,7 +148,12 @@ def _definition(definition: Any) -> dict[str, Any]:
 
 def content(definition: Any) -> str:
     """Serialize all behavior-bearing runner inputs without recording their secrets."""
-    return json.dumps(_definition(definition), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        _definition(definition),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def revision(definition: Any, tenant: Principal | str | None = None) -> str:
@@ -181,9 +195,7 @@ def grant(
     current = revision(definition, principal)
     if not expected_revision or current != expected_revision:
         return False
-    _BOOK.give(
-        _key(definition.id, principal), current, principal=principal.label
-    )
+    _BOOK.give(_key(definition.id, principal), current, principal=principal.label)
     return True
 
 

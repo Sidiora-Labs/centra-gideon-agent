@@ -281,7 +281,9 @@ async def _run_fetch(name: str, model: str, *, repair: bool = False) -> None:
         deleted = await provider.delete_model(model)
         removed = layouts.delete_all_layouts(_cache_root(name), model)
         if not deleted and not removed:
-            raise RuntimeError(f"Could not remove incomplete model '{model}' before repair")
+            raise RuntimeError(
+                f"Could not remove incomplete model '{model}' before repair"
+            )
     ok = await provider.download_model(model)
     if not ok:
         raise RuntimeError(f"Failed to download model '{model}' from {name}")
@@ -369,7 +371,9 @@ class ModelDownloadRegistry:
             _apply_progress(job)
             return job, None
 
-        run = _Running(job=job, baseline=_dir_size(_cache_root(provider)), repair=repair)
+        run = _Running(
+            job=job, baseline=_dir_size(_cache_root(provider)), repair=repair
+        )
         self._running[job.id] = run
         run.tasks.add(asyncio.ensure_future(self._drive(run)))
         return job, None
@@ -417,7 +421,10 @@ class ModelDownloadRegistry:
         from gideon.extensions.apps import app_manager
 
         if not app_manager.acquire_app_state_lock():
-            return None, "app files are being updated or another engine install is running"
+            return (
+                None,
+                "app files are being updated or another engine install is running",
+            )
         try:
             install = self.install(provider)
         except Exception:
@@ -609,13 +616,19 @@ def _classify_error(exc: Exception) -> str:
         return "disk_full"
     if "no space" in text or "disk full" in text:
         return "disk_full"
-    if "pin" in text and any(term in text for term in ("bad", "invalid", "mismatch", "verify")):
+    if "pin" in text and any(
+        term in text for term in ("bad", "invalid", "mismatch", "verify")
+    ):
         return "bad_certificate_pin"
     if "proxy" in kind or "proxy" in text:
         return "proxy_error"
     if any(term in kind or term in text for term in ("ssl", "tls", "certificate")):
         return "tls_error"
-    if "httperror" in kind or getattr(exc, "status_code", None) or getattr(exc, "code", None):
+    if (
+        "httperror" in kind
+        or getattr(exc, "status_code", None)
+        or getattr(exc, "code", None)
+    ):
         return "http_error"
     if any(
         w in text
@@ -643,4 +656,6 @@ def _failure_guidance(reason: str) -> str:
         "gated": "Access to this model is restricted. Confirm the model terms and token access, then retry.",
         "not_found": "The model was not found at its source. Check the model name and retry.",
         "download_failed": "The model download failed. Check Gideon's logs for details and retry.",
-    }.get(reason, "The model download failed. Check Gideon's logs for details and retry.")
+    }.get(
+        reason, "The model download failed. Check Gideon's logs for details and retry."
+    )

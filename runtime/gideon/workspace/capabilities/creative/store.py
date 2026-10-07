@@ -85,7 +85,7 @@ def validate(value):
     return result
 
 
-class IngredientStore:
+class CreativeDatabase:
     def __init__(self, home=None):
         self.home = Path(home) if home is not None else config_dir()
         self.path = self.home / "capabilities" / "creative" / "catalog.sqlite3"
@@ -113,6 +113,7 @@ class IngredientStore:
         finally:
             db.close()
 
+
     def _get(self, db, id):
         row = db.execute(
             "SELECT record FROM ingredients WHERE id=?", (identifier(id),)
@@ -121,6 +122,8 @@ class IngredientStore:
             raise CatalogError("Ingredient not found", 404)
         return json.loads(row[0])
 
+
+class IngredientStore(CreativeDatabase):
     def _relations(self, db, id, record):
         records = {
             key: json.loads(body)

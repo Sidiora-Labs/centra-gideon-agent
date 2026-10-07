@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
 from collections.abc import Mapping
-from typing import Any
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 _PRICING_FILE = Path(__file__).resolve().parent / "model_pricing.json"
@@ -16,6 +16,7 @@ _PROFILE = re.compile(r"^[a-z]{2,8}(?:-[a-z]+)?\.(?=[a-z0-9-]+\.[^.])")
 _API_REVISION = re.compile(r"-v\d+:\d+$")
 _VERSION_TAIL = re.compile(r"-(\d{1,2})-(\d{1,2})(?=-\d{8}|@|\[|$)")
 _SNAPSHOT = re.compile(r"(?:-\d{4,}|@|\[)")
+
 
 def _read_prices(path):
     if path.exists():
@@ -65,12 +66,31 @@ class PriceTable:
         for candidate in candidates:
             if candidate in self.rows:
                 row = self.rows[candidate]
-                return PriceRow(candidate, row, str(row.get("vendor") or ""), str(row.get("recorded") or ""))
+                return PriceRow(
+                    candidate,
+                    row,
+                    str(row.get("vendor") or ""),
+                    str(row.get("recorded") or ""),
+                )
         for candidate in candidates:
-            key = max((key for key in self.rows if candidate.startswith(key) and _SNAPSHOT.match(candidate, len(key))), key=len, default=None)
+            key = max(
+                (
+                    key
+                    for key in self.rows
+                    if candidate.startswith(key)
+                    and _SNAPSHOT.match(candidate, len(key))
+                ),
+                key=len,
+                default=None,
+            )
             if key is not None:
                 row = self.rows[key]
-                return PriceRow(key, row, str(row.get("vendor") or ""), str(row.get("recorded") or ""))
+                return PriceRow(
+                    key,
+                    row,
+                    str(row.get("vendor") or ""),
+                    str(row.get("recorded") or ""),
+                )
         return None
 
     def lookup(self, model):

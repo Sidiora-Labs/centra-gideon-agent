@@ -66,7 +66,9 @@ class DiscordDeskSettings:
         """Read + coerce the app store."""
         d = ProviderSettings.load(_APP)
         return cls(
-            dm_activation=_validate_activation(d.get("dm_activation", ACTIVATION_ALWAYS)),
+            dm_activation=_validate_activation(
+                d.get("dm_activation", ACTIVATION_ALWAYS)
+            ),
             application_id=str(d.get("application_id", "") or ""),
         )
 

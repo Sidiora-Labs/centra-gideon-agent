@@ -762,7 +762,8 @@ def render_template(
     expanded = _resolve_includes(template.content, resolver, 0, ())
     known = {variable.name for variable in declarations}
     declarations.extend(
-        variable for variable in extract_inline_variables(expanded)
+        variable
+        for variable in extract_inline_variables(expanded)
         if variable.name not in known
     )
     return render(expanded, declarations, values)

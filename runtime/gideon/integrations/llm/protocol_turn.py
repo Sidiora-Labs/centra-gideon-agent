@@ -7,8 +7,6 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
-from gideon.integrations.llm.events import ContextUsage
-
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
     EVENT_TOOL_CALL,
@@ -16,6 +14,7 @@ from gideon.integrations.llm.base import (
     LLMEvent,
     ModelProvider,
 )
+from gideon.integrations.llm.events import ContextUsage
 
 logger = logging.getLogger(__name__)
 _Frame = TypeVar("_Frame")

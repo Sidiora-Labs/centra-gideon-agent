@@ -42,7 +42,11 @@ class QueuedDelivery:
         # channel_transports and the legacy channel registry share one send path.
         from gideon.integrations.channel_delivery import MaskedDelivery
 
-        self.delivery = delivery if isinstance(delivery, MaskedDelivery) else MaskedDelivery(delivery)
+        self.delivery = (
+            delivery
+            if isinstance(delivery, MaskedDelivery)
+            else MaskedDelivery(delivery)
+        )
         self._queue: asyncio.Queue[_Send] = asyncio.Queue(maxsize=capacity)
         self._worker: asyncio.Task[None] | None = None
         self._active: asyncio.Future[Any] | None = None
@@ -68,7 +72,9 @@ class QueuedDelivery:
                     await asyncio.sleep(0.05)
             if self._retired:
                 if not result.done():
-                    result.set_exception(RuntimeError(f"{self.provider} delivery retired"))
+                    result.set_exception(
+                        RuntimeError(f"{self.provider} delivery retired")
+                    )
                 return await result
             if self._worker is None or self._worker.done():
                 self._worker = loop.create_task(self._run())
@@ -88,14 +94,21 @@ class QueuedDelivery:
                         value = await getattr(self.delivery, item.method)(
                             *item.args, **item.kwargs
                         )
-                        if value is False or (
-                            item.method in {"send", "deliver_text"} and value is None
-                        ) or (
-                            item.method == "deliver_text"
-                            and value == ""
-                            and len(item.args) > 1
-                            and bool(item.args[1])
-                            and not getattr(self.delivery, "allows_empty_receipt", False)
+                        if (
+                            value is False
+                            or (
+                                item.method in {"send", "deliver_text"}
+                                and value is None
+                            )
+                            or (
+                                item.method == "deliver_text"
+                                and value == ""
+                                and len(item.args) > 1
+                                and bool(item.args[1])
+                                and not getattr(
+                                    self.delivery, "allows_empty_receipt", False
+                                )
+                            )
                         ):
                             raise ConnectionError(
                                 f"{self.provider} {item.method} returned no delivery receipt"
@@ -131,5 +144,7 @@ class QueuedDelivery:
         while not self._queue.empty():
             item = self._queue.get_nowait()
             if not item.result.done():
-                item.result.set_exception(RuntimeError(f"{self.provider} delivery retired"))
+                item.result.set_exception(
+                    RuntimeError(f"{self.provider} delivery retired")
+                )
             self._queue.task_done()

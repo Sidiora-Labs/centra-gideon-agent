@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import fcntl
+import json
 import logging
 import time
 import uuid
@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from gideon.core.config import loader as config_loader
 from gideon.core.atomic_write import atomic_write
+from gideon.core.config import loader as config_loader
 from gideon.core.record_ids import is_safe_record_id, record_path
 from gideon.engine.tasks.models import BUILTIN_PROJECTS, Project, TaskList
 
@@ -116,8 +116,6 @@ class ProjectMigration:
             ):
                 project.name, project.is_builtin = "Personal", True
                 self.store._write_project(project)
-
-
 
 
 @dataclass(frozen=True)
@@ -349,7 +347,10 @@ class HierarchyStore:
             project = self.get_project(project_id)
             if project is None:
                 return None
-            if expected_revision is not None and project.updated_at != expected_revision:
+            if (
+                expected_revision is not None
+                and project.updated_at != expected_revision
+            ):
                 raise ProjectRevisionConflict(project.updated_at)
             updated = ProjectPatch(self, project, fields).apply()
             self._write_project(updated)
@@ -368,7 +369,6 @@ class HierarchyStore:
         )
         shutil.rmtree(self._project_dir(project_id), ignore_errors=True)
         return True
-
 
     def _list_path(self, list_id: str) -> Path:
         return record_path(self._lists_dir(), list_id, kind="list_id")

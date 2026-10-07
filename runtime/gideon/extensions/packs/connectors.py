@@ -244,11 +244,20 @@ def _save_credentials(names: list[str], values: dict[str, str]) -> list[str]:
     """
     from gideon.integrations.llm.credentials import CredentialStore
     from gideon.security.secrets_vault import (
-        PROJECT_KEY_PREFIX, is_reserved_key, is_sign_in_key, valid_key_name,
+        PROJECT_KEY_PREFIX,
+        is_reserved_key,
+        is_sign_in_key,
+        valid_key_name,
     )
-    unusable = [name for name in names if not valid_key_name(name)
-                or is_reserved_key(name) or name.startswith(PROJECT_KEY_PREFIX)
-                or is_sign_in_key(name)]
+
+    unusable = [
+        name
+        for name in names
+        if not valid_key_name(name)
+        or is_reserved_key(name)
+        or name.startswith(PROJECT_KEY_PREFIX)
+        or is_sign_in_key(name)
+    ]
     if unusable:
         raise ConnectorResolutionError(
             f"the pack names credential(s) Gideon cannot store for it: {', '.join(sorted(unusable))}"

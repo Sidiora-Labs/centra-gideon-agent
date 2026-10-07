@@ -129,7 +129,11 @@ class _PromptLaunch:
         return cls(
             dict(
                 task=task,
-                parent_run=("workflow:" + str(ctx.payload["run_id"])) if ctx.event == "workflow_node" and ctx.payload.get("run_id") else "",
+                parent_run=(
+                    ("workflow:" + str(ctx.payload["run_id"]))
+                    if ctx.event == "workflow_node" and ctx.payload.get("run_id")
+                    else ""
+                ),
                 parent_session_key=parent,
                 agent=agent,
                 max_turns=turns,
@@ -141,6 +145,7 @@ class _PromptLaunch:
                 dry_run=bool(config.get("dry_run", False)),
             )
         )
+
 
 class RunPromptActionProvider(ActionProvider):
     @property

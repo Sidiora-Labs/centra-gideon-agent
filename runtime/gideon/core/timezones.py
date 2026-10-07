@@ -115,7 +115,9 @@ class MachineZoneCandidates:
                 if is_known_zone(name):
                     return name
             except TimeZoneDatabaseUnavailable:
-                logger.debug("cannot check machine timezone: the IANA database is unavailable")
+                logger.debug(
+                    "cannot check machine timezone: the IANA database is unavailable"
+                )
                 return ""
             logger.debug(
                 "machine timezone from %s is %r, which is not an IANA key", source, name

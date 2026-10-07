@@ -710,7 +710,13 @@ class HybridRetriever:
                     "AND embedding_provider = ? AND embedding_model = ? "
                     f"{archived_clause} AND length(embedding) = ? "  # noqa: S608
                     "ORDER BY vec_distance_cosine(embedding, ?) LIMIT ?",
-                    (embedding_provider, embedding_model, q_dim * 4, q_blob, max(1, limit) * _ANN_OVERFETCH),
+                    (
+                        embedding_provider,
+                        embedding_model,
+                        q_dim * 4,
+                        q_blob,
+                        max(1, limit) * _ANN_OVERFETCH,
+                    ),
                 ).fetchall()
             except (
                 sqlite3.Error
@@ -728,8 +734,8 @@ class HybridRetriever:
             for row in self.store.db.execute(
                 "SELECT id, embedding FROM items WHERE embedding IS NOT NULL "
                 "AND embedding_provider = ? AND embedding_model = ? "
-                f"AND status = 'active' {archived_clause}"  # noqa: S608 (fixed literal)
-                , (embedding_provider, embedding_model)
+                f"AND status = 'active' {archived_clause}",  # noqa: S608 (fixed literal)
+                (embedding_provider, embedding_model),
             ):
                 _consider(row["id"], row["embedding"], None)
 

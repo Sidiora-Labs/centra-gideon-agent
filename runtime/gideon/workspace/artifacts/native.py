@@ -27,8 +27,8 @@ from pathlib import Path
 from gideon.core.atomic_write import atomic_write, atomic_write_bytes
 from gideon.core.config import loader as config_loader
 from gideon.security.security import is_sensitive_path
+from gideon.workspace.artifacts import changes, source_files
 from gideon.workspace.artifacts.deploy import ArtifactDeployStore
-from gideon.workspace.artifacts import changes
 from gideon.workspace.artifacts.models import (
     ALLOWED_EVENT_TYPES,
     BINARY_KINDS,
@@ -52,7 +52,6 @@ from gideon.workspace.artifacts.models import (
     slugify,
 )
 from gideon.workspace.artifacts.provider import ArtifactProvider
-from gideon.workspace.artifacts import source_files
 
 
 def config_dir() -> Path:
@@ -99,7 +98,9 @@ def _kept_text(kind: str, content: str) -> str:
     if kind != "csv":
         return content
     import csv
+
     from gideon.workspace.documents.writers.csv_writer import render_csv_text
+
     try:
         return render_csv_text(content)
     except csv.Error as exc:
@@ -239,7 +240,9 @@ class NativeArtifactProvider(ArtifactProvider):
         if not source_path:
             return False
         if not source_revision:
-            raise ValueError("source_revision is required before writing a file-backed artifact")
+            raise ValueError(
+                "source_revision is required before writing a file-backed artifact"
+            )
         resolved = source_files.admit(source_path)
         current, revision = source_files.read(resolved)
         if revision != source_revision:
@@ -684,7 +687,9 @@ class NativeArtifactProvider(ArtifactProvider):
                     return None
                 content = _kept_text(art.kind, content)
                 if art.source_path:
-                    self._try_write_source_path(art.source_path, content, source_revision)
+                    self._try_write_source_path(
+                        art.source_path, content, source_revision
+                    )
                 art.version += 1
                 d = self._artifact_dir(slug)
                 self._write_text(d / "current.html", content)
@@ -729,10 +734,14 @@ class NativeArtifactProvider(ArtifactProvider):
         if source_path:
             source_path = source_files.admit(source_path)
             if not source_revision:
-                raise ValueError("source_revision is required when creating from a source file")
+                raise ValueError(
+                    "source_revision is required when creating from a source file"
+                )
             source_content, current_revision = source_files.read(source_path)
             if current_revision != source_revision:
-                raise ValueError("source file changed; reload it before creating the artifact")
+                raise ValueError(
+                    "source file changed; reload it before creating the artifact"
+                )
             artifact_content = source_content if content is None else content
         else:
             artifact_content = content if content is not None else ""
@@ -741,8 +750,12 @@ class NativeArtifactProvider(ArtifactProvider):
             if source_path and content is not None:
                 _current_content, latest_revision = source_files.read(source_path)
                 if latest_revision != source_revision:
-                    raise ValueError("source file changed; reload it before creating the artifact")
-                self._try_write_source_path(source_path, artifact_content, source_revision)
+                    raise ValueError(
+                        "source file changed; reload it before creating the artifact"
+                    )
+                self._try_write_source_path(
+                    source_path, artifact_content, source_revision
+                )
             base = (
                 slug.strip() if slug and is_valid_slug(slug.strip()) else slugify(name)
             )
@@ -839,7 +852,9 @@ class NativeArtifactProvider(ArtifactProvider):
                 d = self._artifact_dir(slug)
                 content_changed = content != (self._current_content(slug) or "")
                 if art.source_path:
-                    self._try_write_source_path(art.source_path, content, source_revision)
+                    self._try_write_source_path(
+                        art.source_path, content, source_revision
+                    )
                 self._write_text(d / "current.html", content)
 
             cut_version = False
@@ -857,7 +872,9 @@ class NativeArtifactProvider(ArtifactProvider):
                 latest_snap = self._version_content(slug, nums[-1]) if nums else None
                 if latest_snap is None or snap_content != latest_snap:
                     art.version += 1
-                    self._snapshot_version(slug, art.version, _kept_text(art.kind, snap_content))
+                    self._snapshot_version(
+                        slug, art.version, _kept_text(art.kind, snap_content)
+                    )
                     cut_version = True
 
             if cut_version or content_changed:
@@ -921,7 +938,9 @@ class NativeArtifactProvider(ArtifactProvider):
             try:
                 ArtifactDeployStore(self._root).teardown(slug)
             except OSError:
-                logger.warning("artifact delete refused: deployment revocation failed: %s", slug)
+                logger.warning(
+                    "artifact delete refused: deployment revocation failed: %s", slug
+                )
                 return False
             try:
                 shutil.rmtree(d)

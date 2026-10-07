@@ -57,7 +57,11 @@ class Availability:
     checked_at: float | None = None
 
     def to_wire(self) -> dict[str, Any]:
-        return {"state": self.state, "reason": self.reason, "checkedAt": self.checked_at}
+        return {
+            "state": self.state,
+            "reason": self.reason,
+            "checkedAt": self.checked_at,
+        }
 
 
 _CHECKING = Availability(CHECKING)
@@ -83,7 +87,12 @@ def parse_answer(line: bytes | str) -> tuple[str, str | None, Availability] | No
     name = raw.get("name")
     state = raw.get("state")
     impl = raw.get("implementation")
-    if not isinstance(name, str) or not name or state not in STATES or state == CHECKING:
+    if (
+        not isinstance(name, str)
+        or not name
+        or state not in STATES
+        or state == CHECKING
+    ):
         return None
     if impl is not None and not isinstance(impl, str):
         return None
@@ -129,7 +138,8 @@ class AvailabilityBoard:
                 # Measured, and the child said nothing about this record. Asking again right
                 # away would loop forever on an app whose child never answers for it.
                 return self._whole_app.get(name) or Availability(
-                    UNKNOWN, "The availability check returned no answer for this provider."
+                    UNKNOWN,
+                    "The availability check returned no answer for this provider.",
                 )
             self._schedule([name])
             return _CHECKING
@@ -205,7 +215,9 @@ class AvailabilityBoard:
                 await self._probe(batch)
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 — a failed batch must not end the drain loop
+            except (
+                Exception
+            ):  # noqa: BLE001 — a failed batch must not end the drain loop
                 logger.warning("provider availability probe failed", exc_info=True)
                 self._settle(batch, set(), "The availability check failed to run.")
             finally:
@@ -214,7 +226,11 @@ class AvailabilityBoard:
     async def _probe(self, names: list[str]) -> None:
         from gideon.core.config.loader import config_dir
         from gideon.extensions.apps import app_python
-        from gideon.security.sandbox import PROFILE_TOOL, build_child_env, create_subprocess_limited
+        from gideon.security.sandbox import (
+            PROFILE_TOOL,
+            build_child_env,
+            create_subprocess_limited,
+        )
 
         env = build_child_env(
             site="provider-availability-probe",
@@ -234,7 +250,9 @@ class AvailabilityBoard:
                 start_new_session=True,
             )
         except OSError as exc:
-            self._settle(names, reported, f"The availability check could not start ({exc}).")
+            self._settle(
+                names, reported, f"The availability check could not start ({exc})."
+            )
             return
         self._proc = proc
         assert proc.stdout is not None and proc.stderr is not None
@@ -256,19 +274,27 @@ class AvailabilityBoard:
             self._proc = None
         tail = await stderr_tail
         if timed_out:
-            reason = f"The availability check did not finish within {self._deadline:.0f} s."
+            reason = (
+                f"The availability check did not finish within {self._deadline:.0f} s."
+            )
         else:
             reason = "The availability check ended without an answer for this provider."
             if proc.returncode not in (0, None) and tail:
                 logger.warning(
-                    "availability probe exited %s: %s", proc.returncode, tail.strip()[-600:]
+                    "availability probe exited %s: %s",
+                    proc.returncode,
+                    tail.strip()[-600:],
                 )
         self._settle(names, reported, reason)
 
     def _record(self, name: str, impl: str | None, answer: Availability) -> set[_Key]:
         if impl is None:
             self._whole_app[name] = answer
-        keys = {(name, impl)} if impl is not None else set(self._keys_by_name.get(name, set()))
+        keys = (
+            {(name, impl)}
+            if impl is not None
+            else set(self._keys_by_name.get(name, set()))
+        )
         now = time.monotonic()
         for key in keys:
             self._keys_by_name.setdefault(name, set()).add(key)

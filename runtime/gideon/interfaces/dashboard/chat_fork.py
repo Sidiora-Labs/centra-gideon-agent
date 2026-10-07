@@ -1,13 +1,12 @@
 """Fork session — copy messages into a new tab."""
 
-from gideon.engine.turn_source import source_of
-
 import logging
 from copy import deepcopy
 
 from aiohttp import web
 
 from gideon.core.http_request import read_json_body
+from gideon.engine.turn_source import source_of
 from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 from gideon.interfaces.dashboard.chat_utils import (
     _history_key_for,
@@ -178,7 +177,15 @@ async def api_chat_session_fork(request: web.Request) -> web.Response:
                 content, _ = redact_exfiltration_urls(content)
                 content, _ = redact_credentials(content)
             cls = "msg msg-u" if role == "user" else "msg msg-a"
-            new_session.append(role, content, cls, ts=m.get("ts", ""), broadcast=False, meta=deepcopy(m.get("meta")), source=source_of(m))
+            new_session.append(
+                role,
+                content,
+                cls,
+                ts=m.get("ts", ""),
+                broadcast=False,
+                meta=deepcopy(m.get("meta")),
+                source=source_of(m),
+            )
         new_session.drain()
         save_session_to_history(state, new_session)
         new_session._resumed_count = len(new_session.messages)
@@ -308,7 +315,13 @@ async def api_chat_session_fork_rewound(request: web.Request) -> web.Response:
                     content, _ = redact_credentials(content)
                 cls = "msg msg-u" if role == "user" else "msg msg-a"
                 new_session.append(
-                    role, content, cls, ts=m.get("ts", ""), broadcast=False, meta=deepcopy(m.get("meta")), source=source_of(m)
+                    role,
+                    content,
+                    cls,
+                    ts=m.get("ts", ""),
+                    broadcast=False,
+                    meta=deepcopy(m.get("meta")),
+                    source=source_of(m),
                 )
             new_session.drain()
             save_session_to_history(state, new_session)

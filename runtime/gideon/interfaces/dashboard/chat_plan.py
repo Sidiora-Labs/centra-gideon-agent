@@ -84,9 +84,13 @@ def _mask_plan_projection(value: Any) -> Any:
     """Mask plan prose without rewriting chat, step, or filesystem identifiers."""
     if isinstance(value, dict):
         return {
-            key: item
-            if key in _OPAQUE_PLAN_FIELDS or key.endswith("_id") or key.endswith("_path")
-            else _mask_plan_projection(item)
+            key: (
+                item
+                if key in _OPAQUE_PLAN_FIELDS
+                or key.endswith("_id")
+                or key.endswith("_path")
+                else _mask_plan_projection(item)
+            )
             for key, item in value.items()
         }
     if isinstance(value, list):
@@ -393,7 +397,9 @@ async def api_chat_plan_edit(request: web.Request) -> web.Response:
             status=409,
         )
     write(sess, binding)
-    return web.json_response({"ok": True, "session": _mask_plan_projection(sess.to_dict())})
+    return web.json_response(
+        {"ok": True, "session": _mask_plan_projection(sess.to_dict())}
+    )
 
 
 async def api_chat_plan_comment(request: web.Request) -> web.Response:

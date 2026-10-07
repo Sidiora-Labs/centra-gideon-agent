@@ -4,7 +4,6 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from slack_desk_runtime.events import SeenCache, _route_message
 from slack_desk_runtime.settings import SlackDeskSettings
 
@@ -14,6 +13,7 @@ def _make_orch(allowed_users: list[dict] | None = None) -> MagicMock:
     orch = MagicMock()
     settings = SlackDeskSettings(allowed_users=allowed_users or [])
     import slack_desk_runtime.settings as _st
+
     _st._current = settings
     orch.settings = settings
     orch.channel_history = MagicMock()
@@ -57,7 +57,9 @@ class TestUserResolutionFallback:
             "team": "TTEST",
         }
 
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch(
+            "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             with patch("slack_desk_runtime.events.is_allowed_user", return_value=True):
                 await _route_message(orch, event, seen, is_mention=False)
                 await asyncio.sleep(0)
@@ -79,7 +81,9 @@ class TestUserResolutionFallback:
         orch = _make_orch(
             allowed_users=[{"slack_id": "U055HN562JG", "name": "shahtani"}],
         )
-        orch.slack_desk.get_user_info = AsyncMock(return_value={"real_name": "Tanish Shah"})
+        orch.slack_desk.get_user_info = AsyncMock(
+            return_value={"real_name": "Tanish Shah"}
+        )
         seen = SeenCache()
         event = {
             "user": "U055HN562JG",
@@ -89,7 +93,9 @@ class TestUserResolutionFallback:
             "team": "TTEST",
         }
 
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch(
+            "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             with patch("slack_desk_runtime.events.is_allowed_user", return_value=True):
                 await _route_message(orch, event, seen, is_mention=False)
                 await asyncio.sleep(0)
@@ -98,7 +104,9 @@ class TestUserResolutionFallback:
                 await asyncio.gather(*tasks, return_exceptions=True)
                 mock_hm.assert_called_once()
                 # Slack API name is used, not config name
-                assert mock_hm.call_args.kwargs.get("user_display_name") == "Tanish Shah"
+                assert (
+                    mock_hm.call_args.kwargs.get("user_display_name") == "Tanish Shah"
+                )
 
     @pytest.mark.asyncio
     async def test_fallback_no_match_in_config(self):
@@ -116,7 +124,9 @@ class TestUserResolutionFallback:
             "team": "TTEST",
         }
 
-        with patch("slack_desk_runtime.events.handle_message", new_callable=AsyncMock) as mock_hm:
+        with patch(
+            "slack_desk_runtime.events.handle_message", new_callable=AsyncMock
+        ) as mock_hm:
             with patch("slack_desk_runtime.events.is_allowed_user", return_value=True):
                 await _route_message(orch, event, seen, is_mention=False)
                 await asyncio.sleep(0)
@@ -125,4 +135,6 @@ class TestUserResolutionFallback:
                 await asyncio.gather(*tasks, return_exceptions=True)
                 mock_hm.assert_called_once()
                 # Falls back to raw sender_id since no config match
-                assert mock_hm.call_args.kwargs.get("user_display_name") == "U055HN562JG"
+                assert (
+                    mock_hm.call_args.kwargs.get("user_display_name") == "U055HN562JG"
+                )

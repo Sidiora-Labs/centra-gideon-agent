@@ -2,22 +2,26 @@
 
 from __future__ import annotations
 
-from gideon.core.turn_streams import closing_stream
-
-import json
 import copy
+import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
 from gideon.core._sdk_deps import require_sdk
+from gideon.core.turn_streams import closing_stream
 from gideon.integrations.llm.base import (
     EVENT_TEXT_CHUNK,
     EVENT_THINKING_CHUNK,
     LLMEvent,
 )
+from gideon.integrations.llm.catalog import SAMPLING_PARAMETERS, refused_sampling
 from gideon.integrations.llm.credentials import Credential
-from gideon.integrations.llm.prompt_cache import CACHE_HINT_KEY, VOLATILE_KEY, PromptCache
+from gideon.integrations.llm.prompt_cache import (
+    CACHE_HINT_KEY,
+    VOLATILE_KEY,
+    PromptCache,
+)
 from gideon.integrations.llm.protocol_turn import (
     ConversationProtocol,
     ToolFragment,
@@ -25,7 +29,6 @@ from gideon.integrations.llm.protocol_turn import (
     until_terminal,
     wire_value,
 )
-from gideon.integrations.llm.catalog import SAMPLING_PARAMETERS, refused_sampling
 from gideon.integrations.llm.registry import CredentialMissing
 from gideon.integrations.model_windows import declared_context_window, is_local_endpoint
 from gideon.integrations.model_windows import model_context_window as _model_window
@@ -209,8 +212,10 @@ class _MessageEnvelope:
                 if message.get("role") != "user":
                     continue
                 own = message.get("content")
-                blocks = own if isinstance(own, list) else (
-                    [{"type": "text", "text": str(own)}] if own else []
+                blocks = (
+                    own
+                    if isinstance(own, list)
+                    else ([{"type": "text", "text": str(own)}] if own else [])
                 )
                 message["content"] = [*blocks, *notes]
                 break
@@ -385,7 +390,9 @@ class AnthropicProvider(ConversationProtocol):
     ) -> dict[str, Any]:
         model = self._require_model(model)
         prepared = self._with_pending_image(messages)
-        cache_enabled = translate and any(CACHE_HINT_KEY in message for message in prepared)
+        cache_enabled = translate and any(
+            CACHE_HINT_KEY in message for message in prepared
+        )
         system, prepared = (
             _translate_messages(prepared) if translate else ("", prepared)
         )
@@ -440,7 +447,9 @@ class AnthropicProvider(ConversationProtocol):
         )
 
     def _unsent(self, model: str, *, thinking: bool) -> dict[str, str]:
-        requested = [name for name in SAMPLING_PARAMETERS if name in self._extra_options]
+        requested = [
+            name for name in SAMPLING_PARAMETERS if name in self._extra_options
+        ]
         unsent = refused_sampling(model, requested)
         if (
             thinking
@@ -491,7 +500,9 @@ class AnthropicProvider(ConversationProtocol):
     async def stream(self, message: str) -> AsyncIterator[LLMEvent]:
         messages = self._begin_message(message, _MAX_HISTORY)
         request = self._request(messages, model=self._model, translate=False)
-        async with closing_stream(self._run_turn(request, self._model, remember=True)) as _owned_events:
+        async with closing_stream(
+            self._run_turn(request, self._model, remember=True)
+        ) as _owned_events:
             async for event in _owned_events:
                 yield event
 
@@ -511,6 +522,8 @@ class AnthropicProvider(ConversationProtocol):
             reasoning_effort=reasoning_effort,
             translate=True,
         )
-        async with closing_stream(self._run_turn(request, selected, remember=False)) as _owned_events:
+        async with closing_stream(
+            self._run_turn(request, selected, remember=False)
+        ) as _owned_events:
             async for event in _owned_events:
                 yield event

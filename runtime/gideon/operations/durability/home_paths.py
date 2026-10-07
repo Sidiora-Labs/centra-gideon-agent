@@ -1,4 +1,5 @@
 """Guard archive and sync paths against linked files and folders."""
+
 from __future__ import annotations
 
 import errno
@@ -7,14 +8,15 @@ import logging
 import os
 import shutil
 import stat
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 from gideon.core.database_privacy import SQLITE_SIDECARS
-from contextlib import contextmanager
-import tempfile
 
 PRIVATE_FILE_MODE = 0o600
+
 
 @contextmanager
 def private_file(dst, *, fsync=False):
@@ -22,7 +24,9 @@ def private_file(dst, *, fsync=False):
     dst.parent.mkdir(parents=True, exist_ok=True)
     staged = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w+b", dir=dst.parent, delete=False) as out:
+        with tempfile.NamedTemporaryFile(
+            mode="w+b", dir=dst.parent, delete=False
+        ) as out:
             staged = out.name
             os.fchmod(out.fileno(), PRIVATE_FILE_MODE)
             yield out
@@ -34,16 +38,17 @@ def private_file(dst, *, fsync=False):
     finally:
         if staged is not None:
             os.unlink(staged)
+
+
 def lock_path(target):
     # Gideon record writers coordinate with a lock inside their store.
     return Path(target).parent / ".gideon-record-files.lock"
 
+
 logger = logging.getLogger(__name__)
 
 #: Why an item is left as it is, by what the home holds on the way to it.
-A_SYMBOLIC_LINK = (
-    "a symbolic link in this home, which nothing restored, imported or synced is written through"
-)
+A_SYMBOLIC_LINK = "a symbolic link in this home, which nothing restored, imported or synced is written through"
 A_HARD_LINK = (
     "a hard link in this home (a file with another name), which nothing restored, imported or "
     "synced is written through"
@@ -58,9 +63,7 @@ A_HARD_LINK_READ = (
 )
 #: Why a lock is not opened (:func:`open_lock`).
 A_SYMBOLIC_LINK_LOCK = "a symbolic link in this home, which no lock is opened through"
-A_HARD_LINK_LOCK = (
-    "a hard link in this home (a file with another name), which no lock is opened through"
-)
+A_HARD_LINK_LOCK = "a hard link in this home (a file with another name), which no lock is opened through"
 
 
 @dataclass(frozen=True)
@@ -101,7 +104,12 @@ def _parts(rel: str | os.PathLike[str]) -> list[str]:
     absolute, or with a part that is empty, ``.``, ``..`` or holds a NUL."""
     text = os.fspath(rel)
     parts = text.split("/")
-    if not text or text.startswith("/") or "\\" in text or any(p in ("", ".", "..") or "\x00" in p for p in parts):
+    if (
+        not text
+        or text.startswith("/")
+        or "\\" in text
+        or any(p in ("", ".", "..") or "\x00" in p for p in parts)
+    ):
         raise ValueError(f"{text!r} names no path inside the home")
     return parts
 
@@ -180,12 +188,16 @@ def _beside(target: Path) -> list[Path]:
     """The files writers keep beside *target* and open with it: SQLite's journal, log and log index
     beside a database (``database_privacy.SQLITE_SIDECARS``), and the lock a store of records takes
     beside its file (``record_files.lock_path``)."""
-    return [*(Path(f"{target}{suffix}") for suffix in SQLITE_SIDECARS), lock_path(target)]
+    return [
+        *(Path(f"{target}{suffix}") for suffix in SQLITE_SIDECARS),
+        lock_path(target),
+    ]
 
 
 def landing(home: Path, rel: str, left: list[str]) -> Path | None:
     """:func:`home_path` for a door that goes on to its next item: the path in *home*, or ``None``
-    when a link is in the way, its sentence put on *left* (once, however many items it stops)."""
+    when a link is in the way, its sentence put on *left* (once, however many items it stops).
+    """
     try:
         return home_path(home, rel)
     except LinkInTheWay as link:
@@ -220,7 +232,11 @@ def open_lock(path: Path | str) -> io.FileIO:
     """
     path = Path(path)
     try:
-        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, PRIVATE_FILE_MODE)
+        fd = os.open(
+            path,
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+            PRIVATE_FILE_MODE,
+        )
     except OSError as exc:
         if exc.errno in (errno.ELOOP, errno.EMLINK) and os.path.islink(path):
             raise _refused_lock(path, A_SYMBOLIC_LINK_LOCK) from None
@@ -253,10 +269,14 @@ def _in_home(path: Path) -> str:
     """*path* by its path inside the home when it is in it (``config.loader.resolve_config_dir``,
     which makes nothing), else as it is."""
     try:
-        from gideon.core.config import loader  # lazy: the loader's imports reach this module
+        from gideon.core.config import (
+            loader,  # lazy: the loader's imports reach this module
+        )
 
         home = os.path.abspath(loader.resolve_config_dir())
-    except Exception:  # noqa: BLE001 — a home that cannot be resolved names the lock in full
+    except (
+        Exception
+    ):  # noqa: BLE001 — a home that cannot be resolved names the lock in full
         return str(path)
     full = os.path.abspath(path)
     if full.startswith(home + os.sep):
@@ -268,6 +288,7 @@ def guard_path(path: Path | str, *, read: bool = False) -> Path:
     """Check an absolute path from its home boundary before filesystem work."""
     path = Path(os.path.abspath(path))
     from gideon.core.config import loader
+
     home = Path(os.path.abspath(loader.resolve_config_dir()))
     try:
         relative = path.relative_to(home)

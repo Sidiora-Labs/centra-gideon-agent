@@ -28,7 +28,9 @@ def set_level(value: int) -> None:
 def shown(record: logging.LogRecord) -> bool:
     product = record.name == "gideon" or record.name.startswith("gideon.")
     return record.levelno >= _level and (
-        record.levelno >= logging.WARNING or product or loaded_app(record.pathname) is not None
+        record.levelno >= logging.WARNING
+        or product
+        or loaded_app(record.pathname) is not None
     )
 
 
@@ -39,7 +41,9 @@ class _Shown(logging.Filter):
         record.msg = sanitize(record.getMessage())
         record.args = ()
         if record.exc_info:
-            record.exc_text = sanitize(logging.Formatter().formatException(record.exc_info))
+            record.exc_text = sanitize(
+                logging.Formatter().formatException(record.exc_info)
+            )
         return True
 
 

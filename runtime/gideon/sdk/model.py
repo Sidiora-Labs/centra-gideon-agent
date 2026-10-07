@@ -14,7 +14,10 @@ to any installed model app), including bundled local model providers.
 """
 
 from gideon.core.turn_streams import closing_stream
-from gideon.extensions.providers.media_scanners import register_scanner, unregister_scanner  # noqa: F401
+from gideon.extensions.providers.media_scanners import (  # noqa: F401
+    register_scanner,
+    unregister_scanner,
+)
 from gideon.integrations.llm.anthropic import AnthropicProvider  # noqa: F401
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
@@ -40,9 +43,14 @@ from gideon.integrations.llm.catalog import (
 )
 from gideon.integrations.llm.credentials import Credential  # noqa: F401
 from gideon.integrations.llm.openai import OpenAIProvider  # noqa: F401
-from gideon.integrations.llm.protocol_turn import until_terminal
 from gideon.integrations.llm.prompt_cache import PromptCache  # noqa: F401
-from gideon.integrations.llm.prompt_cache import CACHE_HINT_KEY, VOLATILE_KEY, system_note_text, turn_note_message
+from gideon.integrations.llm.prompt_cache import (
+    CACHE_HINT_KEY,
+    VOLATILE_KEY,
+    system_note_text,
+    turn_note_message,
+)
+from gideon.integrations.llm.protocol_turn import until_terminal
 from gideon.integrations.llm.registry import (
     CredentialMissing,
     ProviderEntry,
@@ -61,8 +69,8 @@ from gideon.integrations.model_windows import (
     declared_context_window,
     model_context_window,
 )
-from gideon.security.guardrails.failure import AnswerCutOff, FirstTokenTimeout
 from gideon.sdk.provider_helpers import register_branded_app  # noqa: F401
+from gideon.security.guardrails.failure import AnswerCutOff, FirstTokenTimeout
 
 __all__ = [
     "ModelProvider",

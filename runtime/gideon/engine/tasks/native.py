@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any
 
 from gideon.automation.workflows import pool
-from gideon.core.config import loader as config_loader
 from gideon.core.atomic_write import atomic_write
+from gideon.core.config import loader as config_loader
 from gideon.core.record_ids import record_path
 from gideon.engine.tasks import reconcile
 from gideon.engine.tasks.models import (
@@ -28,9 +28,11 @@ from gideon.engine.tasks.models import (
     TaskPriority,
     TaskStatus,
     WorkflowTaskBinding,
-    normalize_exit_criterion,
 )
 from gideon.engine.tasks.models import coerce_task_field as models_coerce
+from gideon.engine.tasks.models import (
+    normalize_exit_criterion,
+)
 from gideon.engine.tasks.provider import TaskProvider
 
 logger = logging.getLogger(__name__)
@@ -109,8 +111,6 @@ def _current_origin_harness() -> str:
         return machine_id(config_dir())
     except Exception:
         return ""
-
-
 
 
 def _coerce_binding(raw: Any) -> WorkflowTaskBinding | None:
@@ -353,11 +353,15 @@ class TaskMutation:
                 entries[index]["completed"] = not bool(entries[index].get("completed"))
                 task.action_plan = entries
             elif kind == "exit":
-                entries = [normalize_exit_criterion(item) for item in task.exit_criteria]
+                entries = [
+                    normalize_exit_criterion(item) for item in task.exit_criteria
+                ]
                 if index < 0 or index >= len(entries):
                     return None
                 met = not bool(entries[index]["met"])
-                entries[index].update(met=met, status="complete" if met else "incomplete")
+                entries[index].update(
+                    met=met, status="complete" if met else "incomplete"
+                )
                 task.exit_criteria = entries
             else:
                 raise ValueError("checklist kind must be 'exit' or 'step'")
@@ -548,7 +552,9 @@ class NativeTaskProvider(TaskProvider):
             await _fire_task_complete(edited)
         return edited
 
-    async def toggle_checklist_item(self, task_id: str, kind: str, index: int) -> Task | None:
+    async def toggle_checklist_item(
+        self, task_id: str, kind: str, index: int
+    ) -> Task | None:
         return await asyncio.to_thread(
             TaskMutation(self).toggle_checklist_item, task_id, kind, index
         )

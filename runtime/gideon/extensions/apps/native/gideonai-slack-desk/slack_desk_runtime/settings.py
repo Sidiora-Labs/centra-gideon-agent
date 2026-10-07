@@ -46,15 +46,28 @@ ACTIVATION_OBSERVE = "observe"
 ACTIVATION_REVIEW = "review"
 ACTIVATION_OFF = "off"
 _VALID_ACTIVATIONS = frozenset(
-    {ACTIVATION_ALWAYS, ACTIVATION_MENTION, ACTIVATION_OBSERVE, ACTIVATION_REVIEW, ACTIVATION_OFF}
+    {
+        ACTIVATION_ALWAYS,
+        ACTIVATION_MENTION,
+        ACTIVATION_OBSERVE,
+        ACTIVATION_REVIEW,
+        ACTIVATION_OFF,
+    }
 )
 _VALID_CHANNEL_PREFIXES = ("C", "D", "G")
 
 # The behavioral keys this app owns (migrate_from_core lifts these out of a legacy core block).
 _OWNED_KEYS = (
-    "allowed_users", "tracking_channels", "open_channels", "command",
-    "trusted_bot_ids", "allowed_enterprise_ids", "reactions", "reactions_enabled",
-    "channels", "dm_activation",
+    "allowed_users",
+    "tracking_channels",
+    "open_channels",
+    "command",
+    "trusted_bot_ids",
+    "allowed_enterprise_ids",
+    "reactions",
+    "reactions_enabled",
+    "channels",
+    "dm_activation",
 )
 
 
@@ -124,13 +137,20 @@ def _validate_tracking_channels(raw: list) -> list[dict]:
     for entry in raw:
         if isinstance(entry, dict) and entry.get("channel_id"):
             result.append(entry)
-        elif isinstance(entry, str) and len(entry) > 1 and entry[0] in _VALID_CHANNEL_PREFIXES:
+        elif (
+            isinstance(entry, str)
+            and len(entry) > 1
+            and entry[0] in _VALID_CHANNEL_PREFIXES
+        ):
             result.append({"channel_id": entry})
             coerced += 1
         else:
             rejected += 1
     if coerced:
-        logger.warning("slack tracking_channels: coerced %d bare string(s) to {channel_id}", coerced)
+        logger.warning(
+            "slack tracking_channels: coerced %d bare string(s) to {channel_id}",
+            coerced,
+        )
     if rejected:
         logger.warning("slack tracking_channels: ignored %d invalid entries", rejected)
     return result
@@ -157,16 +177,25 @@ class SlackDeskSettings:
         migrate_from_core()
         d = ProviderSettings.load(_APP)
         return cls(
-            allowed_users=[u for u in d.get("allowed_users", []) if isinstance(u, dict) and u.get("slack_id")],
-            tracking_channels=_validate_tracking_channels(d.get("tracking_channels", [])),
+            allowed_users=[
+                u
+                for u in d.get("allowed_users", [])
+                if isinstance(u, dict) and u.get("slack_id")
+            ],
+            tracking_channels=_validate_tracking_channels(
+                d.get("tracking_channels", [])
+            ),
             open_channels=[c for c in d.get("open_channels", []) if isinstance(c, str)],
             command=d.get("command", "gideon") or "gideon",
             trusted_bot_ids=set(d.get("trusted_bot_ids", [])),
             allowed_enterprise_ids=[
-                e for e in d.get("allowed_enterprise_ids", []) if isinstance(e, str) and e.startswith("E")
+                e
+                for e in d.get("allowed_enterprise_ids", [])
+                if isinstance(e, str) and e.startswith("E")
             ],
             reactions={
-                k: v for k, v in d.get("reactions", {}).items()
+                k: v
+                for k, v in d.get("reactions", {}).items()
                 if isinstance(k, str) and (v is None or (isinstance(v, str) and v))
             },
             reactions_enabled=bool(d.get("reactions_enabled", True)),
@@ -175,7 +204,9 @@ class SlackDeskSettings:
                 for ch_id, ch_data in d.get("channels", {}).items()
                 if isinstance(ch_data, dict)
             },
-            dm_activation=_validate_activation(d.get("dm_activation", ACTIVATION_ALWAYS)),
+            dm_activation=_validate_activation(
+                d.get("dm_activation", ACTIVATION_ALWAYS)
+            ),
         )
 
     def channel_config(self, channel_id: str) -> ChannelConfig:
@@ -192,12 +223,19 @@ class SlackDeskSettings:
 
 # ── Writers (read-modify-write the app store) ──
 
-def persist_list_entry(section: str, id_field: str, target_id: str, *, remove: bool = False, name: str = "") -> None:
+
+def persist_list_entry(
+    section: str, id_field: str, target_id: str, *, remove: bool = False, name: str = ""
+) -> None:
     """Add/remove {id_field: target_id[, name]} in the app store's *section* list. Idempotent."""
     cur = ProviderSettings.load(_APP)
     entries: list[dict] = list(cur.get(section, []))
     if remove:
-        filtered = [e for e in entries if not (isinstance(e, dict) and e.get(id_field) == target_id)]
+        filtered = [
+            e
+            for e in entries
+            if not (isinstance(e, dict) and e.get(id_field) == target_id)
+        ]
         if len(filtered) == len(entries):
             return
         ProviderSettings.update(_APP, {section: filtered})
@@ -318,4 +356,7 @@ def migrate_from_core() -> None:
         return
     _mark_migration_done()
     if outcome == "migrated":
-        logger.info("Migrated %d Slack config key(s) from core config.json to the app store", moved_count)
+        logger.info(
+            "Migrated %d Slack config key(s) from core config.json to the app store",
+            moved_count,
+        )

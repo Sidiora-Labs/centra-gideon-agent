@@ -93,7 +93,9 @@ def _writes_to(*paths: str) -> CommandEffects:
 
 def _deletes_in(*paths: str) -> CommandEffects:
     """A delete inside each of *paths*."""
-    return CommandEffects(writes=True, deletes=True, targets=frozenset(p for p in paths if p))
+    return CommandEffects(
+        writes=True, deletes=True, targets=frozenset(p for p in paths if p)
+    )
 
 
 def _reaches(*hosts: str) -> CommandEffects:
@@ -175,7 +177,10 @@ def _text_effects(command: str, depth: int) -> CommandEffects:
     relayed = False
     for one in simple:
         effects = effects | _under(
-            _simple_effects(one, depth, relayed=relayed), base, lost=lost, base_glob=base_glob
+            _simple_effects(one, depth, relayed=relayed),
+            base,
+            lost=lost,
+            base_glob=base_glob,
         )
         name = one.words[0].text if one.words else ""
         runs = _runs_code(one)
@@ -232,7 +237,8 @@ def _changes_environment(one: Simple) -> bool:
     name, args = words[k].text, words[k + 1 :]
     if name == "set":
         return any(
-            w.text == "allexport" or (w.text[:1] == "-" and w.text[1:2] != "-" and "a" in w.text)
+            w.text == "allexport"
+            or (w.text[:1] == "-" and w.text[1:2] != "-" and "a" in w.text)
             for w in args
         )
     if name == "printf":
@@ -274,7 +280,8 @@ _NEUTRAL_VARIABLES = frozenset(
 def _relays(word: Word) -> bool:
     """Whether the assignment *word* (``NAME=value``) may send the program it is for elsewhere:
     any variable with a value, past :data:`_NEUTRAL_VARIABLES` (a proxy, a registry, a
-    configuration file can each be set in one). Clearing a variable only takes a setting away."""
+    configuration file can each be set in one). Clearing a variable only takes a setting away.
+    """
     name, _, value = word.text.partition("=")
     if word.opaque:
         return True
@@ -330,7 +337,11 @@ def _under(
         else:
             joined = posixpath.join(base, removal.path)
             shifted = removal.glob_at + len(joined) - len(removal.path)
-            at = base_glob if base_glob >= 0 else (shifted if removal.glob_at >= 0 else -1)
+            at = (
+                base_glob
+                if base_glob >= 0
+                else (shifted if removal.glob_at >= 0 else -1)
+            )
             removes.add(Removal(joined, at))
     return replace(
         effects,
@@ -418,7 +429,9 @@ def _is_leading_cd(one: Simple) -> bool:
 _ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 
 
-def _simple_effects(one: Simple, depth: int = 0, *, relayed: bool = False) -> CommandEffects:
+def _simple_effects(
+    one: Simple, depth: int = 0, *, relayed: bool = False
+) -> CommandEffects:
     """What *one* does. *relayed*: a command before it changed the shell's state, so its program
     may reach and write elsewhere than it names (:func:`_relayed`); its redirects are the
     shell's own, and still go where they say."""
@@ -565,13 +578,19 @@ def _parse(args: list[Word], opts: _Options, globs: str) -> _Parsed:  # noqa: C9
             continue
         if text.startswith("--"):
             name, eq, _value = text.partition("=")
-            if word.glob_at >= 0 and globs != ANY and (globs == NONE or word.glob_at <= len(name)):
+            if (
+                word.glob_at >= 0
+                and globs != ANY
+                and (globs == NONE or word.glob_at <= len(name))
+            ):
                 effects = effects | _UNREAD
             seen.add(name)
             if name in opts.effects:
                 attached = None
                 if eq:
-                    at = word.glob_at - len(name) - 1 if word.glob_at > len(name) else -1
+                    at = (
+                        word.glob_at - len(name) - 1 if word.glob_at > len(name) else -1
+                    )
                     attached = Word(_value, at, word.opaque)
                 option_effect(name, attached)
             elif name in opts.long_flags and not eq or name in opts.long_optional:
@@ -733,7 +752,8 @@ _DU = _Options(
     valued="dBtXI",
     long_flags=_longs(
         "all apparent-size bytes total dereference-args human-readable inodes dereference "
-        "count-links no-dereference null separate-dirs si summarize one-file-system " + _HELP
+        "count-links no-dereference null separate-dirs si summarize one-file-system "
+        + _HELP
     ),
     long_valued=_longs(
         "block-size max-depth threshold time-style exclude-from exclude files0-from"
@@ -745,7 +765,8 @@ _DF = _Options(
     flags="ahHiklPTgmnY",
     valued="Btx",
     long_flags=_longs(
-        "all human-readable si inodes local no-sync portability print-type total " + _HELP
+        "all human-readable si inodes local no-sync portability print-type total "
+        + _HELP
     ),
     long_valued=_longs("block-size type exclude-type"),
     long_optional=_longs("output"),
@@ -763,9 +784,12 @@ _FILE = _Options(
     valued="eFfmP",
     long_flags=_longs(
         "brief checking-printout extension mime mime-type mime-encoding keep-going list "
-        "dereference no-dereference no-buffer no-pad print0 raw special-files apple " + _HELP
+        "dereference no-dereference no-buffer no-pad print0 raw special-files apple "
+        + _HELP
     ),
-    long_valued=_longs("exclude exclude-quiet files-from separator parameter magic-file"),
+    long_valued=_longs(
+        "exclude exclude-quiet files-from separator parameter magic-file"
+    ),
     effects={
         # Compiles the magic file into `<name>.mgc` in the folder it runs in.
         "-C": (_writes_to("."), 0),
@@ -780,7 +804,8 @@ _FILE = _Options(
 )
 
 _WHICH = _Options(
-    flags="as", long_flags=_longs("all skip-dot skip-tilde show-dot show-tilde " + _HELP)
+    flags="as",
+    long_flags=_longs("all skip-dot skip-tilde show-dot show-tilde " + _HELP),
 )
 
 _TREE = _Options(
@@ -923,7 +948,9 @@ def _pager_operands(parsed: _Parsed) -> CommandEffects:
 
 
 def _date_operands(parsed: _Parsed) -> CommandEffects:
-    ok = len(parsed.operands) <= 1 and all(w.text.startswith("+") for w in parsed.operands)
+    ok = len(parsed.operands) <= 1 and all(
+        w.text.startswith("+") for w in parsed.operands
+    )
     return _READ if ok else _UNREAD
 
 
@@ -953,7 +980,9 @@ def _find(args: list[Word]) -> CommandEffects:
     while i < len(args) and args[i].text in _FIND_LEADING:
         i += 1
     starts: list[Word] = []
-    while i < len(args) and not (args[i].text.startswith("-") or args[i].text in _FIND_OPERATORS):
+    while i < len(args) and not (
+        args[i].text.startswith("-") or args[i].text in _FIND_OPERATORS
+    ):
         if _glob_risk(args[i], PATHS):
             effects = effects | _UNREAD
         starts.append(args[i])
@@ -977,7 +1006,9 @@ def _find(args: list[Word]) -> CommandEffects:
             if any(w.opaque or w.glob_at >= 0 for w in starts):
                 effects = effects | _DELETES
             else:
-                effects = effects | _deletes_in(*(w.text for w in starts or [Word(".")]))
+                effects = effects | _deletes_in(
+                    *(w.text for w in starts or [Word(".")])
+                )
             effects = effects | _removal_of(*(starts or [Word(".")]))
         elif text in _FIND_WRITES:
             effects = effects | _target_of(args[i] if i < len(args) else None)
@@ -1102,7 +1133,9 @@ _GIT_STATUS = _Options(
         "short branch show-stash long verbose no-column ahead-behind no-ahead-behind renames "
         "no-renames null"
     ),
-    long_optional=_longs("porcelain untracked-files ignore-submodules ignored column find-renames"),
+    long_optional=_longs(
+        "porcelain untracked-files ignore-submodules ignored column find-renames"
+    ),
 )
 
 #: What `git branch` and `git tag` share for listing: the filters and the output's shape.
@@ -1221,13 +1254,17 @@ _GIT_SUBCOMMANDS: dict[str, _Read] = {
                 "default prefix git-path resolve-git-dir since after until before glob "
                 "exclude disambiguate path-format"
             ),
-            long_optional=_longs("abbrev-ref short show-object-format branches tags remotes"),
+            long_optional=_longs(
+                "abbrev-ref short show-object-format branches tags remotes"
+            ),
         ),
         globs=PATHS,
     ),
     "describe": _program(
         _Options(
-            long_flags=_longs("all tags contains long exact-match debug always first-parent"),
+            long_flags=_longs(
+                "all tags contains long exact-match debug always first-parent"
+            ),
             long_valued=_longs("candidates match exclude"),
             long_optional=_longs("abbrev dirty broken"),
         ),
@@ -1242,7 +1279,9 @@ _GIT_SUBCOMMANDS: dict[str, _Read] = {
                 "no-empty-directory eol deduplicate exclude-standard error-unmatch full-name "
                 "recurse-submodules sparse debug"
             ),
-            long_valued=_longs("exclude exclude-from exclude-per-directory with-tree format"),
+            long_valued=_longs(
+                "exclude exclude-from exclude-per-directory with-tree format"
+            ),
             long_optional=_longs("abbrev"),
         ),
         globs=PATHS,
@@ -1250,7 +1289,9 @@ _GIT_SUBCOMMANDS: dict[str, _Read] = {
     "ls-tree": _program(
         _Options(
             flags="drtlz",
-            long_flags=_longs("long name-only name-status object-only full-name full-tree"),
+            long_flags=_longs(
+                "long name-only name-status object-only full-name full-tree"
+            ),
             long_valued=_longs("format"),
             long_optional=_longs("abbrev"),
         ),
@@ -1279,7 +1320,9 @@ _GIT_SUBCOMMANDS: dict[str, _Read] = {
                 "show-name show-number show-email color-lines color-by-age score-debug "
                 "first-parent"
             ),
-            long_valued=_longs("encoding contents date ignore-rev ignore-revs-file reverse"),
+            long_valued=_longs(
+                "encoding contents date ignore-rev ignore-revs-file reverse"
+            ),
             long_optional=_longs("abbrev"),
         ),
         globs=PATHS,
@@ -1384,7 +1427,8 @@ def _git_init(args: list[Word]) -> CommandEffects:
     scan = _scan(
         args,
         long_valued=_longs(
-            "template separate-git-dir object-format ref-format " "initial-branch shared"
+            "template separate-git-dir object-format ref-format "
+            "initial-branch shared"
         ),
         valued="b",
         unknown_short_is_flag=True,
@@ -1395,7 +1439,8 @@ def _git_init(args: list[Word]) -> CommandEffects:
 
 def _git_submodule(args: list[Word]) -> CommandEffects:
     """``git submodule``: ``add`` reaches the repository it names, ``update`` fetches from the
-    ones the repository lists (unless told not to fetch), and the rest change the repository."""
+    ones the repository lists (unless told not to fetch), and the rest change the repository.
+    """
     scan = _scan(
         args,
         valued="b",
@@ -1467,7 +1512,8 @@ _GIT_CONFIG_VALUED = _longs("file blob type default comment value url")
 
 def _git_config_scan(args: Sequence[Word]) -> _Scan:
     """*args* read as ``git config`` reads them: its options come before the first operand, and a
-    word after that is an operand however it starts (``git config core.abbrev -1`` sets ``-1``)."""
+    word after that is an operand however it starts (``git config core.abbrev -1`` sets ``-1``).
+    """
     return _scan(
         args,
         valued="f",
@@ -1506,13 +1552,18 @@ def _git_config(args: list[Word]) -> CommandEffects:
     elif "--blob" in scan.seen:
         return _UNREAD  # settings read from an object, which git writes nothing to
     else:
-        scope = next((scope for scope in _GIT_CONFIG_SCOPES if scope in scan.seen), "--local")
+        scope = next(
+            (scope for scope in _GIT_CONFIG_SCOPES if scope in scan.seen), "--local"
+        )
         effects = _writes_to(_GIT_CONFIG_SCOPES[scope])
     return effects | _UNREAD if words & {"-e", "--edit", "edit"} else effects
 
 
 _GIT_DESCRIBED_READS: dict[str, _Read] = {
-    **{sub: _git_remote_op(sub) for sub in ("clone", "fetch", "pull", "push", "ls-remote")},
+    **{
+        sub: _git_remote_op(sub)
+        for sub in ("clone", "fetch", "pull", "push", "ls-remote")
+    },
     "init": _git_init,
     "submodule": _git_submodule,
     "config": _git_config,
@@ -1572,7 +1623,9 @@ def _git(args: list[Word]) -> CommandEffects:
         elif word.text.startswith(_GIT_GLOBAL_OTHER):
             extra = _UNREAD
             option, given, value = word.text.partition("=")
-            elsewhere = elsewhere or bool(given and _git_sends_elsewhere(option, Word(value)))
+            elsewhere = elsewhere or bool(
+                given and _git_sends_elsewhere(option, Word(value))
+            )
             i += 1
         else:
             break
@@ -1697,7 +1750,9 @@ def _remote_reach(word: Word, *, needs_colon: bool) -> CommandEffects:
     text = word.text
     if _SCHEME.match(text):
         return _url_reach(word)
-    if needs_colon and (text in (".", "..") or text.startswith(("/", "./", "../", "~"))):
+    if needs_colon and (
+        text in (".", "..") or text.startswith(("/", "./", "../", "~"))
+    ):
         return _READ
     host = _host_part(text, needs_colon=needs_colon)
     if host is None:
@@ -1756,7 +1811,9 @@ _CURL_WRITES = (
 #: Options whose value is a host it connects to instead of, or on the way to, the URL's.
 _CURL_VIA = "-x --proxy --preproxy --socks4 --socks4a --socks5 --socks5-hostname --doh-url".split()
 #: Options that send it somewhere its command line does not name.
-_CURL_ELSEWHERE = frozenset({"--connect-to", "--resolve", "-K", "--config", "--variable"})
+_CURL_ELSEWHERE = frozenset(
+    {"--connect-to", "--resolve", "-K", "--config", "--variable"}
+)
 
 
 def _curl(args: list[Word]) -> CommandEffects:
@@ -1818,7 +1875,14 @@ _WGET_LONG_FLAGS = _longs(
 _WGET_NEGATIONS = frozenset({"-nc", "-nd", "-nH", "-np", "-nv"})
 _WGET_DOCUMENT = ("-O", "--output-document")
 _WGET_FOLDER = ("-P", "--directory-prefix")
-_WGET_LOGS = ("-o", "--output-file", "-a", "--append-output", "--save-cookies", "--warc-file")
+_WGET_LOGS = (
+    "-o",
+    "--output-file",
+    "-a",
+    "--append-output",
+    "--save-cookies",
+    "--warc-file",
+)
 _WGET_ELSEWHERE = frozenset({"-i", "--input-file", "-e", "--execute", "--config"})
 
 
@@ -1833,7 +1897,11 @@ def _wget(args: list[Word]) -> CommandEffects:
     effects = _UNREAD
     if not scan.operands or scan.unknown or scan.seen & _WGET_ELSEWHERE:
         effects = effects | _NETWORK
-    for word in [*scan.operands, *scan.values.get("-B", []), *scan.values.get("--base", [])]:
+    for word in [
+        *scan.operands,
+        *scan.values.get("-B", []),
+        *scan.values.get("--base", []),
+    ]:
         effects = effects | _url_reach(word, bare=True)
     documents = _value_words(scan, _WGET_DOCUMENT)
     folders = _value_words(scan, _WGET_FOLDER)
@@ -1861,13 +1929,19 @@ def _jump_hosts(scan: _Scan) -> CommandEffects:
     effects = _READ
     for word in scan.values.get("-J", []):
         for hop in word.text.split(","):
-            effects = effects | _remote_reach(Word(hop, -1, word.opaque), needs_colon=False)
+            effects = effects | _remote_reach(
+                Word(hop, -1, word.opaque), needs_colon=False
+            )
     for word in scan.values.get("-o", []):
-        setting = word.text.split("=", 1)[0].split()[0].lower() if word.text.strip() else ""
+        setting = (
+            word.text.split("=", 1)[0].split()[0].lower() if word.text.strip() else ""
+        )
         if word.opaque or setting in _SSH_ELSEWHERE_SETTINGS:
             effects = effects | _NETWORK
     if "-F" in scan.values:
-        effects = effects | _NETWORK  # a configuration the command chose names where it goes
+        effects = (
+            effects | _NETWORK
+        )  # a configuration the command chose names where it goes
     return effects
 
 
@@ -1918,7 +1992,8 @@ def _copies_between(
     rsh: tuple[str, ...] = (),
 ) -> CommandEffects:
     """scp and rsync: each operand that names a host is reached, through the remote shell *rsh*
-    names; the last one is where the copy lands, a file written here when it names no host."""
+    names; the last one is where the copy lands, a file written here when it names no host.
+    """
     scan = _scan(
         args,
         flags=flags,
@@ -1945,10 +2020,16 @@ def _scp(args: list[Word]) -> CommandEffects:
 
 def _sftp(args: list[Word]) -> CommandEffects:
     scan = _scan(args, flags=_SFTP_FLAGS, valued=_SFTP_VALUED, stop_at_operand=True)
-    effects = _UNREAD | _jump_hosts(scan) | _writes_to(".")  # what it gets lands where it runs
+    effects = (
+        _UNREAD | _jump_hosts(scan) | _writes_to(".")
+    )  # what it gets lands where it runs
     if scan.unknown or not scan.operands:
         return effects | _NETWORK
-    return effects | _rsh_reach(scan, ("-S",)) | _remote_reach(scan.operands[0], needs_colon=False)
+    return (
+        effects
+        | _rsh_reach(scan, ("-S",))
+        | _remote_reach(scan.operands[0], needs_colon=False)
+    )
 
 
 _RSYNC_VALUED = "efBTM@"
@@ -1981,7 +2062,10 @@ def _rsync(args: list[Word]) -> CommandEffects:
         rsh=("-e", "--rsh"),
     )
     scan = _scan(
-        args, valued=_RSYNC_VALUED, long_valued=_RSYNC_LONG_VALUED, unknown_short_is_flag=True
+        args,
+        valued=_RSYNC_VALUED,
+        long_valued=_RSYNC_LONG_VALUED,
+        unknown_short_is_flag=True,
     )
     for word in _value_words(scan, _RSYNC_WRITES):
         effects = effects | _target_of(word)
@@ -2031,7 +2115,11 @@ def _spec_reach(word: Word, *, shorthand: bool) -> CommandEffects:
         for prefix, host in _NPM_HOSTED.items():
             if text.startswith(prefix):
                 return _reaches(host)
-        if "/" in text and not text.startswith(("@", ".", "/", "~", "file:")) and ":" not in text:
+        if (
+            "/" in text
+            and not text.startswith(("@", ".", "/", "~", "file:"))
+            and ":" not in text
+        ):
             return _reaches("github.com")  # `owner/repo` is a GitHub repository
     return _READ
 
@@ -2072,7 +2160,9 @@ def _manager_effects(manager: _Manager, args: Sequence[Word]) -> CommandEffects:
     scan = _scan(
         args,
         valued=manager.valued,
-        long_valued=manager.long_valued | frozenset(manager.index) | frozenset(manager.into),
+        long_valued=manager.long_valued
+        | frozenset(manager.index)
+        | frozenset(manager.into),
         unknown_short_is_flag=True,
     )
     if manager.fetching:
@@ -2222,14 +2312,27 @@ _YARN = replace(
     _NPM,
     registry=YARN_HOSTS,
     fetching=frozenset(
-        {"add", "install", "upgrade", "up", "dlx", "outdated", "info", "npm", "publish", "audit"}
+        {
+            "add",
+            "install",
+            "upgrade",
+            "up",
+            "dlx",
+            "outdated",
+            "info",
+            "npm",
+            "publish",
+            "audit",
+        }
     ),
     local=frozenset({"add", "install", "upgrade", "up"}),
     bare_fetches=True,
 )
 _BUN = replace(
     _NPM,
-    fetching=frozenset({"add", "a", "install", "i", "update", "x", "outdated", "publish"}),
+    fetching=frozenset(
+        {"add", "a", "install", "i", "update", "x", "outdated", "publish"}
+    ),
     local=frozenset({"add", "a", "install", "i", "update"}),
 )
 
@@ -2247,7 +2350,9 @@ def _python(args: list[Word]) -> CommandEffects:
 def _removal_of(*words: Word) -> CommandEffects:
     """The removal of each of *words*, with everything inside it (:class:`Removal`), or of a path
     this reading cannot name for a word whose text it does not know."""
-    removes = frozenset(Removal(w.text, w.glob_at) for w in words if w.text and not w.opaque)
+    removes = frozenset(
+        Removal(w.text, w.glob_at) for w in words if w.text and not w.opaque
+    )
     unread = any(w.opaque or not w.text for w in words)
     return CommandEffects(removes=removes, removes_unread=unread)
 
@@ -2257,7 +2362,9 @@ def _deletes_of(word: Word) -> CommandEffects:
     if found.target_unread:
         return _DELETES | _removal_of(word)
     deleted = (
-        CommandEffects(writes=True, deletes=True, targets=found.targets) if found.writes else found
+        CommandEffects(writes=True, deletes=True, targets=found.targets)
+        if found.writes
+        else found
     )
     return deleted | _removal_of(word)
 
@@ -2276,7 +2383,10 @@ def _each_operand(
 
     def read(args: list[Word]) -> CommandEffects:
         scan = _scan(
-            args, valued=valued, long_valued=_longs(long_valued), unknown_short_is_flag=True
+            args,
+            valued=valued,
+            long_valued=_longs(long_valued),
+            unknown_short_is_flag=True,
         )
         operands = scan.operands
         if skip_first and "--reference" not in scan.values:
@@ -2298,7 +2408,10 @@ def _to_destination(*, valued: str, long_valued: str, moves: bool = False) -> _R
 
     def read(args: list[Word]) -> CommandEffects:
         scan = _scan(
-            args, valued=valued, long_valued=_longs(long_valued), unknown_short_is_flag=True
+            args,
+            valued=valued,
+            long_valued=_longs(long_valued),
+            unknown_short_is_flag=True,
         )
         folders = _value_words(scan, ("-t", "--target-directory"))
         effects = _UNREAD
@@ -2354,7 +2467,11 @@ def _started(
         inner = _relayed(inner)
     if k:
         inner = inner | _UNREAD
-    return _under(inner, base.text, base_glob=base.glob_at) if base and base.text else inner
+    return (
+        _under(inner, base.text, base_glob=base.glob_at)
+        if base and base.text
+        else inner
+    )
 
 
 def _env(args: list[Word], depth: int) -> CommandEffects:
@@ -2394,7 +2511,11 @@ def _env(args: list[Word], depth: int) -> CommandEffects:
 
 
 def _skip_options(
-    args: list[Word], *, valued: str = "", long_valued: str = "", then_operand: bool = False
+    args: list[Word],
+    *,
+    valued: str = "",
+    long_valued: str = "",
+    then_operand: bool = False,
 ) -> int | None:
     """Where the program a starter starts begins: past its options (and, with *then_operand*,
     the one operand it takes first, ``timeout``'s duration). ``None`` for none."""
@@ -2454,7 +2575,8 @@ def _xargs(args: list[Word], depth: int) -> CommandEffects:
     start = _skip_options(
         args,
         valued="naLsPIEd",
-        long_valued="max-args max-lines " "max-chars max-procs replace eof delimiter arg-file",
+        long_valued="max-args max-lines "
+        "max-chars max-procs replace eof delimiter arg-file",
     )
     inner = _started(args[start:], depth) if start is not None else _UNREAD
     if inner.writes:
@@ -2519,14 +2641,18 @@ def _shell(args: list[Word], depth: int) -> CommandEffects:
 
 _STARTERS: dict[str, _Starter] = {
     "env": _env,
-    "timeout": _starter(valued="sk", long_valued="signal kill-after", then_operand=True),
+    "timeout": _starter(
+        valued="sk", long_valued="signal kill-after", then_operand=True
+    ),
     "nice": _starter(valued="n", long_valued="adjustment"),
     "nohup": _starter(),
     "command": _starter(valued="", describes=frozenset({"-v", "-V"})),
     "exec": _starter(valued="a"),
     "time": _starter(),
     "stdbuf": _starter(valued="ioe", long_valued="input output error"),
-    "sudo": _starter(valued="ugCDhprtTU", describes=frozenset({"-e", "-l", "-v", "-k", "-K"})),
+    "sudo": _starter(
+        valued="ugCDhprtTU", describes=frozenset({"-e", "-l", "-v", "-k", "-K"})
+    ),
     "doas": _starter(valued="uC"),
     "xargs": _xargs,
     "eval": _eval,
@@ -2594,9 +2720,12 @@ _DESCRIBED: dict[str, _Read] = {
     "cp": _to_destination(valued="tS", long_valued="target-directory suffix"),
     "ln": _to_destination(valued="tS", long_valued="target-directory suffix"),
     "install": _to_destination(
-        valued="gmotS", long_valued="group mode owner target-directory suffix " "strip-program"
+        valued="gmotS",
+        long_valued="group mode owner target-directory suffix " "strip-program",
     ),
-    "mv": _to_destination(valued="tS", long_valued="target-directory suffix", moves=True),
+    "mv": _to_destination(
+        valued="tS", long_valued="target-directory suffix", moves=True
+    ),
     "dd": _dd,
     "curl": _curl,
     "wget": _wget,

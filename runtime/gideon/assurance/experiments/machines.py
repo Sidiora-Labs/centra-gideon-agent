@@ -12,7 +12,6 @@ from typing import Any
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
 
-
 _SAFE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
@@ -53,7 +52,11 @@ def validate(row: Any) -> None:
             if not isinstance(raw, str) or not Path(raw).is_absolute():
                 raise ValueError(f"{key} must be an absolute path")
         port = row.get("port", 22)
-        if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+        if (
+            not isinstance(port, int)
+            or isinstance(port, bool)
+            or not 1 <= port <= 65535
+        ):
             raise ValueError("port must be from 1 to 65535")
 
 
@@ -62,7 +65,12 @@ def add(row: dict[str, Any]) -> None:
     rows = list_machines()
     if any(item["id"] == row["id"] for item in rows):
         raise ValueError("machine ID already exists")
-    if row["kind"] == "ssh" and any(item.get("host") == row["host"] and item.get("user") == row["user"] and item.get("port", 22) == row.get("port", 22) for item in rows):
+    if row["kind"] == "ssh" and any(
+        item.get("host") == row["host"]
+        and item.get("user") == row["user"]
+        and item.get("port", 22) == row.get("port", 22)
+        for item in rows
+    ):
         raise ValueError("SSH destination already registered")
     rows.append(row)
     atomic_write(_path(), json.dumps(rows, indent=2, sort_keys=True), mode=0o600)
@@ -88,13 +96,34 @@ def probe(machine_id: str, *, timeout: int = 10) -> dict[str, Any]:
         if not identity.is_file() or not known_hosts.is_file():
             raise ValueError("SSH identity or known_hosts file is missing")
         command = [
-            "ssh", "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
-            "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={known_hosts}",
-            "-o", f"ConnectTimeout={min(timeout, 30)}", "-i", str(identity),
-            "-p", str(row.get("port", 22)), f"{row['user']}@{row['host']}", "uname", "-s",
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            f"UserKnownHostsFile={known_hosts}",
+            "-o",
+            f"ConnectTimeout={min(timeout, 30)}",
+            "-i",
+            str(identity),
+            "-p",
+            str(row.get("port", 22)),
+            f"{row['user']}@{row['host']}",
+            "uname",
+            "-s",
         ]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout + 2, check=False)
-    return {"id": machine_id, "reachable": result.returncode == 0, "system": result.stdout.strip()[:100] if result.returncode == 0 else "", "exit_code": result.returncode}
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=timeout + 2, check=False
+    )
+    return {
+        "id": machine_id,
+        "reachable": result.returncode == 0,
+        "system": result.stdout.strip()[:100] if result.returncode == 0 else "",
+        "exit_code": result.returncode,
+    }
 
 
 def main() -> None:
@@ -109,7 +138,19 @@ def main() -> None:
     probe_cmd.add_argument("id")
     args = parser.parse_args()
     if args.command == "list":
-        print(json.dumps([{k: v for k, v in row.items() if k not in ("identity_file", "known_hosts_file")} for row in list_machines()], indent=2))
+        print(
+            json.dumps(
+                [
+                    {
+                        k: v
+                        for k, v in row.items()
+                        if k not in ("identity_file", "known_hosts_file")
+                    }
+                    for row in list_machines()
+                ],
+                indent=2,
+            )
+        )
     elif args.command == "add":
         add(json.loads(args.json_file.read_text()))
         print("registered")

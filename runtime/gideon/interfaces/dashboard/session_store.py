@@ -46,8 +46,8 @@ should refuse to pretend otherwise.
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import logging
 import os
 import time
@@ -209,14 +209,16 @@ class SessionRecord:
         out: dict[str, Any] = {"exp": self.expiry, "issuer": self.issuer}
         if self.device is not None:
             out["device"] = self.device.to_dict()
-        out.update({
-            "minted_at": self.minted_at,
-            "last_seen": self.last_seen,
-            "ip": self.ip,
-            "kind": self.kind,
-            "label": self.label,
-            "pool": self.pool,
-        })
+        out.update(
+            {
+                "minted_at": self.minted_at,
+                "last_seen": self.last_seen,
+                "ip": self.ip,
+                "kind": self.kind,
+                "label": self.label,
+                "pool": self.pool,
+            }
+        )
         return out
 
 
@@ -272,6 +274,7 @@ def _parse_record(raw: Any) -> SessionRecord | None:
     except (TypeError, ValueError):
         return None
     issuer = str(raw.get("issuer") or ISSUER_UNKNOWN)
+
     def number(key: str) -> float:
         try:
             return float(raw.get(key) or 0.0)
@@ -280,16 +283,30 @@ def _parse_record(raw: Any) -> SessionRecord | None:
 
     pool = str(raw.get("pool") or "")
     raw_kind = str(raw.get("kind") or "unknown").strip().lower()
-    kind = raw_kind if raw_kind in {"browser", "mobile", "desktop", "cli", "app", "unknown"} else "unknown"
+    kind = (
+        raw_kind
+        if raw_kind in {"browser", "mobile", "desktop", "cli", "app", "unknown"}
+        else "unknown"
+    )
     if pool not in POOL_LIMITS:
-        pool = "device" if raw.get("device") is not None else ("app" if kind == "app" else "token")
+        pool = (
+            "device"
+            if raw.get("device") is not None
+            else ("app" if kind == "app" else "token")
+        )
     device = _parse_device(raw.get("device"))
     return SessionRecord(
-        expiry=expiry, issuer=issuer, device=device,
-        minted_at=number("minted_at") or (device.minted_at if device is not None else 0.0),
-        last_seen=number("last_seen") or (device.last_seen if device is not None else 0.0),
-        ip=str(raw.get("ip") or "")[:64], kind=kind,
-        label=sanitize_device_name(raw.get("label") or ""), pool=pool,
+        expiry=expiry,
+        issuer=issuer,
+        device=device,
+        minted_at=number("minted_at")
+        or (device.minted_at if device is not None else 0.0),
+        last_seen=number("last_seen")
+        or (device.last_seen if device is not None else 0.0),
+        ip=str(raw.get("ip") or "")[:64],
+        kind=kind,
+        label=sanitize_device_name(raw.get("label") or ""),
+        pool=pool,
     )
 
 
@@ -305,7 +322,9 @@ def _read_payload() -> dict[str, Any]:
     if not isinstance(value, dict):
         return {"sessions": {}, "ended": {}}
     return {
-        "sessions": value.get("sessions") if isinstance(value.get("sessions"), dict) else {},
+        "sessions": (
+            value.get("sessions") if isinstance(value.get("sessions"), dict) else {}
+        ),
         "ended": value.get("ended") if isinstance(value.get("ended"), dict) else {},
     }
 
@@ -316,10 +335,17 @@ def _ended_key(nonce: str) -> str:
 
 def _bounded_ended(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
     rows = {
-        key: row for key, row in raw.items()
-        if isinstance(key, str) and isinstance(row, dict) and row.get("reason") in END_REASONS
+        key: row
+        for key, row in raw.items()
+        if isinstance(key, str)
+        and isinstance(row, dict)
+        and row.get("reason") in END_REASONS
     }
-    return dict(sorted(rows.items(), key=lambda item: float(item[1].get("ended_at") or 0))[-MAX_ENDED_SESSIONS:])
+    return dict(
+        sorted(rows.items(), key=lambda item: float(item[1].get("ended_at") or 0))[
+            -MAX_ENDED_SESSIONS:
+        ]
+    )
 
 
 def ended_session_reason(nonce: str) -> str:
@@ -414,14 +440,18 @@ def save_session_records(records: dict[str, SessionRecord]) -> None:
             live.pop(nonce, None)
             ended[_ended_key(nonce)] = {"reason": "evicted", "ended_at": now}
     if len(live) > MAX_SESSIONS:
-        oldest = sorted(live.items(), key=lambda item: item[1].last_seen or item[1].minted_at)
+        oldest = sorted(
+            live.items(), key=lambda item: item[1].last_seen or item[1].minted_at
+        )
         for nonce, _record in oldest[: len(live) - MAX_SESSIONS]:
             live.pop(nonce, None)
             ended[_ended_key(nonce)] = {"reason": "evicted", "ended_at": now}
-    _write_payload({
-        "sessions": {n: r.to_dict() for n, r in live.items()},
-        "ended": _bounded_ended(ended),
-    })
+    _write_payload(
+        {
+            "sessions": {n: r.to_dict() for n, r in live.items()},
+            "ended": _bounded_ended(ended),
+        }
+    )
 
 
 def remember_session(
@@ -444,8 +474,14 @@ def remember_session(
     if pool not in POOL_LIMITS:
         pool = "token"
     records[nonce] = SessionRecord(
-        expiry=float(expiry), issuer=issuer, device=device, minted_at=now,
-        ip=str(ip or "")[:64], kind=str(kind), label=sanitize_device_name(label), pool=pool,
+        expiry=float(expiry),
+        issuer=issuer,
+        device=device,
+        minted_at=now,
+        ip=str(ip or "")[:64],
+        kind=str(kind),
+        label=sanitize_device_name(label),
+        pool=pool,
     )
     save_session_records(records)
 
@@ -467,9 +503,15 @@ def attach_device(nonce: str, device: DeviceInfo, *, issuer: str = ISSUER_PAIR) 
         return False
     device.ip = existing.ip
     records[nonce] = SessionRecord(
-        expiry=existing.expiry, issuer=issuer, device=device, minted_at=existing.minted_at,
-        last_seen=existing.last_seen, ip=existing.ip, kind=device.kind,
-        label=device.name, pool="device",
+        expiry=existing.expiry,
+        issuer=issuer,
+        device=device,
+        minted_at=existing.minted_at,
+        last_seen=existing.last_seen,
+        ip=existing.ip,
+        kind=device.kind,
+        label=device.name,
+        pool="device",
     )
     save_session_records(records)
     return True

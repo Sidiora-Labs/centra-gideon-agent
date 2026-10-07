@@ -308,6 +308,7 @@ def _validate_args(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
 def _preflight_tool(name: str, args: dict[str, Any]) -> str:
     from gideon.integrations.mcp_shared import preflight_tool
+
     return preflight_tool(name, args, _validate_args)
 
 

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from gideon.core.turn_streams import closing_stream
-
 import json
 import os
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
+from gideon.core.turn_streams import closing_stream
 from gideon.integrations.llm.base import ModelProvider, _last_user_text
 from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
@@ -353,7 +352,9 @@ class ScriptedProvider(ModelProvider):
             model=model or "",
             reasoning_effort=reasoning_effort,
         )
-        async with closing_stream(self._emit(_last_user_text(messages))) as _owned_events:
+        async with closing_stream(
+            self._emit(_last_user_text(messages))
+        ) as _owned_events:
             async for event in _owned_events:
                 yield event
 
