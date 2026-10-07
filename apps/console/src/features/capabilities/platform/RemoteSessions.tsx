@@ -57,7 +57,7 @@ export function RemoteSessions({ baseUrl = '' }: { baseUrl?: string }) {
       <Button loading={busy} onClick={() => void refresh(connection.id)} ariaLabel={`Refresh remote sessions for ${connection.label}`}>Refresh remote sessions</Button>
       <ul>{connection.retained_sessions.map(session => <li key={session.id}><button type="button" onClick={() => void open(connection.id, session.id)}>{session.title}</button> <span>{session.provenance}</span></li>)}</ul>
     </article>)}
-    {active && <div aria-label="Remote conversation">
+    {active && <div role="group" aria-label="Remote conversation">
       <h3 data-type="headline-s">Session {active.session}</h3>
       <ol>{messages.map(message => <li key={message.id}><strong>{message.role}</strong>: {message.content} <small>{message.source.kind}</small></li>)}</ol>
       {reply && <pre aria-label="Remote reply stream">{reply}</pre>}

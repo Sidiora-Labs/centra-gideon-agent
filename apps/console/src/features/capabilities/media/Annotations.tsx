@@ -44,7 +44,7 @@ export default function Annotations({ artifactId, version }: { artifactId: strin
       {!record.source_available && <p role="alert">The original media version is unavailable. Saved notes remain readable.</p>}
       {record.source_available && record.source_kind === 'image' && <div className="relative max-w-lg">
         <img src={raw} alt="Annotated image" className="w-full" />
-        {entries.filter(entry => entry.region).map(entry => <span key={entry.id} aria-label={entry.text} className="absolute border-2 border-yellow-500 pointer-events-none" style={{ left: entry.region![0]*100+'%', top: entry.region![1]*100+'%', width: entry.region![2]*100+'%', height: entry.region![3]*100+'%' }} />)}
+        {entries.filter(entry => entry.region).map(entry => <span key={entry.id} role="img" aria-label={entry.text} className="absolute border-2 border-yellow-500 pointer-events-none" style={{ left: entry.region![0]*100+'%', top: entry.region![1]*100+'%', width: entry.region![2]*100+'%', height: entry.region![3]*100+'%' }} />)}
       </div>}
       {record.source_available && record.source_kind === 'video' && <><video ref={video} src={raw} controls preload="metadata" className="max-w-full" />{entries.filter(entry => entry.time_seconds !== undefined).map(entry => <Button key={entry.id} onClick={() => { if (video.current) video.current.currentTime = entry.time_seconds! }}>Jump to {entry.time_seconds}s</Button>)}</>}
       <AnnotationList entries={entries} remove={id => setEntries(old => old.filter(entry => entry.id !== id))} />

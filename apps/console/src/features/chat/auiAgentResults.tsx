@@ -60,7 +60,7 @@ export function PendingApprovalResult({ approval, onResolved }: { approval: Pend
       setBusy(false)
     }
   }
-  return <div aria-label={`Approval ${approval.id}`}>
+  return <div role="group" aria-label={`Approval ${approval.id}`}>
     {decision ? <p role="status">{decision === 'approve' ? 'Approved' : 'Rejected'}: {approval.tool}</p>
       : <ApprovalCard state="request" command={typeof approval.tool_input === 'string' ? approval.tool_input : JSON.stringify(approval.tool_input ?? {})}
         title={approval.tool} subtitle={approval.tool_purpose || approval.source}
@@ -92,7 +92,7 @@ export function AgentOptionList({ title, options, onSelect, disabledReason }: {
       setBusy('')
     }
   }
-  return <div aria-label={title}>
+  return <div role="group" aria-label={title}>
     <TaskCard label={title} state={selected ? 'done' : 'waiting'}
       actions={options.length ? <div role="group" aria-label={title}>{options.map(option => <Button key={option.id} size="sm" variant="secondary"
         loading={!!busy} loadingLabel="Saving selection…" disabled={!!selected || !!disabledReason} disabledReason={selected ? 'A selection has already been confirmed.' : disabledReason}
@@ -134,7 +134,7 @@ export function WorkflowQuestionFlow({ runId, continuation, onResolved }: {
   if (!prompt) return <p role="status">Question unavailable for run {runId}.</p>
   if (continuation.ask.kind === 'choice' && !choices?.length)
     return <p role="status">No choices were supplied for run {runId}.</p>
-  return <div aria-label={`Question for run ${runId}`}>
+  return <div role="group" aria-label={`Question for run ${runId}`}>
     {continuation.ask.kind === 'choice' ? <AgentOptionList title={prompt} options={choices!.map(value => ({ id: value, label: value }))} onSelect={submit} disabledReason={!continuation.resume_token ? 'Reopen the workflow to obtain a current answer request.' : undefined} />
       : <TaskCard label={prompt} meta={continuation.node_id} state="waiting"
         actions={<form onSubmit={event => { event.preventDefault(); void submit(answer.trim()) }}>
@@ -161,7 +161,7 @@ export function ArtifactResult({ artifact, onOpen }: { artifact: Artifact; onOpe
 
 export function RunHandoffResult({ run }: { run: WorkflowRunDetailData }) {
   const records = Object.entries(run.round_handoff ?? {}).filter(([, row]) => row.completed_role && row.next_role && !row.stop)
-  return <div aria-label={`Handoffs for run ${run.run_id}`}>
+  return <div role="group" aria-label={`Handoffs for run ${run.run_id}`}>
     {records.map(([id, row]) => <AgentHandoff key={id} from={row.completed_role!} to={row.next_role!}
       carried={row.next_allowed_paths ?? []} settled={false} />)}
   </div>

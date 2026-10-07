@@ -15,7 +15,7 @@ export const MCP_CONFIG_PROVENANCE = 'Gideon composition: assistant-ui elements/
 
 export function GideonAgentStatus({ agent, onOpen }: { agent: SavedAgent; onOpen?: (name: string) => void }) {
   const running = (agent.running_sessions ?? 0) > 0
-  return <div aria-label={`Agent ${agent.name}`} className="flex items-center gap-2">
+  return <div role="group" aria-label={`Agent ${agent.name}`} className="flex items-center gap-2">
     {agent.running_sessions === undefined
       ? <span>{agent.name}: activity unavailable</span>
       : <AgentStatus state={running ? 'working' : 'waiting'}
@@ -25,7 +25,7 @@ export function GideonAgentStatus({ agent, onOpen }: { agent: SavedAgent; onOpen
 }
 
 export function GideonAgentCard({ agent }: { agent: SavedAgent }) {
-  return <div aria-label={`Saved agent ${agent.name}`}>
+  return <div role="group" aria-label={`Saved agent ${agent.name}`}>
     <AgentCard name={agent.name} description={agent.description ?? ''} provider={agent.provider}
       model={agent.model} skills={(agent.skills ?? []).map(name => ({ name, description: '' }))} />
   </div>
@@ -73,7 +73,7 @@ export function ScheduledAgentRun({ job, history, onSaved, displayOnly = false }
       setBusy(false)
     }
   }
-  return <div aria-label={`Schedule ${job.id}`}>
+  return <div role="group" aria-label={`Schedule ${job.id}`}>
     <ScheduleCard name={job.name} cadence={job.schedule} enabled={job.enabled}
       nextRun={job.next_run_ts == null ? 'Next run unavailable' : new Date(job.next_run_ts * 1000).toLocaleString()}
       history={known} onToggle={displayOnly || job.read_only ? undefined : () => void toggle()} />
@@ -106,7 +106,7 @@ export interface ConfiguredQuotaSummary {
 }
 export function ConfiguredQuota({ summary }: { summary: ConfiguredQuotaSummary }) {
   return summary.plan.token_limit != null && summary.plan.token_limit > 0
-    ? <div aria-label={`Configured quota ${summary.plan.name}`}>
+    ? <div role="group" aria-label={`Configured quota ${summary.plan.name}`}>
       <QuotaBanner used={summary.usage.tokens} limit={summary.plan.token_limit} unit="tokens"
         remainingLabel={summary.reservations ? 'tokens unconsumed before reservations' : undefined}
         resetsIn={summary.plan.cycle_end ? `on ${summary.plan.cycle_end}` : undefined} upgradeLabel="" />
@@ -133,7 +133,7 @@ export function McpServerResult({ server, allowManage, onSaved }: { server: McpS
       setBusy(false)
     }
   }
-  return <div aria-label={`MCP server ${server.name}`}>
+  return <div role="group" aria-label={`MCP server ${server.name}`}>
     <TaskCard label={server.name} meta={server.status} state={server.error ? 'failed' : 'waiting'}
       result={server.error || `${server.tools.length} tools`}
       actions={allowManage && server.enabled !== undefined

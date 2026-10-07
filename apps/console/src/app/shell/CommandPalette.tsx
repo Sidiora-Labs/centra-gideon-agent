@@ -68,7 +68,7 @@ function PaletteResults({ query, results, content, cursor, search, select, move,
       </button>)}
       {!results.length && <p className="p-l text-center text-on-surface-low">{content.searching ? 'Searching content…' : `No matches for “${query}”.`}</p>}
     </div>
-    {content.query && <div className="grid gap-1 text-on-surface-low text-[0.75rem]" aria-label="Content search coverage">
+    {content.query && <div className="grid gap-1 text-on-surface-low text-[0.75rem]" role="group" aria-label="Content search coverage">
       {CONTENT_SOURCES.map((source) => <p key={source} role="status" data-source={source} data-state={content.sources[source].status}>
         {SOURCE_LABEL[source]}: {content.sources[source].message ?? (content.searching ? 'Searching…' : 'No results.')}
       </p>)}
