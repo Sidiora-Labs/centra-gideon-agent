@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { AlertTriangleIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -51,20 +53,13 @@ export function EditMessage({
         className={cn("flex w-full max-w-sm justify-end", className)}
         {...props}
       >
-        <button
-          type="button"
-          onClick={onStartEdit}
-          aria-disabled={(!onStartEdit) || undefined}
-          aria-description={(!onStartEdit) ? "Editing is unavailable for this message." : undefined}
-          title={(!onStartEdit) ? "Editing is unavailable for this message." : undefined}
-          className={cn(
+        <Button type="button" onClick={onStartEdit} disabledReason={(!onStartEdit) ? "Editing is unavailable for this message." : undefined} title={(!onStartEdit) ? "Editing is unavailable for this message." : undefined} className={cn(
             "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
             field,
             "hover:bg-foreground/[0.07] max-w-[85%] rounded-2xl px-3.5 py-2.5 text-start text-[13.5px] transition-colors",
-          )}
-        >
+          )} disabled={(!onStartEdit) || undefined} variant="ghost" size="sm" style={{ height: 'auto', paddingInline: '0.875rem', paddingBlock: '0.625rem' }}>
           {value}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -103,30 +98,16 @@ export function EditMessage({
       )}
 
       <div className="flex items-center justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          aria-disabled={(!onCancel) || undefined}
-          aria-description={(!onCancel) ? "Canceling this edit is unavailable." : undefined}
-          title={(!onCancel) ? "Canceling this edit is unavailable." : undefined}
-          className="aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100 text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
-        >
+        <Button type="button" onClick={onCancel} disabledReason={(!onCancel) ? "Canceling this edit is unavailable." : undefined} title={(!onCancel) ? "Canceling this edit is unavailable." : undefined} className="aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100 text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]" disabled={(!onCancel) || undefined} variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.875rem' }}>
           {labels?.cancel ?? "Cancel"}
-        </button>
-        <button
-          type="button"
-          onClick={onSave}
-          aria-disabled={(!onSave) || undefined}
-          aria-description={(!onSave) ? "Saving this edit is unavailable." : undefined}
-          title={(!onSave) ? "Saving this edit is unavailable." : undefined}
-          className={cn(
+        </Button>
+        <Button type="button" onClick={onSave} disabledReason={(!onSave) ? "Saving this edit is unavailable." : undefined} title={(!onSave) ? "Saving this edit is unavailable." : undefined} className={cn(
             "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
             inkButton,
             "flex h-8 items-center rounded-full px-3.5 text-xs font-medium",
-          )}
-        >
+          )} disabled={(!onSave) || undefined} variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.875rem' }}>
           {labels?.send ?? "Send"}
-        </button>
+        </Button>
       </div>
     </div>
   );

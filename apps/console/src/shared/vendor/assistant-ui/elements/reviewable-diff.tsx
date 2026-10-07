@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { CheckIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -77,26 +79,16 @@ export function ReviewableDiff({
                 {hunk.decision === "pending" && (onKeep || onDiscard) ? (
                   <>
                     {onDiscard && (
-                      <button
-                        type="button"
-                        aria-label={`Discard hunk ${hunk.range}`}
-                        onClick={() => onDiscard(hunk.id)}
-                        className="text-foreground/45 hover:bg-foreground/[0.06] hover:text-foreground/90 flex h-6 items-center gap-1 rounded-full px-2 text-[11px] font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
-                      >
+                      <Button type="button" ariaLabel={`Discard hunk ${hunk.range}`} onClick={() => onDiscard(hunk.id)} className="text-foreground/45 hover:bg-foreground/[0.06] hover:text-foreground/90 flex h-6 items-center gap-1 rounded-full px-2 text-[11px] font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]" variant="ghost" size="xs" style={{ height: '1.5rem', paddingInline: '0.5rem' }}>
                         <XIcon className="size-3" />
                         Discard
-                      </button>
+                      </Button>
                     )}
                     {onKeep && (
-                      <button
-                        type="button"
-                        aria-label={`Keep hunk ${hunk.range}`}
-                        onClick={() => onKeep(hunk.id)}
-                        className="flex h-6 items-center gap-1 rounded-full bg-emerald-500/12 px-2 text-[11px] font-medium text-emerald-700 transition-[background-color,scale] duration-150 hover:bg-emerald-500/20 active:scale-[0.96] dark:text-emerald-300"
-                      >
+                      <Button type="button" ariaLabel={`Keep hunk ${hunk.range}`} onClick={() => onKeep(hunk.id)} className="flex h-6 items-center gap-1 rounded-full bg-emerald-500/12 px-2 text-[11px] font-medium text-emerald-700 transition-[background-color,scale] duration-150 hover:bg-emerald-500/20 active:scale-[0.96] dark:text-emerald-300" variant="ghost" size="xs" style={{ height: '1.5rem', paddingInline: '0.5rem' }}>
                         <CheckIcon className="size-3" />
                         Keep
-                      </button>
+                      </Button>
                     )}
                   </>
                 ) : (
@@ -145,17 +137,12 @@ export function ReviewableDiff({
           {pending > 0 ? `${pending} left to review` : "All reviewed"}
         </span>
         {onApply && (
-          <button
-            type="button"
-            disabled={pending > 0}
-            onClick={onApply}
-            className={cn(
+          <Button type="button" onClick={onApply} className={cn(
               inkButton,
               "flex h-7 items-center rounded-full px-3 text-xs font-medium disabled:pointer-events-none disabled:opacity-40",
-            )}
-          >
+            )} disabled={pending > 0} variant="ghost" size="xs" style={{ height: '1.75rem', paddingInline: '0.75rem' }}>
             Apply {kept}
-          </button>
+          </Button>
         )}
       </div>}
     </div>

@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { PencilLineIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -39,21 +41,12 @@ export function DraftRestore({
           unsent draft · {savedAt}
         </span>
       </div>
-      <button
-        type="button"
-        onClick={onRestore}
-        className="text-foreground/70 hover:bg-foreground/[0.06] hover:text-foreground/95 shrink-0 rounded-full px-2.5 py-1 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
-      >
+      <Button type="button" onClick={onRestore} className="text-foreground/70 hover:bg-foreground/[0.06] hover:text-foreground/95 shrink-0 rounded-full px-2.5 py-1 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]" variant="ghost" size="sm" style={{ height: 'auto', paddingInline: '0.625rem', paddingBlock: '0.25rem' }}>
         Restore
-      </button>
-      <button
-        type="button"
-        aria-label="Discard the draft"
-        onClick={onDiscard}
-        className={cn(ghostButton, "size-7 shrink-0")}
-      >
+      </Button>
+      <Button type="button" ariaLabel="Discard the draft" onClick={onDiscard} className={cn(ghostButton, "size-7 shrink-0")} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
         <XIcon className="size-3.5" />
-      </button>
+      </Button>
     </div>
   );
 }

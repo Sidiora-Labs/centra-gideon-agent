@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { RefreshCwIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -39,19 +41,13 @@ export function RegenerateMenu({
       {...props}
     >
       {onOpenChange && (
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-label={labels?.options ?? "Regenerate response options"}
-          onClick={() => onOpenChange(!open)}
-          className={cn(
+        <Button type="button" ariaExpanded={open} ariaLabel={labels?.options ?? "Regenerate response options"} onClick={() => onOpenChange(!open)} className={cn(
             ghostButton,
             "size-7 self-start",
             open && "bg-foreground/[0.06] text-foreground/90",
-          )}
-        >
+          )} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
           <RefreshCwIcon className="size-3.5" />
-        </button>
+        </Button>
       )}
 
       {open && (
@@ -77,14 +73,9 @@ export function RegenerateMenu({
               : "flex items-baseline gap-2 rounded-xl px-2.5 py-1.5 text-start";
 
             return onPick ? (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => onPick(option.id)}
-                className={className}
-              >
+              <Button key={option.id} type="button" onClick={() => onPick(option.id)} className={className} variant="ghost" size="sm" style={{ height: 'auto', paddingInline: '0.625rem', paddingBlock: '0.375rem' }}>
                 {content}
-              </button>
+              </Button>
             ) : (
               <div key={option.id} className={className}>
                 {content}

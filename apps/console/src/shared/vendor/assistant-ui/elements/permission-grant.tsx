@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps, ReactNode } from "react";
 import { KeyRoundIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -99,54 +101,33 @@ export function PermissionGrant({
           choices !== undefined ? (
             choices.length > 0 ? (
               choices.map(({ id, label, name, disabled, disabledReason, tone }) => (
-                <button
-                  key={id}
-                  type="button"
-                  aria-label={name}
-                  aria-disabled={(!onChoice || disabled) || undefined}
-                  aria-description={(!onChoice || disabled) ? !onChoice ? "Answering this request is unavailable." : disabledReason || "This answer is unavailable." : undefined}
-                  title={(!onChoice || disabled) ? !onChoice ? "Answering this request is unavailable." : disabledReason || "This answer is unavailable." : name}
-                  onClick={onChoice && !disabled ? () => onChoice(id) : undefined}
-                  className={cn(
+                <Button key={id} type="button" ariaLabel={name} disabledReason={(!onChoice || disabled) ? !onChoice ? "Answering this request is unavailable." : disabledReason || "This answer is unavailable." : undefined} title={(!onChoice || disabled) ? !onChoice ? "Answering this request is unavailable." : disabledReason || "This answer is unavailable." : name} onClick={onChoice && !disabled ? () => onChoice(id) : undefined} className={cn(
                     "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
                     "h-8 rounded-full px-3 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50",
                     tone === "danger"
                       ? "text-red-600 hover:bg-red-500/10 hover:text-red-700"
                       : "text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90",
-                  )}
-                >
+                  )} disabled={(!onChoice || disabled) || undefined} variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.75rem' }}>
                   {label}
-                </button>
+                </Button>
               ))
             ) : (
               <span className={cn(field, mono, "text-foreground/55 rounded-full px-2.5 py-1.5")}>pending</span>
             )
           ) : onGrant ? (
             <>
-              <button
-                type="button"
-                onClick={() => onGrant("denied")}
-                className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
-              >
+              <Button type="button" onClick={() => onGrant("denied")} className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]" variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.75rem' }}>
                 Deny
-              </button>
-              <button
-                type="button"
-                onClick={() => onGrant("session")}
-                className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
-              >
+              </Button>
+              <Button type="button" onClick={() => onGrant("session")} className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]" variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.75rem' }}>
                 This session
-              </button>
-              <button
-                type="button"
-                onClick={() => onGrant("always")}
-                className={cn(
+              </Button>
+              <Button type="button" onClick={() => onGrant("always")} className={cn(
                   inkButton,
                   "flex h-8 items-center rounded-full px-3 text-xs font-medium",
-                )}
-              >
+                )} variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.75rem' }}>
                 Always
-              </button>
+              </Button>
             </>
           ) : (
             <span

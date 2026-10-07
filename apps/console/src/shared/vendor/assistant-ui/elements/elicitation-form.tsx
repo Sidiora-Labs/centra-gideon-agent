@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps, ReactNode } from "react";
 import { CheckIcon, PlugIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -141,38 +143,20 @@ export function ElicitationForm({
       <div className="flex h-8 items-center justify-end gap-2">
         {state === "request" ? (
           <>
-            <button
-              type="button"
-              onClick={onDecline}
-              aria-disabled={(!onDecline) || undefined}
-              aria-description={(!onDecline) ? "Declining this request is unavailable." : undefined}
-              title={(!onDecline) ? "Declining this request is unavailable." : undefined}
-              className="aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100 text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
-            >
+            <Button type="button" onClick={onDecline} disabledReason={(!onDecline) ? "Declining this request is unavailable." : undefined} title={(!onDecline) ? "Declining this request is unavailable." : undefined} className="aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100 text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]" disabled={(!onDecline) || undefined} variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.875rem' }}>
               Decline
-            </button>
-            <button
-              type="button"
-              onClick={onAccept}
-              aria-disabled={(!onAccept) || undefined}
-              aria-description={(!onAccept) ? "Accepting this request is unavailable." : undefined}
-              title={(!onAccept) ? "Accepting this request is unavailable." : undefined}
-              className={cn(
+            </Button>
+            <Button type="button" onClick={onAccept} disabledReason={(!onAccept) ? "Accepting this request is unavailable." : undefined} title={(!onAccept) ? "Accepting this request is unavailable." : undefined} className={cn(
                 "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
                 inkButton,
                 "flex h-8 items-center rounded-full px-3.5 text-xs font-medium",
-              )}
-            >
+              )} disabled={(!onAccept) || undefined} variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.875rem' }}>
               {acceptLabel}
-            </button>
+            </Button>
             {onCancel && (
-              <button
-                type="button"
-                onClick={onCancel}
-                className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
-              >
+              <Button type="button" onClick={onCancel} className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]" variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.875rem' }}>
                 {cancelLabel}
-              </button>
+              </Button>
             )}
           </>
         ) : (

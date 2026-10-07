@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { ArrowRightIcon, SquareIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -50,21 +52,13 @@ export function StoppedRun({
           {reason}
         </span>
 
-        {onContinue && <button
-          type="button"
-          onClick={onContinue}
-          className="text-foreground/70 hover:bg-foreground/[0.06] hover:text-foreground/95 ms-auto flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
-        >
+        {onContinue && <Button type="button" onClick={onContinue} className="text-foreground/70 hover:bg-foreground/[0.06] hover:text-foreground/95 ms-auto flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]" variant="ghost" size="xs" style={{ height: '1.75rem', paddingInline: '0.625rem' }}>
           Continue
           <ArrowRightIcon className="size-3" />
-        </button>}
-        {onDiscard && <button
-          type="button"
-          onClick={onDiscard}
-          className="text-foreground/45 hover:bg-foreground/[0.06] hover:text-foreground/90 flex h-7 items-center rounded-full px-2.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
-        >
+        </Button>}
+        {onDiscard && <Button type="button" onClick={onDiscard} className="text-foreground/45 hover:bg-foreground/[0.06] hover:text-foreground/90 flex h-7 items-center rounded-full px-2.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]" variant="ghost" size="xs" style={{ height: '1.75rem', paddingInline: '0.625rem' }}>
           Discard
-        </button>}
+        </Button>}
       </div>
     </div>
   );

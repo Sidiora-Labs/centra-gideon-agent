@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -57,35 +59,19 @@ export function MessageBranches({
         {message}
       </p>}
       <div className="flex items-center gap-1">
-        <button
-          type="button"
-          aria-label={labels?.previous ?? "Show previous response"}
-          aria-disabled={(!hasNavigation) || undefined}
-          aria-description={(!hasNavigation) ? total <= 1 ? "There are no other responses to show." : "Response navigation is unavailable." : undefined}
-          title={(!hasNavigation) ? total <= 1 ? "There are no other responses to show." : "Response navigation is unavailable." : undefined}
-          onClick={hasNavigation ? goPrevious : undefined}
-          className={cn(
-            "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",ghostButton, "size-6")}
-        >
+        <Button type="button" ariaLabel={labels?.previous ?? "Show previous response"} disabledReason={(!hasNavigation) ? total <= 1 ? "There are no other responses to show." : "Response navigation is unavailable." : undefined} title={(!hasNavigation) ? total <= 1 ? "There are no other responses to show." : "Response navigation is unavailable." : undefined} onClick={hasNavigation ? goPrevious : undefined} className={cn(
+            "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",ghostButton, "size-6")} disabled={(!hasNavigation) || undefined} variant="ghost" size="xs" style={{ width: '1.5rem', height: '1.5rem', padding: 0 }}>
           <ChevronLeftIcon className="size-3.5" />
-        </button>
+        </Button>
         <span className={cn(mono, "text-foreground/35 tabular-nums")}>
           {total === 0
             ? "0 / 0"
             : `${index + 1} / ${total}`}
         </span>
-        <button
-          type="button"
-          aria-label={labels?.next ?? "Show next response"}
-          aria-disabled={(!hasNavigation) || undefined}
-          aria-description={(!hasNavigation) ? total <= 1 ? "There are no other responses to show." : "Response navigation is unavailable." : undefined}
-          title={(!hasNavigation) ? total <= 1 ? "There are no other responses to show." : "Response navigation is unavailable." : undefined}
-          onClick={hasNavigation ? goNext : undefined}
-          className={cn(
-            "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",ghostButton, "size-6")}
-        >
+        <Button type="button" ariaLabel={labels?.next ?? "Show next response"} disabledReason={(!hasNavigation) ? total <= 1 ? "There are no other responses to show." : "Response navigation is unavailable." : undefined} title={(!hasNavigation) ? total <= 1 ? "There are no other responses to show." : "Response navigation is unavailable." : undefined} onClick={hasNavigation ? goNext : undefined} className={cn(
+            "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",ghostButton, "size-6")} disabled={(!hasNavigation) || undefined} variant="ghost" size="xs" style={{ width: '1.5rem', height: '1.5rem', padding: 0 }}>
           <ChevronRightIcon className="size-3.5" />
-        </button>
+        </Button>
       </div>
     </div>
   );

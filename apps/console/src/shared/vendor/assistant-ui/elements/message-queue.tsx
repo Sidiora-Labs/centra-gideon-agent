@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { ArrowUpIcon, PencilIcon, SquareIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -59,10 +61,9 @@ export function MessageQueue({
           {running}
         </span>
         <span className={cn(mono, "text-foreground/35 shrink-0")}>{labels?.running ?? "running"}</span>
-        {onInterrupt && <button type="button" aria-label={labels?.stopCurrent ?? "Stop current response"} onClick={onInterrupt}
-          className={cn(ghostButton, "size-6 shrink-0")}>
+        {onInterrupt && <Button type="button" ariaLabel={labels?.stopCurrent ?? "Stop current response"} onClick={onInterrupt} className={cn(ghostButton, "size-6 shrink-0")} variant="ghost" size="xs" style={{ width: '1.5rem', height: '1.5rem', padding: 0 }}>
           <SquareIcon className="size-3.5" />
-        </button>}
+        </Button>}
       </div>}
 
       {queued.length > 0 && (
@@ -96,25 +97,18 @@ export function MessageQueue({
             <span className="text-foreground/60 min-w-0 flex-1 truncate text-[13.5px]">
               {message.text}
             </span>
-            {onInterruptQueued ? <button type="button" aria-label={labels?.sendNext?.(message.text) ?? `Send "${message.text}" next`}
-              onClick={() => onInterruptQueued(message.id)} className={cn(ghostButton, "size-6 shrink-0")}>
+            {onInterruptQueued ? <Button type="button" ariaLabel={labels?.sendNext?.(message.text) ?? `Send "${message.text}" next`} onClick={() => onInterruptQueued(message.id)} className={cn(ghostButton, "size-6 shrink-0")} variant="ghost" size="xs" style={{ width: '1.5rem', height: '1.5rem', padding: 0 }}>
               <ArrowUpIcon className="size-3.5" />
-            </button> : <ArrowUpIcon className="text-foreground/25 size-3 shrink-0" />}
+            </Button> : <ArrowUpIcon className="text-foreground/25 size-3 shrink-0" />}
             {onEdit && (
-              <button type="button" aria-label={labels?.edit?.(message.text) ?? `Edit "${message.text}" in the queue`}
-                onClick={() => onEdit(message.id)} className={cn(ghostButton, "size-6 shrink-0")}>
+              <Button type="button" ariaLabel={labels?.edit?.(message.text) ?? `Edit "${message.text}" in the queue`} onClick={() => onEdit(message.id)} className={cn(ghostButton, "size-6 shrink-0")} variant="ghost" size="xs" style={{ width: '1.5rem', height: '1.5rem', padding: 0 }}>
                 <PencilIcon className="size-3.5" />
-              </button>
+              </Button>
             )}
             {onCancel && (
-              <button
-                type="button"
-                aria-label={labels?.remove?.(message.text) ?? `Remove "${message.text}" from the queue`}
-                onClick={() => onCancel(message.id)}
-                className={cn(ghostButton, "size-6 shrink-0 hover:text-danger")}
-              >
+              <Button type="button" ariaLabel={labels?.remove?.(message.text) ?? `Remove "${message.text}" from the queue`} onClick={() => onCancel(message.id)} className={cn(ghostButton, "size-6 shrink-0 hover:text-danger")} variant="ghost" size="xs" style={{ width: '1.5rem', height: '1.5rem', padding: 0 }}>
                 <XIcon className="size-3.5" />
-              </button>
+              </Button>
             )}
           </li>
         ))}

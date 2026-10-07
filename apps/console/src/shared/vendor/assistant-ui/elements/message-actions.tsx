@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps, ReactNode } from "react";
 import {
   CheckIcon,
@@ -64,16 +66,11 @@ export function MessageActions({
 
       {...props}
     >
-      {onCopy && <button
-        type="button"
-        aria-label={copied ? (labels?.copied ?? "Copied response") : (labels?.copy ?? "Copy response")}
-        onClick={onCopy}
-        className={cn(
+      {onCopy && <Button type="button" ariaLabel={copied ? (labels?.copied ?? "Copied response") : (labels?.copy ?? "Copy response")} onClick={onCopy} className={cn(
           buttonClassName,
           "grid place-items-center",
           copied && "text-emerald-500",
-        )}
-      >
+        )} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
         <CopyIcon
           className={cn(
             iconSwap,
@@ -88,68 +85,34 @@ export function MessageActions({
             copied ? iconSwapIn : iconSwapOut,
           )}
         />
-      </button>}
-      {onReactionChange && <button
-        type="button"
-        aria-label={labels?.helpful ?? "Mark response helpful"}
-        aria-pressed={reaction === "up"}
-        aria-busy={reactionBusy}
-        disabled={reactionBusy}
-        aria-disabled={(!allowClearReaction && reaction === "up") || undefined}
-        aria-description={(!allowClearReaction && reaction === "up") ? "This reaction is already selected and cannot be cleared." : undefined}
-        title={(!allowClearReaction && reaction === "up") ? "This reaction is already selected and cannot be cleared." : undefined}
-        onClick={reactionBusy || (!allowClearReaction && reaction === "up") ? undefined : () => onReactionChange(reaction === "up" && allowClearReaction ? null : "up")}
-        className={cn(
+      </Button>}
+      {onReactionChange && <Button type="button" ariaLabel={labels?.helpful ?? "Mark response helpful"} ariaPressed={reaction === "up"} loading={reactionBusy} disabledReason={(!allowClearReaction && reaction === "up") ? "This reaction is already selected and cannot be cleared." : undefined} title={(!allowClearReaction && reaction === "up") ? "This reaction is already selected and cannot be cleared." : undefined} onClick={reactionBusy || (!allowClearReaction && reaction === "up") ? undefined : () => onReactionChange(reaction === "up" && allowClearReaction ? null : "up")} className={cn(
           "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
           buttonClassName,
           reaction === "up" &&
             "bg-foreground/[0.06] text-foreground/90 dark:bg-foreground/[0.09]",
-        )}
-      >
+        )} disabled={(reactionBusy) || ((!allowClearReaction && reaction === "up") || undefined)} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
         <ThumbsUpIcon className="size-3.5" />
-      </button>}
-      {onReactionChange && <button
-        type="button"
-        aria-label={labels?.unhelpful ?? "Mark response unhelpful"}
-        aria-pressed={reaction === "down"}
-        aria-busy={reactionBusy}
-        disabled={reactionBusy}
-        aria-disabled={(!allowClearReaction && reaction === "down") || undefined}
-        aria-description={(!allowClearReaction && reaction === "down") ? "This reaction is already selected and cannot be cleared." : undefined}
-        title={(!allowClearReaction && reaction === "down") ? "This reaction is already selected and cannot be cleared." : undefined}
-        onClick={reactionBusy || (!allowClearReaction && reaction === "down") ? undefined : () => onReactionChange(reaction === "down" && allowClearReaction ? null : "down")}
-        className={cn(
+      </Button>}
+      {onReactionChange && <Button type="button" ariaLabel={labels?.unhelpful ?? "Mark response unhelpful"} ariaPressed={reaction === "down"} loading={reactionBusy} disabledReason={(!allowClearReaction && reaction === "down") ? "This reaction is already selected and cannot be cleared." : undefined} title={(!allowClearReaction && reaction === "down") ? "This reaction is already selected and cannot be cleared." : undefined} onClick={reactionBusy || (!allowClearReaction && reaction === "down") ? undefined : () => onReactionChange(reaction === "down" && allowClearReaction ? null : "down")} className={cn(
           "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
           buttonClassName,
           reaction === "down" &&
             "bg-foreground/[0.06] text-foreground/90 dark:bg-foreground/[0.09]",
-        )}
-      >
+        )} disabled={(reactionBusy) || ((!allowClearReaction && reaction === "down") || undefined)} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
         <ThumbsDownIcon className="size-3.5" />
-      </button>}
-      {onRegenerate && <button
-        type="button"
-        aria-label={labels?.regenerate ?? "Regenerate response"}
-        onClick={onRegenerate}
-        disabled={regenerating}
-        aria-busy={regenerating}
-        className={buttonClassName}
-      >
+      </Button>}
+      {onRegenerate && <Button type="button" ariaLabel={labels?.regenerate ?? "Regenerate response"} onClick={onRegenerate} loading={regenerating} className={buttonClassName} disabled={regenerating} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
         <RefreshCwIcon
           className={cn(
             "size-3.5",
             regenerating && "animate-spin motion-reduce:animate-none",
           )}
         />
-      </button>}
-      {onMore && <button
-        type="button"
-        aria-label={labels?.more ?? "More response actions"}
-        onClick={onMore}
-        className={buttonClassName}
-      >
+      </Button>}
+      {onMore && <Button type="button" ariaLabel={labels?.more ?? "More response actions"} onClick={onMore} className={buttonClassName} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
         <EllipsisIcon className="size-3.5" />
-      </button>}
+      </Button>}
       {children}
     </div>
   );

@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { CheckIcon, Loader2Icon, TerminalIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -70,34 +72,22 @@ export function ApprovalCard({
         {state === "request" ? (
           <>
             {onDeny && (
-              <button
-                type="button"
-                onClick={onDeny}
-                className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
-              >
+              <Button type="button" onClick={onDeny} className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]" variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.875rem' }}>
                 Deny
-              </button>
+              </Button>
             )}
             {onAlwaysAllow && (
-              <button
-                type="button"
-                onClick={onAlwaysAllow}
-                className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
-              >
+              <Button type="button" onClick={onAlwaysAllow} className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]" variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.875rem' }}>
                 Always allow
-              </button>
+              </Button>
             )}
             {onAllowOnce && (
-              <button
-                type="button"
-                onClick={onAllowOnce}
-                className={cn(
+              <Button type="button" onClick={onAllowOnce} className={cn(
                   inkButton,
                   "flex h-8 items-center rounded-full px-3.5 text-xs font-medium",
-                )}
-              >
+                )} variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.875rem' }}>
                 Allow once
-              </button>
+              </Button>
             )}
           </>
         ) : (

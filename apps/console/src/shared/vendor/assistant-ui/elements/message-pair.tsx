@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { CopyIcon, RefreshCwIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -79,12 +81,12 @@ export function MessagePair({
         </p>
         {(onCopy || onRegenerate) && (
           <div className="flex items-center gap-1 pt-1 opacity-0 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100 motion-reduce:transition-none">
-            {onCopy && <button type="button" aria-label="Copy response" onClick={onCopy} className={cn(ghostButton, "size-7")}>
+            {onCopy && <Button type="button" ariaLabel="Copy response" onClick={onCopy} className={cn(ghostButton, "size-7")} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
               <CopyIcon className="size-3.5" />
-            </button>}
-            {onRegenerate && <button type="button" aria-label="Regenerate response" onClick={onRegenerate} className={cn(ghostButton, "size-7")}>
+            </Button>}
+            {onRegenerate && <Button type="button" ariaLabel="Regenerate response" onClick={onRegenerate} className={cn(ghostButton, "size-7")} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
               <RefreshCwIcon className="size-3.5" />
-            </button>}
+            </Button>}
           </div>
         )}
       </div>
