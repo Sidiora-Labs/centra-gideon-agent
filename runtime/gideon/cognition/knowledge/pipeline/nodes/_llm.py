@@ -102,7 +102,7 @@ def _build_messages(prompt: str, images: list[str] | None) -> list[dict]:
     if not images:
         return [{"role": "user", "content": prompt}]
     blocks: list[dict] = [{"type": "text", "text": prompt}]
-    from gideon.interfaces.dashboard.attachment_images import image_part_url
+    from gideon.integrations.attachment_images import image_part_url
 
     for path in images:
         data_url = image_part_url(path)
@@ -113,6 +113,6 @@ def _build_messages(prompt: str, images: list[str] | None) -> list[dict]:
 
 def _image_data_url(path: str) -> str:
     """Compatibility wrapper for existing knowledge image consumers."""
-    from gideon.interfaces.dashboard.attachment_images import image_part_url
+    from gideon.integrations.attachment_images import image_part_url
 
     return image_part_url(path)

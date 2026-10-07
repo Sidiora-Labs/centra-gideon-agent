@@ -719,7 +719,7 @@ class TelegramTransport(ChannelTransportProvider):
                     self.config.get("skip_stt")
                 )
                 if not media["skip_extract"]:
-                    from gideon.interfaces.dashboard.attachment_extract import (
+                    from gideon.integrations.attachment_extract import (
                         get_extractor,
                     )
 

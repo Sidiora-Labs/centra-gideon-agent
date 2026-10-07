@@ -33,11 +33,15 @@ import binascii
 from collections import OrderedDict
 from dataclasses import dataclass
 
+from gideon.integrations.attachment_images import (
+    ALLOWED_MEDIA_TYPES as ALLOWED_MEDIA_TYPES,
+)
+
 _MAX_SESSIONS = 32
 
 MAX_FRAME_BYTES = 6 * 1024 * 1024
 
-ALLOWED_MEDIA_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
+
 
 
 class FrameRejected(ValueError):
