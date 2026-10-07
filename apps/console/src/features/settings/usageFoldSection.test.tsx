@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import { act, render } from '@testing-library/react'
+import type { DailySpend } from '../../shared/data/api'
 
+
+const DAILY_SPEND: DailySpend = {
+  tokens: 0, dollars: 0, max_tokens: 0, max_dollars: 0,
+  status: 'ready', reason: '', paused: false, paid_calls_paused: false,
+  unpriced: 0, held_tokens: 0, held_dollars: 0, resumes_at: '',
+}
 
 const FOLD = {
   window: 'week',
@@ -53,6 +60,7 @@ const mount = async (fold: unknown = FOLD) => {
   vi.resetModules()
   vi.doMock('../../shared/data/api', () => ({
     api: {
+      triggerBudget: () => Promise.resolve(DAILY_SPEND),
       usageTotals: () => Promise.resolve({ totals: null }),
       usageRollup: () => Promise.resolve({ rows: [] }),
       usageFold: () => Promise.resolve(fold),

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
-import { useEffect, useState } from 'react'
 import { ModelsPanel } from './ModelsPanel'
+import { resetDataStore } from '../../shared/data/data'
 import { occupantDetail, pressureDetail, pressureTone, reclaimableCount, sortOccupants } from '../../shared/data/residency'
 import type { LoadedModel, MemoryPressure } from '../../shared/data/api'
 
@@ -18,7 +18,9 @@ vi.mock('../../shared/data/api', async (importOriginal) => {
       gideonConfig: () => Promise.resolve({ agent: { prompt_cache_enabled: true } }),
       patchConfig: vi.fn(() => Promise.resolve({})),
       modelsAvailable: () => Promise.resolve([]),
-      modelsActive: () => Promise.resolve({}),
+      activeModels: () => Promise.resolve({ use_cases: {}, revisions: {} }),
+      modelProviders: () => Promise.resolve([]),
+      modelDownloads: () => Promise.resolve([]),
       modelsHealth: () => Promise.resolve({ providers: [] }),
       judgeBench: () => Promise.reject(new actual.ApiError('No judge benchmark has run yet. Run `gideon judge-bench` to produce one.', 404, 'judge_bench_absent')),
       modelDownloadCleanupCandidates: () => Promise.resolve({ candidates: [], total_bytes: 0 }),
@@ -26,15 +28,6 @@ vi.mock('../../shared/data/api', async (importOriginal) => {
   }
 })
 vi.mock('../../app/shell/appSdk', () => ({ notify: vi.fn() }))
-vi.mock('../../shared/data/data', () => ({
-  useQuery: (_k: string, fn: () => Promise<unknown>) => {
-    const [data, setData] = useState<unknown>(null)
-    const [error, setError] = useState<unknown>(null)
-    useEffect(() => { fn().then(setData).catch(setError) }, [])
-    return { data, error, refresh: () => {} }
-  },
-  invalidateKeys: () => {},
-}))
 
 const PRESSURE: MemoryPressure = {
   total_mb: 16384, used_mb: 12288, available_mb: 4096, used_pct: 75,
@@ -48,6 +41,7 @@ const RESIDENT: LoadedModel[] = [
 
 describe('the loaded-models section in the Models panel', () => {
   beforeEach(() => {
+    resetDataStore()
     modelsLoaded.mockResolvedValue({ loaded: RESIDENT, providers: [], pressure: PRESSURE })
   })
 
