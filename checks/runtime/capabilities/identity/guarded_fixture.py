@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from gideon.core.config import AppConfig
-from gideon.engine.agents.native.builtin_tools import NativeBuiltinToolProvider
+from gideon.engine.agents.native.builtin_tools import create_platform_tools_provider
 from gideon.engine.agents.native.runtime import NativeAgentRuntime
 from gideon.engine.agents.provider import AgentRuntimeDefinition
 from gideon.engine.session import ConversationDirectory, _Session
@@ -16,14 +16,14 @@ from gideon.workspace.capabilities.identity.tools import IdentityToolProvider
 
 
 async def fixture(home: Path, *, dry_run=False):
-    workspace = home / "workspace"
+    workspace = home / "recipe-workspace"
     workspace.mkdir(parents=True, exist_ok=True)
     model = OpenAIProvider(
         model="local-test-unused",
         credential=Credential("test", "api_key", "unused-local-fixture"),
         base_url="http://127.0.0.1:1/v1",
     )
-    native = NativeBuiltinToolProvider(cwd=workspace)
+    native = create_platform_tools_provider(cwd=workspace)
     identity = IdentityToolProvider(home)
     runtime = NativeAgentRuntime(
         definition=AgentRuntimeDefinition(name="fixture"),
