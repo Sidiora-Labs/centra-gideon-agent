@@ -65,8 +65,10 @@ async def get_source(request):
         return web.json_response(
             {"error": "Source reads accept no query selectors"}, status=400
         )
+    knowledge, memory = _stores(request)
     record = source_record(
-        *_stores(request),
+        knowledge,
+        memory,
         request.match_info["source_type"],
         request.match_info["source_id"],
     )

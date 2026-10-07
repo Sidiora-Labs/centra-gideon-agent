@@ -1,6 +1,7 @@
 """Consumption entries, preset snapshots and calendar summaries."""
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 from aiohttp import web
@@ -28,14 +29,15 @@ def register(app: web.Application, home: Path | None = None):
                     if request.method == "DELETE" and request.query
                     else await read_json_body(request)
                 )
-                operation = {
+                operations: dict[tuple[str, bool], Callable[..., object]] = {
                     ("POST", False): store.create_entry,
                     ("PUT", False): store.correct_entry,
                     ("DELETE", False): store.delete_entry,
                     ("POST", True): store.create_preset,
                     ("PUT", True): store.update_preset,
                     ("DELETE", True): store.delete_preset,
-                }[(request.method, preset)]
+                }
+                operation = operations[(request.method, preset)]
                 result = (
                     await asyncio.to_thread(operation, identity, body)
                     if identity

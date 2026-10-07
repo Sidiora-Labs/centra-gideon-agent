@@ -15,12 +15,12 @@ PREFIX = "/api/capabilities/identity"
 
 async def handle(request: web.Request) -> web.Response:
     store = request.app[STORE_KEY]
-    story_id = request.match_info.get("story_id")
+    story_id = request.match_info.get("story_id", "")
     operation = request.match_info.get("operation")
     try:
         if request.method == "GET":
             if operation == "export":
-                result = store.export()
+                result: object = store.export()
             elif operation == "chain":
                 result = store.chain(story_id)
             elif operation == "history":

@@ -1,6 +1,7 @@
 """Owner HTTP surface for broker cases; verified scanner results stay internal."""
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 from aiohttp import web
@@ -49,6 +50,7 @@ def register(app: web.Application, home: Path | None = None):
             identity, action = request.match_info["id"], request.match_info.get(
                 "action"
             )
+            method: Callable[..., object]
             if request.method == "GET":
                 method, envelope = (
                     (store.history, "history")

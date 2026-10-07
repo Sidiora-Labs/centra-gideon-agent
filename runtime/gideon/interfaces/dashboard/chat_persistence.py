@@ -1,7 +1,5 @@
 """Session persistence — save, restore, history prefix."""
 
-from gideon.engine.turn_source import source_of
-
 import json
 import logging
 import re
@@ -14,6 +12,7 @@ from gideon.core.atomic_write import atomic_write
 from gideon.core.config.loader import AppConfig
 from gideon.engine.agent import AGENTS_DIR
 from gideon.engine.task_modes import VALID_TASK_MODES
+from gideon.engine.turn_source import source_of
 from gideon.interfaces.dashboard.chat_utils import (
     _normalize_model,
     _sync_dashboard_sessions,
@@ -252,7 +251,12 @@ def _redact_snapshot_message(m: dict) -> dict:
     if role not in ("user", "system"):
         content, _ = redact_exfiltration_urls(content)
         content, _ = redact_credentials(content)
-    out: dict = {"role": role, "content": content, "ts": m.get("ts", ""), **source_of(m)}
+    out: dict = {
+        "role": role,
+        "content": content,
+        "ts": m.get("ts", ""),
+        **source_of(m),
+    }
     if m.get("cls"):
         out["cls"] = m["cls"]
     if m.get("meta"):
@@ -340,6 +344,7 @@ def _restore_runtime_binding(
 def _restore_ingress_queue(session: _ChatSession, meta: dict) -> None:
     """Restore accepted authenticated queue records, never synthesized owner provenance."""
     from gideon.security.approval_answer import UNKNOWN, principal_from_record
+
     queue = meta.get("ingress_queue", [])
     pending_steers = meta.get("pending_ingress_steers", [])
     if isinstance(queue, list) and isinstance(pending_steers, list):
@@ -347,10 +352,21 @@ def _restore_ingress_queue(session: _ChatSession, meta: dict) -> None:
     if not isinstance(queue, list):
         return
     for item in queue:
-        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not isinstance(item.get("content"), str):
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("id"), str)
+            or not isinstance(item.get("content"), str)
+        ):
             continue
-        ingress = item.get("meta", {}).get("ingress", {}) if isinstance(item.get("meta"), dict) else {}
-        if not isinstance(ingress, dict) or principal_from_record(ingress.get("principal")).kind == UNKNOWN:
+        ingress = (
+            item.get("meta", {}).get("ingress", {})
+            if isinstance(item.get("meta"), dict)
+            else {}
+        )
+        if (
+            not isinstance(ingress, dict)
+            or principal_from_record(ingress.get("principal")).kind == UNKNOWN
+        ):
             continue
         session._queue.append(item)
 
@@ -440,7 +456,9 @@ def _rehydrate_session_from_history(
     if meta.get("reasoning_effort"):
         session.reasoning_effort = _validate_reasoning_effort(meta["reasoning_effort"])
     _restore_runtime_binding(state, session, meta)
-    session._initiator = meta.get("initiator") if isinstance(meta.get("initiator"), dict) else None
+    session._initiator = (
+        meta.get("initiator") if isinstance(meta.get("initiator"), dict) else None
+    )
     _restore_ingress_queue(session, meta)
     created_by_app = meta.get("created_by_app", "")
     if isinstance(created_by_app, str) and created_by_app:
@@ -500,7 +518,10 @@ def _rehydrate_session_from_history(
         _attach_rewound(session, m)
     session.drain()
     session._resumed_count = len(session.messages)
-    session._journal_event_ids = {event.source_event_id for event in state.conversation_log.source_events(history_key)}
+    session._journal_event_ids = {
+        event.source_event_id
+        for event in state.conversation_log.source_events(history_key)
+    }
     session._dirty = False
     logger.info("Rehydrated session %s (%s) from history", session_name, session.title)
     return session
@@ -638,7 +659,9 @@ def restore_recent_sessions(
                 meta["reasoning_effort"]
             )
         _restore_runtime_binding(state, session, meta)
-        session._initiator = meta.get("initiator") if isinstance(meta.get("initiator"), dict) else None
+        session._initiator = (
+            meta.get("initiator") if isinstance(meta.get("initiator"), dict) else None
+        )
         _restore_ingress_queue(session, meta)
         if meta.get("folder_id"):
             session.folder_id = meta["folder_id"]
@@ -699,7 +722,9 @@ def restore_recent_sessions(
             _attach_rewound(session, m)
         session.drain()
         session._resumed_count = len(session.messages)
-        session._journal_event_ids = {event.source_event_id for event in state.conversation_log.source_events(key)}
+        session._journal_event_ids = {
+            event.source_event_id for event in state.conversation_log.source_events(key)
+        }
         session._dirty = False
         restored += 1
         logger.info("Restored session %s (%s)", session_name, session.title)
@@ -707,12 +732,21 @@ def restore_recent_sessions(
     return restored
 
 
-def save_session_to_history(state, session, messages=None, *, closed=False, force=False, metadata_only=False):
+def save_session_to_history(
+    state, session, messages=None, *, closed=False, force=False, metadata_only=False
+):
     if state.conversation_log is None:
         return
     key = persisted_history_key(state.conversation_log, session.key)
     with state.conversation_log.journal_write(key):
-        return _save_session_to_history_locked(state, session, messages, closed=closed, force=force, metadata_only=metadata_only)
+        return _save_session_to_history_locked(
+            state,
+            session,
+            messages,
+            closed=closed,
+            force=force,
+            metadata_only=metadata_only,
+        )
 
 
 def _save_session_to_history_locked(
@@ -766,7 +800,10 @@ def _save_session_to_history_locked(
         expected_bytes = path.read_bytes() if path.exists() else None
         existing_events = state.conversation_log.source_events(history_key)
         known_events = {event.source_event_id: event for event in existing_events}
-        if session._journal_event_ids and any(event.source_event_id not in session._journal_event_ids for event in existing_events):
+        if session._journal_event_ids and any(
+            event.source_event_id not in session._journal_event_ids
+            for event in existing_events
+        ):
             raise ValueError("conversation changed outside the resident journal view")
 
         path = state.conversation_log._path(history_key)
@@ -801,7 +838,11 @@ def _save_session_to_history_locked(
         if session._pending_steers:
             meta_line["pending_ingress_steers"] = list(session._pending_steers.values())
         if session._queue:
-            meta_line["ingress_queue"] = [item for item in session._queue if item.get("meta", {}).get("ingress")]
+            meta_line["ingress_queue"] = [
+                item
+                for item in session._queue
+                if isinstance(item.get("meta"), dict) and item["meta"].get("ingress")
+            ]
         if session.title and session.title != session.key:
             meta_line["title"] = session.title
         if session.agent:
@@ -890,9 +931,20 @@ def _save_session_to_history_locked(
                 entry["cls"] = cls_val
             if m.get("meta"):
                 entry["meta"] = _redact_meta(m["meta"])
-            previous = known_events.get(m.get("source_event_id"))
-            fields = ("role", "content", "ts", "source_thread", "source_user", "meta", "variants", "rewound")
-            if previous is not None and all(m.get(field) == previous.message.get(field) for field in fields):
+            previous = known_events.get(str(m.get("source_event_id") or ""))
+            fields = (
+                "role",
+                "content",
+                "ts",
+                "source_thread",
+                "source_user",
+                "meta",
+                "variants",
+                "rewound",
+            )
+            if previous is not None and all(
+                m.get(field) == previous.message.get(field) for field in fields
+            ):
                 lines.append(previous.raw_bytes.decode("utf-8") + "\n")
             else:
                 lines.append(json.dumps(entry) + "\n")
@@ -903,7 +955,10 @@ def _save_session_to_history_locked(
         if current_bytes != expected_bytes:
             raise ValueError("conversation changed during the history save")
         atomic_write(path, "".join(lines), fsync=True)
-        session._journal_event_ids = {event.source_event_id for event in state.conversation_log.source_events(history_key)}
+        session._journal_event_ids = {
+            event.source_event_id
+            for event in state.conversation_log.source_events(history_key)
+        }
         state.conversation_log._invalidate_cache(history_key)
         state.conversation_log.invalidate_tab_id_cache()
         try:
@@ -969,12 +1024,19 @@ def in_flight_index(session: _ChatSession, message: str) -> int | None:
     """
     messages = session.messages
     last_assistant = next(
-        (i for i in range(len(messages) - 1, -1, -1) if messages[i].get("role") == "assistant"),
+        (
+            i
+            for i in range(len(messages) - 1, -1, -1)
+            if messages[i].get("role") == "assistant"
+        ),
         -1,
     )
     for i in range(len(messages) - 1, last_assistant, -1):
         row = messages[i]
-        if row.get("role") in _TURN_DISPATCH_ROLES and row.get("content", "") == message:
+        if (
+            row.get("role") in _TURN_DISPATCH_ROLES
+            and row.get("content", "") == message
+        ):
             return i
     return None
 
@@ -1000,7 +1062,11 @@ def prior_turns_transcript(
     messages = session.messages
     cut = len(messages)
     last_assistant = next(
-        (i for i in range(len(messages) - 1, -1, -1) if messages[i].get("role") == "assistant"),
+        (
+            i
+            for i in range(len(messages) - 1, -1, -1)
+            if messages[i].get("role") == "assistant"
+        ),
         -1,
     )
     dispatches = [
@@ -1026,12 +1092,16 @@ def prior_turns_transcript(
         role = message.get("role", "")
         if role in _TURN_DISPATCH_ROLES:
             if role == "user":
-                transcript.append({"role": "user", "content": message.get("content", "")})
+                transcript.append(
+                    {"role": "user", "content": message.get("content", "")}
+                )
                 current_user = len(transcript) - 1
                 current_assistant = None
             continue
         if role == "assistant":
-            transcript.append({"role": "assistant", "content": message.get("content", "")})
+            transcript.append(
+                {"role": "assistant", "content": message.get("content", "")}
+            )
             current_assistant = len(transcript) - 1
             continue
         if role != "system":

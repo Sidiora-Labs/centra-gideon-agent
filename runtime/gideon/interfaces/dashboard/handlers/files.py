@@ -38,9 +38,9 @@ from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.security import (
     MASK_CONFLICT,
     MaskConflict,
-    keep_masked_spans,
     is_sensitive_path,
     is_system_path,
+    keep_masked_spans,
     redact_credentials,
     redact_exfiltration_urls,
     redact_for_display,
@@ -805,7 +805,10 @@ async def api_upload_file(request: web.Request) -> web.Response:
                     resources=f"file:{fname} reason:path_traversal",
                 )
                 return web.json_response({"error": "Invalid filename"}, status=400)
-            from gideon.workspace.uploads.content_intake import approve_stream, IntakeRefused
+            from gideon.workspace.uploads.content_intake import (
+                IntakeRefused,
+                approve_stream,
+            )
 
             async def chunks():
                 while True:
@@ -815,12 +818,14 @@ async def api_upload_file(request: web.Request) -> web.Response:
                     yield chunk
 
             try:
-                approved = await approve_stream(chunks(), safe_name, part_mime, surface="attachment")
+                approved = await approve_stream(
+                    chunks(), safe_name, part_mime, surface="attachment"
+                )
             except IntakeRefused as exc:
                 _cleanup()
                 return exc.response()
             try:
-                await approved.persist(dest)
+                await approved.persist(Path(dest))
             finally:
                 approved.close()
             paths.append(str(dest))
@@ -891,13 +896,17 @@ async def api_attachment_extract(request: web.Request) -> web.Response:
         display_name,
         get_extractor,
     )
-
     from gideon.workspace.uploads.content_intake import IntakeRefused
+
     try:
         text = await get_extractor().get(path, _mt.guess_type(path)[0], strict=True)
     except IntakeRefused as refused:
-        _sel().log_api_access(caller=caller, operation="attachment_extract", outcome="denied",
-                              resources=f"name={display_name(path)} reason={refused.code}")
+        _sel().log_api_access(
+            caller=caller,
+            operation="attachment_extract",
+            outcome="denied",
+            resources=f"name={display_name(path)} reason={refused.code}",
+        )
         return refused.response()
     _sel().log_api_access(
         caller=caller,
@@ -1256,10 +1265,14 @@ async def api_file_read(request: web.Request) -> web.Response:
             outcome="success",
             resources=path,
         )
-        headers = {"X-Truncated": "true"} if truncated else {
-            "X-Content-Validator": validator,
-            "X-Content-Revision": revision_of(content),
-        }
+        headers = (
+            {"X-Truncated": "true"}
+            if truncated
+            else {
+                "X-Content-Validator": validator,
+                "X-Content-Revision": revision_of(content),
+            }
+        )
         return web.Response(text=content, content_type="text/plain", headers=headers)
     except Exception:
         logging.getLogger(__name__).exception("file_read failed for %s", path)
@@ -1414,7 +1427,10 @@ async def api_file_write(request: web.Request) -> web.Response:
         with queue_lock(path):
             if not os.path.isfile(path):
                 _sel().log_tool_invocation(
-                    session_key="dashboard", tool_name="file_write", outcome="not_found", resources=path,
+                    session_key="dashboard",
+                    tool_name="file_write",
+                    outcome="not_found",
+                    resources=path,
                 )
                 return web.json_response({"error": "not found"}, status=404)
             try:
@@ -1435,7 +1451,10 @@ async def api_file_write(request: web.Request) -> web.Response:
                     )
                 if refusal is not None:
                     _sel().log_tool_invocation(
-                        session_key="dashboard", tool_name="file_write", outcome="conflict", resources=path,
+                        session_key="dashboard",
+                        tool_name="file_write",
+                        outcome="conflict",
+                        resources=path,
                     )
                     return refusal
                 if expected_validator is not None:
@@ -1446,9 +1465,14 @@ async def api_file_write(request: web.Request) -> web.Response:
                     current_validator = digest.hexdigest()
                     if current_validator != expected_validator:
                         _sel().log_tool_invocation(
-                            session_key="dashboard", tool_name="file_write", outcome="conflict", resources=path,
+                            session_key="dashboard",
+                            tool_name="file_write",
+                            outcome="conflict",
+                            resources=path,
                         )
-                        return web.json_response({"error": "file changed since read"}, status=409)
+                        return web.json_response(
+                            {"error": "file changed since read"}, status=409
+                        )
 
                 if "[REDACTED:" in content:
                     try:
@@ -1483,7 +1507,9 @@ async def api_file_write(request: web.Request) -> web.Response:
                         )
                         from gideon.security.approval_answer import of_request
 
-                        if os.path.realpath(path) == os.path.realpath(str(heartbeat_path())):
+                        if os.path.realpath(path) == os.path.realpath(
+                            str(heartbeat_path())
+                        ):
                             record_owner_file_added_tasks(
                                 before_content,
                                 content,
@@ -1494,21 +1520,32 @@ async def api_file_write(request: web.Request) -> web.Response:
                             "owner file task grants unavailable; file write remains committed"
                         )
                 _sel().log_tool_invocation(
-                    session_key="dashboard", tool_name="file_write", outcome="success", resources=path,
+                    session_key="dashboard",
+                    tool_name="file_write",
+                    outcome="success",
+                    resources=path,
                 )
                 from gideon.stale_write import revision_of
 
-                return web.json_response({
-                    "ok": True,
-                    "validator": hashlib.sha256(content.encode("utf-8")).hexdigest(),
-                    "revision": revision_of(redact_for_display(content)),
-                })
+                return web.json_response(
+                    {
+                        "ok": True,
+                        "validator": hashlib.sha256(
+                            content.encode("utf-8")
+                        ).hexdigest(),
+                        "revision": revision_of(redact_for_display(content)),
+                    }
+                )
             except Exception:
                 logging.getLogger(__name__).exception("file_write failed for %s", path)
                 _sel().log_tool_invocation(
-                    session_key="dashboard", tool_name="file_write", outcome="failure", resources=path,
+                    session_key="dashboard",
+                    tool_name="file_write",
+                    outcome="failure",
+                    resources=path,
                 )
                 return web.json_response({"error": "failed to write file"}, status=500)
+
 
 _EXPLORER_MAX_ENTRIES = 2_000
 
@@ -1578,7 +1615,10 @@ async def api_file_list(request: web.Request) -> web.Response:
                     mtime = float(st.st_mtime)
                 except OSError:
                     continue
-                if not is_dir and _validate_dashboard_path(de.path, read_only=True) is None:
+                if (
+                    not is_dir
+                    and _validate_dashboard_path(de.path, read_only=True) is None
+                ):
                     continue
                 entries.append(
                     {
@@ -2487,36 +2527,50 @@ async def api_file_upload(request: web.Request) -> web.Response:
     from gideon.workspace.uploads.content_intake import IntakeRefused, approve_stream
 
     saved: list[str] = []
+
     def rollback():
         for path in saved:
             with contextlib.suppress(OSError):
                 os.unlink(path)
+
     try:
         async for part in _iter_multipart(reader):
             filename = os.path.basename(part.filename or "")
             refusal = _reject_name(filename)
             if refusal:
                 rollback()
-                return json_error("invalid_name", message=f"invalid filename in upload: {refusal}", status=400)
+                return json_error(
+                    "invalid_name",
+                    message=f"invalid filename in upload: {refusal}",
+                    status=400,
+                )
             dest = _validate_dashboard_path(os.path.join(target_dir, filename))
             if not dest:
                 rollback()
-                return web.json_response({"error": f"forbidden filename: {filename}"}, status=400)
+                return web.json_response(
+                    {"error": f"forbidden filename: {filename}"}, status=400
+                )
             if os.path.exists(dest):
                 rollback()
-                return web.json_response({"error": f"already exists: {filename}"}, status=409)
+                return web.json_response(
+                    {"error": f"already exists: {filename}"}, status=409
+                )
             part_mime = part.headers.get("Content-Type") if part.headers else None
+
             async def chunks():
                 while True:
                     chunk = await part.read_chunk()
                     if not chunk:
                         return
                     yield chunk
-            snapshot = await approve_stream(chunks(), filename, part_mime, surface='file_upload')
+
+            snapshot = await approve_stream(
+                chunks(), filename, part_mime, surface="file_upload"
+            )
             try:
                 if _validate_dashboard_path(dest) != dest:
-                    raise PermissionError('Upload destination is no longer permitted.')
-                await snapshot.persist(dest)
+                    raise PermissionError("Upload destination is no longer permitted.")
+                await snapshot.persist(Path(dest))
                 saved.append(dest)
             finally:
                 snapshot.close()
@@ -2534,8 +2588,12 @@ async def api_file_upload(request: web.Request) -> web.Response:
         if not isinstance(exc, Exception):
             raise
         logging.getLogger(__name__).exception("file_upload failed into %s", target_dir)
-        _sel().log_tool_invocation(session_key="dashboard", tool_name="file_upload",
-                                   outcome="failure", resources=target_dir)
+        _sel().log_tool_invocation(
+            session_key="dashboard",
+            tool_name="file_upload",
+            outcome="failure",
+            resources=target_dir,
+        )
         return web.json_response({"error": "failed to upload"}, status=500)
 
     if not saved:
@@ -2991,18 +3049,26 @@ async def api_dashboard_config(request: web.Request) -> web.Response:
             return web.json_response({"error": str(exc)}, status=400)
         if "operation" in body:
             if body != {"operation": "keep_or_default_name"}:
-                return web.json_response({"error": "invalid config operation"}, status=400)
-            from gideon.core.config.transactions import mutate_config_async
-            from gideon.core.config.transactions import ConfigWriteError
+                return web.json_response(
+                    {"error": "invalid config operation"}, status=400
+                )
+            from gideon.core.config.transactions import (
+                ConfigWriteError,
+                mutate_config_async,
+            )
 
             def keep_or_default(document: dict) -> dict[str, str]:
                 dashboard = document.get("dashboard", {})
                 if not isinstance(dashboard, dict):
-                    raise ConfigWriteError("dashboard config is not an object; nothing was written")
+                    raise ConfigWriteError(
+                        "dashboard config is not an object; nothing was written"
+                    )
                 user_name = dashboard.get("user_name", "")
                 username = dashboard.get("username", "")
                 if not isinstance(user_name, str) or not isinstance(username, str):
-                    raise ConfigWriteError("saved identity fields must be strings; nothing was written")
+                    raise ConfigWriteError(
+                        "saved identity fields must be strings; nothing was written"
+                    )
                 if not (user_name.strip() or username.strip()):
                     user_name = "Operator"
                     dashboard["user_name"] = "Operator"
@@ -3013,11 +3079,15 @@ async def api_dashboard_config(request: web.Request) -> web.Response:
                 identity = await mutate_config_async(keep_or_default)
             except (ConfigWriteError, RuntimeError) as exc:
                 _sel().log_tool_invocation(
-                    session_key="dashboard", tool_name="dashboard_config_write", outcome="failure"
+                    session_key="dashboard",
+                    tool_name="dashboard_config_write",
+                    outcome="failure",
                 )
                 return web.json_response({"error": str(exc)}, status=409)
             _sel().log_tool_invocation(
-                session_key="dashboard", tool_name="dashboard_config_write", outcome="success"
+                session_key="dashboard",
+                tool_name="dashboard_config_write",
+                outcome="success",
             )
             return web.json_response({"ok": True, "identity": identity})
         cfg = AppConfig.load()

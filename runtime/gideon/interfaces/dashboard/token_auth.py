@@ -34,17 +34,16 @@ from urllib.parse import unquote
 
 from aiohttp import web
 
-from gideon.workspace.artifacts.deploy import SERVED_PATH, redacted_serve_path
-
 from gideon.core.config.loader import _DEFAULT_PORT
 from gideon.interfaces.dashboard.origin import is_loopback, is_private_network
-from gideon.security.sel import sel as _sel_fn
 from gideon.security.auth.lifetimes import (
     DEFAULT_BROWSER_SESSION_TTL_SECS,
     MAX_SESSION_TTL_SECS,
     cap_legacy_expiry,
     parse_lifetime,
 )
+from gideon.security.sel import sel as _sel_fn
+from gideon.workspace.artifacts.deploy import SERVED_PATH, redacted_serve_path
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +133,9 @@ class TokenStateManager:
         self._consumed: dict[str, float] = {}
         self._last_seen_touched: dict[str, float] = {}
 
-    def register_nonce(self, nonce: str, expiry: float, pool: str = "token") -> str | None:
+    def register_nonce(
+        self, nonce: str, expiry: float, pool: str = "token"
+    ) -> str | None:
         """Register a nonce and evict the oldest active member only within its pool."""
         if pool not in self._nonces:
             pool = "token"
@@ -165,7 +166,7 @@ class TokenStateManager:
         with self._lock:
             pool = self._nonce_pool.get(nonce)
             in_memory = pool is not None and nonce in self._nonces[pool]
-            if in_memory:
+            if in_memory and pool is not None:
                 self._nonces[pool].move_to_end(nonce)
         if in_memory:
             self._touch_last_seen(nonce)
@@ -183,7 +184,9 @@ class TokenStateManager:
         expiry = stored.get(nonce)
         if expiry is None:
             try:
-                from gideon.interfaces.dashboard.session_store import ended_session_reason
+                from gideon.interfaces.dashboard.session_store import (
+                    ended_session_reason,
+                )
 
                 ended = ended_session_reason(nonce)
                 if ended:
@@ -192,13 +195,17 @@ class TokenStateManager:
                 pass
             with self._lock:
                 return False, (
-                    "no active sessions" if not any(self._nonces.values()) else "token superseded"
+                    "no active sessions"
+                    if not any(self._nonces.values())
+                    else "token superseded"
                 )
         if expiry <= time.time():
             return False, "session expired"
         with self._lock:
             try:
-                from gideon.interfaces.dashboard.session_store import load_session_records
+                from gideon.interfaces.dashboard.session_store import (
+                    load_session_records,
+                )
 
                 record = load_session_records().get(nonce)
                 pool = record.pool if record is not None else "token"
@@ -396,9 +403,11 @@ def _is_assistant_static_request(request: web.Request) -> bool:
         )
     ):
         return True
-    return "text/html" in request.headers.get("Accept", "") and "." not in relative.rsplit(
-        "/", 1
-    )[-1]
+    return (
+        "text/html" in request.headers.get("Accept", "")
+        and "." not in relative.rsplit("/", 1)[-1]
+    )
+
 
 _HANDLER_AUTH_ROUTES = frozenset(
     {
@@ -423,6 +432,7 @@ _HANDLER_AUTH_ROUTES = frozenset(
 def _is_openai_authenticated_route(request: web.Request) -> bool:
     """Delegate only native resolved OpenAI operations to their own admission checks."""
     from gideon.integrations.inbound import openai_dialect as dialect
+
     resource = request.match_info.route.resource
     if resource is None or resource.canonical != request.path:
         return False
@@ -442,9 +452,13 @@ def _is_openai_authenticated_route(request: web.Request) -> bool:
 def _uses_handler_auth(request: web.Request) -> bool:
     """Whether the resolved route authenticates request credentials itself."""
     resource = request.match_info.route.resource
-    if (resource is not None and resource.canonical in (
-        "/artifacts/serve/{slug}", "/artifacts/serve/{slug}/{path}"
-    ) and request.method in ("GET", "HEAD") and SERVED_PATH.fullmatch(request.path)):
+    if (
+        resource is not None
+        and resource.canonical
+        in ("/artifacts/serve/{slug}", "/artifacts/serve/{slug}/{path}")
+        and request.method in ("GET", "HEAD")
+        and SERVED_PATH.fullmatch(request.path)
+    ):
         return True
     return (
         resource is not None
@@ -550,8 +564,14 @@ def _sign(payload: bytes) -> str:
 
 
 def generate_token(
-    user_id: str, ttl_seconds: int = 3600, *, app: str = "", kind: str = "cli",
-    label: str = "", client_ip: str = "", issuer: str = "local",
+    user_id: str,
+    ttl_seconds: int = 3600,
+    *,
+    app: str = "",
+    kind: str = "cli",
+    label: str = "",
+    client_ip: str = "",
+    issuer: str = "local",
 ) -> str:
     """Return ``base64url(payload).base64url(signature)``.
 
@@ -568,10 +588,22 @@ def generate_token(
     _evict_expired()
     now = time.time()
     nonce = os.urandom(8).hex()
-    if not isinstance(ttl_seconds, int) or ttl_seconds <= 0 or ttl_seconds > MAX_SESSION_TTL_SECS:
+    if (
+        not isinstance(ttl_seconds, int)
+        or ttl_seconds <= 0
+        or ttl_seconds > MAX_SESSION_TTL_SECS
+    ):
         raise ValueError("session lifetime must be between 1 second and 90 days")
     session_ttl = ttl_seconds
-    pool = "app" if app else ("device" if kind in {"mobile", "desktop", "device"} else ("browser" if kind == "browser" else "token"))
+    pool = (
+        "app"
+        if app
+        else (
+            "device"
+            if kind in {"mobile", "desktop", "device"}
+            else ("browser" if kind == "browser" else "token")
+        )
+    )
     display_kind = "mobile" if kind == "device" else kind
 
     evicted = _state.register_nonce(nonce, now + session_ttl, pool)
@@ -582,9 +614,14 @@ def generate_token(
         )
 
         remember_session(
-            nonce, now + session_ttl, issuer="app" if app else issuer,
-            minted_at=now, ip=client_ip, kind="app" if app else display_kind,
-            label=app or label, pool=pool,
+            nonce,
+            now + session_ttl,
+            issuer="app" if app else issuer,
+            minted_at=now,
+            ip=client_ip,
+            kind="app" if app else display_kind,
+            label=app or label,
+            pool=pool,
         )
         if evicted:
             end_session(evicted, "evicted")
@@ -614,7 +651,9 @@ def generate_token(
     return f"{encoded_payload}.{signature}"
 
 
-NOT_THE_OWNER_SENTENCE = "Only this channel's owner can open the dashboard sign-in link."
+NOT_THE_OWNER_SENTENCE = (
+    "Only this channel's owner can open the dashboard sign-in link."
+)
 
 
 def owner_sign_in_token(provider: str, user_id: str, ttl_seconds: int = 3600) -> str:
@@ -717,7 +756,11 @@ def served_port(request: Any) -> int:
     try:
         transport = getattr(request, "transport", None)
         address = transport.get_extra_info("sockname") if transport else None
-        if isinstance(address, tuple) and len(address) > 1 and isinstance(address[1], int):
+        if (
+            isinstance(address, tuple)
+            and len(address) > 1
+            and isinstance(address[1], int)
+        ):
             return address[1] if 0 < address[1] <= 65535 else 0
     except Exception:
         pass
@@ -969,24 +1012,45 @@ def _adopt_credentials(request: web.Request, credentials: _RequestCredentials) -
     request["session_nonce"] = token_nonce(credentials.token)
 
 
-INTERNAL_ROUTES: frozenset[str] = frozenset({
-    "POST /api/send-message", "POST /api/session-keepalive",
-    "GET /api/session-tool-policy", "POST /api/hooks/agent",
-    "POST /api/outbox/notify", "POST /api/channel/upload-file",
-    "POST /api/tools/invoke", "POST /api/computer-use/dispatch",
-})
-MIXED_INTERNAL_ROUTES: frozenset[str] = frozenset({
-    "GET /api/spawn", "POST /api/spawn", "GET /api/spawn/{agent_id}",
-    "GET /api/lessons", "POST /api/lessons", "DELETE /api/lessons",
-    "GET /api/memory/recall", "GET /api/memory/approval-rules",
-    "POST /api/memory/approval-rules", "DELETE /api/memory/approval-rules/{key:.+}",
-    "POST /api/prompts/{name:.+}/render", "POST /api/workflows",
-    "POST /api/workflows/runs", "POST /api/workflows/batches", "GET /api/workflows/batches/{name}",
-    "GET /api/autonudge/session/{session_name}",
-    "DELETE /api/autonudge/{loop_id}", "GET /api/chat/sessions/bound-project",
-    "GET /api/context", "POST /api/triggers/{id}/run",
-})
-_ROUTE_PARAM = re.compile(r"\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::(?P<regex>[^{}]+))?\}")
+INTERNAL_ROUTES: frozenset[str] = frozenset(
+    {
+        "POST /api/send-message",
+        "POST /api/session-keepalive",
+        "GET /api/session-tool-policy",
+        "POST /api/hooks/agent",
+        "POST /api/outbox/notify",
+        "POST /api/channel/upload-file",
+        "POST /api/tools/invoke",
+        "POST /api/computer-use/dispatch",
+    }
+)
+MIXED_INTERNAL_ROUTES: frozenset[str] = frozenset(
+    {
+        "GET /api/spawn",
+        "POST /api/spawn",
+        "GET /api/spawn/{agent_id}",
+        "GET /api/lessons",
+        "POST /api/lessons",
+        "DELETE /api/lessons",
+        "GET /api/memory/recall",
+        "GET /api/memory/approval-rules",
+        "POST /api/memory/approval-rules",
+        "DELETE /api/memory/approval-rules/{key:.+}",
+        "POST /api/prompts/{name:.+}/render",
+        "POST /api/workflows",
+        "POST /api/workflows/runs",
+        "POST /api/workflows/batches",
+        "GET /api/workflows/batches/{name}",
+        "GET /api/autonudge/session/{session_name}",
+        "DELETE /api/autonudge/{loop_id}",
+        "GET /api/chat/sessions/bound-project",
+        "GET /api/context",
+        "POST /api/triggers/{id}/run",
+    }
+)
+_ROUTE_PARAM = re.compile(
+    r"\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::(?P<regex>[^{}]+))?\}"
+)
 
 
 @dataclass(frozen=True)
@@ -999,12 +1063,18 @@ class InternalRoute:
     def parse(cls, entry: str) -> "InternalRoute":
         method, _, template = entry.strip().partition(" ")
         template = template.strip()
-        if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"} or not template.startswith("/"):
+        if method not in {
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+        } or not template.startswith("/"):
             raise ValueError(f"Internal operation must be '<METHOD> /path': {entry!r}")
         parts: list[str] = []
         at = 0
         for param in _ROUTE_PARAM.finditer(template):
-            parts.append(re.escape(template[at:param.start()]))
+            parts.append(re.escape(template[at : param.start()]))
             parts.append(f"(?:{param['regex']})" if param["regex"] else "[^{{}}/]+")
             at = param.end()
         parts.append(re.escape(template[at:]))
@@ -1019,7 +1089,9 @@ def _legacy_internal_routes(paths: frozenset[str]) -> frozenset[str]:
     entries = frozenset(entry for entry in known if entry.partition(" ")[2] in paths)
     unknown = paths - {entry.partition(" ")[2] for entry in entries}
     if unknown:
-        raise ValueError("Internal paths require explicit method/path operation declarations")
+        raise ValueError(
+            "Internal paths require explicit method/path operation declarations"
+        )
     return entries
 
 
@@ -1054,11 +1126,13 @@ def token_auth_middleware(
     arbitrary methods or descendants. Legacy method/path tuples remain accepted.
 
     """
-    strict_routes = tuple(InternalRoute.parse(entry) for entry in sorted(
-        internal_routes | _legacy_internal_routes(internal_paths)
-    ))
+    strict_routes = tuple(
+        InternalRoute.parse(entry)
+        for entry in sorted(internal_routes | _legacy_internal_routes(internal_paths))
+    )
     mixed_entries = frozenset(
-        " ".join(entry) if isinstance(entry, tuple) else entry for entry in mixed_internal_routes
+        " ".join(entry) if isinstance(entry, tuple) else entry
+        for entry in mixed_internal_routes
     ) | _legacy_internal_routes(mixed_internal_paths)
     mixed_routes = tuple(InternalRoute.parse(entry) for entry in sorted(mixed_entries))
 
@@ -1165,37 +1239,55 @@ def token_auth_middleware(
     async def middleware(request: web.Request, handler: object) -> web.StreamResponse:
         path = request.path
         routed = request.rel_url.path_safe
-        _matches_strict = any(route.admits(request.method, routed) for route in strict_routes)
-        _matches_mixed = any(route.admits(request.method, routed) for route in mixed_routes)
+        _matches_strict = any(
+            route.admits(request.method, routed) for route in strict_routes
+        )
+        _matches_mixed = any(
+            route.admits(request.method, routed) for route in mixed_routes
+        )
         if "X-Internal-Secret" in request.headers:
             from gideon.http_errors import json_error
 
             if not (_matches_strict or _matches_mixed):
                 _sel_fn().log_api_access(
-                    caller=request.remote or "", operation="internal_auth", outcome="denied",
-                    source="token_auth", resources=path,
+                    caller=request.remote or "",
+                    operation="internal_auth",
+                    outcome="denied",
+                    source="token_auth",
+                    resources=path,
                     error="operation does not take internal credential",
                 )
-                _log_auth(request, "internal", "denied", "operation does not take internal credential")
+                _log_auth(
+                    request,
+                    "internal",
+                    "denied",
+                    "operation does not take internal credential",
+                )
                 return json_error("internal_route_refused", status=403)
             if not internal_secret or not hmac.compare_digest(
                 internal_secret, request.headers["X-Internal-Secret"]
             ):
                 _sel_fn().log_api_access(
-                    caller=request.remote or "", operation="internal_auth", outcome="denied",
-                    source="token_auth", resources=path, error="wrong internal credential",
+                    caller=request.remote or "",
+                    operation="internal_auth",
+                    outcome="denied",
+                    source="token_auth",
+                    resources=path,
+                    error="wrong internal credential",
                 )
                 _log_auth(request, "internal", "denied", "wrong internal credential")
                 return json_error("internal_secret_invalid", status=403)
             supplied_proof = request.headers.get("X-Session-Proof", "")
             if supplied_proof:
                 from gideon.security.session_credentials import verify
+
                 work = verify(supplied_proof, request.headers.get("X-Session-Key", ""))
                 if work is None:
                     return json_error("internal_secret_invalid", status=403)
                 request["_session_work_proof"] = work
         elif "X-Session-Proof" in request.headers:
             from gideon.http_errors import json_error
+
             return json_error("internal_secret_invalid", status=403)
 
         if os.environ.get("GIDEON_BYPASS_LOCAL_NETWORKS") == "1":
@@ -1209,6 +1301,8 @@ def token_auth_middleware(
         path = request.path
 
         if (request.method, path) in _HANDLER_AUTH_ROUTES:
+            if not callable(handler):
+                raise web.HTTPInternalServerError(text="Invalid authentication handler")
             return await handler(request)  # handler verifies the signed peer envelope
 
         if not local_only and _matches_strict and not _matches_mixed:
@@ -1266,9 +1360,7 @@ def token_auth_middleware(
                     resources=path,
                     error=credentials.error,
                 )
-                _log_auth(
-                    request, "internal", "denied", credentials.error
-                )
+                _log_auth(request, "internal", "denied", credentials.error)
                 return _deny(request, credentials.error)
             _adopt_credentials(request, credentials)
             _sel = _sel_fn()
@@ -1359,9 +1451,9 @@ def token_auth_middleware(
                 _log_auth(request, "internal", "denied", "non-loopback source")
                 return _deny(request, "Forbidden")
 
-        if any(path.startswith(p) for p in _BYPASS_PREFIXES) or _is_assistant_static_request(
-            request
-        ):
+        if any(
+            path.startswith(p) for p in _BYPASS_PREFIXES
+        ) or _is_assistant_static_request(request):
             return await handler(request)  # type: ignore[operator]
         if path in _BYPASS_EXACT:
             return await handler(request)  # type: ignore[operator]
@@ -1492,9 +1584,9 @@ def auth_middleware(
             request: web.Request, handler: object
         ) -> web.StreamResponse:
             path = request.path
-            if any(path.startswith(p) for p in _BYPASS_PREFIXES) or _is_assistant_static_request(
-                request
-            ):
+            if any(
+                path.startswith(p) for p in _BYPASS_PREFIXES
+            ) or _is_assistant_static_request(request):
                 return await handler(request)  # type: ignore[operator]
             if path in _BYPASS_EXACT:
                 return await handler(request)  # type: ignore[operator]
@@ -1503,7 +1595,10 @@ def auth_middleware(
 
             auth_header = request.headers.get("Authorization", "")
             if not auth_header.startswith("Bearer "):
-                logger.debug("api_key_mw: missing Bearer header for %s", redacted_serve_path(path))
+                logger.debug(
+                    "api_key_mw: missing Bearer header for %s",
+                    redacted_serve_path(path),
+                )
                 return _deny_401(request, "Unauthorized")
             provided = auth_header[len("Bearer ") :]
             if not api_key_env:
@@ -1514,7 +1609,9 @@ def auth_middleware(
                 logger.warning("api_key_mw: env var %r is not set", api_key_env)
                 return _deny_401(request, "Unauthorized")
             if not hmac.compare_digest(provided, expected):
-                logger.debug("api_key_mw: invalid API key for %s", redacted_serve_path(path))
+                logger.debug(
+                    "api_key_mw: invalid API key for %s", redacted_serve_path(path)
+                )
                 return _deny_401(request, "Unauthorized")
             request["user"] = "api_key"
             return await handler(request)  # type: ignore[operator]
@@ -1540,9 +1637,9 @@ def auth_middleware(
             request: web.Request, handler: object
         ) -> web.StreamResponse:
             path = request.path
-            if any(path.startswith(p) for p in _BYPASS_PREFIXES) or _is_assistant_static_request(
-                request
-            ):
+            if any(
+                path.startswith(p) for p in _BYPASS_PREFIXES
+            ) or _is_assistant_static_request(request):
                 return await handler(request)  # type: ignore[operator]
             if path in _BYPASS_EXACT:
                 return await handler(request)  # type: ignore[operator]
@@ -1551,13 +1648,19 @@ def auth_middleware(
 
             auth_header = request.headers.get("Authorization", "")
             if not auth_header.startswith("Bearer "):
-                logger.debug("oauth2_mw: missing Bearer header for %s", redacted_serve_path(path))
+                logger.debug(
+                    "oauth2_mw: missing Bearer header for %s", redacted_serve_path(path)
+                )
                 return _deny_401(request, "Unauthorized")
             token = auth_header[len("Bearer ") :]
             try:
                 claims = _verifier.verify(token)
             except OidcVerificationError as exc:
-                logger.debug("oauth2_mw: JWT verification failed for %s: %s", redacted_serve_path(path), exc)
+                logger.debug(
+                    "oauth2_mw: JWT verification failed for %s: %s",
+                    redacted_serve_path(path),
+                    exc,
+                )
                 return _deny_401(request, "Unauthorized")
             request["user"] = claims.get("sub", "")
             return await handler(request)  # type: ignore[operator]
@@ -1614,8 +1717,12 @@ def _deny(request: web.Request, reason: str) -> web.Response:
     if os.environ.get("GIDEON_INSTALL_KIND") == "desktop":
         start = page.index("<p>Run <code>")
         end = page.index("</div>", start)
-        page = page[:start] + "<p>Your desktop session needs a new sign-in. Quit Gideon and open it again.</p>" + page[end:]
-        page = page[:page.index("<script>")] + "</body></html>"
+        page = (
+            page[:start]
+            + "<p>Your desktop session needs a new sign-in. Quit Gideon and open it again.</p>"
+            + page[end:]
+        )
+        page = page[: page.index("<script>")] + "</body></html>"
     return web.Response(
         text=page,
         status=403,
@@ -1632,7 +1739,11 @@ def _log_auth(
             caller=user_id or request.remote or "unknown",
             operation="dashboard.token_auth",
             outcome=outcome,
-            resources=f"{redacted_serve_path(request.path)};carrier={carrier}" if carrier else redacted_serve_path(request.path),
+            resources=(
+                f"{redacted_serve_path(request.path)};carrier={carrier}"
+                if carrier
+                else redacted_serve_path(request.path)
+            ),
             error=error,
         )
     except Exception:
@@ -1641,19 +1752,35 @@ def _log_auth(
 
 def renew_sign_in(request: web.Request, *, ttl_seconds: int, user_id: str) -> str:
     """Rotate a credential-proven owner session without freshening any copied old cookie."""
-    from gideon.interfaces.dashboard.session_store import load_session_records, save_session_records, end_session
+    from gideon.interfaces.dashboard.session_store import (
+        end_session,
+        load_session_records,
+        save_session_records,
+    )
+
     nonce = str(request.get("session_nonce") or "")
     records = load_session_records()
     previous = records.get(nonce)
-    token = generate_token(user_id, ttl_seconds=ttl_seconds, kind=previous.kind if previous else "browser", label=previous.label if previous else "Browser", client_ip=request.remote or "")
+    token = generate_token(
+        user_id,
+        ttl_seconds=ttl_seconds,
+        kind=previous.kind if previous else "browser",
+        label=previous.label if previous else "Browser",
+        client_ip=request.remote or "",
+    )
     records = load_session_records()
     replacement = records.get(token_nonce(token))
     if previous is not None and replacement is not None:
         replacement.device = previous.device
-        replacement.issuer = previous.issuer if previous.device is not None else "password"
+        replacement.issuer = (
+            previous.issuer if previous.device is not None else "password"
+        )
         if replacement.device is not None:
             from dataclasses import replace
-            replacement.device = replace(replacement.device, minted_at=replacement.minted_at)
+
+            replacement.device = replace(
+                replacement.device, minted_at=replacement.minted_at
+            )
         save_session_records(records)
     if nonce:
         end_session(nonce, "replaced")

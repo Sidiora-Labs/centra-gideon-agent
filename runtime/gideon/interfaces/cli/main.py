@@ -196,24 +196,42 @@ in Gideon or your paired chat channel. Ctrl+C stops the current turn.
 """,
         formatter_class=_fmt,
     )
-    chat_parser.add_argument("-m", "--message", help="One message: print its reply and exit")
-    chat_parser.add_argument("--model", help="Model for this chat (default: Settings → Models)")
-    chat_parser.add_argument("--port", type=int, default=None, help="Local gateway port")
+    chat_parser.add_argument(
+        "-m", "--message", help="One message: print its reply and exit"
+    )
+    chat_parser.add_argument(
+        "--model", help="Model for this chat (default: Settings → Models)"
+    )
+    chat_parser.add_argument(
+        "--port", type=int, default=None, help="Local gateway port"
+    )
 
     tui_parser = sub.add_parser(
         "tui", help="Interactive gateway-backed terminal chat with tools and approvals"
     )
-    tui_parser.add_argument("--url", default="", help="Gateway origin (required for remote use)")
-    tui_parser.add_argument("--token", default="", help="Gateway token (or GIDEON_TOKEN)")
-    tui_parser.add_argument("--cookie", default="", help="Authenticated cookie (or GIDEON_COOKIE)")
-    tui_parser.add_argument("--session", default="", help="Resume an existing session key")
+    tui_parser.add_argument(
+        "--url", default="", help="Gateway origin (required for remote use)"
+    )
+    tui_parser.add_argument(
+        "--token", default="", help="Gateway token (or GIDEON_TOKEN)"
+    )
+    tui_parser.add_argument(
+        "--cookie", default="", help="Authenticated cookie (or GIDEON_COOKIE)"
+    )
+    tui_parser.add_argument(
+        "--session", default="", help="Resume an existing session key"
+    )
     tui_parser.add_argument("--port", type=int, default=None, help="Local gateway port")
 
     sub.add_parser("acp", help="Serve Gideon to an ACP editor over stdio")
-    mcp_auth_parser = sub.add_parser("mcp-auth", help="Authorize a configured MCP server")
+    mcp_auth_parser = sub.add_parser(
+        "mcp-auth", help="Authorize a configured MCP server"
+    )
     mcp_auth_parser.add_argument("name", help="Configured MCP server name")
     mcp_auth_parser.add_argument(
-        "--manual", action="store_true", help="Paste OAuth callback URL for a remote server"
+        "--manual",
+        action="store_true",
+        help="Paste OAuth callback URL for a remote server",
     )
 
     run_parser = sub.add_parser(
@@ -554,9 +572,15 @@ Examples:
         "--port", type=int, default=None, help="Home gateway port override"
     )
 
-    footprint_parser = sub.add_parser("footprint", help="Measure declared database storage")
-    footprint_parser.add_argument("--reclaim", action="store_true", help="Compact declared databases")
-    footprint_parser.add_argument("--json", action="store_true", help="Print structured results")
+    footprint_parser = sub.add_parser(
+        "footprint", help="Measure declared database storage"
+    )
+    footprint_parser.add_argument(
+        "--reclaim", action="store_true", help="Compact declared databases"
+    )
+    footprint_parser.add_argument(
+        "--json", action="store_true", help="Print structured results"
+    )
 
     # snapshot / restore
     snap_parser = sub.add_parser(
@@ -1148,7 +1172,9 @@ per-arm marginal contribution is the leave-one-out delta with an enable/hold ver
         help="Dashboard port (default: resolved from GIDEON_PORT env or dashboard.url config)",  # noqa: E501
     )
     token_parser.add_argument(
-        "--ttl", default="20h", help="Token TTL, e.g. 1h, 30m (default: 20h; maximum: 90d)"
+        "--ttl",
+        default="20h",
+        help="Token TTL, e.g. 1h, 30m (default: 20h; maximum: 90d)",
     )
 
     pair_parser = sub.add_parser(
@@ -1391,6 +1417,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "gateway":
         from gideon.engine.gateway_base import claim_home
+
         claim_home()
 
     if args.command == "gateway" and getattr(args, "seed", None) is not None:
@@ -1548,7 +1575,10 @@ def main() -> None:
         if rc:
             raise SystemExit(rc)
         if not args.list_snapshots:
-            from gideon.operations.durability.service import JobResult, persist_job_result
+            from gideon.operations.durability.service import (
+                JobResult,
+                persist_job_result,
+            )
 
             persist_job_result(JobResult("nightly_snapshot"))
     elif args.command == "project":
@@ -1636,7 +1666,9 @@ from gideon.interfaces.cli.doctor import (
     _doctor_paths,
     _doctor_rebuild_routing_stats,
 )
-from gideon.interfaces.cli.hypermid import add_parser as _add_hypermid_parser  # noqa: E402
+from gideon.interfaces.cli.hypermid import (  # noqa: E402
+    add_parser as _add_hypermid_parser,
+)
 from gideon.interfaces.cli.hypermid import hypermid_cmd as _hypermid_cmd  # noqa: E402
 from gideon.interfaces.cli.server import (
     _consolidate_cmd,
@@ -1747,7 +1779,9 @@ def _handle_skills(args) -> None:  # noqa: ANN001
         try:
             mp = get_default_skills_registry().get(marketplace_name)
         except KeyError:
-            raise CliRefusal(f"Marketplace '{marketplace_name}' not registered") from None
+            raise CliRefusal(
+                f"Marketplace '{marketplace_name}' not registered"
+            ) from None
         results = mp.search(query)
         if not results:
             print(f"No results for '{query}' on {marketplace_name}")
@@ -1773,7 +1807,9 @@ def _handle_skills(args) -> None:  # noqa: ANN001
         try:
             registry.get(marketplace_name)
         except KeyError:
-            raise CliRefusal(f"Marketplace '{marketplace_name}' not registered") from None
+            raise CliRefusal(
+                f"Marketplace '{marketplace_name}' not registered"
+            ) from None
         try:
             result = registry.install_guarded(
                 marketplace_name, skill_id, target, force=force
@@ -1840,10 +1876,10 @@ def _handle_skills(args) -> None:  # noqa: ANN001
             if not rep.ok and not rep.unlocked:
                 tampered += 1
         lines.append(f"\n{len(dirs)} skill(s) checked, {tampered} tampered.")
-        report = "\n".join(lines)
+        verification_report = "\n".join(lines)
         if tampered:
-            raise CliRefusal(report)
-        print(report)
+            raise CliRefusal(verification_report)
+        print(verification_report)
         return
 
     print("Usage: gideon skills [list|search|install|remove|curate|verify]")

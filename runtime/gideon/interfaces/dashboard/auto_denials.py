@@ -96,7 +96,10 @@ def record_auto_denial(
         return ""
     try:
         from gideon.integrations.inbox import ItemKind, emit_attention_item
-        from gideon.security.security import redact_credentials, redact_exfiltration_urls
+        from gideon.security.security import (
+            redact_credentials,
+            redact_exfiltration_urls,
+        )
 
         safe_tool, _ = redact_exfiltration_urls(tool or "a tool")
         safe_tool, _ = redact_credentials(safe_tool)
@@ -112,7 +115,9 @@ def record_auto_denial(
                 if trigger_id:
                     origin["trigger"] = trigger_id
             except Exception:
-                logger.debug("could not project persisted workflow trigger origin", exc_info=True)
+                logger.debug(
+                    "could not project persisted workflow trigger origin", exc_info=True
+                )
         refs: dict[str, Any] = {
             "auto_denied": True,
             "reason": reason,
@@ -168,21 +173,33 @@ def unanswered_note(state: Any, note_id: str) -> Any | None:
         return None
 
 
-def unanswered_for_chat(state: Any, note_id: str, session: str) -> tuple[Any, str] | None:
+def unanswered_for_chat(
+    state: Any, note_id: str, session: str
+) -> tuple[Any, str] | None:
     """Return the exact still-open denial row and digest for its bound chat."""
     item = unanswered_note(state, note_id)
     refs = item.refs if item is not None and isinstance(item.refs, dict) else {}
     fingerprint = refs.get("call_fingerprint")
-    if refs.get("chat") != session or not isinstance(fingerprint, str) or len(fingerprint) != 64:
+    if (
+        refs.get("chat") != session
+        or not isinstance(fingerprint, str)
+        or len(fingerprint) != 64
+    ):
         return None
     return item, fingerprint
 
 
-def _origin_matches(refs: dict[str, Any], origin_kind: str, origin_id: str, node_id: str) -> bool:
+def _origin_matches(
+    refs: dict[str, Any], origin_kind: str, origin_id: str, node_id: str
+) -> bool:
     if origin_kind == "trigger":
         return refs.get("trigger") == origin_id
     if origin_kind == "workflow":
-        return refs.get("run") == origin_id and refs.get("node") == node_id and bool(node_id)
+        return (
+            refs.get("run") == origin_id
+            and refs.get("node") == node_id
+            and bool(node_id)
+        )
     return False
 
 
@@ -296,16 +313,16 @@ def settle_answered_call(
     """Close only the exact expired note after the existing owner/channel check succeeds."""
     from gideon.security.approval_answer import CHANNEL, OWNER
 
-    if principal.kind not in {OWNER, CHANNEL} or outcome not in {"approved", "rejected"}:
+    if principal.kind not in {OWNER, CHANNEL} or outcome not in {
+        "approved",
+        "rejected",
+    }:
         return False
     if origin_kind:
         item = unanswered_note(state, note_id)
         refs = item.refs if item is not None and isinstance(item.refs, dict) else {}
         stored_fingerprint = refs.get("call_fingerprint", "")
-        if (
-            not attempt_id
-            or not _origin_matches(refs, origin_kind, origin_id, node_id)
-        ):
+        if not attempt_id or not _origin_matches(refs, origin_kind, origin_id, node_id):
             return False
     elif session:
         found = unanswered_for_chat(state, note_id, session)
@@ -316,12 +333,9 @@ def settle_answered_call(
         item = unanswered_note(state, note_id)
         refs = item.refs if item is not None and isinstance(item.refs, dict) else {}
         stored_fingerprint = refs.get("call_fingerprint", "")
-        if (
-            not attempt_id
-            or not _origin_matches(refs, origin_kind, origin_id, node_id)
-        ):
+        if not attempt_id or not _origin_matches(refs, origin_kind, origin_id, node_id):
             return False
-    if stored_fingerprint != fingerprint:
+    if item is None or stored_fingerprint != fingerprint:
         return False
     try:
         from gideon.integrations.inbox import ItemStatus, live_store, owner_username
@@ -331,7 +345,11 @@ def settle_answered_call(
         if store is None:
             return False
         owner = owner_username()
-        status = ItemStatus.HANDLED.value if outcome == "approved" else ItemStatus.DISMISSED.value
+        status = (
+            ItemStatus.HANDLED.value
+            if outcome == "approved"
+            else ItemStatus.DISMISSED.value
+        )
         updated = store.update_status(item.id, status, owner=owner)
         if updated is None:
             return False

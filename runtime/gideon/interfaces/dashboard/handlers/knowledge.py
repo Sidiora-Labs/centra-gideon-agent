@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from aiohttp import web
+from aiohttp import BodyPartReader, web
 
 from gideon.core.http_request import read_json_body
 from gideon.core.token_estimate import NOMINAL_CHARS_PER_TOKEN
@@ -58,8 +58,16 @@ def _editable_item_projection(item: dict) -> dict:
     return {
         key: item.get(key)
         for key in (
-            "title", "content", "summary", "tags", "item_type", "url",
-            "url_title", "url_description", "gist_language", "is_pinned",
+            "title",
+            "content",
+            "summary",
+            "tags",
+            "item_type",
+            "url",
+            "url_title",
+            "url_description",
+            "gist_language",
+            "is_pinned",
             "is_archived",
         )
     }
@@ -110,11 +118,15 @@ def owner_note_store(request: web.Request):
 
     proof = work_of_request(request)
     actor = work_principal_of_request(request)
-    if (actor.kind != OWNER
-            or (request.headers.get("X-Session-Proof") and proof is None)
-            or (proof is not None and (proof.initiator.kind != OWNER
-                                      or proof.memory_mode == "temporary"))
-            or _blocks_reads_session(request.app["state"], request)):
+    if (
+        actor.kind != OWNER
+        or (request.headers.get("X-Session-Proof") and proof is None)
+        or (
+            proof is not None
+            and (proof.initiator.kind != OWNER or proof.memory_mode == "temporary")
+        )
+        or _blocks_reads_session(request.app["state"], request)
+    ):
         raise web.HTTPForbidden(text="This request cannot read owner notes.")
     return _store(request)
 
@@ -413,7 +425,6 @@ async def regenerate_intelligence(request: web.Request) -> web.Response:
     return web.json_response({"queued": n, "scope": scope})
 
 
-
 def _serve_item_path(
     store, item_id: str, *, thumbnail: bool
 ) -> tuple[Path | None, str]:
@@ -531,12 +542,14 @@ async def get_item(request: web.Request) -> web.Response:
 
     from gideon.stale_write import revision_of
 
-    return web.json_response({
-        **item,
-        "revision": revision_of(_editable_item_projection(item)),
-        "entities": entities,
-        "relations": relations,
-    })
+    return web.json_response(
+        {
+            **item,
+            "revision": revision_of(_editable_item_projection(item)),
+            "entities": entities,
+            "relations": relations,
+        }
+    )
 
 
 async def update_item(request: web.Request) -> web.Response:
@@ -569,12 +582,22 @@ async def update_item(request: web.Request) -> web.Response:
     fields = {k: v for k, v in body.items() if k in allowed}
     tag_add = body.get("tag_add", [])
     tag_remove = body.get("tag_remove", [])
-    if not isinstance(tag_add, list) or not all(isinstance(tag, str) for tag in tag_add):
-        return web.json_response({"error": "tag_add must be a list of strings"}, status=400)
-    if not isinstance(tag_remove, list) or not all(isinstance(tag, str) for tag in tag_remove):
-        return web.json_response({"error": "tag_remove must be a list of strings"}, status=400)
+    if not isinstance(tag_add, list) or not all(
+        isinstance(tag, str) for tag in tag_add
+    ):
+        return web.json_response(
+            {"error": "tag_add must be a list of strings"}, status=400
+        )
+    if not isinstance(tag_remove, list) or not all(
+        isinstance(tag, str) for tag in tag_remove
+    ):
+        return web.json_response(
+            {"error": "tag_remove must be a list of strings"}, status=400
+        )
     if ("tag_add" in body or "tag_remove" in body) and "tags" in fields:
-        return web.json_response({"error": "replace tags or apply tag operations, not both"}, status=400)
+        return web.json_response(
+            {"error": "replace tags or apply tag operations, not both"}, status=400
+        )
     has_tag_ops = "tag_add" in body or "tag_remove" in body
     if has_tag_ops and (tag_add or tag_remove) and fields:
         return web.json_response(
@@ -653,8 +676,12 @@ async def update_item(request: web.Request) -> web.Response:
         return web.json_response({"error": "no valid fields"}, status=400)
     if "tags" in fields:
         desired_tags = fields["tags"]
-        if not isinstance(desired_tags, list) or not all(isinstance(tag, str) for tag in desired_tags):
-            return web.json_response({"error": "tags must be a list of strings"}, status=400)
+        if not isinstance(desired_tags, list) or not all(
+            isinstance(tag, str) for tag in desired_tags
+        ):
+            return web.json_response(
+                {"error": "tags must be a list of strings"}, status=400
+            )
     elif has_tag_ops and (tag_add or tag_remove):
         updated_tags = store.update_item_tags(item_id, add=tag_add, remove=tag_remove)
         if updated_tags is None:
@@ -686,11 +713,13 @@ async def update_item(request: web.Request) -> web.Response:
     from gideon.stale_write import revision_of
 
     updated = store.get_item(item_id) or {}
-    return web.json_response({
-        "ok": True,
-        "reenriching": reenrich,
-        "revision": revision_of(_editable_item_projection(updated)),
-    })
+    return web.json_response(
+        {
+            "ok": True,
+            "reenriching": reenrich,
+            "revision": revision_of(_editable_item_projection(updated)),
+        }
+    )
 
 
 async def delete_item(request: web.Request) -> web.Response:
@@ -1352,20 +1381,26 @@ def _entity_extraction_tally(store) -> dict[str, int] | None:
     """Count recorded outcomes in the visible library; unknown records stay unknown."""
     where, parameters = _listable_where()
     in_flight = "COALESCE(i.processing_status, '') IN ('queued', 'processing')"
-    values = {"failed": "failed", "ran": "done", "skipped": "skipped", "not_applicable": "not_applicable"}
-    columns = [
-        f"COALESCE(SUM(CASE WHEN {in_flight} THEN 1 ELSE 0 END), 0) AS running"
-    ]
+    values = {
+        "failed": "failed",
+        "ran": "done",
+        "skipped": "skipped",
+        "not_applicable": "not_applicable",
+    }
+    columns = [f"COALESCE(SUM(CASE WHEN {in_flight} THEN 1 ELSE 0 END), 0) AS running"]
     columns.extend(
         f"COALESCE(SUM(CASE WHEN {in_flight} THEN 0 WHEN {_ENTITIES_PHASE_SQL} = '{status}' THEN 1 ELSE 0 END), 0) AS {key}"
         for key, status in values.items()
     )
     try:
         row = store.db.execute(
-            f"SELECT {', '.join(columns)}, COUNT(*) AS total FROM items i WHERE {where}", parameters
+            f"SELECT {', '.join(columns)}, COUNT(*) AS total FROM items i WHERE {where}",
+            parameters,
         ).fetchone()
         counts = {key: int(row[key]) for key in ("running", *values, "total")}
-        counts["not_run"] = max(0, counts["total"] - sum(counts[key] for key in ("running", *values)))
+        counts["not_run"] = max(
+            0, counts["total"] - sum(counts[key] for key in ("running", *values))
+        )
         return counts
     except Exception:
         logger.warning("Entity processing outcomes could not be counted", exc_info=True)
@@ -1404,7 +1439,9 @@ async def get_full_graph(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid min_weight or top_k"}, status=400)
     extraction = _entity_extraction_tally(store)
     if not store.graph.nodes:
-        return web.json_response(_graph_payload_shell(min_weight, top_k, stale=False, extraction=extraction))
+        return web.json_response(
+            _graph_payload_shell(min_weight, top_k, stale=False, extraction=extraction)
+        )
 
     key = (str(store.db_path), min_weight, top_k)
     signature = _graph_signature(store)
@@ -1415,7 +1452,11 @@ async def get_full_graph(request: web.Request) -> web.Response:
         or now - entry["computed_at"] < _GRAPH_MEMO_DEBOUNCE_SECS
     ):
         return web.json_response(
-            {**entry["payload"], "stale": entry["signature"] != signature, "extraction": extraction}
+            {
+                **entry["payload"],
+                "stale": entry["signature"] != signature,
+                "extraction": extraction,
+            }
         )
     payload = _build_graph_payload(store, min_weight=min_weight, top_k=top_k)
     _graph_memo[key] = {"signature": signature, "payload": payload, "computed_at": now}
@@ -1464,15 +1505,17 @@ async def get_stats(request: web.Request) -> web.Response:
 
 async def ingest_file(request: web.Request) -> web.Response:
     """POST /api/knowledge/ingest — approve one upload before native storage."""
-    from gideon.workspace.uploads.content_intake import approve_stream, IntakeRefused
     from gideon.cognition.knowledge.file_items import store_approved_file
+    from gideon.workspace.uploads.content_intake import IntakeRefused, approve_stream
 
     try:
         reader = await request.multipart()
         field = await reader.next()
     except Exception:
-        return web.json_response({"error": "expected a multipart 'file' upload"}, status=400)
-    if not field or not hasattr(field, "read_chunk") or field.name != "file":
+        return web.json_response(
+            {"error": "expected a multipart 'file' upload"}, status=400
+        )
+    if not field or not isinstance(field, BodyPartReader) or field.name != "file":
         return web.json_response({"error": "missing 'file' field"}, status=400)
     filename = Path(getattr(field, "filename", None) or "upload").name
     mime = (getattr(field, "headers", {}) or {}).get("Content-Type") or None
@@ -1485,23 +1528,31 @@ async def ingest_file(request: web.Request) -> web.Response:
 
     snapshot = None
     try:
-        snapshot = await approve_stream(chunks(), filename, mime, surface='knowledge')
+        snapshot = await approve_stream(chunks(), filename, mime, surface="knowledge")
         item, is_new = await store_approved_file(_store(request), snapshot)
         if item is None:
             return web.json_response({"error": "failed to store item"}, status=500)
         if is_new:
             try:
-                request.app["state"].knowledge_ingest_queue().enqueue(item['id'])
+                request.app["state"].knowledge_ingest_queue().enqueue(item["id"])
             except Exception:
                 logger.debug("file enqueue failed", exc_info=True)
-        _sel_log('ingest', filename=filename, item_id=item['id'], deduped=not is_new)
-        return web.json_response({'item_id': item['id'], 'type': item['type'],
-            'status': 'processing' if is_new else item.get('processing_status') or 'done', 'deduped': not is_new})
+        _sel_log("ingest", filename=filename, item_id=item["id"], deduped=not is_new)
+        return web.json_response(
+            {
+                "item_id": item["id"],
+                "type": item["type"],
+                "status": (
+                    "processing" if is_new else item.get("processing_status") or "done"
+                ),
+                "deduped": not is_new,
+            }
+        )
     except IntakeRefused as refused:
         return refused.response()
     except Exception:
-        logger.exception('Knowledge file ingestion failed')
-        return web.json_response({'error': 'internal server error'}, status=500)
+        logger.exception("Knowledge file ingestion failed")
+        return web.json_response({"error": "internal server error"}, status=500)
     finally:
         if snapshot is not None:
             snapshot.close()
@@ -2107,7 +2158,9 @@ async def get_item_graph(request: web.Request) -> web.Response:
         for p in prev_leaves:
             edges.append({"from": p, "to": stage})
         prev_leaves = [stage]
-    node_phases = await _with_readiness((item.get("file_metadata") or {}).get("node_phases") or {})
+    node_phases = await _with_readiness(
+        (item.get("file_metadata") or {}).get("node_phases") or {}
+    )
     return web.json_response(
         {
             "item_type": item_type,
@@ -2121,22 +2174,37 @@ async def get_item_graph(request: web.Request) -> web.Response:
 
 async def _with_readiness(node_phases: dict) -> dict:
     """Current capability readiness is transient; persisted outcomes stay unchanged."""
-    from gideon.cognition.knowledge.pipeline.outcomes import SKIPPED, capability_ready, legacy
+    from gideon.cognition.knowledge.pipeline.outcomes import (
+        SKIPPED,
+        capability_ready,
+        legacy,
+    )
 
     if not isinstance(node_phases, dict):
         return {}
-    phases = {step: legacy(value) if isinstance(value, str) else value for step, value in node_phases.items()}
+    phases = {
+        step: legacy(value) if isinstance(value, str) else value
+        for step, value in node_phases.items()
+    }
 
     def needs(outcome) -> list[str]:
         if not isinstance(outcome, dict) or outcome.get("status") != SKIPPED:
             return []
         requirements = outcome.get("needs")
-        return [value for value in requirements if isinstance(value, str)] if isinstance(requirements, list) else []
+        return (
+            [value for value in requirements if isinstance(value, str)]
+            if isinstance(requirements, list)
+            else []
+        )
 
     requested = {need for outcome in phases.values() for need in needs(outcome)}
     ready = {need: await capability_ready(need) for need in sorted(requested)}
     return {
-        step: {**outcome, "ready": any(ready[need] for need in needs(outcome))} if needs(outcome) else outcome
+        step: (
+            {**outcome, "ready": any(ready[need] for need in needs(outcome))}
+            if needs(outcome)
+            else outcome
+        )
         for step, outcome in phases.items()
     }
 

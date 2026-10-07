@@ -1,6 +1,7 @@
 """Captured-home memory practice cards and schedules."""
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 from aiohttp import web
@@ -20,7 +21,7 @@ def register(app: web.Application, home: Path | None = None):
             identity = request.match_info.get("id")
             if request.method in ("POST", "PUT"):
                 body = await read_json_body(request)
-                method = (
+                method: Callable[..., object] = (
                     store.create
                     if not identity
                     else store.update if request.method == "PUT" else store.practice

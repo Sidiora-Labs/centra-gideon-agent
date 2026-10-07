@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from builtins import list as ListType
 from dataclasses import dataclass
 from typing import Any
 
@@ -117,7 +118,7 @@ class ReindexRegistry:
         vector_store: Any,
         embedder: Any,
         embed_fn: Any,
-        vector_stores: tuple[Any, ...] | list[Any] | None = None,
+        vector_stores: tuple[Any, ...] | ListType[Any] | None = None,
     ) -> tuple[ReindexJob | None, str | None]:
         """Begin a re-index (or return the in-flight one).
 
@@ -133,7 +134,11 @@ class ReindexRegistry:
         self._jobs[job.id] = job
         run = _Running(job=job)
         self._running[job.id] = run
-        stores = tuple(vector_stores) if vector_stores is not None else ((vector_store,) if vector_store is not None else ())
+        stores = (
+            tuple(vector_stores)
+            if vector_stores is not None
+            else ((vector_store,) if vector_store is not None else ())
+        )
         run.task = asyncio.ensure_future(
             self._drive(run, knowledge_store, stores, embedder, embed_fn)
         )
@@ -172,8 +177,17 @@ class ReindexRegistry:
                     provider, model, dimension
                 )
             from gideon.hypermid.memory import HypermidMemoryProvider
-            native_stores = tuple(store for store in vector_stores if isinstance(store, HypermidMemoryProvider))
-            legacy_stores = tuple(store for store in vector_stores if store is not None and not isinstance(store, HypermidMemoryProvider))
+
+            native_stores = tuple(
+                store
+                for store in vector_stores
+                if isinstance(store, HypermidMemoryProvider)
+            )
+            legacy_stores = tuple(
+                store
+                for store in vector_stores
+                if store is not None and not isinstance(store, HypermidMemoryProvider)
+            )
             m_total = sum(store.count_episodic_to_reembed() for store in legacy_stores)
             job.total = k_total + m_total
             job.phase = "clearing"
@@ -191,16 +205,20 @@ class ReindexRegistry:
                 job.phase = "reindexing native memory"
                 self._publish(job, "progress")
                 base_done, base_total = job.done, job.total
+
                 def progress(done, total):
                     job.done = base_done + done
                     job.total = base_total + total
                     self._publish(job, "progress")
+
                 result = await store.embedding_reembed_all(on_progress=progress)
                 job.memory += result["reembedded"]
                 job.total = base_total + result["total"]
                 job.done = base_done + result["reembedded"]
                 if result["skipped"]:
-                    raise RuntimeError("Native embedding backfill skipped changed records; retry to complete.")
+                    raise RuntimeError(
+                        "Native embedding backfill skipped changed records; retry to complete."
+                    )
 
             job.status = "done"
             job.phase = "done"

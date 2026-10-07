@@ -24,13 +24,13 @@ from gideon.integrations.inbox import (
     redact_item,
     validate_updatable_fields,
 )
-from gideon.security.sel import sel
 from gideon.security.security import (
     MASK_CONFLICT,
     MaskConflict,
     keep_masked_spans,
     redact_for_display,
 )
+from gideon.security.sel import sel
 
 if TYPE_CHECKING:
     from gideon.interfaces.dashboard.state import ConsoleState
@@ -62,9 +62,13 @@ _OPAQUE_INBOX_FIELDS = frozenset(
 def _mask_inbox_projection(value):
     if isinstance(value, dict):
         return {
-            key: item
-            if key in _OPAQUE_INBOX_FIELDS or key.endswith("_id") or key.endswith("_ts")
-            else _mask_inbox_projection(item)
+            key: (
+                item
+                if key in _OPAQUE_INBOX_FIELDS
+                or key.endswith("_id")
+                or key.endswith("_ts")
+                else _mask_inbox_projection(item)
+            )
             for key, item in value.items()
         }
     if isinstance(value, list):
@@ -259,8 +263,11 @@ async def api_inbox_list(request: web.Request) -> web.Response:
     _, inbox = _get_inbox(state)
     owner = owner_username()
     from gideon.integrations.inbox_reach import reader_of_request
+
     reader = reader_of_request(request, state)
-    items = _rank_items(state, [item for item in inbox.items.values() if reader.reads(item)])
+    items = _rank_items(
+        state, [item for item in inbox.items.values() if reader.reads(item)]
+    )
     if request.query.get("mine") in {"1", "true", "yes"}:
         items = [item for item in items if item.belongs_to(owner)]
     items = _filter_by_kind(items, request.query.get("kind"))
@@ -273,8 +280,11 @@ async def api_inbox_open_items(request: web.Request) -> web.Response:
     _, inbox = _get_inbox(state)
     owner = owner_username()
     from gideon.integrations.inbox_reach import reader_of_request
+
     reader = reader_of_request(request, state)
-    items = _rank_items(state, [item for item in inbox.open_items(owner) if reader.reads(item)])
+    items = _rank_items(
+        state, [item for item in inbox.open_items(owner) if reader.reads(item)]
+    )
     items = _filter_by_kind(items, request.query.get("kind"))
     return web.json_response([_owner_item(i, owner) for i in items])
 
@@ -290,6 +300,7 @@ async def api_inbox_kinds(request: web.Request) -> web.Response:
     _, inbox = _get_inbox(state)
     owner = owner_username()
     from gideon.integrations.inbox_reach import reader_of_request
+
     reader = reader_of_request(request, state)
     counts: dict[str, dict[str, int]] = {}
     for item in inbox.items.values():
@@ -532,7 +543,8 @@ async def api_inbox_proposals_clear(request: web.Request) -> web.Response:
         for item in inbox.items.values()
         if item.item_kind == ItemKind.PROPOSAL.value
         and item.belongs_to(owner)
-        and item.status_for(owner) in {
+        and item.status_for(owner)
+        in {
             ItemStatus.HANDLED.value,
             ItemStatus.DISMISSED.value,
         }
@@ -564,21 +576,37 @@ async def api_inbox_draft(request: web.Request) -> web.Response:
         return web.json_response(
             {"error": "this item's source does not support replies"}, status=400
         )
-    from gideon.integrations.reply_grounding import grounding, DRAFT_INSTRUCTIONS_MAX_CHARS
-    from gideon.security.approval_answer import of_request, OWNER
+    from gideon.integrations.reply_grounding import (
+        DRAFT_INSTRUCTIONS_MAX_CHARS,
+        grounding,
+    )
+    from gideon.security.approval_answer import OWNER, of_request
+
     try:
         body = await read_json_body(request) if request.can_read_body else {}
     except Exception:
         return web.json_response({"error": "body must be a JSON object"}, status=400)
     instructions = body.get("instructions", "")
-    if not isinstance(instructions, str) or len(instructions) > DRAFT_INSTRUCTIONS_MAX_CHARS:
-        return web.json_response({"error": "instructions must be text of at most 2000 characters"}, status=400)
+    if (
+        not isinstance(instructions, str)
+        or len(instructions) > DRAFT_INSTRUCTIONS_MAX_CHARS
+    ):
+        return web.json_response(
+            {"error": "instructions must be text of at most 2000 characters"},
+            status=400,
+        )
     if instructions and of_request(request).kind != OWNER:
-        return web.json_response({"error": "Only the authenticated owner can supply reply instructions"}, status=403)
+        return web.json_response(
+            {"error": "Only the authenticated owner can supply reply instructions"},
+            status=403,
+        )
     evidence = grounding(instructions)
     if evidence.named_notes:
+        from gideon.integrations.action_providers.knowledge_retrieve_provider import (
+            named_source_notes,
+        )
         from gideon.interfaces.dashboard.handlers.knowledge import owner_note_store
-        from gideon.integrations.action_providers.knowledge_retrieve_provider import named_source_notes
+
         try:
             note_store = owner_note_store(request)
         except web.HTTPForbidden:
@@ -586,7 +614,10 @@ async def api_inbox_draft(request: web.Request) -> web.Response:
             # return explicit availability evidence for the owner's review.
             pass
         else:
-            evidence = grounding(instructions, read_named=lambda name: named_source_notes(note_store, name))
+            evidence = grounding(
+                instructions,
+                read_named=lambda name: named_source_notes(note_store, name),
+            )
     item = await svc.draft_reply(item_id, instructions=instructions, evidence=evidence)
     if not item:
         logger.warning("Draft failed for %s", item_id)
@@ -612,26 +643,41 @@ async def api_inbox_draft(request: web.Request) -> web.Response:
     except Exception:
         logger.warning("SEL audit failed for inbox draft success", exc_info=True)
     state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
-    return web.json_response({**_owner_item(item, owner), "drafting": _mask_inbox_projection(evidence.report())})
+    return web.json_response(
+        {
+            **_owner_item(item, owner),
+            "drafting": _mask_inbox_projection(evidence.report()),
+        }
+    )
 
 
 async def api_inbox_sort(request: web.Request) -> web.Response:
     """Retry an open unsorted source message without fabricating a verdict."""
     from dataclasses import replace
+
     from gideon.integrations.inbox_sorting import wants_sorting
-    from gideon.security.approval_answer import of_request, OWNER
+    from gideon.security.approval_answer import OWNER, of_request
+
     if of_request(request).kind != OWNER:
         return json_error("forbidden", status=403)
     state = request.app["state"]
     svc = getattr(state, "_inbox_svc", None)
     if svc is None:
-        return json_error("inbox_not_running", message="Inbox service is not running.", status=503)
+        return json_error(
+            "inbox_not_running", message="Inbox service is not running.", status=503
+        )
     item = svc.inbox.items.get(request.match_info["id"])
     owner = owner_username()
     if item is None or not item.belongs_to(owner):
         return json_error("not_found", status=404)
-    if not is_open_status(item.status_for(owner)) or not wants_sorting(replace(item, classify_error="")):
-        return json_error("inbox_item_not_sortable", message="Only an open unsorted source message can be sorted again.", status=409)
+    if not is_open_status(item.status_for(owner)) or not wants_sorting(
+        replace(item, classify_error="")
+    ):
+        return json_error(
+            "inbox_item_not_sortable",
+            message="Only an open unsorted source message can be sorted again.",
+            status=409,
+        )
     updated = svc.inbox.update(item.id, classify_error="")
     svc.sorter.wake()
     shown = _owner_item(updated, owner)
@@ -706,7 +752,11 @@ async def api_inbox_send(request: web.Request) -> web.Response:
                 and getattr(transport.capabilities(), "speaks_as_owner", False)
             )
         except Exception:
-            logger.warning("channel capabilities unavailable for Inbox reply: %s", provider, exc_info=True)
+            logger.warning(
+                "channel capabilities unavailable for Inbox reply: %s",
+                provider,
+                exc_info=True,
+            )
             speaks_as_owner = False
         if not speaks_as_owner:
             return json_error("channel_provider_unavailable", status=503)
@@ -718,7 +768,9 @@ async def api_inbox_send(request: web.Request) -> web.Response:
                 item.channel, text, item.thread_ts or item.reply_target
             )
         except Exception:
-            logger.warning("Inbox reply failed for owner-voice channel %s", provider, exc_info=True)
+            logger.warning(
+                "Inbox reply failed for owner-voice channel %s", provider, exc_info=True
+            )
             receipt = ""
         if not receipt:
             inbox.update(item_id, draft=text)
@@ -732,7 +784,9 @@ async def api_inbox_send(request: web.Request) -> web.Response:
         inbox.update_status(item_id, ItemStatus.SENT.value, owner=owner)
         _record_signal(state, item, "reply")
         state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
-        return web.json_response({"ok": True, "sent": True, "item": _owner_item(item, owner)})
+        return web.json_response(
+            {"ok": True, "sent": True, "item": _owner_item(item, owner)}
+        )
 
     if item.source == "native":
         delivered = False
@@ -752,28 +806,38 @@ async def api_inbox_send(request: web.Request) -> web.Response:
     inbox.update(item_id, draft=text)
     from gideon.integrations.inbox_providers.registry import get_source
 
-    provider = get_source(item.source)
+    reply_provider = get_source(item.source)
     svc = getattr(state, "_inbox_svc", None)
-    if provider is None and getattr(svc, "_provider", None) is not None:
+    if (
+        reply_provider is None
+        and svc is not None
+        and getattr(svc, "_provider", None) is not None
+    ):
         candidate = svc._provider
         if str(getattr(candidate, "source_name", "")) == item.source:
-            provider = candidate
-    if provider is None:
-        return web.json_response({"error": "reply source is unavailable; draft was kept"}, status=503)
+            reply_provider = candidate
+    if reply_provider is None:
+        return web.json_response(
+            {"error": "reply source is unavailable; draft was kept"}, status=503
+        )
     try:
-        delivered = await provider.send_reply(
+        delivered = await reply_provider.send_reply(
             item.channel, text, item.thread_ts or item.reply_target
         )
     except Exception:
         logger.warning("Inbox reply failed for source %s", item.source, exc_info=True)
         delivered = False
     if not delivered:
-        return web.json_response({"error": "reply was not sent; draft was kept"}, status=502)
+        return web.json_response(
+            {"error": "reply was not sent; draft was kept"}, status=502
+        )
     item.replied_at = time.time()
     inbox.update_status(item_id, ItemStatus.SENT.value, owner=owner)
     _record_signal(state, item, "reply")
     state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
-    return web.json_response({"ok": True, "sent": True, "item": _owner_item(item, owner)})
+    return web.json_response(
+        {"ok": True, "sent": True, "item": _owner_item(item, owner)}
+    )
 
 
 async def api_inbox_pair(request: web.Request) -> web.Response:
@@ -810,7 +874,11 @@ async def api_inbox_pair(request: web.Request) -> web.Response:
         ItemStatus.SENT.value,
         ItemStatus.DISMISSED.value,
     }:
-        return json_error("invalid_request", message="This Inbox item was already answered.", status=409)
+        return json_error(
+            "invalid_request",
+            message="This Inbox item was already answered.",
+            status=409,
+        )
 
     from gideon.integrations.channel_transports import get_transport
     from gideon.integrations.channel_trust import allow_sender
@@ -818,11 +886,14 @@ async def api_inbox_pair(request: web.Request) -> web.Response:
     transport = get_transport(provider)
     try:
         speaks_as_owner = bool(
-            transport
-            and getattr(transport.capabilities(), "speaks_as_owner", False)
+            transport and getattr(transport.capabilities(), "speaks_as_owner", False)
         )
     except Exception:
-        logger.warning("channel capabilities unavailable for Inbox pairing: %s", provider, exc_info=True)
+        logger.warning(
+            "channel capabilities unavailable for Inbox pairing: %s",
+            provider,
+            exc_info=True,
+        )
         speaks_as_owner = False
     if not speaks_as_owner:
         return json_error("channel_provider_unavailable", status=503)
@@ -831,7 +902,9 @@ async def api_inbox_pair(request: web.Request) -> web.Response:
     inbox.update(item.id, refs={**item.refs, "paired": True})
     inbox.update_status(item.id, ItemStatus.HANDLED.value, owner=owner)
     state.broadcast_ws("inbox_item_updated", _owner_item(item, owner))
-    return web.json_response({"ok": True, "paired": True, "item": _owner_item(item, owner)})
+    return web.json_response(
+        {"ok": True, "paired": True, "item": _owner_item(item, owner)}
+    )
 
 
 async def api_inbox_open(request: web.Request) -> web.Response:
@@ -1172,8 +1245,15 @@ async def api_inbox_proposal_create(request: web.Request) -> web.Response:
         item_kind=ItemKind.PROPOSAL.value,
         title=proposal.title,
         body=proposal.preview,
-        refs={pc.REFS_KEY: proposal.to_dict(), "app": app_name,
-              "app_display_name": manifest.displayName or manifest.name},
+        refs={
+            pc.REFS_KEY: proposal.to_dict(),
+            "app": app_name,
+            "app_display_name": (
+                (manifest.displayName or manifest.name)
+                if manifest is not None
+                else app_name
+            ),
+        },
         store=inbox,
         dedup_key=str(body.get("dedup_key") or ""),
     )

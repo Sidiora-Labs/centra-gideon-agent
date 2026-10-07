@@ -156,21 +156,19 @@ async def api_tools_list(request: web.Request) -> web.Response:
         locked = tool_prefs.is_locked(name)
         prov_off = provider in disabled_provs
         entry = {
-                "name": name,
-                "description": description,
-                "provider": provider,
-                "parameters": parameters,
-                "requires_approval": requires_approval,
-                "risk_level": getattr(risk_level, "value", risk_level) or "safe",
-                "locked": locked,
-                "providerDisabled": prov_off,
-                "disabled": (not locked)
-                and tool_prefs.is_disabled(
-                    provider, name, disabled_keys, disabled_provs
-                ),
-                "group": _group_of(name, provider),
-                "tier": provider_tiers.get(provider, default_tier),
-            }
+            "name": name,
+            "description": description,
+            "provider": provider,
+            "parameters": parameters,
+            "requires_approval": requires_approval,
+            "risk_level": getattr(risk_level, "value", risk_level) or "safe",
+            "locked": locked,
+            "providerDisabled": prov_off,
+            "disabled": (not locked)
+            and tool_prefs.is_disabled(provider, name, disabled_keys, disabled_provs),
+            "group": _group_of(name, provider),
+            "tier": provider_tiers.get(provider, default_tier),
+        }
         if name.startswith(f"mcp/{provider}/"):
             entry["serverTool"] = name
         tools_out.append(entry)
@@ -298,7 +296,10 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
 
             if provider_name and provider_name != server:
                 return web.json_response(
-                    {"ok": False, "error": "MCP tool owner does not match its canonical name"},
+                    {
+                        "ok": False,
+                        "error": "MCP tool owner does not match its canonical name",
+                    },
                     status=400,
                 )
             if tool_prefs.is_disabled(server, tool_name):
@@ -388,20 +389,39 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
             status=403,
         )
 
-    from gideon.integrations.tool_providers.arguments import argument_refusal, refused_result
-    from gideon.integrations.mcp_core import set_current_session_key, reset_current_session_key
-    reason = argument_refusal(tool_name, arguments, getattr(_tool_def, "parameters", {}))
-    refusal = refused_result(reason) if reason else None
-    if refusal is None:
-        token = set_current_session_key(request.headers.get("X-Session-Key", "") or "internal")
-        try:
-            refusal = await provider.preflight(tool_name, arguments)
-        except Exception:
-            refusal = None
-        finally:
-            reset_current_session_key(token)
-    if refusal is not None:
-        return web.json_response({"ok": False, "error": refusal.error, "metadata": refusal.metadata}, status=400)
+    from gideon.integrations.mcp_core import (
+        reset_current_session_key,
+        set_current_session_key,
+    )
+    from gideon.integrations.tool_providers.arguments import (
+        argument_refusal,
+        refused_result,
+    )
+
+    reason = argument_refusal(
+        tool_name, arguments, getattr(_tool_def, "parameters", {})
+    )
+    argument_result = refused_result(reason) if reason else None
+    if argument_result is not None:
+        return web.json_response(argument_result, status=400)
+    token = set_current_session_key(
+        request.headers.get("X-Session-Key", "") or "internal"
+    )
+    try:
+        preflight_refusal = await provider.preflight(tool_name, arguments)
+    except Exception:
+        preflight_refusal = None
+    finally:
+        reset_current_session_key(token)
+    if preflight_refusal is not None:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": preflight_refusal.error,
+                "metadata": preflight_refusal.metadata,
+            },
+            status=400,
+        )
 
     from gideon.engine.task_modes import MAY_DESTROY, resolve_effective_risk
 
@@ -414,14 +434,27 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
             status=403,
         )
 
-    from gideon.security.protected_folders import call_protected_delete, provider_working_folder, sentence
-    protected = call_protected_delete(_declared, tool_name, "", arguments, cwd=provider_working_folder(provider))
+    from gideon.security.protected_folders import (
+        call_protected_delete,
+        provider_working_folder,
+        sentence,
+    )
+
+    protected = call_protected_delete(
+        _declared, tool_name, "", arguments, cwd=provider_working_folder(provider)
+    )
     if protected:
-        from gideon.security.approval_answer import of_request, OWNER
+        from gideon.security.approval_answer import OWNER, of_request
+
         if of_request(request).kind != OWNER:
-            return json_error("approval_required", message=sentence(protected), status=403)
+            return json_error(
+                "approval_required", message=sentence(protected), status=403
+            )
     from gideon.engine.agents.native import builtin_tools
-    delete_token = builtin_tools._CURRENT_APPROVED_DELETE.set(str(arguments.get("command", "")) if protected else "")
+
+    delete_token = builtin_tools._CURRENT_APPROVED_DELETE.set(
+        str(arguments.get("command", "")) if protected else ""
+    )
     caller = request.headers.get("X-Session-Key", "") or "internal"
     try:
         if tool_name.startswith("mcp/"):
@@ -432,17 +465,35 @@ async def api_tool_invoke(request: web.Request) -> web.Response:
 
             session_token = set_current_session_key(caller)
             try:
-                from gideon.integrations.tool_providers.registry import ConfiguredMcpToolProvider
+                from gideon.integrations.tool_providers.registry import (
+                    ConfiguredMcpToolProvider,
+                )
+
                 if isinstance(provider, ConfiguredMcpToolProvider):
-                    result = await provider.invoke(tool_name, arguments, expected_definition=getattr(_tool_def, "mcp_definition_digest", ""), expected_configuration=getattr(_tool_def, "mcp_configuration_revision", ""))
+                    result = await provider.invoke(
+                        tool_name,
+                        arguments,
+                        expected_definition=getattr(
+                            _tool_def, "mcp_definition_digest", ""
+                        ),
+                        expected_configuration=getattr(
+                            _tool_def, "mcp_configuration_revision", ""
+                        ),
+                    )
                 else:
                     result = await provider.invoke(tool_name, arguments)
             finally:
                 reset_current_session_key(session_token)
         else:
             if tool_name == "inbox_list":
-                from gideon.integrations.inbox_reach import _REQUEST_READER, reader_of_request
-                inbox_reader_token = _REQUEST_READER.set(reader_of_request(request, request.app["state"]))
+                from gideon.integrations.inbox_reach import (
+                    _REQUEST_READER,
+                    reader_of_request,
+                )
+
+                inbox_reader_token = _REQUEST_READER.set(
+                    reader_of_request(request, request.app["state"])
+                )
                 try:
                     result = await provider.invoke(tool_name, arguments)
                 finally:
@@ -519,10 +570,15 @@ async def api_tools_toggle(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "name is required"}, status=400)
     if name.startswith("mcp/") or provider == "mcp":
         return web.json_response(
-            {"ok": False, "error": "MCP tools must use /api/mcp/toggle-tool with server and raw tool name"},
+            {
+                "ok": False,
+                "error": "MCP tools must use /api/mcp/toggle-tool with server and raw tool name",
+            },
             status=400,
         )
-    if name not in {t.name for t in await list_all_tools(skip=("mcp",), skip_configured_mcp=True)}:
+    if name not in {
+        t.name for t in await list_all_tools(skip=("mcp",), skip_configured_mcp=True)
+    }:
         return web.json_response(
             {"ok": False, "error": f"unknown tool {name!r}"}, status=404
         )
@@ -614,7 +670,11 @@ async def api_tool_groups(request: web.Request) -> web.Response:
 
     defs: list = []
     try:
-        defs = [t for t in await list_all_tools(skip=("mcp",), skip_configured_mcp=True) if t.provider != "mcp"]
+        defs = [
+            t
+            for t in await list_all_tools(skip=("mcp",), skip_configured_mcp=True)
+            if t.provider != "mcp"
+        ]
     except Exception:
         logger.warning("Failed to list tools for the group partition", exc_info=True)
     try:

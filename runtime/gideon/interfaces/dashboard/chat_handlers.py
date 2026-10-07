@@ -201,15 +201,30 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
         _rehydrate_session_from_history(state, session_name, include_archived=True)
     session = state.get_or_create_session(session_name, app=request.get("app", ""))
 
-    from gideon.security.approval_answer import of_request, ingress_record, UNKNOWN
+    from gideon.security.approval_answer import UNKNOWN, ingress_record, of_request
 
     authenticated_actor = of_request(request)
     if authenticated_actor.kind == UNKNOWN:
-        return web.json_response({"error": "authenticated initiator is required"}, status=403)
+        return web.json_response(
+            {"error": "authenticated initiator is required"}, status=403
+        )
     # Reserve provenance fields: client metadata cannot impersonate another initiator.
-    user_meta = {k: v for k, v in (user_meta or {}).items()
-                 if k not in {"ingress", "source_user", "source_thread", "source_event_id", "source_digest", "principal"}}
-    accepted_ingress = ingress_record(authenticated_actor, f"dashboard:{session.key}", raw_message.strip())
+    user_meta = {
+        k: v
+        for k, v in (user_meta or {}).items()
+        if k
+        not in {
+            "ingress",
+            "source_user",
+            "source_thread",
+            "source_event_id",
+            "source_digest",
+            "principal",
+        }
+    }
+    accepted_ingress = ingress_record(
+        authenticated_actor, f"dashboard:{session.key}", raw_message.strip()
+    )
     user_meta["ingress"] = accepted_ingress
     request_app = request.get("app", "")
     if request_app:
@@ -271,11 +286,18 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
     if session.running:
         if retry_note_id:
             return web.json_response(
-                {"error": {"code": "retry_session_running", "message": "Wait for the current turn to finish before retrying this recorded call."}},
+                {
+                    "error": {
+                        "code": "retry_session_running",
+                        "message": "Wait for the current turn to finish before retrying this recorded call.",
+                    }
+                },
                 status=409,
             )
         if message:
-            _cr = await _maybe_cancel_and_replace(state, session, message, meta=user_meta)
+            _cr = await _maybe_cancel_and_replace(
+                state, session, message, meta=user_meta
+            )
             if _cr is not None:
                 return _cr
         from gideon.engine.steering import SteeringText
@@ -287,7 +309,11 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
             and mode == "steer"
             and state.sessions.add_steer(_history_key_for(session.key), steer_text)
         ):
-            session._pending_steers[accepted_ingress["source_event_id"]] = {"id": accepted_ingress["source_event_id"], "content": message, "meta": user_meta}
+            session._pending_steers[accepted_ingress["source_event_id"]] = {
+                "id": accepted_ingress["source_event_id"],
+                "content": message,
+                "meta": user_meta,
+            }
             save_session_to_history(state, session, force=True)
             _c, _ = redact_exfiltration_urls(message)
             _c, _ = redact_credentials(_c)
@@ -326,7 +352,12 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
         principal = of_request(request)
         if principal.kind != OWNER:
             return web.json_response(
-                {"error": {"code": "owner_required", "message": "Only the authenticated owner can retry this recorded call."}},
+                {
+                    "error": {
+                        "code": "owner_required",
+                        "message": "Only the authenticated owner can retry this recorded call.",
+                    }
+                },
                 status=403,
             )
         from gideon.interfaces.dashboard.auto_denials import unanswered_for_chat
@@ -334,7 +365,12 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
         denied = unanswered_for_chat(state, retry_note_id, session.key)
         if denied is None:
             return web.json_response(
-                {"error": {"code": "denial_note_unavailable", "message": "This unanswered-call note is no longer available for this chat."}},
+                {
+                    "error": {
+                        "code": "denial_note_unavailable",
+                        "message": "This unanswered-call note is no longer available for this chat.",
+                    }
+                },
                 status=409,
             )
         user_meta = {
@@ -458,7 +494,11 @@ def _default_mid_turn_mode() -> str:
 
 
 async def _maybe_cancel_and_replace(
-    state: "ConsoleState", session: "_ChatSession", message: str, *, meta: dict | None = None
+    state: "ConsoleState",
+    session: "_ChatSession",
+    message: str,
+    *,
+    meta: dict | None = None,
 ) -> "web.Response | None":
     """Cancel-and-replace decision for a follow-up sent mid-turn (PLATFORM-RESILIENCE
     §6.3). Returns a JSON response when it HANDLED the message (cancelled the in-flight
@@ -503,8 +543,13 @@ async def _maybe_cancel_and_replace(
         save_session_to_history(state, session, force=True)
         state.broadcast_ws(
             "chat_done",
-            {"session": session.key, **session.stream_cursor(), "superseded": True,
-             "superseded_by": qid, "last_turn_outcome": "stopped"},
+            {
+                "session": session.key,
+                **session.stream_cursor(),
+                "superseded": True,
+                "superseded_by": qid,
+                "last_turn_outcome": "stopped",
+            },
         )
         sel().log_tool_invocation(
             session_key=_history_key_for(session.key),
@@ -606,7 +651,9 @@ def _visible_app_origin_destinations() -> dict[str, tuple[str, str]]:
     return visible
 
 
-def _app_origin_fields(app_name: Any, destinations: dict[str, tuple[str, str]]) -> dict[str, str]:
+def _app_origin_fields(
+    app_name: Any, destinations: dict[str, tuple[str, str]]
+) -> dict[str, str]:
     """Return the authorized name and destination together, or neither."""
     name = app_name.strip() if isinstance(app_name, str) else ""
     resolved = destinations.get(name)
@@ -652,7 +699,9 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
         d.update(_app_origin_fields(getattr(s, "created_by_app", ""), app_destinations))
         link_thread = link_channel = None
         try:
-            link_thread, link_channel = state.sessions.get_channel_link(_history_key_for(s.key))
+            link_thread, link_channel = state.sessions.get_channel_link(
+                _history_key_for(s.key)
+            )
         except Exception:
             link_thread = link_channel = None
         if link_thread:
@@ -683,7 +732,9 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
             else:
                 name = raw_key
             try:
-                link_thread, link_channel = state.sessions.get_channel_link(_history_key_for(name))
+                link_thread, link_channel = state.sessions.get_channel_link(
+                    _history_key_for(name)
+                )
             except Exception:
                 link_thread = link_channel = None
             if (
@@ -738,7 +789,9 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
                 ),
                 "never_archive": bool(meta.get("never_archive")),
             }
-            row.update(_app_origin_fields(meta.get("created_by_app", ""), app_destinations))
+            row.update(
+                _app_origin_fields(meta.get("created_by_app", ""), app_destinations)
+            )
             if origin != "manual":
                 row["source_id"] = sid
                 row["source_label"] = _origin_label(origin, sid)
@@ -895,7 +948,10 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
         meta = message.get("meta")
         if not isinstance(meta, dict):
             continue
-        if meta.get("stream_epoch") != snapshot_epoch or meta.get("stream_turn") != snapshot_turn:
+        if (
+            meta.get("stream_epoch") != snapshot_epoch
+            or meta.get("stream_turn") != snapshot_turn
+        ):
             continue
         seq = meta.get("stream_seq")
         if isinstance(seq, int) and not isinstance(seq, bool):
@@ -917,11 +973,13 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
                 if not isinstance(meta, dict):
                     meta = {}
                     message["meta"] = meta
-                meta.update({
-                    "stream_epoch": snapshot_epoch,
-                    "stream_turn": snapshot_turn,
-                    "stream_seq": snapshot_seq,
-                })
+                meta.update(
+                    {
+                        "stream_epoch": snapshot_epoch,
+                        "stream_turn": snapshot_turn,
+                        "stream_seq": snapshot_seq,
+                    }
+                )
                 break
     stream_cursor = {
         "stream_epoch": snapshot_epoch,
@@ -932,12 +990,18 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
     if snapshot_running or snapshot_outcome not in {"complete", "stopped", "error"}:
         snapshot_outcome = None
         latest_user = max(
-            (index for index, message in enumerate(messages) if message.get("role") == "user"),
+            (
+                index
+                for index, message in enumerate(messages)
+                if message.get("role") == "user"
+            ),
             default=-1,
         )
         for message in reversed(messages[latest_user + 1 :]):
             meta = message.get("meta")
-            candidate = meta.get("last_turn_outcome") if isinstance(meta, dict) else None
+            candidate = (
+                meta.get("last_turn_outcome") if isinstance(meta, dict) else None
+            )
             if candidate in {"complete", "stopped", "error"}:
                 snapshot_outcome = candidate
                 break
@@ -947,8 +1011,13 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
                     stop_value = json.loads(cls_value)
                 except (TypeError, ValueError):
                     continue
-                if isinstance(stop_value, dict) and stop_value.get("kind") == "stop_event":
-                    if stop_value.get("state") == "stopped" or stop_value.get("outcome") in {"soft", "hard"}:
+                if (
+                    isinstance(stop_value, dict)
+                    and stop_value.get("kind") == "stop_event"
+                ):
+                    if stop_value.get("state") == "stopped" or stop_value.get(
+                        "outcome"
+                    ) in {"soft", "hard"}:
                         snapshot_outcome = "stopped"
                         break
 
@@ -1041,15 +1110,19 @@ async def api_chat_session_detail(request: web.Request) -> web.Response:
     )
 
 
-async def _accepted_chat_action(request: web.Request, payload: dict[str, Any]) -> web.Response:
+async def _accepted_chat_action(
+    request: web.Request, payload: dict[str, Any]
+) -> web.Response:
     detail = await api_chat_session_detail(request)
     if detail.status >= 400:
         return detail
     try:
-        snapshot = json.loads(detail.body or b"{}")
+        snapshot = json.loads(detail.text or "{}")
     except (TypeError, ValueError):
         logger.error("Chat action detail snapshot was not valid JSON")
-        return web.json_response({"error": "Could not read the accepted chat state"}, status=500)
+        return web.json_response(
+            {"error": "Could not read the accepted chat state"}, status=500
+        )
     return web.json_response({**payload, "snapshot": snapshot})
 
 
@@ -1236,7 +1309,11 @@ async def api_chat_session_stop(request: web.Request) -> web.Response:
         stopped = outcome in {"soft", "hard"}
         return await _accepted_chat_action(
             request,
-            {"ok": True, "stopped": stopped, "last_turn_outcome": "stopped" if stopped else None},
+            {
+                "ok": True,
+                "stopped": stopped,
+                "last_turn_outcome": "stopped" if stopped else None,
+            },
         )
 
     if session._stop_state != "idle" or not session.running:
@@ -1301,7 +1378,11 @@ async def api_chat_session_stop(request: web.Request) -> web.Response:
     stopped = outcome in {"soft", "hard"}
     return await _accepted_chat_action(
         request,
-        {"ok": True, "stopped": stopped, "last_turn_outcome": "stopped" if stopped else None},
+        {
+            "ok": True,
+            "stopped": stopped,
+            "last_turn_outcome": "stopped" if stopped else None,
+        },
     )
 
 
@@ -1330,7 +1411,10 @@ async def api_chat_image_input(request: web.Request) -> web.Response:
     session = state._sessions.get(session_name) if session_name else None
     if session_name and session is None:
         return web.json_response({"error": "not found"}, status=404)
-    model_ref = request.query.get("model", "").strip() or (getattr(session, "model", "") or "").strip()
+    model_ref = (
+        request.query.get("model", "").strip()
+        or (getattr(session, "model", "") or "").strip()
+    )
     if not model_ref or model_ref.lower() == "auto":
         refs = active_model_refs("chat")
         model_ref = refs[0] if refs else ""
@@ -1345,8 +1429,12 @@ async def api_chat_image_input(request: web.Request) -> web.Response:
             reason = "The selected chat model cannot receive image pixels; extracted image text will be used."
         else:
             mode = "unread"
-            reason = reader.reason or "No image model is set up. The image will not be read."
-    return web.json_response({"name": display_name(path), "mode": mode, "reason": reason})
+            reason = (
+                reader.reason or "No image model is set up. The image will not be read."
+            )
+    return web.json_response(
+        {"name": display_name(path), "mode": mode, "reason": reason}
+    )
 
 
 async def api_chat_screen_state(request: web.Request) -> web.Response:
@@ -1591,16 +1679,26 @@ async def api_chat_screen_frame_pin(request: web.Request) -> web.Response:
     _upload_dir().mkdir(parents=True, exist_ok=True)
     safe = re.sub(r"[^\w.\-]", "_", filename)
     dest = _upload_dir() / f"{_uuid.uuid4().hex}_{safe}"
-    from gideon.workspace.uploads.content_intake import approve_stream, IntakeRefused
+    from gideon.workspace.uploads.content_intake import IntakeRefused, approve_stream
+
     async def chunks():
         yield raw
+
     snapshot = None
     try:
-        snapshot = await approve_stream(chunks(), filename, frame.media_type, surface='screen_frame_pin')
+        snapshot = await approve_stream(
+            chunks(), filename, frame.media_type, surface="screen_frame_pin"
+        )
         await snapshot.persist(dest)
     except IntakeRefused as exc:
-        sel().log_api_access(caller='dashboard', operation='chat.screen_frame_pin',
-            outcome='denied', source='screen_share', resources=f'session={session.key}', error=exc.code)
+        sel().log_api_access(
+            caller="dashboard",
+            operation="chat.screen_frame_pin",
+            outcome="denied",
+            source="screen_share",
+            resources=f"session={session.key}",
+            error=exc.code,
+        )
         return exc.response()
     finally:
         if snapshot is not None:
@@ -2561,14 +2659,20 @@ async def api_chat_mode(request: web.Request) -> web.Response:
     if session_name is not None and session_name not in state._sessions:
         return web.json_response({"ok": False, "error": "unknown session"}, status=400)
 
-    from gideon.security.guardrails.ladder import approval_screening_verdict
     from gideon.security.approval_grants import stands
+    from gideon.security.guardrails.ladder import approval_screening_verdict
 
     screening = approval_screening_verdict(mode)
     mode_level = "hook_based" if mode == "trust_reads" else "auto"
-    if not screening.allowed or (mode != "normal" and not stands(
-        mode, caller=principal.label, subject=f"session={session_name or 'all'}", level=mode_level
-    )):
+    if not screening.allowed or (
+        mode != "normal"
+        and not stands(
+            mode,
+            caller=principal.label,
+            subject=f"session={session_name or 'all'}",
+            level=mode_level,
+        )
+    ):
         current = _session_approval_mode(
             state, state._sessions.get(session_name) if session_name else None
         )
@@ -2664,7 +2768,9 @@ async def api_chat_mode(request: web.Request) -> web.Response:
                         session, aid, "approved", by=principal
                     )
         for aid in list(state._approval_futures):
-            if not state._pending_approvals.get(aid, {}).get("protected_delete") and not state._pending_approvals.get(aid, {}).get("owner_only"):
+            if not state._pending_approvals.get(aid, {}).get(
+                "protected_delete"
+            ) and not state._pending_approvals.get(aid, {}).get("owner_only"):
                 state.resolve_approval(aid, True, by=principal)
     for session in state._sessions.values():
         policy = "auto" if session._trust or state.is_yolo_active() else ""
@@ -2827,19 +2933,26 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
     reported_decision = original_action
     request_id = str(body.get("request_id", "") or "")
     if not request_id:
-        pending = [(key, future) for key, future in session._approval_futures.items() if not future.done()]
+        pending = [
+            (key, future)
+            for key, future in session._approval_futures.items()
+            if not future.done()
+        ]
         if len(pending) == 1:
             request_id = pending[0][0]
         elif len(pending) > 1:
             return web.json_response(
-                {"error": "multiple approvals pending, specify request_id", "pending": [key for key, _ in pending]},
+                {
+                    "error": "multiple approvals pending, specify request_id",
+                    "pending": [key for key, _ in pending],
+                },
                 status=400,
             )
     fut = session._approval_futures.get(request_id) if request_id else None
     if not fut or fut.done():
         return web.json_response({"error": "no pending approval"}, status=404)
-    from gideon.security.approval_answer import of_request
     from gideon.security.approval_answer import check as check_answerer
+    from gideon.security.approval_answer import of_request
 
     principal = of_request(request)
     why = check_answerer(
@@ -2854,13 +2967,27 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
     revision = ""
     if original_action == "revised":
         revision = body.get("revision", "")
-        if not isinstance(revision, str) or not revision.strip() or len(revision) > 4000:
-            return web.json_response({"error": "revision must contain 1 to 4000 characters"}, status=400)
-        matching = next((message for message in reversed(session.messages)
-            if message.get("role") == "permission"
-            and _permission_request_id(message) == request_id), None)
+        if (
+            not isinstance(revision, str)
+            or not revision.strip()
+            or len(revision) > 4000
+        ):
+            return web.json_response(
+                {"error": "revision must contain 1 to 4000 characters"}, status=400
+            )
+        matching = next(
+            (
+                message
+                for message in reversed(session.messages)
+                if message.get("role") == "permission"
+                and _permission_request_id(message) == request_id
+            ),
+            None,
+        )
         if matching is None or not _permission_can_revise(matching):
-            return web.json_response({"error": "revision is unavailable for this approval"}, status=400)
+            return web.json_response(
+                {"error": "revision is unavailable for this approval"}, status=400
+            )
     screening = None
     requested_mode = {
         "trust": "trust",
@@ -2872,9 +2999,12 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
         from gideon.security.guardrails.ladder import approval_screening_verdict
 
         screening = approval_screening_verdict(requested_mode)
-    pending = state._pending_approvals.get(f"{session.key}:{request_id}", {})
-    if requested_mode and pending.get("protected_delete"):
-        return web.json_response({"error": "This protected deletion must be answered for this call only."}, status=403)
+    pending_entry = state._pending_approvals.get(f"{session.key}:{request_id}", {})
+    if requested_mode and pending_entry.get("protected_delete"):
+        return web.json_response(
+            {"error": "This protected deletion must be answered for this call only."},
+            status=403,
+        )
     grant_allowed = screening is None or screening.allowed
     if requested_mode:
         from gideon.security.approval_grants import stands
@@ -2926,10 +3056,28 @@ async def api_chat_session_approve(request: web.Request) -> web.Response:
         action = "approved"
     elif not grant_allowed:
         action = "approved"
-    resolved = action if action in ("approved", "approved_trust_reads") else "revised" if action == "revised" else "rejected"
-    response_value = "revision:" + json.dumps(revision.strip()) if resolved == "revised" else resolved
-    if not state.resolve_session_approval(session, request_id, response_value, by=principal):
-        return web.json_response({"error": {"code": "approval_owner_only", "message": "Only the owner can answer this approval."}}, status=403)
+    resolved = (
+        action
+        if action in ("approved", "approved_trust_reads")
+        else "revised" if action == "revised" else "rejected"
+    )
+    response_value = (
+        "revision:" + json.dumps(revision.strip())
+        if resolved == "revised"
+        else resolved
+    )
+    if not state.resolve_session_approval(
+        session, request_id, response_value, by=principal
+    ):
+        return web.json_response(
+            {
+                "error": {
+                    "code": "approval_owner_only",
+                    "message": "Only the owner can answer this approval.",
+                }
+            },
+            status=403,
+        )
     if request_id:
         _mark_permission_resolved(
             session.messages,

@@ -5,21 +5,25 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from pathlib import Path
+from typing import cast
 from urllib.parse import quote
 
 from aiohttp import web
 
 from gideon.core.config import config_dir
+from gideon.core.constants import DASHBOARD_SESSION_PREFIX, dashboard_session_key
 from gideon.core.http_request import read_json_body
+from gideon.integrations.browse.customer_control import (
+    ControlDenied,
+    CustomerBrowserControl,
+)
+from gideon.integrations.browse.customer_engine import BrowserUnavailable
 from gideon.integrations.browse.customer_sessions import (
     CustomerBrowserSessionStore,
     InvalidSessionTransition,
     SessionNotFound,
     StaleSessionVersion,
 )
-from gideon.integrations.browse.customer_control import CustomerBrowserControl, ControlDenied
-from gideon.integrations.browse.customer_engine import BrowserUnavailable
-from gideon.core.constants import DASHBOARD_SESSION_PREFIX, dashboard_session_key
 from gideon.interfaces.dashboard.chat_utils import candidate_history_keys
 
 KEY = web.AppKey("customer_browser_sessions", CustomerBrowserSessionStore)
@@ -29,11 +33,7 @@ _LOCAL_ACCOUNT = "local"
 
 def _owner(request: web.Request) -> str:
     owner = request.get("user")
-    if (
-        not isinstance(owner, str)
-        or not owner.strip()
-        or request.get("app")
-    ):
+    if not isinstance(owner, str) or not owner.strip() or request.get("app"):
         raise web.HTTPUnauthorized(text="Authenticated customer required")
     return owner
 
@@ -83,7 +83,9 @@ async def _body(request: web.Request) -> dict:
 
 def _reply(session, status: int = 200) -> web.Response:
     return web.json_response(
-        {"session": session.public()}, status=status, headers={"Cache-Control": "no-store"}
+        {"session": session.public()},
+        status=status,
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -91,7 +93,11 @@ async def create(request: web.Request) -> web.Response:
     owner = _owner(request)
     body = await _body(request)
     conversation_id = body.get("conversation_id")
-    if not isinstance(conversation_id, str) or not conversation_id or len(conversation_id) > 255:
+    if (
+        not isinstance(conversation_id, str)
+        or not conversation_id
+        or len(conversation_id) > 255
+    ):
         raise web.HTTPBadRequest(text="conversation_id is required")
     store = request.app[KEY]
     try:
@@ -111,20 +117,26 @@ async def create(request: web.Request) -> web.Response:
     except SessionNotFound:
         raise web.HTTPNotFound(text="Browser session not found") from None
     except (sqlite3.Error, OSError):
-        raise web.HTTPServiceUnavailable(text="Browser session store unavailable") from None
+        raise web.HTTPServiceUnavailable(
+            text="Browser session store unavailable"
+        ) from None
 
 
 async def get(request: web.Request) -> web.Response:
     owner = _owner(request)
     try:
         session = await request.app[CONTROL_KEY].state(
-            request.match_info["session_id"], _LOCAL_ACCOUNT, owner,
+            request.match_info["session_id"],
+            _LOCAL_ACCOUNT,
+            owner,
         )
         return _reply(session)
     except SessionNotFound:
         raise web.HTTPNotFound(text="Browser session not found") from None
     except sqlite3.Error:
-        raise web.HTTPServiceUnavailable(text="Browser session store unavailable") from None
+        raise web.HTTPServiceUnavailable(
+            text="Browser session store unavailable"
+        ) from None
 
 
 async def mutate(request: web.Request) -> web.Response:
@@ -134,14 +146,19 @@ async def mutate(request: web.Request) -> web.Response:
         action = request.match_info["action"]
         if action == "close":
             session = await request.app[CONTROL_KEY].close(
-                request.match_info["session_id"], _LOCAL_ACCOUNT, owner,
-                body.get("expected_version"),
+                request.match_info["session_id"],
+                _LOCAL_ACCOUNT,
+                owner,
+                cast(int, body.get("expected_version")),
             )
         else:
             session = await asyncio.to_thread(
                 request.app[KEY].transition,
-                request.match_info["session_id"], _LOCAL_ACCOUNT, owner,
-                expected_version=body.get("expected_version"), action=action,
+                request.match_info["session_id"],
+                _LOCAL_ACCOUNT,
+                owner,
+                expected_version=cast(int, body.get("expected_version")),
+                action=action,
             )
         return _reply(session)
     except SessionNotFound:
@@ -153,7 +170,9 @@ async def mutate(request: web.Request) -> web.Response:
     except ValueError:
         raise web.HTTPBadRequest(text="Invalid expected_version") from None
     except sqlite3.Error:
-        raise web.HTTPServiceUnavailable(text="Browser session store unavailable") from None
+        raise web.HTTPServiceUnavailable(
+            text="Browser session store unavailable"
+        ) from None
 
 
 async def start(request: web.Request) -> web.Response:
@@ -161,8 +180,10 @@ async def start(request: web.Request) -> web.Response:
     body = await _body(request)
     try:
         session = await request.app[CONTROL_KEY].start(
-            request.match_info["session_id"], _LOCAL_ACCOUNT, owner,
-            body.get("expected_version"),
+            request.match_info["session_id"],
+            _LOCAL_ACCOUNT,
+            owner,
+            cast(int, body.get("expected_version")),
         )
         return _reply(session)
     except SessionNotFound:
@@ -174,22 +195,31 @@ async def start(request: web.Request) -> web.Response:
     except BrowserUnavailable:
         raise web.HTTPServiceUnavailable(text="Browser engine unavailable") from None
     except (sqlite3.Error, OSError):
-        raise web.HTTPServiceUnavailable(text="Browser session store unavailable") from None
+        raise web.HTTPServiceUnavailable(
+            text="Browser session store unavailable"
+        ) from None
 
 
 async def preview(request: web.Request) -> web.Response:
     owner = _owner(request)
     try:
         session, (image, url, title, stamp) = await request.app[CONTROL_KEY].preview(
-            request.match_info["session_id"], _LOCAL_ACCOUNT, owner,
+            request.match_info["session_id"],
+            _LOCAL_ACCOUNT,
+            owner,
         )
-        return web.Response(body=image, content_type="image/png", headers={
-            "Cache-Control": "no-store", "X-Browser-Version": str(session.version),
-            "X-Browser-Control": session.control_holder,
-            "X-Browser-Timestamp": str(stamp),
-            "X-Browser-Url": quote(url, safe=""),
-            "X-Browser-Title": quote(title, safe=""),
-        })
+        return web.Response(
+            body=image,
+            content_type="image/png",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Browser-Version": str(session.version),
+                "X-Browser-Control": session.control_holder,
+                "X-Browser-Timestamp": str(stamp),
+                "X-Browser-Url": quote(url, safe=""),
+                "X-Browser-Title": quote(title, safe=""),
+            },
+        )
     except SessionNotFound:
         raise web.HTTPNotFound(text="Browser session not found") from None
     except BrowserUnavailable:
@@ -202,8 +232,11 @@ async def control(request: web.Request) -> web.Response:
     action = request.match_info["action"]
     try:
         session = await request.app[CONTROL_KEY].change_holder(
-            request.match_info["session_id"], _LOCAL_ACCOUNT, owner,
-            body.get("expected_version"), action,
+            request.match_info["session_id"],
+            _LOCAL_ACCOUNT,
+            owner,
+            cast(int, body.get("expected_version")),
+            action,
         )
         return _reply(session)
     except SessionNotFound:
@@ -226,14 +259,25 @@ async def drive(request: web.Request) -> web.Response:
             url = body.get("url")
             if not isinstance(url, str) or len(url) > 4096:
                 raise ValueError
-            session = await controller.navigate(session_id, _LOCAL_ACCOUNT, owner,
-                                                body.get("expected_version"), url)
+            session = await controller.navigate(
+                session_id,
+                _LOCAL_ACCOUNT,
+                owner,
+                cast(int, body.get("expected_version")),
+                url,
+            )
         else:
             command, value = body.get("command"), body.get("value")
             if not isinstance(command, str) or not isinstance(value, str):
                 raise ValueError
-            session = await controller.input(session_id, _LOCAL_ACCOUNT, owner,
-                                             body.get("expected_version"), command, value)
+            session = await controller.input(
+                session_id,
+                _LOCAL_ACCOUNT,
+                owner,
+                cast(int, body.get("expected_version")),
+                command,
+                value,
+            )
         return _reply(session)
     except SessionNotFound:
         raise web.HTTPNotFound(text="Browser session not found") from None
@@ -245,22 +289,30 @@ async def drive(request: web.Request) -> web.Response:
         raise web.HTTPBadRequest(text="Invalid browser input") from None
 
 
-def register_browser_session_routes(
-    app: web.Application, *, store_path=None
-) -> None:
+def register_browser_session_routes(app: web.Application, *, store_path=None) -> None:
     app[KEY] = CustomerBrowserSessionStore(
         store_path or config_dir() / "browser/customer_sessions.sqlite3"
     )
     app[CONTROL_KEY] = CustomerBrowserControl(
-        app[KEY], (Path(store_path).parent if store_path else config_dir() / "browser") / "profiles"
+        app[KEY],
+        (Path(store_path).parent if store_path else config_dir() / "browser")
+        / "profiles",
     )
+
     async def cleanup(_app: web.Application) -> None:
         await _app[CONTROL_KEY].shutdown()
+
     app.on_cleanup.append(cleanup)
     app.router.add_post("/api/browser/sessions", create)
     app.router.add_get("/api/browser/sessions/{session_id}", get)
-    app.router.add_post("/api/browser/sessions/{session_id}/{action:close|reopen}", mutate)
+    app.router.add_post(
+        "/api/browser/sessions/{session_id}/{action:close|reopen}", mutate
+    )
     app.router.add_post("/api/browser/sessions/{session_id}/start", start)
     app.router.add_get("/api/browser/sessions/{session_id}/preview", preview)
-    app.router.add_post("/api/browser/sessions/{session_id}/control/{action:takeover|handback}", control)
-    app.router.add_post("/api/browser/sessions/{session_id}/{action:navigate|input}", drive)
+    app.router.add_post(
+        "/api/browser/sessions/{session_id}/control/{action:takeover|handback}", control
+    )
+    app.router.add_post(
+        "/api/browser/sessions/{session_id}/{action:navigate|input}", drive
+    )

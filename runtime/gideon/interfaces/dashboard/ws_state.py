@@ -24,6 +24,8 @@ class WebSocketState:
     _ws_loop: asyncio.AbstractEventLoop | None
     _flush_task: asyncio.Task[None] | None
 
+    _ws_owner: set[web.WebSocketResponse]
+
     def _broadcast(self, note: dict[str, Any]) -> None:
         """Fan a dashboard state note out to the WebSocket clients.
 
@@ -150,7 +152,12 @@ class WebSocketState:
                 self._remove_ws(ws)
 
     def broadcast_ws(
-        self, msg_type: str, data: object, *, extra: dict[str, Any] | None = None, owner_only: bool = False
+        self,
+        msg_type: str,
+        data: object,
+        *,
+        extra: dict[str, Any] | None = None,
+        owner_only: bool = False,
     ) -> None:
         """Send a typed message to all WS clients (not SSE). THE one WS producer.
 
@@ -189,7 +196,8 @@ class WebSocketState:
             send_msg = msg
             if app and msg_type == "sessions" and isinstance(data, list):
                 scoped = [
-                    row for row in data
+                    row
+                    for row in data
                     if isinstance(row, dict)
                     and self._app_owns_session(app, str(row.get("key") or ""))
                 ]
@@ -216,7 +224,12 @@ class WebSocketState:
 
     def _app_may_see_payload(self, app: str, event_type: str, data: object) -> bool:
         """Keep app sockets on their own sessions and app-raised notifications."""
-        if event_type in {"notification", "notification_ack", "notification_unack", "notification_removed"}:
+        if event_type in {
+            "notification",
+            "notification_ack",
+            "notification_unack",
+            "notification_removed",
+        }:
             return isinstance(data, dict) and data.get("created_by_app") == app
         if isinstance(data, dict) and data.get("session"):
             return self._app_owns_session(app, str(data.get("session") or ""))
@@ -226,9 +239,13 @@ class WebSocketState:
         key = session_key.removeprefix("dashboard:").removeprefix("dashboard_")
         sessions = getattr(self, "_sessions", {})
         session = sessions.get(key) if isinstance(sessions, dict) else None
-        return bool(session is not None and getattr(session, "created_by_app", "") == app)
+        return bool(
+            session is not None and getattr(session, "created_by_app", "") == app
+        )
 
-    def register_ws(self, ws: web.WebSocketResponse, *, app: str = "", owner: bool = False) -> None:
+    def register_ws(
+        self, ws: web.WebSocketResponse, *, app: str = "", owner: bool = False
+    ) -> None:
         """Register a new WebSocket client.
 
         ``app`` scopes the connection to an installed app (sandbox P1): its events

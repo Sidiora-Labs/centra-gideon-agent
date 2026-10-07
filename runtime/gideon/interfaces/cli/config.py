@@ -76,6 +76,7 @@ def _config_cmd(args: argparse.Namespace) -> None:
                 print("❌ Config must be a JSON object", file=sys.stderr)
                 sys.exit(1)
             try:
+
                 def apply_file_update(existing: dict) -> None:
                     incoming = preserve_configuration_credentials(data, existing)
                     _validate_file_update(incoming, existing)
@@ -124,9 +125,10 @@ def _config_cmd(args: argparse.Namespace) -> None:
                     )
                     sys.exit(1)
             try:
+
                 def apply_keyed_update(document: dict) -> bool:
                     modeled = AppConfig.load().to_dict()
-                    if not _dict_set(modeled, key, parsed):
+                    if not _dict_set(modeled, str(key), parsed):
                         return False
                     document.update(_merge_config_values(document, modeled))
                     return True
@@ -152,9 +154,14 @@ def _config_cmd(args: argparse.Namespace) -> None:
             sys.exit(1)
         p = config_path()
         try:
+
             def remove_key(document: dict) -> str:
                 if _dict_get(document, key) is _MISSING:
-                    return "known_missing" if _dict_get(AppConfig().to_dict(), key) is not _MISSING else "unknown"
+                    return (
+                        "known_missing"
+                        if _dict_get(AppConfig().to_dict(), key) is not _MISSING
+                        else "unknown"
+                    )
                 owner = document
                 parts = key.split(".")
                 for part in parts[:-1]:

@@ -372,7 +372,7 @@ def _installed_agent_config() -> Path:
     from gideon.engine.agent import AGENTS_DIR  # noqa: F811
     from gideon.engine.agent import AGENT_FILENAME
 
-    return AGENTS_DIR / AGENT_FILENAME
+    return Path(AGENTS_DIR) / AGENT_FILENAME
 
 
 async def api_agent_config(request: web.Request) -> web.Response:
@@ -589,9 +589,18 @@ async def api_agent_detail(request: web.Request) -> web.Response:
                     async with _get_config_lock():
                         data = json.loads(f.read_text(encoding="utf-8"))
                         from gideon.engine.agents.defaults import is_reserved_agent
-                        if is_reserved_agent(name) and any(key != "model" for key in patch_staged):
-                            return json_error("forbidden", message="Only the model of a built-in agent may be changed", status=403)
-                        refusal = _grant_change_response(request, name, data, patch_staged, patch_body)
+
+                        if is_reserved_agent(name) and any(
+                            key != "model" for key in patch_staged
+                        ):
+                            return json_error(
+                                "forbidden",
+                                message="Only the model of a built-in agent may be changed",
+                                status=403,
+                            )
+                        refusal = _grant_change_response(
+                            request, name, data, patch_staged, patch_body
+                        )
                         if refusal is not None:
                             return refusal
                         for key in (
@@ -810,7 +819,9 @@ async def api_gideon_agents(request: web.Request) -> web.Response:
             name = session.agent or cfg.default_agent
             if not name:
                 continue
-            counts = live.setdefault(name, {"active_sessions": 0, "running_sessions": 0})
+            counts = live.setdefault(
+                name, {"active_sessions": 0, "running_sessions": 0}
+            )
             counts["active_sessions"] += 1
             counts["running_sessions"] += int(session.running)
     agents = [
@@ -860,7 +871,9 @@ def _agent_export_owner_only(request: web.Request) -> web.Response | None:
             {"error": "Only the console owner may export agents"}, status=403
         )
     if not request.get("user"):
-        return web.json_response({"error": "Owner authentication is required"}, status=401)
+        return web.json_response(
+            {"error": "Owner authentication is required"}, status=401
+        )
     return None
 
 
@@ -919,7 +932,9 @@ def _agent_export_destination(value: Any) -> tuple[Path, tuple[Any, ...]]:
     destination = Path(value).expanduser()
     resolved = destination.resolve()
     if resolved != home and home not in resolved.parents:
-        raise ExportPathRefused("Destination must remain inside the current user's home")
+        raise ExportPathRefused(
+            "Destination must remain inside the current user's home"
+        )
     try:
         stat = resolved.stat()
     except FileNotFoundError:
@@ -938,7 +953,10 @@ def _agent_export_prune_previews(now: float) -> None:
         if preview["expires"] <= now:
             _agent_export_previews.pop(token, None)
     while len(_agent_export_previews) >= _AGENT_EXPORT_PREVIEW_LIMIT:
-        oldest = min(_agent_export_previews, key=lambda token: _agent_export_previews[token]["created"])
+        oldest = min(
+            _agent_export_previews,
+            key=lambda token: _agent_export_previews[token]["created"],
+        )
         _agent_export_previews.pop(oldest, None)
 
 
@@ -949,9 +967,9 @@ async def api_agent_export_preview(request: web.Request) -> web.Response:
         return denied
     from gideon.extensions.packs.external_formats import (
         CLAUDE_CODE_AGENTS,
+        PROVENANCE_MARKER,
         ExportPathRefused,
         ExportRefused,
-        PROVENANCE_MARKER,
         _resolve_target,
         default_dest_dir,
         export_preview,
@@ -964,7 +982,7 @@ async def api_agent_export_preview(request: web.Request) -> web.Response:
     if not isinstance(body, dict):
         return web.json_response({"error": "JSON body must be an object"}, status=400)
     try:
-        _cfg, entities = _agent_export_entities(body.get("agents"))
+        _cfg, entities = _agent_export_entities(body.get("agents") or [])
         raw_dest = body.get("destination")
         if raw_dest is None:
             raw_dest = str(default_dest_dir(CLAUDE_CODE_AGENTS) or "")
@@ -997,7 +1015,9 @@ async def api_agent_export_preview(request: web.Request) -> web.Response:
                         status = "replace"
             if status == "foreign":
                 conflicts.append(rendered.relpath)
-            row = next(item for item in preview["files"] if item["path"] == rendered.relpath)
+            row = next(
+                item for item in preview["files"] if item["path"] == rendered.relpath
+            )
             row["status"] = status
         preview["destination"] = str(destination)
         preview["conflicts"] = conflicts
@@ -1033,24 +1053,30 @@ async def api_agent_export_write(request: web.Request) -> web.Response:
         return denied
     from gideon.extensions.packs.external_formats import (
         CLAUDE_CODE_AGENTS,
+        PROVENANCE_MARKER,
         ExportClobberRefused,
         ExportPathRefused,
-        PROVENANCE_MARKER,
         _resolve_target,
         export_entities,
     )
+
     try:
         body = await read_json_body(request)
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict) or not isinstance(body.get("preview_token"), str):
-        return web.json_response({"error": "A valid preview is required before export"}, status=400)
+        return web.json_response(
+            {"error": "A valid preview is required before export"}, status=400
+        )
     token = body["preview_token"]
     now = time.monotonic()
     _agent_export_prune_previews(now)
     preview = _agent_export_previews.pop(token, None)
     if preview is None or preview["owner"] != str(request.get("user", "dashboard")):
-        return web.json_response({"error": "Preview expired or is no longer available; preview again"}, status=409)
+        return web.json_response(
+            {"error": "Preview expired or is no longer available; preview again"},
+            status=409,
+        )
     try:
         _cfg, entities = _agent_export_entities(preview["agents"])
         files = CLAUDE_CODE_AGENTS.render(entities)
@@ -1060,19 +1086,35 @@ async def api_agent_export_write(request: web.Request) -> web.Response:
             or identity != preview["destination_identity"]
             or _agent_export_content_digest(files) != preview["content_digest"]
         ):
-            return web.json_response({"error": "Agent content or destination changed after preview; preview again"}, status=409)
+            return web.json_response(
+                {
+                    "error": "Agent content or destination changed after preview; preview again"
+                },
+                status=409,
+            )
         for rendered in files:
             target = _resolve_target(destination, rendered.relpath)
             expected = preview["destination_files"].get(rendered.relpath)
             if target.exists() != (expected is not None):
-                return web.json_response({"error": "Destination changed after preview; preview again"}, status=409)
+                return web.json_response(
+                    {"error": "Destination changed after preview; preview again"},
+                    status=409,
+                )
             if expected is not None:
                 try:
                     actual = hashlib.sha256(target.read_bytes()).hexdigest()
                 except OSError:
-                    return web.json_response({"error": "Destination changed after preview; preview again"}, status=409)
-                if actual != expected or PROVENANCE_MARKER not in target.read_text(encoding="utf-8", errors="replace"):
-                    return web.json_response({"error": "Destination changed after preview; preview again"}, status=409)
+                    return web.json_response(
+                        {"error": "Destination changed after preview; preview again"},
+                        status=409,
+                    )
+                if actual != expected or PROVENANCE_MARKER not in target.read_text(
+                    encoding="utf-8", errors="replace"
+                ):
+                    return web.json_response(
+                        {"error": "Destination changed after preview; preview again"},
+                        status=409,
+                    )
         result = export_entities(
             CLAUDE_CODE_AGENTS,
             entities,
@@ -1095,7 +1137,11 @@ async def api_agent_export_write(request: web.Request) -> web.Response:
             == hashlib.sha256(rendered.text.encode("utf-8")).hexdigest()
         ]
         return web.json_response(
-            {"ok": True, "files": [path.name for path in result.written], "unchanged": unchanged}
+            {
+                "ok": True,
+                "files": [path.name for path in result.written],
+                "unchanged": unchanged,
+            }
         )
     except (ValueError, ExportPathRefused, ExportClobberRefused) as exc:
         return web.json_response({"error": str(exc)}, status=409)
@@ -1122,8 +1168,8 @@ async def api_gideon_agents_sync(request: web.Request) -> web.Response:
 
 
 async def _do_agents_sync(request: web.Request) -> web.Response:
-    from gideon.engine.agents.marketplace import get_default_agent_registry
     from gideon.engine.agents.defaults import is_reserved_agent
+    from gideon.engine.agents.marketplace import get_default_agent_registry
 
     cfg = AppConfig.load()
     synced: list[str] = []
@@ -1138,7 +1184,10 @@ async def _do_agents_sync(request: web.Request) -> web.Response:
             continue
         seen.add(name)
         existing_name = _resolve_agent_name(name, cfg)
-        if existing_name and cfg.agents[existing_name].source not in ("local", "marketplace"):
+        if existing_name and cfg.agents[existing_name].source not in (
+            "local",
+            "marketplace",
+        ):
             continue
         try:
             staged = _staged_agent_fields(body)
@@ -1148,7 +1197,9 @@ async def _do_agents_sync(request: web.Request) -> web.Response:
         staged["source"] = "marketplace"
         profile = AgentProfile(**staged)
         if existing_name:
-            if dataclasses.asdict(cfg.agents[existing_name]) != dataclasses.asdict(profile):
+            if dataclasses.asdict(cfg.agents[existing_name]) != dataclasses.asdict(
+                profile
+            ):
                 cfg.agents[existing_name] = profile
                 updated.append(existing_name)
         elif not is_reserved_agent(name):
@@ -1161,12 +1212,16 @@ async def _do_agents_sync(request: web.Request) -> web.Response:
             for session in state._sessions.values()
             if session.lifecycle == "active" and (session.agent or cfg.default_agent)
         }
-        if state is not None else set()
+        if state is not None
+        else set()
     )
     removed = [
-        name for name, profile in cfg.agents.items()
+        name
+        for name, profile in cfg.agents.items()
         if profile.source in ("local", "marketplace")
-        and name not in seen and name not in active_names and not is_reserved_agent(name)
+        and name not in seen
+        and name not in active_names
+        and not is_reserved_agent(name)
     ]
     for name in removed:
         del cfg.agents[name]
@@ -1245,14 +1300,28 @@ def _grant_change_response(request, name, current, staged, body):
     from gideon.engine.agents import grant_changes
 
     if not grant_changes.widening(current, staged):
-        return web.json_response({"confirmation_required": False, "changes": []}) if body.get("grant_preview") is True else None
+        return (
+            web.json_response({"confirmation_required": False, "changes": []})
+            if body.get("grant_preview") is True
+            else None
+        )
     owner = request.get("user")
     if not isinstance(owner, str) or not owner or request.get("app"):
-        return json_error("forbidden", message="Only the authenticated owner may widen agent grants", status=403)
+        return json_error(
+            "forbidden",
+            message="Only the authenticated owner may widen agent grants",
+            status=403,
+        )
     if body.get("grant_preview") is True:
         return web.json_response(grant_changes.preview(owner, name, current, staged))
-    if not grant_changes.accept(body.get("grant_receipt"), owner, name, current, staged):
-        return json_error("grant_confirmation_required", message="Review and confirm the exact changed grants before saving", status=409)
+    if not grant_changes.accept(
+        body.get("grant_receipt"), owner, name, current, staged
+    ):
+        return json_error(
+            "grant_confirmation_required",
+            message="Review and confirm the exact changed grants before saving",
+            status=409,
+        )
     return None
 
 

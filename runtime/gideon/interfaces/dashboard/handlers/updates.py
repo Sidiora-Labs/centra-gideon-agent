@@ -22,8 +22,8 @@ from gideon.core.config.loader import AppConfig
 from gideon.core.http_request import read_json_body
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.operations import self_update
-from gideon.operations.frontend import build_frontend_async
 from gideon.operations._installer import checkout_install_argv
+from gideon.operations.frontend import build_frontend_async
 
 
 def config_path() -> Path:
@@ -181,13 +181,20 @@ async def _do_update_check() -> None:
             diff_base = local_sha
             if local_sha == remote_sha:
                 tags = await asyncio.create_subprocess_exec(
-                    "git", "tag", "--list", cwd=proj,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                    "git",
+                    "tag",
+                    "--list",
+                    cwd=proj,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
                 )
                 tags_out, _ = await run_with_timeout(tags, 10)
                 diff_base = next(
-                    (tag for tag in tags_out.decode(errors="replace").splitlines()
-                     if self_update.same_version(tag, _local_version)),
+                    (
+                        tag
+                        for tag in tags_out.decode(errors="replace").splitlines()
+                        if self_update.same_version(tag, _local_version)
+                    ),
                     local_sha,
                 )
             diff = await asyncio.create_subprocess_exec(
@@ -301,12 +308,16 @@ _update_operation = None
 
 def _start_update(work, state, project=""):
     global _update_operation
-    _update_operation = self_update.UpdateOperation(work, state.push_update_progress, project)
+    _update_operation = self_update.UpdateOperation(
+        work, state.push_update_progress, project
+    )
     task = _update_operation.task
+
     def release(completed):
         global _apply_in_flight
         if _update_operation.task is completed:
             _apply_in_flight = False
+
     task.add_done_callback(release)
     return task
 
@@ -402,6 +413,7 @@ async def _apply_pip_update(request: web.Request, state: ConsoleState) -> web.Re
                     f"Upgrade failed: {summary}" if summary else "Upgrade failed",
                 )
                 return
+            assert _update_operation is not None
             _update_operation.cancellable = False
             self_update.complete_update()
             state.push_update_progress("restarting", "Restarting server…")
@@ -525,13 +537,21 @@ async def _run_rollback(request: web.Request, state: ConsoleState) -> web.Respon
                     "rolling_back", "Restoring the previous source revision…"
                 )
                 reset = await self_update.launch_update_process(
-                    "git", "reset", "--hard", snapshot["ref"], cwd=proj,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    "git",
+                    "reset",
+                    "--hard",
+                    snapshot["ref"],
+                    cwd=proj,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
                     start_new_session=True,
                 )
                 _, reset_error = await run_with_timeout(reset, 10)
                 if reset.returncode:
-                    raise RuntimeError(reset_error.decode(errors="replace").strip() or "git rollback failed")
+                    raise RuntimeError(
+                        reset_error.decode(errors="replace").strip()
+                        or "git rollback failed"
+                    )
                 pkg_root = self_update.package_root(proj)
                 install = await self_update.launch_update_process(
                     *checkout_install_argv(pkg_root),
@@ -549,12 +569,14 @@ async def _run_rollback(request: web.Request, state: ConsoleState) -> web.Respon
                         (install_err or b"").decode(errors="replace")
                     )
                     raise RuntimeError(detail or "Rollback install failed")
+                assert _update_operation is not None
                 _update_operation.cancellable = False
                 state.push_update_progress("building", "Building frontend…")
                 await build_frontend_async(
                     pkg_root, push_progress=state.push_update_progress
                 )
 
+            assert _update_operation is not None
             _update_operation.cancellable = False
             self_update.complete_rollback()
             state.push_update_progress("restarting", "Rollback complete — restarting…")
@@ -792,6 +814,7 @@ async def api_update_apply(request: web.Request) -> web.Response:
                 state.push_update_progress("error", "pip install failed")
                 return
 
+            assert _update_operation is not None
             _update_operation.cancellable = False
             state.push_update_progress("building", "Building frontend…")
             await build_frontend_async(
@@ -802,6 +825,7 @@ async def api_update_apply(request: web.Request) -> web.Response:
             logger.info(
                 "Update complete — saving history and cleaning up before restart"
             )
+            assert _update_operation is not None
             _update_operation.cancellable = False
             self_update.complete_update()
             await _graceful_reexec(state, auth_mode=_live_auth_mode(request))
@@ -906,9 +930,14 @@ async def api_update_cancel(request: web.Request) -> web.Response:
         status = await operation.cancel()
     except Exception:
         logger.exception("Update cancellation cleanup failed")
-        return web.json_response({"error": "Could not confirm update cleanup; check logs"}, status=500)
+        return web.json_response(
+            {"error": "Could not confirm update cleanup; check logs"}, status=500
+        )
     if status == "too_late":
-        return web.json_response({"error": "Installation completed; cancellation is no longer available"}, status=409)
+        return web.json_response(
+            {"error": "Installation completed; cancellation is no longer available"},
+            status=409,
+        )
     return web.json_response({"ok": True, "status": status})
 
 

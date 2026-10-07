@@ -1,6 +1,7 @@
 """Captured-home intervention schedules and recorded adherence."""
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 from aiohttp import web
@@ -22,7 +23,7 @@ def register(app: web.Application, home: Path | None = None):
             plans = "/plans" in request.path
             if request.method in ("POST", "PUT"):
                 body = await read_json_body(request)
-                operation = (
+                operation: Callable[..., object] = (
                     store.create_plan
                     if not identity
                     else (

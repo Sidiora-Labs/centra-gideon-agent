@@ -10,7 +10,6 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from gideon.engine.home_gateway import open_loopback
 from pathlib import Path
 
 from gideon import __version__
@@ -24,6 +23,7 @@ from gideon.core.constants import DATA_WARNING
 from gideon.core.layout import package_path
 from gideon.engine import gateway_base
 from gideon.engine.gateway import run_gateway
+from gideon.engine.home_gateway import open_loopback
 from gideon.engine.session import ConversationDirectory
 from gideon.extensions.skills import ProcedureLibrary
 from gideon.interfaces.dashboard.origin import dashboard_origin, parse_dashboard_url
@@ -58,6 +58,7 @@ def config_path() -> Path:
 def resolve_client_port(cli_port: int | None) -> int:
     """Resolve only an explicitly declared or live home address."""
     from gideon.engine.gateway_base import resolve_port
+
     return cli_port if cli_port is not None else resolve_port()
 
 
@@ -70,6 +71,7 @@ def _token(args: argparse.Namespace) -> None:
 
     port = resolve_client_port(args.port)
     from gideon.engine.home_gateway import require_home_gateway
+
     require_home_gateway(port)
     secret_path = config_dir() / ".local_secret"
     try:
@@ -100,6 +102,7 @@ def _token(args: argparse.Namespace) -> None:
 def _logout(port: int) -> None:
     """Revoke all dashboard sessions by calling the gateway's /api/logout endpoint."""
     from gideon.engine.home_gateway import require_home_gateway
+
     require_home_gateway(port)
     secret_path = config_dir() / ".local_secret"
     try:
@@ -154,7 +157,11 @@ def _runs_the_gateway(command: str | tuple[str, ...]) -> bool:
         if len(argv) > 2 and Path(argv[1]).name == "gideon":
             return argv[2] in {"gateway", "start"}
         return False
-    return executable in {"gideon", "gideon-backend"} and len(argv) > 1 and argv[1] in {"gateway", "start"}
+    return (
+        executable in {"gideon", "gideon-backend"}
+        and len(argv) > 1
+        and argv[1] in {"gateway", "start"}
+    )
 
 
 def _is_gideon_process(pid: int) -> bool:
@@ -183,8 +190,10 @@ def _stop(port: int) -> None:
         raise SystemExit(1)
     facts = gateway_base.process_facts(recorded.pid)
     if (
-        facts is None or not _runs_the_gateway(facts.argv)
-        or not recorded.identity or facts.identity != recorded.identity
+        facts is None
+        or not _runs_the_gateway(facts.argv)
+        or not recorded.identity
+        or facts.identity != recorded.identity
     ):
         print(
             f"Cannot verify recorded pid {recorded.pid} as this home's Gideon gateway; it was not signalled.",
@@ -199,8 +208,15 @@ def _stop(port: int) -> None:
         if hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"):
             descriptor = os.pidfd_open(recorded.pid)
         confirmed = gateway_base.process_facts(recorded.pid)
-        if confirmed is None or confirmed.identity != facts.identity or confirmed.argv != facts.argv:
-            print("Gateway process identity changed; nothing was stopped.", file=sys.stderr)
+        if (
+            confirmed is None
+            or confirmed.identity != facts.identity
+            or confirmed.argv != facts.argv
+        ):
+            print(
+                "Gateway process identity changed; nothing was stopped.",
+                file=sys.stderr,
+            )
             raise SystemExit(1)
         if descriptor is not None:
             signal.pidfd_send_signal(descriptor, signal.SIGTERM)
@@ -209,25 +225,33 @@ def _stop(port: int) -> None:
     except ProcessLookupError:
         return
     except PermissionError:
-        print(f"No permission to stop the gateway (pid {recorded.pid}).", file=sys.stderr)
+        print(
+            f"No permission to stop the gateway (pid {recorded.pid}).", file=sys.stderr
+        )
         raise SystemExit(1) from None
     finally:
         if descriptor is not None:
             os.close(descriptor)
     for _ in range(150):
         remaining = gateway_base.process_facts(recorded.pid)
-        if (
-            (remaining is None and not gateway_base._pid_is_alive(recorded.pid))
-            or (remaining is not None and (remaining.state == "Z" or remaining.identity != facts.identity))
+        if (remaining is None and not gateway_base._pid_is_alive(recorded.pid)) or (
+            remaining is not None
+            and (remaining.state == "Z" or remaining.identity != facts.identity)
         ):
             sel().log_api_access(
-                caller="cli", operation="gateway_stop", outcome="allowed",
-                source="cli", resources=f"pid={recorded.pid} port={port}",
+                caller="cli",
+                operation="gateway_stop",
+                outcome="allowed",
+                source="cli",
+                resources=f"pid={recorded.pid} port={port}",
             )
             print(f"Stopped the gateway (pid {recorded.pid}, port {port}).")
             return
         time.sleep(0.1)
-    print("Gateway was sent SIGTERM but is still running after 15 seconds.", file=sys.stderr)
+    print(
+        "Gateway was sent SIGTERM but is still running after 15 seconds.",
+        file=sys.stderr,
+    )
     raise SystemExit(1)
 
 
@@ -272,13 +296,23 @@ def _restart(port: int) -> None:
         return
     recorded = gateway_base.BoundGateway.read(gateway_base._runtime_path())
     running = recorded is not None and gateway_base._pid_is_alive(recorded.pid)
-    if running:
+    if running and recorded is not None:
         if recorded.port != port or not _is_gideon_process(recorded.pid):
-            print("Cannot verify this home's gateway on the requested port; nothing was restarted.", file=sys.stderr)
+            print(
+                "Cannot verify this home's gateway on the requested port; nothing was restarted.",
+                file=sys.stderr,
+            )
             raise SystemExit(1)
         facts = gateway_base.process_facts(recorded.pid)
-        if facts is None or not recorded.identity or facts.identity != recorded.identity:
-            print("Cannot verify gateway process identity; nothing was restarted.", file=sys.stderr)
+        if (
+            facts is None
+            or not recorded.identity
+            or facts.identity != recorded.identity
+        ):
+            print(
+                "Cannot verify gateway process identity; nothing was restarted.",
+                file=sys.stderr,
+            )
             raise SystemExit(1)
     if running:
         _stop(port)
@@ -368,7 +402,9 @@ def _update_git(proj: str) -> None:
     if fetched.returncode != 0:
         from gideon.interfaces.cli.commands import CliRefusal
 
-        raise CliRefusal(f"git fetch origin {branch} failed: {(fetched.stderr or '').strip()}")
+        raise CliRefusal(
+            f"git fetch origin {branch} failed: {(fetched.stderr or '').strip()}"
+        )
 
     if self_update.git_is_up_to_date(git_dir, branch):
         print("\n✅ Already up to date!")
@@ -398,13 +434,25 @@ def _update_git(proj: str) -> None:
 
         pkg_root = self_update.package_root(git_dir)
         build_frontend_sync(Path(pkg_root))
-        _install(["-e", ".", "--quiet"], cwd=pkg_root, label="install checkout", checkout=True)
+        _install(
+            ["-e", ".", "--quiet"],
+            cwd=pkg_root,
+            label="install checkout",
+            checkout=True,
+        )
         self_update.complete_update()
     except (KeyboardInterrupt, Exception, SystemExit) as exc:
-        detail = ("Update stopped." if isinstance(exc, KeyboardInterrupt) else "Update failed.")
+        detail = (
+            "Update stopped."
+            if isinstance(exc, KeyboardInterrupt)
+            else "Update failed."
+        )
         detail += self_update.installation_delta(metadata)
         detail += self_update.restore_checkout(git_dir, head, original_branch)
-        self_update.transition_update("cancelled" if isinstance(exc, KeyboardInterrupt) else "failed", error=detail)
+        self_update.transition_update(
+            "cancelled" if isinstance(exc, KeyboardInterrupt) else "failed",
+            error=detail,
+        )
         print(detail, file=sys.stderr)
         raise
 
@@ -436,8 +484,15 @@ def _update_pip() -> None:
         _install(["-U", spec, "--quiet"], cwd="", label=f"install -U {spec}")
         self_update.complete_update()
     except (KeyboardInterrupt, Exception, SystemExit) as exc:
-        detail = ("Update stopped." if isinstance(exc, KeyboardInterrupt) else "Update failed.") + self_update.installation_delta(metadata)
-        self_update.transition_update("cancelled" if isinstance(exc, KeyboardInterrupt) else "failed", error=detail)
+        detail = (
+            "Update stopped."
+            if isinstance(exc, KeyboardInterrupt)
+            else "Update failed."
+        ) + self_update.installation_delta(metadata)
+        self_update.transition_update(
+            "cancelled" if isinstance(exc, KeyboardInterrupt) else "failed",
+            error=detail,
+        )
         print(detail, file=sys.stderr)
         raise
 
@@ -514,8 +569,8 @@ def _latest_release_version() -> str:
 
 
 def _require_update_installer() -> None:
-    from gideon.operations._installer import NoInstallerError, require_own_installer
     from gideon.interfaces.cli.commands import CliRefusal
+    from gideon.operations._installer import NoInstallerError, require_own_installer
 
     try:
         require_own_installer()
@@ -527,8 +582,8 @@ def _install(args: list[str], *, cwd: str, label: str, checkout: bool = False) -
     """Run the resolved installer with *args*, or exit 1 with a readable reason."""
     from gideon.operations._installer import (
         NoInstallerError,
-        install_argv,
         checkout_install_argv,
+        install_argv,
         installer_name,
     )
 
@@ -596,6 +651,7 @@ def _status(args: argparse.Namespace) -> None:
     """Query the running gateway for stats, or print offline message."""
     port = resolve_client_port(getattr(args, "port", None))
     from gideon.engine.home_gateway import require_home_gateway
+
     require_home_gateway(port)
     url = f"http://127.0.0.1:{port}/api/status"
     try:
@@ -663,6 +719,7 @@ async def _gateway(
 ) -> None:
     """Load config and start the gateway (dashboard + channel transports)."""
     from gideon.engine.gateway_base import claim_home
+
     claim_home()
     if safe_surfaces:
         from gideon.workspace.surface_layers import set_safe_surfaces

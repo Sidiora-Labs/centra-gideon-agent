@@ -7,6 +7,7 @@ import logging
 
 from aiohttp import web
 
+from gideon.cognition.onboarding_import.model import Plan, ScanResult
 from gideon.core.http_request import (
     RequestBodyTypeError,
     read_json_body,
@@ -34,10 +35,10 @@ def _redacted(exc: BaseException) -> str:
     return cleaned[:_MAX_MESSAGE]
 
 
-def _scan_with_ledger(activity) -> tuple[list, set[str]]:
+def _scan_with_ledger(activity) -> tuple[list[ScanResult], dict[str, Plan]]:
     """Answer from bounded transcript looks while a background pass completes them."""
-    from gideon.cognition.onboarding_import import scan_all
-    from gideon.cognition.onboarding_import import plans
+    from gideon.cognition.onboarding_import import plans, scan_all
+
     with activity.scanning():
         results = scan_all(look=True)
         known = plans(results)
@@ -75,13 +76,19 @@ async def api_onboarding_import_scan(request: web.Request) -> web.Response:
     for result in results:
         payload = result.to_dict()
         payload["detected"] = result.source in found
-        payload["reading"] = {"read": result.conversation_files - len(result.unread),
-                              "of": result.conversation_files}
+        payload["reading"] = {
+            "read": result.conversation_files - len(result.unread),
+            "of": result.conversation_files,
+        }
         for item in payload["items"]:
             plan = known[item["fingerprint"]]
-            item.update(state=plan.state.value, destination=plan.destination, detail=plan.detail,
-                        existing=plan.state.value == "existing",
-                        preselected=item["preselected"] and plan.state.value == "new")
+            item.update(
+                state=plan.state.value,
+                destination=plan.destination,
+                detail=plan.detail,
+                existing=plan.state.value == "existing",
+                preselected=item["preselected"] and plan.state.value == "new",
+            )
         sources.append(payload)
 
     activity_state = request.app[ACTIVITY].status()
@@ -103,7 +110,10 @@ def _fingerprints(body: dict) -> list[str]:
     entries = body["fingerprints"]
     if not isinstance(entries, list) or not entries or len(entries) > 100000:
         raise ValueError("Choose between 1 and 100000 item fingerprints")
-    if any(not isinstance(entry, str) or re.fullmatch(r"[0-9a-f]{16}", entry) is None for entry in entries):
+    if any(
+        not isinstance(entry, str) or re.fullmatch(r"[0-9a-f]{16}", entry) is None
+        for entry in entries
+    ):
         raise ValueError("Each fingerprint must be 16 lowercase hexadecimal characters")
     return list(dict.fromkeys(entries))
 
@@ -112,12 +122,20 @@ def _accepted(body: dict, fingerprints: list[str]) -> dict[str, str]:
     import re
 
     accepted = body.get("accepted", {})
-    if not isinstance(accepted, dict) or len(accepted) > 10000 or any(
-        not isinstance(key, str) or key not in fingerprints or
-        not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{16}", value) is None
-        for key, value in accepted.items()
+    if (
+        not isinstance(accepted, dict)
+        or len(accepted) > 10000
+        or any(
+            not isinstance(key, str)
+            or key not in fingerprints
+            or not isinstance(value, str)
+            or re.fullmatch(r"[0-9a-f]{16}", value) is None
+            for key, value in accepted.items()
+        )
     ):
-        raise ValueError("'accepted' must map a selected item fingerprint to its warning consent digest")
+        raise ValueError(
+            "'accepted' must map a selected item fingerprint to its warning consent digest"
+        )
     return accepted
 
 
@@ -135,9 +153,16 @@ async def api_onboarding_import_run(request: web.Request) -> web.Response:
         return json_error("invalid_request", message=str(exc), status=400)
     job, started = request.app[ACTIVITY].start_import(fingerprints, accepted)
     if not started:
-        return web.json_response({"error": {"code": "import_running",
-                                             "message": "An import is already running. Wait for it, or stop it first."},
-                                  "job": job.to_dict(include_report=False)}, status=409)
+        return web.json_response(
+            {
+                "error": {
+                    "code": "import_running",
+                    "message": "An import is already running. Wait for it, or stop it first.",
+                },
+                "job": job.to_dict(include_report=False),
+            },
+            status=409,
+        )
     return web.json_response({"job": job.to_dict(include_report=False)}, status=202)
 
 

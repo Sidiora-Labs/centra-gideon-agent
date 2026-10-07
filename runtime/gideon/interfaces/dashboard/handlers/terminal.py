@@ -5,14 +5,14 @@ import fcntl
 import json
 import logging
 import os
-import re
 import pty as _pty
+import re
 import struct
 import termios
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from aiohttp import web
 
@@ -53,6 +53,10 @@ def _sel():
     return _pkg.sel()
 
 
+class _SandboxHandle(Protocol):
+    def cleanup(self) -> None: ...
+
+
 @dataclass
 class _TerminalSession:
     """Server-side state for one PTY session."""
@@ -69,7 +73,7 @@ class _TerminalSession:
     cwd: str = ""
     shell: str = ""
     persistent: bool = False
-    sandbox_handle: object | None = None
+    sandbox_handle: _SandboxHandle | None = None
 
 
 def _session_tier(session_id: str) -> str | None:
@@ -252,11 +256,16 @@ async def api_terminal_ws(request: web.Request) -> web.WebSocketResponse | web.R
     if tier is None:
         if placeholder:
             registry.pop(session_id, None)
-        await ws.send_str(json.dumps({"type": "error", "message": _LEGACY_SESSION_REFUSAL}))
+        await ws.send_str(
+            json.dumps({"type": "error", "message": _LEGACY_SESSION_REFUSAL})
+        )
         await ws.close()
         return ws
     if tier != "none":
-        from gideon.integrations.sandbox_providers import SandboxUnavailableError, resolve_provider
+        from gideon.integrations.sandbox_providers import (
+            SandboxUnavailableError,
+            resolve_provider,
+        )
 
         try:
             resolve_provider(tier)
@@ -313,6 +322,7 @@ async def api_terminal_ws(request: web.Request) -> web.WebSocketResponse | web.R
                     SandboxSpec,
                     resolve_provider,
                 )
+
                 sandbox_handle = resolve_provider(tier).wrap(
                     SandboxSpec(workspace_dir=cwd, egress_tier="all", env={}), argv
                 )
@@ -561,7 +571,9 @@ async def api_terminal_create(request: web.Request) -> web.Response:
                 if isinstance(body.get("sandbox"), str):
                     requested_sandbox = body["sandbox"].strip()
                 elif "sandbox" in body:
-                    return web.json_response({"error": "Invalid sandbox tier"}, status=400)
+                    return web.json_response(
+                        {"error": "Invalid sandbox tier"}, status=400
+                    )
         except Exception:
             pass
     if requested_cwd:
@@ -606,7 +618,9 @@ async def api_terminal_create(request: web.Request) -> web.Response:
         return web.json_response(
             {"error": "Image requires a configured provider"}, status=400
         )
-    if requested_sandbox and not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", requested_sandbox):
+    if requested_sandbox and not re.fullmatch(
+        r"[a-z][a-z0-9_-]{0,31}", requested_sandbox
+    ):
         _pending_cwd.pop(session_id, None)
         _pending_provider_argv.pop(session_id, None)
         from gideon.workspace.capabilities.workspace.provider_terminal import cleanup
@@ -614,7 +628,10 @@ async def api_terminal_create(request: web.Request) -> web.Response:
         cleanup(session_id)
         return web.json_response({"error": "Invalid sandbox tier"}, status=400)
     requested_sandbox = requested_sandbox or "none"
-    from gideon.integrations.sandbox_providers import SandboxUnavailableError, resolve_provider
+    from gideon.integrations.sandbox_providers import (
+        SandboxUnavailableError,
+        resolve_provider,
+    )
 
     try:
         resolve_provider(requested_sandbox)
@@ -673,7 +690,9 @@ async def api_terminal_delete(request: web.Request) -> web.Response:
     session_id = request.match_info.get("session_id", "")
     session_kinds = dict(await _list_tmux_session_kinds())
     if session_kinds.get(_tmux_session_name(session_id)) == tmux_substrate.WORKER_KIND:
-        return web.Response(status=409, text="Durable worker sessions cannot be closed as terminals")
+        return web.Response(
+            status=409, text="Durable worker sessions cannot be closed as terminals"
+        )
     registry = _get_registry(request)
     sess = registry.pop(session_id, None)  # type: ignore[arg-type]
     pending = _pending_provider_argv.pop(session_id, None)

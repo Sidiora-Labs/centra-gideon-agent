@@ -196,11 +196,16 @@ async def api_proactive_digest(request: web.Request) -> web.Response:
             )
         view["schedule"] = state["schedule"]
         view["schedule_drift"] = state["drift"]
-        view["notice"] = _digest_notice(title=str(view.get("title") or ""), body=str(view.get("body") or ""))
+        view["notice"] = _digest_notice(
+            title=str(view.get("title") or ""), body=str(view.get("body") or "")
+        )
         notice = view["notice"]
         view["quiet_hours"] = {
-            "known": notice["known"], "mute_all": notice.get("mute_all", False),
-            "enabled": False, "start": "", "end": "",
+            "known": notice["known"],
+            "mute_all": notice.get("mute_all", False),
+            "enabled": False,
+            "start": "",
+            "end": "",
             **notice.get("quiet_hours", {}),
         }
         from gideon.engine.proactive_decisions import recent
@@ -227,10 +232,13 @@ async def api_proactive_digest(request: web.Request) -> web.Response:
 def _digest_notice(*, title: str, body: str) -> dict[str, Any]:
     """Explain current settings with the same rule decision used by delivery."""
     try:
-        from gideon.extensions.providers.entity_routes import (
-            load_notifications_settings, notification_posture, quiet_window_moments, _load_entity_settings,
-        )
         from gideon.cognition.proactive.rank import DIGEST_NOTIFY_KIND
+        from gideon.extensions.providers.entity_routes import (
+            _load_entity_settings,
+            load_notifications_settings,
+            notification_posture,
+            quiet_window_moments,
+        )
         from gideon.workspace import notification_rules as rules
 
         if _load_entity_settings("notifications") is None:
@@ -241,16 +249,22 @@ def _digest_notice(*, title: str, body: str) -> dict[str, Any]:
 
         def mode(now: object | None) -> str:
             posture = notification_posture(DIGEST_NOTIFY_KIND, now=now)
-            return "dropped" if posture == "blocked" else rules.rule_outcome(DIGEST_NOTIFY_KIND, text, posture=posture).mode
+            return (
+                "dropped"
+                if posture == "blocked"
+                else rules.rule_outcome(DIGEST_NOTIFY_KIND, text, posture=posture).mode
+            )
 
         rule = rules.resolve_rule_for_legacy(DIGEST_NOTIFY_KIND)
         return {
             "known": True,
             "mute_all": bool(settings.get("mute_all")),
             "min_severity": str(settings.get("min_severity", "info")),
-            "quiet_hours": {"enabled": bool(settings.get("quiet_hours_enabled")),
-                            "start": str(settings.get("quiet_hours_start", "") or ""),
-                            "end": str(settings.get("quiet_hours_end", "") or "")},
+            "quiet_hours": {
+                "enabled": bool(settings.get("quiet_hours_enabled")),
+                "start": str(settings.get("quiet_hours_start", "") or ""),
+                "end": str(settings.get("quiet_hours_end", "") or ""),
+            },
             "rule": rule.mode,
             "inside": mode(moments[0] if moments else None),
             "outside": mode(moments[1] if moments else None),
@@ -480,8 +494,8 @@ async def _dispatch_approved(
     if result.executed:
         action = result.executed[0]
         return (
-            bool(action.ok),
-            action.error or f"{proposal.action_type} on {action.source_id}",
+            True,
+            f"{proposal.action_type} on {action.source_id}",
         )
     if result.deferred:
         deferred = result.deferred[0]
@@ -520,14 +534,16 @@ async def api_proactive_reply(request: web.Request) -> web.Response:
     interpretation), ``already`` (this ordinal was answered before, so nothing ran again),
     ``acted``, or an error.
     """
-    from gideon.security import approval_answer
+    from gideon.cognition.proactive import answer as triage_answer
     from gideon.interfaces.dashboard.handlers import _is_restricted_session
     from gideon.interfaces.dashboard.handlers.memory import _get_service
-    from gideon.cognition.proactive import answer as triage_answer
+    from gideon.security import approval_answer
 
     if _is_restricted_session(request.app["state"], request):
         return json_error(
-            "forbidden", message="Digest replies are not allowed in this session mode.", status=403
+            "forbidden",
+            message="Digest replies are not allowed in this session mode.",
+            status=403,
         )
     body = await _body(request)
     if body.get("commitment_key"):
@@ -538,6 +554,7 @@ async def api_proactive_reply(request: web.Request) -> web.Response:
         return json_error("invalid_request", message="run_id is required", status=400)
 
     from gideon.security.session_credentials import work_of_request
+
     proof = work_of_request(request)
     session_key = proof.session_key if proof is not None else ""
     state = request.app["state"]
@@ -571,9 +588,16 @@ async def api_proactive_reply(request: web.Request) -> web.Response:
         # failure of the request. `help_text` rather than `error` so the census's flat shape is not
         # minted for something that is not an error at all.
         return web.json_response(
-            {"ok": False, "outcome": "help", "help": done.help, "help_reason": done.help_reason}
+            {
+                "ok": False,
+                "outcome": "help",
+                "help": done.help,
+                "help_reason": done.help_reason,
+            }
         )
-    return web.json_response({"ok": True, "outcome": "acted", "results": list(done.results)})
+    return web.json_response(
+        {"ok": True, "outcome": "acted", "results": list(done.results)}
+    )
 
 
 async def _commitment_reply(request: web.Request, body: dict) -> web.Response:
@@ -583,21 +607,41 @@ async def _commitment_reply(request: web.Request, body: dict) -> web.Response:
     topic = str(body.get("commitment_key") or "").strip()
     decision = await asyncio.to_thread(proactive_decisions.get, topic)
     if decision is None:
-        return json_error("commitment_not_found", message="that commitment decision is no longer available", status=404)
+        return json_error(
+            "commitment_not_found",
+            message="that commitment decision is no longer available",
+            status=404,
+        )
     action = body.get("action")
     if action == "dismiss":
         updated = await asyncio.to_thread(proactive_decisions.dismiss, topic)
-        return web.json_response({"ok": True, "outcome": "dismissed", "decision": updated})
+        return web.json_response(
+            {"ok": True, "outcome": "dismissed", "decision": updated}
+        )
     if action != "approve_background":
-        return json_error("invalid_request", message="action must be dismiss or approve_background", status=400)
+        return json_error(
+            "invalid_request",
+            message="action must be dismiss or approve_background",
+            status=400,
+        )
     if proactive_decisions.suppressed(decision):
-        return json_error("commitment_suppressed", message="that topic is in its dismissal cooldown", status=409)
+        return json_error(
+            "commitment_suppressed",
+            message="that topic is in its dismissal cooldown",
+            status=409,
+        )
     if decision.get("run_id"):
-        return web.json_response({"ok": True, "outcome": "already", "run_id": decision["run_id"]})
+        return web.json_response(
+            {"ok": True, "outcome": "already", "run_id": decision["run_id"]}
+        )
     name = str(body.get("workflow_name") or "").strip()
     inputs = body.get("inputs") or {}
     if not name or not isinstance(inputs, dict):
-        return json_error("invalid_request", message="a saved workflow and input object are required", status=400)
+        return json_error(
+            "invalid_request",
+            message="a saved workflow and input object are required",
+            status=400,
+        )
     from gideon.automation.workflows import service as workflow_service
     from gideon.automation.workflows.handlers import _guard, _supervisor
     from gideon.automation.workflows.models import OriginKind
@@ -607,21 +651,43 @@ async def _commitment_reply(request: web.Request, body: dict) -> web.Response:
         return denied
     supervisor = _supervisor(request)
     if supervisor is None:
-        return json_error("engine_unavailable", message="workflow supervisor is unavailable", status=503)
+        return json_error(
+            "engine_unavailable",
+            message="workflow supervisor is unavailable",
+            status=503,
+        )
     result = await workflow_service.start_run(
-        name=name, inputs=inputs, supervisor=supervisor,
+        name=name,
+        inputs=inputs,
+        supervisor=supervisor,
         origin_kind=OriginKind.MANUAL,
         session_key=str(request.headers.get("X-Session-Key") or ""),
         idempotency_key=f"proactive:{topic}",
     )
     if not result.get("ok"):
-        return json_error("background_launch_failed", message=str(result.get("message") or "workflow did not start"), status=409)
-    updated = await asyncio.to_thread(proactive_decisions.approved_run, topic, result["run_id"])
-    _sel().log_api_access(
-        caller=request.headers.get("X-Session-Key", ""), operation="commitment_background_launch",
-        outcome="approved", source="dashboard", resources=f"run:{result['run_id']}",
+        return json_error(
+            "background_launch_failed",
+            message=str(result.get("message") or "workflow did not start"),
+            status=409,
+        )
+    updated = await asyncio.to_thread(
+        proactive_decisions.approved_run, topic, result["run_id"]
     )
-    return web.json_response({"ok": True, "outcome": "launched", "run_id": result["run_id"], "decision": updated})
+    _sel().log_api_access(
+        caller=request.headers.get("X-Session-Key", ""),
+        operation="commitment_background_launch",
+        outcome="approved",
+        source="dashboard",
+        resources=f"run:{result['run_id']}",
+    )
+    return web.json_response(
+        {
+            "ok": True,
+            "outcome": "launched",
+            "run_id": result["run_id"],
+            "decision": updated,
+        }
+    )
 
 
 def _verb(parsed: Any) -> str:

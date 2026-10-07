@@ -261,7 +261,7 @@ async def api_session_share(request: web.Request) -> web.Response:
         resources=f"slug={art.slug} messages={len(messages)}",
     )
     return web.json_response(
-        {"ok": True, "kind": art.kind, **session_share.share_info(art, key)},
+        {"ok": True, "kind": art.kind, **(session_share.share_info(art, key) or {})},
         status=201,
     )
 
@@ -273,10 +273,15 @@ async def api_session_shares(request: web.Request) -> web.Response:
     if provider is None:
         return web.json_response({"error": "artifacts are unavailable"}, status=503)
     name = request.match_info["session"]
-    key = resolve_history_key(state.conversation_log, name) if state.conversation_log else None
+    key = (
+        resolve_history_key(state.conversation_log, name)
+        if state.conversation_log
+        else None
+    )
     key = key or _history_key_for(name)
     shares = [
-        info for art in provider.list(tag=session_share.SHARE_TAG)
+        info
+        for art in provider.list(tag=session_share.SHARE_TAG)
         if (info := session_share.share_info(art, key)) is not None
     ]
     shares.sort(key=lambda item: item["created_at"], reverse=True)
@@ -290,7 +295,11 @@ async def api_session_share_revoke(request: web.Request) -> web.Response:
     if provider is None:
         return web.json_response({"error": "artifacts are unavailable"}, status=503)
     name = request.match_info["session"]
-    key = resolve_history_key(state.conversation_log, name) if state.conversation_log else None
+    key = (
+        resolve_history_key(state.conversation_log, name)
+        if state.conversation_log
+        else None
+    )
     key = key or _history_key_for(name)
     slug = request.match_info["slug"]
     art = provider.get(slug)
@@ -299,8 +308,11 @@ async def api_session_share_revoke(request: web.Request) -> web.Response:
     if not provider.delete(slug):
         return web.json_response({"error": "could not revoke snapshot"}, status=500)
     sel().log_api_access(
-        caller="dashboard", operation="chat.session_share_revoke", outcome="allowed",
-        source="dashboard", resources=f"slug={slug}",
+        caller="dashboard",
+        operation="chat.session_share_revoke",
+        outcome="allowed",
+        source="dashboard",
+        resources=f"slug={slug}",
     )
     return web.json_response({"ok": True, "slug": slug})
 
@@ -312,15 +324,22 @@ async def api_session_share_detail(request: web.Request) -> web.Response:
     if provider is None:
         return web.json_response({"error": "artifacts are unavailable"}, status=503)
     name = request.match_info["session"]
-    key = resolve_history_key(state.conversation_log, name) if state.conversation_log else None
+    key = (
+        resolve_history_key(state.conversation_log, name)
+        if state.conversation_log
+        else None
+    )
     key = key or _history_key_for(name)
     art = provider.get(request.match_info["slug"])
     info = session_share.share_info(art, key) if art else None
-    if info is None:
+    if info is None or art is None:
         return web.json_response({"error": "snapshot not found"}, status=404)
-    return web.json_response({
-        **info, "turns": session_share.snapshot_turns(art.content or ""),
-    })
+    return web.json_response(
+        {
+            **info,
+            "turns": session_share.snapshot_turns(art.content or ""),
+        }
+    )
 
 
 def register_routes(app: web.Application) -> None:
@@ -340,5 +359,9 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/chat/sessions/{session}/export", api_session_export)
     app.router.add_post("/api/chat/sessions/{session}/share", api_session_share)
     app.router.add_get("/api/chat/sessions/{session}/shares", api_session_shares)
-    app.router.add_get("/api/chat/sessions/{session}/shares/{slug}", api_session_share_detail)
-    app.router.add_delete("/api/chat/sessions/{session}/shares/{slug}", api_session_share_revoke)
+    app.router.add_get(
+        "/api/chat/sessions/{session}/shares/{slug}", api_session_share_detail
+    )
+    app.router.add_delete(
+        "/api/chat/sessions/{session}/shares/{slug}", api_session_share_revoke
+    )

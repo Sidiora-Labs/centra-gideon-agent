@@ -170,9 +170,7 @@ async def api_skills_list(request: web.Request) -> web.Response:
                 continue
             seen.add(identity)
             rep = verify_skill_integrity(entry)
-            integrity = (
-                rep.state
-            )
+            integrity = rep.state
             always, provenance = _skill_listing_metadata(skill_md)
             skills.append(
                 {
@@ -210,9 +208,7 @@ async def api_skills_list(request: web.Request) -> web.Response:
             for name, skill_md in iter_skill_files(adir):
                 entry = skill_md.parent
                 rep = verify_skill_integrity(entry)
-                integrity = (
-                    rep.state
-                )
+                integrity = rep.state
                 always, provenance = _skill_listing_metadata(skill_md)
                 skills.append(
                     {
@@ -239,7 +235,10 @@ async def api_skills_list(request: web.Request) -> web.Response:
         item["key"] = item["copy"]
         item["read_only"] = _skill_root_read_only(root)
         from gideon.extensions.skills.shipped import Offers
-        item["bundled_update"] = None if item["read_only"] else Offers(root)(item["name"])
+
+        item["bundled_update"] = (
+            None if item["read_only"] else Offers(root)(item["name"])
+        )
     return web.json_response(skills)
 
 
@@ -455,22 +454,31 @@ def _safe_skill_name(name: str) -> bool:
 
 
 def _skill_copy_token(root: Path, name: str, agent: str = "") -> str:
-    return hashlib.sha256(json.dumps([str(root.resolve()), name, agent], separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps([str(root.resolve()), name, agent], separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _skill_root_read_only(root: Path) -> bool:
     from gideon.extensions.skills.loader import _outside_skill_dirs
     from gideon.extensions.skills.native import _bundled_root
-    return root.resolve() in {p.resolve() for p in [*_outside_skill_dirs(), _bundled_root()]}
+
+    return root.resolve() in {
+        p.resolve() for p in [*_outside_skill_dirs(), _bundled_root()]
+    }
 
 
 def _selected_skill_root(name: str, copy: str = "") -> Path | None:
-    from gideon.engine.agent import _all_skill_paths
-    from gideon.extensions.skills.loader import agent_skills_dir
     from gideon.core.config.loader import AppConfig
+    from gideon.engine.agent import _all_skill_paths
     from gideon.engine.agents.defaults import DEFAULT_NATIVE_AGENT_NAME
+    from gideon.extensions.skills.loader import agent_skills_dir
+
     candidates = [(Path(base), "") for base in _all_skill_paths()]
-    candidates += [(agent_skills_dir(agent), agent) for agent in [DEFAULT_NATIVE_AGENT_NAME, *AppConfig.load().agents.keys()]]
+    candidates += [
+        (agent_skills_dir(agent), agent)
+        for agent in [DEFAULT_NATIVE_AGENT_NAME, *AppConfig.load().agents.keys()]
+    ]
     if not _safe_skill_name(name):
         return None
     for root, agent in candidates:
@@ -496,6 +504,7 @@ def _request_skill_root(request: web.Request, name: str) -> Path | None:
 
 async def api_skill_bundled_choice(request: web.Request) -> web.Response:
     from gideon.extensions.skills import shipped
+
     name = request.match_info["name"]
     root = _request_skill_root(request, name)
     if root is None:
@@ -503,16 +512,21 @@ async def api_skill_bundled_choice(request: web.Request) -> web.Response:
     if _skill_root_read_only(root):
         return web.json_response({"error": "This skill copy is read-only"}, status=403)
     body = await read_json_body(request)
-    digest = body.get("digest") if isinstance(body, dict) else None
+    digest = str(body.get("digest") or "") if isinstance(body, dict) else ""
     try:
         if request.match_info["choice"] == "update":
             shipped.use_shipped(root, name, digest)
         else:
             shipped.keep_own(name, digest, base=root)
     except (shipped.NotShipped, shipped.VersionChanged):
-        return web.json_response({"error": "The offered version changed. Refresh this skill."}, status=409)
+        return web.json_response(
+            {"error": "The offered version changed. Refresh this skill."}, status=409
+        )
     except shipped.NotInstalled:
-        return web.json_response({"error": "The update could not be installed; your copy was preserved"}, status=422)
+        return web.json_response(
+            {"error": "The update could not be installed; your copy was preserved"},
+            status=422,
+        )
     return web.json_response({"ok": True})
 
 
@@ -668,7 +682,9 @@ async def api_skills_delete(request: web.Request) -> web.Response:
         root = _request_skill_root(request, name)
         if root is not None:
             if _skill_root_read_only(root):
-                return web.json_response({"error": "This skill copy is read-only"}, status=403)
+                return web.json_response(
+                    {"error": "This skill copy is read-only"}, status=403
+                )
             skill_dir = root / name
             shutil.rmtree(skill_dir)
             removed = str(skill_dir)
@@ -736,21 +752,28 @@ async def api_skill_overlay_revert(request: web.Request) -> web.Response:
     if not name:
         return web.json_response({"error": "name is required"}, status=400)
 
+    from gideon.core.atomic_write import atomic_write
     from gideon.extensions.skills import overlays
     from gideon.extensions.skills.loader import hold_library, overlay_identity
-    from gideon.core.atomic_write import atomic_write
+
     with hold_library():
         root = _selected_skill_root(name, body.get("copy", ""))
         if root is None:
-            return web.json_response({"error": "Selected skill copy not found"}, status=404)
+            return web.json_response(
+                {"error": "Selected skill copy not found"}, status=404
+            )
         if _skill_root_read_only(root):
-            return web.json_response({"error": "This skill copy is read-only"}, status=403)
+            return web.json_response(
+                {"error": "This skill copy is read-only"}, status=403
+            )
         identity = overlay_identity(root, name)
         active = overlays.applied(identity)
         chosen = body.get("refinement", "")
         removed = [a for a in active if not chosen or a.id == chosen]
         if chosen and not removed:
-            return web.json_response({"error": "This refinement is no longer applied"}, status=409)
+            return web.json_response(
+                {"error": "This refinement is no longer applied"}, status=409
+            )
         path = root / name / "SKILL.md"
         content = path.read_text(encoding="utf-8")
         own = overlays.without_copies(content, [a.block for a in active])
@@ -758,7 +781,7 @@ async def api_skill_overlay_revert(request: web.Request) -> web.Response:
             atomic_write(path, own)
         remaining = [a.record for a in active if a not in removed]
         overlay_path = overlays.overlay_path(identity)
-        if remaining:
+        if remaining and overlay_path is not None:
             overlays._store(identity, overlay_path, remaining)
         elif overlay_path is not None:
             overlay_path.unlink(missing_ok=True)
@@ -870,8 +893,8 @@ async def api_skill_proposal_detail(request: web.Request) -> web.Response:
     payload = prop.to_dict()
     if prop.kind == "refine" and prop.refine_target:
         from gideon.extensions.skills import overlays
-
         from gideon.extensions.skills.loader import ProcedureLibrary, overlay_identity
+
         library = ProcedureLibrary(install_builtins=False)
         path = library.skill_file(prop.refine_target)
         payload["diff"] = refine.proposal_diff(prop)
@@ -879,7 +902,9 @@ async def api_skill_proposal_detail(request: web.Request) -> web.Response:
             root = path.parent
             for _ in prop.refine_target.split("/"):
                 root = root.parent
-            payload["version"] = overlays.next_version(overlay_identity(root, prop.refine_target))
+            payload["version"] = overlays.next_version(
+                overlay_identity(root, prop.refine_target)
+            )
         else:
             payload["version"] = 0
     return web.json_response(payload)

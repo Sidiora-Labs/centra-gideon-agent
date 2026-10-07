@@ -27,13 +27,18 @@ def owner_ended(entry: dict[str, Any], *, state: Any) -> str:
                 return "the workflow run that asked for it was cancelled"
 
         if session.startswith("loop-"):
-            from gideon.automation.loop import files, store
+            from gideon.automation.loop import files
+            from gideon.automation.loop import store as loop_store
             from gideon.automation.loop.loop import ENDED_STATUSES
 
-            loop_id = session.removeprefix("loop-plan-") if session.startswith("loop-plan-") else session.removeprefix("loop-")
+            loop_id = (
+                session.removeprefix("loop-plan-")
+                if session.startswith("loop-plan-")
+                else session.removeprefix("loop-")
+            )
             if not files.valid_loop_id(loop_id):
                 return UNVERIFIABLE
-            loop = store.get(loop_id)
+            loop = loop_store.get(loop_id)
             if loop is None:
                 return "the loop that asked for it was deleted"
             status = str(getattr(loop.status, "value", loop.status))
@@ -68,5 +73,7 @@ def owner_ended(entry: dict[str, Any], *, state: Any) -> str:
                 return "the chat turn that asked for it has ended"
         return ""
     except Exception:
-        state._log.warning("could not check the owner of approval %s", entry.get("id"), exc_info=True)
+        state._log.warning(
+            "could not check the owner of approval %s", entry.get("id"), exc_info=True
+        )
         return UNVERIFIABLE

@@ -31,19 +31,25 @@ class AttachmentExtractor:
 
     def start(self, path: str, mime: str | None = None) -> None:
         from gideon.interfaces.dashboard.attachment_images import is_image_attachment
+
         if not path or is_image_attachment(path):
             return
         self._begin(path, mime)
 
     def _begin(self, path: str, mime: str | None = None) -> None:
         from gideon.workspace.uploads.content_intake import source_stamp
+
         if not path:
             return
         try:
             stamp = source_stamp(path)
         except OSError:
             return
-        if self._fingerprints.get(path) == stamp and self._mimes.get(path) == mime and path in self._tasks:
+        if (
+            self._fingerprints.get(path) == stamp
+            and self._mimes.get(path) == mime
+            and path in self._tasks
+        ):
             return
         prior = self._tasks.pop(path, None)
         if prior is not None and not prior.done():
@@ -62,29 +68,38 @@ class AttachmentExtractor:
         except RuntimeError:
             return
         task = loop.create_task(self._run(path, mime, stamp))
-        task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+        task.add_done_callback(
+            lambda done: None if done.cancelled() else done.exception()
+        )
         self._tasks[path] = task
         self._fingerprints[path] = stamp
         self._mimes[path] = mime
 
     async def _run(self, path: str, mime: str | None, stamp: tuple[int, ...]) -> str:
         from gideon.cognition.knowledge.extract import extract_file_content
-        text = await extract_file_content(path, mime, expected_stamp=stamp)
-        return (text or '').replace(os.path.basename(path), display_name(path))[:_MAX_TEXT_CHARS]
 
-    async def get(self, path: str, mime: str | None = None, *, strict: bool = False) -> str:
+        text = await extract_file_content(path, mime, expected_stamp=stamp)
+        return (text or "").replace(os.path.basename(path), display_name(path))[
+            :_MAX_TEXT_CHARS
+        ]
+
+    async def get(
+        self, path: str, mime: str | None = None, *, strict: bool = False
+    ) -> str:
         from gideon.interfaces.dashboard.attachment_images import is_image_attachment
-        from gideon.workspace.uploads.content_intake import source_stamp, IntakeRefused
+        from gideon.workspace.uploads.content_intake import IntakeRefused, source_stamp
 
         image = is_image_attachment(path)
         try:
             # The caller's original read boundary remains in force even for cached text.
             from gideon.security.security import is_sensitive_path
+
             if is_sensitive_path(path):
-                raise PermissionError('Sensitive files cannot be extracted.')
+                raise PermissionError("Sensitive files cannot be extracted.")
             stamp = source_stamp(path)
             if image:
                 from gideon.extensions.providers.image_input import image_reader
+
                 reader = await image_reader()
                 if not reader.ref:
                     return f"Image: {display_name(path)} — {reader.reason or 'No image model is set up.'}"
@@ -95,25 +110,44 @@ class AttachmentExtractor:
             else:
                 text = await asyncio.shield(task)
             if source_stamp(path) != stamp:
-                raise IntakeRefused('upload_content_changed',
-                    'The file changed during extraction, so its text was withheld. Please attach it again.', 409)
+                raise IntakeRefused(
+                    "upload_content_changed",
+                    "The file changed during extraction, so its text was withheld. Please attach it again.",
+                    409,
+                )
             return text
         except asyncio.CancelledError:
-            if asyncio.current_task().cancelling():
+            current_task = asyncio.current_task()
+            if current_task is not None and current_task.cancelling():
                 raise
-            refused = IntakeRefused('upload_content_changed',
-                'The file changed during extraction, so its text was withheld. Please attach it again.', 409)
+            refused = IntakeRefused(
+                "upload_content_changed",
+                "The file changed during extraction, so its text was withheld. Please attach it again.",
+                409,
+            )
         except PermissionError:
-            refused = IntakeRefused('content_read_denied', 'This file cannot be read under the current file permissions.', 403)
+            refused = IntakeRefused(
+                "content_read_denied",
+                "This file cannot be read under the current file permissions.",
+                403,
+            )
         except IntakeRefused as error:
             refused = error
         except OSError:
-            refused = IntakeRefused('upload_content_unchecked', 'The file could not be read, so no text was supplied.', 503)
+            refused = IntakeRefused(
+                "upload_content_unchecked",
+                "The file could not be read, so no text was supplied.",
+                503,
+            )
         except Exception:
-            refused = IntakeRefused('upload_content_unchecked', 'Text extraction could not finish, so no text was supplied.', 503)
+            refused = IntakeRefused(
+                "upload_content_unchecked",
+                "Text extraction could not finish, so no text was supplied.",
+                503,
+            )
         if strict:
             raise refused
-        prefix = 'Image' if image else 'File'
+        prefix = "Image" if image else "File"
         return f"{prefix}: {display_name(path)} — {refused.message}"
 
 

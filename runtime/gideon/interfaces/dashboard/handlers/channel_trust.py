@@ -46,23 +46,26 @@ async def api_channel_trust(request: web.Request) -> web.Response:
         set(channel_trust.list_providers())
         | {name for name in list_transports() if _registered_inbound(name)}
     )
-    providers = [
-        channel_trust.provider_trust(p) for p in providers
-    ]
-    for row in providers:
+    trust_rows = [channel_trust.provider_trust(p) for p in providers]
+    for row in trust_rows:
         row["seen_channels"] = channel_trust.list_seen_channels(row["provider"])
         from gideon.integrations.channel_transports import get_transport
+
         transport = get_transport(row["provider"])
         try:
             capabilities = transport.capabilities() if transport else None
             row["groups"] = bool(getattr(capabilities, "groups", False))
-            row["speaks_as_owner"] = bool(getattr(capabilities, "speaks_as_owner", False))
-            row["pairing_hint"] = str(transport.sender_pairing_hint() or "") if transport else ""
+            row["speaks_as_owner"] = bool(
+                getattr(capabilities, "speaks_as_owner", False)
+            )
+            row["pairing_hint"] = (
+                str(transport.sender_pairing_hint() or "") if transport else ""
+            )
         except Exception:
             row.update(groups=True, speaks_as_owner=False, pairing_hint="")
     return web.json_response(
         {
-            "providers": providers,
+            "trust_rows": trust_rows,
             "dm_policies": list(channel_trust.DM_POLICIES),
             "group_policies": list(channel_trust.GROUP_POLICIES),
             "default_dm_policy": channel_trust.DEFAULT_DM_POLICY,
@@ -102,7 +105,9 @@ def _registered_inbound(provider: str) -> bool:
     from gideon.integrations.channel_transports import get_transport
 
     transport = get_transport(provider)
-    capability = getattr(transport, "capabilities", lambda: None)() if transport else None
+    capability = (
+        getattr(transport, "capabilities", lambda: None)() if transport else None
+    )
     return bool(transport and getattr(capability, "inbound", False))
 
 
@@ -148,7 +153,9 @@ async def api_channel_trust_track(request: web.Request) -> web.Response:
     except (ValueError, TypeError, AttributeError):
         return json_error("invalid_channel", status=400)
     channel_trust.track(provider, channel_id, name)
-    return web.json_response({"ok": True, "provider": provider, "channel_id": channel_id})
+    return web.json_response(
+        {"ok": True, "provider": provider, "channel_id": channel_id}
+    )
 
 
 async def api_channel_trust_untrack(request: web.Request) -> web.Response:
@@ -162,7 +169,9 @@ async def api_channel_trust_untrack(request: web.Request) -> web.Response:
     if not channel_trust.is_tracked_channel(provider, channel_id):
         return json_error("channel_trust_channel_unknown", status=404)
     channel_trust.untrack(provider, channel_id)
-    return web.json_response({"ok": True, "provider": provider, "channel_id": channel_id})
+    return web.json_response(
+        {"ok": True, "provider": provider, "channel_id": channel_id}
+    )
 
 
 async def api_channel_trust_pairing(request: web.Request) -> web.Response:
@@ -173,7 +182,9 @@ async def api_channel_trust_pairing(request: web.Request) -> web.Response:
     if not _registered_inbound(provider):
         return json_error("channel_provider_unavailable", status=404)
     code = channel_trust.create_pairing_code(provider)
-    response = web.json_response({"code": code, "expires_in": channel_trust.PAIRING_CODE_TTL_SECS})
+    response = web.json_response(
+        {"code": code, "expires_in": channel_trust.PAIRING_CODE_TTL_SECS}
+    )
     response.headers["Cache-Control"] = "no-store"
     return response
 

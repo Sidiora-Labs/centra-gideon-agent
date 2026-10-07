@@ -1,7 +1,5 @@
 """Core LLM runner — run_chat, segment flushing, prompt expansion."""
 
-from gideon.engine.turn_source import shared_source
-
 import asyncio
 import json
 import logging
@@ -9,7 +7,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from gideon.assurance.validation import ValidationError, validate_ask_user_question
 from gideon.cognition.context_engine import (
@@ -33,6 +31,7 @@ from gideon.engine.hooks import (
     TOOL_DENY,
     fire_tool_hooks,
 )
+from gideon.engine.turn_source import shared_source
 from gideon.extensions.skills.allocation import SkillLoadState
 from gideon.integrations.acp import permission_authority as acp_permission_authority
 from gideon.integrations.acp.errors import AcpError, AcpProcessDied
@@ -43,11 +42,12 @@ from gideon.integrations.acp.types import (
     STOP_REASON_END_TURN,
     is_cancelled_stop,
 )
+from gideon.integrations.channel_delivery import ChannelTaskStatus
 from gideon.integrations.llm.base import (
     EVENT_COMPLETE,
-    EVENT_SPENT,
     EVENT_MODEL_SUBSTITUTION,
     EVENT_PERMISSION_REQUEST,
+    EVENT_SPENT,
     EVENT_TEXT_CHUNK,
     EVENT_THINKING_CHUNK,
     EVENT_TOOL_CALL,
@@ -55,7 +55,6 @@ from gideon.integrations.llm.base import (
     EVENT_TOOL_RESULT,
 )
 from gideon.integrations.llm.events import AgentEvent, ContextUsage
-from gideon.integrations.channel_delivery import ChannelTaskStatus
 from gideon.integrations.llm_helpers import (
     PromptBusyExhaustedError,
     humanize_provider_error,
@@ -80,16 +79,16 @@ from gideon.interfaces.dashboard.chat_utils import (
     _apply_incognito_prefix,
     _broadcast_auto_tool,
     _broadcast_compaction_result,
-    compaction_result_notice,
     _dequeue_next_message,
     _extract_bash_command,
     _history_key_for,
-    linked_terminal_notice,
     _maybe_consolidate,
     _normalize_model,
     _project_context_preamble,
     _redact_for_display,
     _validate_tool_name,
+    compaction_result_notice,
+    linked_terminal_notice,
     persisted_history_key,
     stream_slash_command,
     strip_status_sentinel,
@@ -112,6 +111,7 @@ from gideon.interfaces.dashboard.state import (
     shell_command,
 )
 from gideon.operations.stats import Stats
+from gideon.security.guardrails.failure import answer_cut_off
 from gideon.security.guardrails.loop_breaker import (
     BLOCK_THRESHOLD,
     WARN_THRESHOLD,
@@ -128,7 +128,6 @@ from gideon.security.security import (
     redact_exfiltration_urls,
 )
 from gideon.security.sel import sel
-from gideon.security.guardrails.failure import answer_cut_off
 
 
 def config_dir() -> Path:
@@ -177,7 +176,9 @@ def is_empty_turn(
     return not benign
 
 
-def _channel_task_terminal_status(event: AgentEvent, *, agent_error: bool = False) -> ChannelTaskStatus:
+def _channel_task_terminal_status(
+    event: AgentEvent, *, agent_error: bool = False
+) -> ChannelTaskStatus:
     """Map the real tool result event to the status mirrored to a channel."""
     if event.kind != EVENT_TOOL_RESULT:
         raise ValueError("channel task outcomes require a tool result event")
@@ -205,10 +206,13 @@ def learning_decision_for_turn(session, user_message: str, tool_calls: int, cfg=
     explicitly makes the sharing visible at the call site instead of implicit in
     object state.
     """
+    from gideon.cognition.learning import Cadence, GateDecision, GateReason
     from gideon.security.capture_origin import current_capture
-    from gideon.cognition.learning import GateDecision, GateReason, Cadence
+
     if current_capture() is None:
-        return GateDecision(False, False, GateReason.UNVERIFIED_SOURCE, Cadence.PER_TURN)
+        return GateDecision(
+            False, False, GateReason.UNVERIFIED_SOURCE, Cadence.PER_TURN
+        )
     from gideon.cognition import after_turn_review as atr
     from gideon.cognition.learning import Cadence, LearningGate
     from gideon.core.config.loader import AppConfig
@@ -227,22 +231,34 @@ def learning_decision_for_turn(session, user_message: str, tool_calls: int, cfg=
 
 
 def _discard_turn_outcomes(provider):
-    drain = getattr(provider, 'drain_tool_outcomes', None)
+    drain = getattr(provider, "drain_tool_outcomes", None)
     if callable(drain):
         try:
             drain()
         except Exception:
-            logger.debug('turn outcome discard failed', exc_info=True)
+            logger.debug("turn outcome discard failed", exc_info=True)
 
 
-def _review_completed_turn(state, session, row, assistant_text, tool_calls, *, provider):
-    from gideon.security.capture_origin import owner_word_capture, capturing
-    capture = owner_word_capture(state.conversation_log, _history_key_for(session.key), row)
+def _review_completed_turn(
+    state, session, row, assistant_text, tool_calls, *, provider
+):
+    from gideon.security.capture_origin import capturing, owner_word_capture
+
+    capture = owner_word_capture(
+        state.conversation_log, _history_key_for(session.key), row
+    )
     with capturing(capture):
-        words = capture.own_text if capture is not None else ''
+        words = capture.own_text if capture is not None else ""
         decision = learning_decision_for_turn(session, words, tool_calls)
-        _maybe_after_turn_review(state, session, words, assistant_text, tool_calls,
-                                 provider=provider, decision=decision)
+        _maybe_after_turn_review(
+            state,
+            session,
+            words,
+            assistant_text,
+            tool_calls,
+            provider=provider,
+            decision=decision,
+        )
         # Outcome/assistant-derived reviews need their own verified contributor proof.
 
 
@@ -267,14 +283,22 @@ def _maybe_after_turn_review(
     """
     from gideon.cognition import after_turn_review as atr
     from gideon.core.config.loader import AppConfig
-
     from gideon.security.capture_origin import current_capture
+
     # owner_words proves authored input, never tool observations or assistant output.
     _discard_turn_outcomes(provider)
     capture = current_capture()
     if capture is None:
-        from gideon.cognition.learning import record_denial, GateDecision, GateReason, Cadence
-        record_denial(GateDecision(False, False, GateReason.UNVERIFIED_SOURCE, Cadence.PER_TURN))
+        from gideon.cognition.learning import (
+            Cadence,
+            GateDecision,
+            GateReason,
+            record_denial,
+        )
+
+        record_denial(
+            GateDecision(False, False, GateReason.UNVERIFIED_SOURCE, Cadence.PER_TURN)
+        )
         return
     user_message = capture.own_text
     cfg = AppConfig.load().learning
@@ -291,8 +315,18 @@ def _maybe_after_turn_review(
 
     svc = service_for(state.context_builder.memory)
     if not isinstance(svc.provider, HypermidMemoryProvider):
-        from gideon.cognition.learning import record_denial, GateDecision, GateReason, Cadence
-        record_denial(GateDecision(False, False, GateReason.NATIVE_AUTHORITY_UNAVAILABLE, Cadence.PER_TURN))
+        from gideon.cognition.learning import (
+            Cadence,
+            GateDecision,
+            GateReason,
+            record_denial,
+        )
+
+        record_denial(
+            GateDecision(
+                False, False, GateReason.NATIVE_AUTHORITY_UNAVAILABLE, Cadence.PER_TURN
+            )
+        )
         return
     facet_learned = atr.capture_preference_facet(svc, user_message)
     if facet_learned and getattr(cfg, "surface_chip", True):
@@ -316,7 +350,7 @@ def _maybe_after_turn_review(
     learned = atr.run_after_turn_review(
         service=svc,
         user_message=user_message,
-        assistant_text='',
+        assistant_text="",
         correction=correction,
         capture_facets=False,
     )
@@ -599,7 +633,14 @@ def _emit_question_card(
             opt["description"] = _redact_text(opt["description"])
     state.broadcast_ws(
         "question_card",
-        {"session": session_key, "tool_call_id": tool_call_id, "questions": questions, "answerable": False, "outcome": "unanswerable", "reason": "This runtime did not provide an owner-answer channel."},
+        {
+            "session": session_key,
+            "tool_call_id": tool_call_id,
+            "questions": questions,
+            "answerable": False,
+            "outcome": "unanswerable",
+            "reason": "This runtime did not provide an owner-answer channel.",
+        },
     )
 
 
@@ -773,7 +814,13 @@ def _permission_policy_denial(session: _ChatSession, event: Any) -> tuple[str, s
     )
     if reason:
         return reason, "owner_only"
-    reason = task_mode_denies(session, event.title, event.tool_kind, event.tool_input, declared=getattr(event, "risk_level", ""))
+    reason = task_mode_denies(
+        session,
+        event.title,
+        event.tool_kind,
+        event.tool_input,
+        declared=getattr(event, "risk_level", ""),
+    )
     return reason, f"task_mode:{getattr(session, '_task_mode', 'agent')}"
 
 
@@ -1163,11 +1210,13 @@ def _attachment_image_paths(session: _ChatSession) -> list[str]:
     )
     from gideon.interfaces.dashboard.attachment_images import is_image_attachment
 
-    return list(dict.fromkeys(
-        path
-        for path in files
-        if _os.path.realpath(path).startswith(roots) and is_image_attachment(path)
-    ))
+    return list(
+        dict.fromkeys(
+            path
+            for path in files
+            if _os.path.realpath(path).startswith(roots) and is_image_attachment(path)
+        )
+    )
 
 
 def _image_ref(session: _ChatSession, client: object | None = None) -> str:
@@ -1241,7 +1290,11 @@ async def _stage_attachment_images(
     unread: list[tuple[str, str]] = []
     for path in paths:
         meta = next(
-            (row.get("meta") for row in reversed(session.messages) if row.get("role") == "user"),
+            (
+                row.get("meta")
+                for row in reversed(session.messages)
+                if row.get("role") == "user"
+            ),
             None,
         )
         delivered = meta.get("image_delivery") if isinstance(meta, dict) else None
@@ -1291,17 +1344,28 @@ async def _stage_attachment_images(
 
             text = await get_extractor().get(path, _mt.guess_type(path)[0])
             if text and not text.startswith(f"Image: {name} —"):
-                reason = "The image was read as text because pixel delivery was unavailable."
+                reason = (
+                    "The image was read as text because pixel delivery was unavailable."
+                )
                 _set_image_delivery(session, path, "text", reason)
                 unread.append((name, f"### Attached image: {name}\n\n{text}"))
                 continue
-        if reader is not None and not reader.ref and reason in {
-            "The selected chat model cannot receive image pixels.",
-            "The chat runtime could not accept this image.",
-        }:
-            reason = reader.reason or "No image model is set up. The image was not read."
+        if (
+            reader is not None
+            and not reader.ref
+            and reason
+            in {
+                "The selected chat model cannot receive image pixels.",
+                "The chat runtime could not accept this image.",
+            }
+        ):
+            reason = (
+                reader.reason or "No image model is set up. The image was not read."
+            )
         _set_image_delivery(session, path, "unread", reason)
-        unread.append((name, f"### Attached image: {name}\n\nThis image was not read. {reason}"))
+        unread.append(
+            (name, f"### Attached image: {name}\n\nThis image was not read. {reason}")
+        )
     if not unread:
         return message
     notes = "\n\n".join(block for _, block in unread)
@@ -1364,18 +1428,29 @@ async def _inject_attachment_content(session: _ChatSession, message: str) -> str
                     _set_image_delivery(session, p, "text", reason)
                     blocks.append(f"### Attached image: {name}\n\n{text}")
                 else:
-                    reason = reader.reason or "No image model is set up. The image was not read."
+                    reason = (
+                        reader.reason
+                        or "No image model is set up. The image was not read."
+                    )
                     _set_image_delivery(session, p, "unread", reason)
-                    blocks.append(f"### Attached image: {name}\n\nThis image was not read. {reason}")
+                    blocks.append(
+                        f"### Attached image: {name}\n\nThis image was not read. {reason}"
+                    )
             else:
                 blocks.append(f"### Attached file: {name}\n\n{text}")
         else:
             if is_image_attachment(p):
-                reason = reader.reason or "The configured image reader returned no text."
+                reason = (
+                    reader.reason or "The configured image reader returned no text."
+                )
                 _set_image_delivery(session, p, "unread", reason)
-                blocks.append(f"### Attached image: {name}\n\nThis image was not read. {reason}")
+                blocks.append(
+                    f"### Attached image: {name}\n\nThis image was not read. {reason}"
+                )
             else:
-                blocks.append(f"### Attached file: {name}\n\n(No extractable text content.)")
+                blocks.append(
+                    f"### Attached file: {name}\n\n(No extractable text content.)"
+                )
     if not blocks:
         return message
     header = (
@@ -1884,19 +1959,31 @@ def _tool_result_payload(session_key: str, event: Any, output: str) -> dict[str,
     }
 
 
-def commit_consumed_steering(state: ConsoleState, session: _ChatSession, text, turn_id: str) -> None:
+def commit_consumed_steering(
+    state: ConsoleState, session: _ChatSession, text, turn_id: str
+) -> None:
     """Commit the canonical receipt only after native insertion or ACP acceptance."""
     meta = dict(text.meta)
     meta.update({"turn_id": turn_id, "turn_origin": "user", "steering": True})
     event_id = meta.get("ingress", {}).get("source_event_id", "")
-    if any(row.get("meta", {}).get("ingress", {}).get("source_event_id") == event_id
-           for row in session.messages if event_id):
+    if any(
+        row.get("meta", {}).get("ingress", {}).get("source_event_id") == event_id
+        for row in session.messages
+        if event_id
+    ):
         return
     session.append("user", str(text), "msg msg-u", meta=meta)
     session._pending_steers.pop(event_id, None)
     save_session_to_history(state, session, force=True)
-    state.broadcast_ws("chat_user_message", {"session": session.key, "content": str(text),
-                                             "ts": session.messages[-1]["ts"], "meta": meta})
+    state.broadcast_ws(
+        "chat_user_message",
+        {
+            "session": session.key,
+            "content": str(text),
+            "ts": session.messages[-1]["ts"],
+            "meta": meta,
+        },
+    )
 
 
 async def run_chat(
@@ -1925,12 +2012,22 @@ async def run_chat(
         _origin_index = in_flight_index(session, message)
         if _origin_index is not None:
             _origin_message = session.messages[_origin_index]
-    _origin_meta = _origin_message.setdefault("meta", {}) if _origin_message is not None else {}
-    _turn_id = str(_origin_meta.get("turn_id") or (_origin_message or {}).get("ts") or uuid.uuid4().hex)
+    _origin_meta = (
+        _origin_message.setdefault("meta", {}) if _origin_message is not None else {}
+    )
+    _turn_id = str(
+        _origin_meta.get("turn_id")
+        or (_origin_message or {}).get("ts")
+        or uuid.uuid4().hex
+    )
     if _origin_message is not None:
         tag_turn_message(_origin_message, _turn_id)
         _origin_meta["turn_origin"] = str(_origin_message.get("role") or "")
-    _retry_user_message = _origin_message if _origin_message and _origin_message.get("role") == "user" else None
+    _retry_user_message = (
+        _origin_message
+        if _origin_message and _origin_message.get("role") == "user"
+        else None
+    )
     _in_flight_text = message
     _prior_history_key = _history_key_for(session.key)
     _prior_transcript = (
@@ -2239,11 +2336,14 @@ async def run_chat(
     _turn_tool_call_count = 0
     _turn_had_calls = False
 
-    async def _update_mirrored_task(
-        call_id: str, status: ChannelTaskStatus
-    ) -> None:
+    async def _update_mirrored_task(call_id: str, status: ChannelTaskStatus) -> None:
         task = _mirror_tasks.get(call_id)
-        if task is None or not _mirror_stream_ts or not _mirror_delivery or not _mirror_chan:
+        if (
+            task is None
+            or not _mirror_stream_ts
+            or not _mirror_delivery
+            or not _mirror_chan
+        ):
             return
         task_id, title = task
         try:
@@ -2260,12 +2360,17 @@ async def run_chat(
             _mirror_tasks.pop(call_id, None)
 
     try:
-        from gideon.security.session_credentials import begin_turn, publish_pid
         from gideon.security.approval_answer import principal_from_record
-        _work_ingress = _origin_meta.get("replay_ingress") or _origin_meta.get("ingress") or {}
+        from gideon.security.session_credentials import begin_turn, publish_pid
+
+        _work_ingress = (
+            _origin_meta.get("replay_ingress") or _origin_meta.get("ingress") or {}
+        )
         _work_credential = begin_turn(
-            session_key, principal_from_record(_work_ingress.get("principal")),
-            turn_id=_turn_id, created_by_app=session.created_by_app,
+            session_key,
+            principal_from_record(_work_ingress.get("principal")),
+            turn_id=_turn_id,
+            created_by_app=session.created_by_app,
             memory_mode=session.memory_mode,
             ingress_event_id=str(_work_ingress.get("source_event_id") or ""),
             ingress_digest=str(_work_ingress.get("source_digest") or ""),
@@ -2315,6 +2420,7 @@ async def run_chat(
                 )
 
         from gideon.automation.loop import run_grants
+
         run_grants.refresh(state, session)
         _sess_acp_mode = getattr(session, "acp_mode", "") or ""
         if _sess_acp_mode:
@@ -2338,6 +2444,7 @@ async def run_chat(
         session.model = _normalize_model(session.model or "") or ""
         from gideon.security.execution_lineage import host_runtime_admission
         from gideon.security.session_credentials import bind_execution
+
         with host_runtime_admission(_work_credential):
             client, is_new, resumed = await state.sessions.get_or_create(
                 session_key,
@@ -2353,6 +2460,7 @@ async def run_chat(
                 project_id=getattr(session, "project_id", "") or "",
                 model_axis="loops" if getattr(session, "_app", "") == "loop" else "",
             )
+        assert _work_credential is not None
         bind_execution(_work_credential, client)
         _acquired = True
         try:
@@ -2768,6 +2876,7 @@ async def run_chat(
 
         def _pull_steering():
             from gideon.engine.steering import SteeringText
+
             pending = state.sessions.drain_steers(session_key)
             for text in pending:
                 if isinstance(text, SteeringText):
@@ -2778,11 +2887,7 @@ async def run_chat(
         _steerable = False
         if hasattr(client, "set_steer_source"):
             try:
-                _steerable = bool(
-                    client.set_steer_source(
-                        _pull_steering
-                    )
-                )
+                _steerable = bool(client.set_steer_source(_pull_steering))
             except Exception:
                 logger.debug("steer source wiring skipped", exc_info=True)
         state.sessions.set_steer_drains(session_key, _steerable)
@@ -2890,7 +2995,9 @@ async def run_chat(
             if event.kind in {"tool_call", "tool_result"}:
                 _turn_had_calls = True
             if event.kind == "carried_on":
-                session.append("system", event.text, "msg msg-system", meta={"turn_id": _turn_id})
+                session.append(
+                    "system", event.text, "msg msg-system", meta={"turn_id": _turn_id}
+                )
                 continue
             if time.time() - last_heartbeat > 5:
                 state.broadcast_ws(
@@ -2936,8 +3043,13 @@ async def run_chat(
                 session.append("chunk", safe_chunk, "chunk", meta=cursor)
                 state.broadcast_ws(
                     "chat_chunk",
-                    {"session": session.key, "content": safe_chunk, "turn_id": _turn_id, **cursor,
-                     "seq": cursor["stream_seq"]},
+                    {
+                        "session": session.key,
+                        "content": safe_chunk,
+                        "turn_id": _turn_id,
+                        **cursor,
+                        "seq": cursor["stream_seq"],
+                    },
                 )
             elif event.kind == EVENT_THINKING_CHUNK:
                 safe_text, exfil_warnings = redact_exfiltration_urls(event.text)
@@ -2952,7 +3064,13 @@ async def run_chat(
                 )
             elif event.kind == EVENT_TOOL_CALL:
                 if not in_tool_group and assistant_text:
-                    _flush_segment(state, session, assistant_text, broadcast=False, turn_id=_turn_id)
+                    _flush_segment(
+                        state,
+                        session,
+                        assistant_text,
+                        broadcast=False,
+                        turn_id=_turn_id,
+                    )
                     assistant_text = ""
                 in_tool_group = True
                 _title, _ = redact_exfiltration_urls(event.title)
@@ -3092,7 +3210,10 @@ async def run_chat(
                 _out = (event.tool_output or "")[:8000]
                 _out, _ = redact_exfiltration_urls(_out)
                 _out, _ = redact_credentials(_out)
-                _payload = {**_tool_result_payload(session.key, event, _out), "turn_id": _turn_id}
+                _payload = {
+                    **_tool_result_payload(session.key, event, _out),
+                    "turn_id": _turn_id,
+                }
                 _content_type = _payload["content_type"]
                 _raw_ref = _payload["raw_ref"]
                 _truncated = _payload["truncated"]
@@ -3103,7 +3224,9 @@ async def run_chat(
                     _tmeta.get("auto_denied") is True
                     and _tmeta.get("auto_denied_reason") == "unattended"
                 ):
-                    from gideon.interfaces.dashboard.auto_denials import record_auto_denial
+                    from gideon.interfaces.dashboard.auto_denials import (
+                        record_auto_denial,
+                    )
 
                     record_auto_denial(
                         state,
@@ -3124,18 +3247,18 @@ async def run_chat(
                         event, agent_error=bool(_agent_error)
                     )
                     await _update_mirrored_task(_mirror_call_id, _mirror_status)
-                if (
-                    unasked_outcome in {"denied", "auto_approved", "invoked"}
-                    and decided_by
-                    in {
-                        "deny_list",
-                        "task_mode",
-                        "tool_grant",
-                        "hook_deny",
-                        "session_policy",
-                        "no_approval_needed",
-                    }
-                ):
+                if unasked_outcome in {
+                    "denied",
+                    "auto_approved",
+                    "invoked",
+                } and decided_by in {
+                    "deny_list",
+                    "task_mode",
+                    "tool_grant",
+                    "hook_deny",
+                    "session_policy",
+                    "no_approval_needed",
+                }:
                     sel().log_tool_invocation(
                         session_key=session_key,
                         agent=_agent_label(session),
@@ -3157,14 +3280,20 @@ async def run_chat(
                             _meta = m.setdefault("meta", {})
                             _meta["done"] = True
                             _meta["output"] = _out
-                            from gideon.security.tool_capture import project_native_result
-                            _outcome_projection = project_native_result(
-                                _tmeta.get('native_outcome_origin'), call_id=event.tool_call_id,
-                                tool_name=event.title, result=event.tool_output or '', projected=_out,
+                            from gideon.security.tool_capture import (
+                                project_native_result,
                             )
-                            _meta.pop('native_outcome_origin', None)
+
+                            _outcome_projection = project_native_result(
+                                _tmeta.get("native_outcome_origin"),
+                                call_id=event.tool_call_id,
+                                tool_name=event.title,
+                                result=event.tool_output or "",
+                                projected=_out,
+                            )
+                            _meta.pop("native_outcome_origin", None)
                             if _outcome_projection is not None:
-                                _meta['native_outcome_origin'] = _outcome_projection
+                                _meta["native_outcome_origin"] = _outcome_projection
                             if _content_type:
                                 _meta["content_type"] = _content_type
                             if _raw_ref:
@@ -3310,10 +3439,13 @@ async def run_chat(
                     _unanswered = unanswered_for_chat(state, _note_id, session.key)
                     if _unanswered is not None and _unanswered[1] == _call_fingerprint:
                         _retry_note_id = _note_id
-                        _retry_meta.pop("_auto_denied_retry", None)
+                        if _retry_meta is not None:
+                            _retry_meta.pop("_auto_denied_retry", None)
                         session._dirty = True
                 if not _retry_note_id:
-                    from gideon.interfaces.dashboard.auto_denials import bind_current_reentry_call
+                    from gideon.interfaces.dashboard.auto_denials import (
+                        bind_current_reentry_call,
+                    )
 
                     _retry_origin = bind_current_reentry_call(
                         state, _call_fingerprint, session=session.key
@@ -3450,9 +3582,7 @@ async def run_chat(
                             event.tool_call_id or event.request_id or ""
                         )
                         if _mirror_call_id:
-                            await _update_mirrored_task(
-                                _mirror_call_id, "rejected"
-                            )
+                            await _update_mirrored_task(_mirror_call_id, "rejected")
                         session.append(
                             "tool", f"{event.title} (invalid: {e})", "msg msg-tool"
                         )
@@ -3487,9 +3617,7 @@ async def run_chat(
                             event.tool_call_id or event.request_id or ""
                         )
                         if _mirror_call_id:
-                            await _update_mirrored_task(
-                                _mirror_call_id, "failed"
-                            )
+                            await _update_mirrored_task(_mirror_call_id, "failed")
                         session.append(
                             "tool", f"{event.title} (hook error)", "msg msg-tool"
                         )
@@ -3510,9 +3638,7 @@ async def run_chat(
                             event.tool_call_id or event.request_id or ""
                         )
                         if _mirror_call_id:
-                            await _update_mirrored_task(
-                                _mirror_call_id, "rejected"
-                            )
+                            await _update_mirrored_task(_mirror_call_id, "rejected")
                         _blk = next(
                             (r for r in pre_hook_results if r.startswith("BLOCKED:")),
                             "",
@@ -3537,14 +3663,34 @@ async def run_chat(
                         continue
                     _pre_tool_hooks_fired = True
                 cmd = shell_command(event.title, event.tool_kind, event.tool_input)
-                from gideon.security.protected_folders import call_protected_delete, provider_working_folder, sentence as protected_sentence
-                protected = call_protected_delete(getattr(event, "risk_level", ""), event.title, event.tool_kind, event.tool_input, cwd=provider_working_folder(client))
+                from gideon.security.protected_folders import (
+                    call_protected_delete,
+                    provider_working_folder,
+                )
+                from gideon.security.protected_folders import (
+                    sentence as protected_sentence,
+                )
+
+                protected = call_protected_delete(
+                    getattr(event, "risk_level", ""),
+                    event.title,
+                    event.tool_kind,
+                    event.tool_input,
+                    cwd=provider_working_folder(client),
+                )
                 app_origin = bool(getattr(session, "created_by_app", ""))
                 yolo_active = state.is_yolo_active() and not app_origin
                 from gideon.security import approval_grants
-                from gideon.security.guardrails.policy import profile_for_session, tool_grant_denial
+                from gideon.security.guardrails.policy import (
+                    profile_for_session,
+                    tool_grant_denial,
+                )
 
-                agent_mode = "" if app_origin else approval_grants.agent_mode_now(session.agent or "")
+                agent_mode = (
+                    ""
+                    if app_origin
+                    else approval_grants.agent_mode_now(session.agent or "")
+                )
                 agent_auto = agent_mode == "auto" and approval_grants.stands(
                     approval_grants.AGENT_FLOOR, caller=session_key, subject=event.title
                 )
@@ -3554,44 +3700,71 @@ async def run_chat(
                     subject=event.title,
                     level="hook_based",
                 )
-                trust_reads = not app_origin and session._trust_reads and not session._agent_floor_seeded and approval_grants.stands(
-                    approval_grants.TRUST_READS,
-                    caller=session_key,
-                    subject=event.title,
-                    level="hook_based",
+                trust_reads = (
+                    not app_origin
+                    and session._trust_reads
+                    and not session._agent_floor_seeded
+                    and approval_grants.stands(
+                        approval_grants.TRUST_READS,
+                        caller=session_key,
+                        subject=event.title,
+                        level="hook_based",
+                    )
                 )
                 run_grants.refresh(state, session)
-                trusted = not app_origin and session._trust and not session._agent_floor_seeded and approval_grants.stands(
-                    approval_grants.TRUST, caller=session_key, subject=event.title
+                trusted = (
+                    not app_origin
+                    and session._trust
+                    and not session._agent_floor_seeded
+                    and approval_grants.stands(
+                        approval_grants.TRUST, caller=session_key, subject=event.title
+                    )
                 )
                 yolo_active = yolo_active and approval_grants.stands(
                     approval_grants.YOLO, caller=session_key, subject=event.title
                 )
                 if protected:
-                    agent_auto = agent_reads = trust_reads = trusted = yolo_active = False
-                posture = profile_for_session(
-                    session_key, unattended=_unattended_turn
-                )
+                    agent_auto = agent_reads = trust_reads = trusted = yolo_active = (
+                        False
+                    )
+                posture = profile_for_session(session_key, unattended=_unattended_turn)
                 tool_denial = tool_grant_denial(
-                    event.title, posture.tool_grants, posture.tool_allowlist, declared=getattr(event, "risk_level", ""), tool_kind=event.tool_kind, tool_input=event.tool_input
+                    event.title,
+                    posture.tool_grants,
+                    posture.tool_allowlist,
+                    declared=getattr(event, "risk_level", ""),
+                    tool_kind=event.tool_kind,
+                    tool_input=event.tool_input,
                 )
                 if tool_denial:
                     await client.reject_tool(event.request_id)
                     sel().log_tool_invocation(
-                        session_key=session_key, agent=_agent_label(session),
-                        source="dashboard", tool_name=event.title,
-                        tool_kind=event.tool_kind, outcome="denied",
-                        request_id=event.request_id, error=tool_denial,
+                        session_key=session_key,
+                        agent=_agent_label(session),
+                        source="dashboard",
+                        tool_name=event.title,
+                        tool_kind=event.tool_kind,
+                        outcome="denied",
+                        request_id=event.request_id,
+                        error=tool_denial,
                         metadata={"decided_by": "tool_grant"},
                     )
                     continue
                 from gideon.integrations.acp.mcp_servers import core_tool_work_asks
-                if not protected and core_tool_work_asks(event.title, event.tool_kind, event.tool_input):
+
+                if not protected and core_tool_work_asks(
+                    event.title, event.tool_kind, event.tool_input
+                ):
                     await client.approve_tool(event.request_id)
                     sel().log_tool_invocation(
-                        session_key=session_key, agent=_agent_label(session), source="dashboard",
-                        tool_name=event.title, tool_kind=event.tool_kind, outcome="auto_approved",
-                        request_id=event.request_id, metadata={"decided_by": "work_asks"},
+                        session_key=session_key,
+                        agent=_agent_label(session),
+                        source="dashboard",
+                        tool_name=event.title,
+                        tool_kind=event.tool_kind,
+                        outcome="auto_approved",
+                        request_id=event.request_id,
+                        metadata={"decided_by": "work_asks"},
                     )
                     continue
                 effective_risk = resolve_effective_risk(
@@ -3650,7 +3823,9 @@ async def run_chat(
                         metadata={
                             "reason": "trust_reads",
                             "risk": effective_risk,
-                            "decided_by": "trust_reads" if trust_reads else "agent_floor",
+                            "decided_by": (
+                                "trust_reads" if trust_reads else "agent_floor"
+                            ),
                         },
                     )
                     continue
@@ -3735,7 +3910,9 @@ async def run_chat(
                             "reason": "yolo" if yolo_active else "trust",
                             "risk": effective_risk,
                             "decided_by": (
-                                "yolo" if yolo_active else "agent_floor" if agent_auto else "trust"
+                                "yolo"
+                                if yolo_active
+                                else "agent_floor" if agent_auto else "trust"
                             ),
                         },
                     )
@@ -3757,7 +3934,7 @@ async def run_chat(
                             else None
                         ),
                     )
-                    perm_meta: dict[str, str] = {
+                    perm_meta: dict[str, object] = {
                         "request_id": str(event.request_id),
                         "tool_call_id": event.tool_call_id or "",
                         "resolved": "rejected",
@@ -3820,6 +3997,7 @@ async def run_chat(
                     )
                     continue
                 from gideon.security.approval_brief import compose_approval_brief
+
                 approval_brief = compose_approval_brief(event) or {}
                 perm_meta = {
                     "loop_run_offer": run_grants.offer(state, session),
@@ -3870,9 +4048,15 @@ async def run_chat(
                         "can_revise": perm_meta["can_revise"],
                         "_call_fingerprint": _call_fingerprint,
                         "_auto_denied_note_id": _retry_note_id,
-                        "_auto_denied_origin_kind": getattr(_retry_origin, "origin_kind", ""),
-                        "_auto_denied_origin_id": getattr(_retry_origin, "origin_id", ""),
-                        "_auto_denied_attempt_id": getattr(_retry_origin, "attempt_id", ""),
+                        "_auto_denied_origin_kind": getattr(
+                            _retry_origin, "origin_kind", ""
+                        ),
+                        "_auto_denied_origin_id": getattr(
+                            _retry_origin, "origin_id", ""
+                        ),
+                        "_auto_denied_attempt_id": getattr(
+                            _retry_origin, "attempt_id", ""
+                        ),
                         "_auto_denied_node_id": getattr(_retry_origin, "node_id", ""),
                     },
                 )
@@ -3909,9 +4093,7 @@ async def run_chat(
                     state.end_approval(
                         f"{session.key}:{event.request_id}", outcome="cancelled"
                     )
-                    _mirror_call_id = str(
-                        event.tool_call_id or event.request_id or ""
-                    )
+                    _mirror_call_id = str(event.tool_call_id or event.request_id or "")
                     if _mirror_call_id:
                         await _update_mirrored_task(_mirror_call_id, "cancelled")
                     raise
@@ -3925,7 +4107,8 @@ async def run_chat(
                         reviser = getattr(client, "revise_tool", None)
                         accepted = (
                             await reviser(event.request_id, instruction)
-                            if callable(reviser) and isinstance(instruction, str) else False
+                            if callable(reviser) and isinstance(instruction, str)
+                            else False
                         )
                     except Exception:
                         accepted = False
@@ -3934,15 +4117,17 @@ async def run_chat(
                     session._trust_reads = True
                     outcome = "approved"
                 if outcome != "approved":
-                    _mirror_call_id = str(
-                        event.tool_call_id or event.request_id or ""
-                    )
-                    _mirror_status = (
-                        outcome if outcome in {"expired", "cancelled"} else "rejected"
+                    _mirror_call_id = str(event.tool_call_id or event.request_id or "")
+                    _denied_mirror_status: Literal[
+                        "expired", "cancelled", "rejected"
+                    ] = (
+                        "expired"
+                        if outcome == "expired"
+                        else "cancelled" if outcome == "cancelled" else "rejected"
                     )
                     if _mirror_call_id:
                         await _update_mirrored_task(
-                            _mirror_call_id, _mirror_status
+                            _mirror_call_id, _denied_mirror_status
                         )
                 if outcome == "approved":
                     try:
@@ -4050,10 +4235,16 @@ async def run_chat(
                             tool_kind=event.tool_kind,
                             outcome="approved",
                             request_id=event.request_id,
-                            metadata={"reason": "interactive", "risk": effective_risk, "decided_by": "you"},
+                            metadata={
+                                "reason": "interactive",
+                                "risk": effective_risk,
+                                "decided_by": "you",
+                            },
                         )
                 elif outcome == "revised":
-                    session.append("tool", f"{event.title} (revision requested)", "msg msg-tool")
+                    session.append(
+                        "tool", f"{event.title} (revision requested)", "msg msg-tool"
+                    )
                     sel().log_tool_invocation(
                         session_key=session_key,
                         agent=_agent_label(session),
@@ -4133,7 +4324,11 @@ async def run_chat(
                 safe_notice, _ = redact_exfiltration_urls(raw_notice)
                 safe_notice, _ = redact_credentials(safe_notice)
                 metadata = getattr(event, "tool_meta", None)
-                record = metadata.get("model_substitution", {}) if isinstance(metadata, dict) else {}
+                record = (
+                    metadata.get("model_substitution", {})
+                    if isinstance(metadata, dict)
+                    else {}
+                )
                 if isinstance(record, dict):
                     _turn_model_substitutions.append(
                         {str(key): str(value) for key, value in record.items()}
@@ -4157,22 +4352,28 @@ async def run_chat(
                         },
                     )
             elif event.kind == EVENT_SPENT:
-                _record_turn_usage(event, session_key=session_key,
-                    source=getattr(session, "_app", "") or "chat", agent=session.agent or "",
-                    provider=getattr(client, "provider_id", ""), model="")
+                _record_turn_usage(
+                    event,
+                    session_key=session_key,
+                    source=getattr(session, "_app", "") or "chat",
+                    agent=session.agent or "",
+                    provider=getattr(client, "provider_id", ""),
+                    model="",
+                )
             elif event.kind == EVENT_COMPLETE:
                 if isinstance(_retry_user_message, dict):
                     _retry_meta = _retry_user_message.get("meta")
-                    if isinstance(_retry_meta, dict) and _retry_meta.pop(
-                        "_auto_denied_retry", None
-                    ) is not None:
+                    if (
+                        isinstance(_retry_meta, dict)
+                        and _retry_meta.pop("_auto_denied_retry", None) is not None
+                    ):
                         session._dirty = True
                 _turn_context_usage = getattr(event, "context_usage", None)
                 if (
                     event.input_tokens
                     or event.output_tokens
                     or event.cost_usd
-                    or getattr(event, "served_model_ref", "")
+                    or event.served_model_ref
                 ):
                     stats = Stats()
                     stats.inc_input_tokens(event.input_tokens)
@@ -4211,7 +4412,10 @@ async def run_chat(
                         ):
                             _record_model = _prov_model
                     from gideon.operations.usage_ledger import EventAccounting
-                    _, _event_price = EventAccounting(event, _record_model or "", False).values(_record_provider)
+
+                    _, _event_price = EventAccounting(
+                        event, _record_model or "", False
+                    ).values(_record_provider)
                     event.cost_usd = float(_event_price.cost_usd or 0.0)
                     if event.cost_usd:
                         stats.inc_cost_usd(event.cost_usd)
@@ -4287,9 +4491,7 @@ async def run_chat(
             logger.info("Deferred compaction result: %s", compaction_result)
             result_type = str(compaction_result.get("type", "timeout"))
             result_detail = str(
-                compaction_result.get("summary")
-                or compaction_result.get("error")
-                or ""
+                compaction_result.get("summary") or compaction_result.get("error") or ""
             )
             msg = compaction_result_notice(result_type, result_detail)
             if not msg:
@@ -4299,7 +4501,9 @@ async def run_chat(
                 "chat_message",
                 {"session": session.key, "role": "assistant", "content": msg},
             )
-            from gideon.interfaces.dashboard.chat_utils import schedule_linked_channel_notice
+            from gideon.interfaces.dashboard.chat_utils import (
+                schedule_linked_channel_notice,
+            )
 
             schedule_linked_channel_notice(state, session, msg)
             pct = client.context_usage_pct()
@@ -4339,7 +4543,9 @@ async def run_chat(
             session._empty_response_retries = 0
 
         if assistant_text:
-            _flush_segment(state, session, assistant_text, broadcast=False, turn_id=_turn_id)
+            _flush_segment(
+                state, session, assistant_text, broadcast=False, turn_id=_turn_id
+            )
             _persist_turn_summary(session, assistant_text)
         if _turn_model_substitutions:
             last_assistant = next(
@@ -4366,10 +4572,17 @@ async def run_chat(
         else:
             _maybe_consolidate(state, session)
             try:
-                _review_completed_turn(state, session, _origin_message, assistant_text, _turn_tool_call_count, provider=client)
+                _review_completed_turn(
+                    state,
+                    session,
+                    _origin_message,
+                    assistant_text,
+                    _turn_tool_call_count,
+                    provider=client,
+                )
             except Exception:
                 _discard_turn_outcomes(client)
-                logger.debug('verified after-turn capture failed', exc_info=True)
+                logger.debug("verified after-turn capture failed", exc_info=True)
         state.sessions.check_context_usage(session_key, client)
         pct = client.context_usage_pct()
         state.broadcast_ws(
@@ -4388,28 +4601,28 @@ async def run_chat(
             from gideon.operations.stats import cache_hit_pct
 
             telemetry_line = _turn_complete_line(
-                        events=_turn_event_count,
-                        tool_calls=_turn_tool_call_count,
-                        context_pct=pct,
-                        input_tokens=_turn_input_tokens,
-                        output_tokens=_turn_output_tokens,
-                        cost_usd=_turn_cost_usd,
-                        priced=_turn_priced,
-                        cache_read_tokens=_turn_cache_read_tokens,
-                        cache_creation_tokens=_turn_cache_creation_tokens,
-                        cache_hit_pct=cache_hit_pct(
-                            cache_read_tokens=_turn_cache_read_tokens,
-                            cache_creation_tokens=_turn_cache_creation_tokens,
-                            input_tokens=_turn_input_tokens,
-                        ),
-                        cache_saved_usd=cache_savings_usd(
-                            _turn_model,
-                            cache_read_tokens=_turn_cache_read_tokens,
-                            cache_creation_tokens=_turn_cache_creation_tokens,
-                            input_tokens=_turn_input_tokens,
-                            output_tokens=_turn_output_tokens,
-                        ),
-                    )
+                events=_turn_event_count,
+                tool_calls=_turn_tool_call_count,
+                context_pct=pct,
+                input_tokens=_turn_input_tokens,
+                output_tokens=_turn_output_tokens,
+                cost_usd=_turn_cost_usd,
+                priced=_turn_priced,
+                cache_read_tokens=_turn_cache_read_tokens,
+                cache_creation_tokens=_turn_cache_creation_tokens,
+                cache_hit_pct=cache_hit_pct(
+                    cache_read_tokens=_turn_cache_read_tokens,
+                    cache_creation_tokens=_turn_cache_creation_tokens,
+                    input_tokens=_turn_input_tokens,
+                ),
+                cache_saved_usd=cache_savings_usd(
+                    _turn_model,
+                    cache_read_tokens=_turn_cache_read_tokens,
+                    cache_creation_tokens=_turn_cache_creation_tokens,
+                    input_tokens=_turn_input_tokens,
+                    output_tokens=_turn_output_tokens,
+                ),
+            )
             from gideon.engine.session_map import stamp_turn_telemetry
 
             if stamp_turn_telemetry(session.messages, telemetry_line):
@@ -4417,7 +4630,11 @@ async def run_chat(
                 try:
                     save_session_to_history(state, session, force=True)
                 except Exception:
-                    logger.warning("Could not persist turn telemetry for %s", session.key, exc_info=True)
+                    logger.warning(
+                        "Could not persist turn telemetry for %s",
+                        session.key,
+                        exc_info=True,
+                    )
             state.broadcast_ws(
                 "activity_event",
                 {"session": session.key, "kind": "stats", "text": telemetry_line},
@@ -4454,7 +4671,9 @@ async def run_chat(
                 "msg msg-a",
             )
         if not session._stopping:
-            timeout_notice = "Turn timed out before a reply was completed; please retry."
+            timeout_notice = (
+                "Turn timed out before a reply was completed; please retry."
+            )
             session.append("error", timeout_notice, "msg msg-err")
             state.broadcast_ws(
                 "chat_message",
@@ -4565,24 +4784,49 @@ async def run_chat(
 
         cut_off = answer_cut_off(exc)
         if cut_off is not None and assistant_text:
-            _flush_segment(state, session, assistant_text, broadcast=False, turn_id=_turn_id)
+            _flush_segment(
+                state, session, assistant_text, broadcast=False, turn_id=_turn_id
+            )
         if cut_off is not None:
             for row in session.messages:
-                if row.get("role") == "assistant" and (row.get("meta") or {}).get("turn_id") == _turn_id:
+                if (
+                    row.get("role") == "assistant"
+                    and (row.get("meta") or {}).get("turn_id") == _turn_id
+                ):
                     row["meta"]["finish_reason"] = "cut_off"
         error_text = (
-            cut_off.sentence() if cut_off is not None
-            else str(exc) if isinstance(exc, NoModelAnswered)
-            else humanize_provider_error(exc)
+            cut_off.sentence()
+            if cut_off is not None
+            else (
+                str(exc)
+                if isinstance(exc, NoModelAnswered)
+                else humanize_provider_error(exc)
+            )
         )
         _err_text, _ = redact_exfiltration_urls(error_text)
         _err_text, _ = redact_credentials(_err_text)
-        error_meta = {"turn_id": _turn_id, **cut_off.chat_meta()} if cut_off is not None else None
-        session.append("error", _err_text, "msg msg-err", meta=error_meta, broadcast=cut_off is None)
+        error_meta = (
+            {"turn_id": _turn_id, **cut_off.chat_meta()}
+            if cut_off is not None
+            else None
+        )
+        session.append(
+            "error",
+            _err_text,
+            "msg msg-err",
+            meta=error_meta,
+            broadcast=cut_off is None,
+        )
         if cut_off is not None:
             state.broadcast_ws(
                 "chat_message",
-                {"session": session.key, "role": "error", "content": _err_text, "turn_id": _turn_id, "meta": error_meta},
+                {
+                    "session": session.key,
+                    "role": "error",
+                    "content": _err_text,
+                    "turn_id": _turn_id,
+                    "meta": error_meta,
+                },
             )
         session._last_turn_errored = True
         await _fire(HOOK_EVENT_ERROR, _err_text)
@@ -4595,6 +4839,7 @@ async def run_chat(
             if callable(_close):
                 await _close()
         from gideon.security.session_credentials import end_turn
+
         try:
             state.owner_questions.end_turn(session.key)
         finally:
@@ -4628,9 +4873,7 @@ async def run_chat(
                     AgentEvent(kind=EVENT_COMPLETE, stop_reason=_stop_reason)
                 )
                 for _mirror_call_id in tuple(_mirror_tasks):
-                    await _update_mirrored_task(
-                        _mirror_call_id, _unfinished_status
-                    )
+                    await _update_mirrored_task(_mirror_call_id, _unfinished_status)
             except Exception:
                 logger.debug("Task append cleanup failed", exc_info=True)
             try:
@@ -4649,7 +4892,9 @@ async def run_chat(
                 try:
                     _meta = getattr(_text, "meta", None)
                     if _meta:
-                        session._pending_steers.pop(_meta.get("ingress", {}).get("source_event_id", ""), None)
+                        session._pending_steers.pop(
+                            _meta.get("ingress", {}).get("source_event_id", ""), None
+                        )
                     _qid = session.queue_append(str(_text), meta=_meta)
                 except Exception:
                     logger.warning(
@@ -4723,8 +4968,18 @@ async def run_chat(
                 "subagent" if is_subagent else "inject" if is_cron else "user",
                 next_msg,
                 json.dumps({"cronLabel": cron_label}) if is_cron else "msg msg-u",
-                meta={**(consumed[0].get("meta") or {}),
-                      **({"merged_ingress": [item.get("meta", {}).get("ingress") for item in consumed]} if len(consumed) > 1 else {})},
+                meta={
+                    **(consumed[0].get("meta") or {}),
+                    **(
+                        {
+                            "merged_ingress": [
+                                item.get("meta", {}).get("ingress") for item in consumed
+                            ]
+                        }
+                        if len(consumed) > 1
+                        else {}
+                    ),
+                },
                 source=shared_source(consumed),
             )
             if not is_cron and not is_subagent:
@@ -4759,7 +5014,11 @@ async def run_chat(
         else:
             session._stopping = False
             latest_user = max(
-                (i for i, row in enumerate(session.messages) if row.get("role") == "user"),
+                (
+                    i
+                    for i, row in enumerate(session.messages)
+                    if row.get("role") == "user"
+                ),
                 default=-1,
             )
             latest_result = next(
@@ -4780,17 +5039,25 @@ async def run_chat(
                     stop_value = json.loads(cls_value)
                 except (TypeError, ValueError):
                     continue
-                if isinstance(stop_value, dict) and stop_value.get("kind") == "stop_event":
-                    stop_completed = stop_value.get("state") == "stopped" or stop_value.get("outcome") in {"soft", "hard"}
+                if (
+                    isinstance(stop_value, dict)
+                    and stop_value.get("kind") == "stop_event"
+                ):
+                    stop_completed = stop_value.get(
+                        "state"
+                    ) == "stopped" or stop_value.get("outcome") in {"soft", "hard"}
                     stop_event_row = row
                     break
             stop_reason = locals().get("_stop_reason", "")
             outcome = (
                 "error"
-                if getattr(session, "_last_turn_errored", False) or latest_result == "error"
-                else "stopped"
-                if stop_completed or is_cancelled_stop(stop_reason)
-                else "complete"
+                if getattr(session, "_last_turn_errored", False)
+                or latest_result == "error"
+                else (
+                    "stopped"
+                    if stop_completed or is_cancelled_stop(stop_reason)
+                    else "complete"
+                )
             )
             session._last_turn_outcome = outcome
             terminal_row = next(
@@ -4825,13 +5092,19 @@ async def run_chat(
             try:
                 save_session_to_history(state, session)
             except Exception:
-                logger.warning("Could not persist turn outcome for %s", session.key, exc_info=True)
+                logger.warning(
+                    "Could not persist turn outcome for %s", session.key, exc_info=True
+                )
             session.append("done", "", "done")
             session.task = None
             state.push_sessions_update()
             state.broadcast_ws(
                 "chat_done",
-                {"session": session.key, **session.stream_cursor(), "last_turn_outcome": outcome},
+                {
+                    "session": session.key,
+                    **session.stream_cursor(),
+                    "last_turn_outcome": outcome,
+                },
             )
             state.push_refresh("history")
             if not session._titled:

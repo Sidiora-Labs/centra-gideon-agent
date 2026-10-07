@@ -19,15 +19,6 @@ from typing import Any
 
 from aiohttp import web
 
-from gideon.security.security import (
-    MASK_CONFLICT,
-    MaskConflict,
-    keep_masked_values,
-    keep_masked_spans,
-    redact_for_display,
-    redact_values_for_display,
-)
-
 from gideon.automation.loop import files as loop_files
 from gideon.automation.loop import kinds, manager, store, validation
 from gideon.automation.loop.loop import ACTION_SOURCE_STATES, KINDS, Loop, LoopStatus
@@ -35,6 +26,14 @@ from gideon.automation.loop.watchdog import registry_key
 from gideon.core.config.loader import AppConfig
 from gideon.core.http_request import read_json_body, string_field
 from gideon.http_errors import json_error
+from gideon.security.security import (
+    MASK_CONFLICT,
+    MaskConflict,
+    keep_masked_spans,
+    keep_masked_values,
+    redact_for_display,
+    redact_values_for_display,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +51,13 @@ def _mask_projection(value: Any) -> Any:
     """Redact structured loop prose while retaining IDs and filesystem paths."""
     if isinstance(value, dict):
         return {
-            key: item
-            if key in _OPAQUE_PROJECTION_FIELDS or key.endswith("_id") or key.endswith("_path")
-            else _mask_projection(item)
+            key: (
+                item
+                if key in _OPAQUE_PROJECTION_FIELDS
+                or key.endswith("_id")
+                or key.endswith("_path")
+                else _mask_projection(item)
+            )
             for key, item in value.items()
         }
     if isinstance(value, list):
@@ -64,7 +67,9 @@ def _mask_projection(value: Any) -> Any:
     return value
 
 
-def _mask_loop_projection(loop: dict[str, Any]) -> dict[str, Any]:
+def _mask_loop_projection(loop: dict[str, Any] | None) -> dict[str, Any]:
+    if loop is None:
+        raise web.HTTPNotFound(text="Loop not found")
     return _mask_projection(loop)
 
 
@@ -393,7 +398,9 @@ async def api_loop_create(request: web.Request) -> web.Response:
             return web.json_response(
                 {
                     "error": "Validation failed",
-                    "errors": ["Scratch workspace teardown is not supported for workflow-backed loops."],
+                    "errors": [
+                        "Scratch workspace teardown is not supported for workflow-backed loops."
+                    ],
                 },
                 status=400,
             )
@@ -440,7 +447,9 @@ async def api_loop_create(request: web.Request) -> web.Response:
         )
     loop = _build_loop_from_body(body)
     created = store.create(loop)
-    return web.json_response(_mask_loop_projection(store.get_redacted(created.id)), status=201)
+    return web.json_response(
+        _mask_loop_projection(store.get_redacted(created.id)), status=201
+    )
 
 
 async def api_loop_list(request: web.Request) -> web.Response:
@@ -459,11 +468,20 @@ def _run_backed(loop_id: str):
     from gideon.automation.workflows import store as run_store
 
     run = run_store.get(loop_id)
-    return run if run is not None and isinstance(run.extra, dict) and run.extra.get("loop_kind") else None
+    return (
+        run
+        if run is not None
+        and isinstance(run.extra, dict)
+        and run.extra.get("loop_kind")
+        else None
+    )
 
 
-async def _run_backed_action(request: web.Request, run: Any, action: str) -> web.Response:
-    from gideon.automation.workflows import loop_view, service as workflows
+async def _run_backed_action(
+    request: web.Request, run: Any, action: str
+) -> web.Response:
+    from gideon.automation.workflows import loop_view
+    from gideon.automation.workflows import service as workflows
     from gideon.automation.workflows.handlers import _audit, _guard, _reply, _supervisor
 
     status = loop_view.loop_status(run)
@@ -618,7 +636,8 @@ async def api_loop_update(request: web.Request) -> web.Response:
         inverse_projection = {
             key: value
             for key, value in body.items()
-            if key in {"name", "task", "summary", "success_criteria", "kind_config", "plan"}
+            if key
+            in {"name", "task", "summary", "success_criteria", "kind_config", "plan"}
         }
         restored = keep_masked_values(inverse_projection, stored_projection)
         body = {**body, **restored}
@@ -737,13 +756,23 @@ async def api_loop_delete(request: web.Request) -> web.Response:
         run = _run_backed(cid)
         if run is not None:
             from gideon.automation.workflows import service as workflows
-            from gideon.automation.workflows.handlers import _audit, _guard, _reply, _supervisor
+            from gideon.automation.workflows.handlers import (
+                _audit,
+                _guard,
+                _reply,
+                _supervisor,
+            )
 
             denied = _guard(request, "workflow_run_delete")
             if denied is not None:
                 return denied
             result = await workflows.delete_run(run.id, supervisor=_supervisor(request))
-            _audit(request, "workflow_run_delete", "success" if result.get("ok") else "failure", run.id)
+            _audit(
+                request,
+                "workflow_run_delete",
+                "success" if result.get("ok") else "failure",
+                run.id,
+            )
             if not result.get("ok"):
                 return _reply(result)
             request.app["state"].push_refresh("loops")
@@ -1197,7 +1226,9 @@ async def api_loop_plan_edit(request: web.Request) -> web.Response:
     if not PS.edit_artifact(session, step_id, markdown):
         return web.json_response({"error": "Step not awaiting review"}, status=409)
     loop_files.write_plan_session(session)
-    return web.json_response({"ok": True, "session": _mask_projection(session.to_dict())})
+    return web.json_response(
+        {"ok": True, "session": _mask_projection(session.to_dict())}
+    )
 
 
 async def api_design_default_tokens(request: web.Request) -> web.Response:
@@ -1275,16 +1306,35 @@ async def api_loop_design_preview(request: web.Request) -> web.Response:
     body = await _json_body(request)
     if isinstance(body, web.Response):
         return body
-    slug, version, approved = body.get("slug"), body.get("version"), body.get("approved")
-    if not isinstance(slug, str) or not slug or type(version) is not int or version < 1 or type(approved) is not bool:
-        return web.json_response({"error": "Expected artifact slug, version, and approved flag"}, status=400)
+    slug, version, approved = (
+        body.get("slug"),
+        body.get("version"),
+        body.get("approved"),
+    )
+    if (
+        not isinstance(slug, str)
+        or not slug
+        or type(version) is not int
+        or version < 1
+        or type(approved) is not bool
+    ):
+        return web.json_response(
+            {"error": "Expected artifact slug, version, and approved flag"}, status=400
+        )
     from gideon.workspace.artifacts import registry as artifact_registry
 
     provider = artifact_registry.get_provider()
     art = provider.get(slug) if provider is not None else None
-    if (art is None or art.kind != "react" or art.version != version
-            or f"loop:{cid}" not in art.tags or not (art.content or "").strip()):
-        return web.json_response({"error": "No matching current Design canvas artifact"}, status=409)
+    if (
+        art is None
+        or art.kind != "react"
+        or art.version != version
+        or f"loop:{cid}" not in art.tags
+        or not (art.content or "").strip()
+    ):
+        return web.json_response(
+            {"error": "No matching current Design canvas artifact"}, status=409
+        )
     record(cid, slug, version, approved)
     return web.json_response({"ok": True, "receipts": receipts(cid)})
 

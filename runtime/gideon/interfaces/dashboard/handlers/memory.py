@@ -25,6 +25,8 @@ from gideon.security.security import (
     MaskConflict,
     keep_masked_spans,
     keep_masked_values,
+    redact_credentials,
+    redact_exfiltration_urls,
     redact_for_display,
 )
 
@@ -69,7 +71,9 @@ async def api_memory_preferences(request: web.Request) -> web.Response:
 
         with _MEMORY_DOCUMENT_LOCK:
             current = redact_for_display(mem.read_preferences() or "")
-            refusal = stale_write_refusal(request, current, what="your memory preferences")
+            refusal = stale_write_refusal(
+                request, current, what="your memory preferences"
+            )
             if refusal is not None:
                 return refusal
             try:
@@ -141,7 +145,9 @@ async def api_memory_history(request: web.Request) -> web.Response:
 
         with _MEMORY_DOCUMENT_LOCK:
             current = redact_for_display(mem.read_recent_history() or "")
-            refusal = stale_write_refusal(request, current, what="your recent memory history")
+            refusal = stale_write_refusal(
+                request, current, what="your recent memory history"
+            )
             if refusal is not None:
                 return refusal
             try:
@@ -221,7 +227,10 @@ async def api_memory_settings(request: web.Request) -> web.Response:
         if not applied:
             return _deny("no settings provided")
 
-        from gideon.core.config.transactions import ConfigPreserveError, mutate_config_async
+        from gideon.core.config.transactions import (
+            ConfigPreserveError,
+            mutate_config_async,
+        )
 
         def update_memory(data: dict) -> None:
             mem = data.get("memory")
@@ -231,6 +240,7 @@ async def api_memory_settings(request: web.Request) -> web.Response:
             mem.update(applied)
             if "vault_mode" in applied:
                 mem.pop("vault_enabled", None)
+
         try:
             await mutate_config_async(update_memory)
         except ConfigPreserveError:
@@ -747,7 +757,7 @@ async def api_memory_episodic_search(request: web.Request) -> web.Response:
 from gideon.security.session_credentials import memory_tool_endpoint
 
 
-@memory_tool_endpoint('memory_recall')
+@memory_tool_endpoint("memory_recall")
 async def api_memory_recall(request: web.Request) -> web.Response:
     """GET /api/memory/recall?q=... — deep on-demand recall for the agent.
 
@@ -977,6 +987,7 @@ async def api_memory_vault_sync(request: web.Request) -> web.Response:
     except Exception:
         logger.debug("vault sync: knowledge ingest unavailable", exc_info=True)
     from gideon.cognition.knowledge.file_items import _owned_io
+
     summary = await _owned_io(
         functools.partial(vault.sync, knowledge=knowledge, enqueue=enqueue)
     )
@@ -1115,11 +1126,20 @@ def _memory_observability(state: ConsoleState, query: str) -> dict:
 
         try:
             health, diagnostics = provider._loop.call(inspect, timeout=8.0)
-            ready = health.state == "ready" and health.durable and health.lexical_available and diagnostics.recovery_state == "ready"
+            ready = (
+                health.state == "ready"
+                and health.durable
+                and health.lexical_available
+                and diagnostics.recovery_state == "ready"
+            )
             search_index = {
                 "authority": "hypermid",
                 "state": "available" if ready else "degraded",
-                "detail": "Native memory storage and keyword search are available." if ready else "Native memory reports that storage or keyword search is not ready.",
+                "detail": (
+                    "Native memory storage and keyword search are available."
+                    if ready
+                    else "Native memory reports that storage or keyword search is not ready."
+                ),
                 "record_count": diagnostics.record_count,
                 "embedding_count": diagnostics.embedding_count,
                 "memory_fts_count": diagnostics.memory_fts_count,
@@ -1131,32 +1151,57 @@ def _memory_observability(state: ConsoleState, query: str) -> dict:
                 "stale_records": diagnostics.stale_record_count,
             }
         except Exception as error:
-            logger.warning("Native memory diagnostics unavailable: %s", type(error).__name__)
+            logger.warning(
+                "Native memory diagnostics unavailable: %s", type(error).__name__
+            )
             search_index = {
-                "authority": "hypermid", "state": "unavailable",
+                "authority": "hypermid",
+                "state": "unavailable",
                 "detail": "Native memory diagnostics could not be read. Search health is unknown.",
                 "repair_id": None,
             }
             stats = {}
         return {
-            "stats": stats, "rejections": {}, "search_index": search_index,
+            "stats": stats,
+            "rejections": {},
+            "search_index": search_index,
             "context_preview_available": False,
-            "context_preview": {"semantic_chars": 0, "episodic_chars": 0, "lessons_chars": 0, "total_chars": 0},
+            "context_preview": {
+                "semantic_chars": 0,
+                "episodic_chars": 0,
+                "lessons_chars": 0,
+                "total_chars": 0,
+            },
         }
     journal = _get_memory(state)
     store = _get_provider(state)
     stats = store.memory_stats()
     keyword = journal.keyword_index_status()
     indexed, embedded = stats.get("faiss_index_size"), stats.get("embedded_count")
-    consistent = indexed == embedded if isinstance(indexed, int) and isinstance(embedded, int) else None
+    consistent = (
+        indexed == embedded
+        if isinstance(indexed, int) and isinstance(embedded, int)
+        else None
+    )
     return {
         "stats": stats,
         "rejections": store.get_rejection_stats(),
-        "context_preview": _redact_memory_field(store.get_context_preview(query_text=query)),
+        "context_preview": _redact_memory_field(
+            store.get_context_preview(query_text=query)
+        ),
         "search_index": {
-            "authority": "journal", **keyword,
-            "semantic_state": "available" if consistent is True else "degraded" if consistent is False else "unknown",
-            "semantic_detail": f"Semantic search indexes {indexed} of {embedded} embedded memories." if consistent is not None else "Semantic index coverage could not be measured.",
+            "authority": "journal",
+            **keyword,
+            "semantic_state": (
+                "available"
+                if consistent is True
+                else "degraded" if consistent is False else "unknown"
+            ),
+            "semantic_detail": (
+                f"Semantic search indexes {indexed} of {embedded} embedded memories."
+                if consistent is not None
+                else "Semantic index coverage could not be measured."
+            ),
         },
     }
 
@@ -1416,7 +1461,9 @@ async def api_memory_entity_delete(request: web.Request) -> web.Response:
     """DELETE /api/memory/entities/{entity_id} — retain a deletion tombstone."""
     svc = _get_service(request.app["state"])
     if not svc.has_graph:
-        return web.json_response({"error": "the memory entity graph is disabled"}, status=409)
+        return web.json_response(
+            {"error": "the memory entity graph is disabled"}, status=409
+        )
     entity_id = request.match_info.get("entity_id", "")
     if not entity_id:
         return web.json_response({"error": "entity id is required"}, status=400)

@@ -1,6 +1,7 @@
 """Owner interface for local encrypted privacy facts and explicit consent."""
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 from aiohttp import web
@@ -10,6 +11,10 @@ from gideon.core.http_request import RequestValidationError, read_json_body
 from gideon.http_errors import json_error
 from gideon.workspace.capabilities.wellbeing.privacy import PrivacyStore
 from gideon.workspace.capabilities.wellbeing.store import MeasurementError
+
+
+async def _run(method: Callable[..., object], *arguments: object) -> object:
+    return await asyncio.to_thread(method, *arguments)
 
 
 def register(app: web.Application, home: Path | None = None):
@@ -22,6 +27,7 @@ def register(app: web.Application, home: Path | None = None):
             scope, suffix = request.match_info.get("scope"), request.match_info.get(
                 "suffix", ""
             )
+            method: Callable[..., object]
             if request.method == "GET":
                 if scope == "subjects":
                     method, envelope = (
@@ -48,9 +54,7 @@ def register(app: web.Application, home: Path | None = None):
                         else (store.get_fact, None)
                     )
                 result = (
-                    await asyncio.to_thread(method, identity)
-                    if identity
-                    else await asyncio.to_thread(method)
+                    await _run(method, identity) if identity else await _run(method)
                 )
                 if envelope:
                     result = {envelope: result}
@@ -67,9 +71,9 @@ def register(app: web.Application, home: Path | None = None):
                 else:
                     method = store.reveal if suffix == "reveal" else store.correct_fact
                 result = (
-                    await asyncio.to_thread(method, identity, payload)
+                    await _run(method, identity, payload)
                     if identity
-                    else await asyncio.to_thread(method, payload)
+                    else await _run(method, payload)
                 )
             response = web.json_response(result)
             response.headers["Cache-Control"] = "no-store"

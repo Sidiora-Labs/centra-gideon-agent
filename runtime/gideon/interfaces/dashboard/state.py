@@ -19,17 +19,17 @@ from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
 from gideon.core.config.loader import DASHBOARD_PORT
-from gideon.engine.turn_source import DASHBOARD_SOURCE, source_of
 from gideon.engine.task_modes import (
     is_read_only_bash,
     resolve_effective_risk,
     shell_command,
 )
-from gideon.interfaces.dashboard.desktop_registry import DesktopRegistry
+from gideon.engine.turn_source import DASHBOARD_SOURCE, source_of
 from gideon.interfaces.dashboard.approval_state import (
     DashboardApprovalState,
     chat_approval_id,
 )
+from gideon.interfaces.dashboard.desktop_registry import DesktopRegistry
 from gideon.interfaces.dashboard.sse import SseRegistry
 from gideon.interfaces.dashboard.ws_state import NOTE_TYPE_NOTIFICATION, WebSocketState
 from gideon.security import trust_mode
@@ -50,9 +50,13 @@ async def _deliver_named_channel(
     if target:
         problem = transport.validate_target(target)
         if problem:
-            logger.warning("scheduled channel target refused by its provider: %s", problem)
+            logger.warning(
+                "scheduled channel target refused by its provider: %s", problem
+            )
             return
-        await delivery.deliver_text(target, _channel_notification_text(title, body, note))
+        await delivery.deliver_text(
+            target, _channel_notification_text(title, body, note)
+        )
         return
     owner = owner_id_for(provider)
     if not owner:
@@ -101,6 +105,8 @@ def _log_channel_send_failure(task: Any) -> None:
     error = task.exception()
     if error:
         logger.warning("channel notification delivery failed", exc_info=error)
+
+
 from gideon.security.guardrails.loop_breaker import LoopBreaker
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
 from gideon.security.sel import sel
@@ -224,8 +230,10 @@ _DEFAULT_PORT = DASHBOARD_PORT
 _SSE_INTERVAL_SECS = 5
 _NOTIFICATIONS_FILE = "notifications.jsonl"
 _MAX_PERSISTED_NOTIFICATIONS = 200
-_SESSION_RESTART_NOTICE = ("Restarted the agent’s session at {pct:.0f}% of its context window: "
-                           "{reason}. It continues from this chat’s messages, without earlier tool results.")
+_SESSION_RESTART_NOTICE = (
+    "Restarted the agent’s session at {pct:.0f}% of its context window: "
+    "{reason}. It continues from this chat’s messages, without earlier tool results."
+)
 _MAX_SESSION_MESSAGES = (
     10000  # Keep all messages — virtual scrolling handles performance
 )
@@ -393,7 +401,7 @@ class _ChatSession:
         self.task: asyncio.Task | None = None  # type: ignore[type-arg]
         self.event = asyncio.Event()
         self._pending: list[dict[str, str]] = []
-        self._queue: list[dict[str, str]] = []
+        self._queue: list[dict[str, Any]] = []
         self._approval_futures: dict[str, asyncio.Future[str]] = {}  # type: ignore[type-arg]
         self._trust: bool = False
         self._trust_reads: bool = False
@@ -452,7 +460,9 @@ class _ChatSession:
         self._ephemeral: bool = ephemeral
         self._pending_context: list[dict[str, Any]] = []
         self._app: str = ""
-        self._created_by_app: str = created_by_app if isinstance(created_by_app, str) else ""
+        self._created_by_app: str = (
+            created_by_app if isinstance(created_by_app, str) else ""
+        )
         self._initiator: dict | None = None
         self._pending_steers: dict[str, dict] = {}
         self._last_turn_errored: bool = False
@@ -533,10 +543,17 @@ class _ChatSession:
         self.event.clear()
         return out
 
-    def queue_append(self, content: str, *, channel: str = "", meta: dict | None = None, source: Mapping[str, str] = DASHBOARD_SOURCE) -> str:
+    def queue_append(
+        self,
+        content: str,
+        *,
+        channel: str = "",
+        meta: dict | None = None,
+        source: Mapping[str, str] = DASHBOARD_SOURCE,
+    ) -> str:
         """Append a message to the queue, retaining its channel origin when present."""
         qid = uuid.uuid4().hex[:12]
-        item = {"id": qid, "content": content, **source_of(source)}
+        item: dict[str, Any] = {"id": qid, "content": content, **source_of(source)}
         if meta:
             item["meta"] = dict(meta)
         if channel:
@@ -659,6 +676,7 @@ class _ChatSession:
 
     def to_dict(self) -> dict:
         from gideon.security.owner_questions import registry
+
         questions = registry()
         if questions is not None and questions.state.get_session(self.key) is self:
             questions.expire_orphans(self)
@@ -742,7 +760,12 @@ class _ChatSession:
             "pending_approval": pending_approval,
             "pending_approval_info": pending_approval_info,
             "last_activity_ts": last_activity_ts,
-            "waiting_for_input": waiting_for_input or any((row.get("meta") or {}).get("owner_question", {}).get("outcome") == "pending" for row in self.messages),
+            "waiting_for_input": waiting_for_input
+            or any(
+                (row.get("meta") or {}).get("owner_question", {}).get("outcome")
+                == "pending"
+                for row in self.messages
+            ),
             "stop_state": self._stop_state,
             "created": self.created_at,
             "last_ts": last_ts,
@@ -824,17 +847,20 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         self._notification_log: list[dict[str, Any]] = _load_notifications()
         self._sessions: dict[str, _ChatSession] = {}
         from gideon.security.owner_questions import OwnerQuestions, install
+
         self.owner_questions = OwnerQuestions(self)
         install(self.owner_questions)
-        register_question_stopper = getattr(self.sessions, "register_approval_stopper", None)
+        register_question_stopper = getattr(
+            self.sessions, "register_approval_stopper", None
+        )
         if register_question_stopper is not None:
             register_question_stopper(self.owner_questions.end_turn)
-        self._channel_to_session: dict[str, str] = {}
+        self._channel_to_session: dict[tuple[str, str] | str, str] = {}
         self._session_counter = 0
         self._folders: list[dict[str, Any]] = []
         self._tags: list[dict[str, Any]] = []
         self._tag_boards: list[dict[str, Any]] = []
-        self._background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+        self._background_tasks: set[asyncio.Future[Any]] = set()
         from gideon.security import trust_mode as _trust
 
         _trust.register_on_disable(self._on_yolo_disabled)
@@ -860,6 +886,7 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         self._ws_log_subscribers: set[web.WebSocketResponse] = set()
         self._ws_subagent_subscribers: set[web.WebSocketResponse] = set()
         self._ws_loop: asyncio.AbstractEventLoop | None = None
+        self._incident_watch_task: asyncio.Task[None] | None = None
         self._pending_approvals: dict[str, dict] = {}
         self._approval_futures: dict[str, asyncio.Future] = {}  # type: ignore[type-arg]
         self._approval_endings: dict[str, str] = {}
@@ -888,7 +915,12 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         self._last_spoken: dict[str, str] = {}
 
     def broadcast_ws(
-        self, msg_type: str, data: object, *, extra: dict[str, Any] | None = None, owner_only: bool = False
+        self,
+        msg_type: str,
+        data: object,
+        *,
+        extra: dict[str, Any] | None = None,
+        owner_only: bool = False,
     ) -> None:
         if (
             msg_type == "approval"
@@ -942,10 +974,19 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         provider = self.sessions.get_channel_provider(key)
         if not provider:
             session = self._sessions.get(key.removeprefix("dashboard:"))
-            resident_provider = getattr(session, "_channel_provider", "") if session else ""
-            if resident_provider and session._channel_thread_ts == thread and session._channel_id == channel:
+            resident_provider = (
+                getattr(session, "_channel_provider", "") if session else ""
+            )
+            if (
+                session is not None
+                and resident_provider
+                and session._channel_thread_ts == thread
+                and session._channel_id == channel
+            ):
                 provider = resident_provider
-                self.sessions.set_channel_link(key, thread, channel, channel_provider=provider)
+                self.sessions.set_channel_link(
+                    key, thread, channel, channel_provider=provider
+                )
         return provider
 
     _LAST_SPOKEN_MAX_SESSIONS = 32
@@ -1144,122 +1185,33 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         source: str,
         tool: str,
         *,
-        tool_input: str = "",
+        tool_input: object = "",
         tool_purpose: str = "",
         session: str = "",
         asked_by: str = "",
+        risk_level: object = "",
+        tool_kind: str = "",
+        tool_annotations: dict | None = None,
         owner_only: bool = False,
         on_decision: Any = None,
         approval_timeout_secs: float | None = None,
     ) -> bool:
-        """Request interactive approval. Returns True if approved, False if rejected/timeout.
-
-        The timeout is origin-aware (see :meth:`_approval_timeout_for`): unattended
-        sources deny fast, interactive sources wait longer. Timeout always fails
-        closed to deny.
-        """
-        loop = asyncio.get_running_loop()
-        current = self._approval_futures.get(approval_id)
-        if current is not None and not current.done():
-            return False
-        fut: asyncio.Future[bool] = loop.create_future()
-        self._approval_futures[approval_id] = fut
-        revision = uuid.uuid4().hex
-        retry_binding = None
-        raw_call_fingerprint = ""
-        try:
-            from gideon.interfaces.dashboard.auto_denials import (
-                bind_current_reentry_call,
-                call_fingerprint,
-            )
-
-            raw_call_fingerprint = call_fingerprint(tool, tool_input)
-            retry_binding = bind_current_reentry_call(self, raw_call_fingerprint, session=session)
-        except Exception:
-            logger.debug("could not bind workflow/trigger denial retry", exc_info=True)
-
-        safe_tool, _ = redact_exfiltration_urls(tool)
-        safe_tool, _ = redact_credentials(safe_tool)
-        safe_input, _ = redact_exfiltration_urls(tool_input)
-        safe_input, _ = redact_credentials(safe_input)
-        safe_purpose, _ = redact_exfiltration_urls(tool_purpose)
-        safe_purpose, _ = redact_credentials(safe_purpose)
-
-        pending = {
-            "id": approval_id,
-            "revision": revision,
-            "source": source,
-            "owner_only": owner_only,
-            "tool": safe_tool,
-            "tool_input": safe_input,
-            "tool_purpose": safe_purpose,
-            "session": session,
-            "asked_by": asked_by or self._approval_requester(source, session),
-            "ts": time.time(),
-        }
-        if on_decision is not None:
-            callbacks = getattr(self, "_approval_decision_callbacks", None)
-            if callbacks is None:
-                callbacks = self._approval_decision_callbacks = {}
-            callbacks[approval_id] = on_decision
-        self._hold_approval(pending)
-        if raw_call_fingerprint:
-            pending["_call_fingerprint"] = raw_call_fingerprint
-        if retry_binding is not None:
-            pending.update(
-                {
-                    "_call_fingerprint": retry_binding.fingerprint,
-                    "_auto_denied_note_id": retry_binding.note_id,
-                    "_auto_denied_origin_kind": retry_binding.origin_kind,
-                    "_auto_denied_origin_id": retry_binding.origin_id,
-                    "_auto_denied_attempt_id": retry_binding.attempt_id,
-                    "_auto_denied_node_id": retry_binding.node_id,
-                }
-            )
-        from gideon.automation.triggers.lifecycle_fire import approval_request_payload
-        from gideon.automation.triggers.lifecycle_fire import fire as _fire_lifecycle
-
-        try:
-            await _fire_lifecycle(
-                approval_request_payload(
-                    tool=safe_tool,
-                    source=source,
-                    session_key=session,
-                    approval_id=approval_id,
-                ),
-                tool_name=safe_tool,
-            )
-            from gideon.security.approval_grants import approval_window_secs
-
-            timeout = approval_window_secs(self._APPROVAL_TIMEOUT)
-            if any(marker in (source or "").lower() for marker in self._UNATTENDED_SOURCE_MARKERS):
-                timeout = min(timeout, self._UNATTENDED_APPROVAL_TIMEOUT)
-            if approval_timeout_secs is not None:
-                timeout = min(timeout, max(0.0, approval_timeout_secs))
-            return await asyncio.wait_for(fut, timeout=timeout)
-        except asyncio.TimeoutError:
-            self.end_approval(approval_id, outcome="expired")
-            try:
-                from gideon.security.sel import sel
-
-                sel().log_api_access(
-                    caller=f"approval_timeout:{source}",
-                    operation="approval_timeout:denied",
-                    outcome="denied",
-                    resources=f"tool={safe_tool[:80]} after={int(timeout)}s",
-                )
-            except Exception:
-                self._log.debug("SEL audit failed for approval timeout", exc_info=True)
-            return False
-        except asyncio.CancelledError:
-            self.end_approval(approval_id, outcome="cancelled")
-            raise
-        finally:
-            if self._pending_approvals.get(approval_id) is pending:
-                self.end_approval(approval_id, outcome="cancelled")
-            getattr(self, "_approval_decision_callbacks", {}).pop(approval_id, None)
-            if self._approval_futures.get(approval_id) is fut:
-                self._approval_futures.pop(approval_id, None)
+        """Forward the complete host decision contract to the canonical registry."""
+        return await super().request_approval(
+            approval_id,
+            source,
+            tool,
+            tool_input=tool_input,
+            tool_purpose=tool_purpose,
+            session=session,
+            asked_by=asked_by,
+            risk_level=risk_level,
+            tool_kind=tool_kind,
+            tool_annotations=tool_annotations,
+            owner_only=owner_only,
+            on_decision=on_decision,
+            approval_timeout_secs=approval_timeout_secs,
+        )
 
     async def request_mcp_elicitation(self, server: str, params: Any) -> Any:
         from mcp.types import ElicitResult
@@ -1329,12 +1281,19 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             self._log.debug("approval push dispatch failed", exc_info=True)
 
     def _audit_and_broadcast_approval(
-        self, session_key: str, approval_id: str, approved: bool | str, *,
-        decided_by: str = "you", entry: dict[str, Any] | None = None,
+        self,
+        session_key: str,
+        approval_id: str,
+        approved: bool | str,
+        *,
+        decided_by: str = "you",
+        entry: dict[str, Any] | None = None,
     ) -> None:
         """Emit SEL audit event and broadcast WS notification for an approval decision."""
-        outcome = approved if isinstance(approved, str) else (
-            "approved" if approved else "rejected"
+        outcome = (
+            approved
+            if isinstance(approved, str)
+            else ("approved" if approved else "rejected")
         )
         DashboardApprovalState._audit_and_broadcast_approval(
             self, session_key, approval_id, outcome, decided_by=decided_by, entry=entry
@@ -1367,7 +1326,10 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
                 except (json.JSONDecodeError, TypeError):
                     continue
                 if str(meta.get("request_id") or "") == approval_id:
-                    return str(meta.get("asked_by") or self._approval_requester("chat", current.key))
+                    return str(
+                        meta.get("asked_by")
+                        or self._approval_requester("chat", current.key)
+                    )
         return ""
 
     def start_flush_loop(self) -> None:
@@ -1438,7 +1400,12 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         _persist_notification(note)
 
     def notify(
-        self, kind: str, title: str, body: str, *, meta: dict | None = None,
+        self,
+        kind: str,
+        title: str,
+        body: str,
+        *,
+        meta: dict | None = None,
         destination: str = "",
     ) -> None:
         """Push a notification to ALL connected SSE clients and persist to disk.
@@ -1567,10 +1534,11 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         self, destination: str, title: str, body: str, note: dict[str, Any]
     ) -> None:
         import asyncio
+
         from gideon.integrations.channel_transports import list_transports
 
         try:
-            provider, separator, target = destination[len("channel:"):].partition(":")
+            provider, separator, target = destination[len("channel:") :].partition(":")
             if not provider or provider not in list_transports():
                 logger.warning("scheduled channel destination provider is unavailable")
                 return
@@ -1578,7 +1546,9 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
                 logger.warning("scheduled channel target is empty")
                 return
             task = asyncio.get_running_loop().create_task(
-                _deliver_named_channel(provider, target if separator else "", title, body, note),
+                _deliver_named_channel(
+                    provider, target if separator else "", title, body, note
+                ),
                 name=f"schedule-channel:{provider}",
             )
             task.add_done_callback(_log_channel_send_failure)
@@ -1673,12 +1643,13 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         if not app:
             return []
         return [
-            note for note in self._notification_log
-            if note.get("created_by_app") == app
+            note for note in self._notification_log if note.get("created_by_app") == app
         ]
 
     def unread_notifications_for_app(self, app: str) -> int:
-        return sum(1 for note in self.notifications_for_app(app) if not note.get("acked"))
+        return sum(
+            1 for note in self.notifications_for_app(app) if not note.get("acked")
+        )
 
     def loop_sse(self) -> SseRegistry:
         """The per-loop SSE registry (key ``loop:<id>``) — serves every kind, incl. code."""
@@ -1780,10 +1751,13 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         removed = len(self._notification_log) < before
         if removed:
             _rewrite_notifications(self._notification_log)
-            self.broadcast_ws("notification_removed", {
-                "ts": ts,
-                **({"created_by_app": app} if app else {}),
-            })
+            self.broadcast_ws(
+                "notification_removed",
+                {
+                    "ts": ts,
+                    **({"created_by_app": app} if app else {}),
+                },
+            )
         return removed
 
     def notification_belongs_to_app(self, ts: str, app: str) -> bool:
@@ -1822,10 +1796,13 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
                     return False
                 n["acked"] = True
                 _rewrite_notifications(self._notification_log)
-                self.broadcast_ws("notification_ack", {
-                    "ts": ts,
-                    **({"created_by_app": app} if app else {}),
-                })
+                self.broadcast_ws(
+                    "notification_ack",
+                    {
+                        "ts": ts,
+                        **({"created_by_app": app} if app else {}),
+                    },
+                )
                 return True
         return False
 
@@ -1837,18 +1814,25 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
                     return False
                 n["acked"] = False
                 _rewrite_notifications(self._notification_log)
-                self.broadcast_ws("notification_unack", {
-                    "ts": ts,
-                    **({"created_by_app": app} if app else {}),
-                })
+                self.broadcast_ws(
+                    "notification_unack",
+                    {
+                        "ts": ts,
+                        **({"created_by_app": app} if app else {}),
+                    },
+                )
                 return True
         return False
 
     def clear_notifications(self, *, app: str = "") -> None:
         """Remove all notifications from memory and disk."""
         if app:
-            removed = [n for n in self._notification_log if n.get("created_by_app") == app]
-            self._notification_log = [n for n in self._notification_log if n.get("created_by_app") != app]
+            removed = [
+                n for n in self._notification_log if n.get("created_by_app") == app
+            ]
+            self._notification_log = [
+                n for n in self._notification_log if n.get("created_by_app") != app
+            ]
         else:
             removed = self._notification_log[:]
             self._notification_log.clear()
@@ -1860,9 +1844,10 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             logger.debug("Failed to clear notifications file", exc_info=True)
         if app:
             for note in removed:
-                self.broadcast_ws("notification_removed", {
-                    "ts": note.get("ts", ""), "created_by_app": app
-                })
+                self.broadcast_ws(
+                    "notification_removed",
+                    {"ts": note.get("ts", ""), "created_by_app": app},
+                )
         else:
             self.broadcast_ws("notification_removed", {"ts": "*"})
 
@@ -1877,10 +1862,13 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         if changed:
             _rewrite_notifications(self._notification_log)
             for note in changed:
-                self.broadcast_ws("notification_ack", {
-                    "ts": note.get("ts", ""),
-                    **({"created_by_app": app} if app else {}),
-                })
+                self.broadcast_ws(
+                    "notification_ack",
+                    {
+                        "ts": note.get("ts", ""),
+                        **({"created_by_app": app} if app else {}),
+                    },
+                )
 
     def get_session(self, name: str) -> _ChatSession | None:
         """Look up a session by name without creating it. Returns None if absent."""
@@ -1898,7 +1886,13 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             from gideon.interfaces.dashboard.chat_utils import resolve_history_key
 
             history_key = resolve_history_key(self.conversation_log, key)
-            value = self.conversation_log.get_metadata(history_key).get("created_by_app", "") if history_key else ""
+            value = (
+                self.conversation_log.get_metadata(history_key).get(
+                    "created_by_app", ""
+                )
+                if history_key
+                else ""
+            )
             return value if isinstance(value, str) else ""
         except Exception:
             logger.debug("conversation creator lookup failed", exc_info=True)
@@ -1906,16 +1900,27 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
 
     def take_channel_turn(self, log: Any, session_key: str) -> None:
         session = self._sessions.get(session_key.removeprefix("dashboard:"))
-        if session is None or log is not self.conversation_log:
+        if (
+            session is None
+            or self.conversation_log is None
+            or log is None
+            or log is not self.conversation_log
+        ):
             return
         with log.journal_write(session_key):
             events = log.source_events(session_key)
-            additions = [event for event in events if event.source_event_id not in session._journal_event_ids]
+            additions = [
+                event
+                for event in events
+                if event.source_event_id not in session._journal_event_ids
+            ]
             insert_at = min(session._resumed_count, len(session.messages))
             for event in additions:
                 row = dict(event.message)
                 row["source_event_id"] = event.source_event_id
-                row.setdefault("cls", "msg msg-u" if row["role"] == "user" else "msg msg-a")
+                row.setdefault(
+                    "cls", "msg msg-u" if row["role"] == "user" else "msg msg-a"
+                )
                 session.messages.insert(insert_at, row)
                 insert_at += 1
                 session.total_messages += 1
@@ -1926,7 +1931,9 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
                 session._dirty = True
                 session.event.set()
 
-    def get_linked_session(self, session_key: str, provider: str = "") -> "_ChatSession | None":
+    def get_linked_session(
+        self, session_key: str, provider: str = ""
+    ) -> "_ChatSession | None":
         from gideon.interfaces.dashboard.channel_links import linked_chat
 
         return linked_chat(self, session_key, provider)
@@ -2030,7 +2037,9 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
                 if _ts and _ch:
                     session._channel_id = _ch
                     session._channel_thread_ts = _ts
-                    session._channel_provider = self.sessions.get_channel_provider(_history_key_for(name))
+                    session._channel_provider = self.sessions.get_channel_provider(
+                        _history_key_for(name)
+                    )
                     self._channel_to_session[(session._channel_provider, _ts)] = name
         except Exception:
             pass

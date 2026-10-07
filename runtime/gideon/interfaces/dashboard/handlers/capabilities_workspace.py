@@ -28,7 +28,9 @@ async def references(request, task_ids):
     if response.status != 200:
         raise ValueError("Terminal inventory unavailable")
     terminals = [
-        s["session_id"] for s in json.loads(response.body)["sessions"] if s.get("alive")
+        s["session_id"]
+        for s in json.loads(response.text or "{}")["sessions"]
+        if s.get("alive")
     ]
     tasks = [task_id for task_id in task_ids if await get_task(task_id) is not None]
     return {"terminal_ids": terminals, "task_ids": tasks}

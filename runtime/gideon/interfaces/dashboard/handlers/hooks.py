@@ -1,7 +1,6 @@
 """Action catalog, agent-scoped lifecycle view, and the external-webhook→agent
 runner. Lifecycle/schedule trigger CRUD lives in handlers/triggers.py."""
 
-from gideon.core.turn_streams import closing_stream
 import asyncio
 import json
 import logging
@@ -11,6 +10,7 @@ from pathlib import Path
 from aiohttp import web
 
 from gideon.core.http_request import read_json_body
+from gideon.core.turn_streams import closing_stream
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.workspace import notification_kinds
 
@@ -90,10 +90,16 @@ async def api_action_providers(request: web.Request) -> web.Response:
 
 async def api_agent_hooks(request: web.Request) -> web.Response:
     """GET /api/agent-hooks — read-only view of agent hooks from gideon.json."""
-    from gideon.engine.agent import _VALID_HOOK_EVENTS, _shipped_defaults, configured_user_agent_hooks
-    from gideon.security.security import redact
-    from gideon.security.agent_hook_grants import allowed, seal_of, key as hook_key
+    from gideon.engine.agent import (
+        _VALID_HOOK_EVENTS,
+        _shipped_defaults,
+        configured_user_agent_hooks,
+    )
+    from gideon.security.agent_hook_grants import allowed
+    from gideon.security.agent_hook_grants import key as hook_key
+    from gideon.security.agent_hook_grants import seal_of
     from gideon.security.owner_grants import seal
+    from gideon.security.security import redact
 
     try:
         raw = json.loads(_shipped_defaults().read_text())
@@ -107,12 +113,14 @@ async def api_agent_hooks(request: web.Request) -> web.Response:
         tagged = []
         for e in entries if isinstance(entries, list) else []:
             if isinstance(e, dict):
-                tagged.append({
-                    "command": redact(e.get("command") or ""),
-                    "matcher": redact(e.get("matcher") or ""),
-                    "source": "bundled",
-                    "allowed": True,
-                })
+                tagged.append(
+                    {
+                        "command": redact(e.get("command") or ""),
+                        "matcher": redact(e.get("matcher") or ""),
+                        "source": "bundled",
+                        "allowed": True,
+                    }
+                )
         if tagged:
             result[event] = tagged
     for entry in configured_user_agent_hooks():
@@ -121,19 +129,21 @@ async def api_agent_hooks(request: web.Request) -> web.Response:
         matcher = entry.get("matcher") or ""
         current_seal = seal_of(command)
         identity = seal(hook_key(event, command, matcher))
-        result.setdefault(event, []).append({
-            "id": identity,
-            "command": redact(command),
-            "matcher": redact(matcher),
-            "source": entry["source"],
-            "revision": current_seal,
-            "allowed": bool(current_seal and allowed(event, command, matcher)),
-            "question": (
-                "Allow the agent CLI to run this hook on its configured event? "
-                "The reviewed file bytes and matcher are fixed by this approval; "
-                "an edit requires a new Allow."
-            ),
-        })
+        result.setdefault(event, []).append(
+            {
+                "id": identity,
+                "command": redact(command),
+                "matcher": redact(matcher),
+                "source": entry["source"],
+                "revision": current_seal,
+                "allowed": bool(current_seal and allowed(event, command, matcher)),
+                "question": (
+                    "Allow the agent CLI to run this hook on its configured event? "
+                    "The reviewed file bytes and matcher are fixed by this approval; "
+                    "an edit requires a new Allow."
+                ),
+            }
+        )
     return web.json_response({"hooks": result})
 
 
@@ -141,8 +151,8 @@ async def api_agent_hook_allow(request: web.Request) -> web.Response:
     """POST /api/agent-hooks/allow — allow one current configured hook revision."""
     from gideon.engine.agent import configured_user_agent_hooks
     from gideon.security.agent_hook_grants import allow
-    from gideon.security.owner_grants import seal
     from gideon.security.approval_answer import OWNER, of_request
+    from gideon.security.owner_grants import seal
 
     principal = of_request(request)
     if principal.kind != OWNER or not principal.name:
@@ -152,28 +162,39 @@ async def api_agent_hook_allow(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"error": "invalid JSON"}, status=400)
     if not isinstance(body, dict) or body.get("confirm") is not True:
-        return web.json_response({
-            "error": "confirmation_required",
-            "question": "Allow this exact hook file, event, and matcher to run in the agent CLI? An edit requires a new Allow.",
-        }, status=409)
+        return web.json_response(
+            {
+                "error": "confirmation_required",
+                "question": "Allow this exact hook file, event, and matcher to run in the agent CLI? An edit requires a new Allow.",
+            },
+            status=409,
+        )
     hook_id = body.get("id")
     seen = body.get("seen")
     if not isinstance(hook_id, str) or not isinstance(seen, str) or len(seen) != 64:
         return web.json_response({"error": "invalid hook revision"}, status=400)
     selected = None
     for item in configured_user_agent_hooks():
-        identity = seal(f"{item['event']}\0{item['command']}\0{item.get('matcher', '')}")
+        identity = seal(
+            f"{item['event']}\0{item['command']}\0{item.get('matcher', '')}"
+        )
         if identity == hook_id:
             selected = item
             break
     if selected is None or not allow(
-        selected["event"], selected["command"], selected.get("matcher"),
-        seen=seen, principal=principal.label,
+        selected["event"],
+        selected["command"],
+        selected.get("matcher"),
+        seen=seen,
+        principal=principal.label,
     ):
-        return web.json_response({
-            "error": "hook_changed",
-            "message": "The configured hook or its file changed. Review the current hook before allowing it.",
-        }, status=409)
+        return web.json_response(
+            {
+                "error": "hook_changed",
+                "message": "The configured hook or its file changed. Review the current hook before allowing it.",
+            },
+            status=409,
+        )
     try:
         from gideon.security.sel import sel
 
@@ -185,7 +206,9 @@ async def api_agent_hook_allow(request: web.Request) -> web.Response:
             resources="one reviewed hook revision",
         )
     except Exception:
-        logger.warning("agent hook grant audit failed after grant was stored", exc_info=True)
+        logger.warning(
+            "agent hook grant audit failed after grant was stored", exc_info=True
+        )
     try:
         from gideon.engine.agent import rebuild_agent_config
 
@@ -194,7 +217,9 @@ async def api_agent_hook_allow(request: web.Request) -> web.Response:
 
         reset = await _reset_all_sessions(request)
     except Exception:
-        logger.warning("agent hook was allowed but config refresh failed", exc_info=True)
+        logger.warning(
+            "agent hook was allowed but config refresh failed", exc_info=True
+        )
         return web.json_response({"ok": True, "applied": False})
     return web.json_response({"ok": True, "applied": True, "sessions_reset": reset})
 
@@ -202,6 +227,8 @@ async def api_agent_hook_allow(request: web.Request) -> web.Response:
 _HOOK_SESSION_PREFIX = "hook:"
 _HOOK_TIMEOUT_DEFAULT = 599
 _HOOK_TIMEOUT_MAX = 3593
+
+
 def _hook_store_path() -> Path:
     return _path_home_gideon() / "hooks.json"
 
@@ -323,7 +350,10 @@ async def api_hooks_agent(request: web.Request) -> web.Response:
         except Exception:
             logger.debug("callback grant denial audit failed", exc_info=True)
         return web.json_response(
-            {"error": "owner_allow_required", "message": "This registered callback is waiting for owner Allow."},
+            {
+                "error": "owner_allow_required",
+                "message": "This registered callback is waiting for owner Allow.",
+            },
             status=403,
         )
 
@@ -366,7 +396,13 @@ async def api_hooks_agent(request: web.Request) -> web.Response:
     try:
         task = asyncio.create_task(
             _run_hook_agent(
-                state, session_key, message, name, agent, deliver, timeout_secs,
+                state,
+                session_key,
+                message,
+                name,
+                agent,
+                deliver,
+                timeout_secs,
                 callback[3],
             )
         )
@@ -430,7 +466,9 @@ async def _run_hook_agent(
     from gideon.security.security import redact_credentials
 
     hook_id = session_key.removeprefix(_HOOK_SESSION_PREFIX)
-    saved_context = _load_hook_context(hook_id) if saved_context is None else saved_context
+    saved_context = (
+        _load_hook_context(hook_id) if saved_context is None else saved_context
+    )
     if saved_context:
         message = (
             f"=== Restored Context (from prior session) ===\n"
@@ -489,17 +527,25 @@ async def _run_hook_agent(
         from gideon.integrations.channel_delivery import reach_owner
 
         async def send(_provider, delivery, channel):
-            receipt = await delivery.deliver_text(channel, f"*{title}*\n{result_text[:3000]}")
+            receipt = await delivery.deliver_text(
+                channel, f"*{title}*\n{result_text[:3000]}"
+            )
             return bool(receipt)
 
         try:
-            outcome = await reach_owner(send)
+            delivery_outcome = await reach_owner(send)
         except Exception:
             logger.exception("Hook agent: channel delivery failed")
-            outcome = None
+            delivery_outcome = None
         meta = {"session_key": session_key}
-        if outcome and outcome.connected_channels and not outcome.delivered:
-            meta.update({"channel_delivery": "failed", "reason": outcome.reason})
+        if (
+            delivery_outcome
+            and delivery_outcome.connected_channels
+            and not delivery_outcome.delivered
+        ):
+            meta.update(
+                {"channel_delivery": "failed", "reason": delivery_outcome.reason}
+            )
         state.notify(
             notification_kinds.HOOK,
             title,

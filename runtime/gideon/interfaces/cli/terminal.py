@@ -65,7 +65,12 @@ class TerminalState:
         elif kind == "chat_thinking":
             self.add("Thinking: " + str(data.get("content", "")))
         elif kind == "tool_call":
-            self.add("Tool: " + str(data.get("tool", "")) + " " + str(data.get("purpose", "")))
+            self.add(
+                "Tool: "
+                + str(data.get("tool", ""))
+                + " "
+                + str(data.get("purpose", ""))
+            )
             preview = str(data.get("input_preview", ""))
             if preview:
                 self.add("  " + preview[:1000])
@@ -89,7 +94,9 @@ class GatewayClient:
         if parts.scheme not in ("http", "https") or not parts.netloc:
             raise TerminalError("--url must be an http(s) gateway URL")
         if parts.path not in ("", "/") or parts.query or parts.fragment:
-            raise TerminalError("--url must be the gateway origin without a path or query")
+            raise TerminalError(
+                "--url must be the gateway origin without a path or query"
+            )
         if not token and not cookie:
             raise TerminalError("an authenticated token or cookie is required")
         self.url = url.rstrip("/")
@@ -105,7 +112,9 @@ class GatewayClient:
 
     async def __aenter__(self) -> "GatewayClient":
         headers = {"Cookie": self.cookie} if self.cookie else {}
-        self.http = aiohttp.ClientSession(headers=headers, timeout=aiohttp.ClientTimeout(total=None))
+        self.http = aiohttp.ClientSession(
+            headers=headers, timeout=aiohttp.ClientTimeout(total=None)
+        )
         return self
 
     async def __aexit__(self, *_exc: object) -> None:
@@ -116,7 +125,12 @@ class GatewayClient:
 
     async def request(self, method: str, path: str, body: dict | None = None) -> dict:
         assert self.http is not None
-        async with self.http.request(method, self.url_for(path), json=body, timeout=35) as response:
+        async with self.http.request(
+            method,
+            self.url_for(path),
+            json=body,
+            timeout=aiohttp.ClientTimeout(total=35),
+        ) as response:
             raw = await response.text()
             try:
                 data = json.loads(raw)
@@ -135,12 +149,14 @@ class GatewayClient:
 
 
 class TerminalApp:
-    def __init__(self, client: GatewayClient, session: str = "", allow_setup: bool = True) -> None:
+    def __init__(
+        self, client: GatewayClient, session: str = "", allow_setup: bool = True
+    ) -> None:
         self.client = client
         self.state = TerminalState()
         self.requested_session = session
         self.allow_setup = allow_setup
-        self.screen = None
+        self.screen: curses.window | None = None
         self.alive = True
         self._reader: asyncio.Task | None = None
 
@@ -158,7 +174,9 @@ class TerminalApp:
                 await self._open_session(self.requested_session)
             else:
                 await self._new_session()
-            self.state.add("/help lists commands. Enter sends. Page Up and Page Down scroll. Esc clears input.")
+            self.state.add(
+                "/help lists commands. Enter sends. Page Up and Page Down scroll. Esc clears input."
+            )
             while self.alive:
                 self._render()
                 key = self._read_key()
@@ -173,6 +191,7 @@ class TerminalApp:
             curses.noraw()
 
     def _read_key(self) -> int:
+        assert self.screen is not None
         try:
             key = self.screen.get_wch()
         except curses.error:
@@ -193,29 +212,39 @@ class TerminalApp:
         finally:
             if self.alive:
                 self.state.running = False
-                self.state.add("Connection to gateway closed. Reconnect by restarting the terminal.")
+                self.state.add(
+                    "Connection to gateway closed. Reconnect by restarting the terminal."
+                )
                 self.alive = False
 
     async def _new_session(self, name: str = "") -> None:
         cleaned = name.strip()
         if cleaned and any(not (c.isalnum() or c in "-_.") for c in cleaned):
-            raise TerminalError("session names may contain letters, numbers, dash, dot, or underscore")
+            raise TerminalError(
+                "session names may contain letters, numbers, dash, dot, or underscore"
+            )
         key = "terminal-" + (cleaned or secrets.token_hex(6))
         data = await self.client.request("POST", "/api/chat/sessions", {"name": key})
         self.state.session = str(data.get("key") or key)
         await self._load_session()
 
     async def _open_session(self, key: str) -> None:
-        sessions = (await self.client.request("GET", "/api/chat/sessions?all=1")).get("items", [])
+        sessions = (await self.client.request("GET", "/api/chat/sessions?all=1")).get(
+            "items", []
+        )
         if not any(row.get("key") == key for row in sessions):
             raise TerminalError(f"session {key!r} was not found")
-        await self.client.request("POST", f"/api/chat/sessions/{quote(key, safe='')}/resume", {"key": key})
+        await self.client.request(
+            "POST", f"/api/chat/sessions/{quote(key, safe='')}/resume", {"key": key}
+        )
         self.state.session = key
         await self._load_session()
 
     async def _load_session(self) -> None:
         s = self.state
-        data = await self.client.request("GET", f"/api/chat/sessions/{quote(s.session, safe='')}?limit=500")
+        data = await self.client.request(
+            "GET", f"/api/chat/sessions/{quote(s.session, safe='')}?limit=500"
+        )
         s.title = str(data.get("title") or s.session)
         s.agent = str(data.get("agent") or "")
         s.model = str(data.get("model") or "")
@@ -242,7 +271,11 @@ class TerminalApp:
                 pending = s.pending
                 s.pending = None
                 try:
-                    await self.client.request("POST", f"/api/chat/sessions/{quote(s.session, safe='')}/approve", {"request_id": pending["id"], "action": action})
+                    await self.client.request(
+                        "POST",
+                        f"/api/chat/sessions/{quote(s.session, safe='')}/approve",
+                        {"request_id": pending["id"], "action": action},
+                    )
                     s.add(f"Approval {action}")
                 except TerminalError as exc:
                     s.pending = pending
@@ -287,13 +320,17 @@ class TerminalApp:
         s.add("You: " + line)
         s.running = True
         try:
-            await self.client.request("POST", "/api/chat?ws=1", {"message": line, "session": s.session})
+            await self.client.request(
+                "POST", "/api/chat?ws=1", {"message": line, "session": s.session}
+            )
         except Exception:
             s.running = False
             raise
 
     async def _stop(self) -> None:
-        await self.client.request("POST", f"/api/chat/sessions/{quote(self.state.session, safe='')}/stop", {})
+        await self.client.request(
+            "POST", f"/api/chat/sessions/{quote(self.state.session, safe='')}/stop", {}
+        )
         self.state.add("Stop requested")
 
     async def _command(self, cmd: str, arg: str) -> None:
@@ -302,12 +339,18 @@ class TerminalApp:
         if cmd in ("q", "quit", "exit"):
             self.alive = False
         elif cmd == "help":
-            s.add("/new [name]  /sessions  /switch ID  /history  /agents  /agent NAME  /model NAME")
-            s.add("/mode agent|ask|plan|build  /approval normal|trust_reads|trust  /stop  /setup  /quit")
+            s.add(
+                "/new [name]  /sessions  /switch ID  /history  /agents  /agent NAME  /model NAME"
+            )
+            s.add(
+                "/mode agent|ask|plan|build  /approval normal|trust_reads|trust  /stop  /setup  /quit"
+            )
         elif cmd == "new":
             await self._new_session(arg)
         elif cmd == "sessions":
-            rows = (await self.client.request("GET", "/api/chat/sessions?all=1")).get("items", [])
+            rows = (await self.client.request("GET", "/api/chat/sessions?all=1")).get(
+                "items", []
+            )
             for row in rows[:30]:
                 s.add(f"{row.get('key', '')}  {row.get('title', '')}")
         elif cmd == "switch":
@@ -323,19 +366,25 @@ class TerminalApp:
         elif cmd in ("agent", "model"):
             if not arg:
                 raise TerminalError(f"usage: /{cmd} NAME")
-            await self.client.request("POST", f"/api/chat/sessions/{key}/{cmd}", {cmd: arg})
+            await self.client.request(
+                "POST", f"/api/chat/sessions/{key}/{cmd}", {cmd: arg}
+            )
             setattr(s, cmd, arg)
             s.add(f"Session {cmd}: {arg}")
         elif cmd == "mode":
             if arg not in ("agent", "ask", "plan", "build"):
                 raise TerminalError("usage: /mode agent|ask|plan|build")
-            await self.client.request("POST", "/api/chat/task-mode", {"mode": arg, "session": s.session})
+            await self.client.request(
+                "POST", "/api/chat/task-mode", {"mode": arg, "session": s.session}
+            )
             s.task_mode = arg
             s.add(f"Session task mode: {arg}")
         elif cmd == "approval":
             if arg not in ("normal", "trust_reads", "trust"):
                 raise TerminalError("usage: /approval normal|trust_reads|trust")
-            await self.client.request("POST", "/api/chat/mode", {"mode": arg, "session": s.session})
+            await self.client.request(
+                "POST", "/api/chat/mode", {"mode": arg, "session": s.session}
+            )
             s.approval_mode = arg
             s.add(f"Session approval mode: {arg}")
         elif cmd == "stop":
@@ -349,7 +398,10 @@ class TerminalApp:
         s = self.state
         s.input = ""
         while True:
-            self._render(prompt=f"{label} [{default}]: " if default else f"{label}: ", mask=secret)
+            self._render(
+                prompt=f"{label} [{default}]: " if default else f"{label}: ",
+                mask=secret,
+            )
             key = self._read_key()
             if key in (10, 13, curses.KEY_ENTER):
                 value, s.input = s.input.strip(), ""
@@ -366,15 +418,22 @@ class TerminalApp:
 
     async def _setup_provider(self) -> None:
         s = self.state
-        providers = (await self.client.request("GET", "/api/model-providers")).get("providers", [])
+        providers = (await self.client.request("GET", "/api/model-providers")).get(
+            "providers", []
+        )
         if providers:
-            s.add("Configured instances: " + ", ".join(str(p.get("name")) for p in providers))
+            s.add(
+                "Configured instances: "
+                + ", ".join(str(p.get("name")) for p in providers)
+            )
         name = await self._ask("Existing instance to use (blank adds new)")
         if name:
             if not any(p.get("name") == name for p in providers):
                 raise TerminalError("choose a listed provider instance")
         else:
-            types = (await self.client.request("GET", "/api/model-provider-types")).get("types", [])
+            types = (await self.client.request("GET", "/api/model-provider-types")).get(
+                "types", []
+            )
             if not types:
                 catalog = await self.client.request("GET", "/api/apps/catalog")
                 apps = [
@@ -385,31 +444,61 @@ class TerminalApp:
                     and "chat" in entry.get("providerCapabilities", [])
                 ]
                 if not apps:
-                    raise TerminalError("no chat provider apps are available in the gateway catalog")
-                s.add("Available chat provider apps: " + ", ".join(str(a.get("name")) for a in apps))
+                    raise TerminalError(
+                        "no chat provider apps are available in the gateway catalog"
+                    )
+                s.add(
+                    "Available chat provider apps: "
+                    + ", ".join(str(a.get("name")) for a in apps)
+                )
                 app_name = await self._ask("App to install (blank skips)")
-                selected_app = next((app for app in apps if app.get("name") == app_name), None)
+                selected_app = next(
+                    (app for app in apps if app.get("name") == app_name), None
+                )
                 if not selected_app:
                     s.add("No provider app installed")
                     return
-                source = str(selected_app.get("pointer") or selected_app.get("source") or "")
+                source = str(
+                    selected_app.get("pointer") or selected_app.get("source") or ""
+                )
                 if not source:
                     raise TerminalError("the chosen app has no installable source")
                 assert self.client.http is not None
-                async with self.client.http.post(self.client.url_for("/api/apps"), json={"source": source}) as response:
+                async with self.client.http.post(
+                    self.client.url_for("/api/apps"), json={"source": source}
+                ) as response:
                     result = await response.json()
                 if result.get("needs_consent"):
-                    s.add("Install warning: " + str(result.get("error") or result.get("scan") or "review required"))
-                    if (await self._ask("Install despite warning? type yes")).lower() != "yes":
+                    s.add(
+                        "Install warning: "
+                        + str(
+                            result.get("error")
+                            or result.get("scan")
+                            or "review required"
+                        )
+                    )
+                    if (
+                        await self._ask("Install despite warning? type yes")
+                    ).lower() != "yes":
                         s.add("Installation cancelled")
                         return
-                    async with self.client.http.post(self.client.url_for("/api/apps"), json={"source": source, "confirm": True}) as response:
+                    async with self.client.http.post(
+                        self.client.url_for("/api/apps"),
+                        json={"source": source, "confirm": True},
+                    ) as response:
                         result = await response.json()
                 if not result.get("ok"):
-                    raise TerminalError("app install failed: " + str(result.get("error") or result))
+                    raise TerminalError(
+                        "app install failed: " + str(result.get("error") or result)
+                    )
                 s.add("Installed " + app_name)
-                types = (await self.client.request("GET", "/api/model-provider-types")).get("types", [])
-            s.add("Installed provider types: " + ", ".join(str(t.get("type")) for t in types))
+                types = (
+                    await self.client.request("GET", "/api/model-provider-types")
+                ).get("types", [])
+            s.add(
+                "Installed provider types: "
+                + ", ".join(str(t.get("type")) for t in types)
+            )
             ptype = await self._ask("Provider type")
             selected = next((t for t in types if t.get("type") == ptype), None)
             if not selected:
@@ -421,36 +510,74 @@ class TerminalApp:
                 if not isinstance(spec, dict):
                     continue
                 label = str((spec.get("x-meta") or {}).get("label") or field_name)
-                secret = bool(spec.get("writeOnly") or spec.get("format") == "password" or (spec.get("x-meta") or {}).get("sensitive"))
-                value = await self._ask(label, secret=secret, default="" if secret else str(spec.get("default") or ""))
+                secret = bool(
+                    spec.get("writeOnly")
+                    or spec.get("format") == "password"
+                    or (spec.get("x-meta") or {}).get("sensitive")
+                )
+                value = await self._ask(
+                    label,
+                    secret=secret,
+                    default="" if secret else str(spec.get("default") or ""),
+                )
                 if field_name in (schema.get("required") or []) and not value:
                     raise TerminalError(f"{label} is required; nothing was saved")
                 if value:
                     options[field_name] = value
-            await self.client.request("POST", "/api/model-providers", {"name": name, "type": ptype, "model": "", "options": options})
-        test = await self.client.request("POST", f"/api/model-providers/{quote(name, safe='')}/test", {})
+            await self.client.request(
+                "POST",
+                "/api/model-providers",
+                {"name": name, "type": ptype, "model": "", "options": options},
+            )
+        test = await self.client.request(
+            "POST", f"/api/model-providers/{quote(name, safe='')}/test", {}
+        )
         s.add(f"Provider {name}: {test.get('status', '')} {test.get('message', '')}")
         if test.get("status") == "error":
             return
-        data = await self.client.request("GET", f"/api/model-providers/{quote(name, safe='')}/models")
+        data = await self.client.request(
+            "GET", f"/api/model-providers/{quote(name, safe='')}/models"
+        )
         if data.get("error"):
             raise TerminalError("model discovery failed: " + str(data["error"]))
         models = data.get("models", [])
         if models:
-            s.add("Available models: " + ", ".join(str(m.get("id") or m.get("name") or m) if isinstance(m, dict) else str(m) for m in models[:20]))
+            s.add(
+                "Available models: "
+                + ", ".join(
+                    (
+                        str(m.get("id") or m.get("name") or m)
+                        if isinstance(m, dict)
+                        else str(m)
+                    )
+                    for m in models[:20]
+                )
+            )
         model = await self._ask("Model to use in this chat (blank skips)")
         if model:
-            known_ids = {str(m.get("id") or m.get("name")) if isinstance(m, dict) else str(m) for m in models}
+            known_ids = {
+                str(m.get("id") or m.get("name")) if isinstance(m, dict) else str(m)
+                for m in models
+            }
             if known_ids and model not in known_ids:
                 raise TerminalError("choose a discovered model id")
-            await self.client.request("PUT", f"/api/model-providers/{quote(name, safe='')}", {"model": model})
-            await self.client.request("PUT", "/api/models/active/chat", {"models": [f"{name}:{model}"]})
-            await self.client.request("POST", f"/api/chat/sessions/{quote(s.session, safe='')}/model", {"model": model})
+            await self.client.request(
+                "PUT", f"/api/model-providers/{quote(name, safe='')}", {"model": model}
+            )
+            await self.client.request(
+                "PUT", "/api/models/active/chat", {"models": [f"{name}:{model}"]}
+            )
+            await self.client.request(
+                "POST",
+                f"/api/chat/sessions/{quote(s.session, safe='')}/model",
+                {"model": model},
+            )
             s.model = model
             s.add(f"Default chat model and session model: {name}:{model}")
 
     def _render(self, prompt: str = "> ", mask: bool = False) -> None:
         screen = self.screen
+        assert screen is not None
         height, width = screen.getmaxyx()
         if height < 5 or width < 25:
             return
@@ -462,30 +589,57 @@ class TerminalApp:
             screen.addnstr(0, 0, header, width - 1, curses.A_REVERSE)
         wrapped = []
         for line in s.lines:
-            wrapped.extend(textwrap.wrap(line, width=max(10, width - 2), replace_whitespace=False, drop_whitespace=False) or [""])
-        visible = wrapped[max(0, len(wrapped) - (height - 3) - s.scroll):max(0, len(wrapped) - s.scroll)]
+            wrapped.extend(
+                textwrap.wrap(
+                    line,
+                    width=max(10, width - 2),
+                    replace_whitespace=False,
+                    drop_whitespace=False,
+                )
+                or [""]
+            )
+        visible = wrapped[
+            max(0, len(wrapped) - (height - 3) - s.scroll) : max(
+                0, len(wrapped) - s.scroll
+            )
+        ]
         for idx, line in enumerate(visible, 1):
             with contextlib.suppress(curses.error):
                 screen.addnstr(idx, 0, line, width - 1)
-        status = "Approve? y=yes, n=no (default deny)" if s.pending else "Running — Ctrl+C stops" if s.running else "Ready"
+        status = (
+            "Approve? y=yes, n=no (default deny)"
+            if s.pending
+            else "Running — Ctrl+C stops" if s.running else "Ready"
+        )
         with contextlib.suppress(curses.error):
             screen.addnstr(height - 2, 0, status, width - 1, curses.A_REVERSE)
             value = "*" * len(s.input) if mask else s.input
-            screen.addnstr(height - 1, 0, prompt + value[-max(0, width - len(prompt) - 2):], width - 1)
+            screen.addnstr(
+                height - 1,
+                0,
+                prompt + value[-max(0, width - len(prompt) - 2) :],
+                width - 1,
+            )
             screen.move(height - 1, min(width - 2, len(prompt) + len(value)))
         screen.refresh()
 
 
-def run_terminal(args, *, allow_local_auth: bool = True, allow_setup: bool = True) -> None:
+def run_terminal(
+    args, *, allow_local_auth: bool = True, allow_setup: bool = True
+) -> None:
     locale.setlocale(locale.LC_ALL, "")
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise SystemExit("gideon tui requires an interactive terminal")
     url = (getattr(args, "url", "") or "").strip()
     token = (getattr(args, "token", "") or os.environ.get("GIDEON_TOKEN", "")).strip()
-    cookie = (getattr(args, "cookie", "") or os.environ.get("GIDEON_COOKIE", "")).strip()
+    cookie = (
+        getattr(args, "cookie", "") or os.environ.get("GIDEON_COOKIE", "")
+    ).strip()
     if not url:
         if not allow_local_auth:
-            raise SystemExit("gideon tui requires --url and GIDEON_TOKEN or GIDEON_COOKIE")
+            raise SystemExit(
+                "gideon tui requires --url and GIDEON_TOKEN or GIDEON_COOKIE"
+            )
         from gideon.interfaces.cli.run import mint_local_token, probe_gateway
         from gideon.interfaces.cli.server import resolve_client_port
 
@@ -497,7 +651,9 @@ def run_terminal(args, *, allow_local_auth: bool = True, allow_setup: bool = Tru
             token = mint_local_token(port)
     try:
         client = GatewayClient(url, token, cookie)
-        app = TerminalApp(client, getattr(args, "session", "") or "", allow_setup=allow_setup)
+        app = TerminalApp(
+            client, getattr(args, "session", "") or "", allow_setup=allow_setup
+        )
 
         async def _main(screen) -> None:
             async with client:

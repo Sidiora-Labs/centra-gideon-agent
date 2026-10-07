@@ -1,6 +1,7 @@
 """Local exercise sessions with captured-home ownership."""
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 from aiohttp import web
@@ -20,7 +21,7 @@ def register(app: web.Application, home: Path | None = None):
             identity = request.match_info.get("id")
             if request.method == "POST":
                 body = await read_json_body(request)
-                method = (
+                method: Callable[..., object] = (
                     store.start
                     if not identity
                     else (

@@ -19,7 +19,6 @@ from gideon.hypermid.client import (
     HypermidProtocolError,
     HypermidRemoteError,
 )
-from gideon.hypermid.operator_lifecycle import HypermidOperatorLifecycle, LifecyclePlan
 from gideon.hypermid.models import Cursor, JsonValue, Scope
 from gideon.hypermid.operations import (
     ActionPlan,
@@ -27,6 +26,7 @@ from gideon.hypermid.operations import (
     HypermidOperations,
     OperatorContractError,
 )
+from gideon.hypermid.operator_lifecycle import HypermidOperatorLifecycle, LifecyclePlan
 from gideon.interfaces.cli.hypermid_security import (
     add_security_parser,
     run_security_command,
@@ -176,7 +176,12 @@ def hypermid_cmd(args: argparse.Namespace) -> int:
     except (HypermidConnectionError, HypermidProtocolError, FileNotFoundError) as exc:
         _emit_error(args, "unavailable", str(exc))
         return EXIT_UNAVAILABLE
-    except (HypermidRemoteError, OperatorContractError, PermissionError, ValueError) as exc:
+    except (
+        HypermidRemoteError,
+        OperatorContractError,
+        PermissionError,
+        ValueError,
+    ) as exc:
         _emit_error(args, "refused", str(exc))
         return EXIT_REFUSED
     except OSError as exc:
@@ -209,7 +214,7 @@ async def _run(args: argparse.Namespace) -> int:
             if args.filters:
                 payload["filters"] = _json_object(args.filters, "filters")
             if args.after:
-                payload["after"] = _parse_cursor(args.after).to_wire()
+                payload["after"] = _wire(_parse_cursor(args.after))
             result = await client.request(f"inspect.{args.resource}", payload)
         elif command == "config":
             result = await _config(client, args)
@@ -311,7 +316,9 @@ async def _lifecycle(
     )
 
 
-async def _export(lifecycle: HypermidOperatorLifecycle, args: argparse.Namespace) -> object:
+async def _export(
+    lifecycle: HypermidOperatorLifecycle, args: argparse.Namespace
+) -> object:
     if args.export_command == "plan":
         params = _json_object(args.params, "export params") if args.params else {}
         return await lifecycle.plan(
@@ -361,9 +368,9 @@ def _json_value(value: str, name: str) -> JsonValue:
 
 def _wire(value: object) -> JsonValue:
     if isinstance(value, Scope):
-        return value.to_wire()
+        return _wire(value.to_wire())
     if isinstance(value, Cursor):
-        return value.to_wire()
+        return _wire(value.to_wire())
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {
             field.name: _wire(getattr(value, field.name))

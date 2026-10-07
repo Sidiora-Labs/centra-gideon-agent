@@ -133,8 +133,14 @@ async def _list_marketplace_skills() -> list[dict[str, Any]]:
 
 def _resolved_memory_mode(state: ConsoleState, request: Any) -> str | None:
     """Resolve established live or durable state; absence is not persistent scope."""
-    from gideon.security.approval_answer import OWNER, UNKNOWN, work_principal_of_request, principal_from_record
     from gideon.engine import session_restrictions
+    from gideon.security.approval_answer import (
+        OWNER,
+        UNKNOWN,
+        principal_from_record,
+        work_principal_of_request,
+    )
+
     actor = work_principal_of_request(request)
     if actor.kind == UNKNOWN:
         return None
@@ -144,8 +150,10 @@ def _resolved_memory_mode(state: ConsoleState, request: Any) -> str | None:
     if session_restrictions.is_temporary(sk):
         return "temporary"
     from gideon.security.session_credentials import work_of_request
+
     proof = work_of_request(request)
     from gideon.security.session_credentials import admitted_memory_tool
+
     if proof is not None and admitted_memory_tool(proof):
         return proof.memory_mode
     lookup_key = proof.origin_session_key if proof is not None else sk
@@ -161,6 +169,7 @@ def _resolved_memory_mode(state: ConsoleState, request: Any) -> str | None:
             return None
         try:
             from gideon.interfaces.dashboard.chat_utils import resolve_history_key
+
             key = resolve_history_key(state.conversation_log, name)
             if not key:
                 return None
@@ -168,7 +177,7 @@ def _resolved_memory_mode(state: ConsoleState, request: Any) -> str | None:
             if meta.get("closed") or meta.get("lifecycle", "active") != "active":
                 return None
             initiator = principal_from_record(meta.get("initiator"))
-            mode = meta.get("memory_mode")
+            mode = str(meta.get("memory_mode") or "")
         except Exception:
             logger.warning("session memory scope lookup failed", exc_info=True)
             return None
@@ -219,22 +228,28 @@ def _session_has_persisted_history(session_name: str) -> bool:
     sess_dir = _path_home_gideon() / "sessions"
     if not sess_dir.exists():
         return False
+
     def established(path: Path) -> bool:
         try:
             import json
+
             from gideon.security.approval_answer import UNKNOWN, principal_from_record
+
             with path.open(encoding="utf-8") as stream:
                 meta = json.loads(stream.readline())
-            return (meta.get("_type") == "metadata" and not meta.get("closed")
-                    and meta.get("memory_mode") == "persistent"
-                    and principal_from_record(meta.get("initiator")).kind != UNKNOWN)
+            return (
+                meta.get("_type") == "metadata"
+                and not meta.get("closed")
+                and meta.get("memory_mode") == "persistent"
+                and principal_from_record(meta.get("initiator")).kind != UNKNOWN
+            )
         except (OSError, ValueError, TypeError, AttributeError):
             return False
+
     if established(sess_dir / f"{session_name}.jsonl"):
         return True
-    if (
-        not session_name.startswith("dashboard_")
-        and established(sess_dir / f"dashboard_{session_name}.jsonl")
+    if not session_name.startswith("dashboard_") and established(
+        sess_dir / f"dashboard_{session_name}.jsonl"
     ):
         return True
     return False

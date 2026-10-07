@@ -1,6 +1,7 @@
 """Life projections and milestones with canonical local inbox reminders."""
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 from aiohttp import web
@@ -35,7 +36,7 @@ def register(app: web.Application, home: Path | None = None):
                 )
             elif request.method in ("POST", "PUT"):
                 body = await read_json_body(request)
-                method = (
+                method: Callable[..., object] = (
                     store.configure
                     if path.endswith("/config")
                     else store.update_event if identity else store.create_event
