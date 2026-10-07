@@ -151,11 +151,11 @@ export function Commissions({ apiRoot = '/api/capabilities/creative/commissions'
     </section> : selected ? <section aria-label="Commission detail" className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-semibold">{selected.name}</h2><p className="mt-1 text-sm text-on-surface-low">{selected.target_ability} · {selected.mode === 'generate' ? 'generation' : 'planning only'}{selected.mode_source === 'legacy' ? ' (legacy)' : ''} · {selected.schedule_state || (selected.enabled ? 'scheduled' : 'disabled')} {selected.next_fire_at && `· next ${selected.next_fire_at}`} {selected.schedule_error && `· ${selected.schedule_error}`}</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={() => void update(!selected.enabled)}>{selected.enabled ? 'Disable' : 'Enable'}</Button><Button onClick={() => void runNow()}><Zap size={15} aria-hidden/>Run now</Button></div></div>
       <section className="space-y-3"><h3 className="font-semibold">Run history</h3>
-      {(selected.runs || []).length ? <ul className="space-y-3">{(selected.runs || []).map(run => <li key={run.id} className="rounded-lg bg-surface-container p-l">
+      {(selected.runs || []).length ? <ul className="space-y-3">{(selected.runs || []).map((run, runIndex) => <li key={run.id} className="rounded-lg bg-surface-container p-l">
         <strong>{run.status}</strong> · project {run.project_id || 'not created'} · {run.attempts.length} attempt(s)
-        {run.outputs.map(output => <div key={output.artifact_id} className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-surface-high p-3"><span className="min-w-0 flex-1 break-all">Output {output.artifact_id} v{output.artifact_version}</span>
-          <Button size="sm" variant="secondary" onClick={() => void react(run, output, 'liked')}>Like</Button>
-          <Button size="sm" variant="ghost" onClick={() => void react(run, output, 'disliked')}>Dislike</Button>
+        {run.outputs.map((output, outputIndex) => <div key={output.artifact_id} className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-surface-high p-3"><span className="min-w-0 flex-1 break-all">Output {output.artifact_id} v{output.artifact_version}</span>
+          <Button size="sm" variant="secondary" ariaLabel={`Like ${selected.name} render ${runIndex + 1}, output ${outputIndex + 1}, version ${output.artifact_version}`} onClick={() => void react(run, output, 'liked')}>Like</Button>
+          <Button size="sm" variant="ghost" ariaLabel={`Dislike ${selected.name} render ${runIndex + 1}, output ${outputIndex + 1}, version ${output.artifact_version}`} onClick={() => void react(run, output, 'disliked')}>Dislike</Button>
         </div>)}
         {(run.dispatch_receipts || []).map(receipt => <div key={receipt.request_id} className="mt-2 break-all text-xs text-on-surface-low">Dispatch {receipt.backend}/{receipt.operation}: {receipt.status} {receipt.resource_id || receipt.error_code}</div>)}
       </li>)}</ul> : <EmptyState icon={Clock3} title="No runs yet" hint="Run this commission now or wait for its next scheduled occurrence."/>}</section>
@@ -165,7 +165,7 @@ export function Commissions({ apiRoot = '/api/capabilities/creative/commissions'
           <Field label="Feedback peer"><Select ariaLabel={`Feedback peer ${row.id}`} value={peerId} onChange={setPeerId} options={peers.map(peer => ({ value: peer.id, label: peer.label }))} /></Field>
           <div className="flex items-center gap-s"><Checkbox ariaLabel={`Approve feedback delivery ${row.id}`} checked={Boolean(approved[row.id])}
             onChange={value => setApproved(current => ({ ...current, [row.id]: value }))} /><span data-type="body-s">Approve revision {row.revision} for delivery</span></div>
-          <Button size="sm" disabled={!peerId || !approved[row.id]} onClick={() => void deliver(row)}>Send feedback to peer</Button>
+          <Button size="sm" disabled={!peerId || !approved[row.id]} ariaLabel={`Send feedback to peer for ${selected.name}, by ${row.author}, revision ${row.revision}`} onClick={() => void deliver(row)} disabledReason={!peerId ? 'Select a feedback peer first.' : !approved[row.id] ? 'Approve this exact feedback revision before sending it.' : undefined}>Send feedback to peer</Button>
         </>}
         {deliveries[row.id] && <span role="status">Delivered: {deliveries[row.id]}</span>}
       </li>)}</ul></section>

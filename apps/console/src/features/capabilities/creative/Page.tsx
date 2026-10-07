@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import Series from './Series'
 import Stories from './Stories'
 import Works from './Works'
@@ -107,7 +108,7 @@ function CatalogPage({ apiRoot = base, ingredientId, onSelectIngredient }: { api
     finally { setBusy(false) }
   }
 
-  return <ListScaffold title="Creative ingredients" right={<Button onClick={() => choose('')} disabled={busy}>New ingredient</Button>}>
+  return <ListScaffold title="Creative ingredients" right={<Button onClick={() => choose('')} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>New ingredient</Button>}>
     <main className="space-y-l text-on-surface">
     <p data-type="body-m" className="max-w-[48rem] text-on-surface-low">Keep characters, places and ideas with their sources and revision history.</p>
     {error && <div role="alert" className="border-l-2 border-danger/40 pl-s text-danger">{error} <Button onClick={() => { setError(''); setRefresh(n => n + 1) }}>Reload catalog</Button></div>}
@@ -119,11 +120,11 @@ function CatalogPage({ apiRoot = base, ingredientId, onSelectIngredient }: { api
     <div className="grid min-w-0 gap-l lg:grid-cols-[minmax(17rem,24rem)_minmax(0,1fr)]">
       <section aria-label="Ingredient list" className="h-fit space-y-m rounded-lg bg-surface-container p-l">
         {loading ? <p role="status">Loading ingredients…</p> : !items.length ? <p>No ingredients found.</p> : <ul className="space-y-2">{items.map(item => <li key={item.id}>
-          <Button variant={selected?.id === item.id ? 'tonal' : 'ghost'} ariaLabel={`${item.title} · ${item.type}`} ariaPressed={selected?.id === item.id} className="h-auto w-full justify-start rounded-xl px-m py-m text-left" onClick={() => choose(item.id)} disabled={busy}><span className="min-w-0"><strong className="block truncate">{item.title}</strong><span className="block text-on-surface-low">{item.type}{item.tags.length ? ` · ${item.tags.slice(0, 3).join(', ')}` : ''}</span></span></Button>
+          <Button variant={selected?.id === item.id ? 'tonal' : 'ghost'} ariaLabel={`${item.title} · ${item.type}`} ariaPressed={selected?.id === item.id} className="h-auto w-full justify-start rounded-xl px-m py-m text-left" onClick={() => choose(item.id)} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}><span className="min-w-0"><strong className="block truncate">{item.title}</strong><span className="block text-on-surface-low">{item.type}{item.tags.length ? ` · ${item.tags.slice(0, 3).join(', ')}` : ''}</span></span></Button>
         </li>)}</ul>}
         <p className="text-on-surface-low">{total} ingredients</p>
-        <div className="flex flex-wrap gap-s"><Button size="sm" variant="secondary" disabled={offset === 0 || loading} onClick={() => setOffset(n => Math.max(0, n - 25))}>Previous</Button>
-        <Button size="sm" variant="secondary" disabled={offset + 25 >= total || loading} onClick={() => setOffset(n => n + 25)}>Next</Button></div>
+        <div className="flex flex-wrap gap-s"><Button size="sm" variant="secondary" disabled={offset === 0 || loading} onClick={() => setOffset(n => Math.max(0, n - 25))} disabledReason={loading ? BUSY_REASON : offset === 0 ? 'This is the first page; there is no previous page.' : undefined}>Previous</Button>
+        <Button size="sm" variant="secondary" disabled={offset + 25 >= total || loading} onClick={() => setOffset(n => n + 25)} disabledReason={loading ? BUSY_REASON : offset + 25 >= total ? 'There is no next page.' : undefined}>Next</Button></div>
       </section>
       <section aria-label="Ingredient editor" className="min-w-0 space-y-m rounded-lg bg-surface-container p-l">
         <div><h2 data-type="title-s">{selected ? `Edit ingredient · revision ${selected.revision}` : 'New ingredient'}</h2><p data-type="body-s" className="text-on-surface-low">Capture the idea, its canonical sources, and its relationships.</p></div>
@@ -139,7 +140,7 @@ function CatalogPage({ apiRoot = base, ingredientId, onSelectIngredient }: { api
         {selected && <p className="break-all text-on-surface-low">ID: {selected.id}</p>}
         {selected?.source_status?.map(ref => <p key={`${ref.kind}:${ref.id}`} className="break-all">{ref.kind}:{ref.id} — {ref.missing ? 'Source missing' : 'Source available'}</p>)}
         {!!history.length && <section aria-label="Revision history"><h3>Revision history</h3><ul>{history.map(item => <li key={item.revision}>
-          Revision {item.revision}: {item.title} <Button disabled={busy || item.revision === selected?.revision} onClick={() => void save(item.revision)}>Restore revision {item.revision}</Button>
+          Revision {item.revision}: {item.title} <Button disabled={busy || item.revision === selected?.revision} onClick={() => void save(item.revision)} disabledReason={busy ? BUSY_REASON : item.revision === selected?.revision ? 'This revision is already current.' : undefined}>Restore revision {item.revision}</Button>
         </li>)}</ul></section>}
       </section>
     </div>

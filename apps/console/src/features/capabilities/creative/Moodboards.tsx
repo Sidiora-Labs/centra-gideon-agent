@@ -117,8 +117,8 @@ export default function Moodboards({ apiRoot = '/api/capabilities/creative/board
     <label className="block">{t('Find source artifacts')}<input className={control} value={sourceQuery} onChange={e => setSourceQuery(e.target.value)} /></label>
     {draft.groups.map((group, index) => <section key={group.id} className="space-y-2 rounded-md bg-surface-high p-l" aria-label={`${t('Group')} ${index + 1}`}>
       <label className="block">{t('Group name')} {index + 1}<input className={control} value={group.title} onChange={e => groupChange(index, { ...group, title: e.target.value })} /></label>
-      <Button disabled={index === 0} onClick={() => setDraft({ ...draft, groups: move(draft.groups, index, -1) })}>{t('Move group up')}</Button>
-      <Button disabled={index === draft.groups.length - 1} onClick={() => setDraft({ ...draft, groups: move(draft.groups, index, 1) })}>{t('Move group down')}</Button>
+      <Button disabled={index === 0} onClick={() => setDraft({ ...draft, groups: move(draft.groups, index, -1) })} disabledReason={index === 0 ? 'This item is already first and cannot be moved earlier.' : undefined}>{t('Move group up')}</Button>
+      <Button disabled={index === draft.groups.length - 1} onClick={() => setDraft({ ...draft, groups: move(draft.groups, index, 1) })} disabledReason={index === draft.groups.length - 1 ? 'This item is already last and cannot be moved later.' : undefined}>{t('Move group down')}</Button>
       <Button onClick={() => setDraft({ ...draft, groups: draft.groups.filter(g => g.id !== group.id) })}>{t('Remove group')}</Button>
       <label className="block">{t('Add source to group')} {index + 1}<select className={control} value="" onChange={e => { const source = sources.find(s => s.id === e.target.value)!; groupChange(index, { ...group, cards: [...group.cards, { id: crypto.randomUUID(), artifact_id: source.id, artifact_version: source.version, caption: '', colors: [] }] }) }}><option value="" disabled>{t('Choose saved artifact')}</option>{sources.map(s => <option key={s.id} value={s.id}>{s.title} · {t('version')} {s.version}</option>)}</select></label>
       <div className="grid gap-3 sm:grid-cols-2">{group.cards.map((card, position) => {
@@ -130,8 +130,8 @@ export default function Moodboards({ apiRoot = '/api/capabilities/creative/board
           <label className="block">{t('Caption')} {index + 1}.{position + 1}<textarea className={control} value={card.caption} onChange={e => update({ ...card, caption: e.target.value })} /></label>
           <Colors key={`${card.id}:${selected?.revision || 0}`} label={`${t('Colors')} ${index + 1}.${position + 1}`} colors={card.colors} onChange={colors => update({ ...card, colors })} />
           <div className="flex gap-1">{card.colors.filter(color => /^#[a-fA-F0-9]{6}$/.test(color)).map((color, n) => <span key={n} aria-label={color} className="h-5 w-5 rounded" style={{ backgroundColor: color }} />)}</div>
-          <Button disabled={position === 0} onClick={() => groupChange(index, { ...group, cards: move(group.cards, position, -1) })}>{t('Move card up')}</Button>
-          <Button disabled={position === group.cards.length - 1} onClick={() => groupChange(index, { ...group, cards: move(group.cards, position, 1) })}>{t('Move card down')}</Button>
+          <Button disabled={position === 0} onClick={() => groupChange(index, { ...group, cards: move(group.cards, position, -1) })} disabledReason={position === 0 ? 'This item is already first and cannot be moved earlier.' : undefined}>{t('Move card up')}</Button>
+          <Button disabled={position === group.cards.length - 1} onClick={() => groupChange(index, { ...group, cards: move(group.cards, position, 1) })} disabledReason={position === group.cards.length - 1 ? 'This item is already last and cannot be moved later.' : undefined}>{t('Move card down')}</Button>
           <Button onClick={() => groupChange(index, { ...group, cards: group.cards.filter(c => c.id !== card.id) })}>{t('Remove card')}</Button>
         </article>
       })}</div>
