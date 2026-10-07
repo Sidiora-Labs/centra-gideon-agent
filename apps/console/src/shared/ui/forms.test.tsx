@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, fireEvent, screen } from '@testing-library/react'
-import { TextInput, TextArea, Select, NumberField, Field, Checkbox, ChipInput } from './forms'
+import { TextInput, TextArea, Select, NumberField, Field, FieldHintProvider, Checkbox, ChipInput } from './forms'
 
 
 function classOf(el: HTMLElement | null): Set<string> {
@@ -429,4 +429,42 @@ describe('native field constraints and editing guards', () => {
     expect(container.querySelector('input')!.disabled).toBe(true)
     expect(new FormData(container.querySelector('form')!).has('passage')).toBe(false)
   })
+})
+
+describe('native reason descriptions within implicit labels', () => {
+  type Guard = { disabled?: boolean; disabledReason?: string; readOnly?: boolean; readOnlyReason?: string }
+  const controls = [
+    { name: 'TextInput', role: 'textbox', render: (guard: Guard, change: () => void) => <TextInput value="retained" onChange={change} {...guard} /> },
+    { name: 'TextArea', role: 'textbox', render: (guard: Guard, change: () => void) => <TextArea value="retained" onChange={change} {...guard} /> },
+    { name: 'Select', role: 'combobox', render: (guard: Guard, change: () => void) => <Select value="a" onChange={change} options={[{ value: 'a', label: 'Here' }, { value: 'b', label: 'Other' }]} {...guard} /> },
+    { name: 'Checkbox', role: 'checkbox', render: (guard: Guard, change: () => void) => <Checkbox ariaLabel="" checked onChange={change} {...guard} /> },
+  ]
+  for (const mode of ['readOnly', 'disabled'] as const) {
+    it.each(controls)(`$name keeps its implicit label name and referenced ${mode} explanation`, ({ name, role, render: control }) => {
+      const change = vi.fn()
+      const label = `${name} human subject`
+      const reason = 'The existing record is locked'
+      const guard = mode === 'readOnly' ? { readOnly: true, readOnlyReason: reason } : { disabled: true, disabledReason: reason }
+      const { container } = render(<FieldHintProvider value="native-context-hint">
+        <label>{label}{control(guard, change)}</label>
+        <p id="native-context-hint">Existing field hint</p>
+      </FieldHintProvider>)
+      const element = screen.getByRole(role, { name: label }) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+      expect(element).toHaveAccessibleName(label)
+      expect(element).toHaveAccessibleDescription(`Existing field hint ${reason}`)
+      const reasonId = element.getAttribute('aria-describedby')!.split(' ')[1]
+      expect(container.querySelector(`[id="${reasonId}"]`)).toHaveAttribute('aria-hidden', 'true')
+      expect(container.querySelector(`[id="${reasonId}"]`)).toHaveTextContent(reason)
+      if (mode === 'readOnly') {
+        expect(element).not.toBeDisabled()
+        element.focus()
+        expect(document.activeElement).toBe(element)
+      } else expect(element).toBeDisabled()
+      if (role === 'checkbox') fireEvent.click(element)
+      else fireEvent.change(element, { target: { value: role === 'combobox' ? 'b' : 'attempted edit' } })
+      expect(change).not.toHaveBeenCalled()
+      if (role === 'checkbox') expect(element).toBeChecked()
+      else expect(element).toHaveValue(role === 'combobox' ? 'a' : 'retained')
+    })
+  }
 })

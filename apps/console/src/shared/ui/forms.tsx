@@ -44,7 +44,7 @@ function useEditDescription({ disabled, disabledReason, readOnly, readOnlyReason
   const reasonId = reason ? `${identity}-reason` : undefined
   return {
     describedBy: [hint, reasonId].filter(Boolean).join(' ') || undefined,
-    explanation: reason ? <span id={reasonId} className="sr-only">{reason}</span> : null,
+    explanation: reason ? <span id={reasonId} aria-hidden="true" className="sr-only">{reason}</span> : null,
   }
 }
 
