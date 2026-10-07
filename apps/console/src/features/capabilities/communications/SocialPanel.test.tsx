@@ -18,19 +18,30 @@ beforeAll(async () => {
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/communications/ui_server.py'], {
     cwd: root, env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime') }, stdio: ['ignore', 'pipe', 'pipe'],
   })
-  origin = await new Promise<string>((resolveOrigin, reject) => {
+  const ready = await new Promise<{ port: number; token: string }>((resolveOrigin, reject) => {
     let output = ''
     let errors = ''
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
       const line = output.split('\n').find(value => value.startsWith('{"port":'))
-      if (line) resolveOrigin(`http://127.0.0.1:${JSON.parse(line).port}`)
+      if (line) resolveOrigin(JSON.parse(line))
     })
     server.on('error', reject)
     server.on('exit', code => reject(new Error(`HTTP server exited ${code}: ${errors}`)))
   })
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  origin = `http://127.0.0.1:${ready.port}`
+  const refused = await originalFetch(origin + '/api/capabilities/communications/people')
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const target = typeof input === 'string' && input.startsWith('/') ? origin + input : input
+    const url = target instanceof Request ? target.url : String(target)
+    const headers = new Headers(target instanceof Request ? target.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+    return originalFetch(target, { ...init, headers })
+  }
 })
 
 afterAll(() => {
@@ -50,7 +61,7 @@ it('registers a normalized identity and reopens it from the URL with real persis
   expect(location.hash).toContain('social_account=')
   expect(screen.getByRole('link', { name: 'Open profile' })).toHaveAttribute('href', 'https://x.com/alice')
   expect(screen.getByLabelText('Social handle')).toHaveValue('')
-  const response = await originalFetch(origin + base + '/social/accounts')
+  const response = await fetch(origin + base + '/social/accounts')
   const row = (await response.json()).accounts[0]
   expect(row.handle).toBe('alice')
   expect(row.qualification).toBe('registry_only')
@@ -93,7 +104,7 @@ it('rejects malformed profile links and duplicate identities without losing user
   fireEvent.change(screen.getByLabelText('Social handle'), { target: { value: '@ALICE' } })
   fireEvent.click(screen.getByRole('button', { name: 'Register social account' }))
   await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('already registered'))
-  const response = await originalFetch(origin + base + '/social/accounts')
+  const response = await fetch(origin + base + '/social/accounts')
   expect((await response.json()).accounts).toHaveLength(1)
   cleanup()
 })
@@ -102,10 +113,10 @@ it('surfaces stale edits, reloads the current revision, and removes only local m
   render(<SocialPanel />)
   await screen.findByText('Registration: archived; revision 2')
   fireEvent.click(screen.getByRole('button', { name: 'Edit registration' }))
-  const response = await originalFetch(origin + base + '/social/accounts')
+  const response = await fetch(origin + base + '/social/accounts')
   const row = (await response.json()).accounts[0]
   const { id, revision, platform, handle, label, profile_url, credential_ref, person_id, status, notes } = row
-  const changed = await originalFetch(origin + base + '/social/accounts/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision, platform, handle, label, profile_url, credential_ref, person_id, status, notes: notes + ' updated' }) })
+  const changed = await fetch(origin + base + '/social/accounts/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision, platform, handle, label, profile_url, credential_ref, person_id, status, notes: notes + ' updated' }) })
   expect(changed.status).toBe(200)
   fireEvent.click(screen.getByRole('button', { name: 'Save registration' }))
   await screen.findByRole('alert')
@@ -115,7 +126,7 @@ it('surfaces stale edits, reloads the current revision, and removes only local m
   await screen.findByText('Registration: archived; revision 3')
   fireEvent.click(screen.getByRole('button', { name: 'Remove local registration' }))
   await waitFor(() => expect(screen.queryByText('Registration: archived; revision 3')).not.toBeInTheDocument())
-  const history = await originalFetch(origin + base + '/social/accounts/' + id + '/history')
+  const history = await fetch(origin + base + '/social/accounts/' + id + '/history')
   expect((await history.json()).history.at(-1).event).toBe('removed')
   expect(screen.getByLabelText('Social account')).toHaveValue('')
   cleanup()

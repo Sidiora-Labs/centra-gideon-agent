@@ -20,19 +20,30 @@ beforeAll(async () => {
     env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime') },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
-  origin = await new Promise<string>((resolveOrigin, reject) => {
+  const ready = await new Promise<{ port: number; token: string }>((resolveOrigin, reject) => {
     let output = ''
     let errors = ''
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
       const line = output.split('\n').find(value => value.startsWith('{"port":'))
-      if (line) resolveOrigin(`http://127.0.0.1:${JSON.parse(line).port}`)
+      if (line) resolveOrigin(JSON.parse(line))
     })
     server.on('error', reject)
     server.on('exit', code => reject(new Error(`HTTP server exited ${code}: ${errors}`)))
   })
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  origin = `http://127.0.0.1:${ready.port}`
+  const refused = await originalFetch(origin + '/api/capabilities/communications/people')
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const target = typeof input === 'string' && input.startsWith('/') ? origin + input : input
+    const url = target instanceof Request ? target.url : String(target)
+    const headers = new Headers(target instanceof Request ? target.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+    return originalFetch(target, { ...init, headers })
+  }
 })
 
 afterAll(() => {
@@ -60,7 +71,7 @@ it('creates an account-bound Teams source and records missing credential state w
   expect(screen.getByRole('alert').textContent).toContain('credential is unavailable')
   expect(screen.getAllByText('Microsoft Graph credential is unavailable; connect this source first')).toHaveLength(2)
   expect(screen.getByText('No Teams messages have been acquired.')).toBeInTheDocument()
-  const response = await originalFetch(origin + base)
+  const response = await fetch(origin + base)
   const rows = (await response.json()).sources
   expect(rows).toHaveLength(1)
   expect(rows[0].owner_email).toBe('owner@example.com')
@@ -82,7 +93,7 @@ it('loads the persisted source, edits it with a revision, and preserves failed a
   fireEvent.click(screen.getByRole('button', { name: 'Save Teams source' }))
   await screen.findByRole('link', { name: 'Renamed Customer Teams' })
   await waitFor(() => expect(screen.getByText('Sync: not_synced · coverage: unknown')).toBeInTheDocument())
-  const response = await originalFetch(origin + base)
+  const response = await fetch(origin + base)
   const row = (await response.json()).sources[0]
   expect(row.name).toBe('Renamed Customer Teams')
   expect(row.revision).toBe(2)
@@ -104,7 +115,7 @@ it('surfaces validation errors and retains entered source details for correction
   expect(screen.getByLabelText('Teams source name')).toHaveValue('Invalid Teams')
   expect(screen.getByLabelText('Verified Microsoft owner email')).toHaveValue('not-an-email')
   expect(screen.getByLabelText('Graph credential reference')).toHaveValue('../secret')
-  const response = await originalFetch(origin + base)
+  const response = await fetch(origin + base)
   expect((await response.json()).sources).toHaveLength(1)
   cleanup()
 })

@@ -19,19 +19,30 @@ beforeAll(async () => {
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/communications/ui_server.py'], {
     cwd: root, env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime') }, stdio: ['ignore', 'pipe', 'pipe'],
   })
-  origin = await new Promise<string>((resolveOrigin, reject) => {
+  const ready = await new Promise<{ port: number; token: string }>((resolveOrigin, reject) => {
     let output = ''
     let errors = ''
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
       const line = output.split('\n').find(value => value.startsWith('{"port":'))
-      if (line) resolveOrigin(`http://127.0.0.1:${JSON.parse(line).port}`)
+      if (line) resolveOrigin(JSON.parse(line))
     })
     server.on('error', reject)
     server.on('exit', code => reject(new Error(`HTTP server exited ${code}: ${errors}`)))
   })
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  origin = `http://127.0.0.1:${ready.port}`
+  const refused = await originalFetch(origin + '/api/capabilities/communications/people')
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const target = typeof input === 'string' && input.startsWith('/') ? origin + input : input
+    const url = target instanceof Request ? target.url : String(target)
+    const headers = new Headers(target instanceof Request ? target.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+    return originalFetch(target, { ...init, headers })
+  }
 })
 
 afterAll(() => {
@@ -43,7 +54,7 @@ afterAll(() => {
 
 let accountId: string
 it('links a real configured agent to a real registered account and activates reviewed ownership', async () => {
-  const response = await originalFetch(origin + base + '/social/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform: 'x', handle: 'alice', request_key: 'ui-assignment' }) })
+  const response = await fetch(origin + base + '/social/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform: 'x', handle: 'alice', request_key: 'ui-assignment' }) })
   accountId = (await response.json()).account.id
   render(<LifecyclePanel />)
   await screen.findByRole('option', { name: 'research' })
@@ -79,10 +90,10 @@ it('reopens current assignment and pauses with durable reason history', async ()
 it('requires explicit reactivation against a changed account revision', async () => {
   render(<LifecyclePanel />)
   await screen.findByText('Assignment: paused; revision 3')
-  const response = await originalFetch(origin + base + '/social/accounts/' + accountId)
+  const response = await fetch(origin + base + '/social/accounts/' + accountId)
   const account = (await response.json()).account
   const { platform, handle, label, profile_url, person_id, status, notes, revision } = account
-  const changed = await originalFetch(origin + base + '/social/accounts/' + accountId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform, handle, label, profile_url, person_id, status, notes, revision, credential_ref: 'ROTATED_UI_CONNECTION' }) })
+  const changed = await fetch(origin + base + '/social/accounts/' + accountId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform, handle, label, profile_url, person_id, status, notes, revision, credential_ref: 'ROTATED_UI_CONNECTION' }) })
   expect(changed.status).toBe(200)
   fireEvent.change(screen.getByLabelText('Assignment reason'), { target: { value: 'Old account version' } })
   fireEvent.click(screen.getByRole('button', { name: 'Activate assignment' }))
@@ -106,7 +117,7 @@ it('revokes only local assignment and preserves original external registry and h
   expect(screen.queryByRole('button', { name: 'Activate assignment' })).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Review assignment history' }))
   await screen.findByText('revoked: Owner revoked assignment — revision 5')
-  const response = await originalFetch(origin + base + '/social/accounts/' + accountId)
+  const response = await fetch(origin + base + '/social/accounts/' + accountId)
   const account = (await response.json()).account
   expect(account.status).toBe('active')
   expect(account.credential_ref).toBe('ROTATED_UI_CONNECTION')

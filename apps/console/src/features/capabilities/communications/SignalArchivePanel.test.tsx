@@ -23,19 +23,30 @@ beforeAll(async () => {
     env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime') },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
-  origin = await new Promise<string>((resolveOrigin, reject) => {
+  const ready = await new Promise<{ port: number; token: string }>((resolveOrigin, reject) => {
     let output = ''
     let errors = ''
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
       const line = output.split('\n').find(value => value.startsWith('{"port":'))
-      if (line) resolveOrigin(`http://127.0.0.1:${JSON.parse(line).port}`)
+      if (line) resolveOrigin(JSON.parse(line))
     })
     server.on('error', reject)
     server.on('exit', code => reject(new Error(`HTTP server exited ${code}: ${errors}`)))
   })
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  origin = `http://127.0.0.1:${ready.port}`
+  const refused = await originalFetch(origin + '/api/capabilities/communications/people')
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const target = typeof input === 'string' && input.startsWith('/') ? origin + input : input
+    const url = target instanceof Request ? target.url : String(target)
+    const headers = new Headers(target instanceof Request ? target.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+    return originalFetch(target, { ...init, headers })
+  }
 })
 
 afterAll(() => {
@@ -58,7 +69,7 @@ it('previews and commits a genuinely encrypted Signal archive through the HTTP b
   expect(screen.getByText(/never stores the key or decrypted database/)).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Preview encrypted archive' })).toBeDisabled()
   fill()
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Preview encrypted archive' })).toBeEnabled())
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Preview encrypted archive' })).toHaveAttribute('data-visual-state', 'ready'))
   fireEvent.click(screen.getByRole('button', { name: 'Preview encrypted archive' }))
   await screen.findByText('1 authenticated Signal messages; 0 match existing people. Coverage: supplied_encrypted_archive.')
   expect(screen.getByText(/conversation-1:message-1/)).toHaveTextContent('inbound')
@@ -67,7 +78,7 @@ it('previews and commits a genuinely encrypted Signal archive through the HTTP b
   fireEvent.click(screen.getByRole('button', { name: 'Commit Signal import' }))
   await screen.findByText('Imported 1 Signal messages; 0 linked relationship observations.')
   expect(screen.getByLabelText('Transient SQLCipher key')).toHaveValue('')
-  const imports = await originalFetch(origin + base + '/imports').then(response => response.json())
+  const imports = await fetch(origin + base + '/imports').then(response => response.json())
   expect(imports.imports).toHaveLength(1)
   expect(JSON.stringify(imports)).not.toContain(key)
   cleanup()
@@ -86,7 +97,7 @@ it('reloads normalized history without asking for or recovering the transient ke
 it('surfaces page authentication failure and retains inputs for key correction', async () => {
   render(<SignalArchivePanel />)
   fill('ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Preview encrypted archive' })).toBeEnabled())
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Preview encrypted archive' })).toHaveAttribute('data-visual-state', 'ready'))
   fireEvent.click(screen.getByRole('button', { name: 'Preview encrypted archive' }))
   await screen.findByRole('alert')
   expect(screen.getByRole('alert')).toHaveTextContent('authentication failed')

@@ -18,19 +18,30 @@ beforeAll(async () => {
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/communications/ui_server.py'], {
     cwd: root, env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime') }, stdio: ['ignore', 'pipe', 'pipe'],
   })
-  origin = await new Promise<string>((resolveOrigin, reject) => {
+  const ready = await new Promise<{ port: number; token: string }>((resolveOrigin, reject) => {
     let output = ''
     let errors = ''
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
       const line = output.split('\n').find(value => value.startsWith('{"port":'))
-      if (line) resolveOrigin(`http://127.0.0.1:${JSON.parse(line).port}`)
+      if (line) resolveOrigin(JSON.parse(line))
     })
     server.on('error', reject)
     server.on('exit', code => reject(new Error(`HTTP server exited ${code}: ${errors}`)))
   })
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  origin = `http://127.0.0.1:${ready.port}`
+  const refused = await originalFetch(origin + '/api/capabilities/communications/people')
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const target = typeof input === 'string' && input.startsWith('/') ? origin + input : input
+    const url = target instanceof Request ? target.url : String(target)
+    const headers = new Headers(target instanceof Request ? target.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+    return originalFetch(target, { ...init, headers })
+  }
 })
 
 afterAll(() => {
@@ -59,7 +70,7 @@ it('creates a real ICS source, imports it, and reviews the selected local day', 
   await screen.findByText('UI calendar meeting')
   expect(screen.getByText('Review coverage: available_snapshot')).toBeInTheDocument()
   expect(screen.getByText('Office')).toBeInTheDocument()
-  const response = await originalFetch(origin + base + '/calendar/daily?date=2026-09-25&timezone=Europe%2FBerlin')
+  const response = await fetch(origin + base + '/calendar/daily?date=2026-09-25&timezone=Europe%2FBerlin')
   const review = await response.json()
   expect(review.events[0].uid).toBe('ui-meeting')
   expect(review.timezone).toBe('Europe/Berlin')
@@ -82,11 +93,11 @@ it('retains imported data on invalid input and expands recurrence in the selecte
   fireEvent.click(screen.getByRole('button', { name: 'Import calendar export' }))
   await screen.findByText('Calendar sync: synced; available_snapshot')
   fireEvent.change(screen.getByLabelText('Review date'), { target: { value: '2026-09-26' } })
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Review calendar day' })).toBeEnabled())
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Review calendar day' })).toHaveAttribute('data-visual-state', 'ready'))
   fireEvent.click(screen.getByRole('button', { name: 'Review calendar day' }))
   await screen.findByText('Review coverage: available_snapshot')
   expect(screen.getByText('UI calendar meeting')).toBeInTheDocument()
-  const response = await originalFetch(origin + base + '/calendar/daily?date=2026-09-27&timezone=UTC')
+  const response = await fetch(origin + base + '/calendar/daily?date=2026-09-27&timezone=UTC')
   expect((await response.json()).events).toHaveLength(1)
   cleanup()
 })
@@ -96,15 +107,15 @@ it('edits source settings with actual revision invalidation and then imports cur
   await screen.findByText('Calendar sync: synced; available_snapshot')
   fireEvent.click(screen.getByRole('button', { name: 'Edit calendar source' }))
   expect(screen.getByLabelText('Calendar name')).toHaveValue('UI Calendar')
-  expect(screen.getByLabelText('Calendar kind')).toBeDisabled()
+  expect(screen.getByRole('combobox', { name: 'Calendar kind' })).toBeDisabled()
   fireEvent.change(screen.getByLabelText('Calendar name'), { target: { value: 'Renamed UI Calendar' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save calendar changes' }))
   await screen.findByText('Calendar sync: not_synced; unknown')
   await screen.findByRole('option', { name: 'Renamed UI Calendar' })
-  const sources = await originalFetch(origin + base + '/calendar/sources')
+  const sources = await fetch(origin + base + '/calendar/sources')
   const row = (await sources.json()).sources[0]
   expect(row.revision).toBe(2)
-  const before = await originalFetch(origin + base + '/calendar/daily?date=2026-09-25')
+  const before = await fetch(origin + base + '/calendar/daily?date=2026-09-25')
   expect((await before.json()).events).toHaveLength(0)
   fireEvent.change(screen.getByLabelText('ICS export content'), { target: { value: calendarExport } })
   fireEvent.click(screen.getByRole('button', { name: 'Import calendar export' }))
@@ -116,7 +127,7 @@ it('configures a remote source and records unavailable credentials without inven
   render(<CalendarPanel />)
   await screen.findByText('Calendar sync: synced; available_snapshot')
   fireEvent.change(screen.getByLabelText('Calendar name'), { target: { value: 'Remote calendar' } })
-  fireEvent.change(screen.getByLabelText('Calendar kind'), { target: { value: 'google' } })
+  fireEvent.change(screen.getByRole('combobox', { name: 'Calendar kind' }), { target: { value: 'google' } })
   fireEvent.change(screen.getByLabelText('Calendar credential reference'), { target: { value: 'ABSENT_UI_CALENDAR_195D' } })
   fireEvent.click(screen.getByRole('button', { name: 'Create calendar source' }))
   await screen.findByText('Calendar sync: not_synced; unknown')

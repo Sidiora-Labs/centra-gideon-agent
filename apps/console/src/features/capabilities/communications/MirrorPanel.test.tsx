@@ -18,19 +18,30 @@ beforeAll(async () => {
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/communications/ui_server.py'], {
     cwd: root, env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime') }, stdio: ['ignore', 'pipe', 'pipe'],
   })
-  origin = await new Promise<string>((resolveOrigin, reject) => {
+  const ready = await new Promise<{ port: number; token: string }>((resolveOrigin, reject) => {
     let output = ''
     let errors = ''
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
       const line = output.split('\n').find(value => value.startsWith('{"port":'))
-      if (line) resolveOrigin(`http://127.0.0.1:${JSON.parse(line).port}`)
+      if (line) resolveOrigin(JSON.parse(line))
     })
     server.on('error', reject)
     server.on('exit', code => reject(new Error(`HTTP server exited ${code}: ${errors}`)))
   })
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  origin = `http://127.0.0.1:${ready.port}`
+  const refused = await originalFetch(origin + '/api/capabilities/communications/people')
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const target = typeof input === 'string' && input.startsWith('/') ? origin + input : input
+    const url = target instanceof Request ? target.url : String(target)
+    const headers = new Headers(target instanceof Request ? target.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+    return originalFetch(target, { ...init, headers })
+  }
 })
 
 afterAll(() => {
@@ -65,12 +76,12 @@ it('creates and syncs a real Maildir account through the UI and reads persisted 
   await screen.findByText('Mirrored maildir')
   expect(screen.getByText(/Actual persisted message body maildir/)).toBeInTheDocument()
   expect(screen.getByText(/coverage: complete_source_snapshot/)).toBeInTheDocument()
-  const response = await originalFetch(origin + base + '/mirror/accounts')
+  const response = await fetch(origin + base + '/mirror/accounts')
   const accounts = (await response.json()).accounts
   const account = accounts.find((row: { name: string }) => row.name === 'UI Maildir')
   expect(account.sync.seen).toBe(1)
   expect(account.sync.scope).toBe('uploaded_or_local_source')
-  const messages = await originalFetch(origin + base + '/mirror/accounts/' + account.id + '/messages')
+  const messages = await fetch(origin + base + '/mirror/accounts/' + account.id + '/messages')
   expect((await messages.json()).messages[0].external_id).toBe('<maildir@example.com>')
   cleanup()
   render(<MirrorPanel />)

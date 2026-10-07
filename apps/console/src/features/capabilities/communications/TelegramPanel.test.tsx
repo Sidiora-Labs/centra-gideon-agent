@@ -18,19 +18,30 @@ beforeAll(async () => {
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/communications/ui_server.py'], {
     cwd: root, env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime') }, stdio: ['ignore', 'pipe', 'pipe'],
   })
-  origin = await new Promise<string>((resolveOrigin, reject) => {
+  const ready = await new Promise<{ port: number; token: string }>((resolveOrigin, reject) => {
     let output = ''
     let errors = ''
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
       const line = output.split('\n').find(value => value.startsWith('{"port":'))
-      if (line) resolveOrigin(`http://127.0.0.1:${JSON.parse(line).port}`)
+      if (line) resolveOrigin(JSON.parse(line))
     })
     server.on('error', reject)
     server.on('exit', code => reject(new Error(`HTTP server exited ${code}: ${errors}`)))
   })
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  origin = `http://127.0.0.1:${ready.port}`
+  const refused = await originalFetch(origin + '/api/capabilities/communications/people')
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const target = typeof input === 'string' && input.startsWith('/') ? origin + input : input
+    const url = target instanceof Request ? target.url : String(target)
+    const headers = new Headers(target instanceof Request ? target.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+    return originalFetch(target, { ...init, headers })
+  }
 })
 
 afterAll(() => {
@@ -41,7 +52,7 @@ afterAll(() => {
 })
 
 it('previews an operational command from real people and saves explicit Telegram settings', async () => {
-  const response = await originalFetch(origin + base + '/people', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Telegram UI Friend' }) })
+  const response = await fetch(origin + base + '/people', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Telegram UI Friend' }) })
   expect(response.status).toBe(201)
   render(<TelegramPanel />)
   await screen.findByText('No Telegram delivery attempts.')
@@ -56,7 +67,7 @@ it('previews an operational command from real people and saves explicit Telegram
   fireEvent.click(screen.getByRole('button', { name: 'Save Telegram settings' }))
   await screen.findByText('Telegram settings saved')
   expect(screen.getByLabelText('Automatically reply to authorized operational commands')).not.toBeChecked()
-  const saved = await originalFetch(origin + base + '/telegram/config')
+  const saved = await fetch(origin + base + '/telegram/config')
   const settings = (await saved.json()).config
   expect(settings.enabled).toBe(true)
   expect(settings.automatic_replies).toBe(false)
@@ -75,11 +86,11 @@ it('queues a real notification and keeps it queued when credentials are unavaila
   await screen.findByText('Chat 12345: queued')
   expect(screen.getByLabelText('Telegram notification text')).toHaveValue('')
   expect(location.hash).toContain('telegram_chat=12345')
-  fireEvent.click(screen.getByRole('button', { name: 'Send queued Telegram notification' }))
+  fireEvent.click(screen.getByRole('button', { name: /^Send queued Telegram notification:/ }))
   await screen.findByRole('alert')
   expect(screen.getByRole('alert').textContent).toContain('bot credential is unavailable')
   expect(screen.getByText('Chat 12345: queued')).toBeInTheDocument()
-  const response = await originalFetch(origin + base + '/telegram/deliveries')
+  const response = await fetch(origin + base + '/telegram/deliveries')
   const rows = (await response.json()).deliveries
   expect(rows).toHaveLength(1)
   expect(rows[0].message_id).toBeNull()
@@ -98,7 +109,7 @@ it('restores attempts and refuses an unapproved chat without losing the composed
   expect(screen.getByRole('alert').textContent).toContain('not allowed')
   expect(screen.getByLabelText('Telegram notification text')).toHaveValue('Must remain unsent')
   fireEvent.click(screen.getByRole('button', { name: 'Refresh Telegram attempts' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh Telegram attempts' })).not.toBeDisabled())
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh Telegram attempts' })).not.toHaveAttribute('aria-disabled', 'true'))
   expect(screen.getAllByText('Chat 12345: queued')).toHaveLength(1)
   fireEvent.change(screen.getByLabelText('Operational command'), { target: { value: '/people' } })
   fireEvent.click(screen.getByRole('button', { name: 'Preview Telegram command' }))

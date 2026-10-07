@@ -18,19 +18,30 @@ beforeAll(async () => {
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/communications/ui_server.py'], {
     cwd: root, env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime') }, stdio: ['ignore', 'pipe', 'pipe'],
   })
-  origin = await new Promise<string>((resolveOrigin, reject) => {
+  const ready = await new Promise<{ port: number; token: string }>((resolveOrigin, reject) => {
     let output = ''
     let errors = ''
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
       const line = output.split('\n').find(value => value.startsWith('{"port":'))
-      if (line) resolveOrigin(`http://127.0.0.1:${JSON.parse(line).port}`)
+      if (line) resolveOrigin(JSON.parse(line))
     })
     server.on('error', reject)
     server.on('exit', code => reject(new Error(`HTTP server exited ${code}: ${errors}`)))
   })
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  origin = `http://127.0.0.1:${ready.port}`
+  const refused = await originalFetch(origin + '/api/capabilities/communications/people')
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const target = typeof input === 'string' && input.startsWith('/') ? origin + input : input
+    const url = target instanceof Request ? target.url : String(target)
+    const headers = new Headers(target instanceof Request ? target.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+    return originalFetch(target, { ...init, headers })
+  }
 })
 
 afterAll(() => {
@@ -42,10 +53,10 @@ afterAll(() => {
 
 let personId: string
 it('projects real recorded touchpoints with date, provenance and person filters', async () => {
-  const response = await originalFetch(origin + base + '/people', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Timeline Alice' }) })
+  const response = await fetch(origin + base + '/people', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Timeline Alice' }) })
   personId = (await response.json()).person.id
   for (let index = 0; index < 27; index++) {
-    const point = await originalFetch(origin + base + '/people/' + personId + '/touchpoints', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'manual', external_id: 'timeline-' + index, occurred_at: '2026-09-25T09:00:00Z', direction: 'mutual', summary: 'Recorded conversation ' + index }) })
+    const point = await fetch(origin + base + '/people/' + personId + '/touchpoints', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'manual', external_id: 'timeline-' + index, occurred_at: '2026-09-25T09:00:00Z', direction: 'mutual', summary: 'Recorded conversation ' + index }) })
     expect(point.status).toBe(201)
   }
   render(<TimelinePanel />)
@@ -88,10 +99,10 @@ it('reports invalid timezone and shows known source schedules without attendance
   fireEvent.click(screen.getByRole('button', { name: 'Review recorded activity' }))
   await screen.findByRole('alert')
   expect(screen.getByRole('alert').textContent).toContain('valid timezone')
-  const response = await originalFetch(origin + base + '/calendar/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Activity calendar', kind: 'ics' }) })
+  const response = await fetch(origin + base + '/calendar/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Activity calendar', kind: 'ics' }) })
   const source = (await response.json()).source
   const content = 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:activity-meeting\r\nDTSTART:20260925T100000Z\r\nDTEND:20260925T110000Z\r\nSUMMARY:Planned meeting\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n'
-  const uploaded = await originalFetch(origin + base + '/calendar/sources/' + source.id + '/upload', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content, revision: 1 }) })
+  const uploaded = await fetch(origin + base + '/calendar/sources/' + source.id + '/upload', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content, revision: 1 }) })
   expect(uploaded.status).toBe(200)
   fireEvent.change(screen.getByLabelText('Activity timezone'), { target: { value: 'Europe/Berlin' } })
   fireEvent.change(screen.getByLabelText('Activity person'), { target: { value: '' } })

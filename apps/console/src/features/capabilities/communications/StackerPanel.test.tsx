@@ -19,19 +19,30 @@ beforeAll(async () => {
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/communications/ui_server.py'], {
     cwd: root, env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime') }, stdio: ['ignore', 'pipe', 'pipe'],
   })
-  origin = await new Promise<string>((resolveOrigin, reject) => {
+  const ready = await new Promise<{ port: number; token: string }>((resolveOrigin, reject) => {
     let output = ''
     let errors = ''
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
       const line = output.split('\n').find(value => value.startsWith('{"port":'))
-      if (line) resolveOrigin(`http://127.0.0.1:${JSON.parse(line).port}`)
+      if (line) resolveOrigin(JSON.parse(line))
     })
     server.on('error', reject)
     server.on('exit', code => reject(new Error(`HTTP server exited ${code}: ${errors}`)))
   })
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  origin = `http://127.0.0.1:${ready.port}`
+  const refused = await originalFetch(origin + '/api/capabilities/communications/people')
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const target = typeof input === 'string' && input.startsWith('/') ? origin + input : input
+    const url = target instanceof Request ? target.url : String(target)
+    const headers = new Headers(target instanceof Request ? target.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+    return originalFetch(target, { ...init, headers })
+  }
 })
 
 afterAll(() => {
@@ -43,22 +54,22 @@ afterAll(() => {
 
 let accountId: string
 it('prepares a real immutable discussion and explicitly reviews its destination and fees', async () => {
-  const response = await originalFetch(origin + base + '/social/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform: 'stackernews', handle: 'alice', request_key: 'ui-stacker', credential_ref: 'ABSENT_STACKER_UI_293D' }) })
+  const response = await fetch(origin + base + '/social/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform: 'stackernews', handle: 'alice', request_key: 'ui-stacker', credential_ref: 'ABSENT_STACKER_UI_293D' }) })
   accountId = (await response.json()).account.id
   render(<StackerPanel />)
   await screen.findByRole('option', { name: '@alice' })
   fireEvent.change(screen.getByLabelText('Stacker registration'), { target: { value: accountId } })
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Prepare Stacker action' })).toBeEnabled())
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Prepare Stacker action' })).toHaveAttribute('data-visual-state', 'ready'))
   fireEvent.change(screen.getByLabelText('Action title'), { target: { value: 'UI discussion' } })
   fireEvent.change(screen.getByLabelText('Action text'), { target: { value: 'A careful discussion body' } })
   fireEvent.click(screen.getByRole('button', { name: 'Prepare Stacker action' }))
   await screen.findByText('Stacker action: draft; revision 1')
   expect(location.hash).toContain('stacker_account=')
   expect(screen.getByText('Action territory: ~bitcoin; target item: new discussion')).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Submit reviewed Stacker action' })).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: 'Confirm Stacker review' }))
+  expect(screen.queryByRole('button', { name: /^Submit reviewed Stacker action:/ })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: /^Confirm Stacker review:/ }))
   await screen.findByText('Stacker action: reviewed; revision 2')
-  expect(screen.getByRole('button', { name: 'Submit reviewed Stacker action' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: /^Submit reviewed Stacker action:/ })).toHaveAttribute('aria-disabled', 'true')
   expect(screen.getByRole('link', { name: 'Open reviewed Stacker destination' })).toHaveAttribute('href', 'https://stacker.news/~bitcoin')
   cleanup()
 })
@@ -68,12 +79,12 @@ it('requires exact action approval and shows missing credentials without posting
   await screen.findByText('Stacker action: reviewed; revision 2')
   expect(screen.getByText('A careful discussion body')).toBeInTheDocument()
   fireEvent.click(screen.getByLabelText('Approve this exact action; provider may post and charge fees'))
-  fireEvent.click(screen.getByRole('button', { name: 'Submit reviewed Stacker action' }))
+  fireEvent.click(screen.getByRole('button', { name: /^Submit reviewed Stacker action:/ }))
   await screen.findByRole('alert')
   expect(screen.getByRole('alert').textContent).toContain('credential is unavailable')
   expect(screen.getByText('Stacker action: reviewed; revision 2')).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Submit reviewed Stacker action' })).toBeDisabled()
-  const response = await originalFetch(origin + base + '/stacker/accounts/' + accountId + '/actions')
+  expect(screen.getByRole('button', { name: /^Submit reviewed Stacker action:/ })).toHaveAttribute('aria-disabled', 'true')
+  const response = await fetch(origin + base + '/stacker/accounts/' + accountId + '/actions')
   const action = (await response.json()).actions[0]
   expect(action.external_execution).toBe('not_attempted')
   expect(action.payin_id).toBeUndefined()
@@ -90,10 +101,10 @@ it('keeps API-key zap as browser-only review with the exact amount and target', 
   await screen.findByText('Stacker action: draft; revision 1')
   expect(screen.getByText('Requested zap: 21 sats')).toBeInTheDocument()
   expect(screen.getByText('Action territory: ~bitcoin; target item: 123')).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: 'Confirm Stacker review' }))
+  fireEvent.click(screen.getByRole('button', { name: /^Confirm Stacker review:/ }))
   await waitFor(() => expect(screen.getAllByRole('link', { name: 'Open reviewed Stacker destination' })).toHaveLength(2))
-  expect(screen.getAllByRole('button', { name: 'Submit reviewed Stacker action' })).toHaveLength(1)
-  const response = await originalFetch(origin + base + '/stacker/accounts/' + accountId + '/actions')
+  expect(screen.getAllByRole('button', { name: /^Submit reviewed Stacker action:/ })).toHaveLength(1)
+  const response = await fetch(origin + base + '/stacker/accounts/' + accountId + '/actions')
   const actions = (await response.json()).actions
   expect(actions[1].kind).toBe('zap')
   expect(actions[1].external_execution).toBe('not_attempted')
@@ -107,14 +118,14 @@ it('rejects invalid territory reads locally and invalidates old account action c
   fireEvent.click(screen.getByRole('button', { name: 'Read territory' }))
   await screen.findByRole('alert')
   expect(screen.getByRole('alert').textContent).toContain('Invalid territory name')
-  const response = await originalFetch(origin + base + '/social/accounts/' + accountId)
+  const response = await fetch(origin + base + '/social/accounts/' + accountId)
   const account = (await response.json()).account
   const { platform, handle, label, profile_url, credential_ref, person_id, notes, revision } = account
-  const changed = await originalFetch(origin + base + '/social/accounts/' + accountId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform, handle, label, profile_url, credential_ref, person_id, notes, revision, status: 'paused' }) })
+  const changed = await fetch(origin + base + '/social/accounts/' + accountId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform, handle, label, profile_url, credential_ref, person_id, notes, revision, status: 'paused' }) })
   expect(changed.status).toBe(200)
   fireEvent.click(screen.getByRole('button', { name: 'Reload Stacker actions' }))
   await screen.findAllByText('Registration changed; create a new reviewed action.')
-  expect(screen.queryByRole('button', { name: 'Submit reviewed Stacker action' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /^Submit reviewed Stacker action:/ })).not.toBeInTheDocument()
   expect(screen.queryByRole('link', { name: 'Open reviewed Stacker destination' })).not.toBeInTheDocument()
   cleanup()
 })

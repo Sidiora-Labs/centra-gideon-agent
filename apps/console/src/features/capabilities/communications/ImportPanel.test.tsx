@@ -20,19 +20,30 @@ beforeAll(async () => {
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/communications/ui_server.py'], {
     cwd: root, env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime') }, stdio: ['ignore', 'pipe', 'pipe'],
   })
-  origin = await new Promise<string>((resolveOrigin, reject) => {
+  const ready = await new Promise<{ port: number; token: string }>((resolveOrigin, reject) => {
     let output = ''
     let errors = ''
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
       const line = output.split('\n').find(value => value.startsWith('{"port":'))
-      if (line) resolveOrigin(`http://127.0.0.1:${JSON.parse(line).port}`)
+      if (line) resolveOrigin(JSON.parse(line))
     })
     server.on('error', reject)
     server.on('exit', code => reject(new Error(`HTTP server exited ${code}: ${errors}`)))
   })
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  origin = `http://127.0.0.1:${ready.port}`
+  const refused = await originalFetch(origin + '/api/capabilities/communications/people')
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const target = typeof input === 'string' && input.startsWith('/') ? origin + input : input
+    const url = target instanceof Request ? target.url : String(target)
+    const headers = new Headers(target instanceof Request ? target.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+    return originalFetch(target, { ...init, headers })
+  }
 })
 
 afterAll(() => {
@@ -51,7 +62,7 @@ it('previews without writing then commits only explicitly selected contacts', as
   expect(screen.getByText('Skipped Friend')).toBeInTheDocument()
   expect(screen.getByLabelText('Decision for contact 1')).toHaveValue('skip')
   expect(screen.getByRole('button', { name: 'Commit selected contacts' })).toBeDisabled()
-  const before = await originalFetch(origin + peoplePath)
+  const before = await fetch(origin + peoplePath)
   expect((await before.json()).people).toEqual([])
   fireEvent.change(screen.getByLabelText('Decision for contact 1'), { target: { value: 'create' } })
   fireEvent.click(screen.getByRole('button', { name: 'Commit selected contacts' }))
@@ -59,7 +70,7 @@ it('previews without writing then commits only explicitly selected contacts', as
   expect(changes).toBe(1)
   expect(screen.getByRole('button', { name: 'Commit selected contacts' })).toBeDisabled()
   expect(screen.getByText('Skipped')).toBeInTheDocument()
-  const after = await originalFetch(origin + peoplePath)
+  const after = await fetch(origin + peoplePath)
   const people = (await after.json()).people
   expect(people).toHaveLength(1)
   expect(people[0].name).toBe('Imported Friend')
@@ -80,7 +91,7 @@ it('reviews a real matching person and adds identities while preserving existing
   fireEvent.change(screen.getByLabelText('Decision for contact 1'), { target: { value: id } })
   fireEvent.click(screen.getByRole('button', { name: 'Commit selected contacts' }))
   await screen.findByText(/Import saved at/)
-  const response = await originalFetch(`${origin}${peoplePath}/${id}`)
+  const response = await fetch(`${origin}${peoplePath}/${id}`)
   const detail = await response.json()
   expect(detail.person.notes).toBe('Original imported note')
   expect(detail.person.name).toBe('Imported Friend')
@@ -96,9 +107,9 @@ it('refuses stale review against real HTTP and leaves contact data available to 
   fireEvent.click(screen.getByRole('button', { name: 'Preview contacts' }))
   const option = await screen.findByRole('option', { name: 'Add identities to Imported Friend' })
   const id = (option as HTMLOptionElement).value
-  const currentResponse = await originalFetch(`${origin}${peoplePath}/${id}`)
+  const currentResponse = await fetch(`${origin}${peoplePath}/${id}`)
   const current = (await currentResponse.json()).person
-  const updated = await originalFetch(`${origin}${peoplePath}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: current.name, identities: current.identities, notes: 'Edited outside import', ring: current.ring, cadence_days: current.cadence_days, revision: current.revision }) })
+  const updated = await fetch(`${origin}${peoplePath}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: current.name, identities: current.identities, notes: 'Edited outside import', ring: current.ring, cadence_days: current.cadence_days, revision: current.revision }) })
   expect(updated.status).toBe(200)
   fireEvent.change(screen.getByLabelText('Decision for contact 1'), { target: { value: id } })
   fireEvent.click(screen.getByRole('button', { name: 'Commit selected contacts' }))
@@ -112,7 +123,7 @@ it('refuses stale review against real HTTP and leaves contact data available to 
   fireEvent.change(screen.getByLabelText('Decision for contact 1'), { target: { value: id } })
   fireEvent.click(screen.getByRole('button', { name: 'Commit selected contacts' }))
   await screen.findByText(/Import saved at/)
-  const finalResponse = await originalFetch(`${origin}${peoplePath}/${id}`)
+  const finalResponse = await fetch(`${origin}${peoplePath}/${id}`)
   const final = (await finalResponse.json()).person
   expect(final.notes).toBe('Edited outside import')
   expect(final.identities).toContainEqual({ kind: 'phone', value: '+12025550124' })
@@ -130,7 +141,7 @@ it('invalidates preview when the source changes and exposes malformed contacts',
   fireEvent.change(screen.getByLabelText('Contact data'), { target: { value: 'name,email\nFixed,fixed@example.com' } })
   expect(screen.queryByText('Invalid email identity')).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Commit selected contacts' })).not.toBeInTheDocument()
-  const response = await originalFetch(origin + peoplePath)
+  const response = await fetch(origin + peoplePath)
   expect((await response.json()).people).toHaveLength(1)
   cleanup()
 })
