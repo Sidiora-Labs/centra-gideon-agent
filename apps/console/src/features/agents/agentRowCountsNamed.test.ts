@@ -8,41 +8,39 @@ const strip = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\
 const read = (rel: string) => strip(readFileSync(join(SRC, rel), 'utf8'))
 
 const COUNTS = [
-  { field: 'skills', glyph: 'Sparkles', noun: 'skill' },
-  { field: 'tools', glyph: 'Wrench', noun: 'tool' },
-  { field: 'triggers', glyph: 'Zap', noun: 'trigger' },
+  { field: 'skills', count: 'skillCount', glyph: 'Sparkles', noun: 'skill' },
+  { field: 'tools', count: 'toolCount', glyph: 'Wrench', noun: 'tool' },
+  { field: 'triggers', count: 'triggerCount', glyph: 'Zap', noun: 'trigger' },
 ] as const
 
 describe('every count in an agent row says what it counts', () => {
   const src = read('features/agents/AgentsListPage.tsx')
 
-  it('reads the real file (not vacuously green)', () => {
+  it('reads the real native row and each actual agent count binding', () => {
     expect(src, 'the row component moved — this rail measures nothing').toMatch(/function NativeRow\(/)
     expect(src.length).toBeGreaterThan(4000)
-    for (const c of COUNTS) {
-      expect(src, `the ${c.field} badge must still exist to be asserted about`).toMatch(
-        new RegExp(`agent\\.${c.field}!\\.length`),
+    for (const { field, count } of COUNTS) {
+      expect(src, `the ${field} count must derive from the actual agent`).toContain(
+        `const ${count} = agent.${field}?.length ?? 0`,
       )
+      expect(src).toContain(`${count} > 0 && <span`)
     }
   })
 
-  it.each(COUNTS)('the $field count carries role="img" AND a label naming it', ({ field, noun }) => {
-    const at = src.indexOf(`agent.${field}?.length`)
-    expect(at, `the ${field} badge was not found`).toBeGreaterThan(-1)
+  it.each(COUNTS)('the $field count carries role="img" and a label naming it', ({ count, glyph, noun }) => {
+    const at = src.indexOf(`${count} > 0 && <span`)
+    expect(at, `the ${noun} badge was not found`).toBeGreaterThan(-1)
     const badge = src.slice(at, src.indexOf('</span>', at))
-    expect(badge, `${field}: role="img" is what makes aria-label legal on a span`).toMatch(/role="img"/)
-    expect(badge, `${field}: the label must name the dimension, not just repeat the number`).toMatch(
-      new RegExp(`aria-label=\\{\`\\$\\{agent\\.${field}!\\.length\\} ${noun}`),
-    )
+    expect(badge).toContain('role="img"')
+    expect(badge).toContain('aria-label={`${' + count + '} ' + noun)
+    expect(badge).toContain(`<${glyph} size={11} /> {${count}}`)
   })
 
-  it('and it pluralises, because "1 skills" is the tell that a label was pasted', () => {
-    for (const { field, noun } of COUNTS) {
-      const at = src.indexOf(`agent.${field}?.length`)
+  it('pluralises each named dimension using the actual displayed count', () => {
+    for (const { count, noun } of COUNTS) {
+      const at = src.indexOf(`${count} > 0 && <span`)
       const badge = src.slice(at, src.indexOf('</span>', at))
-      expect(badge, `${field}: singular/plural must follow the count`).toMatch(
-        new RegExp(`${noun}\\$\\{agent\\.${field}!\\.length === 1 \\? '' : 's'\\}`),
-      )
+      expect(badge).toContain(noun + "${" + count + " === 1 ? '' : 's'}")
     }
   })
 

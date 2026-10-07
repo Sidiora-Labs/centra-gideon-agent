@@ -62,7 +62,7 @@ export function AgentCard({
         </span>
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="flex items-baseline gap-2">
-            <span className="truncate text-[13.5px] font-medium">{name}</span>
+            <span className="truncate text-[13.5px] font-medium" title={name}>{name}</span>
           {version && <span className={cn(mono, "text-foreground/30 shrink-0")}>
             v{version}
           </span>}
