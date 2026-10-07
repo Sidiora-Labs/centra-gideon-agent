@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useRef, useState } from 'react'
 import NativeMediaPage from './NativeMediaPage'
 import { Button } from '../../../shared/ui/Button'
@@ -30,6 +31,6 @@ export default function VideoPage({ onJob }: { onJob?: (id: string) => void } = 
     <label className="block">Aspect ratio<select value={aspect} onChange={e => setAspect(e.target.value)}><option value="">Model default</option>{model?.aspect_ratios.map(value => <option key={value}>{value}</option>)}</select></label>
     {model && Object.entries(model.controls).map(([key, spec]) => <label key={key} className="block">{key}<input type="number" min={spec.minimum} max={spec.maximum} step={spec.integer ? 1 : 'any'} value={controls[key] ?? ''} onChange={e => setControls(previous => { const next = { ...previous }; if (e.target.value === '') delete next[key]; else next[key] = Number(e.target.value); return next })} /></label>)}
     {(['first_frame', 'last_frame', 'continuation'] as const).map(key => <fieldset key={key} disabled={!model?.[`supports_${key}`]}><legend>{key.replaceAll('_', ' ')} {!model?.[`supports_${key}`] && '(unsupported)'}</legend><label>Artifact ID<input value={refs[key]?.id || ''} onChange={e => setRefs({ ...refs, [key]: { version: refs[key]?.version || 1, id: e.target.value } })} /></label><label>Version<input type="number" min={1} value={refs[key]?.version || 1} onChange={e => setRefs({ ...refs, [key]: { id: refs[key]?.id || '', version: Number(e.target.value) } })} /></label></fieldset>)}
-    <Button disabled={busy || !prompt.trim() || !caps?.available || !caps.media_tools_available || !model} onClick={() => void submit()}>Queue video</Button>{job && <p>Queued {job}. <a href="#/capabilities/media?view=jobs">View job</a></p>}{error && <p role="alert">{error}</p>}
+    <Button disabled={busy || !prompt.trim() || !caps?.available || !caps.media_tools_available || !model} onClick={() => void submit()} disabledReason={busy ? BUSY_REASON : undefined}>Queue video</Button>{job && <p>Queued {job}. <a href="#/capabilities/media?view=jobs">View job</a></p>}{error && <p role="alert">{error}</p>}
   </NativeMediaPage>
 }

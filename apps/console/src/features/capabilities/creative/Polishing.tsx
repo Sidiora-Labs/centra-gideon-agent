@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -47,11 +48,11 @@ export default function Polishing({ id, revision, text, apiRoot, onPromoted }: {
     <label className="block">{t('Selected saved passage')}<textarea className={control} readOnly value={text.slice(start, end)} /></label>
     <label className="block">{t('Polishing instruction')}<textarea className={control} value={instruction} onChange={e => { setInstruction(e.target.value); setRequestId(crypto.randomUUID()) }} /></label>
     {mode === 'authored' && <label className="block">{t('My replacement passage')}<textarea className={control} value={replacement} onChange={e => { setReplacement(e.target.value); setRequestId(crypto.randomUUID()) }} /></label>}
-    <Button disabled={busy || end <= start || end - start > 4000 || end > text.length} onClick={() => void propose()}>{t('Prepare polishing candidate')}</Button>
-    </section><section aria-label={t('Polishing candidates')} className="space-y-3"><h3 data-type="label-l" className="text-on-surface">{t('Polishing candidates')}</h3>{items.length === 0 && <p className="text-sm text-on-surface-variant">{t('No polishing candidates yet.')}</p>}<ul className="space-y-2">{items.map((item, index) => <li key={item.id} className="rounded-lg border border-outline-variant bg-surface p-3"><Button disabled={busy} onClick={() => void open(item.id)}>{t('Review candidate')} {items.length - index}</Button> <span className="text-sm text-on-surface-variant">{t(item.mode)} · {item.summary}</span></li>)}</ul>
+    <Button disabled={busy || end <= start || end - start > 4000 || end > text.length} onClick={() => void propose()} disabledReason={busy ? BUSY_REASON : undefined}>{t('Prepare polishing candidate')}</Button>
+    </section><section aria-label={t('Polishing candidates')} className="space-y-3"><h3 data-type="label-l" className="text-on-surface">{t('Polishing candidates')}</h3>{items.length === 0 && <p className="text-sm text-on-surface-variant">{t('No polishing candidates yet.')}</p>}<ul className="space-y-2">{items.map((item, index) => <li key={item.id} className="rounded-lg border border-outline-variant bg-surface p-3"><Button disabled={busy} onClick={() => void open(item.id)} disabledReason={busy ? BUSY_REASON : undefined}>{t('Review candidate')} {items.length - index}</Button> <span className="text-sm text-on-surface-variant">{t(item.mode)} · {item.summary}</span></li>)}</ul>
     {selected && <section aria-label={t('Polishing review')} className="space-y-3"><h3>{t('Polishing review')}</h3><p>{selected.summary}</p><p>{t('Base work revision')} {selected.base_revision}</p>
       {selected.missing ? <p>{t('Candidate or base artifact missing')}</p> : <><label className="block">{t('Original passage')}<textarea className={control} readOnly value={selected.original} /></label><label className="block">{t('Candidate passage')}<textarea className={control} readOnly value={selected.replacement} /></label><pre className="whitespace-pre-wrap break-words">{selected.diff}</pre>{selected.diff_truncated && <p>{t('Diff excerpt limited to 20000 characters')}</p>}</>}
-      {selected.promotion ? <p>{t('Candidate promoted')}</p> : <Button disabled={busy || selected.missing || selected.base_revision !== revision} onClick={() => void promote()}>{t('Promote reviewed candidate')}</Button>}
+      {selected.promotion ? <p>{t('Candidate promoted')}</p> : <Button disabled={busy || selected.missing || selected.base_revision !== revision} onClick={() => void promote()} disabledReason={busy ? BUSY_REASON : undefined}>{t('Promote reviewed candidate')}</Button>}
     </section>}</section></div>
   </section>
 }

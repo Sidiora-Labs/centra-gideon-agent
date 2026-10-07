@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import NativeMediaPage from './NativeMediaPage'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../../shared/ui/Button'
@@ -84,7 +85,7 @@ export default function LibraryPage({ artifactId, onSelectArtifact, onNavigate }
     {result && <><p role="status">{result.total} matching artifacts</p>
       {!result.items.length && <p>No matching media. Import an image or generate media in a conversation.</p>}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{result.items.map(item => <MediaCard key={item.id} item={item} onSelect={() => { if (!dirty) selectArtifact(item.id) }} />)}</div>
-      <div className="flex gap-3"><Button disabled={!offset || busy} onClick={() => setOffset(Math.max(0, offset - 24))}>Previous</Button><Button disabled={offset + 24 >= result.total || busy} onClick={() => setOffset(offset + 24)}>Next</Button></div>
+      <div className="flex gap-3"><Button disabled={!offset || busy} onClick={() => setOffset(Math.max(0, offset - 24))} disabledReason={busy ? BUSY_REASON : undefined}>Previous</Button><Button disabled={offset + 24 >= result.total || busy} onClick={() => setOffset(offset + 24)} disabledReason={busy ? BUSY_REASON : undefined}>Next</Button></div>
     </>}
     {selected && <section aria-label="Media details" className="rounded-lg bg-surface-high p-l space-y-m">
       <h2>{selected.name}</h2><a href={selected.raw_url} download>Download original</a>
@@ -94,8 +95,8 @@ export default function LibraryPage({ artifactId, onSelectArtifact, onNavigate }
       <Button disabled={!dirty || busy || selected.readonly} onClick={() => void action(async () => {
         const item = await fetch(base + '/' + selected.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_updated_at: selected.updated_at, name, tags: tags.split(',').map(value => value.trim()).filter(Boolean), collection: membership }) }).then(json)
         choose(item); setRefresh(value => value + 1)
-      })}>Save metadata</Button>
-      <Button disabled={!dirty || busy} onClick={() => choose(selected)}>Discard changes</Button>
+      })} disabledReason={busy ? BUSY_REASON : undefined}>Save metadata</Button>
+      <Button disabled={!dirty || busy} onClick={() => choose(selected)} disabledReason={busy ? BUSY_REASON : undefined}>Discard changes</Button>
       {dirty && <p>Unsaved changes. Save or discard before selecting another artifact.</p>}
       {selected.readonly && <p>This artifact is read-only.</p>}
       <dl>{Object.entries(selected.provenance).map(([key, value]) => <div key={key}><dt>{key}</dt><dd className="break-all">{String(value)}</dd></div>)}</dl>

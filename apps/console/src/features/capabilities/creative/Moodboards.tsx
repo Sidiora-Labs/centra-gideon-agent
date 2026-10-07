@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -101,12 +102,12 @@ export default function Moodboards({ apiRoot = '/api/capabilities/creative/board
       setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (e) { fail(e) }
   }
-  return <ListScaffold title={t('Moodboards')} right={<Button disabled={busy} onClick={startNew}><Plus className="h-4 w-4" />{t('New moodboard')}</Button>}><main className="space-y-xl text-on-surface">
+  return <ListScaffold title={t('Moodboards')} right={<Button disabled={busy} onClick={startNew} disabledReason={busy ? BUSY_REASON : undefined}><Plus className="h-4 w-4" />{t('New moodboard')}</Button>}><main className="space-y-xl text-on-surface">
     <p data-type="body-m" className="text-on-surface-low">{t('Arrange saved artifacts into inspiration groups. Each card keeps its original source version.')}</p>
     {error && <div role="alert">{error}<Button onClick={() => { setError(''); setRefresh(n => n + 1); setReload(n => n + 1) }}>{t('Retry moodboards')}</Button></div>}
     <label className="block">{t('Search boards')}<input className={control} value={query} onChange={e => { setQuery(e.target.value); setOffset(0) }} /></label>
     {loading ? <p role="status">{t('Loading moodboards…')}</p> : !boards.length ? <EmptyState icon={Images} title={t('No moodboards yet.')} hint={t('Group pinned visual references into a reusable board.')} action={{ label: t('New moodboard'), onClick: startNew, icon: Plus }} /> : <div className="space-y-2">{boards.map((board, index) => <ListRow key={board.id} index={index} onClick={() => choose(board.id)} label={board.title}><Images className="h-5 w-5 shrink-0 text-primary" /><div className="min-w-0"><p className="font-medium">{board.title}</p><p className="text-sm text-on-surface-variant">{t('Moodboard revision')} {board.revision} · {board.groups.length} {t('Group')}</p></div></ListRow>)}</div>}
-    <p>{total} {t('moodboards')}</p><Button disabled={loading || offset === 0} onClick={() => setOffset(n => n - 25)}>{t('Previous boards')}</Button><Button disabled={loading || offset + 25 >= total} onClick={() => setOffset(n => n + 25)}>{t('Next boards')}</Button>
+    <p>{total} {t('moodboards')}</p><Button disabled={loading || offset === 0} disabledReason={loading ? BUSY_REASON : undefined} onClick={() => setOffset(n => n - 25)}>{t('Previous boards')}</Button><Button disabled={loading || offset + 25 >= total} disabledReason={loading ? BUSY_REASON : undefined} onClick={() => setOffset(n => n + 25)}>{t('Next boards')}</Button>
     {(creating || selected) ? <section aria-label={selected ? t('Moodboard revision') : t('Create moodboard')} className="space-y-l rounded-lg bg-surface-container p-l"><h2 data-type="title-s">{selected ? `${t('Moodboard revision')} ${selected.revision}` : t('Create moodboard')}</h2>
     <label className="block">{t('Board title')}<input className={control} value={draft.title} maxLength={200} onChange={e => setDraft({ ...draft, title: e.target.value })} /></label>
     <label className="block">{t('Find ingredients')}<input className={control} value={ingredientQuery} onChange={e => setIngredientQuery(e.target.value)} /></label>
@@ -135,10 +136,10 @@ export default function Moodboards({ apiRoot = '/api/capabilities/creative/board
         </article>
       })}</div>
     </section>)}
-    <Button disabled={busy || !draft.title.trim()} onClick={() => void save()}>{t('Save moodboard')}</Button>
-    {selected && <Button disabled={busy} onClick={() => void exportBoard()}>{t('Export moodboard')}</Button>}
+    <Button disabled={busy || !draft.title.trim()} onClick={() => void save()} disabledReason={busy ? BUSY_REASON : undefined}>{t('Save moodboard')}</Button>
+    {selected && <Button disabled={busy} onClick={() => void exportBoard()} disabledReason={busy ? BUSY_REASON : undefined}>{t('Export moodboard')}</Button>}
     {exported && <textarea aria-label={t('Exported moodboard')} readOnly className={control} rows={8} value={exported} />}
-    {history.length > 0 && <section aria-label={t('Board revisions')}><h3>{t('Previous revisions')}</h3>{history.map(r => <p key={r.revision}>{r.title} · {r.revision} <Button disabled={busy || r.revision === selected?.revision} onClick={() => void save(r.revision)}>{t('Restore board revision')} {r.revision}</Button></p>)}</section>}
+    {history.length > 0 && <section aria-label={t('Board revisions')}><h3>{t('Previous revisions')}</h3>{history.map(r => <p key={r.revision}>{r.title} · {r.revision} <Button disabled={busy || r.revision === selected?.revision} onClick={() => void save(r.revision)} disabledReason={busy ? BUSY_REASON : undefined}>{t('Restore board revision')} {r.revision}</Button></p>)}</section>}
     </section> : boards.length > 0 && <EmptyState icon={Images} title={t('Choose a moodboard')} hint={t('Select a board to review its pinned sources and revision history.')} action={{ label: t('New moodboard'), onClick: startNew, icon: Plus }} />}
   </main></ListScaffold>
 }

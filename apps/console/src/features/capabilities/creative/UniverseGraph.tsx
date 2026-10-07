@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -68,7 +69,7 @@ export default function UniverseGraph({ id, revision, apiRoot = '/api/capabiliti
     </Surface>}
     <Surface className="h-fit space-y-m p-l"><h3 data-type="title-m" className="text-on-surface">{t('Merge another universe')}</h3><p data-type="body-m" className="text-on-surface-low">{t('The preview lists additions and requires an explicit choice for every conflict. The source remains unchanged.')}</p><SearchField value={query} onChange={setQuery} placeholder={t('Search merge sources')} ariaLabel={t('Search merge sources')} surface="container" />
     <Field label={t('Source universe')}><Select value={source} onChange={value => { setSource(value); setPreview(null) }} options={[{ value: '', label: t('Choose universe') }, ...sources.map(item => ({ value: item.id, label: `${item.title} · ${t('revision')} ${item.revision}` }))]} /></Field>
-    <Button disabled={busy || !source} onClick={() => void prepare()}>{t('Preview merge')}</Button>
+    <Button disabled={busy || !source} onClick={() => void prepare()} disabledReason={busy ? BUSY_REASON : undefined}>{t('Preview merge')}</Button>
     {preview && <section aria-label={t('Merge preview')} className="space-y-3 border-t border-outline-variant/30 pt-l"><h3 data-type="title-s">{t('Merge preview')}</h3><p>{preview.source.title} {t('revision')} {preview.source.revision} → {preview.target.title} {t('revision')} {preview.target.revision}</p>
       <p>{preview.added_canon_ids.length} {t('new canon entries. Ingredient links and pinned moodboards will be combined. The source universe stays unchanged.')}</p>
       {preview.canon_conflicts.map(conflict => <fieldset key={conflict.id} className="space-y-2 border p-2"><legend>{t('Canon conflict:')} {conflict.id}</legend><p>{t('Target:')} {conflict.target.title} — {conflict.target.body}</p><p>{t('Source:')} {conflict.source.title} — {conflict.source.body}</p>
@@ -76,7 +77,7 @@ export default function UniverseGraph({ id, revision, apiRoot = '/api/capabiliti
       </fieldset>)}
       {preview.identity_conflict && <><p>{t('Target visual identity:')} {preview.target.visual_identity.colors.join(', ')} — {preview.target.visual_identity.style_notes}</p><p>{t('Source visual identity:')} {preview.source.visual_identity.colors.join(', ')} — {preview.source.visual_identity.style_notes}</p>
         <Field label={t('Resolve visual identity')}><Select value={identity} onChange={setIdentity} options={[{ value: '', label: t('Choose value') }, { value: 'target', label: t('Keep target') }, { value: 'source', label: t('Use source') }]} /></Field></>}
-      <Button disabled={busy || !identity || preview.canon_conflicts.some(conflict => !choices[conflict.id])} onClick={() => void merge()}>{t('Apply merge')}</Button>
+      <Button disabled={busy || !identity || preview.canon_conflicts.some(conflict => !choices[conflict.id])} onClick={() => void merge()} disabledReason={busy ? BUSY_REASON : undefined}>{t('Apply merge')}</Button>
     </section>}</Surface></div>
   </section>
 }

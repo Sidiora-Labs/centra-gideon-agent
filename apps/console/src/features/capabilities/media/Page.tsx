@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import SpritePage from './SpritePage'
 import AnimationPage from './AnimationPage'
 import DownloadPage from './DownloadPage'
@@ -84,7 +85,7 @@ function SketchPage({ sketchId, onSelectSketch, onJob }: { sketchId?: string; on
       <Button disabled={busy || !!dirty} onClick={() => void action(async () => {
         const value = await request('', 'POST', { width: size[0], height: size[1], request_id: crypto.randomUUID(), ...(source ? { source_artifact_id: source, source_version: version } : {}) })
         select(value); setItems(old => [value, ...old]); if (onSelectSketch) onSelectSketch(value.id); else location.hash = '/capabilities/media?sketch=' + value.id
-      })}>New sketch</Button>
+      })} disabledReason={busy ? BUSY_REASON : undefined}>New sketch</Button>
     </div>
     <label>Saved sketches<select aria-label="Saved sketches" disabled={busy || !!dirty} value={sketch?.id || ''} onChange={e => { if (e.target.value) { if (onSelectSketch) onSelectSketch(e.target.value); else location.hash = '/capabilities/media?sketch=' + e.target.value } }}>
       <option value="">Choose a sketch</option>{items.map(item => <option key={item.id} value={item.id}>{item.id}</option>)}
@@ -95,10 +96,10 @@ function SketchPage({ sketchId, onSelectSketch, onJob }: { sketchId?: string; on
         <Button aria-pressed={tool === 'draw'} onClick={() => setTool('draw')}>Draw</Button><Button aria-pressed={tool === 'erase'} onClick={() => setTool('erase')}>Erase</Button>
         <label>Color<input aria-label="Color" type="color" value={color} onChange={e => setColor(e.target.value)} /></label>
         <label>Brush width<input aria-label="Brush width" type="number" min="1" max="128" value={width} onChange={e => setWidth(Math.max(1, Math.min(128, Number(e.target.value))))} /></label>
-        <Button disabled={!strokes.length || busy} onClick={() => setStrokes(old => old.slice(0, -1))}>Undo</Button>
-        <Button disabled={!dirty || busy} onClick={() => void action(async () => { select(await request('/' + sketch.id, 'PUT', { revision: sketch.revision, strokes })) })}>Save</Button>
-        <Button disabled={!dirty || busy} onClick={() => setStrokes(sketch.strokes)}>Discard changes</Button>
-        <Button disabled={!!dirty || busy} onClick={() => void action(async () => { const result = await request('/' + sketch.id + '/export', 'POST', { revision: sketch.revision }); setDownload('/api/artifacts/' + result.artifact_id + '/raw?version=' + result.version) })}>Export PNG</Button>
+        <Button disabled={!strokes.length || busy} onClick={() => setStrokes(old => old.slice(0, -1))} disabledReason={busy ? BUSY_REASON : undefined}>Undo</Button>
+        <Button disabled={!dirty || busy} onClick={() => void action(async () => { select(await request('/' + sketch.id, 'PUT', { revision: sketch.revision, strokes })) })} disabledReason={busy ? BUSY_REASON : undefined}>Save</Button>
+        <Button disabled={!dirty || busy} onClick={() => setStrokes(sketch.strokes)} disabledReason={busy ? BUSY_REASON : undefined}>Discard changes</Button>
+        <Button disabled={!!dirty || busy} onClick={() => void action(async () => { const result = await request('/' + sketch.id + '/export', 'POST', { revision: sketch.revision }); setDownload('/api/artifacts/' + result.artifact_id + '/raw?version=' + result.version) })} disabledReason={busy ? BUSY_REASON : undefined}>Export PNG</Button>
         {download && <a href={download} download="sketch.png">Download PNG</a>}
       </div>
       <button disabled={busy || !!dirty} onClick={() => { setBusy(true); fetch('/api/capabilities/media/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'sketch_export', sketch_id: sketch.id, revision: sketch.revision, request_id: crypto.randomUUID() }) }).then(async response => { const value = await response.json(); if (!response.ok) throw new Error(value.error); if (onJob) onJob(value.id); else location.hash = '#/capabilities/media?view=jobs' }).catch(reason => setError(String(reason))).finally(() => setBusy(false)) }}>Queue PNG export</button>
