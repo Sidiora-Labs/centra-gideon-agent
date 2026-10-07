@@ -122,7 +122,7 @@ function PlanReview({ plan, reviewed, destructiveConfirmed, onReviewed, onDestru
   busy: boolean
 }) {
   const decision = decideMaintenanceApply(plan, reviewed ? plan.plan_digest : '', destructiveConfirmed)
-  return <div role="dialog" aria-modal="false" aria-labelledby="maintenance-plan-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
+  return <section aria-labelledby="maintenance-plan-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
     <div className="flex flex-wrap items-start justify-between gap-m"><div>
       <h3 id="maintenance-plan-title" className="text-base text-on-surface">Review maintenance plan</h3>
       <p className="mt-xs text-sm text-on-surface-low">Expires {new Date(plan.expires_at).toLocaleString()}</p>
@@ -146,7 +146,7 @@ function PlanReview({ plan, reviewed, destructiveConfirmed, onReviewed, onDestru
     </label>}
     {!decision.allowed && <p className="mt-s text-sm text-on-surface-low">{decision.reason}</p>}
     <div className="hypermid-action-bar mt-m flex justify-end"><Button size="sm" disabled={!decision.allowed} disabledReason={!decision.allowed ? decision.reason : undefined} loading={busy} onClick={onApply}><ShieldCheck size={14} /> Apply reviewed plan</Button></div>
-  </div>
+  </section>
 }
 
 function Receipt({ receipt, busy, onRefresh, onCancel }: {

@@ -19,7 +19,7 @@ function bytes(value: number): string {
 }
 
 function CachePlan({ plan, onClose }: { plan: HypermidCachePlanWire; onClose: () => void }) {
-  return <div role="dialog" aria-modal="false" aria-labelledby="hypermid-cache-plan-title" className="mt-m rounded-lg border border-outline-variant bg-surface p-l">
+  return <section aria-labelledby="hypermid-cache-plan-title" className="mt-m rounded-lg border border-outline-variant bg-surface p-l">
     <div className="flex items-start justify-between gap-m">
       <div><h3 id="hypermid-cache-plan-title" className="text-base text-on-surface">Review {plan.action} plan</h3>
         <p className="mt-xs text-sm text-on-surface-low">{plan.recovery}</p></div>
@@ -30,7 +30,7 @@ function CachePlan({ plan, onClose }: { plan: HypermidCachePlanWire; onClose: ()
       <div><dt className="text-on-surface-low">Affected data</dt><dd className="text-on-surface">{bytes(plan.entries.reduce((total, entry) => total + entry.bytes, 0))}</dd></div>
     </dl>
     <p data-type="caption" className="mt-m text-on-surface-low">This is a read-only plan. Apply it from Maintenance after reviewing the final scope and plan digest.</p>
-  </div>
+  </section>
 }
 
 function CacheRow({ cache, onPlan }: { cache: HypermidCacheWire; onPlan: (plan: HypermidCachePlanWire) => void }) {

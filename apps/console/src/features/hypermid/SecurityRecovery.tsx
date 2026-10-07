@@ -45,7 +45,7 @@ function PlanReview({ plan, reviewed, confirmed, busy, onReviewed, onConfirmed, 
   onApply: () => void
 }) {
   const decision = securityRecoveryApplyDecision(plan, reviewed ? plan.plan_digest : '', confirmed)
-  return <div role="dialog" aria-modal="false" aria-labelledby="security-recovery-plan-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
+  return <section aria-labelledby="security-recovery-plan-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
     <div className="flex flex-wrap items-start justify-between gap-m"><div>
       <h3 id="security-recovery-plan-title" className="text-base text-on-surface">Review encrypted {plan.destructive ? 'restore' : 'backup'} plan</h3>
       <p className="mt-xs text-sm text-on-surface-low">Expires {new Date(plan.expires_at).toLocaleString()}</p></div>
@@ -73,7 +73,7 @@ function PlanReview({ plan, reviewed, confirmed, busy, onReviewed, onConfirmed, 
     {plan.destructive && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={confirmed} onChange={(checked) => onConfirmed(checked)} className="size-4 accent-primary" ariaLabel={"I confirm this restore may replace authoritative memory."} />I confirm this restore may replace authoritative memory.</label>}
     {!decision.allowed && <p className="mt-s text-sm text-on-surface-low">{decision.reason}</p>}
     <div className="hypermid-action-bar mt-m flex justify-end"><Button size="sm" disabled={!decision.allowed} disabledReason={!decision.allowed ? decision.reason : undefined} loading={busy} onClick={onApply}><ShieldCheck size={14} /> Apply reviewed plan</Button></div>
-  </div>
+  </section>
 }
 
 function Receipt({ receipt, busy, onStatus, onRecover }: {

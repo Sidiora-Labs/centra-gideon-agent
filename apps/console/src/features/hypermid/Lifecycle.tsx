@@ -70,7 +70,7 @@ function PlanReview({ plan, reviewed, destructiveConfirmed, purgeConfirmed, busy
   const decision = decideLifecycleApply(plan, reviewed ? plan.plan_digest : '', destructiveConfirmed, purgeConfirmed)
   const inventory = Object.entries(plan.inventory || {})
   const install = lifecycleInstallEvidence(plan)
-  return <div role="dialog" aria-modal="false" aria-labelledby="lifecycle-plan-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
+  return <section aria-labelledby="lifecycle-plan-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
     <div className="flex flex-wrap items-start justify-between gap-m"><div><h3 id="lifecycle-plan-title" className="text-base text-on-surface">Review lifecycle plan</h3>
       <p className="mt-xs text-sm text-on-surface-low">Expires {new Date(plan.expires_at).toLocaleString()}</p></div><div className="flex flex-wrap gap-s">
       {plan.restart_required && <StatusPill label="restart required" tone="warn" />}{plan.destructive && <StatusPill label="destructive" tone="warn" />}
@@ -127,7 +127,7 @@ function PlanReview({ plan, reviewed, destructiveConfirmed, purgeConfirmed, busy
     {plan.data_disposition === 'purge' && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={purgeConfirmed} onChange={(checked) => onPurge(checked)} className="size-4 accent-primary" ariaLabel={"I separately confirm permanent user-data purge."} />I separately confirm permanent user-data purge.</label>}
     {!decision.allowed && <p className="mt-s text-sm text-on-surface-low">{decision.reason}</p>}
     <div className="hypermid-action-bar mt-m flex justify-end"><Button size="sm" disabled={!decision.allowed} disabledReason={!decision.allowed ? decision.reason : undefined} loading={busy} onClick={onApply}><ShieldCheck size={14} /> Apply reviewed plan</Button></div>
-  </div>
+  </section>
 }
 
 function RecoveryReceipt({ receipt, recoveryState, busy, onCheck, onRecover, onResume, onRollback }: {

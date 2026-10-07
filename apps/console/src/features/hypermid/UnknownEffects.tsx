@@ -54,7 +54,7 @@ function PlanReview({ plan, reviewed, busy, onReviewed, onCancel, onReconcile }:
   onCancel: () => void
   onReconcile: () => void
 }) {
-  return <div role="dialog" aria-modal="false" aria-labelledby="effect-review-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
+  return <section aria-labelledby="effect-review-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
     <div className="flex flex-wrap items-start justify-between gap-s"><div><h3 id="effect-review-title" className="text-base text-on-surface">Review authoritative reconciliation</h3>
       <p className="mt-xs text-sm text-on-surface-low">This records the provider-confirmed outcome. It does not repeat the external effect.</p></div>
       <StatusPill label={readable(plan.proposed_state)} tone="ok" /></div>
@@ -71,7 +71,7 @@ function PlanReview({ plan, reviewed, busy, onReviewed, onCancel, onReconcile }:
     <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={reviewed} onChange={(checked) => onReviewed(checked)} className="size-4 accent-primary" ariaLabel={"I reviewed this exact operation, scope, proposed outcome, and evidence digest."} />I reviewed this exact operation, scope, proposed outcome, and evidence digest.</label>
     <div className="hypermid-action-bar mt-m flex flex-wrap justify-end gap-s"><Button size="sm" variant="secondary" onClick={onCancel}>Cancel</Button>
       <Button size="sm" disabled={!reviewed} disabledReason={!reviewed ? 'Review this exact operation, scope, outcome, and evidence digest first.' : undefined} loading={busy} onClick={onReconcile}><FileCheck2 size={14} /> Record reviewed outcome</Button></div>
-  </div>
+  </section>
 }
 
 export function UnknownEffectsView({ snapshot, plan, reviewed = false, busy = '', error = '', announcement = '', onRefresh, onReview, onReviewed, onCancel, onReconcile }: {

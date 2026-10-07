@@ -78,7 +78,7 @@ export function AuthorityControl({ onStatus, onCommitted }: {
         </Button>
       </div>
     </Surface>
-    {plan && <div role="dialog" aria-modal="false" aria-labelledby="authority-plan-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
+    {plan && <section aria-labelledby="authority-plan-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
       <h3 id="authority-plan-title" className="text-base text-on-surface">{plan.action === 'activate_primary' ? 'Review Primary writer handoff' : 'Review rollback to Gideon'}</h3>
       <p className="mt-xs text-sm text-on-surface-low">This plan expires {new Date(plan.expires_at).toLocaleString()}.</p>
       <ol className="mt-m grid gap-s">{plan.steps.map((step, index) => <li key={step} className="rounded-lg bg-surface-container px-m py-s text-sm text-on-surface">{index + 1}. {humanStep(step)}</li>)}</ol>
@@ -88,7 +88,7 @@ export function AuthorityControl({ onStatus, onCommitted }: {
       {!decision?.allowed && <p className="mt-s text-sm text-on-surface-low">{decision?.reason}</p>}
       <div className="hypermid-action-bar mt-m flex flex-wrap justify-end gap-s"><Button size="sm" variant="secondary" onClick={() => { setPlan(undefined); setReviewed(false) }}>Cancel</Button>
         <Button size="sm" disabled={!decision?.allowed} disabledReason={!decision?.allowed ? decision?.reason : undefined} loading={busy === 'apply'} onClick={() => void apply()}>Apply reviewed handoff</Button></div>
-    </div>}
+    </section>}
     {outcome === 'outcome_unknown' && <p role="alert" className="mt-m text-sm text-warn">The handoff may have taken effect. Reconcile writer authority before retrying.</p>}
     {outcome === 'committed' && <p role="status" className="mt-m text-sm text-success">Writer authority changed and the returned status confirms the result.</p>}
     {error && <p role="alert" className="mt-m break-words text-sm text-danger">{error}</p>}
