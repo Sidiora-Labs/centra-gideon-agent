@@ -5,6 +5,8 @@ import json
 import logging
 import os
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, cast
@@ -38,49 +40,66 @@ class CredentialStore:
         self._credentials_path = self._home / self.CREDENTIALS_FILE
         self._env_path = self._home / self.ENV_FILE
         self._state_lock = threading.RLock()
+        self._disk_lock_depth = 0
         self._descriptors: dict[str, dict[str, object]] = {}
         self._env: dict[str, str] = {}
         self.reload()
 
     def reload(self) -> None:
         with self._state_lock:
-            descriptors, environment = self._load_descriptors(), self._load_env_file()
-            migrated = {name: dict(row) for name, row in descriptors.items()}
-            unresolved = False
-            changed = False
-            for name, row in migrated.items():
-                if str(row.get("type", "none")) not in _SECRET_BEARING_KINDS:
-                    continue
-                value = row.get("value")
-                env_name = row.get("value_env")
-                if isinstance(env_name, str) and env_name:
-                    value = (
-                        os.environ.get(env_name) or environment.get(env_name) or value
-                    )
-                if not value:
-                    value = environment.get(name)
-                if isinstance(value, str) and value:
-                    _core_credentials.save_credential(name, value, self._home)
-                    if _core_credentials.get_credential(name, self._home) != value:
-                        unresolved = True
-                        continue
-                    row.pop("value", None)
-                    row.pop("value_env", None)
-                    row["value_ref"] = name
-                    changed = True
-                elif row.get("value_ref") == name and _core_credentials.get_credential(
-                    name, self._home
-                ):
-                    continue
-                else:
-                    unresolved = True
-            if changed and not unresolved:
-                payload = json.dumps(migrated, indent=2, sort_keys=True) + "\n"
-                atomic_write(
-                    self._credentials_path, payload, fsync=True, mode=self.FILE_MODE
+            if not self._home.exists():
+                self._descriptors, self._env = {}, {}
+                return
+            with self._disk_lock():
+                descriptors, environment = (
+                    self._load_descriptors(),
+                    self._load_env_file(),
                 )
-                descriptors = migrated
-            self._descriptors, self._env = descriptors, environment
+                migrated = {name: dict(row) for name, row in descriptors.items()}
+                unresolved = False
+                changed = False
+                for name, row in migrated.items():
+                    if str(row.get("type", "none")) not in _SECRET_BEARING_KINDS:
+                        continue
+                    if (
+                        row.get("value_ref") == name
+                        and "value" not in row
+                        and "value_env" not in row
+                        and _core_credentials.get_credential(name, self._home)
+                    ):
+                        continue
+                    value = row.get("value")
+                    env_name = row.get("value_env")
+                    if isinstance(env_name, str) and env_name:
+                        value = (
+                            os.environ.get(env_name)
+                            or environment.get(env_name)
+                            or value
+                        )
+                    if not value:
+                        value = environment.get(name)
+                    if isinstance(value, str) and value:
+                        _core_credentials.save_credential(name, value, self._home)
+                        if _core_credentials.get_credential(name, self._home) != value:
+                            unresolved = True
+                            continue
+                        row.pop("value", None)
+                        row.pop("value_env", None)
+                        row["value_ref"] = name
+                        changed = True
+                    elif row.get(
+                        "value_ref"
+                    ) == name and _core_credentials.get_credential(name, self._home):
+                        continue
+                    else:
+                        unresolved = True
+                if changed and not unresolved:
+                    payload = json.dumps(migrated, indent=2, sort_keys=True) + "\n"
+                    atomic_write(
+                        self._credentials_path, payload, fsync=True, mode=self.FILE_MODE
+                    )
+                    descriptors = migrated
+                self._descriptors, self._env = descriptors, environment
 
     def has(self, name: str) -> bool:
         with self._state_lock:
@@ -127,23 +146,24 @@ class CredentialStore:
     def save(self, descriptors: dict[str, dict[str, object]]) -> None:
         snapshot = {name: dict(row) for name, row in descriptors.items()}
         with self._state_lock:
-            for name, row in snapshot.items():
-                if str(row.get("type", "none")) in _SECRET_BEARING_KINDS:
-                    value = row.pop("value", None)
-                    if isinstance(value, str) and value:
-                        _core_credentials.save_credential(name, value, self._home)
-                    if not _core_credentials.get_credential(name, self._home):
-                        raise OSError(
-                            "credential backend did not verify the stored value"
-                        )
-                    row.pop("value_env", None)
-                    row.pop("value", None)
-                    row["value_ref"] = name
-            payload = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
-            atomic_write(
-                self._credentials_path, payload, fsync=True, mode=self.FILE_MODE
-            )
-            self._descriptors = snapshot
+            with self._disk_lock():
+                for name, row in snapshot.items():
+                    if str(row.get("type", "none")) in _SECRET_BEARING_KINDS:
+                        value = row.pop("value", None)
+                        if isinstance(value, str) and value:
+                            _core_credentials.save_credential(name, value, self._home)
+                        if not _core_credentials.get_credential(name, self._home):
+                            raise OSError(
+                                "credential backend did not verify the stored value"
+                            )
+                        row.pop("value_env", None)
+                        row.pop("value", None)
+                        row["value_ref"] = name
+                payload = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
+                atomic_write(
+                    self._credentials_path, payload, fsync=True, mode=self.FILE_MODE
+                )
+                self._descriptors = snapshot
 
     def put(self, name: str, descriptor: dict[str, object]) -> None:
         if not isinstance(name, str) or not name or not isinstance(descriptor, dict):
@@ -157,22 +177,33 @@ class CredentialStore:
 
     def _mutate(self, name: str, descriptor: dict[str, object] | None) -> None:
         with self._state_lock:
-            self._home.mkdir(parents=True, exist_ok=True)
-            fd = os.open(
-                self._home / ".credentials.lock", os.O_CREAT | os.O_RDWR, self.FILE_MODE
-            )
-            with os.fdopen(fd, "a+") as stream:
-                fcntl.flock(stream, fcntl.LOCK_EX)
-                try:
-                    snapshot = self._load_descriptors()
-                    if descriptor is None:
-                        snapshot.pop(name, None)
-                        _core_credentials.delete_credential(name, self._home)
-                    else:
-                        snapshot[name] = descriptor
-                    self.save(snapshot)
-                finally:
-                    fcntl.flock(stream, fcntl.LOCK_UN)
+            with self._disk_lock():
+                snapshot = self._load_descriptors()
+                if descriptor is None:
+                    snapshot.pop(name, None)
+                    _core_credentials.delete_credential(name, self._home)
+                else:
+                    snapshot[name] = descriptor
+                self.save(snapshot)
+
+    @contextmanager
+    def _disk_lock(self) -> Iterator[None]:
+        # Callers hold _state_lock; save may join the current mutation transaction.
+        if self._disk_lock_depth:
+            yield
+            return
+        self._home.mkdir(parents=True, exist_ok=True)
+        fd = os.open(
+            self._home / ".credentials.lock", os.O_CREAT | os.O_RDWR, self.FILE_MODE
+        )
+        with os.fdopen(fd, "a+") as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX)
+            self._disk_lock_depth += 1
+            try:
+                yield
+            finally:
+                self._disk_lock_depth -= 1
+                fcntl.flock(stream, fcntl.LOCK_UN)
 
     def _private_text(self, path: Path) -> str | None:
         if not path.is_file():
