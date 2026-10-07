@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { resetDataStore } from '../../shared/data/data'
+import { ROUTABLE_ROOTS } from '../../app/shell/navigationModel'
 import type { InboxItem, PendingApproval } from '../../shared/data/api'
 
 
@@ -15,6 +16,8 @@ vi.mock('../../shared/data/api', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   api: {
     inboxOpen: (...a: unknown[]) => inboxOpen(...a),
+    uLoops: () => Promise.resolve([]),
+    workflowRuns: () => Promise.resolve({ runs: [] }),
     approvals: (...a: unknown[]) => approvals(...a),
     chatSessions: (...a: unknown[]) => chatSessions(...a),
     resolveApproval: (...a: unknown[]) => resolveApproval(...a),
@@ -38,7 +41,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const approval = (over: Partial<PendingApproval> = {}): PendingApproval => ({
-  id: 'appr-1', source: 'chat', tool: 'shell.run', session: 'nightly-sweep', ts: 1, ...over,
+  id: 'appr-1', revision: 'approval-revision-1', source: 'chat', tool: 'shell.run', session: 'nightly-sweep', ts: 1, ...over,
 })
 
 const session = (over: Record<string, unknown> = {}) => ({
@@ -119,7 +122,7 @@ describe('approving from a lane', () => {
     render(<MissionControl />)
     await userEvent.click(await screen.findByRole('button', { name: /^Approve/ }))
 
-    expect(resolveApproval).toHaveBeenCalledWith('appr-1', 'approve')
+    expect(resolveApproval).toHaveBeenCalledWith('appr-1', 'approve', 'approval-revision-1')
     expect(await screen.findByRole('status')).toHaveTextContent('Approved.')
     await waitFor(() => expect(screen.queryByRole('button', { name: /^Approve/ })).toBeNull())
   })
@@ -128,7 +131,7 @@ describe('approving from a lane', () => {
     resolveApproval.mockResolvedValue({ ok: true })
     render(<MissionControl />)
     await userEvent.click(await screen.findByRole('button', { name: /^Reject/ }))
-    expect(resolveApproval).toHaveBeenCalledWith('appr-1', 'reject')
+    expect(resolveApproval).toHaveBeenCalledWith('appr-1', 'reject', 'approval-revision-1')
   })
 
   it('a FAILED approve says so on the card, and the card does NOT read as resolved', async () => {
@@ -228,6 +231,7 @@ describe('the lane split comes from lib/attentionLanes, not from this view', () 
         [item],
         [appr],
         [{ key: 'chat-1', title: 'nightly sweep', running: true, stopping: false, pending_approval: false }],
+        [], [],
       ),
     )
   })
@@ -242,7 +246,7 @@ describe('the lane split comes from lib/attentionLanes, not from this view', () 
     approvals.mockResolvedValue([appr])
     render(<MissionControl />)
 
-    await waitFor(() => expect(toLanes).toHaveBeenCalled())
+    await waitFor(() => expect(toLanes).toHaveBeenCalledWith([mirror], [appr], [], [], []))
     const [gotItems, gotApprovals] = toLanes.mock.calls[toLanes.mock.calls.length - 1]
     expect(gotItems).toEqual([mirror])
     expect(gotApprovals).toEqual([appr])
@@ -252,7 +256,9 @@ describe('the lane split comes from lib/attentionLanes, not from this view', () 
     chatSessions.mockResolvedValue([{ key: 'chat-2', title: 'old chat', messages: 3 }])
     render(<MissionControl />)
 
-    await waitFor(() => expect(toLanes).toHaveBeenCalled())
+    await waitFor(() => expect(toLanes).toHaveBeenCalledWith([], [], [
+      { key: 'chat-2', title: 'old chat', running: false, stopping: false, pending_approval: false },
+    ], [], []))
     const activity = toLanes.mock.calls[toLanes.mock.calls.length - 1][2]
     expect(activity).toEqual([
       { key: 'chat-2', title: 'old chat', running: false, stopping: false, pending_approval: false },
@@ -316,9 +322,8 @@ describe('the route is mounted in the shell', () => {
   })
 
   it('is in ROUTABLE, so the hash route is not rejected before it renders', () => {
-    const routable = app.match(/^const ROUTABLE = [^\n]+/m)
-    expect(routable, 'the ROUTABLE literal moved — re-point this rail').toBeTruthy()
-    expect(routable![0]).toContain(`'${MISSION_CONTROL_VIEW_ID}'`)
+    expect(app).toMatch(/^const ROUTABLE = ROUTABLE_ROOTS$/m)
+    expect(ROUTABLE_ROOTS).toContain(MISSION_CONTROL_VIEW_ID)
   })
 
   it('is reachable by a user, via the command palette', () => {
