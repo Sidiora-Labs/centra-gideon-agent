@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import stat
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -277,26 +276,14 @@ def write_export(
     data = canonical_bytes(archive.to_mapping())
     if len(data) > MAX_EXPORT_BYTES:
         raise MigrationError("EXPORT_TOO_LARGE", "export exceeds the size limit")
-    handle, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+    from gideon.core.atomic_write import atomic_write_bytes
+
+    atomic_write_bytes(target, data, fsync=True, mode=0o600)
+    directory_fd = os.open(target.parent, os.O_DIRECTORY)
     try:
-        os.fchmod(handle, 0o600)
-        with os.fdopen(handle, "wb", closefd=True) as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, target)
-        directory_fd = os.open(target.parent, os.O_DIRECTORY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    except BaseException:
-        try:
-            os.close(handle)
-        except OSError:
-            pass
-        Path(temporary).unlink(missing_ok=True)
-        raise
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
     return ExportReceipt(
         target, Digest.sha256(data), len(data), archive.cursor, archive.source_digest
     )
@@ -416,26 +403,14 @@ def write_memory_bundle(
     data = canonical_bytes(bundle.to_mapping())
     if len(data) > MAX_EXPORT_BYTES:
         raise MigrationError("EXPORT_TOO_LARGE", "memory export exceeds the size limit")
-    handle, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+    from gideon.core.atomic_write import atomic_write_bytes
+
+    atomic_write_bytes(target, data, fsync=True, mode=0o600)
+    directory_fd = os.open(target.parent, os.O_DIRECTORY)
     try:
-        os.fchmod(handle, 0o600)
-        with os.fdopen(handle, "wb", closefd=True) as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, target)
-        directory_fd = os.open(target.parent, os.O_DIRECTORY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    except BaseException:
-        try:
-            os.close(handle)
-        except OSError:
-            pass
-        Path(temporary).unlink(missing_ok=True)
-        raise
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
     manifest = bundle.manifest
     return MemoryBundleReceipt(
         target,

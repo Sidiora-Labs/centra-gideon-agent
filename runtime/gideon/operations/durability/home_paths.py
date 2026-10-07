@@ -8,7 +8,6 @@ import logging
 import os
 import shutil
 import stat
-import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,24 +19,10 @@ PRIVATE_FILE_MODE = 0o600
 
 @contextmanager
 def private_file(dst, *, fsync=False):
-    dst = Path(dst)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    staged = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w+b", dir=dst.parent, delete=False
-        ) as out:
-            staged = out.name
-            os.fchmod(out.fileno(), PRIVATE_FILE_MODE)
-            yield out
-            out.flush()
-            if fsync:
-                os.fsync(out.fileno())
-        os.replace(staged, dst)
-        staged = None
-    finally:
-        if staged is not None:
-            os.unlink(staged)
+    from gideon.core.atomic_write import atomic_stream
+
+    with atomic_stream(dst, fsync=fsync, mode=PRIVATE_FILE_MODE) as out:
+        yield out
 
 
 def lock_path(target):

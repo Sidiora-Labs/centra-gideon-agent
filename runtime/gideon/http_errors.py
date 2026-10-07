@@ -349,6 +349,11 @@ HTTP_ERROR_CODES: dict[str, str] = {
 }
 
 
+def error_payload(code: str | int, message: str) -> dict[str, Any]:
+    """The code/message object shared by HTTP and JSON-RPC wire envelopes."""
+    return {"code": code, "message": message}
+
+
 def json_error(
     code: str,
     *,
@@ -377,10 +382,9 @@ def json_error(
     message) rather than raising: a typo must not turn a 400 into a 500. The
     append-only rail is what catches the typo, statically, before it ships.
     """
-    err: dict[str, Any] = {
-        "code": code,
-        "message": message if message is not None else HTTP_ERROR_CODES.get(code, code),
-    }
+    err = error_payload(
+        code, message if message is not None else HTTP_ERROR_CODES.get(code, code)
+    )
     if error_extra:
         err.update(error_extra)
     return web.json_response(

@@ -5,7 +5,6 @@ from __future__ import annotations
 import fcntl
 import json
 import os
-import tempfile
 from dataclasses import dataclass, field, replace
 from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 from enum import Enum
@@ -177,29 +176,14 @@ class FileCacheStore:
                 encoded = json.dumps(
                     state.to_wire(), sort_keys=True, separators=(",", ":")
                 )
-                temporary_descriptor, temporary_name = tempfile.mkstemp(
-                    prefix=f".{self.path.name}.", dir=self.path.parent
-                )
+                from gideon.core.atomic_write import atomic_write
+
+                atomic_write(self.path, encoded + "\n", fsync=True, mode=0o600)
+                directory = os.open(self.path.parent, os.O_RDONLY)
                 try:
-                    os.fchmod(temporary_descriptor, 0o600)
-                    with os.fdopen(
-                        temporary_descriptor, "w", encoding="utf-8"
-                    ) as output:
-                        output.write(encoded + "\n")
-                        output.flush()
-                        os.fsync(output.fileno())
-                    os.replace(temporary_name, self.path)
-                    directory = os.open(self.path.parent, os.O_RDONLY)
-                    try:
-                        os.fsync(directory)
-                    finally:
-                        os.close(directory)
-                except BaseException:
-                    try:
-                        os.unlink(temporary_name)
-                    except FileNotFoundError:
-                        pass
-                    raise
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
         except BaseException:
             if not isinstance(descriptor, int):
                 os.close(descriptor)

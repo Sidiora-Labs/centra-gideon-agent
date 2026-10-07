@@ -841,7 +841,6 @@ def install_skill_files(
                 f"skill install refused: scanner flagged {rel_path!r} as dangerous ({cats})"
             )
 
-    import os
     import shutil
     import tempfile
     import uuid
@@ -855,14 +854,9 @@ def install_skill_files(
     backup = target_base / f".skill-backup-{uuid.uuid4().hex}"
     try:
         _stage_files(files, stage)
-        if skill_dir.exists():
-            os.replace(skill_dir, backup)
-        try:
-            os.replace(stage, skill_dir)
-        except BaseException:
-            if backup.exists():
-                os.replace(backup, skill_dir)
-            raise
+        from gideon.core.atomic_write import atomic_directory_publish
+
+        atomic_directory_publish(stage, skill_dir, backup=backup)
         if backup.exists():
             shutil.rmtree(backup)
     finally:

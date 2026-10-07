@@ -31,9 +31,7 @@ pins that promise per format.
 from __future__ import annotations
 
 import hashlib
-import os
 import re
-import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -476,23 +474,9 @@ def export_entities(
                 rendered = rf.text.encode("utf-8")
                 if current == rendered:
                     continue
-                with tempfile.NamedTemporaryFile(
-                    mode="wb",
-                    dir=target.parent,
-                    prefix=f".{target.name}.",
-                    suffix=".tmp",
-                    delete=False,
-                ) as stream:
-                    staged = Path(stream.name)
-                    stream.write(rendered)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                try:
-                    os.replace(staged, target)
-                finally:
-                    staged.unlink(missing_ok=True)
-            elif overwrite and expected_existing is None and target.exists():
-                target.write_text(rf.text, encoding="utf-8")
+                from gideon.core.atomic_write import atomic_write_bytes
+
+                atomic_write_bytes(target, rendered, fsync=True)
             else:
                 # O_EXCL semantics close the check/write race: a file created after the
                 # earlier clobber scan is refused instead of being truncated.

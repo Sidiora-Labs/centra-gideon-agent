@@ -979,11 +979,9 @@ def _rpc_result(request_id: Any, result: Any) -> dict[str, Any]:
 
 
 def _rpc_error(request_id: Any, code: int, message: str) -> dict[str, Any]:
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "error": {"code": code, "message": message},
-    }
+    from gideon.http_errors import error_payload
+
+    return {"jsonrpc": "2.0", "id": request_id, "error": error_payload(code, message)}
 
 
 async def handle_rpc(request: web.Request) -> web.StreamResponse:

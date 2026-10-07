@@ -1556,25 +1556,10 @@ def _file_digest(path: Path) -> Digest:
 
 def _atomic_private_write(path: Path, content: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    descriptor, temporary = tempfile.mkstemp(
-        prefix=".hypermid-backup-", dir=path.parent
-    )
-    temporary_path = Path(temporary)
-    try:
-        os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary_path, path)
-        _sync_directory(path.parent)
-    except BaseException:
-        try:
-            os.close(descriptor)
-        except OSError:
-            pass
-        temporary_path.unlink(missing_ok=True)
-        raise
+    from gideon.core.atomic_write import atomic_write_bytes
+
+    atomic_write_bytes(path, content, fsync=True, mode=0o600)
+    _sync_directory(path.parent)
 
 
 def _sync_file(path: Path) -> None:

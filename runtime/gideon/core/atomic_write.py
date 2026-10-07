@@ -10,6 +10,7 @@ import stat
 import tempfile
 import threading
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -166,3 +167,56 @@ def atomic_json_write(
         permissions=mode,
         replace_fallback=replace_fallback,
     )
+
+
+@contextmanager
+def atomic_stream(path: Path | str, *, fsync: bool = False, mode: int | None = None):
+    """Publish streamed bytes atomically through the shared persistence hooks."""
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w+b", dir=destination.parent, suffix=".tmp", delete=False
+        ) as stream:
+            temporary = stream.name
+            os.fchmod(stream.fileno(), _permissions.resolve(mode))
+            yield stream
+            stream.flush()
+            if fsync:
+                os.fsync(stream.fileno())
+        os.replace(temporary, destination)
+        temporary = None
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+    _subscriptions.publish(destination)
+
+
+def atomic_directory_publish(
+    stage: Path | str, destination: Path | str, *, backup: Path | str | None = None
+) -> None:
+    """Commit a validated directory and restore its prior directory on failure."""
+    stage, destination = Path(stage), Path(destination)
+    backup = Path(backup) if backup is not None else None
+    if stage.is_symlink() or not stage.is_dir() or destination.is_symlink():
+        raise ValueError("Directory publication requires real directories")
+    if backup is None:
+        if destination.exists():
+            raise FileExistsError(destination)
+        os.rename(stage, destination)
+    else:
+        if backup.exists() or backup.is_symlink():
+            raise FileExistsError(backup)
+        if destination.exists():
+            os.replace(destination, backup)
+        try:
+            os.replace(stage, destination)
+        except BaseException:
+            if backup.exists():
+                os.replace(backup, destination)
+            raise
+    _subscriptions.publish(destination)

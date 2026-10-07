@@ -11,9 +11,9 @@ from gideon.core.http_request import read_json_body
 
 
 def _error(code: str, message: str, status: int) -> web.Response:
-    return web.json_response(
-        {"error": {"code": code, "message": message}}, status=status
-    )
+    from gideon.http_errors import json_error
+
+    return json_error(code, message=message, status=status)
 
 
 async def _body(request: web.Request) -> dict:
