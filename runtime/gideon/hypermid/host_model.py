@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gideon.integrations.llm.base import ModelProvider
+
+    from .history import HistoryJournal
 
 from .summarizer import (
     SummaryCandidate,
@@ -14,12 +20,12 @@ from .summarizer import (
 
 @dataclass(frozen=True, slots=True)
 class HostSummaryModel:
-    provider: object
+    provider: ModelProvider
 
     async def summarize(
         self,
         job: SummaryJob,
-        journal: object,
+        journal: HistoryJournal,
         *,
         source_token_count: int,
         now_ms: int,
