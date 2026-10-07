@@ -762,3 +762,119 @@ def test_actual_custom_native_aliases_and_predicate_fields_have_exact_wire_parit
     predicate = root / "runtime/gideon/hypermid/contracts.py"
     smart_note = root / "crates/hypermid-memory/src/smart_note.rs"
     assert matches[(predicate.resolve(), "PredicateField")] == (smart_note.resolve(),)
+
+
+def _member_name_wire_fixture(tmp_path):
+    python = tmp_path / "transport.py"
+    python.write_text('''from enum import Enum
+class WireOperation(str, Enum):
+    FIRST = "memory.first"
+    SECOND = "memory.second"
+class WireRequest:
+    operation: WireOperation
+    def to_wire(self):
+        result = {"operation": self.operation.name.lower()}
+        return result
+    @classmethod
+    def from_wire(cls, value):
+        raw = _mapping(value, "request")
+        return cls(operation=WireOperation[raw["operation"].upper()])
+''')
+    native = tmp_path / "transport.rs"
+    native.write_text('''#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WireOperation { First, Second, }
+impl WireOperation {
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::First => "memory.first",
+            Self::Second => "memory.second",
+        }
+    }
+}
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WireRequest { pub operation: WireOperation, }
+''')
+    return python, native
+
+
+def test_complete_member_name_transport_wire_proof_clears_both_maps(tmp_path):
+    python, native = _member_name_wire_fixture(tmp_path)
+    assert _inert_enum_members([python], set(), [native]) == []
+    assert len(_inert_enum_members([python], set())) == 2
+
+
+@pytest.mark.parametrize("mutation", [
+    "wrong-native-map", "missing-native-arm", "extra-native-arm", "wildcard-arm",
+    "wrong-serde-pair", "wrong-struct-type", "no-struct-deserialize",
+    "struct-field-rename", "wrong-encoder", "wrong-decoder", "wrong-input",
+    "overridden-wire-field", "dict-update", "overridden-input", "encoder-not-returned",
+    "nested-input-reassignment", "input-update", "escaped-wire-dict",
+])
+def test_partial_or_mismatched_member_transport_contract_stays_flagged(tmp_path, mutation):
+    python, native = _member_name_wire_fixture(tmp_path)
+    py = python.read_text()
+    rs = native.read_text()
+    if mutation == "wrong-native-map":
+        rs = rs.replace('Self::Second => "memory.second"', 'Self::Second => "memory.other"')
+    elif mutation == "missing-native-arm":
+        rs = rs.replace('Self::Second => "memory.second",', '')
+    elif mutation == "extra-native-arm":
+        rs = rs.replace('Self::Second => "memory.second",', 'Self::Second => "memory.second", Self::Third => "memory.third",')
+    elif mutation == "wildcard-arm":
+        rs = rs.replace('Self::Second => "memory.second",', '_ => "memory.second",')
+    elif mutation == "wrong-serde-pair":
+        rs = rs.replace('First, Second,', '#[serde(rename = "second")] First, #[serde(rename = "first")] Second,')
+    elif mutation == "wrong-struct-type":
+        rs = rs.replace('pub operation: WireOperation', 'pub operation: OtherOperation')
+    elif mutation == "no-struct-deserialize":
+        rs = rs.replace('#[derive(Deserialize, Serialize)]\n#[serde(deny_unknown_fields)]', '#[derive(Serialize)]\n#[serde(deny_unknown_fields)]')
+    elif mutation == "struct-field-rename":
+        rs = rs.replace('pub operation: WireOperation', '#[serde(rename = "other")] pub operation: WireOperation')
+    elif mutation == "wrong-encoder":
+        py = py.replace('self.operation.name.lower()', 'self.operation.value')
+    elif mutation == "wrong-decoder":
+        py = py.replace('raw["operation"].upper()', 'raw["other"].upper()')
+    elif mutation == "wrong-input":
+        py = py.replace('_mapping(value, "request")', '_mapping({}, "request")')
+    elif mutation == "overridden-wire-field":
+        py = py.replace('        return result', '        result["operation"] = "first"\n        return result')
+    elif mutation == "dict-update":
+        py = py.replace('        return result', '        result.update(operation="first")\n        return result')
+    elif mutation == "overridden-input":
+        py = py.replace('        return cls(', '        raw["operation"] = "first"\n        return cls(')
+    elif mutation == "nested-input-reassignment":
+        py = py.replace('        return cls(operation=WireOperation[raw["operation"].upper()])', '        try:\n            raw = {"operation": "first"}\n            return cls(operation=WireOperation[raw["operation"].upper()])\n        except Exception:\n            raise')
+    elif mutation == "input-update":
+        py = py.replace('        return cls(', '        raw.update(operation="first")\n        return cls(')
+    elif mutation == "escaped-wire-dict":
+        py = py.replace('        return result', '        mutate(document=result)\n        return result')
+    elif mutation == "encoder-not-returned":
+        py = py.replace('return result', 'return {}')
+    python.write_text(py)
+    native.write_text(rs)
+    assert len(_inert_enum_members([python], set(), [native])) == 2
+
+
+def test_actual_memory_transport_member_and_envelope_wire_maps_round_trip():
+    from tooling.scripts.native_wire_enums import native_wire_enum_evidence
+    from gideon.hypermid.foundation import Cursor, Id, Scope, Trace
+    from gideon.hypermid.transport import MemoryOperation, MemoryRequest
+
+    root = Path(__file__).resolve().parents[2]
+    python = root / "runtime/gideon/hypermid/transport.py"
+    native = root / "crates/hypermid-memory/src/protocol.rs"
+    evidence = native_wire_enum_evidence([python], [native])
+    assert evidence[(python.resolve(), "MemoryOperation")] == (native.resolve(),)
+    scope = Scope("owner-1", "project-1")
+    for operation in MemoryOperation:
+        request = MemoryRequest(
+            operation, scope, scope, Id("resource-1"), Id("capability-1"),
+            Trace("trace-1", "request-1"), expected_cursor=Cursor(1, 0),
+            idempotency_key=Id("request-1"),
+        )
+        wire = request.to_wire()
+        assert wire["operation"] == operation.name.lower()
+        assert request.envelope().operation == operation.value
+        assert MemoryRequest.from_wire(wire).operation is operation

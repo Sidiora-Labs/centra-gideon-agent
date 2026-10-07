@@ -495,7 +495,9 @@ def _inert_enum_members(
        clears ALL of that class's members; or
     3. a public native Rust unit enum derives both serde serialization traits and
        supported literal serde renames, with the same class name (or a verified
-       source-bound counterpart alias) and complete variant values.
+       source-bound counterpart alias) and complete variant values. Member-name
+       request encodings also require proven request serializers/deserializers and
+       complete native member-name and envelope-value maps.
        The production census supplies native source files explicitly; fixture trees
        and ordinary value constructors do not gain this clearance.
 
