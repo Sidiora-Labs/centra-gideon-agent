@@ -1,7 +1,7 @@
 import {
   FileText, FileCode, Image, FileJson, Table, Globe, File as FileIcon,
   Folder, Box, Code2, Hash, Braces, BarChart3, ScrollText, ImagePlus,
-  Presentation, Film, type LucideIcon,
+  Presentation, Film, AudioLines, type LucideIcon,
 } from 'lucide-react'
 import type { ArtifactKind } from '../../shared/data/api'
 
@@ -136,6 +136,8 @@ export const ARTIFACT_KINDS: { key: ArtifactKind; label: string; icon: LucideIco
   { key: 'pptx', label: 'Slides', icon: Presentation, tone: '#e06c4f' },
   { key: 'pdf', label: 'PDF', icon: FileText, tone: '#e05c5c' },
   { key: 'video', label: 'Video', icon: Film, tone: '#9d86f5' },
+  { key: 'audio', label: 'Audio', icon: AudioLines, tone: 'var(--color-primary)' },
+  { key: 'model', label: '3D model', icon: Box, tone: 'var(--color-primary)' },
 ]
 
 export const UNKNOWN_ARTIFACT_KIND: { key: ''; label: string; icon: LucideIcon; tone: string } = {

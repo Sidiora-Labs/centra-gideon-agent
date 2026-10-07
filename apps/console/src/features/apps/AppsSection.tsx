@@ -1011,7 +1011,7 @@ const PROVIDER_ENTITY_LABEL: Record<string, string> = {
   model: 'Model', agent: 'Agent', search: 'Search', channel: 'Channel',
   inbox: 'Inbox', notification: 'Notification', tool: 'Tool', task: 'Task',
   action: 'Action', skills: 'Skills', knowledge: 'Knowledge', memory: 'Memory',
-  prompt: 'Prompt', workflow: 'Workflow',
+  prompt: 'Prompt', workflow: 'Workflow', context_engine: 'Context engine', vector_store: 'Vector store',
   trigger_source: 'Trigger source', duty_gate: 'Duty gate', sync: 'Sync', sandbox: 'Sandbox',
   trigger: 'Trigger',
 }

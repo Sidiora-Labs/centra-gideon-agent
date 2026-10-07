@@ -7,7 +7,7 @@ const SRC = join(import.meta.dirname, "../..")
 const stripComments = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 const read = (rel: string) => stripComments(readFileSync(join(SRC, rel), 'utf8'))
 
-describe('the agent row coral rail signals the active agent, not the native group', () => {
+describe('the native agent default marker signals the active agent, not the native group', () => {
   const src = read('features/agents/AgentsListPage.tsx')
 
   const nativeStart = src.indexOf('function NativeRow(')
@@ -17,13 +17,13 @@ describe('the agent row coral rail signals the active agent, not the native grou
   it('reads the real NativeRow (not vacuously green)', () => {
     expect(nativeStart, 'NativeRow moved — this rail measures nothing').toBeGreaterThan(-1)
     expect(nativeEnd, 'DiscoveredRow moved — the slice is unbounded').toBeGreaterThan(nativeStart)
-    expect(nativeRow, 'NativeRow must still render a ListRow to accent').toMatch(/<ListRow\b/)
+    expect(nativeRow, 'NativeRow must still render the real AgentCard for default context').toMatch(/<AgentCard\b/)
     expect(nativeRow, 'NativeRow must still know which agent is the default').toMatch(/\bisDefault\b/)
   })
 
-  it('gates the coral accent on isDefault', () => {
-    expect(nativeRow, 'the coral rail must ride isDefault, so it means "active", not "native"').toMatch(
-      /accent=\{\s*isDefault\s*\?\s*'var\(--color-primary\)'\s*:\s*undefined\s*\}/,
+  it('gates the native default marker on isDefault', () => {
+    expect(nativeRow, 'the default marker must ride isDefault, so it means active rather than native').toMatch(
+      /isDefault && <span[^>]*className="[^"]*text-primary[^"]*"[^>]*><Star[^>]*\/> default<\/span>/,
     )
   })
 

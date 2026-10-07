@@ -3768,7 +3768,7 @@ export interface GitStatusResp { repoRoot: string; branch: string; statuses: Rec
 export interface ContentMatch { file: string; line: number; col: number; preview: string }
 export interface ContentSearchResp { results: ContentMatch[]; engine: 'rg' | 'python'; truncated: boolean }
 
-export type ArtifactKind = 'widget' | 'html' | 'react' | 'markdown' | 'svg' | 'json' | 'text' | 'infographic' | 'document' | 'image' | 'csv' | 'docx' | 'xlsx' | 'pptx' | 'pdf' | 'video'
+export type ArtifactKind = 'widget' | 'html' | 'react' | 'markdown' | 'svg' | 'json' | 'text' | 'infographic' | 'document' | 'image' | 'csv' | 'docx' | 'xlsx' | 'pptx' | 'pdf' | 'video' | 'audio' | 'model'
 export type ArtifactSource = 'chat' | 'cron' | 'subagent' | 'manual' | 'import'
 export type TileSize = 's' | 'm' | 'l' | 'full'
 export interface TileDataNode { id: string; provider: string; config: Record<string, unknown> }
