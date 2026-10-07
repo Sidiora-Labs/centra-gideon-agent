@@ -61,7 +61,7 @@ export function focalIndex(word: string) {
 function FocalWord({ value }: { value: string }) {
   const chars = Array.from(value)
   const index = focalIndex(value)
-  return <span className="flex w-full items-baseline justify-center font-mono text-3xl tracking-wide @min-[40rem]:text-5xl">
+  return <span data-type="display-s" data-type-wide="display-l-container" className="flex w-full items-baseline justify-center font-mono">
     <span className="flex-1 text-right whitespace-pre">{chars.slice(0, index).join('')}</span>
     <span className="text-primary">{chars[index] || ''}</span>
     <span className="flex-1 text-left whitespace-pre">{chars.slice(index + 1).join('')}</span>

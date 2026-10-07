@@ -392,7 +392,14 @@
   *::-webkit-scrollbar { display: none; }
 
                                                             
-  [data-type="display-l"]  { font-size: 2.625rem; line-height: 3rem;    font-variation-settings: "wght" 280; letter-spacing: 0; }
+  :root { --type-display-l-size: 2.625rem; --type-display-l-line: 3rem; --type-display-l-weight: 280; }
+  [data-type="display-l"] { font-size: var(--type-display-l-size); line-height: var(--type-display-l-line); font-variation-settings: "wght" var(--type-display-l-weight); letter-spacing: 0; }
+  @container (min-width: 40rem) {
+    [data-type="display-s"][data-type-wide="display-l-container"] { font-size: var(--type-display-l-size); line-height: var(--type-display-l-line); font-variation-settings: "wght" var(--type-display-l-weight); letter-spacing: 0; }
+  }
+  @media (min-width: 40rem) {
+    [data-type="display-m"][data-type-wide="display-l-viewport"] { font-size: var(--type-display-l-size); line-height: var(--type-display-l-line); font-variation-settings: "wght" var(--type-display-l-weight); letter-spacing: 0; }
+  }
   [data-type="display-m"]  { font-size: 2.25rem;  line-height: 2.75rem; font-variation-settings: "wght" 320; }
   [data-type="display-s"]  { font-size: 2rem;     line-height: 2.375rem;font-variation-settings: "wght" 360; }
   [data-type="headline-l"] { font-size: 1.75rem;  line-height: 2.25rem; font-variation-settings: "wght" 350; }

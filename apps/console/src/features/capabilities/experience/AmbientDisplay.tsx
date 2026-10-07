@@ -72,7 +72,7 @@ export default function AmbientDisplay({ baseUrl = '/api/capabilities/experience
       </form>}
     </div>
     <h1>Ambient display</h1>
-    {snapshot?.preferences.show_clock && <time aria-label="Current time" dateTime={now.toISOString()} className="block text-4xl sm:text-6xl my-6">{now.toLocaleTimeString()}</time>}
+    {snapshot?.preferences.show_clock && <time aria-label="Current time" dateTime={now.toISOString()} data-type="display-m" data-type-wide="display-l-viewport" className="block my-6">{now.toLocaleTimeString()}</time>}
     {notice && <p role="status">{notice}</p>}
     {error && <p role="alert">Display refresh failed; shown data may be stale. {error}</p>}
     {!snapshot && !error && <p role="status">Loading ambient data…</p>}
