@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi, afterEach } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { createElement } from 'react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { api } from '../data/api'
+import { DegradedChip } from './DegradedChip'
+import { useShellNavigation } from '../../app/shell/shellControllers'
+
 
 
 const SRC = join(process.cwd(), "src")
@@ -19,9 +25,9 @@ describe('DegradedChip is dismissible from the keyboard', () => {
   const src = read('shared/ui/DegradedChip.tsx')
 
   it('Escape closes it and returns focus to the chip', () => {
-    expect(src).toMatch(/e\.key !== 'Escape'/)
+    expect(src).toMatch(/useDismissKey\('Escape', restore, 100\)/)
     expect(src).toMatch(/setOpen\(false\)/)
-    expect(src).toMatch(/triggerRef\.current\?\.focus\(\)/)
+    expect(src).toMatch(/close\(\); trigger\.current\?\.focus\(\)/)
   })
 
   it('the trigger carries the ref that focus returns to', () => {
@@ -29,11 +35,13 @@ describe('DegradedChip is dismissible from the keyboard', () => {
   })
 
   it('Escape is consumed so one press does not close two layers', () => {
-    expect(src).toMatch(/e\.stopPropagation\(\)/)
+    const helper = read('shared/ui/overlayInteraction.ts')
+    expect(helper).toMatch(/event\.preventDefault\(\)/)
+    expect(helper).toMatch(/event\.stopImmediatePropagation\(\)/)
   })
 
   it('the listener is scoped to the open state', () => {
-    expect(src).toMatch(/if \(!open\) return/)
+    expect(src).toMatch(/\{open && <DegradedPanel/)
   })
 })
 
@@ -41,9 +49,11 @@ describe('the NavRail overlay drawer is dismissible from the keyboard', () => {
   const src = read('app/shell/App.tsx')
 
   it('Escape closes the drawer', () => {
-    expect(src).toMatch(/if \(!mobileNavOpen\) return/)
-    expect(src).toMatch(/setMobileNavOpen\(false\)/)
-    expect(src).toMatch(/e\.stopPropagation\(\)/)
+    expect(src).toMatch(/const rail = useShellNavigation\(isMobile, navigate\)/)
+    expect(src).toMatch(/onScrimClick=\{\(\) => rail\.close\(\)\}/)
+    const controller = read('app/shell/shellControllers.ts')
+    expect(controller).toMatch(/useDismissKey\('Escape', \(\) => dispatch\('close'\), 50, state\.open\)/)
+    expect(read('shared/ui/NavRail.tsx')).toMatch(/new FocusScope\(captureFocus\(\)\)\.attach\(overlayRef\.current\)/)
   })
 
   it('the drawer is reachable at desktop widths, which is why it needs Escape', () => {
@@ -59,7 +69,17 @@ describe('the rail: an overlay with a click-away scrim also binds Escape', () =>
   const withScrim = files.filter((f) => SCRIM.test(f.src))
 
   it('every file with a click-away scrim handles Escape', () => {
-    const offenders = withScrim.filter((f) => !/'Escape'/.test(f.src)).map((f) => f.rel)
+    const delegates: Record<string, [RegExp, string]> = {
+      'shared/ui/content/ContentSurface.tsx': [/useContentTools\(draft\)/, 'shared/ui/content/contentSurfaceState.ts'],
+      'shared/ui/widget/ReactWidgetFrame.tsx': [/useWidgetExpansion\(\)/, 'shared/ui/widget/widgetFrameState.ts'],
+      'shared/ui/widget/WidgetFrame.tsx': [/useWidgetExpansion\(\)/, 'shared/ui/widget/widgetFrameState.ts'],
+    }
+    const handlesEscape = (source: string) => /['"]Escape['"]/.test(source)
+    const offenders = withScrim.filter(f => {
+      if (handlesEscape(f.src)) return false
+      const delegate = delegates[f.rel]
+      return !delegate || !delegate[0].test(f.src) || !handlesEscape(read(delegate[1]))
+    }).map(f => f.rel)
     expect(
       offenders,
       `A scrim is a MOUSE dismissal; without an Escape handler a keyboard user cannot close the ` +
@@ -78,5 +98,39 @@ describe('the rail: an overlay with a click-away scrim also binds Escape', () =>
     expect(SCRIM.test('<div className="fixed inset-0 z-[100] overflow-hidden" style={{}}>')).toBe(false)
     const sample = { rel: 'x.tsx', src: '<div className="fixed inset-0 z-40" onClick={close} />' }
     expect(SCRIM.test(sample.src) && !/'Escape'/.test(sample.src)).toBe(true)
+  })
+})
+
+
+afterEach(() => vi.restoreAllMocks())
+function NativeLayers() {
+  const rail = useShellNavigation(true, () => {})
+  return createElement('div', null,
+    createElement('button', { onClick: rail.toggle }, 'Open navigation'),
+    rail.open && createElement('div', { 'data-testid': 'navigation-layer' }, 'Navigation open'),
+    createElement(DegradedChip),
+  )
+}
+describe('native status over navigation Escape layering', () => {
+  it('closes only the status layer, restores focus, then closes the rail and removes its listener', async () => {
+    vi.spyOn(api, 'degraded').mockResolvedValue({ surfaces: [{ surface: 'search_ranking', available: false, floor: 'Keyword ranking', backlog: 0, use_cases: ['embedding'] }], degraded: ['search_ranking'] })
+    vi.spyOn(api, 'onboarding').mockRejectedValue(new Error('not needed for this diagnosis'))
+    render(createElement(NativeLayers))
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
+    expect(screen.getByTestId('navigation-layer')).toBeTruthy()
+    const trigger = await screen.findByRole('button', { name: /degraded/i })
+    trigger.focus(); fireEvent.click(trigger)
+    await screen.findByRole('dialog')
+    const first = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    fireEvent(document, first)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(first.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(trigger)
+    expect(screen.getByTestId('navigation-layer')).toBeTruthy()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByTestId('navigation-layer')).toBeNull())
+    const idle = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    fireEvent(document, idle)
+    expect(idle.defaultPrevented).toBe(false)
   })
 })

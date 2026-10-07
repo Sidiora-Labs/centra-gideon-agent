@@ -3,12 +3,13 @@ import { useEffect, useRef } from 'react'
 let nextLayer = 0
 const layers = new Map<number, number>()
 
-export function useDismissKey(key: string, dismiss: () => void, priority: number) {
+export function useDismissKey(key: string, dismiss: () => void, priority: number, enabled = true) {
   const identity = useRef<number | null>(null)
   if (identity.current === null) identity.current = ++nextLayer
   const latest = useRef(dismiss)
   latest.current = dismiss
   useEffect(() => {
+    if (!enabled) return
     const id = identity.current!
     layers.set(id, priority)
     const onKey = (event: KeyboardEvent) => {
@@ -25,7 +26,7 @@ export function useDismissKey(key: string, dismiss: () => void, priority: number
       layers.delete(id)
       window.removeEventListener('keydown', onKey)
     }
-  }, [key, priority])
+  }, [key, priority, enabled])
 }
 
 export function useDockReservation(docked: boolean) {

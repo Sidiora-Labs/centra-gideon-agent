@@ -1,3 +1,4 @@
+import { useDismissKey } from '../../shared/ui/overlayInteraction'
 import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from 'react'
 import { hasActiveTerminal, runInTerminal, runInTerminalWhenReady, subscribeTerminal } from '../../features/terminal/terminalBridge'
 import type { RouteProps } from './useQueryState'
@@ -20,14 +21,7 @@ export function useShellNavigation(mobile: boolean, navigate: RouteProps['naviga
     try { localStorage.setItem(railPreference, state.collapsed ? '1' : '0') } catch { /* Optional preference. */ }
   }, [state.collapsed])
   useEffect(() => { if (!mobile) dispatch('close') }, [mobile])
-  useEffect(() => {
-    if (!state.open) return
-    const dismiss = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.stopPropagation(); dispatch('close') }
-    }
-    document.addEventListener('keydown', dismiss)
-    return () => document.removeEventListener('keydown', dismiss)
-  }, [state.open])
+  useDismissKey('Escape', () => dispatch('close'), 50, state.open)
   return {
     collapsed: mobile ? !state.open : state.collapsed,
     open: state.open,

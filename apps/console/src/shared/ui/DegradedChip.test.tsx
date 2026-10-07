@@ -51,7 +51,7 @@ describe('DegradedChip width in the shell corner', () => {
     vi.spyOn(api, 'degraded').mockResolvedValue({ surfaces: [SURFACES[0]] } as never)
     render(<DegradedChip />)
     const btn = await waitFor(() => screen.getByRole('button', { name: /degraded/i }))
-    expect(btn.getAttribute('title')).toMatch(/1 surface running without a model/)
+    expect(btn.getAttribute('title')).toMatch(/1 surface cannot use their chosen model/)
     expect(btn.getAttribute('title'), 'and not the hedge it replaced').not.toMatch(/surface\(s\)/)
   })
 
@@ -59,7 +59,7 @@ describe('DegradedChip width in the shell corner', () => {
     vi.spyOn(api, 'degraded').mockResolvedValue({ surfaces: SURFACES } as never)
     render(<DegradedChip />)
     const btn = await waitFor(() => screen.getByRole('button', { name: /degraded/i }))
-    expect(btn.getAttribute('title')).toMatch(/2 surfaces running without a model/)
+    expect(btn.getAttribute('title')).toMatch(/2 surfaces cannot use their chosen model/)
   })
 
   it('keeps its text label on desktop, where the corner has room', async () => {
@@ -96,30 +96,36 @@ describe('the degraded popover names the missing use-case', () => {
   it('states what is missing beside what still works', async () => {
     const { container } = await openPopover(SURFACES_WITH_USE_CASES)
     const text = container.textContent ?? ''
-    expect(text).toContain('No model for Chat')
+    expect(text).toContain('No model chosen for Chat')
     expect(text).toContain('Rules only')
   })
 
   it('uses the canonical use-case label, not the raw slug', async () => {
     const { container } = await openPopover(SURFACES_WITH_USE_CASES)
-    expect(container.textContent).toContain('No model for Speech-to-text')
+    expect(container.textContent).toContain('No model chosen for Speech-to-text')
     expect(container.textContent).not.toContain('Stt')
   })
 
   it('names Embedding for the knowledge surface', async () => {
     expect((await openPopover(SURFACES_WITH_USE_CASES)).container.textContent)
-      .toContain('No model for Embedding')
+      .toContain('No model chosen for Embedding')
   })
 
   it('falls back to a prettified slug for a use-case the map does not know', async () => {
     const { container } = await openPopover(SURFACES_WITH_USE_CASES)
-    expect(container.textContent).toContain('No model for Some new case')
+    expect(container.textContent).toContain('No model chosen for Some new case')
+  })
+
+  it('retains the authoritative diagnosis when a chosen model cannot be used', async () => {
+    const { container } = await openPopover([{ ...SURFACES_WITH_USE_CASES[0], model_chosen: true, problem: 'The chosen Chat model is unavailable.' }])
+    expect(container.textContent).toContain('The chosen Chat model is unavailable.')
+    expect(container.textContent).not.toContain('No model chosen for Chat')
   })
 
   it('renders no use-case line when the payload omits the field', async () => {
     const { container } = await openPopover(SURFACES)
     expect(container.textContent).toContain('Keyword ranking')
-    expect(container.textContent).not.toContain('No model for')
+    expect(container.textContent).not.toContain('No model chosen for')
   })
 
   it('renders no use-case line for an empty use_cases array', async () => {
@@ -127,7 +133,7 @@ describe('the degraded popover names the missing use-case', () => {
       { surface: 'x', available: false, floor: 'Still fine', backlog: 0, use_cases: [] },
     ])
     expect(container.textContent).toContain('Still fine')
-    expect(container.textContent).not.toContain('No model for')
+    expect(container.textContent).not.toContain('No model chosen for')
   })
 })
 
@@ -145,7 +151,7 @@ describe('the degraded popover links to where you fix it', () => {
     expect(link.textContent).toContain('Settings')
     expect(link.textContent).toContain('Models')
     expect(link.getAttribute('aria-label')).toBeNull()
-    expect(container.textContent).toContain('No model for Speech-to-text')
+    expect(container.textContent).toContain('No model chosen for Speech-to-text')
   })
 
   it('places the link ABOVE the first surface row, where a tall panel still shows it', async () => {
@@ -194,7 +200,7 @@ describe('setup-land: no provider has ever been configured', () => {
     setViewport(false)
     render(<DegradedChip />)
     await waitFor(() => expect(api.degraded).toHaveBeenCalled())
-    const chip = await screen.findByTitle(/running without a model/i)
+    const chip = await screen.findByTitle(/cannot use their chosen model/i)
     expect(chip.textContent).toContain('degraded')
     expect(chip.getAttribute('style')).toContain('--color-warn')
   })
