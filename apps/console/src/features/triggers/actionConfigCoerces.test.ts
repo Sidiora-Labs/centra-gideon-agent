@@ -61,7 +61,15 @@ describe('every surface that edits an action config coerces before saving', () =
     .filter((f) => /<ActionConfig\b/.test(readFileSync(join(DIR, f), 'utf8')))
 
   it('found the consumers it is supposed to be checking', () => {
-    expect(consumers.sort()).toEqual(['LifecycleDetail.tsx', 'TriggerCreatePage.tsx'])
+    expect(consumers.length).toBeGreaterThanOrEqual(2)
+    expect(consumers.sort()).toEqual(['LifecycleDetail.tsx', 'StoreTriggerDetail.tsx', 'TriggerCreatePage.tsx', 'TriggersListPage.tsx'])
+    for (const file of consumers) {
+      const source = readFileSync(join(DIR, file), 'utf8')
+      expect(source).toMatch(/coerceActionConfig\s*\(/)
+      expect(source).toMatch(/coerced\.error/)
+      expect(source).toMatch(/(?:config|provider_config):\s*coerced\.config/)
+      expect(source).not.toMatch(/\b(?:config|provider_config):\s*config\b/)
+    }
   })
 
   it.each(consumers)('%s calls coerceActionConfig', (file) => {

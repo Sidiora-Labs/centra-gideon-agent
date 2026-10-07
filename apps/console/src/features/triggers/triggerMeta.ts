@@ -3,7 +3,7 @@ import { CalendarClock, Webhook, Bell, MessageSquare, ListPlus, Users, TerminalS
 import type { LucideIcon } from 'lucide-react'
 import { api, type ScheduleJob, type HookItem, type HookEnforcement, type LifecycleEventInfo, type TriggerVariables, type Trigger as WireTrigger, type EventPattern } from '../../shared/data/api'
 import { deriveKind, deriveMode, kindMeta as schedKindMeta, modeMeta as schedModeMeta } from '../schedule/scheduleMeta'
-import { statusMeta, triggerHealthMeta, type StatusMeta } from '../schedule/scheduleMeta'
+import { lastRunMeta, triggerHealthMeta, type StatusMeta } from '../schedule/scheduleMeta'
 import { epochSeconds } from '../../shared/data/epoch'
 
 export type TriggerKind = 'schedule' | 'lifecycle' | 'event' | 'store'
@@ -264,9 +264,9 @@ export function triggerStatusMeta(trigger: Trigger): TriggerStatusMeta {
   const lifecycle = triggerHealthMeta(trigger.health, trigger.state)
   const stopped = trigger.state && trigger.state !== 'active'
   const unhealthy = trigger.health && trigger.health !== 'ok' && trigger.health !== 'success'
-  const meta = stopped || unhealthy
+  const meta = (stopped || unhealthy) && lifecycle.label
     ? lifecycle
-    : statusMeta(trigger.lastRunTs || trigger.lastStatus ? trigger.lastStatus : null)
+    : lastRunMeta(trigger.lastRunTs || trigger.lastStatus ? trigger.lastStatus : null, trigger.health)
   return { ...meta, reason: trigger.lastError || '' }
 }
 

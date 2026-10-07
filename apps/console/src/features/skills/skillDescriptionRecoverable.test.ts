@@ -1,3 +1,5 @@
+import { jsxTags } from '../../shared/testing/jsxContracts'
+import { namedOwner } from '../../shared/testing/sourceOwners'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -43,7 +45,15 @@ describe('a clipped skill description can still be read', () => {
   })
 
   it('the row keeps the titles it already had on its status chips', () => {
-    expect(SKILLS).toMatch(/title="Always loaded"/)
-    expect(SKILLS).toMatch(/title="Integrity check failed — files changed since install"/)
+    const row = namedOwner(SKILLS, 'Installed')
+    const chips = jsxTags(row, ['span'])
+    expect(chips.some((tag) => tag.attributes.get('title') === '"Always loaded"')).toBe(true)
+    const damaged = chips.find((tag) => tag.attributes.get('title') === '"Install record damaged — installed files cannot be verified"')
+    expect(damaged?.element).toContain('tampered')
+    expect(row).toContain("s.integrity === 'tampered'")
+    expect(row).toContain("s.integrity === 'edited'")
+    const descriptions = jsxTags(row, ['p']).filter((tag) => tag.attributes.get('title') === '{s.description}')
+    expect(descriptions.length).toBe(1)
+    expect(descriptions[0].element).toContain('{s.description}')
   })
 })

@@ -1,3 +1,4 @@
+import { namedOwner } from '../testing/sourceOwners'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -75,10 +76,19 @@ describe('every mutation site busts the collection it changed', () => {
   })
 
   it('both artifact mutation sites bust the artifacts namespace', () => {
-    for (const rel of ['features/artifacts/ArtifactViewer.tsx', 'shared/ui/widget/WidgetFrame.tsx']) {
-      expect(codeOf(rel), `${rel} must bust the artifacts namespace`)
-        .toMatch(/invalidateKeys\('artifacts:', true\)/)
-    }
+    expect(codeOf('features/artifacts/ArtifactViewer.tsx')).toMatch(/invalidateKeys\('artifacts:', true\)/)
+    const frame = codeOf('shared/ui/widget/WidgetFrame.tsx')
+    expect(frame).toMatch(/import \{[^}]*\buseWidgetArtifact\b[^}]*\} from '.\/widgetFrameState'/)
+    expect(frame).toContain('useWidgetArtifact(identity, title, html, streaming)')
+    expect(frame).toContain('onClick={artifact.toggleSave}')
+    const state = codeOf('shared/ui/widget/widgetFrameState.ts')
+    const mutate = namedOwner(state, 'mutate')
+    expect(mutate).toContain('await api.deleteArtifact(slug)')
+    expect(mutate).toContain('await create(html)')
+    expect(namedOwner(state, 'create')).toContain('await api.createArtifact(')
+    expect(mutate).toMatch(/invalidateKeys\('artifacts:', true\)/)
+    expect(mutate.indexOf('invalidateKeys(')).toBeGreaterThan(mutate.indexOf('await create(html)'))
+    expect(namedOwner(state, 'useWidgetArtifact')).toContain("toggleSave: () => mutate('save')")
   })
 
   it('the picker key lives in its COLLECTION namespace, not the chat one', () => {

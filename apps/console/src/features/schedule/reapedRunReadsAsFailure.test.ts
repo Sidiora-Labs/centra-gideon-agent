@@ -1,3 +1,5 @@
+import { scheduleToTrigger, triggerStatusMeta } from '../triggers/triggerMeta'
+import { namedOwner } from '../../shared/testing/sourceOwners'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -60,6 +62,19 @@ describe('both renderers consume the reconciler, not the bare chain', () => {
 
   it("the list's schedule rows", () => {
     const s = read('triggers/TriggersListPage.tsx')
-    expect(s).toContain('lastRunMeta(t.schedule.last_run_status, t.schedule.last_status)')
+    expect(s).toMatch(/import \{[^}]*\btriggerStatusMeta\b[^}]*\} from '.\/triggerMeta'/)
+    expect(s).toContain('const sd = triggerStatusMeta(t)')
+    expect(s).toContain('{sd.label}')
+    const metaSource = read('triggers/triggerMeta.ts')
+    expect(namedOwner(metaSource, 'scheduleToTrigger')).toContain('health: metadata.health ?? j.last_status ?? null')
+    expect(namedOwner(metaSource, 'triggerStatusMeta')).toContain('lastRunMeta(')
+    for (const [health, label, tone] of [['degraded', 'degraded', 'var(--color-warning)'], ['failing', 'failing', 'var(--color-danger)'], ['parked', 'parked', 'var(--color-info)'], ['error', 'error', 'var(--color-danger)'], ['ok', 'ok', 'var(--color-ok)']]) {
+      const trigger = scheduleToTrigger({ id: 'job-1', name: 'Daily', message: '', enabled: true, schedule: 'every 1h', last_run_ts: 1, last_run_status: 'success', last_status: health, last_error: 'Observed result' })
+      const actual = triggerStatusMeta(trigger)
+      expect(actual.label, `health=${health} must reconcile actual schedule input`).toBe(label)
+      expect(actual.tone).toBe(tone)
+      expect(actual.reason).toBe('Observed result')
+      expect(triggerStatusMeta({ ...trigger, state: 'quarantined' }).label).toBe('quarantined')
+    }
   })
 })
