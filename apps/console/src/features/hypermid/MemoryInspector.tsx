@@ -97,8 +97,8 @@ function MemoryDetail({ id, onChanged }: { id: string; onChanged: () => void }) 
         ariaLabel="Memory content" rows={7} />
       <div className="mt-s flex flex-wrap items-center justify-end gap-s">
         {dirty && <span data-type="caption" className="mr-auto text-on-surface-low">Unsaved draft</span>}
-        <Button size="sm" variant="secondary" disabled={!dirty || saving} onClick={() => setEdit(beginConflictDraft(edit.authoritative, edit.revision))}>Discard draft</Button>
-        <Button size="sm" loading={saving} disabled={!dirty} onClick={() => void save()}>Save memory</Button>
+        <Button size="sm" variant="secondary" disabled={!dirty || saving} disabledReason={saving ? 'Wait for the memory save before discarding the draft.' : !dirty ? 'There are no draft changes to discard.' : undefined} onClick={() => setEdit(beginConflictDraft(edit.authoritative, edit.revision))}>Discard draft</Button>
+        <Button size="sm" loading={saving} disabled={!dirty} disabledReason={!dirty ? 'Make a memory change before saving.' : undefined} onClick={() => void save()}>Save memory</Button>
       </div>
     </div>}
     {edit.conflict && <div role="alert" className="mt-m rounded-lg border border-warn/40 bg-warn/10 p-m">

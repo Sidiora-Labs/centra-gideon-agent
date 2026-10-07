@@ -71,7 +71,7 @@ function PlanReview({ plan, reviewed, confirmed, busy, onReviewed, onConfirmed, 
     <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><input type="checkbox" checked={reviewed} onChange={(event) => onReviewed(event.target.checked)} className="size-4 accent-primary" />I reviewed this exact scope, source evidence, steps, and digest.</label>
     {plan.destructive && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface"><input type="checkbox" checked={confirmed} onChange={(event) => onConfirmed(event.target.checked)} className="size-4 accent-primary" />I confirm this restore may replace authoritative memory.</label>}
     {!decision.allowed && <p className="mt-s text-sm text-on-surface-low">{decision.reason}</p>}
-    <div className="hypermid-action-bar mt-m flex justify-end"><Button size="sm" disabled={!decision.allowed} loading={busy} onClick={onApply}><ShieldCheck size={14} /> Apply reviewed plan</Button></div>
+    <div className="hypermid-action-bar mt-m flex justify-end"><Button size="sm" disabled={!decision.allowed} disabledReason={!decision.allowed ? decision.reason : undefined} loading={busy} onClick={onApply}><ShieldCheck size={14} /> Apply reviewed plan</Button></div>
   </div>
 }
 
@@ -189,7 +189,7 @@ export function SecurityRecovery() {
           <Row label="Expected source digest" hint="Copy the source digest from the committed backup receipt."><input value={draft.source_digest} onChange={(event) => changeDraft({ ...draft, source_digest: event.target.value.trim().toLowerCase() })} aria-label="Expected backup source digest" placeholder="64 lowercase hexadecimal characters"
             className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m font-mono text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
         </>}</RowGroup>
-      <div className="mt-m flex justify-end"><Button size="sm" variant="secondary" disabled={!configured} loading={busy === 'plan'} onClick={() => void review()}>Review security plan</Button></div>
+      <div className="mt-m flex justify-end"><Button size="sm" variant="secondary" disabled={!configured} disabledReason={!configured ? 'Configure the security settings before preparing a plan.' : undefined} loading={busy === 'plan'} onClick={() => void review()}>Review security plan</Button></div>
       {plan && <PlanReview plan={plan} reviewed={reviewed} confirmed={confirmed} busy={busy === 'apply'} onReviewed={setReviewed} onConfirmed={setConfirmed} onApply={() => void apply()} />}
     </Section>
     <Section title="Outcome recovery" hint="Load the authoritative job receipt. An unknown outcome must be recovered before retrying.">

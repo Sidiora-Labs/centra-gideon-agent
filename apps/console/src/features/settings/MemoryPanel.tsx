@@ -510,8 +510,8 @@ export function FacetControls({ fact, onSaved }: { fact: SemanticEntry; onSaved:
   }
   return <div className="flex flex-col gap-2">
     <div className="flex gap-2">
-      <Button size="sm" disabled={busy || flags.forgotten} onClick={() => void update('pin')}>{flags.pinned ? 'Unpin preference' : 'Pin preference'}</Button>
-      <Button size="sm" disabled={busy || flags.forgotten} onClick={() => void update('forget')}>{flags.forgotten ? 'Preference forgotten' : 'Forget preference'}</Button>
+      <Button size="sm" disabled={busy || flags.forgotten} disabledReason={busy ? 'Wait for the current preference update.' : flags.forgotten ? 'Forgotten preferences cannot be pinned.' : undefined} onClick={() => void update('pin')}>{flags.pinned ? 'Unpin preference' : 'Pin preference'}</Button>
+      <Button size="sm" disabled={busy || flags.forgotten} disabledReason={busy ? 'Wait for the current preference update.' : flags.forgotten ? 'This preference has already been forgotten.' : undefined} onClick={() => void update('forget')}>{flags.forgotten ? 'Preference forgotten' : 'Forget preference'}</Button>
     </div>
     {error && <p role="alert">{error}</p>}
   </div>
@@ -597,7 +597,7 @@ function FactValueEditor({ fact, onSaved }: { fact: SemanticEntry; onSaved: () =
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={save} loading={busy} loadingLabel="Saving…" disabled={busy || draft === base}
           disabledReason={draft === base ? 'No changes to save' : undefined}><Save size={14} /> Save fact</Button>
-        <Button size="sm" variant="ghost" onClick={cancel} disabled={busy}>Cancel</Button>
+        <Button size="sm" variant="ghost" onClick={cancel} disabled={busy} disabledReason={busy ? 'Wait for the fact save before cancelling the editor.' : undefined}>Cancel</Button>
         {draft !== base && <span data-type="caption" className="text-on-surface-low">Unsaved changes</span>}
       </div>
     </> : <Button size="sm" variant="secondary" onClick={begin}><FileEdit size={14} /> Edit fact</Button>}

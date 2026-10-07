@@ -144,7 +144,7 @@ function PlanReview({ plan, reviewed, destructiveConfirmed, onReviewed, onDestru
       <input type="checkbox" checked={destructiveConfirmed} onChange={(event) => onDestructive(event.target.checked)} className="size-4 accent-primary" />I confirm the listed destructive effects.
     </label>}
     {!decision.allowed && <p className="mt-s text-sm text-on-surface-low">{decision.reason}</p>}
-    <div className="hypermid-action-bar mt-m flex justify-end"><Button size="sm" disabled={!decision.allowed} loading={busy} onClick={onApply}><ShieldCheck size={14} /> Apply reviewed plan</Button></div>
+    <div className="hypermid-action-bar mt-m flex justify-end"><Button size="sm" disabled={!decision.allowed} disabledReason={!decision.allowed ? decision.reason : undefined} loading={busy} onClick={onApply}><ShieldCheck size={14} /> Apply reviewed plan</Button></div>
   </div>
 }
 

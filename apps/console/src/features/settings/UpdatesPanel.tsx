@@ -130,8 +130,8 @@ export function UpdatesPanel() {
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <Button variant="secondary" size="sm" loading={checking} onClick={check}><RefreshCw size={14} /> Check</Button>
-              {info.rollback_available && canApplyInApp && <Button variant="secondary" size="sm" loading={rollingBack} disabled={applying} onClick={rollback}><RotateCcw size={14} /> Roll back</Button>}
-              {info.available && canApplyInApp && <Button size="sm" loading={applying} disabled={rollingBack} onClick={apply}><DownloadCloud size={14} /> Update</Button>}
+              {info.rollback_available && canApplyInApp && <Button variant="secondary" size="sm" loading={rollingBack} disabled={applying} disabledReason={applying ? 'Wait for the update to finish before rolling back.' : undefined} onClick={rollback}><RotateCcw size={14} /> Roll back</Button>}
+              {info.available && canApplyInApp && <Button size="sm" loading={applying} disabled={rollingBack} disabledReason={rollingBack ? 'Wait for the rollback to finish before applying an update.' : undefined} onClick={apply}><DownloadCloud size={14} /> Update</Button>}
             </div>
           </div>
           {msg && <div data-type="caption" className="mt-2 text-on-surface-low">{msg}</div>}

@@ -714,7 +714,7 @@ function SyncSection({ cfg, setCfg, status, transports, onChanged }: {
         {status?.sync.encrypted && <Row label="Sync passphrase" hint={status.sync.passphrase_stored ? 'Saved on this machine. Use the same passphrase on every machine.' : 'Save a passphrase before encrypted sync can run. Use the same one on every machine.'}>
           <div className="flex flex-wrap items-center gap-2">
             <TextInput type="password" value={passphrase} onChange={setPassphrase} ariaLabel="Sync passphrase" />
-            <Button variant="secondary" size="sm" onClick={savePassphrase} disabled={!passphrase || savingPassphrase}>Save passphrase</Button>
+            <Button variant="secondary" size="sm" onClick={savePassphrase} disabled={!passphrase || savingPassphrase} disabledReason={savingPassphrase ? 'Wait for the current passphrase save.' : !passphrase ? 'Enter a backup passphrase.' : undefined}>Save passphrase</Button>
           </div>
         </Row>}
         {status?.sync.removal_failed && <p data-type="caption" className="py-2 text-on-surface-var">Older sync copies could not be removed: {status.sync.removal_failed}. The next sync retries cleanup.</p>}

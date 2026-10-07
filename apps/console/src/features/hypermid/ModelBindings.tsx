@@ -89,7 +89,7 @@ export function ModelBindings() {
     {plan && <div className="mt-m rounded-lg border border-outline-variant bg-surface p-m">
       <h3 className="flex items-center gap-s text-sm text-on-surface">{plan.readiness_required ? <TriangleAlert size={15} className="text-warn" /> : <CheckCircle2 size={15} className="text-success" />} Review binding change</h3>
       <p className="mt-xs text-sm text-on-surface-low">Affected duties: {plan.affected_duties.join(', ') || 'Only the selected duty'}.</p>
-      <div className="mt-m flex justify-end"><Button size="sm" disabled={plan.readiness_required && !modelIsReady(data.models.find((model) => model.id === plan.model_id) || { availability: '', health: '' })}
+      <div className="mt-m flex justify-end"><Button size="sm" disabled={plan.readiness_required && !modelIsReady(data.models.find((model) => model.id === plan.model_id) || { availability: '', health: '' })} disabledReason={plan.readiness_required && !modelIsReady(data.models.find((model) => model.id === plan.model_id) || { availability: '', health: '' }) ? 'The selected model must pass readiness before this binding can be applied.' : undefined}
         loading={busy === `save:${plan.duty}`} onClick={() => void save()}>Apply binding</Button></div>
     </div>}
     {state.conflict && <div role="alert" className="mt-m rounded-lg border border-warn/40 bg-warn/10 p-m">

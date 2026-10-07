@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { AlertTriangle, Clock3, RefreshCw } from 'lucide-react'
 import { api, ApiError, type HypermidRuntimeConfigValueWire } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
@@ -17,6 +17,7 @@ const MODES: Array<{ value: HypermidRuntimeConfigValueWire['mode']; label: strin
 ]
 
 export function RuntimeConfig() {
+  const modeReasonId = useId()
   const config = useQuery('hypermid:config:runtime', () => api.hypermidRuntimeConfig())
   const [state, setState] = useState<RevisionedDraft<HypermidRuntimeConfigValueWire>>()
   const [saving, setSaving] = useState(false)
@@ -29,6 +30,8 @@ export function RuntimeConfig() {
   if (!config.data && config.error) return <LoadError what="Hypermid runtime configuration" error={config.error} onRetry={config.refresh} />
   if (!config.data || !state) return <FormSkeleton sections={3} rows={3} what="Hypermid runtime configuration" />
   const setDraft = (change: Partial<HypermidRuntimeConfigValueWire>) => setState((current) => current && ({ ...current, draft: { ...current.draft, ...change } }))
+  const modeUnavailable = !config.data.editable || authorityOwnsWrites
+  const modeReason = authorityOwnsWrites ? 'Rollback writer authority to Gideon before changing mode.' : !config.data.editable ? 'Runtime policy does not permit editing the mode.' : undefined
   const dirty = JSON.stringify(state.draft) !== JSON.stringify(state.base)
   const save = async () => {
     setSaving(true); setError(''); setNotice('')
@@ -53,11 +56,12 @@ export function RuntimeConfig() {
       <RowGroup>
         <Row label="Effective source" hint={`Policy revision ${config.data.policy_revision}`}><StatusPill label={config.data.source.replaceAll('_', ' ')} tone="muted" /></Row>
         <Row label="Mode" hint={MODES.find((mode) => mode.value === state.draft.mode)?.detail}>
-          <select value={state.draft.mode} onChange={(event) => setDraft({ mode: event.target.value as HypermidRuntimeConfigValueWire['mode'] })}
-            disabled={!config.data.editable || authorityOwnsWrites} aria-label="Hypermid runtime mode"
-            className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50">
+          <select value={state.draft.mode} onChange={(event) => { if (modeUnavailable) return; setDraft({ mode: event.target.value as HypermidRuntimeConfigValueWire['mode'] }) }}
+            aria-disabled={!config.data.editable || authorityOwnsWrites} aria-describedby={modeUnavailable ? modeReasonId : undefined} aria-label="Hypermid runtime mode"
+            className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary aria-disabled:opacity-50">
             {MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
           </select>
+          {modeUnavailable && <span id={modeReasonId} className="sr-only">{modeReason}</span>}
         </Row>
         {state.draft.mode === 'primary' && <Row label="Authority handoff" hint="After Primary mode reaches the safe turn boundary, review the separate writer handoff below.">
           <span className="inline-flex items-center gap-xs text-sm text-warn"><Clock3 size={14} /> Writer review required</span>
@@ -100,7 +104,7 @@ export function RuntimeConfig() {
     {notice && <p role="status" className="mb-m text-sm text-success">{notice}</p>}
     <div className="flex flex-wrap justify-end gap-s">
       <Button size="sm" variant="secondary" onClick={() => { config.refresh(); setState(undefined) }}><RefreshCw size={14} /> Reload</Button>
-      <Button size="sm" disabled={!dirty || !config.data.editable} loading={saving} onClick={() => void save()}>Stage settings</Button>
+      <Button size="sm" disabled={!dirty || !config.data.editable} disabledReason={!config.data.editable ? 'Runtime policy does not permit editing these settings.' : !dirty ? 'Make a settings change before staging.' : undefined} loading={saving} onClick={() => void save()}>Stage settings</Button>
     </div>
   </>
 }

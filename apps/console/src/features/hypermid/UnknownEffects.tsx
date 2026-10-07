@@ -69,7 +69,7 @@ function PlanReview({ plan, reviewed, busy, onReviewed, onCancel, onReconcile }:
     <p data-type="caption" className="mt-xs break-all font-mono text-on-surface-low">Plan digest {plan.plan_digest}</p>
     <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><input type="checkbox" checked={reviewed} onChange={(event) => onReviewed(event.target.checked)} className="size-4 accent-primary" />I reviewed this exact operation, scope, proposed outcome, and evidence digest.</label>
     <div className="hypermid-action-bar mt-m flex flex-wrap justify-end gap-s"><Button size="sm" variant="secondary" onClick={onCancel}>Cancel</Button>
-      <Button size="sm" disabled={!reviewed} loading={busy} onClick={onReconcile}><FileCheck2 size={14} /> Record reviewed outcome</Button></div>
+      <Button size="sm" disabled={!reviewed} disabledReason={!reviewed ? 'Review this exact operation, scope, outcome, and evidence digest first.' : undefined} loading={busy} onClick={onReconcile}><FileCheck2 size={14} /> Record reviewed outcome</Button></div>
   </div>
 }
 

@@ -172,7 +172,7 @@ function ProviderSection({ p, revoking, onRevoke, refresh }: {
           </label>}
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Button size="xs" disabled={p.policies.dm !== 'pairing' && !p.pairing_active} onClick={() => void pairing()} loading={busy}>{p.pairing_active ? 'Cancel sender code' : 'Create sender code'}</Button>
+          <Button size="xs" disabled={p.policies.dm !== 'pairing' && !p.pairing_active} disabledReason={p.policies.dm !== 'pairing' && !p.pairing_active ? 'Choose the pairing policy before creating a sender code.' : undefined} onClick={() => void pairing()} loading={busy}>{p.pairing_active ? 'Cancel sender code' : 'Create sender code'}</Button>
           {pairCode ? <span role="status" className="select-all font-mono text-on-surface">{pairCode}</span> : null}
           {pairCode ? <span data-type="caption" className="text-on-surface-low">Shown once; expires in ten minutes.</span> : null}
         </div>

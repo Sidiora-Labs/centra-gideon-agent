@@ -94,7 +94,7 @@ export function RateForm({ initial, locked, choices, onSaved, onCancel }: { init
         {(['size', 'quality', 'price'] as const).map((field) => <Field key={field} label={`${field === 'size' ? 'Size up to' : field === 'quality' ? 'Quality' : '$ per image'}, price ${index + 1}`}><TextInput value={tier[field]} onChange={(value) => set('tiers', draft.tiers.map((current, i) => i === index ? { ...current, [field]: value } : current))} type={field === 'price' ? 'number' : 'text'} min={field === 'price' ? 0 : undefined} size="md" surface="high" /></Field>)}
         <Button variant="ghost" size="sm" ariaLabel={`Remove image price ${index + 1}`} disabled={draft.tiers.length === 1} disabledReason="Keep at least one image price." onClick={() => set('tiers', draft.tiers.filter((_, i) => i !== index))}><X size={14} /></Button>
       </div>)}
-      <Button variant="secondary" disabled={draft.tiers.length >= 24} onClick={() => set('tiers', [...draft.tiers, blankTier()])}>Add size or quality</Button>
+      <Button variant="secondary" disabled={draft.tiers.length >= 24} disabledReason={draft.tiers.length >= 24 ? 'The maximum is 24 size or quality prices.' : undefined} onClick={() => set('tiers', [...draft.tiers, blankTier()])}>Add size or quality</Button>
       <div className="grid grid-cols-1 gap-m sm:grid-cols-2"><Field label="Default size"><TextInput value={draft.defaultSize} onChange={(value) => set('defaultSize', value)} placeholder="1024x1024" size="md" surface="high" /></Field><Field label="Default quality"><TextInput value={draft.defaultQuality} onChange={(value) => set('defaultQuality', value)} placeholder="standard" size="md" surface="high" /></Field></div>
     </> : draft.unit !== 'token' && input(`Price, $ ${PER[draft.unit]}`, 'price')}
     {error && <FieldError>{error}</FieldError>}
@@ -123,12 +123,12 @@ export function ModelPricesSection() {
       {rows.map(({ key, rate, own, defaultRate }) => <div key={key} className="flex flex-col gap-s rounded-lg bg-surface-container px-m py-m">
         <div className="flex flex-col gap-s sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0"><div data-type="body-s" className="break-words text-on-surface">{modelName(key)}</div><p data-type="caption" className="text-on-surface-low">{rateText(rate)} · {sourceText(rate)}</p>{own && <p data-type="caption" className="text-on-surface-low">Reset: {defaultRate ? `${rateText(defaultRate)} · ${sourceText(defaultRate)}` : 'no default price; this model becomes unpriced.'}</p>}</div>
-          <div className="flex shrink-0 gap-xs"><Button size="sm" variant="secondary" disabled={!!data.unreadable} ariaExpanded={editing?.initial.key === key} onClick={() => setEditing({ initial: draftOf(key, rate.source === 'local' ? null : rate), locked: refs.has(key) })}>{own ? 'Edit price' : 'Set your price'}</Button>{own && <Button size="sm" variant="ghost" loading={resetting === key} disabled={!!data.unreadable || !!resetting} onClick={() => reset(key)}>{defaultRate ? 'Reset to default' : 'Remove price'}</Button>}</div>
+          <div className="flex shrink-0 gap-xs"><Button size="sm" variant="secondary" disabled={!!data.unreadable} disabledReason={data.unreadable || undefined} ariaExpanded={editing?.initial.key === key} onClick={() => setEditing({ initial: draftOf(key, rate.source === 'local' ? null : rate), locked: refs.has(key) })}>{own ? 'Edit price' : 'Set your price'}</Button>{own && <Button size="sm" variant="ghost" loading={resetting === key} disabled={!!data.unreadable || !!resetting} disabledReason={resetting ? 'Wait for the current price reset.' : data.unreadable || undefined} onClick={() => reset(key)}>{defaultRate ? 'Reset to default' : 'Remove price'}</Button>}</div>
         </div>
         {editing?.locked && editing.initial.key === key && <RateForm key={key} {...editing} choices={[...refs]} onSaved={saved} onCancel={() => setEditing(null)} />}
       </div>)}
       {failed && <FieldError>{failed}</FieldError>}
-      {editing && !editing.locked ? <RateForm key={editing.initial.key} {...editing} choices={[...refs]} onSaved={saved} onCancel={() => setEditing(null)} /> : <Button variant="secondary" disabled={!!data.unreadable} onClick={() => setEditing({ initial: blank(), locked: false })}><Plus size={14} /> Add a price</Button>}
+      {editing && !editing.locked ? <RateForm key={editing.initial.key} {...editing} choices={[...refs]} onSaved={saved} onCancel={() => setEditing(null)} /> : <Button variant="secondary" disabled={!!data.unreadable} disabledReason={data.unreadable || undefined} onClick={() => setEditing({ initial: blank(), locked: false })}><Plus size={14} /> Add a price</Button>}
     </div>
   </Section>
 }

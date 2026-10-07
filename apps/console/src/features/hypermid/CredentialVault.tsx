@@ -79,7 +79,7 @@ export function CredentialVault() {
       <Row label="Secret value" hint="Write-only. Hypermid never returns this value through its read API."><TextInput value={value} onChange={setValue} ariaLabel="Credential value" type="password" size="sm" /></Row>
       <Row label=""><div className="flex flex-wrap items-center justify-end gap-s">
         {notice && <span role="status" className="inline-flex items-center gap-xs text-sm text-success"><CheckCircle2 size={14} />{notice}</span>}
-        <Button size="sm" disabled={!name.trim() || !value} loading={busy} onClick={() => void save()}>{credentials.data?.credentials.some((item) => item.name === name.trim()) ? 'Replace credential' : 'Store credential'}</Button>
+        <Button size="sm" disabled={!name.trim() || !value} disabledReason={!name.trim() ? 'Enter a credential name.' : !value ? 'Enter the secret value to store.' : undefined} loading={busy} onClick={() => void save()}>{credentials.data?.credentials.some((item) => item.name === name.trim()) ? 'Replace credential' : 'Store credential'}</Button>
       </div></Row>
     </RowGroup>
     {error && <p role="alert" className="mt-m text-sm text-danger">{error}</p>}

@@ -131,7 +131,7 @@ function PlanReview({ plan, reviewed, destructiveConfirmed, purgeConfirmed, busy
     {plan.destructive && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface"><input type="checkbox" checked={destructiveConfirmed} onChange={(event) => onDestructive(event.target.checked)} className="size-4 accent-primary" />I confirm the listed destructive effects.</label>}
     {plan.data_disposition === 'purge' && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface"><input type="checkbox" checked={purgeConfirmed} onChange={(event) => onPurge(event.target.checked)} className="size-4 accent-primary" />I separately confirm permanent user-data purge.</label>}
     {!decision.allowed && <p className="mt-s text-sm text-on-surface-low">{decision.reason}</p>}
-    <div className="hypermid-action-bar mt-m flex justify-end"><Button size="sm" disabled={!decision.allowed} loading={busy} onClick={onApply}><ShieldCheck size={14} /> Apply reviewed plan</Button></div>
+    <div className="hypermid-action-bar mt-m flex justify-end"><Button size="sm" disabled={!decision.allowed} disabledReason={!decision.allowed ? decision.reason : undefined} loading={busy} onClick={onApply}><ShieldCheck size={14} /> Apply reviewed plan</Button></div>
   </div>
 }
 

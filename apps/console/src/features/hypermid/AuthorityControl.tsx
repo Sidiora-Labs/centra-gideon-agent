@@ -72,7 +72,7 @@ export function AuthorityControl({ onStatus, onCommitted }: {
       {!canPlan && <p className="mt-s text-sm text-on-surface-low">Stage Primary mode and wait for the safe turn boundary before preparing the writer handoff.</p>}
       <div className="mt-m flex flex-wrap justify-end gap-s">
         {status.lease_state === 'unknown' && <Button size="sm" variant="secondary" loading={busy === 'reconcile'} onClick={() => void reconcile()}><RefreshCw size={14} /> Reconcile authority</Button>}
-        <Button size="sm" variant={active ? 'danger' : 'secondary'} disabled={!canPlan || status.lease_state === 'unknown'} loading={busy === 'plan'} onClick={() => void prepare()}>
+        <Button size="sm" variant={active ? 'danger' : 'secondary'} disabled={!canPlan || status.lease_state === 'unknown'} disabledReason={busy === 'plan' ? 'Preparing the authority review.' : status.lease_state === 'unknown' ? 'Reconcile writer authority before reviewing a handoff.' : !canPlan ? 'Stage Primary mode and wait for the safe turn boundary.' : undefined} loading={busy === 'plan'} onClick={() => void prepare()}>
           {active ? <Undo2 size={14} /> : <ShieldCheck size={14} />}{active ? 'Review rollback to Gideon' : 'Review Primary handoff'}
         </Button>
       </div>
@@ -86,7 +86,7 @@ export function AuthorityControl({ onStatus, onCommitted }: {
       <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><input type="checkbox" checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} className="size-4 accent-primary" />I reviewed this exact scope, sequence, and digest.</label>
       {!decision?.allowed && <p className="mt-s text-sm text-on-surface-low">{decision?.reason}</p>}
       <div className="hypermid-action-bar mt-m flex flex-wrap justify-end gap-s"><Button size="sm" variant="secondary" onClick={() => { setPlan(undefined); setReviewed(false) }}>Cancel</Button>
-        <Button size="sm" disabled={!decision?.allowed} loading={busy === 'apply'} onClick={() => void apply()}>Apply reviewed handoff</Button></div>
+        <Button size="sm" disabled={!decision?.allowed} disabledReason={!decision?.allowed ? decision?.reason : undefined} loading={busy === 'apply'} onClick={() => void apply()}>Apply reviewed handoff</Button></div>
     </div>}
     {outcome === 'outcome_unknown' && <p role="alert" className="mt-m text-sm text-warn">The handoff may have taken effect. Reconcile writer authority before retrying.</p>}
     {outcome === 'committed' && <p role="status" className="mt-m text-sm text-success">Writer authority changed and the returned status confirms the result.</p>}

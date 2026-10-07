@@ -321,7 +321,7 @@ export function ModelTokenSection() {
               <Wifi size={12} /> Test
             </Button>
             {data?.source === 'credential_store' ? (
-              <Button variant="ghost" size="xs" onClick={remove} disabled={saving}>Remove saved token</Button>
+              <Button variant="ghost" size="xs" onClick={remove} disabled={saving} disabledReason={saving ? 'Wait for the token change before removing the saved token.' : undefined}>Remove saved token</Button>
             ) : null}
           </div>
           {testStatus && (
@@ -669,7 +669,7 @@ function UseCaseRow({ useCase, activeModels, revision, allModels, providers, cat
                   disabled={i === activeModels.length - 1 || stale.conflict !== null} loading={saving} onClick={() => move(i, 1)}
                   disabledReason={i === activeModels.length - 1 ? 'Already the last fallback' : undefined} />
                 <IconButton icon={X} label={`Remove ${id} from chain`} size={24} iconSize={13}
-                  loading={saving} disabled={stale.conflict !== null} onClick={() => setActive(activeModels.filter((m) => m !== ref))} />
+                  loading={saving} disabled={stale.conflict !== null} disabledReason={stale.conflict !== null ? 'Resolve the model-chain conflict before removing a model.' : undefined} onClick={() => setActive(activeModels.filter((m) => m !== ref))} />
               </div>
             )
           })}

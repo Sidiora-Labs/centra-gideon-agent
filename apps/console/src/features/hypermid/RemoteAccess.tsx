@@ -101,7 +101,7 @@ export function RemoteAccess() {
           <input type="checkbox" checked={capabilities.includes(capability.id)} onChange={(event) => toggleCapability(capability.id, event.target.checked)} className="size-4 accent-primary" />{capability.label}
         </label>)}</div>
       </fieldset>
-      <div className="mt-m flex justify-end"><Button size="sm" disabled={!endpoint || !serverName.trim() || !deviceName.trim() || !capabilities.length || Boolean(endpointError)} loading={busy === 'plan'} onClick={() => void review()}><ShieldCheck size={14} /> Review remote access</Button></div>
+      <div className="mt-m flex justify-end"><Button size="sm" disabled={!endpoint || !serverName.trim() || !deviceName.trim() || !capabilities.length || Boolean(endpointError)} disabledReason={!endpoint ? 'Enter the remote endpoint.' : endpointError || (!serverName.trim() ? 'Enter a server name.' : !deviceName.trim() ? 'Enter a device name.' : !capabilities.length ? 'Select at least one read capability.' : undefined)} loading={busy === 'plan'} onClick={() => void review()}><ShieldCheck size={14} /> Review remote access</Button></div>
       {plan && <div role="dialog" aria-modal="false" aria-labelledby="remote-plan-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
         <h3 id="remote-plan-title" className="text-base text-on-surface">Review device enrollment</h3>
         <dl className="mt-m grid gap-s text-sm sm:grid-cols-2"><div><dt className="text-on-surface-low">Device</dt><dd className="text-on-surface">{plan.device_name}</dd></div>

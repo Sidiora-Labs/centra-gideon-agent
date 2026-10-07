@@ -263,7 +263,7 @@ export function ExternalAccessPanel() {
           </label>
           <Toggle on={keepConversation} onChange={setKeepConversation} disabled={busy === 'create-client'} label="One conversation per user" />
           <p data-type="caption" className="text-on-surface-low">Off: each request is answered alone. On: requests with the same user value continue a conversation.</p>
-          <Button size="sm" loading={busy === 'create-client'} disabled={!newClientLabel.trim()} type="submit">Create client</Button>
+          <Button size="sm" loading={busy === 'create-client'} disabled={!newClientLabel.trim()} disabledReason={!newClientLabel.trim() ? 'Enter a client label.' : undefined} type="submit">Create client</Button>
         </form>
         {freshToken && (
           <div

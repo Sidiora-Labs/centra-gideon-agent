@@ -10,6 +10,10 @@ import { RungChip } from '../../shared/ui/RungChip'
 import { rungMeta } from '../../shared/data/rungs'
 import { FormSkeleton, LoadError } from '../../shared/ui/ListScaffold'
 
+function actionSubject(key: string): string {
+  return key.replace(/^(?:action|tool)\./, '').replace(/[._-]+/g, ' ').trim() || 'this action'
+}
+
 type GuardrailsCfg = {
   budgets?: { max_tokens_per_run?: number; max_tokens_per_day?: number; max_dollars_per_day?: number }
   breaker?: { failure_threshold?: number; recovery_secs?: number }
@@ -172,7 +176,7 @@ function AutonomyLadderSection() {
                     </Button>
                   )}
                   {t.granted_at && (
-                    <Button size="xs" variant="ghost" loading={busy === t.key} onClick={() => handBack(t)}
+                    <Button size="xs" variant="ghost" loading={busy === t.key} onClick={() => handBack(t)} ariaLabel={`Hand back permission for ${actionSubject(t.key)}`}
                       title={`Drop ${t.key} back to ${rungMeta(t.floor, ladder).label} and start its cooldown.`}>
                       Hand back
                     </Button>
@@ -219,7 +223,7 @@ export function UndoList({ ladder, onChange }: { ladder: AutonomyLadder; onChang
         ) : pending.map((r) => (
           <Row key={r.id} label={r.label || r.action_type}
             hint={`Ran ${r.created_at.slice(0, 16).replace('T', ' ')}.${backTo(r) ? ` Undoing it also puts ${r.action_type} back so it ${rungMeta(backTo(r), ladder).label}.` : ''}`}>
-            <Button size="xs" variant="secondary" loading={busy === r.id} onClick={() => undo(r)}>Undo</Button>
+            <Button size="xs" variant="secondary" loading={busy === r.id} onClick={() => undo(r)} ariaLabel={`Undo ${r.label || actionSubject(r.action_type)}`}>Undo</Button>
           </Row>
         ))}
       </RowGroup>
