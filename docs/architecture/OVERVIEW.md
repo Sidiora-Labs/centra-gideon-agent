@@ -1,6 +1,7 @@
 # Gideon architecture overview
 
-Gideon is a self-hosted personal agent. Its Python gateway coordinates conversations,
+This repository documents Gideon’s open-source, self-hosted edition. Gideon also
+offers a hosted service. The OSS Python gateway coordinates conversations,
 agent runtimes, tools, knowledge, memory, tasks, schedules, workflows and channels, and
 serves the console over HTTP and WebSocket. Integrations and optional local services can
 run additional processes; “one gateway” does not mean every capability runs in that process.

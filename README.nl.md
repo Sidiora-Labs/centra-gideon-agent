@@ -1,5 +1,7 @@
 # Gideon Agent
 
+Deze repository documenteert de opensourceversie voor zelfhosting. Gideon biedt ook een gehoste dienst.
+
 Gideon is een persoonlijke agent met een webconsole, chat, taken, automatisering, kennis en apps met machtigingen.
 
 Deze introductie vat de installatie samen. De volledige actuele documentatie staat in de Engelse README en de gekoppelde handleidingen.

@@ -1,7 +1,8 @@
 # Remote access to your gateway
 
-Remote access connects another device to your own Gideon gateway. It does not create a
-hosted Gideon service or grant the agent additional tools. Authentication, origin checks,
+This guide covers remote access to the OSS self-hosted gateway. Gideon also
+offers a hosted service; this is not its setup guide.
+Connecting another device does not grant the agent additional tools. Authentication, origin checks,
 transport encryption and execution permissions remain separate.
 
 Start from the access URL printed by your gateway or `gideon token`. Treat the complete

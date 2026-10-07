@@ -1,5 +1,7 @@
 # Gideon Agent
 
+Este repositório documenta a edição de código aberto para auto-hospedagem. O Gideon também oferece um serviço hospedado.
+
 Gideon é um agente pessoal com console web, chat, tarefas, automação, conhecimento e aplicativos com permissões.
 
 Esta introdução resume a instalação. A documentação completa e atual está no README em inglês e nos guias vinculados.

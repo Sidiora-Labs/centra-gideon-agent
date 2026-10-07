@@ -1,6 +1,8 @@
 # Threat model
 
-Gideon is a single-owner, self-hosted agent runtime. It can read files, invoke tools,
+This threat model covers Gideon’s single-owner, self-hosted OSS runtime. Gideon
+also offers a hosted service; its control plane is outside this document.
+The runtime can read files, invoke tools,
 run programs and contact configured services. The owner trusts the operating system,
 the account running Gideon and the installed distribution. This document identifies
 boundaries and source controls; it does not certify every integration or deployment.

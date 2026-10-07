@@ -1,6 +1,8 @@
 # Security architecture
 
-Gideon is a single-owner runtime that can act on the host and configured services.
+This document covers Gideon’s single-owner OSS runtime, which can act on its host
+and configured services. Gideon also offers a hosted service; hosted account and
+control-plane security are outside this repository-level description.
 Controls apply at different seams: HTTP admission, tool invocation, app lifecycle,
 work lineage, network dispatch, memory scope and persistence. Paths below are relative
 to the repository root; they identify implementation, not a claim of universal coverage.
@@ -15,7 +17,8 @@ bind to loopback through `effective_bind`.
 `runtime/gideon/interfaces/dashboard/token_auth.py` implements gateway token admission,
 owner login/session behavior and app identity adoption. Owner login credentials and
 second-factor helpers live under `runtime/gideon/security/auth`. These are single-owner
-authentication mechanisms, not a hosted multi-tenant user/role system. An opt-in
+authentication mechanisms in the OSS runtime. Hosted service account and tenant
+controls are a separate layer, not an absent Gideon offering. An opt-in
 local-network bypass is a separate exposure choice. It must not be assumed safe behind
 a public reverse proxy.
 

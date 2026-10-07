@@ -1,6 +1,8 @@
 # Security
 
-Gideon runs on your machine, with your files and your credentials. It reads local files,
+This document covers Gideon’s open-source, self-hosted edition. Gideon also offers
+a hosted service, whose control plane is outside this repository-level description.
+The self-hosted runtime runs with the files and credentials you supply. It reads local files,
 runs tools, and talks to services you configure. The gateway token and the account the
 gateway runs under are therefore real access to that machine. Treat both the way you
 treat a login shell.

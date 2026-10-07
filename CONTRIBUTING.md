@@ -1,6 +1,6 @@
 # Contributing to Gideon
 
-Gideon is a personal AI agent that runs on your own machine. The repository is [Sidiora-Labs/centra-gideon-agent](https://github.com/Sidiora-Labs/centra-gideon-agent), licensed under Apache 2.0. See [LICENSE](LICENSE).
+This repository provides the open-source, self-hosted edition of Gideon. Gideon also offers a hosted service. The repository is [Sidiora-Labs/centra-gideon-agent](https://github.com/Sidiora-Labs/centra-gideon-agent), licensed under Apache 2.0. See [LICENSE](LICENSE).
 
 Two things decide whether a change lands: it does something real for a user, and you ran the check that covers it.
 

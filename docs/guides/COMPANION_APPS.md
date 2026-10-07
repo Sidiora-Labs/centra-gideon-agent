@@ -1,6 +1,8 @@
 # Companion apps
 
-A companion is another device accessing a Gideon gateway. It needs both a reachable
+A companion connects another device to its configured Gideon instance. The local
+gateway setup below covers the OSS self-hosted edition; Gideon also offers a hosted
+service. It needs both a reachable
 address and authorized access; finding an address does not grant permission. The shared
 dashboard supplies the main UI, while desktop and mobile shells own their native storage,
 navigation, and platform integration.
