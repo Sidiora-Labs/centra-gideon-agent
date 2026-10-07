@@ -62,3 +62,71 @@ describe('a refused retention value rolls back and says so (#624)', () => {
     expect(notified).toEqual([])
   })
 })
+
+describe('watched-channel editor', () => {
+  it('writes the read revision, removes channels, and re-applies a stale add without losing another channel', async () => {
+    vi.doUnmock('../../shared/data/api')
+    const { api } = await import('../../shared/data/api')
+    let stored = ['C_KEEP']
+    let revision = 'r1'
+    const writes: Array<{ path: string; value: unknown; basedOn?: string }> = []
+    vi.spyOn(api, 'gideonConfig').mockImplementation(async () => ({ inbox: { watched_channels: [...stored] }, revisions: { 'inbox.watched_channels': revision } }))
+    vi.spyOn(api, 'inboxProviders').mockResolvedValue([{ name: 'slack', display_name: 'Slack', source_name: 'slack', watches_channels: true }])
+    vi.spyOn(api, 'patchConfig').mockImplementation(async (path, value, basedOn) => {
+      writes.push({ path, value, basedOn })
+      if (basedOn !== revision) throw Object.assign(new Error('The channel settings changed.'), { code: 'stale_write' })
+      stored = [...value as string[]]
+      revision = `r${Number(revision.slice(1)) + 1}`
+      return {}
+    })
+    try {
+      const { WatchedChannelsField } = await import('./WatchedChannelsField')
+      render(<WatchedChannelsField />)
+      const field = await screen.findByRole('textbox', { name: 'Channel ID' })
+      fireEvent.change(field, { target: { value: 'C_ADD' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Add channel' }))
+      await screen.findByText('C_ADD')
+      expect(writes[0]).toEqual({ path: 'inbox.watched_channels', value: ['C_KEEP', 'C_ADD'], basedOn: 'r1' })
+      fireEvent.click(screen.getByRole('button', { name: 'Remove watched channel 2 of 2' }))
+      await waitFor(() => expect(screen.queryByText('C_ADD')).toBeNull())
+      expect(writes[1]).toEqual({ path: 'inbox.watched_channels', value: ['C_KEEP'], basedOn: 'r2' })
+      stored = ['C_KEEP', 'C_ELSEWHERE']
+      revision = 'r4'
+      fireEvent.change(field, { target: { value: 'C_MINE' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Add channel' }))
+      await screen.findByText(/Your watched channels changed elsewhere/)
+      expect(stored).toEqual(['C_KEEP', 'C_ELSEWHERE'])
+      expect(writes[2]).toEqual({ path: 'inbox.watched_channels', value: ['C_KEEP', 'C_MINE'], basedOn: 'r3' })
+      expect((field as HTMLInputElement).value).toBe('C_MINE')
+      const reapply = screen.getByRole('button', { name: 'Reload and reapply' })
+      await waitFor(() => expect(reapply).not.toHaveAttribute('aria-busy', 'true'))
+      fireEvent.click(reapply)
+      await screen.findByText('C_MINE')
+      expect(stored).toEqual(['C_KEEP', 'C_ELSEWHERE', 'C_MINE'])
+      expect(writes[3]).toEqual({ path: 'inbox.watched_channels', value: ['C_KEEP', 'C_ELSEWHERE', 'C_MINE'], basedOn: 'r4' })
+      expect(screen.queryByText(/Your watched channels changed elsewhere/)).toBeNull()
+    } finally { vi.restoreAllMocks() }
+  })
+
+  it('refuses to write without a read revision and does not admit providers that do not watch channels', async () => {
+    vi.doUnmock('../../shared/data/api')
+    const { api } = await import('../../shared/data/api')
+    vi.spyOn(api, 'gideonConfig').mockResolvedValue({ inbox: { watched_channels: ['C_KEEP'] } })
+    vi.spyOn(api, 'inboxProviders').mockResolvedValue([{ name: 'slack', display_name: 'Slack', source_name: 'slack', watches_channels: true }])
+    const write = vi.spyOn(api, 'patchConfig')
+    try {
+      const { WatchedChannelsField } = await import('./WatchedChannelsField')
+      const view = render(<WatchedChannelsField />)
+      expect(await screen.findByRole('alert')).toHaveTextContent('Inbox channel settings have not been read with a revision.')
+      expect(screen.queryByRole('textbox', { name: 'Channel ID' })).toBeNull()
+      expect(write).not.toHaveBeenCalled()
+      view.unmount()
+      vi.spyOn(api, 'gideonConfig').mockResolvedValue({ inbox: { watched_channels: ['C_KEEP'] }, revisions: { 'inbox.watched_channels': 'r1' } })
+      vi.spyOn(api, 'inboxProviders').mockResolvedValue([{ name: 'filesystem', display_name: 'Filesystem', source_name: 'filesystem', watches_channels: false }])
+      render(<WatchedChannelsField />)
+      await waitFor(() => expect(api.inboxProviders).toHaveBeenCalledTimes(2))
+      expect(screen.queryByRole('textbox', { name: 'Channel ID' })).toBeNull()
+      expect(write).not.toHaveBeenCalled()
+    } finally { vi.restoreAllMocks() }
+  })
+})

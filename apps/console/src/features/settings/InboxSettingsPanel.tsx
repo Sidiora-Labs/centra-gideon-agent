@@ -1,3 +1,4 @@
+import { WatchedChannelsField } from '../inbox/WatchedChannelsField'
 import { useEffect, useState } from 'react'
 import { api, type InboxSettings } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
@@ -120,6 +121,7 @@ export function InboxSettingsPanel() {
           <Toggle on={!!engagementOn} onChange={setEngagement} label="Engagement ranking" disabled={engagementOn === null} />
         </Row>
         </InboxConfigBoundary>
+        <WatchedChannelsField />
       </Section>
 
       {
