@@ -58,6 +58,7 @@ from typing import Any
 from gideon.core.atomic_write import atomic_write, atomic_write_bytes
 from gideon.core.config import loader as config_loader
 from gideon.security import session_signing
+from gideon.security.auth import session_payload
 from gideon.security.session_signing import _ensure_owner_only as _ensure_owner_only
 
 
@@ -73,7 +74,7 @@ def config_dir() -> Path:
 logger = logging.getLogger(__name__)
 
 KEY_FILE = session_signing.KEY_FILE
-SESSIONS_FILE = "sessions.json"
+SESSIONS_FILE = session_payload.SESSIONS_FILE
 
 KEY_BYTES = session_signing.KEY_BYTES
 
@@ -85,8 +86,8 @@ ISSUER_PAIR = "pair"
 DEVICE_KINDS: tuple[str, ...] = ("browser", "mobile", "desktop", "cli", "unknown")
 
 POOL_LIMITS = {"browser": 64, "device": 128, "token": 64, "app": 512}
-MAX_ENDED_SESSIONS = 512
-END_REASONS = frozenset({"expired", "evicted", "revoked", "signed_out", "replaced"})
+MAX_ENDED_SESSIONS = session_payload.MAX_ENDED_SESSIONS
+END_REASONS = session_payload.END_REASONS
 
 MAX_DEVICE_NAME = 64
 
@@ -274,22 +275,7 @@ def _parse_record(raw: Any) -> SessionRecord | None:
 
 
 def _read_payload() -> dict[str, Any]:
-    path = sessions_path()
-    if not path.is_file():
-        return {"sessions": {}, "ended": {}}
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        logger.warning("session store unreadable — treating every session as absent")
-        return {"sessions": {}, "ended": {}}
-    if not isinstance(value, dict):
-        return {"sessions": {}, "ended": {}}
-    return {
-        "sessions": (
-            value.get("sessions") if isinstance(value.get("sessions"), dict) else {}
-        ),
-        "ended": value.get("ended") if isinstance(value.get("ended"), dict) else {},
-    }
+    return session_payload.read_payload(sessions_path())
 
 
 def _ended_key(nonce: str) -> str:
@@ -297,18 +283,7 @@ def _ended_key(nonce: str) -> str:
 
 
 def _bounded_ended(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    rows = {
-        key: row
-        for key, row in raw.items()
-        if isinstance(key, str)
-        and isinstance(row, dict)
-        and row.get("reason") in END_REASONS
-    }
-    return dict(
-        sorted(rows.items(), key=lambda item: float(item[1].get("ended_at") or 0))[
-            -MAX_ENDED_SESSIONS:
-        ]
-    )
+    return session_payload.bounded_ended(raw, limit=MAX_ENDED_SESSIONS, reasons=END_REASONS)
 
 
 def ended_session_reason(nonce: str) -> str:
@@ -331,12 +306,7 @@ def end_session(nonce: str, reason: str) -> bool:
 
 
 def _write_payload(payload: dict[str, Any]) -> None:
-    path = sessions_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(path, json.dumps(payload, indent=2) + "\n", mode=0o600)
-    except OSError:
-        logger.warning("could not persist the session store", exc_info=True)
+    session_payload.write_payload(payload, sessions_path(), writer=atomic_write)
 
 
 def load_session_records() -> dict[str, SessionRecord]:

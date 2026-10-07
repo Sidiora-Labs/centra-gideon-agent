@@ -610,17 +610,64 @@ def test_revoke_cli_prefers_the_running_gateway(monkeypatch, _isolated) -> None:
     """
     from gideon.security.auth import cli as auth_cli
 
-    called: list[int] = []
-    monkeypatch.setattr(
-        auth_cli, "_revoke_via_gateway", lambda port: (called.append(port) or True)
-    )
+    import os
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
 
-    class _Args:
-        all = True
-        port = 12345
+    from gideon.engine import gateway_base
+    from gideon.interfaces.dashboard import session_store
 
-    assert auth_cli._revoke_cmd(_Args()) == 0
-    assert called == [12345], "the CLI did not route the revoke through the gateway"
+    health_requests: list[str] = []
+
+    class HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            health_requests.append(self.path)
+            facts = gateway_base.process_facts(os.getpid())
+            assert facts is not None
+            payload = json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "home_fingerprint": gateway_base.home_fingerprint(),
+                    "process_identity": facts.identity,
+                    "port": self.server.server_port,
+                }
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), HealthHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        called: list[int] = []
+        monkeypatch.setattr(
+            auth_cli, "_revoke_via_gateway", lambda port: (called.append(port) or True)
+        )
+
+        class Args:
+            all = True
+            port = server.server_port
+
+        assert auth_cli._revoke_cmd(Args()) == 0
+        assert called == [server.server_port]
+        assert health_requests == ["/api/healthz"]
+
+        session_store.remember_session("live-session", time.time() + 3600)
+        before = session_store.sessions_path().read_bytes()
+        monkeypatch.setattr(auth_cli, "_revoke_via_gateway", lambda port: False)
+        assert auth_cli._revoke_cmd(Args()) == 1
+        assert session_store.sessions_path().read_bytes() == before
+        assert health_requests == ["/api/healthz", "/api/healthz"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def test_revoke_cli_falls_back_when_no_gateway_is_running(
@@ -631,15 +678,15 @@ def test_revoke_cli_falls_back_when_no_gateway_is_running(
 
     monkeypatch.setattr(auth_cli, "_revoke_via_gateway", lambda port: False)
     cleared: list[bool] = []
-    import gideon.interfaces.dashboard.token_auth as ta
-
-    monkeypatch.setattr(ta, "revoke_all_sessions", lambda: cleared.append(True))
+    from gideon.security.auth import revocation
 
     class _Args:
         all = True
         port = 0
 
-    assert auth_cli._revoke_cmd(_Args()) == 0
+    with monkeypatch.context() as patch:
+        patch.setattr(revocation, "revoke_all_sessions", lambda: cleared.append(True))
+        assert auth_cli._revoke_cmd(_Args()) == 0
     assert cleared == [True]
 
 

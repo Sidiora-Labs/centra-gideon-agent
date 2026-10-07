@@ -197,13 +197,10 @@ def test_unparseable_config_duration_uses_the_default(raw) -> None:  # noqa: ANN
     assert parse_config_duration(raw, default_secs=4242) == 4242
 
 
-def test_config_duration_is_capped() -> None:
-    from gideon.interfaces.dashboard.token_auth import (
-        MAX_SESSION_TTL_SECS,
-        parse_config_duration,
-    )
+def test_config_duration_over_policy_uses_the_default() -> None:
+    from gideon.interfaces.dashboard.token_auth import parse_config_duration
 
-    assert parse_config_duration("99999d", default_secs=1) == MAX_SESSION_TTL_SECS
+    assert parse_config_duration("99999d", default_secs=1) == 1
 
 
 def test_the_token_duration_parser_is_unchanged() -> None:

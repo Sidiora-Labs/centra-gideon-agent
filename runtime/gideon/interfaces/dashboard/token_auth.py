@@ -38,6 +38,8 @@ from gideon.core.config.loader import _DEFAULT_PORT
 from gideon.interfaces.dashboard.origin import is_loopback, is_private_network
 from gideon.security.auth.lifetimes import DEFAULT_BROWSER_SESSION_TTL_SECS as _DEFAULT_BROWSER_SESSION_TTL_SECS
 from gideon.security.auth.lifetimes import MAX_SESSION_TTL_SECS, cap_legacy_expiry, parse_lifetime
+from gideon.security.auth.lifetimes import parse_config_duration as parse_config_duration
+from gideon.security.auth import revocation
 from gideon.security.sel import sel as _sel_fn
 from gideon.workspace.artifacts.deploy import SERVED_PATH, redacted_serve_path
 
@@ -849,22 +851,17 @@ def revoke_all_sessions() -> None:
     `test_token_rejected_when_no_nonces_registered`, which is exactly the assertion that
     should notice.
     """
-    _sel_fn().log_api_access(
-        caller="system",
-        operation="dashboard_sessions_revoked",
-        outcome="ok",
-        source="token_auth",
-        resources="action=revoke_all",
-    )
-    _state.clear_all()
-    try:
+    def clear_durable() -> None:
         from gideon.interfaces.dashboard.session_store import clear_sessions
 
         clear_sessions()
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "could not clear the durable session store during revoke", exc_info=True
-        )
+
+    revocation.revoke_all_sessions(
+        clear_memory=_state.clear_all,
+        clear_durable=clear_durable,
+        audit=_sel_fn().log_api_access,
+        log=logger,
+    )
 
 
 def secure_cookies() -> bool:
@@ -958,24 +955,6 @@ def parse_duration(s: str) -> int | None:
 
 
 _DURATION_UNITS = {"m": 60, "h": 3600, "d": 86400}
-
-
-def parse_config_duration(s: str, *, default_secs: int) -> int:
-    """Parse ``'<int>[mhd]'`` from CONFIG into seconds, falling back to *default_secs*.
-
-    Deliberately a second function rather than a widened `parse_duration`. That one serves
-    `gideon token --ttl` and the token endpoint, where an unrecognised unit must be a
-    hard error the user sees immediately — silently reading ``30d`` as something else would
-    mint a token with the wrong lifetime. Here the input is a config file that may have been
-    hand-edited, so the posture is the opposite: never let a typo brick the box; take the
-    documented default and carry on. ``d`` is accepted because a browser session lifetime is
-    naturally expressed in days (the plan's ``30d``), where a token's is in hours.
-    """
-    value = parse_lifetime(s, units="mhd")
-    if value is None:
-        logger.warning("unparseable duration %r in config — using the default", s)
-        return default_secs
-    return value
 
 
 @dataclass(frozen=True)

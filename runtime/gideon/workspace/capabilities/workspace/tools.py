@@ -263,10 +263,10 @@ class WorkspaceToolProvider(ToolProvider):
         return definitions
 
     async def invoke(self, tool_name, arguments):
-        from gideon.interfaces.dashboard.handlers.files import _dashboard_roots
+        from gideon.core.file_roots import dashboard_roots
 
         root = config_dir() / "capabilities" / "workspace"
-        roots = [p for _, p in _dashboard_roots()]
+        roots = [p for _, p in dashboard_roots()]
         try:
             definitions = {t.name: t for t in await self.list_tools()}
             definition = definitions.get(tool_name)

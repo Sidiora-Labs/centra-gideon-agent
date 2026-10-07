@@ -18,7 +18,7 @@ import getpass
 import os
 import sys
 
-from gideon.interfaces.dashboard.token_auth import parse_config_duration
+from gideon.security.auth.lifetimes import parse_config_duration
 from gideon.security.auth import credentials as creds
 from gideon.security.auth.lifetimes import (
     DEFAULT_BROWSER_SESSION_TTL_SECS,
@@ -239,7 +239,7 @@ def _revoke_cmd(args) -> int:
     if port is not None:
         print("❌ Live gateway revocation failed; refusing an offline store clear.")
         return 1
-    from gideon.interfaces.dashboard.token_auth import revoke_all_sessions
+    from gideon.security.auth.revocation import revoke_all_sessions
 
     revoke_all_sessions()
     print("✅ Revoked every stored session (no gateway was running).")
