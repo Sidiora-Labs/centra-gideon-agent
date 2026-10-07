@@ -1,3 +1,4 @@
+import { TextArea } from '../../../shared/ui/forms'
 import { useEffect, useState } from 'react'
 import { gatewayRequest, readJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -60,7 +61,7 @@ export function RemoteSessions({ baseUrl = '' }: { baseUrl?: string }) {
       <h3 data-type="headline-s">Session {active.session}</h3>
       <ol>{messages.map(message => <li key={message.id}><strong>{message.role}</strong>: {message.content} <small>{message.source.kind}</small></li>)}</ol>
       {reply && <pre aria-label="Remote reply stream">{reply}</pre>}
-      <label className="grid gap-xs text-sm">Message<textarea className="min-h-24 w-full resize-y rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-sm text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" value={composer} onChange={event => setComposer(event.target.value)} /></label>
+      <label className="grid gap-xs text-sm">Message<TextArea className="min-h-24 w-full resize-y rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-sm text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" value={composer} onChange={value => setComposer(value)} /></label>
       <Button loading={busy} onClick={() => void send()}>Send to remote agent</Button>
     </div>}
   </section>

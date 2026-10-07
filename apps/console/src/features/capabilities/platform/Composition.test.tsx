@@ -59,7 +59,10 @@ it('selects and edits canonical user view membership order and size', async () =
   await screen.findByLabelText('Size core:tasks')
   fireEvent.change(screen.getByLabelText('Size core:tasks'), { target: { value: 'full' } })
   await waitFor(() => expect(screen.getByLabelText('Size core:tasks')).toHaveValue('full'))
-  await waitFor(() => expect(screen.getByLabelText('Add core widget')).not.toBeDisabled())
+  await waitFor(() => {
+    expect(screen.getByLabelText('Add core widget')).not.toBeDisabled()
+    expect(screen.getByLabelText('Add core widget')).not.toHaveAttribute('aria-readonly', 'true')
+  })
   fireEvent.change(screen.getByLabelText('Add core widget'), { target: { value: 'core:schedule' } })
   await screen.findByLabelText('Size core:schedule')
   fireEvent.click(screen.getByRole('button', { name: 'Move up core:schedule' }))
