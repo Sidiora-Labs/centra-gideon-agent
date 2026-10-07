@@ -11,7 +11,7 @@ import { Row, RowGroup, Section } from '../settings/settingsUI'
 import { humanUnknown, modelIsReady, openRevisionedDraft, reapplyRevisionedDraft, rejectRevisionedDraft, reloadRevisionedDraft, type RevisionedDraft } from './configState'
 
 function ModelFacts({ model }: { model: HypermidModelWire }) {
-  return <dl className="mt-s grid gap-xs text-xs text-on-surface-low sm:grid-cols-2">
+  return <dl data-type="caption" className="mt-s grid gap-xs text-on-surface-low sm:grid-cols-2">
     <div><dt className="inline">Provider: </dt><dd className="inline text-on-surface">{model.provider_id}</dd></div>
     <div><dt className="inline">Context: </dt><dd className="inline text-on-surface">{humanUnknown(model.context_tokens, (value) => `${Number(value).toLocaleString()} tokens`)}</dd></div>
     <div><dt className="inline">Embedding: </dt><dd className="inline text-on-surface">{humanUnknown(model.embedding_dimensions, (value) => `${value} dimensions`)}</dd></div>
@@ -71,7 +71,7 @@ export function ModelBindings() {
       const ready = selected ? modelIsReady(selected) : false
       return <Row key={duty.id} label={duty.label} hint={`Required check: ${duty.required_probe}`}>
         <div className="flex flex-wrap items-center justify-end gap-s">
-          <div className="w-full max-w-64"><Select value={selectedId} onChange={(value) => void choose(duty.id, value)} ariaLabel={`${duty.label} model`} className="min-h-11 max-w-64 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "", label: "Choose a model" }, ...data.models.map(model => ({ value: model.id, label: `${model.display_name || model.id} · ${model.provider_id}` }))]} /></div>
+          <div className="w-full max-w-64"><Select value={selectedId} onChange={(value) => void choose(duty.id, value)} ariaLabel={`${duty.label} model`} className="min-h-11 max-w-64 rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "", label: "Choose a model" }, ...data.models.map(model => ({ value: model.id, label: `${model.display_name || model.id} · ${model.provider_id}` }))]} /></div>
           {selected && <StatusPill label={ready ? 'probe ready' : selected.health === 'unknown' ? 'readiness unknown' : selected.health} tone={ready ? 'ok' : 'warn'} />}
           {selected && !ready && <Button size="sm" variant="secondary" loading={busy === `probe:${selected.id}`} onClick={() => void probe(selected)}><Gauge size={14} /> Run required probe</Button>}
         </div>
@@ -80,22 +80,22 @@ export function ModelBindings() {
     {state.draft && <div className="mt-m grid gap-m sm:grid-cols-2">{Object.entries(state.draft).map(([duty, modelId]) => {
       const model = data.models.find((item) => item.id === modelId)
       return model ? <Surface key={duty} tone="container" radius="lg" className="p-m">
-        <div className="flex items-center gap-s"><Server size={15} className="text-primary" /><span className="text-sm text-on-surface">{model.display_name || model.id}</span>
+        <div className="flex items-center gap-s"><Server size={15} className="text-primary" /><span data-type="label-m" className="text-on-surface">{model.display_name || model.id}</span>
           <StatusPill label={modelIsReady(model) ? 'ready' : 'not ready'} tone={modelIsReady(model) ? 'ok' : 'warn'} /></div><ModelFacts model={model} />
       </Surface> : null
     })}</div>}
     {plan && <div className="mt-m rounded-lg border border-outline-variant bg-surface p-m">
-      <h3 className="flex items-center gap-s text-sm text-on-surface">{plan.readiness_required ? <TriangleAlert size={15} className="text-warn" /> : <CheckCircle2 size={15} className="text-success" />} Review binding change</h3>
-      <p className="mt-xs text-sm text-on-surface-low">Affected duties: {plan.affected_duties.join(', ') || 'Only the selected duty'}.</p>
+      <h3 data-type="title-m" className="flex items-center gap-s text-on-surface">{plan.readiness_required ? <TriangleAlert size={15} className="text-warn" /> : <CheckCircle2 size={15} className="text-success" />} Review binding change</h3>
+      <p data-type="body-s" className="mt-xs text-on-surface-low">Affected duties: {plan.affected_duties.join(', ') || 'Only the selected duty'}.</p>
       <div className="mt-m flex justify-end"><Button size="sm" disabled={plan.readiness_required && !modelIsReady(data.models.find((model) => model.id === plan.model_id) || { availability: '', health: '' })} disabledReason={plan.readiness_required && !modelIsReady(data.models.find((model) => model.id === plan.model_id) || { availability: '', health: '' }) ? 'The selected model must pass readiness before this binding can be applied.' : undefined}
         loading={busy === `save:${plan.duty}`} onClick={() => void save()}>Apply binding</Button></div>
     </div>}
     {state.conflict && <div role="alert" className="mt-m rounded-lg border border-warn/40 bg-warn/10 p-m">
-      <p className="text-sm text-on-surface">{state.conflict.message}</p><div className="mt-m flex flex-wrap justify-end gap-s">
+      <p data-type="body-s" className="text-on-surface">{state.conflict.message}</p><div className="mt-m flex flex-wrap justify-end gap-s">
         <Button size="sm" variant="secondary" onClick={() => setState(reloadRevisionedDraft(state))}>Reload bindings</Button>
         <Button size="sm" onClick={() => setState(reapplyRevisionedDraft(state))}>Reapply selection</Button>
       </div>
     </div>}
-    {error && <p role="alert" className="mt-m text-sm text-danger">{error}</p>}
+    {error && <p data-type="body-s" role="alert" className="mt-m text-danger">{error}</p>}
   </Section>
 }

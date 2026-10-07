@@ -49,18 +49,18 @@ export function LiveLogs() {
   }
   return <Section title="Live logs" hint="Bounded and redacted before display. Pause freezes this view while collection continues.">
     <div className="mb-m grid gap-s sm:grid-cols-[12rem_minmax(0,1fr)_auto]">
-      <Select value={severity} onChange={(value) => setSeverity(value)} ariaLabel="Log severity" className="min-h-11 min-w-0 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "", label: "All severities" }, { value: "error", label: "Errors" }, { value: "warning", label: "Warnings" }, { value: "info", label: "Information" }, { value: "debug", label: "Debug" }]} />
+      <Select value={severity} onChange={(value) => setSeverity(value)} ariaLabel="Log severity" className="min-h-11 min-w-0 rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "", label: "All severities" }, { value: "error", label: "Errors" }, { value: "warning", label: "Warnings" }, { value: "info", label: "Information" }, { value: "debug", label: "Debug" }]} />
       <TextInput value={component} onChange={setComponent} ariaLabel="Log component" placeholder="Filter by component" size="sm" />
       <div className="flex flex-wrap gap-s"><Button size="sm" variant="secondary" onClick={togglePause}>{paused ? <Play size={14} /> : <Pause size={14} />}{paused ? 'Resume view' : 'Pause view'}</Button>
         <Button size="sm" variant="secondary" onClick={() => void load(true)}><RefreshCw size={14} /> Refresh</Button></div>
     </div>
-    {buffer.gap && <p role="alert" className="mb-m rounded-lg bg-warn/10 px-m py-s text-sm text-on-surface">Older log entries are no longer retained. Display resumed from the daemon recovery cursor.</p>}
-    {error && <p role="alert" className="mb-m break-words text-sm text-danger">{error}</p>}
+    {buffer.gap && <p data-type="body-s" role="alert" className="mb-m rounded-lg bg-warn/10 px-m py-s text-on-surface">Older log entries are no longer retained. Display resumed from the daemon recovery cursor.</p>}
+    {error && <p data-type="body-s" role="alert" className="mb-m break-words text-danger">{error}</p>}
     {loading && !buffer.cursor ? <FormSkeleton sections={1} rows={3} what="Hypermid logs" /> : visible.length === 0
       ? <EmptyState title="No log entries" hint="No retained entries match these filters." />
       : <div className="grid gap-s" aria-label="Hypermid log entries">{visible.map((entry) => <Surface key={`${entry.cursor.epoch}:${entry.cursor.sequence}`} tone="container" radius="lg" className="min-w-0 p-m">
         <div className="flex flex-wrap items-center gap-s text-on-surface-low"><span className="uppercase" data-type="label-s">{entry.severity}</span><span data-type="caption">{entry.component}</span><span data-type="caption">{new Date(entry.observed_at).toLocaleString()}</span></div>
-        <p className="mt-xs break-words text-sm text-on-surface">{entry.message}</p>
+        <p data-type="body-m" className="mt-xs break-words text-on-surface">{entry.message}</p>
       </Surface>)}</div>}
     <p role="status" aria-live="polite" className="sr-only">{paused ? 'Log view paused.' : `Showing ${visible.length} log entries.`}</p>
   </Section>

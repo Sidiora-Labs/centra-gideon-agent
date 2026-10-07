@@ -54,7 +54,7 @@ export function HypermidOverview({ onConfigure }: { onConfigure?: () => void }) 
         Build {data.versions.build || 'unknown'} · Protocol {data.versions.protocol || 'unknown'} · Storage {data.versions.storage || 'unknown'}
         {data.checked_at_ms > 0 ? ` · checked ${new Date(data.checked_at_ms).toLocaleString()}` : ''}
       </p>
-      {data.maintenance.active && <p role="status" className="mt-m rounded-lg bg-warn/10 px-m py-s text-sm text-on-surface">
+      {data.maintenance.active && <p data-type="body-s" role="status" className="mt-m rounded-lg bg-warn/10 px-m py-s text-on-surface">
         Maintenance is running{data.maintenance.label ? `: ${data.maintenance.label}` : ''}.
       </p>}
     </Section>

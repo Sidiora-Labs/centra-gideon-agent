@@ -42,15 +42,15 @@ export function Diagnostics() {
       {snapshot.checks.map((check) => <Surface key={check.id} tone="container" radius="lg" className="min-w-0 p-l">
         <div className="flex min-w-0 items-start justify-between gap-m"><div className="flex min-w-0 items-center gap-s">
           <Stethoscope size={16} aria-hidden className="shrink-0 text-primary" />
-          <h3 className="min-w-0 break-words text-sm text-on-surface">{check.title}</h3></div>
+          <h3 data-type="title-m" className="min-w-0 break-words text-on-surface">{check.title}</h3></div>
           <StatusPill label={check.health} tone={tone(check.health)} /></div>
-        <p className="mt-s break-words text-sm text-on-surface-low">{check.summary}</p>
-        {check.next_action && <p className="mt-s break-words text-sm text-on-surface"><span className="text-on-surface-low">Next action: </span>{check.next_action}</p>}
+        <p data-type="body-s" className="mt-s break-words text-on-surface-low">{check.summary}</p>
+        {check.next_action && <p data-type="body-s" className="mt-s break-words text-on-surface"><span className="text-on-surface-low">Next action: </span>{check.next_action}</p>}
         <p data-type="caption" className="mt-s text-on-surface-low">Observed {new Date(check.observed_at).toLocaleString()}{check.cached ? ' · cached' : ''}</p>
       </Surface>)}
     </div>
-    {snapshot.checks.length === 0 && <p role="status" className="text-sm text-on-surface-low">The daemon returned no diagnostic checks for this scope.</p>}
-    {rerunError && <p role="alert" className="mt-m break-words text-sm text-danger">{rerunError} The previous observation remains visible.</p>}
+    {snapshot.checks.length === 0 && <p data-type="body-s" role="status" className="text-on-surface-low">The daemon returned no diagnostic checks for this scope.</p>}
+    {rerunError && <p data-type="body-s" role="alert" className="mt-m break-words text-danger">{rerunError} The previous observation remains visible.</p>}
     <p role="status" aria-live="polite" className="sr-only">{announcement}</p>
   </Section>
 }

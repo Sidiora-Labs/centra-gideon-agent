@@ -25,11 +25,11 @@ function MemoryProvenanceStatus({ memoryId }: { memoryId: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   if (!provenance.data && provenance.error) return <div className="mt-l rounded-lg bg-surface-high p-m">
-    <p className="text-sm text-on-surface">Memory provenance unavailable</p>
+    <p data-type="body-s" className="text-on-surface">Memory provenance unavailable</p>
     <p data-type="caption" className="mt-xs text-on-surface-low">The authenticated provenance authority did not return metadata for this record.</p>
     <Button size="sm" variant="secondary" className="hypermid-touch mt-s" onClick={provenance.refresh}>Retry</Button>
   </div>
-  if (!provenance.data) return <p role="status" className="mt-l text-sm text-on-surface-low">Loading memory provenance…</p>
+  if (!provenance.data) return <p data-type="body-s" role="status" className="mt-l text-on-surface-low">Loading memory provenance…</p>
   const promote = async (expectedRevision: number) => {
     if (!(await confirm({
       title: 'Review this memory as an instruction?',
@@ -46,7 +46,7 @@ function MemoryProvenanceStatus({ memoryId }: { memoryId: string }) {
   }
   return <div className="mt-l">
     <MemoryProvenance memory={provenance.data} busy={busy} onPromote={(_, revision) => void promote(revision)} />
-    {error && <p role="alert" className="mt-s text-sm text-danger">{error}</p>}
+    {error && <p data-type="body-s" role="alert" className="mt-s text-danger">{error}</p>}
   </div>
 }
 
@@ -88,8 +88,8 @@ function MemoryDetail({ id, onChanged }: { id: string; onChanged: () => void }) 
       {data.verified && <StatusPill label="verified" tone="ok" />}
       {data.contradicted && <StatusPill label="contradicted" tone="warn" />}
     </div>
-    <h3 className="mt-m text-base text-on-surface">{recordLabel(data)}</h3>
-    {immutable ? <div className="mt-m rounded-lg bg-primary/10 p-m text-sm text-on-surface">
+    <h3 data-type="title-m" className="mt-m text-on-surface">{recordLabel(data)}</h3>
+    {immutable ? <div data-type="body-m" className="mt-m rounded-lg bg-primary/10 p-m text-on-surface">
       <div className="flex items-center gap-s font-medium"><Anchor size={15} /> Immutable chronological anchor</div>
       <p className="mt-xs whitespace-pre-wrap text-on-surface-low">{data.content || 'Content is not available to this scope.'}</p>
     </div> : <div className="mt-m">
@@ -102,25 +102,25 @@ function MemoryDetail({ id, onChanged }: { id: string; onChanged: () => void }) 
       </div>
     </div>}
     {edit.conflict && <div role="alert" className="mt-m rounded-lg border border-warn/40 bg-warn/10 p-m">
-      <div className="flex items-center gap-s text-sm text-on-surface"><ShieldAlert size={16} className="text-warn" />{edit.conflict.message}</div>
+      <div data-type="body-s" className="flex items-center gap-s text-on-surface"><ShieldAlert size={16} className="text-warn" />{edit.conflict.message}</div>
       <div className="mt-m grid gap-s sm:grid-cols-2">
-        <div><p data-type="caption" className="mb-xs text-on-surface-low">Your draft</p><p className="whitespace-pre-wrap rounded-md bg-surface p-s text-sm text-on-surface">{edit.draft}</p></div>
-        <div><p data-type="caption" className="mb-xs text-on-surface-low">Current saved value</p><p className="whitespace-pre-wrap rounded-md bg-surface p-s text-sm text-on-surface">{edit.conflict.latest}</p></div>
+        <div><p data-type="caption" className="mb-xs text-on-surface-low">Your draft</p><p data-type="body-m" className="whitespace-pre-wrap rounded-md bg-surface p-s text-on-surface">{edit.draft}</p></div>
+        <div><p data-type="caption" className="mb-xs text-on-surface-low">Current saved value</p><p data-type="body-m" className="whitespace-pre-wrap rounded-md bg-surface p-s text-on-surface">{edit.conflict.latest}</p></div>
       </div>
       <div className="mt-m flex flex-wrap justify-end gap-s">
         <Button size="sm" variant="secondary" onClick={() => setEdit(reloadConflict(edit))}>Reload saved value</Button>
         <Button size="sm" onClick={() => setEdit(reapplyConflict(edit))}>Keep my draft</Button>
       </div>
     </div>}
-    {error && <p role="alert" className="mt-s text-sm text-danger">{error}</p>}
-    <dl className="mt-l grid gap-s text-sm sm:grid-cols-2">
+    {error && <p data-type="body-s" role="alert" className="mt-s text-danger">{error}</p>}
+    <dl data-type="body-s" className="mt-l grid gap-s sm:grid-cols-2">
       <div><dt className="text-on-surface-low">Source</dt><dd className="text-on-surface">{data.source_session_id ? 'Linked session' : 'No session source'}</dd></div>
       <div><dt className="text-on-surface-low">Embedding</dt><dd className="text-on-surface">{data.embedding?.state || 'Unknown'}{data.embedding?.dimensions ? ` · ${data.embedding.dimensions} dimensions` : ''}</dd></div>
       <div><dt className="text-on-surface-low">Retrieval score</dt><dd className="text-on-surface">{data.retrieval?.score == null ? 'Unknown' : data.retrieval.score.toFixed(3)}</dd></div>
       <div><dt className="text-on-surface-low">Suppressed candidates</dt><dd className="text-on-surface">{data.retrieval?.suppressed == null ? 'Unknown' : data.retrieval.suppressed}</dd></div>
     </dl>
-    {data.lineage && data.lineage.length > 0 && <div className="mt-l"><p className="flex items-center gap-s text-sm text-on-surface"><GitBranch size={15} /> Lineage</p>
-      <ul className="mt-s space-y-xs text-sm text-on-surface-low">{data.lineage.map((item) => <li key={`${item.relation}:${item.id}`}>{item.relation.replaceAll('_', ' ')}</li>)}</ul>
+    {data.lineage && data.lineage.length > 0 && <div className="mt-l"><p data-type="label-s" className="flex items-center gap-s text-on-surface"><GitBranch size={15} /> Lineage</p>
+      <ul data-type="caption" className="mt-s space-y-xs text-on-surface-low">{data.lineage.map((item) => <li key={`${item.relation}:${item.id}`}>{item.relation.replaceAll('_', ' ')}</li>)}</ul>
     </div>}
     <MemoryProvenanceStatus memoryId={data.id} />
   </div>
@@ -136,7 +136,7 @@ export function MemoryInspector() {
     right={<Button size="sm" variant="secondary" onClick={memory.refresh}><RefreshCw size={14} /> Refresh</Button>}>
     <div className="mb-m grid gap-s sm:grid-cols-[minmax(0,1fr)_12rem]">
       <SearchField value={query} onChange={setQuery} placeholder="Search scoped memory" ariaLabel="Search Hypermid memory" />
-      <Select value={kind} onChange={(value) => setKind(value as typeof kind)} ariaLabel="Memory kind" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[...KINDS.map(value => ({ value: value, label: value ? value.replaceAll('_', ' ') : 'All memory types' }))]} />
+      <Select value={kind} onChange={(value) => setKind(value as typeof kind)} ariaLabel="Memory kind" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[...KINDS.map(value => ({ value: value, label: value ? value.replaceAll('_', ' ') : 'All memory types' }))]} />
     </div>
     <ResultAnnouncement count={memory.data?.items.length ?? 0} noun="memories" singular="memory" active={!!(query.trim() || kind) && !memory.revalidating && !memory.error && !!memory.data && memory.data.state !== 'unavailable' && memory.data.state !== 'unreadable'} />
     {memory.error && !memory.data ? <LoadError what="Hypermid memory" error={memory.error} onRetry={memory.refresh} />
@@ -149,7 +149,7 @@ export function MemoryInspector() {
             {memory.data.items.map((item) => <button key={item.id} type="button" onClick={() => setSelected(item.id)} aria-pressed={selected === item.id}
               className="flex min-h-11 w-full items-center gap-m border-b border-outline-variant/30 px-l py-m text-left last:border-0 hover:bg-surface-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
               {item.kind === 'anchor' ? <Anchor size={16} className="text-primary" /> : item.verified ? <CheckCircle2 size={16} className="text-success" /> : <FileClock size={16} className="text-on-surface-low" />}
-              <span className="min-w-0 flex-1"><span className="block truncate text-sm text-on-surface">{recordLabel(item)}</span>
+              <span className="min-w-0 flex-1"><span data-type="label-m" className="block truncate text-on-surface">{recordLabel(item)}</span>
                 <span data-type="caption" className="text-on-surface-low">{item.kind.replaceAll('_', ' ')} · {item.state}</span></span>
             </button>)}
           </Surface>

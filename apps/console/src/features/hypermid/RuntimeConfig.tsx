@@ -56,22 +56,22 @@ export function RuntimeConfig() {
       <RowGroup>
         <Row label="Effective source" hint={`Policy revision ${config.data.policy_revision}`}><StatusPill label={config.data.source.replaceAll('_', ' ')} tone="muted" /></Row>
         <Row label="Mode" hint={MODES.find((mode) => mode.value === state.draft.mode)?.detail}>
-          <Select value={state.draft.mode} onChange={(value) => { if (modeUnavailable) return; setDraft({ mode: value as HypermidRuntimeConfigValueWire['mode'] }) }} ariaLabel="Hypermid runtime mode" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary aria-disabled:opacity-50" options={[...MODES.map(mode => ({ value: mode.value, label: mode.label }))]} readOnly={modeUnavailable} readOnlyReason={modeReason} />
+          <Select value={state.draft.mode} onChange={(value) => { if (modeUnavailable) return; setDraft({ mode: value as HypermidRuntimeConfigValueWire['mode'] }) }} ariaLabel="Hypermid runtime mode" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary aria-disabled:opacity-50" options={[...MODES.map(mode => ({ value: mode.value, label: mode.label }))]} readOnly={modeUnavailable} readOnlyReason={modeReason} />
         </Row>
         {state.draft.mode === 'primary' && <Row label="Authority handoff" hint="After Primary mode reaches the safe turn boundary, review the separate writer handoff below.">
-          <span className="inline-flex items-center gap-xs text-sm text-warn"><Clock3 size={14} /> Writer review required</span>
+          <span data-type="label-s" className="inline-flex items-center gap-xs text-warn"><Clock3 size={14} /> Writer review required</span>
         </Row>}
-        {authorityOwnsWrites && <Row label="Change mode" hint="Rollback writer authority to Gideon before moving away from Primary."><span className="text-sm text-on-surface-low">Locked during Hypermid writer ownership</span></Row>}
+        {authorityOwnsWrites && <Row label="Change mode" hint="Rollback writer authority to Gideon before moving away from Primary."><span data-type="body-s" className="text-on-surface-low">Locked during Hypermid writer ownership</span></Row>}
       </RowGroup>
     </Section>
     <AuthorityControl onStatus={(next) => setAuthorityOwnsWrites(next.owns_writes)} onCommitted={() => { config.refresh(); setState(undefined) }} />
     <Section title="Strictness" hint="These policies govern overflow and refusal without changing the runtime mode.">
       <RowGroup>
         <Row label="When context overflows">
-          <Select value={state.draft.overflow_policy} onChange={(value) => setDraft({ overflow_policy: value as HypermidRuntimeConfigValueWire['overflow_policy'] })} ariaLabel="Context overflow policy" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "reclaim_then_refuse", label: "Reclaim, then refuse" }, { value: "refuse_immediately", label: "Refuse immediately" }]} />
+          <Select value={state.draft.overflow_policy} onChange={(value) => setDraft({ overflow_policy: value as HypermidRuntimeConfigValueWire['overflow_policy'] })} ariaLabel="Context overflow policy" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "reclaim_then_refuse", label: "Reclaim, then refuse" }, { value: "refuse_immediately", label: "Refuse immediately" }]} />
         </Row>
         <Row label="When a projection is refused">
-          <Select value={state.draft.refusal_policy} onChange={(value) => setDraft({ refusal_policy: value as HypermidRuntimeConfigValueWire['refusal_policy'] })} ariaLabel="Projection refusal policy" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "refuse", label: "Refuse the turn" }, { value: "compatible_last_known_good", label: "Use compatible last known good" }, { value: "host_passthrough", label: "Use Gideon pass-through" }]} />
+          <Select value={state.draft.refusal_policy} onChange={(value) => setDraft({ refusal_policy: value as HypermidRuntimeConfigValueWire['refusal_policy'] })} ariaLabel="Projection refusal policy" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "refuse", label: "Refuse the turn" }, { value: "compatible_last_known_good", label: "Use compatible last known good" }, { value: "host_passthrough", label: "Use Gideon pass-through" }]} />
         </Row>
       </RowGroup>
     </Section>
@@ -84,13 +84,13 @@ export function RuntimeConfig() {
       </RowGroup>
     </Section>
     {state.conflict && <div role="alert" className="mb-l rounded-lg border border-warn/40 bg-warn/10 p-m">
-      <div className="flex items-center gap-s text-sm text-on-surface"><AlertTriangle size={16} className="text-warn" />{state.conflict.message}</div>
+      <div data-type="body-s" className="flex items-center gap-s text-on-surface"><AlertTriangle size={16} className="text-warn" />{state.conflict.message}</div>
       <div className="mt-m flex flex-wrap justify-end gap-s"><Button size="sm" variant="secondary" onClick={() => setState(reloadRevisionedDraft(state))}>Reload current settings</Button>
         <Button size="sm" onClick={() => setState(reapplyRevisionedDraft(state))}>Reapply my draft</Button></div>
     </div>}
-    {config.data.validation.length > 0 && <ul role="alert" className="mb-m rounded-lg bg-danger/10 p-m text-sm text-danger">{config.data.validation.map((item) => <li key={item}>{item}</li>)}</ul>}
-    {error && <p role="alert" className="mb-m text-sm text-danger">{error}</p>}
-    {notice && <p role="status" className="mb-m text-sm text-success">{notice}</p>}
+    {config.data.validation.length > 0 && <ul data-type="body-s" role="alert" className="mb-m rounded-lg bg-danger/10 p-m text-danger">{config.data.validation.map((item) => <li key={item}>{item}</li>)}</ul>}
+    {error && <p data-type="body-s" role="alert" className="mb-m text-danger">{error}</p>}
+    {notice && <p data-type="body-s" role="status" className="mb-m text-success">{notice}</p>}
     <div className="flex flex-wrap justify-end gap-s">
       <Button size="sm" variant="secondary" onClick={() => { config.refresh(); setState(undefined) }}><RefreshCw size={14} /> Reload</Button>
       <Button size="sm" disabled={!dirty || !config.data.editable} disabledReason={!config.data.editable ? 'Runtime policy does not permit editing these settings.' : !dirty ? 'Make a settings change before staging.' : undefined} loading={saving} onClick={() => void save()}>Stage settings</Button>

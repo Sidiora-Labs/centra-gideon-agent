@@ -21,11 +21,11 @@ function bytes(value: number): string {
 function CachePlan({ plan, onClose }: { plan: HypermidCachePlanWire; onClose: () => void }) {
   return <section aria-labelledby="hypermid-cache-plan-title" className="mt-m rounded-lg border border-outline-variant bg-surface p-l">
     <div className="flex items-start justify-between gap-m">
-      <div><h3 id="hypermid-cache-plan-title" className="text-base text-on-surface">Review {plan.action} plan</h3>
-        <p className="mt-xs text-sm text-on-surface-low">{plan.recovery}</p></div>
+      <div><h3 data-type="title-m" id="hypermid-cache-plan-title" className="text-on-surface">Review {plan.action} plan</h3>
+        <p data-type="body-s" className="mt-xs text-on-surface-low">{plan.recovery}</p></div>
       <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
     </div>
-    <dl className="mt-m grid gap-s text-sm sm:grid-cols-2">
+    <dl data-type="body-s" className="mt-m grid gap-s sm:grid-cols-2">
       <div><dt className="text-on-surface-low">Affected entries</dt><dd className="text-on-surface">{plan.entries.length}</dd></div>
       <div><dt className="text-on-surface-low">Affected data</dt><dd className="text-on-surface">{bytes(plan.entries.reduce((total, entry) => total + entry.bytes, 0))}</dd></div>
     </dl>
@@ -47,7 +47,7 @@ function CacheRow({ cache, onPlan }: { cache: HypermidCacheWire; onPlan: (plan: 
     <div className="flex flex-wrap items-start justify-between gap-m">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-s"><DatabaseZap size={16} className="text-primary" aria-hidden />
-          <h3 className="text-sm text-on-surface">{cache.kind.replaceAll('_', ' ')}</h3><StatusPill label={cache.freshness} tone={tone} /></div>
+          <h3 data-type="title-m" className="text-on-surface">{cache.kind.replaceAll('_', ' ')}</h3><StatusPill label={cache.freshness} tone={tone} /></div>
         <p data-type="caption" className="mt-xs text-on-surface-low">Generation {cache.generation} · {bytes(cache.bytes)} · {cache.hits ?? 'Unknown'} hits · {cache.misses ?? 'Unknown'} misses</p>
         <p data-type="caption" className="mt-xs text-on-surface-low">{cache.observed_at ? `Observed ${new Date(cache.observed_at).toLocaleString()}` : 'Observation time unknown'}</p>
       </div>
@@ -56,7 +56,7 @@ function CacheRow({ cache, onPlan }: { cache: HypermidCacheWire; onPlan: (plan: 
         <Button size="sm" variant="secondary" loading={busy === 'clear'} onClick={() => void plan('clear')}>Plan clear</Button>
       </div>
     </div>
-    {error && <p role="alert" className="mt-s text-sm text-danger">{error}</p>}
+    {error && <p data-type="body-s" role="alert" className="mt-s text-danger">{error}</p>}
   </Surface>
 }
 
@@ -68,7 +68,7 @@ export function CacheInspector() {
   return <Section title="Caches and projections" hint="Inspect freshness and recovery impact before clearing or rebuilding scoped derived state."
     right={<Button size="sm" variant="secondary" onClick={caches.refresh}><RefreshCw size={14} /> Refresh</Button>}>
     <div className="mb-m flex justify-end">
-      <div className="w-full sm:w-56"><Select value={freshness} onChange={(value) => setFreshness(value as typeof freshness)} ariaLabel="Cache freshness" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary sm:w-56" options={[...FRESHNESS.map(value => ({ value: value, label: value ? value.charAt(0).toUpperCase() + value.slice(1) : 'All cache states' }))]} /></div>
+      <div className="w-full sm:w-56"><Select value={freshness} onChange={(value) => setFreshness(value as typeof freshness)} ariaLabel="Cache freshness" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary sm:w-56" options={[...FRESHNESS.map(value => ({ value: value, label: value ? value.charAt(0).toUpperCase() + value.slice(1) : 'All cache states' }))]} /></div>
     </div>
     {caches.error && !caches.data ? <LoadError what="Hypermid caches" error={caches.error} onRetry={caches.refresh} />
       : !caches.data ? <ListSkeleton what="Hypermid caches" />
