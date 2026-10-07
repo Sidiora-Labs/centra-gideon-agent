@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { useAgentActivity } from '../../../shared/data/useAgentActivity'
@@ -38,7 +39,7 @@ export default function AvatarPanel({ baseUrl = '/api/capabilities/experience' }
     <h2 data-type="title-m">Animated avatar</h2>
     <p>Motion follows reported agent activity and actual speech playback.</p>
     {error && <p role="alert">{error}</p>}
-    <div className="flex flex-wrap gap-2"><Button disabled={busy} onClick={() => void run(() => requestJson(baseUrl + '/avatars/bundled', 'POST', {}))}>Install bundled robot</Button><Button onClick={() => void refresh().catch(cause => setError(String(cause)))} disabled={busy}>Refresh avatars</Button></div>
+    <div className="flex flex-wrap gap-2"><Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void run(() => requestJson(baseUrl + '/avatars/bundled', 'POST', {}))}>Install bundled robot</Button><Button onClick={() => void refresh().catch(cause => setError(String(cause)))} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>Refresh avatars</Button></div>
     {selection && <div className="flex flex-wrap gap-2">
       <Field label="Avatar"><Select disabled={busy} value={selection.avatar_id || ''} onChange={value => void run(() => requestJson(baseUrl + '/avatar-selection', 'PUT', { ...selection, avatar_id: value || null }))} options={[{value:'',label:'No avatar'},...avatars.map(row=>({value:row.id,label:row.title+(row.availability !== 'ready'?' (source unavailable)':''),disabled:row.availability !== 'ready'}))]} /></Field>
       <Field label="Activity source"><Select disabled={busy} value={selection.entity_id} onChange={value => void run(() => requestJson(baseUrl + '/avatar-selection', 'PUT', { ...selection, entity_id: value }))} options={[{value:'',label:'Overall activity'},...activity.entities.map(entity=>({value:entity.id,label:entity.title})),...(selection.entity_id&&!activity.entities.some(entity=>entity.id===selection.entity_id)?[{value:selection.entity_id,label:'Selected source unavailable'}]:[])]} /></Field>
@@ -48,7 +49,7 @@ export default function AvatarPanel({ baseUrl = '/api/capabilities/experience' }
     <form onSubmit={event => { event.preventDefault(); if (source) void run(() => requestJson(baseUrl + '/avatars', 'POST', { title, artifact_slug: source.slug, artifact_version: source.version, clips: mapping })) }} className="space-y-2">
       <h3 data-type="title-m">Publish an avatar variant</h3><Field label="Animated model"><Select value={model} onChange={value => { setModel(value); const next = models.find(row => `${row.slug}:${row.version}` === value); setTitle(next?.name || ''); setMapping(next ? { idle: next.clips[0] } : {}) }} options={[{value:'',label:'Choose an existing animated model'},...models.map(row=>({value:`${row.slug}:${row.version}`,label:`${row.name} · version ${row.version}`}))]} /></Field>
       {source && <><Field label="Avatar name"><TextInput required maxLength={200} value={title} onChange={setTitle} /></Field>{avatarStates.map(name => <label key={name}>{name} clip<select className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m" value={mapping[name] || ''} required={name === 'idle'} onChange={event => setMapping(previous => { const next = { ...previous }; if (event.target.value) next[name] = event.target.value; else delete next[name]; return next })}><option value="">{name === 'idle' ? 'Choose idle clip' : 'Use idle fallback'}</option>{source.clips.map(clip => <option key={clip} value={clip}>{clip}</option>)}</select></label>)}</>}
-      <Button type="submit" disabled={busy || !source}>Publish avatar</Button>
+      <Button type="submit" disabled={busy || !source} disabledReason={busy ? BUSY_REASON : undefined}>Publish avatar</Button>
     </form>
   </section>
 }

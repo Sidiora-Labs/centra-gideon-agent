@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { gatewayRequest, readJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -24,9 +25,9 @@ export default function Gsd({ baseUrl = '' }: { baseUrl?: string }) {
     <h2 data-type="title-m">GSD project planning</h2><p>Edit the project’s original planning documents. Phase buttons create open requests in its GSD task list.</p>
     {error && <p role="alert">{error}</p>}{receipt && <p role="status">{receipt}</p>}
     <label className="grid gap-xs text-sm">Project<select className="min-h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-sm text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="GSD project" value={selected} onChange={event => void load(event.target.value)}><option value="">Select project</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
-    {detail && <><div className="flex flex-wrap gap-s">{detail.documents.map(name => <Button key={name} disabled={busy} onClick={() => void load(selected, name)}>{name}</Button>)}</div>
-      {detail.document && <><label className="grid gap-xs text-sm">{detail.document.name}<textarea aria-label="Planning document text" className="block min-h-48 w-full bg-surface-high p-s" value={text} onChange={event => setText(event.target.value)} /></label><Button disabled={busy} onClick={() => void save()}>Save planning document</Button><Button disabled={busy} onClick={() => void load(selected, detail.document!.name)}>Reload planning document</Button></>}
-      {detail.phases.map(phase => <article className="grid gap-s rounded-lg border border-outline-variant/20 bg-surface-container p-l" key={phase.id} aria-label={phase.id}><h3 data-type="headline-s">{phase.id}</h3><p>{phase.plans.length} plan documents · {phase.summaries.length} summary documents</p>{['plan', 'execute', 'verify'].map(action => <Button key={action} disabled={busy} onClick={() => void request(phase.id, action)}>Request {action} {phase.id}</Button>)}</article>)}
+    {detail && <><div className="flex flex-wrap gap-s">{detail.documents.map(name => <Button key={name} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void load(selected, name)}>{name}</Button>)}</div>
+      {detail.document && <><label className="grid gap-xs text-sm">{detail.document.name}<textarea aria-label="Planning document text" className="block min-h-48 w-full bg-surface-high p-s" value={text} onChange={event => setText(event.target.value)} /></label><Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void save()}>Save planning document</Button><Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void load(selected, detail.document!.name)}>Reload planning document</Button></>}
+      {detail.phases.map(phase => <article className="grid gap-s rounded-lg border border-outline-variant/20 bg-surface-container p-l" key={phase.id} aria-label={phase.id}><h3 data-type="headline-s">{phase.id}</h3><p>{phase.plans.length} plan documents · {phase.summaries.length} summary documents</p>{['plan', 'execute', 'verify'].map(action => <Button key={action} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void request(phase.id, action)}>Request {action} {phase.id}</Button>)}</article>)}
     </>}
   </section>
 }

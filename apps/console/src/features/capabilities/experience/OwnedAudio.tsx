@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useRef, useState } from 'react'
 import { reportSpeechPlayback } from './speechPlayback'
 import { Button } from '../../../shared/ui/Button'
@@ -49,7 +50,7 @@ export default function OwnedAudio({ src, baseUrl, label = 'Scene narration audi
   }
   useEffect(() => { if (autoPlay) void play() }, [src, autoPlay])
   return <div><audio ref={element} aria-label={label} src={src} onPlaying={() => { if (held.current && held.current.expires_at * 1000 > Date.now()) reportSpeechPlayback(playbackId.current, true); else stop() }} onPause={() => reportSpeechPlayback(playbackId.current, false)} onEnded={stop} onError={() => { stop(); setError('Audio playback failed.') }} />
-    <Button disabled={busy} onClick={() => playing ? stop() : void play()}>{playing ? 'Pause speech' : 'Play speech'}</Button>
+    <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => playing ? stop() : void play()}>{playing ? 'Pause speech' : 'Play speech'}</Button>
     {error && <p role="alert">{error}</p>}
   </div>
 }

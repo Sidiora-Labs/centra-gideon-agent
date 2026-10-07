@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -25,8 +26,8 @@ export default function WorldFoundations({ baseUrl = '/api/capabilities/experien
     {!snapshot ? <p>Loading foundations…</p> : <>
       <p role="status">{snapshot.foundations.length} foundations · {snapshot.controllers.length} controllers</p>
       <div className="grid gap-m lg:grid-cols-2"><Surface tone="low" className="p-m"><h3 data-type="title-m">Foundation library</h3><ul className="divide-y divide-outline-variant/30">{snapshot.foundations.map(row => <li key={row.id}><strong>{row.title}</strong> — {row.state} · {row.provenance.kind}{row.style === null ? ' · no transferred style' : ''}</li>)}</ul></Surface>
-      <Surface className="p-m"><h3 data-type="title-m">Installed controllers</h3><ul className="divide-y divide-outline-variant/30">{snapshot.controllers.map(row => <li key={row.id}><strong>{row.world}</strong> — {row.state} (desired {row.desired_state}) {row.last_receipt?.complete && '· engine acknowledged'} <Button disabled={busy === row.id || row.state === 'retired'} onClick={() => void control(row, row.desired_state === 'armed' ? 'stop' : 'arm')}>{row.desired_state === 'armed' ? 'Stop controller' : 'Arm controller'}</Button>{row.desired_state === 'armed' && <Button disabled={busy === row.id} onClick={() => void control(row, 'restart')}>Restart controller</Button>}</li>)}</ul></Surface></div>
-      <Button variant="secondary" disabled={Boolean(busy)} onClick={() => void refresh().catch(error => setError(String(error)))}>Refresh lifecycle</Button>
+      <Surface className="p-m"><h3 data-type="title-m">Installed controllers</h3><ul className="divide-y divide-outline-variant/30">{snapshot.controllers.map(row => <li key={row.id}><strong>{row.world}</strong> — {row.state} (desired {row.desired_state}) {row.last_receipt?.complete && '· engine acknowledged'} <Button disabled={busy === row.id || row.state === 'retired'} disabledReason={busy===row.id ? BUSY_REASON : undefined} onClick={() => void control(row, row.desired_state === 'armed' ? 'stop' : 'arm')}>{row.desired_state === 'armed' ? 'Stop controller' : 'Arm controller'}</Button>{row.desired_state === 'armed' && <Button disabled={busy === row.id} disabledReason={busy===row.id ? BUSY_REASON : undefined} onClick={() => void control(row, 'restart')}>Restart controller</Button>}</li>)}</ul></Surface></div>
+      <Button variant="secondary" disabled={Boolean(busy)} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void refresh().catch(error => setError(String(error)))}>Refresh lifecycle</Button>
     </>}
   </section>
 }

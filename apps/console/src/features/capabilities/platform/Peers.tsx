@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { gatewayRequest, readJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -41,7 +42,7 @@ export default function Peers({ baseUrl = '' }: { baseUrl?: string }) {
         <Field label="Send scopes"><TextArea ariaLabel="Send scopes" mono value={draft.send_categories.join('\n')} onChange={value => categories('send_categories', value)} /></Field>
         <Field label="Receive scopes"><TextArea ariaLabel="Receive scopes" mono value={draft.receive_categories.join('\n')} onChange={value => categories('receive_categories', value)} /></Field>
         <Field label="Status"><label className="flex min-h-10 items-center gap-s rounded-md border border-outline-variant/30 bg-surface-container px-m"><Checkbox ariaLabel="Peer enabled" checked={draft.enabled} onChange={enabled => setDraft(row => ({ ...row, enabled }))} /><span data-type="body-s">Enabled</span></label></Field>
-      </div><div className="flex flex-wrap gap-s"><Button disabled={busy || !draft.id} onClick={() => void save()}>Save peer policy</Button><Button variant="danger" disabled={busy || !draft.revision} onClick={() => void remove()}>Remove peer</Button></div></Surface>
+      </div><div className="flex flex-wrap gap-s"><Button disabled={busy || !draft.id} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void save()}>Save peer policy</Button><Button variant="danger" disabled={busy || !draft.revision} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void remove()}>Remove peer</Button></div></Surface>
     </>}
   </section>
 }

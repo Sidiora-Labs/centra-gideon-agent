@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../../shared/data/api'
 import { requestJson } from '../../../shared/data/gatewayRequest'
@@ -53,8 +54,8 @@ export default function SpokenNavigation({ items, navigate, currentRoute, baseUr
   return <Surface tone="low" className="p-m"><section aria-label="Spoken navigation" className="space-y-m">
     <form onSubmit={event => { event.preventDefault(); void submit() }} className="grid min-w-0 gap-s md:grid-cols-[minmax(0,1fr)_auto_auto] md:items-end">
       <Field label="Navigation command"><TextInput maxLength={400} value={command} disabled={busy} onChange={value => { setCommand(value); setOrigin('typed') }} /></Field>
-      <Button type="submit" disabled={busy || !command.trim()}>Go</Button>
-      <Button disabled={busy || mic.state === 'transcribing'} onClick={() => void mic.toggle()}>{mic.listening ? 'Stop listening' : 'Use microphone'}</Button>
+      <Button type="submit" disabled={busy || !command.trim()} disabledReason={busy ? BUSY_REASON : undefined}>Go</Button>
+      <Button disabled={busy || mic.state === 'transcribing'} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void mic.toggle()}>{mic.listening ? 'Stop listening' : 'Use microphone'}</Button>
       {mic.listening && <MicCaptureChip onStop={() => void mic.toggle()} />}
     </form>
     {receipt?.status === 'requested' && <Button onClick={() => { setReceipt(null); setBusy(false); request.current = null }}>Stop waiting</Button>}

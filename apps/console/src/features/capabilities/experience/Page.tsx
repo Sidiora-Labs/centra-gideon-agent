@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../../shared/ui/Button'
 import './experience.css'
@@ -96,7 +97,7 @@ export default function Page({ baseUrl = '/api/capabilities/experience' }: { bas
   })
   if (new URLSearchParams(route.split('?')[1] || '').get('ambient') === '1') return <AmbientDisplay baseUrl={baseUrl} onClose={() => { location.hash = '/capabilities/experience' }} />
   return <AreaNavigation label="Experience workspace" items={destinations} active={activeView} onChange={selectView}><div className="flex h-full min-h-0 flex-col text-on-surface">
-    <TopBar left={<PageTitle>{destinations.find(item => item.id === activeView)?.label || 'Experience'}</PageTitle>} right={activeView === 'stories' ? <HeaderActions><Button variant="secondary" onClick={() => { const query = selected(); query.set('ambient', '1'); location.hash = '/capabilities/experience?' + query }}>Open ambient display</Button><Button disabled={busy} onClick={() => { location.hash = '/capabilities/experience'; setDraft(blank()); setView(null) }}>New story</Button></HeaderActions> : undefined} />
+    <TopBar left={<PageTitle>{destinations.find(item => item.id === activeView)?.label || 'Experience'}</PageTitle>} right={activeView === 'stories' ? <HeaderActions><Button variant="secondary" onClick={() => { const query = selected(); query.set('ambient', '1'); location.hash = '/capabilities/experience?' + query }}>Open ambient display</Button><Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => { location.hash = '/capabilities/experience'; setDraft(blank()); setView(null) }}>New story</Button></HeaderActions> : undefined} />
     <main className="experience-page min-h-0 flex-1 overflow-y-auto" aria-label="Interactive stories"><div className="mx-auto flex w-full flex-col gap-l px-l py-2xl" style={{ maxWidth: 'var(--content-width)' }}>
     {activeView === 'world' && <><WorldEngine baseUrl={baseUrl} /><Worlds baseUrl={baseUrl} /></>}
     {activeView === 'foundations' && <WorldFoundations baseUrl={baseUrl} />}
@@ -110,7 +111,7 @@ export default function Page({ baseUrl = '/api/capabilities/experience' }: { bas
     {loading && <p role="status">Loading stories…</p>}
     {error && <p role="alert">{error}</p>}
     <nav aria-label="Story library" className="flex flex-wrap gap-s">
-      {stories.map(s => <span key={s.id}><Button disabled={busy} onClick={() => navigate('story', s.id)}>{s.title}</Button> <Button disabled={busy} onClick={() => start(s)}>Play {s.title}</Button></span>)}
+      {stories.map(s => <span key={s.id}><Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => navigate('story', s.id)}>{s.title}</Button> <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => start(s)}>Play {s.title}</Button></span>)}
     </nav>
     {!loading && stories.length === 0 && <p>No stories yet. Write an opening below.</p>}
     {view ? <section aria-label="Story player"><Surface className="space-y-m p-m">
@@ -118,7 +119,7 @@ export default function Page({ baseUrl = '/api/capabilities/experience' }: { bas
       <p style={{ whiteSpace: 'pre-wrap' }}>{view.node.text}</p>
       <Narration sessionId={view.session.id} revision={view.session.revision} baseUrl={baseUrl} />
       {view.node.kind === 'ending' && <p role="status">The end</p>}
-      {view.node.choices.map(c => <Button key={c.id} disabled={busy} onClick={() => choose(c)}>{c.label}</Button>)}
+      {view.node.choices.map(c => <Button key={c.id} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => choose(c)}>{c.label}</Button>)}
     </Surface></section> : <form className="space-y-m" onSubmit={e => { e.preventDefault(); void save() }}>
       <fieldset disabled={busy || loading} className="space-y-m">
         <div className="grid gap-m md:grid-cols-2"><Field label="Story title"><TextInput required maxLength={200} value={draft.title} onChange={title => setDraft(d => ({ ...d, title }))} /></Field>
@@ -138,7 +139,7 @@ export default function Page({ baseUrl = '/api/capabilities/experience' }: { bas
         <Button type="submit">Save story</Button>
       </fieldset>
     </form>}
-    <section aria-label="Saved playthroughs" className="space-y-s"><h2 data-type="title-m">Resume a playthrough</h2>{sessions.length === 0 && <p>No saved playthroughs.</p>}<div className="flex flex-wrap gap-s">{sessions.map(s => <Button key={s.id} variant="secondary" disabled={busy} onClick={() => navigate('session', s.id)}>{stories.find(x => x.id === s.story_id)?.title || 'Saved story'} · {s.current_node} · {s.id.slice(0, 8)}</Button>)}</div></section>
+    <section aria-label="Saved playthroughs" className="space-y-s"><h2 data-type="title-m">Resume a playthrough</h2>{sessions.length === 0 && <p>No saved playthroughs.</p>}<div className="flex flex-wrap gap-s">{sessions.map(s => <Button key={s.id} variant="secondary" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => navigate('session', s.id)}>{stories.find(x => x.id === s.story_id)?.title || 'Saved story'} · {s.current_node} · {s.id.slice(0, 8)}</Button>)}</div></section>
     </>}
   </div></main></div></AreaNavigation>
 }

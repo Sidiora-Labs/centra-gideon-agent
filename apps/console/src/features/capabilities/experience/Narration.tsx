@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useRef, useState } from 'react'
 import { gatewayRequest, requestJson, responseError } from '../../../shared/data/gatewayRequest'
 import OwnedAudio from './OwnedAudio'
@@ -52,7 +53,7 @@ export default function Narration({ sessionId, revision, baseUrl = '/api/capabil
   }
   const active = !!job && ['queued', 'running'].includes(job.status)
   return <section aria-label="Story narration" className="space-y-2">
-    <Button disabled={busy || active} onClick={() => void start()}>Narrate this scene</Button>
+    <Button disabled={busy || active} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void start()}>Narrate this scene</Button>
     {active && <Button onClick={() => void cancel()}>Cancel narration</Button>}
     {job && <p role="status">Narration: {job.status}{job.error ? ` — ${job.error}` : ''}</p>}
     {error && <p role="alert">{error}</p>}

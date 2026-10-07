@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { gatewayRequest, readJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -32,13 +33,13 @@ export default function RemoteMedia({ baseUrl = '' }: { baseUrl?: string }) {
       <label className="grid gap-xs text-sm">Execution peer<select className="min-h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-sm text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Execution peer" value={peerId} onChange={event => setPeerId(event.target.value)}><option value="">Select a peer</option>{data.peers.map(peer => <option key={peer.id} value={peer.id}>{peer.label}</option>)}</select></label>
       <label className="grid gap-xs text-sm">Request ID<input className="min-h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-sm text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Request ID" value={requestId} maxLength={40} onChange={event => setRequestId(event.target.value)} /></label>
       <label className="grid gap-xs text-sm">Image prompt<textarea className="min-h-24 w-full resize-y rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-sm text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Image prompt" value={prompt} maxLength={4000} onChange={event => setPrompt(event.target.value)} /></label>
-      <Button disabled={busy || !peerId || !requestId || !prompt.trim()} onClick={() => void dispatch()}>Dispatch remote job</Button>
+      <Button disabled={busy || !peerId || !requestId || !prompt.trim()} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void dispatch()}>Dispatch remote job</Button>
       {!data.items.length && <p>No remote executions recorded.</p>}
       <ul aria-label="Remote executions">{data.items.map(item => <li key={item.id}>
         <strong>{item.request_id}</strong> · {item.status} · peer <code>{item.peer_id}</code> · job <code>{item.remote_job_id}</code>
         {item.result?.artifact_id && <span> · artifact <code>{item.result.artifact_id}@{item.result.version}</code></span>}{item.error && <span> · {item.error}</span>}
-        <Button disabled={busy} onClick={() => void action(item, 'refresh')}>Refresh</Button>
-        <Button variant="danger" disabled={busy || ['succeeded', 'failed', 'cancelled'].includes(item.status)} onClick={() => void action(item, 'cancel')}>Cancel</Button>
+        <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void action(item, 'refresh')}>Refresh</Button>
+        <Button variant="danger" disabled={busy || ['succeeded', 'failed', 'cancelled'].includes(item.status)} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void action(item, 'cancel')}>Cancel</Button>
       </li>)}</ul>
     </>}
   </section>

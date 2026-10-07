@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useMemo, useState } from 'react'
 import { gatewayRequest, readJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -68,7 +69,7 @@ export default function IntegrationApps({ baseUrl = '' }: { baseUrl?: string }) 
       <h3 data-type="headline-s">{run.request.operation}</h3><p role="status">{run.status} · {run.request.method} {run.request.path}</p>
       <pre>{JSON.stringify({ params: run.request.params, body: run.request.body }, null, 2)}</pre>
       {run.request.mutates && <p>Remote mutation: owner approval is required.</p>}{run.error && <p>{run.error}</p>}
-      <Button disabled={busy || run.status !== 'prepared'} disabledReason="Only a prepared request can be executed" onClick={() => void execute(run)}>Approve and execute</Button>
+      <Button disabled={busy || run.status !== 'prepared'} disabledReason={busy ? BUSY_REASON : "Only a prepared request can be executed"} onClick={() => void execute(run)}>Approve and execute</Button>
     </article>)}</div>
   </section>
 }

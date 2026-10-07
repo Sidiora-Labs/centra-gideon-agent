@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -36,13 +37,13 @@ export default function NativeCalls({ baseUrl = '/api/capabilities/experience' }
       <p role="status">{data.readiness.available ? 'Native control can be requested; call audio remains unverified.' : 'Native control unavailable'}</p>
       {data.readiness.errors.map((message, i) => <p key={i}>{message}</p>)}<p>{data.readiness.detail}</p>
       {data.readiness.target_name && <p>Configured recipient: {data.readiness.target_name}</p>}
-      <div className="flex flex-wrap gap-2">{['probe', 'call', 'answer', 'hangup'].map(operation => <Button key={operation} disabled={busy || !data.readiness.available} onClick={() => void command(operation)}>{operation}</Button>)}<Button disabled={busy} onClick={() => void refresh().catch(e => setError(String(e)))}>Refresh native readiness</Button></div>
+      <div className="flex flex-wrap gap-2">{['probe', 'call', 'answer', 'hangup'].map(operation => <Button key={operation} disabled={busy || !data.readiness.available} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void command(operation)}>{operation}</Button>)}<Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void refresh().catch(e => setError(String(e)))}>Refresh native readiness</Button></div>
       <ul>{data.requests.map(row => <li key={row.id}>{row.command}: {row.state} — {row.result}</li>)}</ul>
       <h3 data-type="title-m">Save a supplied transcript</h3><p>This records text you provide; it does not verify that a call connected or that audio was captured.</p>
       <Field label="Native request"><Select value={selected} onChange={value => { setSelected(value); setRequestId(crypto.randomUUID()) }} options={[{value:'',label:'Choose a request'},...data.requests.map(row=>({value:row.id,label:`${row.command} · ${row.state}`}))]} /></Field>
       <Field label="Existing conversation"><TextInput value={conversation} onChange={value => { setConversation(value); setRequestId(crypto.randomUUID()) }} /></Field>
       <Field label="Supplied transcript"><TextArea rows={8} value={transcript} onChange={value => { setTranscript(value); setRequestId(crypto.randomUUID()) }} /></Field>
-      <Button disabled={busy || !selected || !conversation || !transcript.trim()} onClick={() => void saveTranscript()}>Save transcript to conversation</Button>
+      <Button disabled={busy || !selected || !conversation || !transcript.trim()} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void saveTranscript()}>Save transcript to conversation</Button>
     </>}
   </section></Surface>
 }

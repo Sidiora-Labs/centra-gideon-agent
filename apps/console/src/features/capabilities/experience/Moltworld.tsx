@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -16,10 +17,10 @@ export default function Moltworld({baseUrl='/api/capabilities/experience'}:{base
     {error&&<p role="alert">{error}</p>}{!snapshot?<p>Loading Moltworld…</p>:<>
       <p role="status">{snapshot.readiness.ready?'ready locally':'not ready'} · remote {snapshot.readiness.remote_status} · {snapshot.readiness.protocol}</p>
       <p>Credential: {snapshot.readiness.config.credential_name||'not configured'} · secret {snapshot.readiness.credential_available?'available':'unavailable'}</p>
-      <Button disabled={busy||!snapshot.readiness.ready} onClick={()=>void status()}>Verify remote status</Button>
+      <Button disabled={busy||!snapshot.readiness.ready} disabledReason={busy ? BUSY_REASON : undefined} onClick={()=>void status()}>Verify remote status</Button>
       {remote&&<pre aria-label="Verified remote agent state">{JSON.stringify(remote,null,2)}</pre>}
       <h3 data-type="title-m">Action history</h3><ul>{snapshot.history.map(row=><li key={row.request_id}><strong>{row.action}</strong> · {row.state} · {row.approval}{row.queued_for_tick!==undefined&&' · tick '+row.queued_for_tick}{row.error&&' · '+row.error}</li>)}</ul>
-      <Button disabled={busy} onClick={()=>void refresh().catch(error=>setError(String(error)))}>Refresh local history</Button>
+      <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={()=>void refresh().catch(error=>setError(String(error)))}>Refresh local history</Button>
     </>}
   </section>
 }
