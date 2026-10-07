@@ -12,6 +12,7 @@ import Migration from './Migration'
 let server: ChildProcess
 let baseUrl: string
 let home: string
+const nativeFetch = globalThis.fetch
 
 function tarFile(files: Record<string, Buffer>) {
   const blocks: Buffer[] = []
@@ -111,18 +112,36 @@ function coordinatedFixture() {
 beforeAll(async () => {
   home = await mkdtemp(`${tmpdir()}/gideon-migration-`)
   const root = resolve(process.cwd(), '../..')
-  server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/platform/migration_ui_server.py'], { cwd: root, env: { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home, GIDEON_DEV_NO_AUTH: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
+  server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/platform/migration_ui_server.py'], { cwd: root, env: { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] })
   let diagnostics = ''
   server.stderr!.on('data', chunk => { diagnostics += chunk.toString() })
   baseUrl = await new Promise<string>((accept, reject) => {
     const lines = createInterface({ input: server.stdout! })
-    lines.on('line', line => { if (/^\d+$/.test(line)) { accept(`http://127.0.0.1:${line}`); lines.close() } })
+    lines.on('line', line => {
+      if (!line.startsWith('{')) return
+      const ready = JSON.parse(line) as { port: number; token: string }
+      const origin = `http://127.0.0.1:${ready.port}`
+      globalThis.fetch = (input, init) => {
+        const requestUrl = input instanceof Request ? input.url : String(input)
+        const headers = new Headers(input instanceof Request ? input.headers : undefined)
+        new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+        if (new URL(requestUrl, window.location.href).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+        return nativeFetch(input, { ...init, headers })
+      }
+      accept(origin)
+      lines.close()
+    })
     server.once('error', reject)
     server.once('exit', code => reject(new Error(`HTTP process exited ${code}: ${diagnostics}`)))
   })
+  // Production middleware still refuses an unauthenticated caller.
+  const refused = await nativeFetch(`${baseUrl}/api/capabilities/platform/migration`)
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
 })
 
 afterAll(async () => {
+  globalThis.fetch = nativeFetch
   if (server && server.exitCode === null) await new Promise<void>(done => { server.once('exit', () => done()); server.kill('SIGTERM') })
   await rm(home, { recursive: true, force: true })
 })
