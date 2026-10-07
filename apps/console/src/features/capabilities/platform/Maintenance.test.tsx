@@ -9,22 +9,41 @@ import Maintenance from './Maintenance'
 let server: ChildProcess
 let baseUrl: string
 let home: string
+const nativeFetch = globalThis.fetch
 beforeAll(async () => {
   home = await mkdtemp(`${tmpdir()}/gideon-maintenance-`)
   const root = resolve(process.cwd(), '../..')
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home }
+  delete childEnv.GIDEON_DEV_NO_AUTH
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/platform/maintenance_ui_server.py'], {
-    cwd: root, env: { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home, GIDEON_DEV_NO_AUTH: '1' }, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: root, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'],
   })
   let diagnostics = ''
   server.stderr!.on('data', chunk => { diagnostics += chunk.toString() })
-  baseUrl = await new Promise<string>((accept, reject) => {
+  const ready = await new Promise<{ url: string; token: string }>((accept, reject) => {
     const lines = createInterface({ input: server.stdout! })
-    lines.on('line', line => { if (/^\d+$/.test(line)) { accept(`http://127.0.0.1:${line}`); lines.close() } })
+    lines.on('line', line => {
+      try {
+        const value = JSON.parse(line) as { url: string; token: string }
+        if (typeof value.url !== 'string' || typeof value.token !== 'string') return
+        accept(value); lines.close()
+      } catch { /* Native readiness is the JSON line from this child. */ }
+    })
     server.once('error', reject)
     server.once('exit', code => reject(new Error(`HTTP process exited ${code}: ${diagnostics}`)))
   })
+  baseUrl = ready.url
+  expect((await nativeFetch(`${baseUrl}/api/capabilities/platform/maintenance`)).status).toBe(403)
+  globalThis.fetch = (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), baseUrl)
+    if (url.origin !== baseUrl) return nativeFetch(input, init)
+    const headers = new Headers(init?.headers)
+    headers.set('Authorization', `Bearer ${ready.token}`)
+    return nativeFetch(url, { ...init, headers })
+  }
 })
 afterAll(async () => {
+  globalThis.fetch = nativeFetch
   if (server && server.exitCode === null) await new Promise<void>(done => { server.once('exit', () => done()); server.kill('SIGTERM') })
   await rm(home, { recursive: true, force: true })
 })
@@ -45,12 +64,16 @@ it('launches real supervised maintenance and cancels then resumes through HTTP',
     const value = await (await fetch(`${baseUrl}/api/capabilities/platform/maintenance`)).json()
     expect(value.runs[0].child_id).toBeTruthy()
   }, { timeout: 5000 })
-  fireEvent.click(screen.getByRole('button', { name: 'Cancel maintenance' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel maintenance for Maintenance project, stage 1' }))
   await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('cancelled'), { timeout: 7000 })
-  expect(screen.getByRole('button', { name: 'Resume maintenance' })).not.toBeDisabled()
+  await waitFor(() => {
+    const resume = screen.getByRole('button', { name: 'Resume maintenance for Maintenance project, stage 1' })
+    expect(resume).not.toBeDisabled()
+    expect(resume).not.toHaveAttribute('aria-disabled', 'true')
+  })
   const before = await (await fetch(`${baseUrl}/api/capabilities/platform/maintenance`)).json()
   expect(before.runs[0].history[0].status).toBe('cancelled')
-  fireEvent.click(screen.getByRole('button', { name: 'Resume maintenance' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Resume maintenance for Maintenance project, stage 1' }))
   await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('running'))
   const after = await (await fetch(`${baseUrl}/api/capabilities/platform/maintenance`)).json()
   expect(after.runs[0].child_id).not.toBe(before.runs[0].history[0].child_id)
