@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from gideon.extensions.providers.settings import ProviderSettings
-from gideon.integrations.channel_transports.base import ChannelCapabilities, OutboundMessage
+from gideon.integrations.channel_transports.base import (
+    ChannelCapabilities,
+    OutboundMessage,
+)
 from gideon.integrations.messaging_channels.base import MessagingTransport
 
 logger = logging.getLogger(__name__)
@@ -73,7 +76,10 @@ class MatrixTransport(MessagingTransport):
     async def _on_message(self, room: Any, event: Any) -> None:
         if event.sender == self.config["user_id"]:
             return
-        is_dm = isinstance(getattr(room, "member_count", None), int) and room.member_count <= 2
+        is_dm = (
+            isinstance(getattr(room, "member_count", None), int)
+            and room.member_count <= 2
+        )
         if not is_dm:
             policy = self.config.get("group_policy", "mention")
             if policy == "off":
@@ -81,12 +87,18 @@ class MatrixTransport(MessagingTransport):
             source = getattr(event, "source", {}) or {}
             body = source.get("content", {}) if isinstance(source, dict) else {}
             mentions = body.get("m.mentions", {}) if isinstance(body, dict) else {}
-            if policy == "mention" and self.config["user_id"] not in mentions.get("user_ids", []):
+            if policy == "mention" and self.config["user_id"] not in mentions.get(
+                "user_ids", []
+            ):
                 return
         source = getattr(event, "source", {}) or {}
         content = source.get("content", {}) if isinstance(source, dict) else {}
         relation = content.get("m.relates_to", {}) if isinstance(content, dict) else {}
-        thread = str(relation.get("event_id") or "") if relation.get("rel_type") == "m.thread" else ""
+        thread = (
+            str(relation.get("event_id") or "")
+            if relation.get("rel_type") == "m.thread"
+            else ""
+        )
         await self._inbound(
             room.room_id,
             str(event.sender),
@@ -103,7 +115,7 @@ class MatrixTransport(MessagingTransport):
     async def send(self, message: OutboundMessage) -> str:
         if self.client is None or not self._connected:
             raise ConnectionError("Matrix is disconnected")
-        body = {"msgtype": "m.text", "body": message.text}
+        body: dict[str, object] = {"msgtype": "m.text", "body": message.text}
         thread = message.thread_id
         prefix = f"matrix:{message.channel_id}:"
         if thread.startswith(prefix):

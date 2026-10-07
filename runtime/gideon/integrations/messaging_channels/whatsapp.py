@@ -16,7 +16,10 @@ import websockets
 
 from gideon.core.atomic_write import atomic_write
 from gideon.extensions.providers.settings import ProviderSettings
-from gideon.integrations.channel_transports.base import ChannelCapabilities, OutboundMessage
+from gideon.integrations.channel_transports.base import (
+    ChannelCapabilities,
+    OutboundMessage,
+)
 from gideon.integrations.messaging_channels.base import MessagingTransport
 
 
@@ -65,10 +68,14 @@ class WhatsAppTransport(MessagingTransport):
                     atomic_write(token_path, self.bridge_token + "\n")
                     token_path.chmod(0o600)
             script = Path(__file__).parent / "bridge" / "index.mjs"
-            dependencies = script.parent / "node_modules" / "@whiskeysockets" / "baileys"
+            dependencies = (
+                script.parent / "node_modules" / "@whiskeysockets" / "baileys"
+            )
             node = shutil.which("node")
             if not node or not dependencies.is_dir():
-                raise RuntimeError("Install Node 20+ and the WhatsApp bridge package dependencies")
+                raise RuntimeError(
+                    "Install Node 20+ and the WhatsApp bridge package dependencies"
+                )
             port = url.port or 3001
             environment = os.environ.copy()
             environment.update(
@@ -90,7 +97,9 @@ class WhatsAppTransport(MessagingTransport):
             try:
                 async with websockets.connect(str(self.config["bridge_url"])) as ws:
                     self.ws = ws
-                    await ws.send(json.dumps({"type": "auth", "token": self.bridge_token}))
+                    await ws.send(
+                        json.dumps({"type": "auth", "token": self.bridge_token})
+                    )
                     async for frame in ws:
                         await self._frame(frame)
             except asyncio.CancelledError:
@@ -103,7 +112,9 @@ class WhatsAppTransport(MessagingTransport):
                 self.ws = None
                 for future in self.pending.values():
                     if not future.done():
-                        future.set_exception(ConnectionError("WhatsApp bridge disconnected"))
+                        future.set_exception(
+                            ConnectionError("WhatsApp bridge disconnected")
+                        )
                 self.pending.clear()
             await asyncio.sleep(5)
 
@@ -115,7 +126,9 @@ class WhatsAppTransport(MessagingTransport):
         kind = frame.get("type")
         if kind == "status":
             self._connected = frame.get("status") == "connected"
-            self._detail = "Connected" if self._connected else "Awaiting WhatsApp pairing"
+            self._detail = (
+                "Connected" if self._connected else "Awaiting WhatsApp pairing"
+            )
             if self._connected:
                 self.pairing_qr = ""
         elif kind == "qr":
@@ -126,11 +139,19 @@ class WhatsAppTransport(MessagingTransport):
                 if kind == "sent":
                     future.set_result(str(frame.get("messageId") or ""))
                 else:
-                    future.set_exception(ConnectionError(str(frame.get("error") or "WhatsApp send failed")))
+                    future.set_exception(
+                        ConnectionError(
+                            str(frame.get("error") or "WhatsApp send failed")
+                        )
+                    )
         elif kind == "message":
             chat = str(frame.get("chat") or "")
             group = bool(frame.get("isGroup"))
-            if group and self.config.get("group_policy", "mention") == "mention" and not frame.get("wasMentioned"):
+            if (
+                group
+                and self.config.get("group_policy", "mention") == "mention"
+                and not frame.get("wasMentioned")
+            ):
                 return
             await self._inbound(
                 chat,
@@ -162,7 +183,12 @@ class WhatsAppTransport(MessagingTransport):
         self.pending[identifier] = result
         await self.ws.send(
             json.dumps(
-                {"type": "send", "id": identifier, "to": message.channel_id, "text": message.text},
+                {
+                    "type": "send",
+                    "id": identifier,
+                    "to": message.channel_id,
+                    "text": message.text,
+                },
                 ensure_ascii=False,
             )
         )

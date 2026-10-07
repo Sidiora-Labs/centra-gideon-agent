@@ -233,7 +233,10 @@ def thread_mute_key(source: str, channel: str, message_id: str) -> str:
     import hashlib
 
     identity = "\0".join((str(source), str(channel), str(message_id)))
-    return "inbox-thread:" + hashlib.sha256(identity.encode("utf-8", "replace")).hexdigest()
+    return (
+        "inbox-thread:"
+        + hashlib.sha256(identity.encode("utf-8", "replace")).hexdigest()
+    )
 
 
 class Classification(str, Enum):
@@ -386,7 +389,9 @@ class InboxItem:
     def thread_key(self) -> str:
         """The source-owned root message key used by both mute writers and pollers."""
         return thread_mute_key(
-            self.source or "native", self.channel, self.thread_ts or self.reply_target or self.id
+            self.source or "native",
+            self.channel,
+            self.thread_ts or self.reply_target or self.id,
         )
 
     @classmethod
@@ -419,7 +424,10 @@ class InboxItem:
                 )
                 continue
             clean[key] = value
-        if "classified_by" not in d and clean.get("confidence") != Confidence.USER.value:
+        if (
+            "classified_by" not in d
+            and clean.get("confidence") != Confidence.USER.value
+        ):
             if clean.get("source") not in {"native", "digest"}:
                 clean["classification"] = ""
             clean["confidence"] = ""
@@ -508,7 +516,9 @@ class InboxState:
                     desired = current[key]
                     existing = merged.get(key, {})
                     if not isinstance(existing, dict):
-                        raise ValueError(f"inbox_state.json field {key} must be an object")
+                        raise ValueError(
+                            f"inbox_state.json field {key} must be an object"
+                        )
                     combined = dict(existing)
                     for identity in set(baseline) | set(desired):
                         if baseline.get(identity) == desired.get(identity):
@@ -524,10 +534,10 @@ class InboxState:
                     existing = merged.get(key, [])
                     if not isinstance(existing, list):
                         raise ValueError(f"inbox_state.json field {key} must be a list")
-                    combined = set(existing)
-                    combined.difference_update(baseline - desired)
-                    combined.update(desired - baseline)
-                    merged[key] = sorted(combined)
+                    combined_keys = set(existing)
+                    combined_keys.difference_update(baseline - desired)
+                    combined_keys.update(desired - baseline)
+                    merged[key] = sorted(combined_keys)
                 target = record_files.safe_target(root, self._path.name)
                 atomic_write(target, json.dumps(merged, indent=2), mode=0o600)
             self.last_read_ts = merged.get("last_read_ts", {})
@@ -587,9 +597,7 @@ class InboxStore:
                     for row in document["items"]
                 ):
                     raise ValueError("inbox.json contains an item without a valid id")
-                live = {
-                    row["id"]: row for row in document["items"]
-                }
+                live = {row["id"]: row for row in document["items"]}
                 current = {item.id: item.to_dict() for item in self.items.values()}
                 merged_items = _merge_record_changes(
                     live, self._baseline_items, current
@@ -640,7 +648,9 @@ class InboxStore:
         self.save()
         return item
 
-    def apply_sort_batch(self, expected: dict[str, dict], changes: dict[str, dict]) -> list[InboxItem]:
+    def apply_sort_batch(
+        self, expected: dict[str, dict], changes: dict[str, dict]
+    ) -> list[InboxItem]:
         """Compare complete sent-row snapshots and apply verdicts under one file lock.
 
         A second process's human edit, removal or status move wins over a late
@@ -670,8 +680,12 @@ class InboxStore:
                 document["items"] = list(live.values())
                 target = record_files.safe_target(root, self._path.name)
                 atomic_write(target, json.dumps(document, indent=2), mode=0o600)
-        self.items = {identity: InboxItem.from_dict(row) for identity, row in live.items()}
-        self._baseline_items = {identity: item.to_dict() for identity, item in self.items.items()}
+        self.items = {
+            identity: InboxItem.from_dict(row) for identity, row in live.items()
+        }
+        self._baseline_items = {
+            identity: item.to_dict() for identity, item in self.items.items()
+        }
         self._dirty = False
         return changed
 
@@ -747,7 +761,11 @@ def evaluate_alert(item: InboxItem, user_name: str = "") -> str:
     return rule.conditions.matches(text, user_name)
 
 
-FEEDBACK_TARGETS = {"inbox_classification": "classification", "inbox_draft": "draft", "inbox_digest": "digest"}
+FEEDBACK_TARGETS = {
+    "inbox_classification": "classification",
+    "inbox_draft": "draft",
+    "inbox_digest": "digest",
+}
 
 
 def judgment_producers(item: dict) -> dict[str, dict]:
@@ -757,7 +775,10 @@ def judgment_producers(item: dict) -> dict[str, dict]:
         if item.get(field) and item.get(maker):
             producers[field] = {"producer_kind": "prompt", "producer_id": item[maker]}
     if item.get("source") == "digest" and item.get("classified_by"):
-        producers["digest"] = {"producer_kind": "prompt", "producer_id": item["classified_by"]}
+        producers["digest"] = {
+            "producer_kind": "prompt",
+            "producer_id": item["classified_by"],
+        }
     return producers
 
 
@@ -969,6 +990,7 @@ def _schedule_attention_verification(
         apply()
 
     if owner_loop is not None:
+
         def create_and_track() -> None:
             if owner_loop.is_closed() or not owner_loop.is_running():
                 return
@@ -1042,7 +1064,11 @@ def _apply_attention_verdict(
             str(pending.get("kind") or item.source),
             str(pending.get("title") or ""),
             str(pending.get("body") or ""),
-            meta={"inbox_item": item.id, "item_kind": item.item_kind, **dict(item.refs)},
+            meta={
+                "inbox_item": item.id,
+                "item_kind": item.item_kind,
+                **dict(item.refs),
+            },
         )
     except Exception:
         logger.warning("attention verification: notify failed", exc_info=True)
@@ -1059,7 +1085,10 @@ def settle_verification_rows(state: Any, store: InboxStore) -> int:
                 notice = legacy if isinstance(legacy, dict) else {}
             item.refs["verify"] = "skipped"
             changed += 1
-            if state is not None and item.status_for(item.owner) == ItemStatus.PENDING.value:
+            if (
+                state is not None
+                and item.status_for(item.owner) == ItemStatus.PENDING.value
+            ):
                 try:
                     state.notify(
                         str(notice.get("kind") or item.source),
@@ -1068,14 +1097,22 @@ def settle_verification_rows(state: Any, store: InboxStore) -> int:
                         meta={"inbox_item": item.id, "item_kind": item.item_kind},
                     )
                 except Exception:
-                    logger.debug("interrupted attention notification failed", exc_info=True)
-        elif item.status_for(item.owner) == ItemStatus.FILTERED.value and isinstance(item.refs.get("verify_withheld"), dict):
+                    logger.debug(
+                        "interrupted attention notification failed", exc_info=True
+                    )
+        elif item.status_for(item.owner) == ItemStatus.FILTERED.value and isinstance(
+            item.refs.get("verify_withheld"), dict
+        ):
             withheld = item.refs["verify_withheld"]
-            is_decision = item.item_kind == ItemKind.AGENT_REQUEST.value or bool(item.refs.get("approval"))
+            is_decision = item.item_kind == ItemKind.AGENT_REQUEST.value or bool(
+                item.refs.get("approval")
+            )
             if not is_decision:
                 continue
             approval_id = str(item.refs.get("approval") or "")
-            pending_approvals = getattr(state, "_pending_approvals", {}) if state is not None else {}
+            pending_approvals = (
+                getattr(state, "_pending_approvals", {}) if state is not None else {}
+            )
             if approval_id and approval_id not in pending_approvals:
                 item.set_status_for(item.owner, ItemStatus.HANDLED.value)
                 item.refs.pop("verify_withheld", None)

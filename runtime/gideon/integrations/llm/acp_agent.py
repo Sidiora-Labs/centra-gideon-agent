@@ -5,16 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-from gideon.core.turn_streams import closing_stream
-from gideon.integrations.acp.spend import AcpTurnMeter
-
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from gideon.core.turn_streams import closing_stream
 from gideon.engine.agents.provider import AgentProvider
 from gideon.integrations.acp.client import AcpClient
 from gideon.integrations.acp.outcomes import AcpToolOutcomesMixin
+from gideon.integrations.acp.spend import AcpTurnMeter
 from gideon.integrations.llm.acp_provider_runtime import (
     ProbePlan,
     cancel_turn,
@@ -41,7 +40,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class AcpAgentProvider(AcpTurnMeter, AcpToolOutcomesMixin, ModelProvider, AgentProvider):
+class AcpAgentProvider(
+    AcpTurnMeter, AcpToolOutcomesMixin, ModelProvider, AgentProvider
+):
     def __init__(
         self,
         *,
@@ -68,7 +69,9 @@ class AcpAgentProvider(AcpTurnMeter, AcpToolOutcomesMixin, ModelProvider, AgentP
 
         if not command:
             raise ValueError("AcpAgentProvider requires a non-empty command list")
-        from gideon.integrations.acp.options import compacts_itself as validate_compaction
+        from gideon.integrations.acp.options import (
+            compacts_itself as validate_compaction,
+        )
 
         self._compacts_itself = validate_compaction(compacts_itself)
         self._command = list(command)
@@ -155,9 +158,10 @@ class AcpAgentProvider(AcpTurnMeter, AcpToolOutcomesMixin, ModelProvider, AgentP
             await self.start()
             snapshot = dict(self.session_snapshot or {})
             async for event in self.stream("Reply with a short confirmation."):
-                if event.kind in {EVENT_TEXT_CHUNK, EVENT_COMPLETE} and str(
-                    getattr(event, "text", "") or ""
-                ).strip():
+                if (
+                    event.kind in {EVENT_TEXT_CHUNK, EVENT_COMPLETE}
+                    and str(getattr(event, "text", "") or "").strip()
+                ):
                     output = True
             if output:
                 return (
@@ -226,18 +230,22 @@ class AcpAgentProvider(AcpTurnMeter, AcpToolOutcomesMixin, ModelProvider, AgentP
         models, efforts = list(discovered.models), list(discovered.supported_efforts)
         if record_capabilities:
             try:
-                from gideon.engine.agents.runners import record_capabilities
+                from gideon.engine.agents.runners import (
+                    record_capabilities as save_capabilities,
+                )
 
                 axes = {
                     "models": models,
-                    "modes": [str(row["id"]) for row in discovered.agents if row.get("id")],
+                    "modes": [
+                        str(row["id"]) for row in discovered.agents if row.get("id")
+                    ],
                     "efforts": [
                         str(row["value"])
                         for row in efforts
                         if isinstance(row, dict) and row.get("value")
                     ],
                 }
-                record_capabilities(runtime, **axes)
+                save_capabilities(runtime, **axes)
             except Exception:
                 logger.debug(
                     "Runner capability recording failed for %s", runtime, exc_info=True
@@ -309,13 +317,21 @@ class AcpAgentProvider(AcpTurnMeter, AcpToolOutcomesMixin, ModelProvider, AgentP
         event.tool_meta = metadata
 
     async def stream(self, message: str) -> AsyncIterator[LLMEvent]:
-        async with closing_stream(self._metered(relay_events(self, self._client.stream_events, message), prompt=message)) as events:
+        async with closing_stream(
+            self._metered(
+                relay_events(self, self._client.stream_events, message), prompt=message
+            )
+        ) as events:
             async for event in events:
                 self._stamp_usage_attribution(event)
                 yield event
 
     async def stream_command(self, command: str) -> AsyncIterator[LLMEvent]:
-        async with closing_stream(self._metered(relay_events(self, self._client.stream_command, command), prompt=command)) as events:
+        async with closing_stream(
+            self._metered(
+                relay_events(self, self._client.stream_command, command), prompt=command
+            )
+        ) as events:
             async for event in events:
                 self._stamp_usage_attribution(event)
                 yield event

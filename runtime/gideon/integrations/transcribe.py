@@ -34,7 +34,7 @@ class _HomePath(os.PathLike[str]):
         return os.path.expanduser(self._relative)
 
 
-_FFMPEG_CANDIDATE_DIRS = [
+_FFMPEG_CANDIDATE_DIRS: list[str | os.PathLike[str]] = [
     _HomePath("~/ffmpeg"),
     _HomePath("~/.local/bin"),
     "/opt/homebrew/bin",
@@ -46,7 +46,8 @@ def ensure_ffmpeg_in_path() -> None:
     original = os.environ.get("PATH", "")
     known = original.split(os.pathsep)
     additions = []
-    for directory in reversed(_FFMPEG_CANDIDATE_DIRS):
+    for candidate_directory in reversed(_FFMPEG_CANDIDATE_DIRS):
+        directory = os.fspath(candidate_directory)
         if directory not in known and os.path.isfile(os.path.join(directory, "ffmpeg")):
             additions.append(directory)
             known.append(directory)
@@ -69,7 +70,11 @@ async def audio_seconds(path: str) -> float | None:
     def wav_seconds():
         try:
             with wave.open(path, "rb") as clip:
-                return clip.getnframes() / clip.getframerate() if clip.getframerate() else None
+                return (
+                    clip.getnframes() / clip.getframerate()
+                    if clip.getframerate()
+                    else None
+                )
         except (OSError, EOFError, wave.Error):
             return None
 
@@ -82,11 +87,19 @@ async def audio_seconds(path: str) -> float | None:
     proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
-            executable, "-hide_banner", "-nostdin", "-i", path,
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+            executable,
+            "-hide_banner",
+            "-nostdin",
+            "-i",
+            path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
         _, error = await asyncio.wait_for(proc.communicate(), timeout=15)
-        found = re.search(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)", error.decode(errors="replace"))
+        found = re.search(
+            r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)",
+            error.decode(errors="replace"),
+        )
         if found:
             hours, minutes, seconds = found.groups()
             return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
@@ -106,8 +119,8 @@ class _TranscriptionRequest:
     audio_path: str = ""
 
     async def invoke(self, path: str, *, detailed: bool = False, bias_terms=None):
-        from gideon.security.guardrails.media_call import MediaCall, metered_media_call
         from gideon.security.guardrails.failure import BudgetExceededError
+        from gideon.security.guardrails.media_call import MediaCall, metered_media_call
 
         arguments = {"model": self.model, "language": self.language}
         seconds = await audio_seconds(path)
@@ -129,7 +142,10 @@ class _TranscriptionRequest:
 
         try:
             return await metered_media_call(
-                MediaCall(self.provider.name, self.model, "minute", quantity), run, billed=billed)
+                MediaCall(self.provider.name, self.model, "minute", quantity),
+                run,
+                billed=billed,
+            )
         except BudgetExceededError as exc:
             raise SttError("budget_exceeded", detail=exc.sentence()) from exc
         except SttError as exc:

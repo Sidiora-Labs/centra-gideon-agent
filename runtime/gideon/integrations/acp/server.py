@@ -9,8 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from gideon.core.turn_streams import closing_stream
 from gideon.core.config import AppConfig
+from gideon.core.turn_streams import closing_stream
 from gideon.integrations.llm.events import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
@@ -33,12 +33,16 @@ class AcpStdioServer:
         self._write_lock = asyncio.Lock()
 
     async def send(self, payload: dict[str, Any]) -> None:
-        data = (json.dumps(payload, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
+        data = (
+            json.dumps(payload, separators=(",", ":"), ensure_ascii=False) + "\n"
+        ).encode("utf-8")
         async with self._write_lock:
             await asyncio.to_thread(sys.stdout.buffer.write, data)
             await asyncio.to_thread(sys.stdout.buffer.flush)
 
-    async def reply(self, request_id: Any, result: Any = None, error: tuple[int, str] | None = None) -> None:
+    async def reply(
+        self, request_id: Any, result: Any = None, error: tuple[int, str] | None = None
+    ) -> None:
         frame: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id}
         if error is None:
             frame["result"] = result
@@ -47,64 +51,122 @@ class AcpStdioServer:
         await self.send(frame)
 
     async def update(self, session_id: str, body: dict[str, Any]) -> None:
-        await self.send({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": session_id, "update": body}})
+        await self.send(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {"sessionId": session_id, "update": body},
+            }
+        )
 
     async def _permission(self, session_id: str, provider: Any, event: Any) -> None:
         request_id = self._next_request_id
         self._next_request_id -= 1
         declared = getattr(event, "options", None)
-        offered = []
+        offered: list[dict[str, str]] = []
         if isinstance(declared, list):
             for row in declared:
                 if not isinstance(row, dict):
                     continue
                 identity = row.get("optionId") or row.get("id")
                 kind = row.get("kind")
-                if isinstance(identity, str) and identity and kind in {"allow_once", "allow_always", "reject_once", "reject_always"}:
+                if (
+                    isinstance(identity, str)
+                    and identity
+                    and kind
+                    in {"allow_once", "allow_always", "reject_once", "reject_always"}
+                ):
                     if not any(option["optionId"] == identity for option in offered):
-                        offered.append({"optionId": identity, "kind": kind, "name": str(row.get("name") or row.get("label") or identity)})
+                        offered.append(
+                            {
+                                "optionId": identity,
+                                "kind": kind,
+                                "name": str(
+                                    row.get("name") or row.get("label") or identity
+                                ),
+                            }
+                        )
         if not declared:
-            offered = [{"optionId": "allow_once", "kind": "allow_once", "name": "Allow once"},
-                       {"optionId": "reject_once", "kind": "reject_once", "name": "Reject"}]
+            offered = [
+                {"optionId": "allow_once", "kind": "allow_once", "name": "Allow once"},
+                {"optionId": "reject_once", "kind": "reject_once", "name": "Reject"},
+            ]
         fut = asyncio.get_running_loop().create_future()
         self.pending[request_id] = fut
         try:
-            await self.send({
-                "jsonrpc": "2.0", "id": request_id, "method": "session/request_permission",
-                "params": {
-                    "sessionId": session_id,
-                    "toolCall": {"toolCallId": str(event.tool_call_id or event.request_id), "title": str(event.title or "Tool request")},
-                    "options": offered,
-                },
-            })
+            await self.send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "session/request_permission",
+                    "params": {
+                        "sessionId": session_id,
+                        "toolCall": {
+                            "toolCallId": str(event.tool_call_id or event.request_id),
+                            "title": str(event.title or "Tool request"),
+                        },
+                        "options": offered,
+                    },
+                }
+            )
             response = await asyncio.wait_for(fut, timeout=120)
-            outcome = response.get("result", {}).get("outcome", {}) if isinstance(response, dict) else {}
-            selected = next((row for row in offered if row["optionId"] == outcome.get("optionId")), None)
-            if outcome.get("outcome") == "selected" and selected and selected["kind"].startswith("allow_"):
+            outcome = (
+                response.get("result", {}).get("outcome", {})
+                if isinstance(response, dict)
+                else {}
+            )
+            selected = next(
+                (row for row in offered if row["optionId"] == outcome.get("optionId")),
+                None,
+            )
+            if (
+                outcome.get("outcome") == "selected"
+                and selected
+                and selected["kind"].startswith("allow_")
+            ):
                 await provider.approve_tool(event.request_id)
             else:
                 await provider.reject_tool(event.request_id)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             await provider.reject_tool(event.request_id)
-            if asyncio.current_task() and asyncio.current_task().cancelling():
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
                 raise
         finally:
             self.pending.pop(request_id, None)
 
-    async def _prompt(self, session_id: str, request_id: Any, params: dict[str, Any]) -> None:
+    async def _prompt(
+        self, session_id: str, request_id: Any, params: dict[str, Any]
+    ) -> None:
         provider = self.sessions[session_id]
         parts = params.get("prompt") or []
         if not isinstance(parts, list):
             await self.reply(request_id, error=(-32602, "prompt must be a list"))
             return
-        text = "\n".join(str(part.get("text")) for part in parts if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str)).strip()
+        text = "\n".join(
+            str(part.get("text"))
+            for part in parts
+            if isinstance(part, dict)
+            and part.get("type") == "text"
+            and isinstance(part.get("text"), str)
+        ).strip()
         for part in parts:
             if not isinstance(part, dict) or part.get("type") != "image":
                 continue
             data = part.get("data")
             mime = part.get("mimeType")
-            if not isinstance(data, str) or not isinstance(mime, str) or not provider.stage_image_part(f"data:{mime};base64,{data}"):
-                await self.reply(request_id, error=(-32602, "image content is unsupported by the selected provider"))
+            if (
+                not isinstance(data, str)
+                or not isinstance(mime, str)
+                or not provider.stage_image_part(f"data:{mime};base64,{data}")
+            ):
+                await self.reply(
+                    request_id,
+                    error=(
+                        -32602,
+                        "image content is unsupported by the selected provider",
+                    ),
+                )
                 return
         if not text:
             await self.reply(request_id, error=(-32602, "text prompt required"))
@@ -112,30 +174,82 @@ class AcpStdioServer:
         try:
             async with closing_stream(provider.stream(text)) as events:
                 async for event in events:
-                    if event.kind in (EVENT_TEXT_CHUNK, EVENT_THINKING_CHUNK) and event.text:
-                        kind = "agent_message_chunk" if event.kind == EVENT_TEXT_CHUNK else "agent_thought_chunk"
-                        await self.update(session_id, {"sessionUpdate": kind, "content": {"type": "text", "text": event.text}})
+                    if (
+                        event.kind in (EVENT_TEXT_CHUNK, EVENT_THINKING_CHUNK)
+                        and event.text
+                    ):
+                        kind = (
+                            "agent_message_chunk"
+                            if event.kind == EVENT_TEXT_CHUNK
+                            else "agent_thought_chunk"
+                        )
+                        await self.update(
+                            session_id,
+                            {
+                                "sessionUpdate": kind,
+                                "content": {"type": "text", "text": event.text},
+                            },
+                        )
                     elif event.kind in (EVENT_TOOL_CALL, EVENT_TOOL_CALL_UPDATE):
-                        await self.update(session_id, {
-                            "sessionUpdate": "tool_call" if event.kind == EVENT_TOOL_CALL else "tool_call_update",
-                            "toolCallId": str(event.tool_call_id or event.request_id),
-                            "title": str(event.title or "Tool"),
-                            "kind": str(event.tool_kind or "other"),
-                            "status": "in_progress" if event.kind == EVENT_TOOL_CALL else "completed",
-                            "rawInput": event.tool_input_obj or event.tool_input,
-                        })
+                        await self.update(
+                            session_id,
+                            {
+                                "sessionUpdate": (
+                                    "tool_call"
+                                    if event.kind == EVENT_TOOL_CALL
+                                    else "tool_call_update"
+                                ),
+                                "toolCallId": str(
+                                    event.tool_call_id or event.request_id
+                                ),
+                                "title": str(event.title or "Tool"),
+                                "kind": str(event.tool_kind or "other"),
+                                "status": (
+                                    "in_progress"
+                                    if event.kind == EVENT_TOOL_CALL
+                                    else "completed"
+                                ),
+                                "rawInput": event.tool_input_obj or event.tool_input,
+                            },
+                        )
                     elif event.kind == EVENT_TOOL_RESULT:
-                        await self.update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": str(event.tool_call_id or event.request_id), "status": "completed", "content": [{"type": "text", "text": str(event.tool_output)}]})
+                        await self.update(
+                            session_id,
+                            {
+                                "sessionUpdate": "tool_call_update",
+                                "toolCallId": str(
+                                    event.tool_call_id or event.request_id
+                                ),
+                                "status": "completed",
+                                "content": [
+                                    {"type": "text", "text": str(event.tool_output)}
+                                ],
+                            },
+                        )
                     elif event.kind == EVENT_PERMISSION_REQUEST:
                         await self._permission(session_id, provider, event)
                     elif event.kind == EVENT_COMPLETE:
                         payload = {"stopReason": event.stop_reason or "end_turn"}
-                        metadata = event.tool_meta if isinstance(event.tool_meta, dict) else {}
-                        fields = {name: getattr(event, name, 0) for name in
-                            ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens", "cost_usd")}
+                        metadata = (
+                            event.tool_meta if isinstance(event.tool_meta, dict) else {}
+                        )
+                        fields = {
+                            name: getattr(event, name, 0)
+                            for name in (
+                                "input_tokens",
+                                "output_tokens",
+                                "cache_read_tokens",
+                                "cache_creation_tokens",
+                                "cost_usd",
+                            )
+                        }
                         if any(fields.values()) or metadata.get("usage_reported"):
-                            fields["usage_reported"] = bool(metadata.get("usage_reported") or any(fields.values()))
-                            fields["cost_reported"] = bool(metadata.get("cost_reported") or event.cost_usd > 0)
+                            fields["usage_reported"] = bool(
+                                metadata.get("usage_reported") or any(fields.values())
+                            )
+                            fields["cost_reported"] = bool(
+                                metadata.get("cost_reported") or event.cost_usd > 0
+                            )
                             payload["_meta"] = {"gideon_usage": fields}
                         await self.reply(request_id, payload)
                         return
@@ -150,7 +264,10 @@ class AcpStdioServer:
 
     async def dispatch(self, frame: dict[str, Any]) -> None:
         if "method" not in frame:
-            future = self.pending.get(frame.get("id"))
+            identifier = frame.get("id")
+            future = (
+                self.pending.get(identifier) if isinstance(identifier, int) else None
+            )
             if future and not future.done():
                 future.set_result(frame)
             return
@@ -161,16 +278,30 @@ class AcpStdioServer:
             await self.reply(request_id, error=(-32602, "params must be an object"))
             return
         if method == "initialize":
-            await self.reply(request_id, {"protocolVersion": 1, "agentCapabilities": {"promptCapabilities": {"image": True}, "loadSession": False}, "agentInfo": {"name": "Gideon", "title": "Gideon", "version": "1"}})
+            await self.reply(
+                request_id,
+                {
+                    "protocolVersion": 1,
+                    "agentCapabilities": {
+                        "promptCapabilities": {"image": True},
+                        "loadSession": False,
+                    },
+                    "agentInfo": {"name": "Gideon", "title": "Gideon", "version": "1"},
+                },
+            )
             return
         if method == "session/new":
             cwd = Path(str(params.get("cwd") or Path.cwd())).expanduser().resolve()
             if not cwd.is_dir():
-                await self.reply(request_id, error=(-32602, "cwd must be an existing directory"))
+                await self.reply(
+                    request_id, error=(-32602, "cwd must be an existing directory")
+                )
                 return
             session_id = secrets.token_urlsafe(18)
             config = AppConfig.load()
-            provider = config.create_provider_factory()(f"acp:{session_id}", agent=config.default_agent or None, cwd=str(cwd))
+            provider = config.create_provider_factory()(
+                f"acp:{session_id}", agent=config.default_agent or None, cwd=str(cwd)
+            )
             provider.set_workspace(cwd)
             provider.set_session_key(f"acp:{session_id}")
             try:
@@ -190,14 +321,18 @@ class AcpStdioServer:
             if session_id in self.turns:
                 await self.reply(request_id, error=(-32002, "session is busy"))
                 return
-            self.turns[session_id] = asyncio.create_task(self._prompt(session_id, request_id, params))
+            self.turns[session_id] = asyncio.create_task(
+                self._prompt(session_id, request_id, params)
+            )
         elif method == "session/cancel":
             turn = self.turns.get(session_id)
             if turn:
                 turn.cancel()
             await self.reply(request_id, {})
         else:
-            await self.reply(request_id, error=(-32601, f"unsupported method {method!r}"))
+            await self.reply(
+                request_id, error=(-32601, f"unsupported method {method!r}")
+            )
 
     async def serve(self) -> None:
         try:
@@ -214,7 +349,10 @@ class AcpStdioServer:
                     await self.reply(None, error=(-32700, "invalid JSON"))
                     continue
                 if not isinstance(frame, dict) or frame.get("jsonrpc") != "2.0":
-                    await self.reply(frame.get("id") if isinstance(frame, dict) else None, error=(-32600, "invalid JSON-RPC request"))
+                    await self.reply(
+                        frame.get("id") if isinstance(frame, dict) else None,
+                        error=(-32600, "invalid JSON-RPC request"),
+                    )
                     continue
                 await self.dispatch(frame)
         finally:
@@ -222,7 +360,10 @@ class AcpStdioServer:
                 task.cancel()
             if self.turns:
                 await asyncio.gather(*self.turns.values(), return_exceptions=True)
-            await asyncio.gather(*(provider.shutdown() for provider in self.sessions.values()), return_exceptions=True)
+            await asyncio.gather(
+                *(provider.shutdown() for provider in self.sessions.values()),
+                return_exceptions=True,
+            )
 
 
 def run_stdio() -> None:

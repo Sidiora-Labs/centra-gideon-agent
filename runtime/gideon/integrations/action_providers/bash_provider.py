@@ -152,7 +152,7 @@ class BashActionProvider(ActionProvider):
                 stderr=asyncio.subprocess.PIPE,
                 env=environment,
                 start_new_session=True,
-                **({"cwd": ctx.execution_cwd} if ctx.execution_cwd else {}),
+                cwd=ctx.execution_cwd or None,
             )
             output = await owned.capture(json.dumps(ctx.payload).encode(), deadline)
             status = owned.process.returncode or 0

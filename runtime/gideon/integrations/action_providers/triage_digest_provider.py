@@ -106,7 +106,9 @@ def _window(config: dict[str, Any], previous: dict | None) -> tuple[float, str]:
         hours = DEFAULT_WINDOW_HOURS
     fallback = time.time() - max(0.0, hours) * 3600.0
 
-    stamp = str((previous or {}).get("started_at") or (previous or {}).get("created_at") or "")
+    stamp = str(
+        (previous or {}).get("started_at") or (previous or {}).get("created_at") or ""
+    )
     if stamp:
         try:
             parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
@@ -115,11 +117,17 @@ def _window(config: dict[str, Any], previous: dict | None) -> tuple[float, str]:
             return (parsed.timestamp(), stamp)
         except ValueError:
             logger.debug("triage: unparseable last-digest stamp %r", stamp)
-    return (fallback, datetime.fromtimestamp(fallback, UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    return (
+        fallback,
+        datetime.fromtimestamp(fallback, UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
 
 
 def _still_waiting(
-    previous: tuple[dict | None, dict | None, list[dict]], *, inbox_store: Any, state: Any
+    previous: tuple[dict | None, dict | None, list[dict]],
+    *,
+    inbox_store: Any,
+    state: Any,
 ) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
     """``(still waiting, dealt with)``: what the last digest's card has waiting on you, each
     checked against its item as its lane reads it now (`carry.recheck`)."""
@@ -130,7 +138,9 @@ def _still_waiting(
     run, output, events = previous
     if run is None or output is None:
         return (), ()
-    view = build_digest_view(enabled=True, installed=True, run=run, output=output, events=events)
+    view = build_digest_view(
+        enabled=True, installed=True, run=run, output=output, events=events
+    )
 
     def look(source: str, source_id: str) -> Any:
         return current_item(source, source_id, inbox_store=inbox_store, state=state)
@@ -152,7 +162,9 @@ def _rules(config: dict[str, Any]) -> list[Any]:
         if isinstance(entry, dict):
             text = str(entry.get("rule", "") or "").strip()
             if text:
-                out.append(GateRule(source=str(entry.get("source", "*") or "*"), rule=text))
+                out.append(
+                    GateRule(source=str(entry.get("source", "*") or "*"), rule=text)
+                )
         elif isinstance(entry, str) and entry.strip():
             # A bare string is a rule that applies to every lane. Accepted because that is what
             # a user types first, and refusing it would make the common case the awkward one.
@@ -195,7 +207,8 @@ def _record(result: Any, ctx: ActionContext) -> int:
             item_ordinal=item.ordinal,
             item_source=item.source,
             item_source_id=item.source_id,
-            rationale=(outcome.rationale if outcome else "") or "dropped by the classifier gate",
+            rationale=(outcome.rationale if outcome else "")
+            or "dropped by the classifier gate",
             rule=(outcome.rule if outcome else ""),
         )
         written += 1
@@ -344,8 +357,8 @@ def _auto_stage(action_config: dict[str, Any], ctx: ActionContext, cfg: Any) -> 
     """
     from datetime import UTC, datetime
 
-    from gideon.security.guardrails.policy import unattended_dispatch_key
     from gideon.cognition.proactive.autoexec import auto_execute, default_budget_check
+    from gideon.security.guardrails.policy import unattended_dispatch_key
 
     run_id = run_identity(ctx, "run_id")
     # The trigger whose fire this is, as its dispatch says (`ActionContext.trigger_id`), never the
@@ -356,7 +369,9 @@ def _auto_stage(action_config: dict[str, Any], ctx: ActionContext, cfg: Any) -> 
     # run's `SafetyProfile.denylist_extra` layer onto the operator denylist instead of being
     # silently skipped, and it is what makes a clamp in the SEL attributable to this automation
     # rather than to "some action".
-    session_key = unattended_dispatch_key(f"trigger:{trigger_id or run_id or 'triage-digest'}")
+    session_key = unattended_dispatch_key(
+        f"trigger:{trigger_id or run_id or 'triage-digest'}"
+    )
     rules = _approval_rules()
     ledger = _ledger_writer(ctx)
     capabilities = _capabilities(action_config)
@@ -397,10 +412,10 @@ class TriageDigestActionProvider(ActionProvider):
     ) -> ActionResult:
         from datetime import UTC, datetime
 
-        from gideon.integrations.action_providers.services import get_action_services
         from gideon.cognition.proactive.collect import collect_all
         from gideon.cognition.proactive.pipeline import run_triage
         from gideon.cognition.proactive.proposals import MAX_PROPOSALS
+        from gideon.integrations.action_providers.services import get_action_services
 
         cfg = _proactive_config()
         if not getattr(cfg, "triage_enabled", False):
@@ -428,7 +443,9 @@ class TriageDigestActionProvider(ActionProvider):
         now = datetime.now(UTC)
         previous = _previous_digest()
         since_ts, since_iso = _window(action_config, previous[0])
-        waiting, handled = _still_waiting(previous, inbox_store=inbox_store, state=state)
+        waiting, handled = _still_waiting(
+            previous, inbox_store=inbox_store, state=state
+        )
         items = collect_all(
             inbox_store=inbox_store,
             state=state,
@@ -478,7 +495,7 @@ class TriageDigestActionProvider(ActionProvider):
                 exit_code=0,
                 stdout=json.dumps(summary),
                 outcome="degraded",
-                summary=(
+                stderr=(
                     "The triage digest went out without new proposals: the proposal step gave "
                     "none it could use."
                 ),
@@ -486,5 +503,7 @@ class TriageDigestActionProvider(ActionProvider):
         return ActionResult(success=True, exit_code=0, stdout=json.dumps(summary))
 
 
-def create_provider(config: dict[str, Any] | None = None) -> "TriageDigestActionProvider":
+def create_provider(
+    config: dict[str, Any] | None = None,
+) -> "TriageDigestActionProvider":
     return TriageDigestActionProvider()

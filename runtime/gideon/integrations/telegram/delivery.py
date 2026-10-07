@@ -1,13 +1,15 @@
 """Telegram replies, media, progress and owner-bound approval prompts."""
 
 from __future__ import annotations
+
 import asyncio
+import json
+import re
 import secrets
 import time
-import re
-import json
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
+
 from gideon.integrations.channel_trust import (
     is_allowed_sender,
     is_tracked_channel,
@@ -15,6 +17,7 @@ from gideon.integrations.channel_trust import (
 )
 from gideon.security.approval_answer import Principal, on_channel
 from gideon.security.security import redact_credentials, redact_exfiltration_urls
+
 from .api import TelegramError
 from .format import split_text, to_markdown_v2
 
@@ -268,12 +271,12 @@ class TelegramDelivery:
 
             params = active_voice_params()
             if params and params.get("enabled"):
-                options = {
+                voice_options = {
                     key: params[key]
                     for key in ("provider", "voice", "speed", "speech_voice")
                     if key in params
                 }
-                path = await synthesize_speech(**options, text=safe_text(text))
+                path = await synthesize_speech(**voice_options, text=safe_text(text))
                 if path:
                     try:
                         await self.api.upload(
@@ -461,12 +464,37 @@ class TelegramDelivery:
                 and not pending.future.done()
             ):
                 answer = cm.text.split("\n", 1)[0].strip().casefold()
-                selected = next((value for value in pending.answers if value.word.casefold() == answer), None)
+                selected = next(
+                    (
+                        value
+                        for value in pending.answers
+                        if value.word.casefold() == answer
+                    ),
+                    None,
+                )
                 if selected is None and answer in ("yes", "y", "no", "n"):
-                    selected = next((value for value in pending.answers if value.key == ("approved" if answer in ("yes", "y") else "rejected")), None)
-                if selected is not None and pending.owner == owner and pending.transport is self.transport and all(raw.get(field) == value for field, value in thread_options(pending.thread).items()):
+                    selected = next(
+                        (
+                            value
+                            for value in pending.answers
+                            if value.key
+                            == ("approved" if answer in ("yes", "y") else "rejected")
+                        ),
+                        None,
+                    )
+                if (
+                    selected is not None
+                    and pending.owner == owner
+                    and pending.transport is self.transport
+                    and all(
+                        raw.get(field) == value
+                        for field, value in thread_options(pending.thread).items()
+                    )
+                ):
                     by = on_channel("telegram", cm.sender, pending.tenant)
-                    if callable(pending.on_answer) and not pending.on_answer(selected.key, by):
+                    if callable(pending.on_answer) and not pending.on_answer(
+                        selected.key, by
+                    ):
                         return False
                     pending.answerer = by
                     pending.chosen_answer = selected.key
@@ -544,33 +572,64 @@ class TelegramDelivery:
         if not owner or not is_allowed_sender("telegram", owner):
             return None
         key = secrets.token_hex(12)
-        from gideon.security.approval_brief import approval_brief_for
-        from gideon.integrations.channel_delivery import offered_answers, ONE_CALL_ANSWERS
+        from gideon.integrations.channel_delivery import (
+            ONE_CALL_ANSWERS,
+            offered_answers,
+        )
         from gideon.interfaces.dashboard.chat_utils import _history_key_for
+        from gideon.security.approval_brief import approval_brief_for
+
         brief = approval_brief_for(event) or {}
         answers = offered_answers(brief.get("answers")) or ONE_CALL_ANSWERS
         channel, thread = owner, ""
         if parent_session_key and sessions is not None:
             history_key = _history_key_for(parent_session_key)
             if sessions.get_channel_provider(history_key) == "telegram":
-                candidate_thread, candidate_channel = sessions.get_channel_link(history_key)
+                candidate_thread, candidate_channel = sessions.get_channel_link(
+                    history_key
+                )
                 pieces = str(candidate_thread).split(":")
                 slot = pieces[1] if len(pieces) == 4 else "primary"
                 if pieces and pieces[0] == "telegram" and slot == self.transport.slot:
                     channel, thread = str(candidate_channel), str(candidate_thread)
         title = safe_text(brief.get("tool") or getattr(event, "title", "Action"))
-        body = "\n\n".join(str(brief.get(field) or "") for field in ("input", "purpose", "summary") if brief.get(field))
+        body = "\n\n".join(
+            str(brief.get(field) or "")
+            for field in ("input", "purpose", "summary")
+            if brief.get(field)
+        )
         promises = "\n".join(answer.promise for answer in answers if answer.promise)
-        markup = {"inline_keyboard": [[{"text": answer.label, "callback_data": f"answer:{key}:{answer.key}"} for answer in answers]]}
+        markup = {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": answer.label,
+                        "callback_data": f"answer:{key}:{answer.key}",
+                    }
+                    for answer in answers
+                ]
+            ]
+        }
         parts = split_text(f"{source}: {title}\n\n{body}\n{promises}".strip())
         msg = None
         for index, part in enumerate(parts):
             options = thread_options(thread)
             if index == len(parts) - 1:
                 options["reply_markup"] = markup
-            msg = await self.api.call("sendMessage", chat_id=channel, text=part, **options)
-        pending = PendingApproval(chat_id=channel, message_id=int(msg["message_id"]), owner=owner,
-            tenant=f"telegram:{self.transport.slot}", thread=thread, answers=answers, transport=self.transport)
+            msg = await self.api.call(
+                "sendMessage", chat_id=channel, text=part, **options
+            )
+        if msg is None:
+            raise RuntimeError("Telegram approval prompt produced no message")
+        pending = PendingApproval(
+            chat_id=channel,
+            message_id=int(msg["message_id"]),
+            owner=owner,
+            tenant=f"telegram:{self.transport.slot}",
+            thread=thread,
+            answers=answers,
+            transport=self.transport,
+        )
         self.pending[key] = pending
         shared_timeout = bool(on_prompted(pending)) if on_prompted else False
         outcome = "cancelled"
@@ -590,7 +649,14 @@ class TelegramDelivery:
             raise
         finally:
             self.pending.pop(key, None)
-            chosen = next((answer for answer in answers if answer.key == (pending.chosen_answer or outcome)), None)
+            chosen = next(
+                (
+                    answer
+                    for answer in answers
+                    if answer.key == (pending.chosen_answer or outcome)
+                ),
+                None,
+            )
             ending = _approval_ending(chosen.ends if chosen else str(outcome))
             if chosen and chosen.promise:
                 ending += "\n" + chosen.promise
@@ -631,17 +697,22 @@ class TelegramDelivery:
         sender = cq.get("from") or {}
         owner = str(self.transport.config.get("owner_id", ""))
         allowed = (
-            pending is not None and not pending.future.done()
+            pending is not None
+            and not pending.future.done()
             and answer in {value.key for value in pending.answers}
-            and not sender.get("is_bot") and str(sender.get("id", "")) == owner == pending.owner
+            and not sender.get("is_bot")
+            and str(sender.get("id", "")) == owner == pending.owner
             and pending.transport is self.transport
             and pending.tenant == f"telegram:{self.transport.slot}"
             and str(message.get("chat", {}).get("id", "")) == pending.chat_id
             and message.get("message_id") == pending.message_id
-            and all(message.get(field) == value for field, value in thread_options(pending.thread).items())
+            and all(
+                message.get(field) == value
+                for field, value in thread_options(pending.thread).items()
+            )
             and is_allowed_sender("telegram", owner)
         )
-        if allowed:
+        if allowed and pending is not None:
             by = on_channel("telegram", owner, pending.tenant)
             if callable(pending.on_answer) and not pending.on_answer(answer, by):
                 return False
@@ -712,11 +783,17 @@ class TelegramDelivery:
                 sender = cq.get("from") or {}
                 message = cq.get("message") or {}
                 owner = str(self.transport.config.get("owner_id", ""))
-                if (not sender.get("is_bot") and str(sender.get("id", "")) == owner == pending.owner
+                if (
+                    not sender.get("is_bot")
+                    and str(sender.get("id", "")) == owner == pending.owner
                     and is_allowed_sender("telegram", owner)
                     and str(message.get("chat", {}).get("id", "")) == pending.chat_id
                     and message.get("message_id") == pending.message_id
-                    and all(message.get(field) == value for field, value in thread_options(pending.thread).items())):
+                    and all(
+                        message.get(field) == value
+                        for field, value in thread_options(pending.thread).items()
+                    )
+                ):
                     response = ending
         await self.api.call(
             "answerCallbackQuery",

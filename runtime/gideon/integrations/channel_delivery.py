@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, is_dataclass, replace
 import logging
 from copy import copy
+from dataclasses import dataclass, is_dataclass, replace
 from threading import RLock
 from typing import Any, Callable, Literal, Protocol, runtime_checkable
 
@@ -21,6 +21,7 @@ ChannelTaskStatus = Literal[
 @dataclass(frozen=True)
 class ApprovalAnswer:
     """One answer offered by an owner approval prompt."""
+
     key: str
     label: str
     ends: str
@@ -33,7 +34,10 @@ class ApprovalAnswer:
 
 ALLOW_ONCE = ApprovalAnswer("approved", "Allow once", "approved", "APPROVE")
 ALLOW_FOR_THIS_CHAT = ApprovalAnswer(
-    "trust", "Allow for this chat", "approved", "TRUST",
+    "trust",
+    "Allow for this chat",
+    "approved",
+    "TRUST",
     "Every tool in this chat runs without asking, until you change it back.",
 )
 DENY = ApprovalAnswer("rejected", "Deny", "rejected", "DENY")
@@ -354,7 +358,7 @@ def _mask_approval(event: Any) -> Any:
             changes[field] = redact_values_for_display(getattr(event, field))
     if not changes:
         return event
-    if is_dataclass(event):
+    if is_dataclass(event) and not isinstance(event, type):
         return replace(event, **changes)
     masked = copy(event)
     for field, value in changes.items():
@@ -382,7 +386,7 @@ def _mask_outbound_message(message: Any) -> Any:
         changes["metadata"] = _mask_rich_value(getattr(message, "metadata"))
     if not changes:
         raise TypeError("channel send message has no maskable text field")
-    if is_dataclass(message):
+    if is_dataclass(message) and not isinstance(message, type):
         return replace(message, **changes)
     masked = copy(message)
     for field, value in changes.items():
@@ -421,7 +425,11 @@ def _mask_call(name: str, method: Callable[..., Any], *args: Any, **kwargs: Any)
 
     for field, position in _TEXT_ARGUMENTS.get(name, {}).items():
         if position is not None and len(positional) > position:
-            positional[position] = redact_for_display(positional[position]) if isinstance(positional[position], str) else positional[position]
+            positional[position] = (
+                redact_for_display(positional[position])
+                if isinstance(positional[position], str)
+                else positional[position]
+            )
         elif field in keyword and isinstance(keyword[field], str):
             keyword[field] = redact_for_display(keyword[field])
     return method(*positional, **keyword)
@@ -551,7 +559,11 @@ async def reach_owner(
                 continue
             if await send(provider, delivery, destination):
                 return OwnerReachResult(
-                    True, provider, "delivered", connected, tuple(attempted),
+                    True,
+                    provider,
+                    "delivered",
+                    connected,
+                    tuple(attempted),
                     tuple(reasons),
                 )
             reasons.append(f"{provider}: delivery refused")
@@ -559,21 +571,29 @@ async def reach_owner(
             logger.info("owner delivery failed for provider=%s", provider)
             reasons.append(f"{provider}: delivery failed")
     if connected == 0:
-        return OwnerReachResult(False, reason="no connected channels", connected_channels=0)
+        return OwnerReachResult(
+            False, reason="no connected channels", connected_channels=0
+        )
     reason = "; ".join(reasons) or "no owner channel could deliver"
     if inbox_fallback is not None:
         try:
             await inbox_fallback(reason)
             return OwnerReachResult(
-                False, reason="inbox fallback", connected_channels=connected,
-                attempted_channels=tuple(attempted), failures=tuple(reasons),
+                False,
+                reason="inbox fallback",
+                connected_channels=connected,
+                attempted_channels=tuple(attempted),
+                failures=tuple(reasons),
             )
         except Exception:
             logger.info("owner delivery inbox fallback failed")
             reason = "channel delivery and inbox fallback failed"
     return OwnerReachResult(
-        False, reason=reason, connected_channels=connected,
-        attempted_channels=tuple(attempted), failures=tuple(reasons),
+        False,
+        reason=reason,
+        connected_channels=connected,
+        attempted_channels=tuple(attempted),
+        failures=tuple(reasons),
     )
 
 

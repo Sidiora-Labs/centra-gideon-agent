@@ -18,14 +18,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from gideon.integrations.mcp_status import StartFailure
-
 import aiohttp
 
 from gideon.core.cancellation import terminate_and_reap
 from gideon.core.env import augmented_path
 from gideon.core.layout import package_path
 from gideon.engine.hooks import safe_read_file
+from gideon.integrations.mcp_status import StartFailure
 
 logger = logging.getLogger(__name__)
 
@@ -111,11 +110,23 @@ def _definition_revision(server: "McpServerInfo") -> str:
         material = {
             key: getattr(server, key)
             for key in (
-                "name", "source", "command", "args", "env", "cwd", "url",
-                "transport", "headers", "oauth", "allowElicitation", "poolable",
+                "name",
+                "source",
+                "command",
+                "args",
+                "env",
+                "cwd",
+                "url",
+                "transport",
+                "headers",
+                "oauth",
+                "allowElicitation",
+                "poolable",
             )
         }
-        revision = json.dumps(material, sort_keys=True, default=str, separators=(",", ":"))
+        revision = json.dumps(
+            material, sort_keys=True, default=str, separators=(",", ":")
+        )
     return f"{revision}:{'allowed' if mcp_grants.allowed(server) else 'waiting'}"
 
 
@@ -133,13 +144,21 @@ def _get_cached(server: "McpServerInfo | str") -> tuple[str, list[dict[str, Any]
         if cached is None:
             return "unknown", [], ""
         age = time.monotonic() - cached.probed_at
-        return (cached.status, cached.tools, cached.error) if age <= _PROBE_TTL_SECS else ("outdated", cached.tools, "")
+        return (
+            (cached.status, cached.tools, cached.error)
+            if age <= _PROBE_TTL_SECS
+            else ("outdated", cached.tools, "")
+        )
     revision = _definition_revision(server)
     cached = _probe_cache.get(server.name)
     if cached is not None and cached.definition_revision != revision:
         cached = None
     if cached is None:
-        return ("probing" if _probing.get(server.name, {}).get(revision) else "unknown"), [], ""
+        return (
+            ("probing" if _probing.get(server.name, {}).get(revision) else "unknown"),
+            [],
+            "",
+        )
     from gideon.integrations.mcp_status import STOP_AFTER, stopped_trying
 
     if cached.failures >= STOP_AFTER:
@@ -163,10 +182,23 @@ def _keep(name: str, result: _ProbeResult) -> None:
 def _cache_probe(server: "McpServerInfo") -> None:
     revision = _definition_revision(server)
     previous = _probe_cache.get(server.name)
-    count = previous.failures if previous is not None and previous.definition_revision == revision else 0
-    _keep(server.name, _ProbeResult(server.status, list(server.tools), server.error,
-                                   time.monotonic(), revision, server.detail,
-                                   0 if server.status == "ok" else count))
+    count = (
+        previous.failures
+        if previous is not None and previous.definition_revision == revision
+        else 0
+    )
+    _keep(
+        server.name,
+        _ProbeResult(
+            server.status,
+            list(server.tools),
+            server.error,
+            time.monotonic(),
+            revision,
+            server.detail,
+            0 if server.status == "ok" else count,
+        ),
+    )
 
 
 def forget_probe(name: str) -> None:
@@ -179,7 +211,9 @@ def forget_probe(name: str) -> None:
 
 
 def definition_seal(name: str, spec: dict[str, Any]) -> str:
-    return _definition_revision(_server_from_spec(name, spec, str(spec.get("source") or "mcp.json")))
+    return _definition_revision(
+        _server_from_spec(name, spec, str(spec.get("source") or "mcp.json"))
+    )
 
 
 def start_refused(name: str, seal: str) -> str | None:
@@ -191,21 +225,45 @@ def start_refused(name: str, seal: str) -> str | None:
     return None
 
 
-def note_start(name: str, seal: str, *, tools: list[Any] | None = None, failure: StartFailure | None = None) -> None:
+def note_start(
+    name: str,
+    seal: str,
+    *,
+    tools: list[Any] | None = None,
+    failure: StartFailure | None = None,
+) -> None:
     current = next((server for server in list_servers() if server.name == name), None)
     if current is None or _definition_revision(current) != seal:
         return
     previous = _probe_cache.get(name)
-    count = previous.failures if previous and previous.definition_revision == seal else 0
+    count = (
+        previous.failures if previous and previous.definition_revision == seal else 0
+    )
     if failure is None:
-        rows = [{"name": tool.name, "description": tool.description, "inputSchema": tool.input_schema, "annotations": dict(tool.annotations)} for tool in tools or []]
+        rows = [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "inputSchema": tool.input_schema,
+                "annotations": dict(tool.annotations),
+            }
+            for tool in tools or []
+        ]
         result = _ProbeResult("ok", rows, "", time.monotonic(), seal)
     else:
-        result = _ProbeResult("probing" if failure.pending else "error", [], failure.headline,
-                              time.monotonic(), seal, failure.detail, count + int(failure.counts))
+        result = _ProbeResult(
+            "probing" if failure.pending else "error",
+            [],
+            failure.headline,
+            time.monotonic(),
+            seal,
+            failure.detail,
+            count + int(failure.counts),
+        )
     _keep(name, result)
     if failure is None:
         from gideon.security import mcp_grants, mcp_read_only_trust
+
         if not mcp_grants.exempt(current):
             mcp_read_only_trust.observe(name, tools or [])
 
@@ -225,7 +283,15 @@ def _probe_error_copy(error: str, url: str) -> str:
 
     host = urlsplit(url).hostname or "the MCP server"
     lower = error.lower()
-    if any(marker in lower for marker in ("name or service not known", "temporary failure in name resolution", "getaddrinfo failed", "nodename nor servname")):
+    if any(
+        marker in lower
+        for marker in (
+            "name or service not known",
+            "temporary failure in name resolution",
+            "getaddrinfo failed",
+            "nodename nor servname",
+        )
+    ):
         return f"Could not resolve the MCP server host {host}. Check the server URL and network DNS."
     if "connection refused" in lower or "actively refused" in lower:
         return f"The MCP server at {host} refused the connection. Check that it is running and reachable."
@@ -283,9 +349,22 @@ class McpServerInfo:
             allowed = False
             allow_revision = ""
             allow_question = mcp_grants.WAITING_REASON
-            display = {"command": "", "args": [], "url": "", "transport": "", "env": [], "headers": [], "header_credentials": [], "oauth": [], "poolable": False}
+            display = {
+                "command": "",
+                "args": [],
+                "url": "",
+                "transport": "",
+                "env": [],
+                "headers": [],
+                "header_credentials": [],
+                "oauth": [],
+                "poolable": False,
+            }
             display_valid = False
-        from gideon.extensions.providers.mcp_instances import _display_args, _display_command
+        from gideon.extensions.providers.mcp_instances import (
+            _display_args,
+            _display_command,
+        )
         from gideon.integrations.mcp_secret_refs import safe_display_url
 
         safe_command = _display_command(display["command"])
@@ -579,7 +658,11 @@ def list_servers() -> list[McpServerInfo]:
         s.tools = tools
         s.error = error
         cached = _probe_cache.get(s.name)
-        s.detail = cached.detail if cached and cached.definition_revision == _definition_revision(s) else ""
+        s.detail = (
+            cached.detail
+            if cached and cached.definition_revision == _definition_revision(s)
+            else ""
+        )
         if not _server_allowed(s):
             s.status = "waiting"
             s.tools = []
@@ -623,22 +706,45 @@ async def _probe_server(server: McpServerInfo) -> McpServerInfo:
         return _wait_for_owner(server)
     from gideon.integrations.mcp_client import McpServerConn
 
-    spec = {"command": server.command, "args": server.args or [], "env": server.env,
-            "cwd": server.cwd, "url": server.url, "transport": server.transport,
-            "headers": server.headers, "oauth": server.oauth, "poolable": server.poolable,
-            "allowElicitation": server.allowElicitation, "source": server.source}
+    spec = {
+        "command": server.command,
+        "args": server.args or [],
+        "env": server.env,
+        "cwd": server.cwd,
+        "url": server.url,
+        "transport": server.transport,
+        "headers": server.headers,
+        "oauth": server.oauth,
+        "poolable": server.poolable,
+        "allowElicitation": server.allowElicitation,
+        "source": server.source,
+    }
     server.status, server.error, server.detail, server.tools = "probing", "", "", []
-    conn = McpServerConn(server.name, spec, scope=server.source, connect_timeout=_get_probe_timeout())
+    conn = McpServerConn(
+        server.name, spec, scope=server.source, connect_timeout=_get_probe_timeout()
+    )
     try:
         tools = await conn.list_tools()
         if conn.error:
             stopped = start_refused(server.name, definition_seal(server.name, spec))
-            server.status = "stopped" if stopped else "probing" if conn._failure and conn._failure.pending else "error"
+            server.status = (
+                "stopped"
+                if stopped
+                else "probing" if conn._failure and conn._failure.pending else "error"
+            )
             server.error = stopped or conn.error
             server.detail = conn._failure.detail if conn._failure else ""
         else:
             server.status = "ok"
-            server.tools = [{"name": tool.name, "description": tool.description, "inputSchema": tool.input_schema, "annotations": dict(tool.annotations)} for tool in tools]
+            server.tools = [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.input_schema,
+                    "annotations": dict(tool.annotations),
+                }
+                for tool in tools
+            ]
     finally:
         await conn.shutdown()
     _cache_probe(server)
@@ -682,13 +788,13 @@ async def agent_callable_status(
     servers: list[McpServerInfo],
 ) -> dict[str, dict[str, Any]]:
     """Project whether configured MCP tools survive the agent's real catalog policy."""
+    from gideon.integrations.tool_providers import tool_prefs
     from gideon.integrations.tool_providers.registry import (
         ConfiguredMcpToolProvider,
         get_ownership_refusals,
         list_providers,
         resolve_tool_catalog,
     )
-    from gideon.integrations.tool_providers import tool_prefs
 
     providers = list_providers()
     server_providers = {
@@ -858,7 +964,8 @@ def discover_importable_servers() -> list[dict[str, Any]]:
 
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for path, backend in _IMPORT_JSON_PATHS:
+    for import_path, backend in _IMPORT_JSON_PATHS:
+        path = Path(import_path)
         if not path.is_file():
             continue
         try:
@@ -877,11 +984,17 @@ def discover_importable_servers() -> list[dict[str, Any]]:
             if not (spec.get("command") or spec.get("url")):
                 continue
             seen.add(name)
-            env = spec.get("env") if isinstance(spec.get("env"), dict) else {}
-            headers = spec.get("headers") if isinstance(spec.get("headers"), dict) else {}
-            from gideon.integrations.mcp_secret_refs import issue_import_id, safe_import_projection
+            raw_env = spec.get("env")
+            env = raw_env if isinstance(raw_env, dict) else {}
+            raw_headers = spec.get("headers")
+            headers = raw_headers if isinstance(raw_headers, dict) else {}
+            from gideon.integrations.mcp_secret_refs import (
+                issue_import_id,
+                safe_import_projection,
+            )
 
-            safe_env, skipped = {}, 0
+            safe_env: dict[str, str] = {}
+            skipped = 0
             try:
                 from gideon.cognition.onboarding_import.floors import strip_secrets
 
@@ -982,7 +1095,11 @@ def register_servers_for_cc(
             if s.headers:
                 entry["headers"] = s.headers
         else:
-            entry = {"command": s.command, "args": executable.get("args", []), "type": "stdio"}
+            entry = {
+                "command": s.command,
+                "args": executable.get("args", []),
+                "type": "stdio",
+            }
             if s.env:
                 entry["env"] = s.env
 

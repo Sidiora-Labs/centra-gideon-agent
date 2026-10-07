@@ -21,13 +21,15 @@ class ModelDiscoveryFailure(RuntimeError):
         self.rejected_credential = rejected_credential
 
 
-_DISCOVERY_FAILURES = contextvars.ContextVar("gideon_discovery_failures", default=None)
+_DISCOVERY_FAILURES: contextvars.ContextVar[list[ModelDiscoveryFailure] | None] = (
+    contextvars.ContextVar("gideon_discovery_failures", default=None)
+)
 
 
 @contextlib.contextmanager
 def capture_discovery_failures():
     """Observe a fail-soft catalog on this request without sharing errors across tasks."""
-    failures = []
+    failures: list[ModelDiscoveryFailure] = []
     token = _DISCOVERY_FAILURES.set(failures)
     try:
         yield failures
@@ -37,10 +39,19 @@ def capture_discovery_failures():
 
 def _discovery_failed(endpoint: str, *, status: int = 0) -> None:
     from urllib.parse import urlsplit
+
     host = urlsplit(endpoint).hostname or "The provider"
     rejected = status in {401, 403}
-    detail = (f"{host} rejected its credential (HTTP {status}). Check the key in Settings → Providers."
-              if rejected else f"{host} did not return its models" + (f" (HTTP {status})." if status else ". Check its connection in Settings → Providers."))
+    detail = (
+        f"{host} rejected its credential (HTTP {status}). Check the key in Settings → Providers."
+        if rejected
+        else f"{host} did not return its models"
+        + (
+            f" (HTTP {status})."
+            if status
+            else ". Check its connection in Settings → Providers."
+        )
+    )
     failures = _DISCOVERY_FAILURES.get()
     if failures is not None:
         failures.append(ModelDiscoveryFailure(detail, rejected_credential=rejected))
@@ -223,7 +234,18 @@ _VIDEO_MODALITY_MARKERS = (
 
 _STT_MARKERS = ("whisper", "stt-", "transcribe", "-asr", "paraformer", "sensevoice")
 
-_TTS_MARKERS = ("tts-", "-tts", "piper", "elevenlabs", "polly", "kokoro", "orpheus", "cosyvoice", "sambert", "cartesia")
+_TTS_MARKERS = (
+    "tts-",
+    "-tts",
+    "piper",
+    "elevenlabs",
+    "polly",
+    "kokoro",
+    "orpheus",
+    "cosyvoice",
+    "sambert",
+    "cartesia",
+)
 
 _MODEL_FAMILY_PROVIDER_TYPES: tuple[tuple[tuple[str, ...], frozenset[str]], ...] = (
     (
@@ -293,7 +315,9 @@ def refused_sampling(
             for parameter in wanted
         }
     if any(marker in normalized for marker in _TEMPERATURE_OR_TOP_P_MARKERS):
-        pair = [parameter for parameter in wanted if parameter in ("temperature", "top_p")]
+        pair = [
+            parameter for parameter in wanted if parameter in ("temperature", "top_p")
+        ]
         if len(pair) == 2:
             return {pair[1]: f"{shown} takes a temperature or a top_p, not both"}
     return {}
@@ -329,7 +353,9 @@ def _app_declared_types(markers: tuple[str, ...]) -> frozenset[str]:
 def infer_capabilities(model_id: str, families: list[str] | None = None) -> list[str]:
     family_text = " ".join(families or []).lower()
     searchable = f"{model_id or ''} {family_text}".lower()
-    if any(marker in searchable for marker in _NOT_BOUND_MARKERS) or _RESPONSES_ONLY_TIER.search(str(model_id or "").lower()):
+    if any(
+        marker in searchable for marker in _NOT_BOUND_MARKERS
+    ) or _RESPONSES_ONLY_TIER.search(str(model_id or "").lower()):
         return []
     for tag, markers in _EXCLUSIVE_TAGS:
         if any(marker in searchable for marker in markers):
@@ -345,14 +371,17 @@ def infer_capabilities(model_id: str, families: list[str] | None = None) -> list
 def _capabilities_by_id(record: dict[str, Any]) -> list[str]:
     """What a model record says with nothing but the OpenAI models object: its ``id``, and its
     ``root`` — the model an alias serves, which that object has always carried and a self-hosted
-    server (vLLM) fills in, so an alias of a reranker is read as the reranker it serves."""
+    server (vLLM) fills in, so an alias of a reranker is read as the reranker it serves.
+    """
     model_id = str(record.get("id") or "")
     root = record.get("root")
     families = [root] if isinstance(root, str) and root and root != model_id else None
     return infer_capabilities(model_id, families)
 
+
 def _record_capabilities(
-    record: dict[str, Any], capabilities_of: Callable[[dict[str, Any]], list[str]] | None
+    record: dict[str, Any],
+    capabilities_of: Callable[[dict[str, Any]], list[str]] | None,
 ) -> list[str]:
     """``record``'s tags by the vendor's own reading of its records, else by its id and root.
 
@@ -374,7 +403,11 @@ def _record_capabilities(
 
 
 def _decode_model_rows(document: object, capabilities_of=None) -> list[ModelInfo]:
-    rows = document if isinstance(document, list) else document.get("data", []) if isinstance(document, dict) else None
+    rows = (
+        document
+        if isinstance(document, list)
+        else document.get("data", []) if isinstance(document, dict) else None
+    )
     if not isinstance(rows, list):
         return []
     models = []
@@ -391,8 +424,17 @@ def _decode_model_rows(document: object, capabilities_of=None) -> list[ModelInfo
                 name=identifier,
                 capabilities=_record_capabilities(row, capabilities_of),
                 extra={
-                    key: value for key, value in row.items()
-                    if key in {"owned_by", "context_length", "context_window", "max_model_len", "n_ctx", "max_input_tokens"}
+                    key: value
+                    for key, value in row.items()
+                    if key
+                    in {
+                        "owned_by",
+                        "context_length",
+                        "context_window",
+                        "max_model_len",
+                        "n_ctx",
+                        "max_input_tokens",
+                    }
                 },
             )
         )

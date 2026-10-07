@@ -313,41 +313,65 @@ class DirSourceProvider(KnowledgeSourceProvider):
 
     async def _read(self, spec: dict, rel: str) -> str | None:
         """Read a declared root's settled file once, decode and admit owned bytes."""
-        from gideon.automation.triggers.pathguard import canonicalize, PathScope
-        from gideon.workspace.uploads.content_intake import approve_path, approve_text
+        from gideon.automation.triggers.pathguard import PathScope, canonicalize
         from gideon.cognition.knowledge.file_items import _owned_io
+        from gideon.workspace.uploads.content_intake import approve_path, approve_text
+
         root = self._resolved_path(spec)
-        if not root or Path(rel).is_absolute() or '..' in Path(rel).parts:
-            raise PermissionError('Source file is outside its declared root.')
+        if not root or Path(rel).is_absolute() or ".." in Path(rel).parts:
+            raise PermissionError("Source file is outside its declared root.")
         path = Path(root) / rel
         if not PathScope(root).contains(canonicalize(str(path))):
-            raise PermissionError('Source file is outside its declared root.')
+            raise PermissionError("Source file is outside its declared root.")
         from gideon.workspace.uploads.content_intake import source_stamp
+
         original_stamp = source_stamp(path)
-        snapshot = await approve_path(path, surface='watched_folder', expected_stamp=original_stamp)
+        snapshot = await approve_path(
+            path, surface="watched_folder", expected_stamp=original_stamp
+        )
         try:
+
             def decode():
                 import codecs
+
                 snapshot.require_approved()
                 raw = os.pread(snapshot._fd, MAX_FILE_BYTES, 0)
-                for mark, codec in ((codecs.BOM_UTF32_LE, 'utf-32'), (codecs.BOM_UTF32_BE, 'utf-32'),
-                                    (codecs.BOM_UTF16_LE, 'utf-16'), (codecs.BOM_UTF16_BE, 'utf-16')):
+                for mark, codec in (
+                    (codecs.BOM_UTF32_LE, "utf-32"),
+                    (codecs.BOM_UTF32_BE, "utf-32"),
+                    (codecs.BOM_UTF16_LE, "utf-16"),
+                    (codecs.BOM_UTF16_BE, "utf-16"),
+                ):
                     if raw.startswith(mark):
-                        return raw.decode(codec, errors='replace')
-                if b'\0' in raw[:8192]:
+                        return raw.decode(codec, errors="replace")
+                if b"\0" in raw[:8192]:
                     from gideon.workspace.uploads.content_intake import IntakeRefused
-                    raise IntakeRefused('upload_type_unsupported', 'A binary file cannot be indexed as watched text.', 415)
-                return raw.decode('utf-8', errors='replace')
+
+                    raise IntakeRefused(
+                        "upload_type_unsupported",
+                        "A binary file cannot be indexed as watched text.",
+                        415,
+                    )
+                return raw.decode("utf-8", errors="replace")
+
             text = await _owned_io(decode)
-            text = (await approve_text(text, surface='watched_folder_text')).text
+            text = (await approve_text(text, surface="watched_folder_text")).text
             if not PathScope(root).contains(canonicalize(str(path))):
-                raise PermissionError('Source file is no longer inside its declared root.')
+                raise PermissionError(
+                    "Source file is no longer inside its declared root."
+                )
             from gideon.workspace.uploads.content_intake import source_stamp
+
             # approve_path checked identity through the raw scan; decoding/text
             # admission can await another child, so also bind the final handoff.
             if source_stamp(path) != original_stamp:
                 from gideon.workspace.uploads.content_intake import IntakeRefused
-                raise IntakeRefused('upload_content_changed', 'The watched file changed while it was read.', 409)
+
+                raise IntakeRefused(
+                    "upload_content_changed",
+                    "The watched file changed while it was read.",
+                    409,
+                )
             return text
         finally:
             snapshot.close()
@@ -407,13 +431,19 @@ class DirSourceProvider(KnowledgeSourceProvider):
                 if 0.0 <= elapsed < window:
                     continue
             from gideon.workspace.uploads.content_intake import IntakeRefused
+
             try:
                 emitted = await self._emit(spec, rel, change, now)
             except IntakeRefused as exc:
                 if exc.status in {503, 409}:
-                    from gideon.integrations.knowledge_providers.base import HEALTH_DEGRADED
-                    return SourcePollResult(error=exc.code, cursor=cursor, health_status=HEALTH_DEGRADED)
-                emitted = SourceItem(guid=rel, title='', content='', change=change)
+                    from gideon.integrations.knowledge_providers.base import (
+                        HEALTH_DEGRADED,
+                    )
+
+                    return SourcePollResult(
+                        error=exc.code, cursor=cursor, health_status=HEALTH_DEGRADED
+                    )
+                emitted = SourceItem(guid=rel, title="", content="", change=change)
                 emitted._intake_refusal = exc
             except (OSError, PermissionError):
                 emitted = None
@@ -432,6 +462,7 @@ class DirSourceProvider(KnowledgeSourceProvider):
         result = SourcePollResult(items=items, cursor=state.dump())
         if read_errors:
             from gideon.integrations.knowledge_providers.base import HEALTH_DEGRADED
+
             result.health_status = HEALTH_DEGRADED
             if not items:
                 result.error = f"{read_errors} file(s) could not be read"
@@ -441,7 +472,9 @@ class DirSourceProvider(KnowledgeSourceProvider):
                 )
         return result
 
-    async def _emit(self, spec: dict, rel: str, change: str, now: float) -> SourceItem | None:
+    async def _emit(
+        self, spec: dict, rel: str, change: str, now: float
+    ) -> SourceItem | None:
         """Build the sighting for a settled change (content read only for a live file)."""
         from datetime import datetime
 

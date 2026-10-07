@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import hmac
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -18,7 +18,6 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from gideon.core.config.loader import config_dir
-
 
 _CALLBACK_STATE_TTL = 600.0
 _CALLBACK_STATE_KEY = secrets.token_bytes(32)
@@ -46,14 +45,17 @@ class OAuthCallbackError(ValueError):
 
 
 def _state_signature(nonce: str) -> str:
-    digest = hmac.new(_CALLBACK_STATE_KEY, nonce.encode("ascii"), hashlib.sha256).digest()
+    digest = hmac.new(
+        _CALLBACK_STATE_KEY, nonce.encode("ascii"), hashlib.sha256
+    ).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
 def _prune_pending_callbacks(now: float | None = None) -> None:
     current = time.monotonic() if now is None else now
     expired = [
-        nonce for nonce, pending in _PENDING_CALLBACKS.items()
+        nonce
+        for nonce, pending in _PENDING_CALLBACKS.items()
         if current - pending.created_at > _CALLBACK_STATE_TTL
     ]
     for nonce in expired:
@@ -78,14 +80,27 @@ def issue_callback_state(
     """Create an opaque signed, one-time state tied to the exact OAuth attempt."""
     from gideon.security.approval_answer import OWNER, Principal
 
-    if not isinstance(principal, Principal) or principal.kind != OWNER or not principal.name:
+    if (
+        not isinstance(principal, Principal)
+        or principal.kind != OWNER
+        or not principal.name
+    ):
         raise PermissionError("MCP OAuth requires an authenticated owner")
-    if not all(isinstance(value, str) and value for value in (server, resource, revision, sdk_state)):
+    if not all(
+        isinstance(value, str) and value
+        for value in (server, resource, revision, sdk_state)
+    ):
         raise ValueError("MCP OAuth callback binding is incomplete")
     if issuer and not issuer.startswith("https://"):
         raise ValueError("MCP OAuth issuer must be an HTTPS URL")
     parsed = urlsplit(resource)
-    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.fragment
+    ):
         raise ValueError("MCP OAuth resource must be a credential-free HTTPS URL")
 
     now = time.monotonic()
@@ -115,7 +130,11 @@ def consume_callback_state(
     """Validate and consume a callback state exactly once for its initiating owner."""
     from gideon.security.approval_answer import OWNER, Principal
 
-    if not isinstance(principal, Principal) or principal.kind != OWNER or not principal.name:
+    if (
+        not isinstance(principal, Principal)
+        or principal.kind != OWNER
+        or not principal.name
+    ):
         raise PermissionError("MCP OAuth callback requires an authenticated owner")
     if not isinstance(state, str) or state.count(".") != 1:
         raise OAuthCallbackError("MCP OAuth callback state is invalid")
@@ -135,7 +154,9 @@ def consume_callback_state(
         or pending.resource != resource
         or pending.revision != revision
     ):
-        raise OAuthCallbackError("MCP OAuth callback does not match the initiating owner or server")
+        raise OAuthCallbackError(
+            "MCP OAuth callback does not match the initiating owner or server"
+        )
     del _PENDING_CALLBACKS[nonce]
     return pending
 
@@ -144,7 +165,11 @@ def callback_binding(state: str, principal: Any) -> PendingCallback:
     """Read a signed callback binding without consuming its one-time state."""
     from gideon.security.approval_answer import OWNER, Principal
 
-    if not isinstance(principal, Principal) or principal.kind != OWNER or not principal.name:
+    if (
+        not isinstance(principal, Principal)
+        or principal.kind != OWNER
+        or not principal.name
+    ):
         raise PermissionError("MCP OAuth callback requires an authenticated owner")
     if not isinstance(state, str) or state.count(".") != 1:
         raise OAuthCallbackError("MCP OAuth callback state is invalid")
@@ -162,7 +187,14 @@ def callback_binding(state: str, principal: Any) -> PendingCallback:
 
 def _canonical_resource(value: str) -> str:
     parsed = urlsplit(value)
-    if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+    if (
+        parsed.scheme.lower() != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
         raise OAuthCallbackError("MCP OAuth resource must be a canonical HTTPS URL")
     try:
         port = parsed.port
@@ -185,15 +217,26 @@ async def begin_dashboard_authorization(
     redirect_uri: str,
 ) -> dict[str, str]:
     """Start the SDK's real MCP OAuth challenge flow and return its safe login URL."""
-    from gideon.security.approval_answer import OWNER, Principal
-    from gideon.security import mcp_grants
     from mcp import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
 
-    if not isinstance(principal, Principal) or principal.kind != OWNER or not principal.name:
+    from gideon.security import mcp_grants
+    from gideon.security.approval_answer import OWNER, Principal
+
+    if (
+        not isinstance(principal, Principal)
+        or principal.kind != OWNER
+        or not principal.name
+    ):
         raise PermissionError("MCP OAuth requires an authenticated owner")
-    if not isinstance(server, dict) or server.get("name") != name or server.get("source") != "mcp.json":
-        raise ValueError("MCP OAuth is available only for the current owner-managed server")
+    if (
+        not isinstance(server, dict)
+        or server.get("name") != name
+        or server.get("source") != "mcp.json"
+    ):
+        raise ValueError(
+            "MCP OAuth is available only for the current owner-managed server"
+        )
     url = str(server.get("url") or server.get("endpoint") or "")
     if urlsplit(url).scheme.lower() != "https":
         raise ValueError("MCP OAuth requires an HTTPS remote server")
@@ -201,13 +244,21 @@ async def begin_dashboard_authorization(
         raise ValueError("Allow the current MCP server definition before signing in")
 
     authorization_url: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-    callback: asyncio.Future[tuple[str, str]] = asyncio.get_running_loop().create_future()
+    callback: asyncio.Future[tuple[str, str]] = (
+        asyncio.get_running_loop().create_future()
+    )
     flow_state: dict[str, str] = {}
     provider: dict[str, Any] = {}
 
     async def redirect(auth_url: str) -> None:
         parsed = urlsplit(auth_url)
-        if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+        if (
+            parsed.scheme.lower() != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.fragment
+        ):
             raise OAuthCallbackError("MCP authorization server returned an unsafe URL")
         query = parse_qs(parsed.query, keep_blank_values=True)
         states = query.get("state", [])
@@ -215,15 +266,22 @@ async def begin_dashboard_authorization(
             raise OAuthCallbackError("MCP authorization request has no unique state")
         resources = query.get("resource", [])
         if len(resources) > 1:
-            raise OAuthCallbackError("MCP authorization request has an ambiguous resource")
+            raise OAuthCallbackError(
+                "MCP authorization request has an ambiguous resource"
+            )
         selected_resource = resources[0] if resources else ""
         if not selected_resource and provider.get("auth") is not None:
             selected_resource = str(provider["auth"].context.get_resource_url())
         resource = _canonical_resource(selected_resource or url)
         sdk_state = states[0]
-        auth_context = provider.get("auth").context if provider.get("auth") is not None else None
+        current_auth = provider.get("auth")
+        auth_context = current_auth.context if current_auth is not None else None
         oauth_metadata = getattr(auth_context, "oauth_metadata", None)
-        issuer = str(getattr(oauth_metadata, "issuer", "") or getattr(auth_context, "auth_server_url", "") or "")
+        issuer = str(
+            getattr(oauth_metadata, "issuer", "")
+            or getattr(auth_context, "auth_server_url", "")
+            or ""
+        )
         signed_state = issue_callback_state(
             principal,
             server=name,
@@ -236,7 +294,15 @@ async def begin_dashboard_authorization(
         flow_state["nonce"] = nonce
         _CALLBACK_FUTURES[nonce] = callback
         query["state"] = [signed_state]
-        safe_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query, doseq=True), ""))
+        safe_url = urlunsplit(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                urlencode(query, doseq=True),
+                "",
+            )
+        )
         if not authorization_url.done():
             authorization_url.set_result(safe_url)
 
@@ -245,7 +311,10 @@ async def begin_dashboard_authorization(
 
     async def authorize() -> None:
         try:
-            from gideon.integrations.mcp_client import _remote_http_client_factory, normalize_transport
+            from gideon.integrations.mcp_client import (
+                normalize_transport,
+                remote_http_factory,
+            )
 
             auth = oauth_provider(
                 name,
@@ -256,15 +325,14 @@ async def begin_dashboard_authorization(
                 redirect_uri=redirect_uri,
             )
             provider["auth"] = auth
-            factory = lambda **kw: _remote_http_client_factory(
-                endpoint=url,
-                oauth_context=getattr(auth, "context", None),
-                **kw,
-            )
+            factory = remote_http_factory(url, getattr(auth, "context", None))
             if normalize_transport(server) == "sse":
                 from mcp.client.sse import sse_client
 
-                async with sse_client(url, auth=auth, httpx_client_factory=factory) as (read, write):
+                async with sse_client(url, auth=auth, httpx_client_factory=factory) as (
+                    read,
+                    write,
+                ):
                     async with ClientSession(read, write) as session:
                         await session.initialize()
             else:
@@ -277,7 +345,9 @@ async def begin_dashboard_authorization(
                         await session.initialize()
         except Exception:
             if not authorization_url.done():
-                authorization_url.set_exception(ValueError("MCP OAuth authorization could not start"))
+                authorization_url.set_exception(
+                    ValueError("MCP OAuth authorization could not start")
+                )
             raise
 
     task = asyncio.create_task(authorize())
@@ -305,7 +375,12 @@ async def complete_dashboard_callback(
     issuer: str = "",
 ) -> dict[str, str]:
     """Consume an owner-bound callback, let the SDK exchange it, and return safe status."""
-    if not isinstance(code, str) or not code or len(code) > 8192 or any(ord(ch) < 32 for ch in code):
+    if (
+        not isinstance(code, str)
+        or not code
+        or len(code) > 8192
+        or any(ord(ch) < 32 for ch in code)
+    ):
         raise OAuthCallbackError("MCP OAuth callback has no valid authorization code")
     pending = consume_callback_state(
         state,
@@ -322,7 +397,9 @@ async def complete_dashboard_callback(
             callback.cancel()
         if task is not None and not task.done():
             task.cancel()
-        raise OAuthCallbackError("MCP OAuth callback issuer does not match the authorization server")
+        raise OAuthCallbackError(
+            "MCP OAuth callback issuer does not match the authorization server"
+        )
     nonce = state.split(".", 1)[0]
     callback = _CALLBACK_FUTURES.pop(nonce, None)
     task = _AUTHORIZATION_TASKS.get(nonce)
@@ -383,7 +460,11 @@ class McpOAuthStorage:
         try:
             self._private_directory()
             metadata = self.path.lstat()
-            if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid() or metadata.st_mode & 0o077:
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or metadata.st_mode & 0o077
+            ):
                 raise PermissionError("MCP OAuth token file is not private")
             data = json.loads(self.path.read_text(encoding="utf-8"))
             data = data if isinstance(data, dict) else {}
@@ -405,7 +486,9 @@ class McpOAuthStorage:
                 values[field] = value
         if not values:
             return data
-        references = store(values, owner=_owner(self.name), declared=set(values), previous=previous)
+        references = store(
+            values, owner=_owner(self.name), declared=set(values), previous=previous
+        )
         if references != previous:
             try:
                 self._write_references(references)
@@ -427,7 +510,9 @@ class McpOAuthStorage:
                 try:
                     result[field] = json.loads(value)
                 except json.JSONDecodeError as exc:
-                    raise ValueError("MCP OAuth credential record is malformed") from exc
+                    raise ValueError(
+                        "MCP OAuth credential record is malformed"
+                    ) from exc
         saved_at = refs.get("tokens_saved_at")
         if isinstance(saved_at, (int, float)) and not isinstance(saved_at, bool):
             result["tokens_saved_at"] = float(saved_at)
@@ -438,7 +523,9 @@ class McpOAuthStorage:
         if self.path.exists() or self.path.is_symlink():
             metadata = self.path.lstat()
             if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():
-                raise PermissionError("MCP OAuth token path is not a private regular file")
+                raise PermissionError(
+                    "MCP OAuth token path is not a private regular file"
+                )
         temporary = self.path.with_name(self.path.name + "." + secrets.token_hex(8))
         fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
@@ -459,7 +546,9 @@ class McpOAuthStorage:
             for field in ("tokens", "client_info")
             if isinstance(data.get(field), dict)
         }
-        refs = store(values, owner=_owner(self.name), declared=set(values), previous=old)
+        refs = store(
+            values, owner=_owner(self.name), declared=set(values), previous=old
+        )
         if isinstance(data.get("tokens_saved_at"), (int, float)):
             refs["tokens_saved_at"] = float(data["tokens_saved_at"])
         try:
@@ -485,7 +574,11 @@ class McpOAuthStorage:
         from mcp.shared.auth import OAuthClientInformationFull
 
         data = self._read().get("client_info")
-        return OAuthClientInformationFull.model_validate(data) if isinstance(data, dict) else None
+        return (
+            OAuthClientInformationFull.model_validate(data)
+            if isinstance(data, dict)
+            else None
+        )
 
     async def set_client_info(self, client_info) -> None:
         data = self._read()
@@ -553,21 +646,36 @@ def oauth_provider(
     settings = spec.get("oauth") or {}
     if not isinstance(settings, dict):
         raise ValueError("MCP OAuth settings must be an object")
-    redirect_uri = str(redirect_uri or settings.get("redirect_uri") or "http://127.0.0.1:8765/callback")
+    redirect_uri = str(
+        redirect_uri or settings.get("redirect_uri") or "http://127.0.0.1:8765/callback"
+    )
     parsed = urlsplit(redirect_uri)
     if parsed.scheme == "https":
-        if not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path != "/api/mcp/oauth/callback":
-            raise ValueError("MCP OAuth dashboard redirect_uri must be an HTTPS callback URL")
+        if (
+            not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or parsed.path != "/api/mcp/oauth/callback"
+        ):
+            raise ValueError(
+                "MCP OAuth dashboard redirect_uri must be an HTTPS callback URL"
+            )
     elif (
         parsed.scheme != "http"
         or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
         or not parsed.port
         or parsed.path not in {"/callback", "/api/mcp/oauth/callback"}
     ):
-        raise ValueError("MCP OAuth redirect_uri must use the dashboard HTTPS callback or local loopback callback")
+        raise ValueError(
+            "MCP OAuth redirect_uri must use the dashboard HTTPS callback or local loopback callback"
+        )
+    from pydantic import AnyUrl
+
     metadata = OAuthClientMetadata(
         client_name="Gideon",
-        redirect_uris=[redirect_uri],
+        redirect_uris=[AnyUrl(redirect_uri)],
         scope=str(settings.get("scope") or "") or None,
         token_endpoint_auth_method="none",
         grant_types=["authorization_code", "refresh_token"],
@@ -596,7 +704,9 @@ async def authorize_server(name: str, *, manual: bool = False) -> dict[str, Any]
     url = str(spec.get("url") or spec.get("endpoint") or "")
     if not url.startswith("https://"):
         raise ValueError("MCP OAuth requires an HTTPS server URL")
-    redirect_uri = str(spec["oauth"].get("redirect_uri") or "http://127.0.0.1:8765/callback")
+    redirect_uri = str(
+        spec["oauth"].get("redirect_uri") or "http://127.0.0.1:8765/callback"
+    )
     parsed = urlsplit(redirect_uri)
     if parsed.hostname != "127.0.0.1" or not parsed.port or parsed.path != "/callback":
         raise ValueError("invalid loopback redirect_uri")
@@ -604,8 +714,12 @@ async def authorize_server(name: str, *, manual: bool = False) -> dict[str, Any]
 
     async def receive(request: web.Request) -> web.Response:
         if not callback.done():
-            callback.set_result((request.query.get("code", ""), request.query.get("state")))
-        return web.Response(text="Gideon MCP authorization received. You may close this tab.")
+            callback.set_result(
+                (request.query.get("code", ""), request.query.get("state"))
+            )
+        return web.Response(
+            text="Gideon MCP authorization received. You may close this tab."
+        )
 
     app = web.Application()
     app.router.add_get("/callback", receive)
@@ -616,6 +730,7 @@ async def authorize_server(name: str, *, manual: bool = False) -> dict[str, Any]
         site = web.TCPSite(runner, "127.0.0.1", parsed.port)
         await site.start()
     try:
+
         async def redirect(auth_url: str) -> None:
             print(f"Open this MCP authorization URL: {auth_url}", flush=True)
             if not manual:
@@ -623,19 +738,30 @@ async def authorize_server(name: str, *, manual: bool = False) -> dict[str, Any]
 
         async def await_callback() -> tuple[str, str | None]:
             if manual:
-                pasted = await asyncio.to_thread(input, "Paste the final callback URL: ")
+                pasted = await asyncio.to_thread(
+                    input, "Paste the final callback URL: "
+                )
                 result = urlsplit(pasted.strip())
-                if result.scheme != parsed.scheme or result.netloc != parsed.netloc or result.path != parsed.path:
-                    raise ValueError("callback URL did not match the configured redirect_uri")
+                if (
+                    result.scheme != parsed.scheme
+                    or result.netloc != parsed.netloc
+                    or result.path != parsed.path
+                ):
+                    raise ValueError(
+                        "callback URL did not match the configured redirect_uri"
+                    )
                 query = parse_qs(result.query)
                 code = (query.get("code") or [""])[0]
-                state = (query.get("state") or [None])[0]
+                state_values = query.get("state")
+                state = state_values[0] if state_values else None
                 if not code:
                     raise ValueError("callback URL has no authorization code")
                 return code, state
             return await asyncio.wait_for(callback, timeout=300)
 
-        auth = oauth_provider(name, url, spec, redirect_handler=redirect, callback_handler=await_callback)
+        auth = oauth_provider(
+            name, url, spec, redirect_handler=redirect, callback_handler=await_callback
+        )
         async with streamablehttp_client(url, auth=auth) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()

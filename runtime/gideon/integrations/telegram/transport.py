@@ -1,15 +1,17 @@
 """Native Telegram polling lifecycle and trusted session ingress."""
 
 from __future__ import annotations
+
 import asyncio
 import hashlib
 import json
 import logging
 import re
-import uuid
 import time
+import uuid
 from collections import deque
 from pathlib import Path
+
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config.loader import config_dir
 from gideon.extensions.apps.app_config import read_config
@@ -22,10 +24,11 @@ from gideon.integrations.channel_transports.base import (
     ChannelTransportProvider,
 )
 from gideon.integrations.channel_trust import is_allowed_sender
+
 from .api import TelegramAPI, TelegramError
 from .delivery import TelegramDelivery, thread_options
+from .policy import command_allowed, settings
 from .topics import TopicStore
-from .policy import settings, command_allowed
 
 logger = logging.getLogger(__name__)
 APP = "telegram-channel"
@@ -186,7 +189,7 @@ class TelegramTransport(ChannelTransportProvider):
         self.observed = {}
         self._lobby_notice = {}
         self._webhook_lock = asyncio.Lock()
-        self._webhook_seen = deque(maxlen=2048)
+        self._webhook_seen: deque[int] = deque(maxlen=2048)
         self._webhook_seen_path = None
         self._connection_signature = None
         self._forum_commands = set()
@@ -197,7 +200,8 @@ class TelegramTransport(ChannelTransportProvider):
     def connected(self):
         return self.state == "ready"
 
-    def capabilities(self):
+    @staticmethod
+    def capabilities() -> ChannelCapabilities:
         return ChannelCapabilities(
             inbound=True,
             threads=True,
@@ -386,6 +390,7 @@ class TelegramTransport(ChannelTransportProvider):
                         from gideon.integrations.tool_providers.registry import (
                             register_provider,
                         )
+
                         from .tools import TelegramTools
 
                         register_provider(TelegramTools(self))
@@ -411,6 +416,8 @@ class TelegramTransport(ChannelTransportProvider):
                 if cfg.get("transport", "polling") == "webhook":
                     await asyncio.sleep(5)
                     continue
+                if self._inbox is None or self._offset_path is None:
+                    raise RuntimeError("Telegram polling paths are unavailable")
                 updates = await self.api.call(
                     "getUpdates",
                     offset=self._offset,
@@ -451,6 +458,8 @@ class TelegramTransport(ChannelTransportProvider):
             pending_path.unlink(missing_ok=True)
 
     async def _enqueue(self, update, pending_path=None):
+        if self.services is None:
+            raise RuntimeError("Telegram inbound services are unavailable")
         if update.get("callback_query"):
             await self.delivery.resolve_callback(update["callback_query"])
             return
@@ -667,6 +676,10 @@ class TelegramTransport(ChannelTransportProvider):
             self._queue_tasks.pop(key, None)
 
     async def _message(self, cm):
+        if self.api is None:
+            raise RuntimeError("Telegram API is unavailable")
+        if self.services is None:
+            raise RuntimeError("Telegram inbound services are unavailable")
         state = self.services.dashboard_state
         session = state.get_linked_session(cm.thread_id)
         while session is not None and session.running:
@@ -769,6 +782,8 @@ class TelegramTransport(ChannelTransportProvider):
                     )
 
     async def _best_effort(self, method, **payload):
+        if self.api is None:
+            return
         try:
             await self.api.call(method, **payload)
         except TelegramError:
@@ -784,6 +799,8 @@ class TelegramTransport(ChannelTransportProvider):
             )
 
     async def _command(self, cm):
+        if self.services is None:
+            raise RuntimeError("Telegram inbound services are unavailable")
         command = cm.text.split()[0].split("@")[0].lower() if cm.text else ""
         from .commands import COMMANDS, HOSTED_EXCLUSIONS, extra_command
 

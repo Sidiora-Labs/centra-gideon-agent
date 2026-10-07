@@ -46,13 +46,16 @@ class StdioRun:
         pending = self._pending_stderr + data
         emitted = bytearray()
         while pending:
-            matches = [(position, -len(secret), secret) for secret in self._secrets
-                       if (position := pending.find(secret)) >= 0]
+            matches = [
+                (position, -len(secret), secret)
+                for secret in self._secrets
+                if (position := pending.find(secret)) >= 0
+            ]
             if matches:
                 position, _length, secret = min(matches)
                 emitted.extend(pending[:position])
                 emitted.extend(b"[REDACTED: credential]")
-                pending = pending[position + len(secret):]
+                pending = pending[position + len(secret) :]
                 continue
             held = 0
             for secret in self._secrets:
@@ -102,7 +105,11 @@ async def _discard(stream: Any) -> None:
 
 
 async def _finish(server: str, identity: tuple[str, ...], proc: Any) -> None:
-    readers = [asyncio.create_task(_discard(stream)) for stream in (proc.stdout, proc.stderr) if stream is not None]
+    readers = [
+        asyncio.create_task(_discard(stream))
+        for stream in (proc.stdout, proc.stderr)
+        if stream is not None
+    ]
     ended = False
     try:
         try:
@@ -141,24 +148,36 @@ def stop_finishing_soon(match: Callable[[str], bool]) -> None:
 
 
 @contextlib.asynccontextmanager
-async def stdio_streams(server: str, spec: Mapping[str, Any], *, run: StdioRun, seal: str = "") -> AsyncIterator[tuple[Any, Any]]:
+async def stdio_streams(
+    server: str, spec: Mapping[str, Any], *, run: StdioRun, seal: str = ""
+) -> AsyncIterator[tuple[Any, Any]]:
     import anyio
     from mcp import types
     from mcp.shared.message import SessionMessage
-    from gideon.core.env import augmented_path
-    from gideon.security.sandbox import PROFILE_TOOL, build_child_env, create_subprocess_limited
 
+    from gideon.core.env import augmented_path
     from gideon.integrations.mcp_argument_secrets import known_values
+    from gideon.security.sandbox import (
+        PROFILE_TOOL,
+        build_child_env,
+        create_subprocess_limited,
+    )
 
     run._secrets = tuple(value.encode("utf-8") for value in known_values(spec))
     extra = dict(spec.get("env") or {})
-    env = build_child_env(site=f"mcp:{server}", extra={k: v for k, v in extra.items() if k != "PATH"})
+    env = build_child_env(
+        site=f"mcp:{server}", extra={k: v for k, v in extra.items() if k != "PATH"}
+    )
     env["PATH"] = augmented_path(os.environ.get("PATH", ""))
     if extra.get("PATH"):
         env["PATH"] = extra["PATH"] + os.pathsep + env["PATH"]
     command = str(spec.get("command") or "")
     cwd = str(spec.get("cwd") or "") or None
-    lookup = os.path.join(cwd, command) if cwd and os.sep in command and not os.path.isabs(command) else command
+    lookup = (
+        os.path.join(cwd, command)
+        if cwd and os.sep in command and not os.path.isabs(command)
+        else command
+    )
     resolved = shutil.which(lookup, path=env.get("PATH"))
     if not resolved:
         raise CommandNotFound(f"command not found: {command}")
@@ -170,9 +189,15 @@ async def stdio_streams(server: str, spec: Mapping[str, Any], *, run: StdioRun, 
         await asyncio.wait({earlier.task})
         run.waiting = False
     proc = await create_subprocess_limited(
-        resolved, *args, profile=PROFILE_TOOL, stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        env=env, cwd=cwd, start_new_session=True,
+        resolved,
+        *args,
+        profile=PROFILE_TOOL,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+        cwd=cwd,
+        start_new_session=True,
     )
     read_send, read_recv = anyio.create_memory_object_stream[Any](0)
     write_send, write_recv = anyio.create_memory_object_stream[Any](0)
@@ -189,8 +214,11 @@ async def stdio_streams(server: str, spec: Mapping[str, Any], *, run: StdioRun, 
                         continue
                     run.spoke = True
                     _left_unanswered.discard(server)
+                    item: SessionMessage | Exception
                     try:
-                        item = SessionMessage(types.JSONRPCMessage.model_validate_json(line))
+                        item = SessionMessage(
+                            types.JSONRPCMessage.model_validate_json(line)
+                        )
                     except Exception as error:
                         item = error
                     try:
@@ -203,7 +231,12 @@ async def stdio_streams(server: str, spec: Mapping[str, Any], *, run: StdioRun, 
         async with write_recv:
             async for message in write_recv:
                 try:
-                    proc.stdin.write(message.message.model_dump_json(by_alias=True, exclude_none=True).encode() + b"\n")
+                    proc.stdin.write(
+                        message.message.model_dump_json(
+                            by_alias=True, exclude_none=True
+                        ).encode()
+                        + b"\n"
+                    )
                     await proc.stdin.drain()
                 except (BrokenPipeError, ConnectionResetError):
                     return
@@ -228,7 +261,13 @@ async def stdio_streams(server: str, spec: Mapping[str, Any], *, run: StdioRun, 
                     if proc.stdin is not None:
                         with contextlib.suppress(Exception):
                             proc.stdin.close()
-                    if proc.returncode is None and run.abandoned and not run.spoke and not stdout_ended.is_set() and server not in _left_unanswered:
+                    if (
+                        proc.returncode is None
+                        and run.abandoned
+                        and not run.spoke
+                        and not stdout_ended.is_set()
+                        and server not in _left_unanswered
+                    ):
                         run.left_to_finish = True
                     else:
                         try:
@@ -245,5 +284,7 @@ async def stdio_streams(server: str, spec: Mapping[str, Any], *, run: StdioRun, 
     finally:
         if run.left_to_finish:
             _left_unanswered.add(server)
-            task = asyncio.create_task(_finish(server, identity, proc), name=f"mcp-finish:{server}")
+            task = asyncio.create_task(
+                _finish(server, identity, proc), name=f"mcp-finish:{server}"
+            )
             _finishing[identity] = _Finishing(server, task)

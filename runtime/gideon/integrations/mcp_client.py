@@ -25,14 +25,18 @@ import json
 import logging
 import re
 import time
-from urllib.parse import urlsplit
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
-from gideon.integrations.mcp_status import StartFailure
+if TYPE_CHECKING:
+    import httpx
+    from mcp.shared._httpx_utils import McpHttpClientFactory
+    from gideon.integrations.mcp_stdio import StdioRun
 
 from gideon.assurance import trace_recorder as _trace
+from gideon.integrations.mcp_status import StartFailure
 
 logger = logging.getLogger(__name__)
 
@@ -61,13 +65,34 @@ def _resource_metadata_from_challenge(challenge: str) -> str | None:
     return (match.group(1) or match.group(2) or "").strip() or None
 
 
-def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoint="", oauth_context=None):
+def remote_http_factory(
+    endpoint: str, oauth_context: object | None = None
+) -> McpHttpClientFactory:
+    def factory(
+        headers: dict[str, str] | None = None,
+        timeout: httpx.Timeout | None = None,
+        auth: httpx.Auth | None = None,
+    ) -> httpx.AsyncClient:
+        return _remote_http_client_factory(
+            headers=headers,
+            timeout=timeout,
+            auth=auth,
+            endpoint=endpoint,
+            oauth_context=oauth_context,
+        )
+
+    return factory
+
+
+def _remote_http_client_factory(
+    *, headers=None, timeout=None, auth=None, endpoint="", oauth_context=None
+):
     """Create MCP's HTTP client with the shared egress decision on every request."""
     import httpx
 
+    from gideon.security.net.client import EgressBlocked, _audit
     from gideon.security.net.guard import evaluate
     from gideon.security.net.policy import MCP_SERVER, STRICT, egress_policy_for
-    from gideon.security.net.client import EgressBlocked, _audit
 
     base = urlsplit(endpoint)
     default_headers = httpx.Headers(headers or {})
@@ -80,11 +105,18 @@ def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoi
         source_port = base.port or (443 if base.scheme == "https" else 80)
         target_port = target.port or (443 if target.scheme == "https" else 80)
         same_port = target_port == source_port or (
-            base.scheme == "http" and target.scheme == "https"
-            and source_port == 80 and target_port == 443
+            base.scheme == "http"
+            and target.scheme == "https"
+            and source_port == 80
+            and target_port == 443
         )
-        return target.hostname.lower() == base.hostname.lower() and same_port and (
-            target.scheme == base.scheme or (base.scheme == "http" and target.scheme == "https")
+        return (
+            target.hostname.lower() == base.hostname.lower()
+            and same_port
+            and (
+                target.scheme == base.scheme
+                or (base.scheme == "http" and target.scheme == "https")
+            )
         )
 
     def oauth_request(request):
@@ -98,8 +130,15 @@ def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoi
                 raise ValueError("MCP OAuth endpoints require HTTPS")
             return True
         metadata = getattr(context, "oauth_metadata", None)
-        for field in ("token_endpoint", "registration_endpoint", "revocation_endpoint", "introspection_endpoint"):
-            endpoint_value = getattr(metadata, field, None) if metadata is not None else None
+        for field in (
+            "token_endpoint",
+            "registration_endpoint",
+            "revocation_endpoint",
+            "introspection_endpoint",
+        ):
+            endpoint_value = (
+                getattr(metadata, field, None) if metadata is not None else None
+            )
             if endpoint_value is not None and str(endpoint_value) == str(request.url):
                 if parsed.scheme.lower() != "https":
                     raise ValueError("MCP OAuth endpoints require HTTPS")
@@ -111,12 +150,18 @@ def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoi
                 raise ValueError("MCP OAuth authorization server requires HTTPS")
             if request.method.upper() == "POST":
                 fallback_origin = f"{auth_origin.scheme}://{auth_origin.netloc}"
-                if str(request.url) in {fallback_origin + "/token", fallback_origin + "/register"}:
+                if str(request.url) in {
+                    fallback_origin + "/token",
+                    fallback_origin + "/register",
+                }:
                     if parsed.scheme.lower() != "https":
                         raise ValueError("MCP OAuth endpoints require HTTPS")
                     return True
             if request.method.upper() == "GET":
-                for suffix in ("/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"):
+                for suffix in (
+                    "/.well-known/oauth-authorization-server",
+                    "/.well-known/openid-configuration",
+                ):
                     if str(request.url) == f"{auth_server.rstrip('/')}{suffix}":
                         return True
         return False
@@ -128,7 +173,16 @@ def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoi
         candidate = _resource_metadata_from_challenge(challenge)
         if candidate:
             target = urlsplit(candidate)
-            if target.scheme == "https" and target.hostname and not (target.username or target.password or target.query or target.fragment):
+            if (
+                target.scheme == "https"
+                and target.hostname
+                and not (
+                    target.username
+                    or target.password
+                    or target.query
+                    or target.fragment
+                )
+            ):
                 oauth_metadata_urls.add(candidate)
 
     class GuardedTransport(httpx.AsyncBaseTransport):
@@ -138,12 +192,16 @@ def _remote_http_client_factory(*, headers=None, timeout=None, auth=None, endpoi
         async def handle_async_request(self, request):
             parsed = urlsplit(str(request.url))
             if parsed.username or parsed.password or parsed.fragment:
-                raise ValueError("MCP remote URL must not contain userinfo or a fragment")
+                raise ValueError(
+                    "MCP remote URL must not contain userinfo or a fragment"
+                )
             is_oauth = oauth_request(request)
             if not same_origin(str(request.url)) and not is_oauth:
                 # Cross-origin GETs in an OAuth flow are discovery documents; credentials
                 # configured for the MCP resource never travel with those requests.
-                raise ValueError("MCP remote transport refused a cross-origin redirect or endpoint")
+                raise ValueError(
+                    "MCP remote transport refused a cross-origin redirect or endpoint"
+                )
             policy = egress_policy_for(STRICT if is_oauth else MCP_SERVER)
             decision = await asyncio.to_thread(evaluate, str(request.url), policy)
             audit_origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -232,7 +290,15 @@ def _schema_numeric_kind(prop_schema: object) -> str | None:
     if any(k in prop_schema for k in ("anyOf", "oneOf", "allOf", "$ref")):
         return None
     t = prop_schema.get("type")
-    types = {t} if isinstance(t, str) else set(t) if isinstance(t, list) and all(isinstance(item, str) for item in t) else set()
+    types = (
+        {t}
+        if isinstance(t, str)
+        else (
+            set(t)
+            if isinstance(t, list) and all(isinstance(item, str) for item in t)
+            else set()
+        )
+    )
     if types - {"integer", "number", "null"}:
         return None
     if "integer" in types:
@@ -262,9 +328,20 @@ def _coerce_args_to_schema(
             continue
         prop = props.get(key)
         kind = _schema_numeric_kind(prop)
-        if isinstance(prop, dict) and not any(k in prop for k in ("anyOf", "oneOf", "allOf", "$ref")):
+        if isinstance(prop, dict) and not any(
+            k in prop for k in ("anyOf", "oneOf", "allOf", "$ref")
+        ):
             declared = prop.get("type")
-            types = {declared} if isinstance(declared, str) else set(declared) if isinstance(declared, list) and all(isinstance(t, str) for t in declared) else set()
+            types = (
+                {declared}
+                if isinstance(declared, str)
+                else (
+                    set(declared)
+                    if isinstance(declared, list)
+                    and all(isinstance(t, str) for t in declared)
+                    else set()
+                )
+            )
             choices = types - {"null"}
             if len(choices) == 1 and choices <= {"boolean", "array", "object"}:
                 try:
@@ -272,7 +349,9 @@ def _coerce_args_to_schema(
                 except (ValueError, TypeError):
                     pass
                 else:
-                    expected = {"boolean": bool, "array": list, "object": dict}[next(iter(choices))]
+                    expected = {"boolean": bool, "array": list, "object": dict}[
+                        next(iter(choices))
+                    ]
                     if type(decoded) is expected:
                         out[key] = decoded
         if kind == "integer" and _INT_LITERAL_RE.match(val):
@@ -299,8 +378,10 @@ def _not_sent(request: _Request, reason: str) -> str:
 
 
 def _uncertain(request: _Request, server: str, reason: str) -> str:
-    return (f"MCP tool '{request.tool}' may have gone through: Gideon sent it to '{server}' and {reason}. "
-            "Check whether it did what was intended before calling it again, or it may happen twice.")
+    return (
+        f"MCP tool '{request.tool}' may have gone through: Gideon sent it to '{server}' and {reason}. "
+        "Check whether it did what was intended before calling it again, or it may happen twice."
+    )
 
 
 class McpServerConn:
@@ -333,9 +414,11 @@ class McpServerConn:
         self._consecutive_failures: int = 0
         self._breaker_until: float = 0.0
         self._elicitation_handler = elicitation_handler
-        self._connect_timeout = connect_timeout if connect_timeout is not None else _CONNECT_TIMEOUT_SECS
+        self._connect_timeout = (
+            connect_timeout if connect_timeout is not None else _CONNECT_TIMEOUT_SECS
+        )
         self._failure: StartFailure | None = None
-        self._stdio = None
+        self._stdio: StdioRun | None = None
         self._credential_redactions: tuple[str, ...] = ()
 
     @property
@@ -381,7 +464,9 @@ class McpServerConn:
                 from gideon.security.net.policy import egress_held_to
 
                 with egress_held_to(""):
-                    self._task = asyncio.create_task(self._run(), name=f"mcp-conn-{self.name}")
+                    self._task = asyncio.create_task(
+                        self._run(), name=f"mcp-conn-{self.name}"
+                    )
         # The actor owns its startup deadline. Cancelling a waiter cannot cut off another
         # caller's startup, and a failed attempt is counted once by the actor.
         await self._ready.wait()
@@ -433,7 +518,15 @@ class McpServerConn:
         await self.protocol_call("tools/list")
         return list(self._tools)
 
-    async def call_tool(self, tool: str, arguments: dict[str, Any], *, expected_definition: str = "", expected_configuration: str = "", expected_read_authority: bool = False) -> tuple[bool, str]:
+    async def call_tool(
+        self,
+        tool: str,
+        arguments: dict[str, Any],
+        *,
+        expected_definition: str = "",
+        expected_configuration: str = "",
+        expected_read_authority: bool = False,
+    ) -> tuple[bool, str]:
         if refused := await self._egress_refusal():
             return False, refused
         if not await self.ensure_started():
@@ -443,9 +536,22 @@ class McpServerConn:
         if spec is not None:
             arguments = _coerce_args_to_schema(arguments, spec.input_schema)
             from gideon.integrations.tool_providers.arguments import argument_refusal
-            if reason := argument_refusal(tool, arguments, spec.input_schema, types=True):
+
+            if reason := argument_refusal(
+                tool, arguments, spec.input_schema, types=True
+            ):
                 return False, reason
-        request = _Request("call", {"tool": tool, "arguments": arguments, "expected_definition": expected_definition, "expected_configuration": expected_configuration, "expected_read_authority": expected_read_authority}, asyncio.get_running_loop().create_future())
+        request = _Request(
+            "call",
+            {
+                "tool": tool,
+                "arguments": arguments,
+                "expected_definition": expected_definition,
+                "expected_configuration": expected_configuration,
+                "expected_read_authority": expected_read_authority,
+            },
+            asyncio.get_running_loop().create_future(),
+        )
         if self._requests is None or not self.started or self._closing:
             return False, _not_sent(request, "the connection ended first")
         self._requests.put_nowait(request)
@@ -455,12 +561,35 @@ class McpServerConn:
             if not request.answer.done():
                 request.answer.cancel()
         if request.answer.cancelled():
-            answer = ((True, _uncertain(request, self.name, f"had no answer after {_CALL_TIMEOUT_SECS:g} seconds"))
-                      if request.sent else (False, _not_sent(request, "its caller stopped waiting before dispatch")))
+            answer = (
+                (
+                    True,
+                    _uncertain(
+                        request,
+                        self.name,
+                        f"had no answer after {_CALL_TIMEOUT_SECS:g} seconds",
+                    ),
+                )
+                if request.sent
+                else (
+                    False,
+                    _not_sent(request, "its caller stopped waiting before dispatch"),
+                )
+            )
         else:
             answer = request.answer.result()
         if _trace.is_recording():
-            _trace.record("mcp", self.name, "call_tool", {"tool": tool, "arguments": arguments, "ok": answer[0], "output": answer[1]})
+            _trace.record(
+                "mcp",
+                self.name,
+                "call_tool",
+                {
+                    "tool": tool,
+                    "arguments": arguments,
+                    "ok": answer[0],
+                    "output": answer[1],
+                },
+            )
         return answer
 
     async def protocol_call(self, kind: str, **payload: Any) -> dict[str, Any]:
@@ -479,10 +608,16 @@ class McpServerConn:
             if not request.answer.done():
                 request.answer.cancel()
 
-    def _settle(self, request: _Request, value: Any = None, error: BaseException | None = None) -> None:
+    def _settle(
+        self, request: _Request, value: Any = None, error: BaseException | None = None
+    ) -> None:
         if request.answer.done():
             if request.sent:
-                logger.warning("MCP server '%s' answered '%s' after its caller stopped waiting", self.name, request.tool)
+                logger.warning(
+                    "MCP server '%s' answered '%s' after its caller stopped waiting",
+                    self.name,
+                    request.tool,
+                )
             return
         if error is not None:
             request.answer.set_exception(error)
@@ -568,8 +703,11 @@ class McpServerConn:
             while not requests.empty():
                 request = requests.get_nowait()
                 message = _not_sent(request, "the connection ended first")
-                self._settle(request, (False, message) if request.kind == "call" else None,
-                             None if request.kind == "call" else RuntimeError(message))
+                self._settle(
+                    request,
+                    (False, message) if request.kind == "call" else None,
+                    None if request.kind == "call" else RuntimeError(message),
+                )
 
     def _start_failure(self, exc: BaseException, *, timed_out: bool) -> StartFailure:
         from gideon.integrations import mcp_status, mcp_stdio
@@ -578,12 +716,20 @@ class McpServerConn:
         run = self._stdio
         if run is not None:
             if run.waiting or run.left_to_finish:
-                return mcp_status.still_starting(self.name, self._connect_timeout, run.stderr,
-                                                allowance=mcp_stdio.FINISH_SECS, earlier=run.waiting)
-            if run.exited:
-                return mcp_status.exited(self.name, run.returncode, run.stderr)
+                return mcp_status.still_starting(
+                    self.name,
+                    self._connect_timeout,
+                    run.stderr,
+                    allowance=mcp_stdio.FINISH_SECS,
+                    earlier=run.waiting,
+                )
+            returncode = run.returncode
+            if run.exited and returncode is not None:
+                return mcp_status.exited(self.name, returncode, run.stderr)
             if timed_out:
-                return mcp_status.did_not_answer(self.name, self._connect_timeout, run.stderr)
+                return mcp_status.did_not_answer(
+                    self.name, self._connect_timeout, run.stderr
+                )
             if run.stopped:
                 return mcp_status.closed(self.name, run.stderr)
         if isinstance(exc, mcp_stdio.CommandNotFound):
@@ -591,19 +737,29 @@ class McpServerConn:
         url = str(self.spec.get("url") or self.spec.get("endpoint") or "")
         from gideon.integrations.mcp_argument_secrets import scrub_text
 
-        diagnostic = scrub_text(str(exc) or type(exc).__name__, self._credential_redactions)
+        diagnostic = scrub_text(
+            str(exc) or type(exc).__name__, self._credential_redactions
+        )
         message = _probe_error_copy(diagnostic, url) if url else diagnostic
-        return StartFailure(mcp_status.safe_text(message)[:500], mcp_status.safe_text(run.stderr) if run else "",
-                            counts=not isinstance(exc, PermissionError))
+        return StartFailure(
+            mcp_status.safe_text(message)[:500],
+            mcp_status.safe_text(run.stderr) if run else "",
+            counts=not isinstance(exc, PermissionError),
+        )
 
     async def _open_transport(self, stack: Any):
         """Enter the right transport context for this server's spec."""
+        from gideon.integrations.mcp_discovery import _definition_revision, list_servers
         from gideon.security.mcp_grants import allowed
 
-        from gideon.integrations.mcp_discovery import list_servers, _definition_revision
-
-        current = next((server for server in list_servers() if server.name == self.name), None)
-        if current is None or _definition_revision(current) != self._definition_seal() or not allowed(current):
+        current = next(
+            (server for server in list_servers() if server.name == self.name), None
+        )
+        if (
+            current is None
+            or _definition_revision(current) != self._definition_seal()
+            or not allowed(current)
+        ):
             raise PermissionError("MCP server is not allowed in its current definition")
         from gideon.extensions.providers.mcp_instances import resolve_server_credentials
 
@@ -614,7 +770,10 @@ class McpServerConn:
         url = spec.get("url") or spec.get("endpoint")
         if url:
             headers = spec.get("headers") or {}
-            if not isinstance(headers, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in headers.items()):
+            if not isinstance(headers, dict) or any(
+                not isinstance(k, str) or not isinstance(v, str)
+                for k, v in headers.items()
+            ):
                 raise ValueError("MCP headers must be a string mapping")
             auth = None
             oauth_settings = spec.get("oauth")
@@ -635,11 +794,11 @@ class McpServerConn:
 
                 read, write, _ = await stack.enter_async_context(
                     streamablehttp_client(
-                        url, headers=headers, auth=auth,
-                        httpx_client_factory=lambda **kw: _remote_http_client_factory(
-                            endpoint=str(url),
-                            oauth_context=getattr(auth, "context", None),
-                            **kw,
+                        url,
+                        headers=headers,
+                        auth=auth,
+                        httpx_client_factory=remote_http_factory(
+                            str(url), getattr(auth, "context", None)
                         ),
                     )
                 )
@@ -647,21 +806,28 @@ class McpServerConn:
             from mcp.client.sse import sse_client
 
             read, write = await stack.enter_async_context(
-                sse_client(url, headers=headers, auth=auth,
-                           httpx_client_factory=lambda **kw: _remote_http_client_factory(
-                               endpoint=str(url),
-                               oauth_context=getattr(auth, "context", None),
-                               **kw,
-                           ))
+                sse_client(
+                    url,
+                    headers=headers,
+                    auth=auth,
+                    httpx_client_factory=remote_http_factory(
+                        str(url), getattr(auth, "context", None)
+                    ),
+                )
             )
             return read, write
 
         from gideon.integrations.mcp_stdio import StdioRun, stdio_streams
 
         self._stdio = StdioRun()
-        return await stack.enter_async_context(stdio_streams(
-            self.name, spec, run=self._stdio, seal=self._definition_seal(),
-        ))
+        return await stack.enter_async_context(
+            stdio_streams(
+                self.name,
+                spec,
+                run=self._stdio,
+                seal=self._definition_seal(),
+            )
+        )
 
     async def _refresh_tools(self, session: Any) -> None:
         tools: list[McpToolSpec] = []
@@ -671,8 +837,20 @@ class McpServerConn:
             result = await session.list_tools(cursor=cursor)
             for tool in getattr(result, "tools", None) or []:
                 labels = getattr(tool, "annotations", None)
-                annotations = labels.model_dump(exclude_none=True) if hasattr(labels, "model_dump") else dict(labels or {})
-                tools.append(McpToolSpec(name=getattr(tool, "name", ""), description=getattr(tool, "description", "") or "", input_schema=getattr(tool, "inputSchema", None) or {"type": "object", "properties": {}}, annotations=annotations))
+                annotations = (
+                    labels.model_dump(exclude_none=True)
+                    if labels is not None and hasattr(labels, "model_dump")
+                    else dict(labels or {})
+                )
+                tools.append(
+                    McpToolSpec(
+                        name=getattr(tool, "name", ""),
+                        description=getattr(tool, "description", "") or "",
+                        input_schema=getattr(tool, "inputSchema", None)
+                        or {"type": "object", "properties": {}},
+                        annotations=annotations,
+                    )
+                )
             if len(tools) > 1000:
                 raise ValueError("MCP tool inventory exceeds the review limit")
             cursor = getattr(result, "nextCursor", None)
@@ -686,9 +864,12 @@ class McpServerConn:
             raise ValueError("MCP tool inventory contains duplicate names")
         self._tools = tools
         from gideon.integrations.mcp_discovery import note_start
+
         note_start(self.name, self._definition_seal(), tools=tools)
 
-    async def _serve(self, session: Any, requests: asyncio.Queue[_Request] | None = None) -> None:
+    async def _serve(
+        self, session: Any, requests: asyncio.Queue[_Request] | None = None
+    ) -> None:
         import anyio
         from mcp.shared.exceptions import McpError
 
@@ -700,30 +881,77 @@ class McpServerConn:
                 continue
             kind, payload = request.kind, request.payload
             request.sent = kind != "call"
+            value: Any
             try:
                 if kind == "tools/list":
                     await self._refresh_tools(session)
-                    value = {"tools": [{"name": t.name, "description": t.description, "inputSchema": t.input_schema, "annotations": t.annotations} for t in self._tools]}
+                    value = {
+                        "tools": [
+                            {
+                                "name": t.name,
+                                "description": t.description,
+                                "inputSchema": t.input_schema,
+                                "annotations": t.annotations,
+                            }
+                            for t in self._tools
+                        ]
+                    }
                 elif kind == "call":
                     expected = payload.get("expected_definition", "")
                     configuration = payload.get("expected_configuration", "")
                     if expected:
                         from gideon.security import mcp_read_only_trust
+
                         await self._refresh_tools(session)
-                        current = next((t for t in self._tools if t.name == payload["tool"]), None)
-                        if current is None or mcp_read_only_trust.digest(current) != expected or not configuration or mcp_read_only_trust.configuration_revision(self.name) != configuration or (payload.get("expected_read_authority") and not mcp_read_only_trust.believes(self.name, current)):
-                            self._settle(request, (False, "MCP tool was not run: its reviewed definition changed. Refresh the tools and approve the current definition."))
+                        current = next(
+                            (t for t in self._tools if t.name == payload["tool"]), None
+                        )
+                        if (
+                            current is None
+                            or mcp_read_only_trust.digest(current) != expected
+                            or not configuration
+                            or mcp_read_only_trust.configuration_revision(self.name)
+                            != configuration
+                            or (
+                                payload.get("expected_read_authority")
+                                and not mcp_read_only_trust.believes(self.name, current)
+                            )
+                        ):
+                            self._settle(
+                                request,
+                                (
+                                    False,
+                                    "MCP tool was not run: its reviewed definition changed. Refresh the tools and approve the current definition.",
+                                ),
+                            )
                             continue
-                    current = next((t for t in self._tools if t.name == payload["tool"]), None)
+                    current = next(
+                        (t for t in self._tools if t.name == payload["tool"]), None
+                    )
                     if current is not None:
-                        from gideon.integrations.tool_providers.arguments import argument_refusal
-                        payload["arguments"] = _coerce_args_to_schema(payload["arguments"], current.input_schema)
-                        if reason := argument_refusal(payload["tool"], payload["arguments"], current.input_schema, types=True):
+                        from gideon.integrations.tool_providers.arguments import (
+                            argument_refusal,
+                        )
+
+                        payload["arguments"] = _coerce_args_to_schema(
+                            payload["arguments"], current.input_schema
+                        )
+                        if reason := argument_refusal(
+                            payload["tool"],
+                            payload["arguments"],
+                            current.input_schema,
+                            types=True,
+                        ):
                             self._settle(request, (False, reason))
                             continue
                     request.sent = True
-                    result = await session.call_tool(payload["tool"], payload["arguments"])
-                    value: Any = (not getattr(result, "isError", False), _coerce_output(result))
+                    result = await session.call_tool(
+                        payload["tool"], payload["arguments"]
+                    )
+                    value = (
+                        not getattr(result, "isError", False),
+                        _coerce_output(result),
+                    )
                 elif kind == "resources/list":
                     result = await session.list_resources(cursor=payload.get("cursor"))
                     value = result.model_dump(mode="json")
@@ -736,35 +964,65 @@ class McpServerConn:
                     result = await session.list_prompts(cursor=payload.get("cursor"))
                     value = result.model_dump(mode="json")
                 elif kind == "prompts/get":
-                    result = await session.get_prompt(payload["name"], payload.get("arguments") or {})
+                    result = await session.get_prompt(
+                        payload["name"], payload.get("arguments") or {}
+                    )
                     value = result.model_dump(mode="json")
                 else:
                     raise ValueError(f"unknown request: {kind}")
             except asyncio.CancelledError:
-                message = _uncertain(request, self.name, "the connection ended before its answer arrived")
-                self._settle(request, (True, message) if kind == "call" else None,
-                             None if kind == "call" else RuntimeError(message))
+                message = _uncertain(
+                    request, self.name, "the connection ended before its answer arrived"
+                )
+                self._settle(
+                    request,
+                    (True, message) if kind == "call" else None,
+                    None if kind == "call" else RuntimeError(message),
+                )
                 raise
             except (anyio.ClosedResourceError, anyio.BrokenResourceError):
                 request.sent = False
                 message = _not_sent(request, "the session connection already ended")
-                self._settle(request, (False, message) if kind == "call" else None,
-                             None if kind == "call" else RuntimeError(message))
+                self._settle(
+                    request,
+                    (False, message) if kind == "call" else None,
+                    None if kind == "call" else RuntimeError(message),
+                )
                 return
             except McpError as exc:
-                ended = "connection closed" in str(exc).lower() or "connection lost" in str(exc).lower()
-                message = (_uncertain(request, self.name, "the connection ended before its answer arrived")
-                           if ended else str(exc)[:500])
-                self._settle(request, (ended, message) if kind == "call" else None,
-                             None if kind == "call" else RuntimeError(message))
+                ended = (
+                    "connection closed" in str(exc).lower()
+                    or "connection lost" in str(exc).lower()
+                )
+                message = (
+                    _uncertain(
+                        request,
+                        self.name,
+                        "the connection ended before its answer arrived",
+                    )
+                    if ended
+                    else str(exc)[:500]
+                )
+                self._settle(
+                    request,
+                    (ended, message) if kind == "call" else None,
+                    None if kind == "call" else RuntimeError(message),
+                )
                 if ended:
                     return
             except Exception as exc:
                 from gideon.integrations.mcp_status import safe_text
 
-                message = _uncertain(request, self.name, f"could not read its answer: {safe_text(str(exc))[:300]}")
-                self._settle(request, (True, message) if kind == "call" else None,
-                             None if kind == "call" else RuntimeError(message))
+                message = _uncertain(
+                    request,
+                    self.name,
+                    f"could not read its answer: {safe_text(str(exc))[:300]}",
+                )
+                self._settle(
+                    request,
+                    (True, message) if kind == "call" else None,
+                    None if kind == "call" else RuntimeError(message),
+                )
             else:
                 self._settle(request, value)
 
@@ -946,7 +1204,10 @@ class McpClientRegistry:
             if gone or stale_hash:
                 from gideon.integrations.mcp_stdio import stop_finishing_soon
 
-                stop_finishing_soon(lambda server, removed=name: server == removed)
+                def same_server(server: str, removed: str = name) -> bool:
+                    return server == removed
+
+                stop_finishing_soon(same_server)
                 conn = self._conns.pop(key)
                 asyncio.ensure_future(conn.shutdown())
 
@@ -966,7 +1227,11 @@ class McpClientRegistry:
 
         if not serving_only:
             stop_finishing_soon(lambda server: server == name)
-        keys = [key for key, conn in self._conns.items() if key[0] == name and (not serving_only or conn._ready.is_set())]
+        keys = [
+            key
+            for key, conn in self._conns.items()
+            if key[0] == name and (not serving_only or conn._ready.is_set())
+        ]
         for key in keys:
             conn = self._conns.pop(key)
             asyncio.ensure_future(conn.shutdown())

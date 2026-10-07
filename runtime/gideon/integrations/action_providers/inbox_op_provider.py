@@ -184,10 +184,9 @@ async def _draft_through_the_inbox(state: Any, item: Any) -> str:
     """Draft a reply to *item* through the Inbox's own drafting path: ``""`` when it wrote one,
     else why it did not, in words the action's result can say.
 
-    A message that takes no reply is refused before the model runs, as the Inbox page's Draft
-    refuses it. A draft that did not happen changes nothing: the drafting path clears the draft
-    when its model judges no reply is wanted, so the draft she had is put back, with what it
-    stood on and who wrote it.
+    A message that takes no reply is refused before the model runs. The Inbox preserves
+    prior drafts when no reply is written. Its separate evidence report carries questions,
+    skipped replies and concurrent-edit warnings.
     """
     from gideon.integrations.inbox_service import InboxService
 
@@ -198,24 +197,29 @@ async def _draft_through_the_inbox(state: Any, item: Any) -> str:
     service = getattr(state, "_inbox_svc", None)
     if not isinstance(service, InboxService):
         return "no running inbox service to draft the reply with"
-    before = {
-        "draft": str(getattr(item, "draft", "") or ""),
-        "drafted_by": str(getattr(item, "drafted_by", "") or ""),
-        "context_summary": str(getattr(item, "context_summary", "") or ""),
-    }
-    outcome = await service.draft_reply(item.id)
+    from gideon.integrations.reply_grounding import grounding
+
+    evidence = grounding("")
+    outcome = await service.draft_reply(item.id, evidence=evidence)
     if outcome is None:
         return "the reply could not be drafted: the call to the drafting model failed"
-    if outcome.unread:
-        return outcome.unread_sentence()
-    if outcome.question:
-        return f"the reply needs your word first: {outcome.question}"
-    if outcome.skipped or not str(getattr(outcome.item, "draft", "") or "").strip():
-        service.inbox.update(item.id, **before)
-        if outcome.skipped:
+    unavailable = [
+        str(note.get("name", ""))
+        for note in evidence.named_notes
+        if not note.get("available")
+    ]
+    if unavailable:
+        return "the reply needs readable evidence: " + ", ".join(unavailable)
+    if evidence.question:
+        return f"the reply needs your word first: {evidence.question}"
+    if evidence.warnings:
+        return " ".join(evidence.warnings)
+    if evidence.skipped or not evidence.wrote or not str(outcome.draft or "").strip():
+        if evidence.skipped:
             return "the drafting model judged that this message needs no reply"
         return "the drafting model wrote no reply"
     return ""
+
 
 class InboxOpActionProvider(ActionProvider):
     @property
@@ -253,14 +257,22 @@ class InboxOpActionProvider(ActionProvider):
         item = live.store.items.get(item_id)
         if item is None:
             return ActionResult(False, error=f"inbox-op: no inbox item {item_id!r}")
-        if operation == "reply_draft" and not str(action_config.get("draft") or action_config.get("body") or "").strip():
+        if (
+            operation == "reply_draft"
+            and not str(
+                action_config.get("draft") or action_config.get("body") or ""
+            ).strip()
+        ):
             prior = str(getattr(item, "draft", "") or "")
             reason = await _draft_through_the_inbox(live.state, item)
             if reason:
                 return ActionResult(False, error="inbox-op: " + reason)
             updated = live.store.items.get(item_id)
             draft = str(getattr(updated, "draft", "") or "")
-            return _result(dict(op=operation, item_id=item_id, drafted=len(draft)), dict(op=operation, item_id=item_id, prior=prior))
+            return _result(
+                dict(op=operation, item_id=item_id, drafted=len(draft)),
+                dict(op=operation, item_id=item_id, prior=prior),
+            )
         return _InboxCommand(operation, item_id).apply(live, item, action_config)
 
     async def reverse(self, handle: str) -> ActionResult:

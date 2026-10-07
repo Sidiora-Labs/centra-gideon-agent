@@ -18,7 +18,22 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from copy import deepcopy
 from dataclasses import dataclass, field, fields
-from typing import Any
+from typing import Any, Protocol
+
+
+class SendRefusal(Protocol):
+    """A channel-owned refusal returned without transmitting the message."""
+
+    @property
+    def channel(self) -> str: ...
+
+    @property
+    def target(self) -> str: ...
+
+    @property
+    def reason(self) -> str: ...
+
+    def __bool__(self) -> bool: ...
 
 
 @dataclass
@@ -103,7 +118,7 @@ class ChannelTransportProvider(ABC):
         ...
 
     @abstractmethod
-    async def send(self, message: OutboundMessage) -> bool:
+    async def send(self, message: OutboundMessage) -> bool | str | SendRefusal:
         """Send a message to the external channel. Returns success."""
         ...
 

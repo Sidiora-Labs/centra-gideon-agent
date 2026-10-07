@@ -7,19 +7,19 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from functools import partial
 from pathlib import Path
 
-from gideon.integrations.acp import translate
-from gideon.integrations.acp.errors import AcpError, AcpTimeoutError, AcpProcessDied
 from gideon.core.turn_streams import closing_stream
+from gideon.integrations.acp import translate
+from gideon.integrations.acp.errors import AcpError, AcpProcessDied, AcpTimeoutError
 from gideon.integrations.acp.translate import extract_text_chunk  # noqa: F401
 from gideon.integrations.acp.turn_decode import TurnDecoder
 from gideon.integrations.acp.types import (
     CAP_COMMANDS,
-    EVENT_COMPLETE,
     EVENT_CARRIED_ON,
+    EVENT_COMPLETE,
     METHOD_AGENT_SWITCHED,
     METHOD_CLEAR_STATUS,
     METHOD_COMMANDS_EXECUTE,
@@ -29,8 +29,8 @@ from gideon.integrations.acp.types import (
     METHOD_REQUEST_PERMISSION,
     METHOD_SESSION_UPDATE,
     OPTION_ALLOW_ONCE,
-    STOP_REASON_END_TURN,
     STOP_REASON_CANCELLED,
+    STOP_REASON_END_TURN,
     AcpEvent,
     AcpPromptStats,
     JsonRpcMessage,
@@ -94,8 +94,8 @@ class AcpSession:
         self._question_handler = None
         self._questions_enabled = True
         self._questions_permitted = True
-        self._question_tasks = {}
-        self._question_answers = set()
+        self._question_tasks: dict[tuple[type, object], asyncio.Task[None]] = {}
+        self._question_answers: set[tuple[type, object]] = set()
         self._cancel_session = cancel_session
         self._is_process_alive = is_process_alive
         self._dialect = dialect or DefaultDialect()
@@ -199,14 +199,23 @@ class AcpSession:
         self._questions_enabled = callable(handler)
 
     async def _answer_question(self, message) -> None:
-        from .elicitation import CANCEL, attended_owner, answer_owner_form
+        from .elicitation import CANCEL, answer_owner_form, attended_owner
+
         identity = (type(message.id), message.id)
         result = dict(CANCEL)
         try:
-            if self._questions_enabled and self._questions_permitted and not self._cancelled and attended_owner(self._session_key):
+            if (
+                self._questions_enabled
+                and self._questions_permitted
+                and not self._cancelled
+                and attended_owner(self._session_key)
+            ):
                 if self._question_handler is None:
-                    result = await answer_owner_form(message.params, session_key=self._session_key,
-                        call_id="acp-question:" + uuid.uuid4().hex)
+                    result = await answer_owner_form(
+                        message.params,
+                        session_key=self._session_key,
+                        call_id="acp-question:" + uuid.uuid4().hex,
+                    )
                 else:
                     result = await self._question_handler(message.params)
         except asyncio.CancelledError:
@@ -221,14 +230,18 @@ class AcpSession:
                 try:
                     await self._send_response(message.id, result)
                 except Exception:
-                    logger.debug("ACP question response could not be sent", exc_info=True)
+                    logger.debug(
+                        "ACP question response could not be sent", exc_info=True
+                    )
             self._question_tasks.pop(identity, None)
 
     def _start_question(self, message) -> None:
         identity = (type(message.id), message.id)
         if identity in self._question_tasks or identity in self._question_answers:
             return
-        self._question_tasks[identity] = asyncio.create_task(self._answer_question(message))
+        self._question_tasks[identity] = asyncio.create_task(
+            self._answer_question(message)
+        )
 
     async def _cancel_questions(self) -> None:
         tasks = list(self._question_tasks.values())
@@ -243,7 +256,9 @@ class AcpSession:
                 try:
                     await self._send_response(identity[1], {"action": "cancel"})
                 except Exception:
-                    logger.debug("ACP cancelled question response failed", exc_info=True)
+                    logger.debug(
+                        "ACP cancelled question response failed", exc_info=True
+                    )
 
     async def cancel(self) -> None:
         self._cancelled = True
@@ -276,7 +291,9 @@ class AcpSession:
                 self._dialect.select_allow_option_id(choices) or OPTION_ALLOW_ONCE
             )
         allowed = next((row for row in choices if row.get("id") == selected), None)
-        if allowed is None or not str(allowed.get("kind") or allowed.get("id") or "").startswith("allow"):
+        if allowed is None or not str(
+            allowed.get("kind") or allowed.get("id") or ""
+        ).startswith("allow"):
             self._answered_permissions.discard(str(request_id))
             self._offered_options[str(request_id)] = choices
             await self.reject_tool(request_id)
@@ -287,19 +304,28 @@ class AcpSession:
 
     def permission_answer(self, request_id: str | int) -> dict | None:
         from copy import deepcopy
+
         return deepcopy(self._permission_answers.get(str(request_id)))
 
     def _record_permission_answer(self, request_id, offered, answer) -> None:
         from copy import deepcopy
+
         from gideon.security.sel import redact_event, sel
-        record = {"remote_session_id": self.session_id, "offered": deepcopy(offered),
-                  "sent": deepcopy(answer)}
+
+        record = {
+            "remote_session_id": self.session_id,
+            "offered": deepcopy(offered),
+            "sent": deepcopy(answer),
+        }
         self._permission_answers[str(request_id)] = record
         try:
             safe = redact_event({"metadata": record})["metadata"]
             sel().log_tool_invocation(
-                session_key=self._session_key or "", source="acp:permission",
-                tool_name="permission_response", outcome="sent", request_id=request_id,
+                session_key=self._session_key or "",
+                source="acp:permission",
+                tool_name="permission_response",
+                outcome="sent",
+                request_id=request_id,
                 metadata=safe,
             )
         except Exception:
@@ -308,8 +334,14 @@ class AcpSession:
     def deny_outcome(self, request_id: str | int) -> dict:
         offered = self._offered_options.get(str(request_id), [])
         ends = self._dialect.deny_ends_turn(offered)
-        consequence = "declines" if not ends else "carries_on" if self._carry_ons < 4 else "ends"
-        return {"ends_turn": ends, "consequence": consequence, "offered": [dict(row) for row in offered]}
+        consequence = (
+            "declines" if not ends else "carries_on" if self._carry_ons < 4 else "ends"
+        )
+        return {
+            "ends_turn": ends,
+            "consequence": consequence,
+            "offered": [dict(row) for row in offered],
+        }
 
     def refusal_answer(self, request_id: str | int) -> dict | None:
         answer = self._refusal_answers.get(str(request_id))
@@ -321,11 +353,17 @@ class AcpSession:
             return
         self._answered_permissions.add(identity)
         choices = self._offered_options.pop(identity, [])
-        selected = "" if self._cancelled else self._dialect.select_reject_option_id(choices)
+        selected = (
+            "" if self._cancelled else self._dialect.select_reject_option_id(choices)
+        )
         if selected:
-            self._refusal_answers[identity] = next(dict(row) for row in choices if row.get("id") == selected)
+            self._refusal_answers[identity] = next(
+                dict(row) for row in choices if row.get("id") == selected
+            )
         if not self._cancelled and self._dialect.deny_ends_turn(choices):
-            self._declined_steps.append(self._asked_steps.get(identity, "the requested step"))
+            self._declined_steps.append(
+                self._asked_steps.get(identity, "the requested step")
+            )
         answer = self._dialect.reject_outcome(selected)
         await self._send_response(request_id, answer)
         self._record_permission_answer(request_id, choices, answer)
@@ -359,7 +397,9 @@ class AcpSession:
             while not self._closed:
                 if self._cancelled:
                     try:
-                        terminal = await asyncio.wait_for(asyncio.shield(response_future), 2.0)
+                        terminal = await asyncio.wait_for(
+                            asyncio.shield(response_future), 2.0
+                        )
                     except (TimeoutError, ConnectionError):
                         return
                     yield terminal
@@ -443,10 +483,20 @@ class AcpSession:
             if self._closed:
                 raise AcpError("ACP session is closed")
             if not await self.settle_owed_answer():
-                raise AcpProcessDied("The agent has not answered the turn it was told to stop")
+                raise AcpProcessDied(
+                    "The agent has not answered the turn it was told to stop"
+                )
             self._begin_turn()
-            request_id, future = await self._send_request(method, {"sessionId": self.session_id, **payload})
-            frames = self._dispatch_frames(request_id, future, timeout, extract_agent_from_result=command, method=method)
+            request_id, future = await self._send_request(
+                method, {"sessionId": self.session_id, **payload}
+            )
+            frames = self._dispatch_frames(
+                request_id,
+                future,
+                timeout,
+                extract_agent_from_result=command,
+                method=method,
+            )
             async with closing_stream(frames):
                 async for event in frames:
                     if event.kind == EVENT_COMPLETE and held:
@@ -459,12 +509,23 @@ class AcpSession:
                 self._turn_done.set()
                 self._turn_lock.release()
 
-    def stream_events(self, message: str, timeout: float = _DEFAULT_PROMPT_TIMEOUT) -> AsyncIterator[AcpEvent]:
-        return self._invoke(METHOD_PROMPT, {"prompt": translate.encode_prompt_content(message)}, timeout)
+    def stream_events(
+        self, message: str, timeout: float = _DEFAULT_PROMPT_TIMEOUT
+    ) -> AsyncIterator[AcpEvent]:
+        return self._invoke(
+            METHOD_PROMPT, {"prompt": translate.encode_prompt_content(message)}, timeout
+        )
 
-    def stream_command(self, command: str, timeout: float = _DEFAULT_PROMPT_TIMEOUT) -> AsyncIterator[AcpEvent]:
+    def stream_command(
+        self, command: str, timeout: float = _DEFAULT_PROMPT_TIMEOUT
+    ) -> AsyncIterator[AcpEvent]:
         name, arguments = _parse_slash_command(command)
-        return self._invoke(METHOD_COMMANDS_EXECUTE, {"command": {"command": name, "args": arguments}}, timeout, command=True)
+        return self._invoke(
+            METHOD_COMMANDS_EXECUTE,
+            {"command": {"command": name, "args": arguments}},
+            timeout,
+            command=True,
+        )
 
     async def _dispatch_frames(
         self,
@@ -474,13 +535,17 @@ class AcpSession:
         *,
         extract_agent_from_result: bool = False,
         method: str = "",
-    ) -> AsyncIterator[AcpEvent]:
+    ) -> AsyncGenerator[AcpEvent, None]:
         self._reset_turn_data()
         deadline = time.monotonic() + timeout
         try:
             while True:
-                decoder = TurnDecoder(self, method=method, command=extract_agent_from_result)
-                drain = self._drain_turn(req_id, response_future, max(0.0, deadline-time.monotonic()))
+                decoder = TurnDecoder(
+                    self, method=method, command=extract_agent_from_result
+                )
+                drain = self._drain_turn(
+                    req_id, response_future, max(0.0, deadline - time.monotonic())
+                )
                 carry_on = False
                 async with closing_stream(drain):
                     async for message in drain:
@@ -490,10 +555,15 @@ class AcpSession:
                             continue
                         if action == "request":
                             identity = (type(message.id), message.id)
-                            if identity not in self._question_answers and identity not in self._question_tasks:
+                            if (
+                                identity not in self._question_answers
+                                and identity not in self._question_tasks
+                            ):
                                 self._question_answers.add(identity)
                                 if self._send_error is not None:
-                                    await self._send_error(message.id, -32601, "Method not found")
+                                    await self._send_error(
+                                        message.id, -32601, "Method not found"
+                                    )
                             continue
                         for event in decoder.accept(action, message):
                             if event.kind == EVENT_COMPLETE:
@@ -522,25 +592,36 @@ class AcpSession:
                     steps = list(self._declined_steps)
                     self._declined_steps.clear()
                     note = (
-                        "The user refused these steps, which did not run: " + "; ".join(steps) +
-                        ". Continue the original task without these steps, using what is already "
+                        "The user refused these steps, which did not run: "
+                        + "; ".join(steps)
+                        + ". Continue the original task without these steps, using what is already "
                         "available. State any resulting limits and do not request those steps again."
                     )
                     req_id, response_future = await self._send_request(
-                        METHOD_PROMPT, {"sessionId": self.session_id,
-                                        "prompt": [{"type": "text", "text": note}]}
+                        METHOD_PROMPT,
+                        {
+                            "sessionId": self.session_id,
+                            "prompt": [{"type": "text", "text": note}],
+                        },
                     )
-                    yield AcpEvent(kind=EVENT_CARRIED_ON, text="The denied step ended the agent’s turn. Continuing the same task without it.")
+                    yield AcpEvent(
+                        kind=EVENT_CARRIED_ON,
+                        text="The denied step ended the agent’s turn. Continuing the same task without it.",
+                    )
                     continue
                 if decoder.finished:
                     return
                 if self._cancelled:
                     self._last_stop_reason = STOP_REASON_CANCELLED
                     self._turn_done.set()
-                    yield AcpEvent(kind=EVENT_COMPLETE, stop_reason=STOP_REASON_CANCELLED)
+                    yield AcpEvent(
+                        kind=EVENT_COMPLETE, stop_reason=STOP_REASON_CANCELLED
+                    )
                     return
                 if not self._is_process_alive():
-                    raise AcpProcessDied("The agent process ended before answering its prompt")
+                    raise AcpProcessDied(
+                        "The agent process ended before answering its prompt"
+                    )
                 raise AcpTimeoutError()
         finally:
             await self._cancel_questions()
@@ -569,7 +650,16 @@ class AcpSession:
 
 
 class AcpConnection:
-    def __init__(self, proc, router, *, dialect=None, transport=None, session_meta=None, session_key=None) -> None:
+    def __init__(
+        self,
+        proc,
+        router,
+        *,
+        dialect=None,
+        transport=None,
+        session_meta=None,
+        session_key=None,
+    ) -> None:
         from gideon.integrations.acp.options import session_metadata
 
         self._session_meta = session_metadata(session_meta)
@@ -582,15 +672,27 @@ class AcpConnection:
         self._sessions: dict[str, AcpSession] = {}
         self._agent_capabilities: dict = {}
         self._last_session_new_snapshot: dict = {}
-        self._server_responses = set()
-        self._server_tasks = set()
+        self._server_responses: set[tuple[type, object]] = set()
+        self._server_tasks: set[asyncio.Task[None]] = set()
         self._router._on_server_request = self._route_server_request
 
     def _route_server_request(self, message) -> None:
         if message.method == "elicitation/create":
-            session_id = message.params.get("sessionId") if isinstance(message.params, dict) else None
-            active = [session for session in self._sessions.values() if session.has_active_turn()]
-            session = self._sessions.get(session_id) if isinstance(session_id, str) else (active[0] if len(active) == 1 else None)
+            session_id = (
+                message.params.get("sessionId")
+                if isinstance(message.params, dict)
+                else None
+            )
+            active = [
+                session
+                for session in self._sessions.values()
+                if session.has_active_turn()
+            ]
+            session = (
+                self._sessions.get(session_id)
+                if isinstance(session_id, str)
+                else (active[0] if len(active) == 1 else None)
+            )
             if session is not None and session.has_active_turn():
                 session._queue.put_nowait(message)
                 return
@@ -601,6 +703,7 @@ class AcpConnection:
         if identity in self._server_responses:
             return
         self._server_responses.add(identity)
+
         async def respond():
             try:
                 if result is None:
@@ -609,6 +712,7 @@ class AcpConnection:
                     await self.send_response(message.id, result)
             except Exception:
                 logger.debug("ACP server request response failed", exc_info=True)
+
         task = asyncio.create_task(respond())
         self._server_tasks.add(task)
         task.add_done_callback(self._server_tasks.discard)
@@ -639,7 +743,14 @@ class AcpConnection:
         )
         await process.spawn()
         router = FrameRouter(process.readline)
-        connection = cls(None, router, dialect=dialect, transport=process, session_meta=session_meta, session_key=session_key)
+        connection = cls(
+            None,
+            router,
+            dialect=dialect,
+            transport=process,
+            session_meta=session_meta,
+            session_key=session_key,
+        )
         router.start()
         return connection
 
@@ -676,7 +787,9 @@ class AcpConnection:
         await self._write(dict(jsonrpc="2.0", id=req_id, result=result))
 
     async def send_error(self, req_id, code: int, message: str) -> None:
-        await self._write(dict(jsonrpc="2.0", id=req_id, error={"code": code, "message": message}))
+        await self._write(
+            dict(jsonrpc="2.0", id=req_id, error={"code": code, "message": message})
+        )
 
     async def request(self, method: str, params: dict, *, timeout: float = 60.0):
         _, response = await self.send_request(method, params)
@@ -695,7 +808,9 @@ class AcpConnection:
             )
         )
 
-    def _bind_session(self, sid: str, session_files_dir=None, audit_session_key=None) -> AcpSession:
+    def _bind_session(
+        self, sid: str, session_files_dir=None, audit_session_key=None
+    ) -> AcpSession:
         session = AcpSession(
             sid,
             self._router.register_session(sid),
@@ -706,7 +821,11 @@ class AcpConnection:
             is_process_alive=self.is_process_alive,
             dialect=self._dialect,
             session_files_dir=session_files_dir,
-            session_key=audit_session_key if audit_session_key is not None else self._session_key,
+            session_key=(
+                audit_session_key
+                if audit_session_key is not None
+                else self._session_key
+            ),
         )
         self._sessions[sid] = session
         return session
@@ -718,19 +837,32 @@ class AcpConnection:
         return {**params, "_meta": session_metadata(meta)} if meta else dict(params)
 
     async def new_session(
-        self, params: dict, *, timeout: float = 60.0, session_files_dir=None, audit_session_key=None
+        self,
+        params: dict,
+        *,
+        timeout: float = 60.0,
+        session_files_dir=None,
+        audit_session_key=None,
     ) -> AcpSession:
-        response = await self.request("session/new", self._with_session_meta(params), timeout=timeout)
+        response = await self.request(
+            "session/new", self._with_session_meta(params), timeout=timeout
+        )
         if response.error:
             from gideon.security.security import redact_field
-            raise AcpError("The agent could not open a session: " + redact_field(str(response.error))[:500])
+
+            raise AcpError(
+                "The agent could not open a session: "
+                + redact_field(str(response.error))[:500]
+            )
         result = response.result if isinstance(response.result, dict) else {}
         if not result.get("sessionId"):
             raise RuntimeError(
                 "The agent did not return a session ID. Check its configuration and sign-in, then retry."
             )
         self._last_session_new_snapshot = dict(result)
-        return self._bind_session(result["sessionId"], session_files_dir, audit_session_key)
+        return self._bind_session(
+            result["sessionId"], session_files_dir, audit_session_key
+        )
 
     async def load_session(
         self,
@@ -740,7 +872,9 @@ class AcpConnection:
         timeout: float = 60.0,
         session_files_dir=None,
     ) -> AcpSession | None:
-        response = await self.request("session/load", self._with_session_meta(params), timeout=timeout)
+        response = await self.request(
+            "session/load", self._with_session_meta(params), timeout=timeout
+        )
         if isinstance(response.result, dict) and "modes" in response.result:
             self._last_session_new_snapshot = dict(response.result)
             return self._bind_session(session_id, session_files_dir)

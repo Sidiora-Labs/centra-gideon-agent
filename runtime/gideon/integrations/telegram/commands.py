@@ -1,8 +1,10 @@
 """Telegram commands backed by Gideon's own sessions, skills and delegation."""
 
 from __future__ import annotations
+
 import asyncio
 import json
+
 from .api import TelegramError
 
 COMMANDS = {
@@ -58,16 +60,24 @@ def menu(config):
 
 async def extra_command(transport, cm, command, argument):
     if command in ("people", "care"):
+        from gideon.workspace.capabilities.communications import (
+            PeopleError,
+            PeopleStore,
+        )
+        from gideon.workspace.capabilities.communications.telegram import (
+            command as people_command,
+        )
+
         from .policy import command_allowed
-        from gideon.workspace.capabilities.communications import PeopleStore, PeopleError
-        from gideon.workspace.capabilities.communications.telegram import command as people_command
 
         if not command_allowed(transport.config, cm, command):
             return "Your Telegram role does not allow that command."
         if argument:
             return f"/{command} does not accept arguments."
         try:
-            return (await asyncio.to_thread(people_command, PeopleStore(), "/" + command))["text"]
+            return (
+                await asyncio.to_thread(people_command, PeopleStore(), "/" + command)
+            )["text"]
         except PeopleError as exc:
             return str(exc)
     state = transport.services.dashboard_state
@@ -179,8 +189,9 @@ async def extra_command(transport, cm, command, argument):
         )
         persisted = update
         if transport.slot != "primary":
-            from .policy import configured
             from gideon.extensions.apps.app_config import read_config
+
+            from .policy import configured
 
             preferences = configured(
                 read_config("telegram-channel").get("bot_preferences"), {}
@@ -190,6 +201,8 @@ async def extra_command(transport, cm, command, argument):
                 **update,
             }
             persisted = {"bot_preferences": json.dumps(preferences)}
+        if manifest is None or manifest.provider is None:
+            raise RuntimeError("Telegram channel provider manifest is unavailable")
         await asyncio.to_thread(
             write_config,
             "telegram-channel",
@@ -217,10 +230,10 @@ async def extra_command(transport, cm, command, argument):
         await transport.topics.rename(transport, cm, session)
         return "Conversation renamed."
     if command == "reasoning":
+        from gideon.interfaces.dashboard.chat_handlers import _effort_not_honorable
         from gideon.interfaces.dashboard.chat_persistence import (
             _validate_reasoning_effort,
         )
-        from gideon.interfaces.dashboard.chat_handlers import _effort_not_honorable
 
         if not argument:
             return "Reasoning effort: " + (
@@ -244,8 +257,8 @@ async def extra_command(transport, cm, command, argument):
     if command == "context":
         return f"Conversation: {session.key}\nMessages: {session.total_messages}\nAgent: {session.agent or 'Gideon'}\nRunning: {session.running}"
     if command == "usage":
-        from gideon.operations import usage_ledger
         from gideon.interfaces.dashboard.chat_utils import _history_key_for
+        from gideon.operations import usage_ledger
 
         totals = await asyncio.to_thread(
             usage_ledger.totals, session_key=_history_key_for(session.key)

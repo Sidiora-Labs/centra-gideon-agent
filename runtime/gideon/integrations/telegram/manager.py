@@ -1,13 +1,16 @@
 """Multiple bot connections sharing one hosted account's Telegram provider."""
 
 from __future__ import annotations
+
 import asyncio
-from .transport import TelegramTransport, APP
-from .api import TelegramError
-from .policy import bot_configs
+
 from gideon.extensions.apps.app_config import read_config
 from gideon.integrations import channel_delivery
 from gideon.integrations.channel_transports.base import ChannelTransportProvider
+
+from .api import TelegramError
+from .policy import bot_configs
+from .transport import APP, TelegramTransport
 
 
 class DeliveryRouter:
@@ -27,7 +30,7 @@ class DeliveryRouter:
         return child.delivery, str(channel)
 
     def list_reply_channels(self):
-        rows = []
+        rows: list[dict[str, str]] = []
         for key, child in self.transport.bots.items():
             if child.connected:
                 rows.extend(
@@ -147,7 +150,7 @@ class TelegramManager(ChannelTransportProvider):
         return any(bot.connected for bot in self.bots.values())
 
     def capabilities(self):
-        return TelegramTransport.capabilities(self)
+        return TelegramTransport.capabilities()
 
     async def connect(self):
         return self.connected
@@ -204,6 +207,7 @@ class TelegramManager(ChannelTransportProvider):
                 from gideon.integrations.tool_providers.registry import (
                     register_provider,
                 )
+
                 from .tools import TelegramTools
 
                 register_provider(TelegramTools(self))

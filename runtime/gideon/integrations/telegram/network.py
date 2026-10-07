@@ -124,31 +124,39 @@ class TelegramFallbackTransport(httpx.AsyncBaseTransport):
                 attempt_order.append(ip)
 
         last_error: Exception | None = None
-        for ip in attempt_order:
-            candidate = request if ip is None else _rewrite_request_for_ip(request, ip)
-            transport = self._primary if ip is None else await self._get_fallback(ip)
+        for attempt_ip in attempt_order:
+            candidate = (
+                request
+                if attempt_ip is None
+                else _rewrite_request_for_ip(request, attempt_ip)
+            )
+            transport = (
+                self._primary
+                if attempt_ip is None
+                else await self._get_fallback(attempt_ip)
+            )
             try:
                 response = await transport.handle_async_request(candidate)
-                if ip is not None and self._sticky_ip != ip:
+                if attempt_ip is not None and self._sticky_ip != attempt_ip:
                     async with self._sticky_lock:
-                        if self._sticky_ip != ip:
-                            self._sticky_ip = ip
+                        if self._sticky_ip != attempt_ip:
+                            self._sticky_ip = attempt_ip
                             logger.warning(
                                 "[Telegram] Primary api.telegram.org path unreachable; using sticky fallback IP %s",
-                                ip,
+                                attempt_ip,
                             )
                 return response
             except Exception as exc:
                 last_error = exc
                 if not _is_retryable_connect_error(exc):
                     raise
-                if ip is not None and ip == self._sticky_ip:
+                if attempt_ip is not None and ip == self._sticky_ip:
                     async with self._sticky_lock:
                         if self._sticky_ip == ip:
                             self._sticky_ip = None
                             logger.warning(
                                 "[Telegram] Sticky fallback IP %s failed; resetting to primary DNS path",
-                                ip,
+                                attempt_ip,
                             )
                 if ip is None:
                     logger.warning(
@@ -213,7 +221,7 @@ def _resolve_system_dns() -> set[str]:
     """Return the IPv4 addresses that the OS resolver gives for api.telegram.org."""
     try:
         results = socket.getaddrinfo(_TELEGRAM_API_HOST, 443, socket.AF_INET)
-        return {addr[4][0] for addr in results}
+        return {str(addr[4][0]) for addr in results}
     except Exception:
         return set()
 

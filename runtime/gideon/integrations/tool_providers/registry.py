@@ -191,8 +191,8 @@ class ConfiguredMcpToolProvider(ToolProvider):
 
     async def list_tools(self, *, cached_only: bool = False) -> list[ToolDefinition]:
         from gideon.integrations.mcp_client import get_mcp_client_registry
-        from gideon.security import mcp_read_only_trust
         from gideon.integrations.tool_providers.base import risk_from_annotations
+        from gideon.security import mcp_read_only_trust
 
         registry = get_mcp_client_registry()
         if registry is None:
@@ -204,27 +204,51 @@ class ConfiguredMcpToolProvider(ToolProvider):
         if conn is None:
             return []
         disabled = spec.get("disabledTools", [])
-        disabled_names = {name for name in disabled if isinstance(name, str)} if isinstance(disabled, list) else set()
+        disabled_names = (
+            {name for name in disabled if isinstance(name, str)}
+            if isinstance(disabled, list)
+            else set()
+        )
         try:
             if cached_only:
                 from gideon.integrations.mcp_client import McpToolSpec
-                from gideon.integrations.mcp_discovery import _probe_cache, definition_seal
+                from gideon.integrations.mcp_discovery import (
+                    _probe_cache,
+                    definition_seal,
+                )
+
                 cached = _probe_cache.get(self.server)
-                advertised = [McpToolSpec(
-                    name=row["name"], description=str(row.get("description") or ""),
-                    input_schema=row.get("inputSchema") or {},
-                    annotations=row.get("annotations") or {},
-                ) for row in cached.tools] if cached and cached.status == "ok" and cached.definition_revision == definition_seal(self.server, spec) else []
+                advertised = (
+                    [
+                        McpToolSpec(
+                            name=row["name"],
+                            description=str(row.get("description") or ""),
+                            input_schema=row.get("inputSchema") or {},
+                            annotations=row.get("annotations") or {},
+                        )
+                        for row in cached.tools
+                    ]
+                    if cached
+                    and cached.status == "ok"
+                    and cached.definition_revision == definition_seal(self.server, spec)
+                    else []
+                )
             else:
                 advertised = await conn.list_tools()
         except Exception:
-            logger.debug("MCP server %s could not list agent tools", self.server, exc_info=True)
+            logger.debug(
+                "MCP server %s could not list agent tools", self.server, exc_info=True
+            )
             return []
 
         counts: dict[str, int] = {}
         for item in advertised:
             name = getattr(item, "name", None)
-            if isinstance(name, str) and name.strip() and not any(ord(char) < 32 for char in name):
+            if (
+                isinstance(name, str)
+                and name.strip()
+                and not any(ord(char) < 32 for char in name)
+            ):
                 counts[name] = counts.get(name, 0) + 1
         definitions: list[ToolDefinition] = []
         for item in advertised:
@@ -238,27 +262,48 @@ class ConfiguredMcpToolProvider(ToolProvider):
             ):
                 continue
             raw_schema = getattr(item, "input_schema", None)
+            if not isinstance(raw_schema, dict):
+                continue
             definitions.append(
                 ToolDefinition(
                     name=f"mcp/{self.server}/{tool_name}",
                     description=str(getattr(item, "description", "") or ""),
                     provider=self.server,
-                    parameters=raw_schema if isinstance(raw_schema, dict) else raw_schema,
-                    requires_approval=not (getattr(item, "annotations", {}).get("readOnlyHint") is True and mcp_read_only_trust.believes(self.server, item)),
-                    risk_level=risk_from_annotations(getattr(item, "annotations", {}), trusted=mcp_read_only_trust.believes(self.server, item)),
+                    parameters=raw_schema,
+                    requires_approval=not (
+                        getattr(item, "annotations", {}).get("readOnlyHint") is True
+                        and mcp_read_only_trust.believes(self.server, item)
+                    ),
+                    risk_level=risk_from_annotations(
+                        getattr(item, "annotations", {}),
+                        trusted=mcp_read_only_trust.believes(self.server, item),
+                    ),
                     mcp_definition_digest=mcp_read_only_trust.digest(item),
-                    mcp_configuration_revision=mcp_read_only_trust.configuration_revision(self.server),
-                    annotations=getattr(item, "annotations", {}) if isinstance(getattr(item, "annotations", None), dict) else {},
+                    mcp_configuration_revision=mcp_read_only_trust.configuration_revision(
+                        self.server
+                    ),
+                    annotations=(
+                        getattr(item, "annotations", {})
+                        if isinstance(getattr(item, "annotations", None), dict)
+                        else {}
+                    ),
                 )
             )
-        from gideon.integrations.tool_providers.portable_schema import offered_tool_definitions
+        from gideon.integrations.tool_providers.portable_schema import (
+            offered_tool_definitions,
+        )
 
         return offered_tool_definitions(definitions, provider=self.server)
 
     async def preflight(self, tool_name: str, arguments: dict[str, Any]):
-        from gideon.integrations.mcp_client import get_mcp_client_registry, _coerce_args_to_schema
+        from gideon.integrations.mcp_client import (
+            _coerce_args_to_schema,
+            get_mcp_client_registry,
+        )
         from gideon.integrations.mcp_core import get_current_session_key
+
         from .arguments import argument_refusal, refused_result
+
         registry = get_mcp_client_registry()
         if registry is None:
             return None
@@ -269,13 +314,31 @@ class ConfiguredMcpToolProvider(ToolProvider):
         spec = next((t for t in conn._tools if t.name == raw), None)
         if spec is None:
             return None
-        reason = argument_refusal(tool_name, _coerce_args_to_schema(arguments, spec.input_schema), spec.input_schema, types=True)
+        reason = argument_refusal(
+            tool_name,
+            _coerce_args_to_schema(arguments, spec.input_schema),
+            spec.input_schema,
+            types=True,
+        )
         return refused_result(reason) if reason else None
 
-    async def invoke(self, tool_name: str, arguments: dict[str, Any], *, expected_definition: str = "", expected_configuration: str = "", expected_read_authority: bool = False):
+    async def invoke(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        expected_definition: str = "",
+        expected_configuration: str = "",
+        expected_read_authority: bool = False,
+    ):
         from gideon.integrations.tool_providers.base import ToolResult
+
         if not expected_definition or not expected_configuration:
-            return ToolResult(False, error="MCP tool was not run: its offered definition and configuration are required", metadata={"effect_state": "not_started"})
+            return ToolResult(
+                False,
+                error="MCP tool was not run: its offered definition and configuration are required",
+                metadata={"effect_state": "not_started"},
+            )
         from gideon.integrations.mcp_client import get_mcp_client_registry
         from gideon.integrations.mcp_core import get_current_session_key
         from gideon.integrations.tool_providers.base import ToolResult
@@ -283,7 +346,7 @@ class ConfiguredMcpToolProvider(ToolProvider):
         prefix = f"mcp/{self.server}/"
         if not isinstance(tool_name, str) or not tool_name.startswith(prefix):
             return ToolResult(False, error="MCP tool is not owned by this server")
-        raw_name = tool_name[len(prefix):]
+        raw_name = tool_name[len(prefix) :]
         if not raw_name:
             return ToolResult(False, error="MCP tool name is required")
         registry = get_mcp_client_registry()
@@ -300,8 +363,23 @@ class ConfiguredMcpToolProvider(ToolProvider):
         if conn is None:
             return ToolResult(False, error="MCP server is not configured or enabled")
         try:
-            success, output = await conn.call_tool(raw_name, arguments, expected_definition=expected_definition, expected_configuration=expected_configuration, expected_read_authority=expected_read_authority)
-            return ToolResult(bool(success), output=output if success else "", error="" if success else output, metadata={"effect_state": "not_started"} if not success and output.startswith("MCP tool was not run:") else {})
+            success, output = await conn.call_tool(
+                raw_name,
+                arguments,
+                expected_definition=expected_definition,
+                expected_configuration=expected_configuration,
+                expected_read_authority=expected_read_authority,
+            )
+            return ToolResult(
+                bool(success),
+                output=output if success else "",
+                error="" if success else output,
+                metadata=(
+                    {"effect_state": "not_started"}
+                    if not success and output.startswith("MCP tool was not run:")
+                    else {}
+                ),
+            )
         except Exception as exc:
             return ToolResult(False, error=str(exc)[:300])
 
@@ -331,7 +409,10 @@ def register_provider(
     provider_name = str(getattr(provider, "name", "") or "").strip()
     owner_name = str(owner or (provider_name if owner_type != "app" else ""))
     instance = str(
-        instance_id or getattr(provider, "instance_id", "") or owner_name or provider_name
+        instance_id
+        or getattr(provider, "instance_id", "")
+        or owner_name
+        or provider_name
     )
     if not provider_name or not owner_name or not instance:
         return {"accepted": False, "reason": "missing_provider_identity"}
@@ -347,7 +428,12 @@ def register_provider(
     _providers.clear()
     for prior in sorted(
         _registrations.values(),
-        key=lambda r: (_owner_order(r.owner_type), r.owner, r.instance_id, r.provider.name),
+        key=lambda r: (
+            _owner_order(r.owner_type),
+            r.owner,
+            r.instance_id,
+            r.provider.name,
+        ),
     ):
         _providers.setdefault(prior.provider.name, prior.provider)
 
@@ -395,7 +481,11 @@ def unregister_provider(
     for record in candidates:
         _registrations.pop(id(record.provider), None)
     remaining = next(
-        (record.provider for record in _registrations.values() if record.provider.name == name),
+        (
+            record.provider
+            for record in _registrations.values()
+            if record.provider.name == name
+        ),
         None,
     )
     if remaining is None:
@@ -432,18 +522,14 @@ def _sync_mcp_server_providers() -> None:
         desired = set()
 
     for server in set(_mcp_provider_instances) - desired:
-        unregister_provider(
-            server, owner_type="mcp", owner=server, instance_id=server
-        )
+        unregister_provider(server, owner_type="mcp", owner=server, instance_id=server)
         _mcp_provider_instances.pop(server, None)
     for server in sorted(desired):
         provider = _mcp_provider_instances.get(server)
         if provider is None:
             provider = ConfiguredMcpToolProvider(server)
             _mcp_provider_instances[server] = provider
-        register_provider(
-            provider, owner_type="mcp", owner=server, instance_id=server
-        )
+        register_provider(provider, owner_type="mcp", owner=server, instance_id=server)
 
 
 def list_providers() -> list[ToolProvider]:
@@ -452,7 +538,12 @@ def list_providers() -> list[ToolProvider]:
         record.provider
         for record in sorted(
             _registrations.values(),
-            key=lambda r: (_owner_order(r.owner_type), r.owner, r.instance_id, r.provider.name),
+            key=lambda r: (
+                _owner_order(r.owner_type),
+                r.owner,
+                r.instance_id,
+                r.provider.name,
+            ),
         )
     ]
 
@@ -470,7 +561,11 @@ def _namespace_refusal(owner_type: str, names: list[str]) -> str:
     """Keep external MCP tool names in their reserved canonical namespace."""
     if owner_type == "mcp":
         return ""
-    return "mcp_namespace_reserved" if any(name.startswith("mcp/") for name in names) else ""
+    return (
+        "mcp_namespace_reserved"
+        if any(name.startswith("mcp/") for name in names)
+        else ""
+    )
 
 
 def _registration_for(provider: ToolProvider) -> ProviderRegistration:
@@ -488,7 +583,8 @@ def _registration_for(provider: ToolProvider) -> ProviderRegistration:
 
 async def resolve_tool_catalog(
     providers: list[ToolProvider] | None = None,
-    *, skip: tuple[str, ...] = (),
+    *,
+    skip: tuple[str, ...] = (),
     skip_configured_mcp: bool = False,
     cached_mcp: bool = False,
 ) -> ToolCatalog:
@@ -508,7 +604,9 @@ async def resolve_tool_catalog(
         unique: list[ToolProvider] = []
         seen: set[int] = set()
         for provider in selected:
-            if provider.name in skip or (skip_configured_mcp and isinstance(provider, ConfiguredMcpToolProvider)):
+            if provider.name in skip or (
+                skip_configured_mcp and isinstance(provider, ConfiguredMcpToolProvider)
+            ):
                 continue
             if id(provider) not in seen:
                 unique.append(provider)
@@ -530,7 +628,9 @@ async def resolve_tool_catalog(
         try:
             from gideon.engine.agents.native.builtin_tools import PLATFORM_TOOL_NAMES
 
-            reserved.update({name: "core:gideon-filesystem" for name in PLATFORM_TOOL_NAMES})
+            reserved.update(
+                {name: "core:gideon-filesystem" for name in PLATFORM_TOOL_NAMES}
+            )
         except Exception:
             logger.debug(
                 "platform tool names unavailable for ownership reservation",
@@ -545,7 +645,11 @@ async def resolve_tool_catalog(
         for record in records:
             provider = record.provider
             try:
-                declared = list(await provider.list_tools(cached_only=cached_mcp)) if isinstance(provider, ConfiguredMcpToolProvider) else list(await provider.list_tools())
+                declared = (
+                    list(await provider.list_tools(cached_only=cached_mcp))
+                    if isinstance(provider, ConfiguredMcpToolProvider)
+                    else list(await provider.list_tools())
+                )
             except Exception as exc:
                 record_failure(provider.name, str(exc))
                 continue
@@ -583,9 +687,9 @@ async def resolve_tool_catalog(
                 }
                 if conflict:
                     refusal["tool"] = conflict
-                    refusal["existing_owner"] = reserved.get(conflict) or accepted_owners.get(
-                        conflict, ""
-                    )
+                    refusal["existing_owner"] = reserved.get(
+                        conflict
+                    ) or accepted_owners.get(conflict, "")
                 if reason == "mcp_namespace_reserved":
                     refusal["error"] = (
                         f"Tool provider {provider.name!r} was refused because the mcp/ "
@@ -637,16 +741,22 @@ async def resolve_tool_catalog(
                 try:
                     record.status_callback(dict(status))
                 except Exception:
-                    logger.debug("tool provider ownership status callback failed", exc_info=True)
+                    logger.debug(
+                        "tool provider ownership status callback failed", exc_info=True
+                    )
         return ToolCatalog(definitions, accepted_providers, accepted_owners, refusals)
 
 
-async def list_all_tools(*, skip: tuple[str, ...] = (), skip_configured_mcp: bool = False) -> list[ToolDefinition]:
+async def list_all_tools(
+    *, skip: tuple[str, ...] = (), skip_configured_mcp: bool = False
+) -> list[ToolDefinition]:
     """Aggregate tools from all registered providers.
 
     A provider that raises while listing its tools is recorded as a load failure
     (operator-visible via :func:`get_load_failures`) rather than silently
     dropped, and the remaining providers still contribute.
     """
-    catalog = await resolve_tool_catalog(skip=skip, skip_configured_mcp=skip_configured_mcp)
+    catalog = await resolve_tool_catalog(
+        skip=skip, skip_configured_mcp=skip_configured_mcp
+    )
     return catalog.definitions

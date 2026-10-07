@@ -210,6 +210,8 @@ TOOL_NAMES: frozenset[str] = frozenset(TOOLS_BY_NAME)
 
 
 class _ToolResponse(str):
+    agent_error: AgentError
+
     def __new__(cls, text: str, agent_error: AgentError):
         value = str.__new__(cls, text)
         value.agent_error = agent_error
@@ -225,7 +227,9 @@ def _agent_error_from_wire(error: Any) -> AgentError | None:
     if not all(isinstance(error.get(field), str) for field in ("what", "why", "fix")):
         return None
     suggestions = error.get("suggestions", [])
-    if not isinstance(suggestions, list) or not all(isinstance(item, str) for item in suggestions):
+    if not isinstance(suggestions, list) or not all(
+        isinstance(item, str) for item in suggestions
+    ):
         return None
     return AgentError(
         code=code,

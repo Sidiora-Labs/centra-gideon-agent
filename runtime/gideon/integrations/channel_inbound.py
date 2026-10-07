@@ -6,8 +6,6 @@ its verdict by message identity and owns only session routing and task lifetime.
 
 from __future__ import annotations
 
-from gideon.engine.turn_source import arrived_on
-
 import asyncio
 import hashlib
 import logging
@@ -17,6 +15,7 @@ from datetime import datetime, timezone
 from threading import RLock
 from typing import TYPE_CHECKING, Any
 
+from gideon.engine.turn_source import arrived_on
 from gideon.integrations.channel_trust import TrustVerdict, guard_inbound
 
 if TYPE_CHECKING:
@@ -174,10 +173,14 @@ class _SessionIngress:
         if linked is not None:
             if not getattr(linked, "_app", ""):
                 linked._app = self.provider
-            self.state.link_channel(linked.key, thread, self.message.channel_id, self.provider)
+            self.state.link_channel(
+                linked.key, thread, self.message.channel_id, self.provider
+            )
             return linked
         created = self.state.get_or_create_session(app=self.provider)
-        self.state.link_channel(created.key, thread, self.message.channel_id, self.provider)
+        self.state.link_channel(
+            created.key, thread, self.message.channel_id, self.provider
+        )
         return created
 
     def record(self, session: Any) -> None:
@@ -190,22 +193,32 @@ class _SessionIngress:
         for redact in (redact_exfiltration_urls, redact_credentials):
             displayed, _ = redact(displayed)
         from gideon.security.approval_answer import ingress_record, on_channel
+
         tenant = self.provider
         if self.provider in {"slack", "discord", "mail-desk"}:
             from gideon.integrations.channel_delivery import raw_delivery_for
+
             delivery = raw_delivery_for(self.provider)
-            identity = delivery.approval_identity(self.message.channel_id) if delivery is not None and hasattr(delivery, "approval_identity") else None
+            identity = (
+                delivery.approval_identity(self.message.channel_id)
+                if delivery is not None and hasattr(delivery, "approval_identity")
+                else None
+            )
             if identity is not None:
                 tenant = identity["tenant"]
         if self.provider == "telegram":
             from gideon.integrations.channel_transports import get_transport
+
             transport = get_transport(self.provider)
             slot = str(self.message.metadata.get("telegram_bot_id") or "primary")
             child = (getattr(transport, "bots", {}) or {}).get(slot)
             if child is not None and getattr(child, "connected", False):
                 tenant = f"telegram:{child.slot}"
-        origin = ingress_record(on_channel(self.provider, self.message.sender, tenant),
-                                self.message.thread_id or self.message.channel_id, self.text)
+        origin = ingress_record(
+            on_channel(self.provider, self.message.sender, tenant),
+            self.message.thread_id or self.message.channel_id,
+            self.text,
+        )
         payload = {
             "session": session.key,
             "role": "user",
@@ -213,7 +226,9 @@ class _SessionIngress:
             "cls": "msg msg-u",
             "meta": {"ingress": origin},
         }
-        paths = [str(item["path"]) for item in self.message.attachments if item.get("path")]
+        paths = [
+            str(item["path"]) for item in self.message.attachments if item.get("path")
+        ]
         if paths:
             payload["meta"]["files"] = paths
             raw_files = [
@@ -223,9 +238,27 @@ class _SessionIngress:
             ]
             if raw_files:
                 payload["meta"]["raw_files"] = raw_files
-            session.append(payload["role"], payload["content"], payload["cls"], meta=payload["meta"], source=arrived_on(self.message.thread_id or self.message.channel_id, self.message.sender))
+            session.append(
+                payload["role"],
+                payload["content"],
+                payload["cls"],
+                meta=payload["meta"],
+                source=arrived_on(
+                    self.message.thread_id or self.message.channel_id,
+                    self.message.sender,
+                ),
+            )
         else:
-            session.append(payload["role"], payload["content"], payload["cls"], meta=payload["meta"], source=arrived_on(self.message.thread_id or self.message.channel_id, self.message.sender))
+            session.append(
+                payload["role"],
+                payload["content"],
+                payload["cls"],
+                meta=payload["meta"],
+                source=arrived_on(
+                    self.message.thread_id or self.message.channel_id,
+                    self.message.sender,
+                ),
+            )
         broadcast = getattr(self.state, "broadcast_ws", None)
         if broadcast is not None:
             broadcast("chat_message", payload)
@@ -238,23 +271,43 @@ class _SessionIngress:
     ) -> None:
         if getattr(session, "running", False):
             from gideon.security.approval_answer import ingress_record, on_channel
+
             tenant = self.provider
             if self.provider in {"slack", "discord", "mail-desk"}:
                 from gideon.integrations.channel_delivery import raw_delivery_for
+
                 delivery = raw_delivery_for(self.provider)
-                identity = delivery.approval_identity(self.message.channel_id) if delivery is not None and hasattr(delivery, "approval_identity") else None
+                identity = (
+                    delivery.approval_identity(self.message.channel_id)
+                    if delivery is not None and hasattr(delivery, "approval_identity")
+                    else None
+                )
                 if identity is not None:
                     tenant = identity["tenant"]
             if self.provider == "telegram":
                 from gideon.integrations.channel_transports import get_transport
+
                 transport = get_transport(self.provider)
                 slot = str(self.message.metadata.get("telegram_bot_id") or "primary")
                 child = (getattr(transport, "bots", {}) or {}).get(slot)
                 if child is not None and getattr(child, "connected", False):
                     tenant = f"telegram:{child.slot}"
-            meta = {"ingress": ingress_record(on_channel(self.provider, self.message.sender, tenant),
-                                            self.message.thread_id or self.message.channel_id, self.text)}
-            queue_id = session.queue_append(self.text, channel=self.provider, meta=meta, source=arrived_on(self.message.thread_id or self.message.channel_id, self.message.sender))
+            meta = {
+                "ingress": ingress_record(
+                    on_channel(self.provider, self.message.sender, tenant),
+                    self.message.thread_id or self.message.channel_id,
+                    self.text,
+                )
+            }
+            queue_id = session.queue_append(
+                self.text,
+                channel=self.provider,
+                meta=meta,
+                source=arrived_on(
+                    self.message.thread_id or self.message.channel_id,
+                    self.message.sender,
+                ),
+            )
             from gideon.security.security import (
                 redact_credentials,
                 redact_exfiltration_urls,
@@ -281,8 +334,12 @@ class _SessionIngress:
 
         self.record(session)
         from gideon.interfaces.dashboard.chat_runner import run_chat
+
+        running: Awaitable[None]
         if runner is run_chat:
-            running = runner(self.state, session, self.text, _origin_message=session.messages[-1])
+            running = runner(
+                self.state, session, self.text, _origin_message=session.messages[-1]
+            )
         else:
             running = runner(self.state, session, self.text)
         pending = asyncio.ensure_future(running)
@@ -310,7 +367,11 @@ async def deliver_inbound(
         if _reserve_delivery(identity):
             try:
                 await _route_to_session(
-                    services, provider, msg, decision.fenced_text or msg.text, turn_runner
+                    services,
+                    provider,
+                    msg,
+                    decision.fenced_text or msg.text,
+                    turn_runner,
                 )
             except Exception:
                 with _ADMISSION_LOCK:

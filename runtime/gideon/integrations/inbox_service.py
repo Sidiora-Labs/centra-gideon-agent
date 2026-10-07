@@ -52,7 +52,11 @@ from gideon.integrations.inbox import (
     thread_mute_key,
 )
 from gideon.security.guardrails.audit import caller_scope
-from gideon.security.security import fence_untrusted, redact_credentials, redact_exfiltration_urls
+from gideon.security.security import (
+    fence_untrusted,
+    redact_credentials,
+    redact_exfiltration_urls,
+)
 
 if TYPE_CHECKING:
     from gideon.integrations.inbox_providers.base import (
@@ -114,7 +118,13 @@ def _resolve_source_kind(declared: str, source_name: str) -> str:
     return ItemKind.MESSAGE.value
 
 
-def _fence_message(item: InboxItem, *, max_chars: int = _MAX_MESSAGE_CHARS, max_turns: int = _MAX_THREAD_TURNS, heading: str = "") -> str:
+def _fence_message(
+    item: InboxItem,
+    *,
+    max_chars: int = _MAX_MESSAGE_CHARS,
+    max_turns: int = _MAX_THREAD_TURNS,
+    heading: str = "",
+) -> str:
     """Render an item's external text (body + thread context) as ONE fenced block.
 
     Everything the sender controlled is inside a single ``<untrusted_content>`` fence
@@ -155,6 +165,7 @@ class InboxService:
         self._last_maintenance_at = 0.0
         self._source_health: dict[str, dict] = {}
         from gideon.integrations.inbox_sorting import InboxSorter
+
         self.sorter = InboxSorter(self.inbox)
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
 
@@ -178,18 +189,22 @@ class InboxService:
             name = str(source.source_name)
             health = self._source_health.get(name, {})
             last = float(health.get("last_poll_at") or 0)
-            result.append({
-                "name": name,
-                "active": bool(enabled),
-                "kind": "poll",
-                "can_reply": name != "filesystem",
-                "watches_channels": bool(getattr(source, "watches_channels", False)),
-                "last_poll_at": last,
-                "last_poll_ok": bool(health.get("last_poll_ok", False)),
-                "last_error": str(health.get("last_error") or ""),
-                "poll_count": int(health.get("poll_count") or 0),
-                "stale": bool(last and now - last > 900),
-            })
+            result.append(
+                {
+                    "name": name,
+                    "active": bool(enabled),
+                    "kind": "poll",
+                    "can_reply": name != "filesystem",
+                    "watches_channels": bool(
+                        getattr(source, "watches_channels", False)
+                    ),
+                    "last_poll_at": last,
+                    "last_poll_ok": bool(health.get("last_poll_ok", False)),
+                    "last_error": str(health.get("last_error") or ""),
+                    "poll_count": int(health.get("poll_count") or 0),
+                    "stale": bool(last and now - last > 900),
+                }
+            )
         return result
 
     def start(self) -> None:
@@ -254,7 +269,8 @@ class InboxService:
                     ]
                     self._last_poll_ok = not failed
                     self._last_error = "; ".join(
-                        f"{name}: {value['last_error']}" for name, value in self._source_health.items()
+                        f"{name}: {value['last_error']}"
+                        for name, value in self._source_health.items()
                         if name in active_names and not value["last_poll_ok"]
                     )
                 except Exception as exc:
@@ -274,41 +290,61 @@ class InboxService:
         from gideon.core.config.loader import AppConfig
 
         cfg = AppConfig.load().inbox
-        catalog = [(source, enabled) for source, enabled in self._source_catalog() if enabled]
+        catalog = [
+            (source, enabled) for source, enabled in self._source_catalog() if enabled
+        ]
         timeout = 30.0
 
-        async def poll_one(source: "MessageSourceProvider") -> tuple[str, int, str, bool]:
+        async def poll_one(
+            source: "MessageSourceProvider",
+        ) -> tuple[str, int, str, bool]:
             name = str(source.source_name)
             started = time.time()
             try:
                 prefix = f"{name}:"
                 checkpoints = {
-                    key[len(prefix):]: value
+                    key[len(prefix) :]: value
                     for key, value in self.state.last_read_ts.items()
                     if key.startswith(prefix)
                 }
                 if name == "filesystem" and not checkpoints:
                     checkpoints = dict(self.state.last_read_ts)
-                watched = list(cfg.watched_channels) if getattr(source, "watches_channels", False) else []
+                watched = (
+                    list(cfg.watched_channels)
+                    if getattr(source, "watches_channels", False)
+                    else []
+                )
                 messages, new_checkpoints = await asyncio.wait_for(
                     source.poll(watched, checkpoints, cfg.user_id), timeout=timeout
                 )
-                self.state.last_read_ts.update({prefix + key: value for key, value in new_checkpoints.items()})
+                self.state.last_read_ts.update(
+                    {prefix + key: value for key, value in new_checkpoints.items()}
+                )
                 ingested = self._ingest(
-                    messages, source=source, own_user_id=cfg.user_id, test_mode=cfg.test_mode
+                    messages,
+                    source=source,
+                    own_user_id=cfg.user_id,
+                    test_mode=cfg.test_mode,
                 )
                 provider_error = str(getattr(source, "last_error", "") or "")
                 if provider_error:
-                    provider_error = redact_exfiltration_urls(redact_credentials(provider_error))
+                    provider_error = redact_exfiltration_urls(
+                        redact_credentials(provider_error)[0]
+                    )[0]
                 self._source_health[name] = {
                     "active": True,
                     "kind": "poll",
                     "can_reply": name != "filesystem",
-                    "watches_channels": bool(getattr(source, "watches_channels", False)),
+                    "watches_channels": bool(
+                        getattr(source, "watches_channels", False)
+                    ),
                     "last_poll_at": started,
                     "last_poll_ok": not bool(provider_error),
                     "last_error": provider_error,
-                    "poll_count": int(self._source_health.get(name, {}).get("poll_count", 0)) + 1,
+                    "poll_count": int(
+                        self._source_health.get(name, {}).get("poll_count", 0)
+                    )
+                    + 1,
                     "stale": False,
                 }
                 return name, ingested, "", bool(new_checkpoints)
@@ -316,7 +352,7 @@ class InboxService:
                 error = f"poll exceeded {timeout:g}s timeout"
             except Exception as exc:
                 detail = str(exc) or exc.__class__.__name__
-                error = redact_exfiltration_urls(redact_credentials(detail))
+                error = redact_exfiltration_urls(redact_credentials(detail)[0])[0]
                 logger.warning("Inbox source %s poll failed", name, exc_info=True)
             self._source_health[name] = {
                 "active": True,
@@ -326,7 +362,10 @@ class InboxService:
                 "last_poll_at": started,
                 "last_poll_ok": False,
                 "last_error": error,
-                "poll_count": int(self._source_health.get(name, {}).get("poll_count", 0)) + 1,
+                "poll_count": int(
+                    self._source_health.get(name, {}).get("poll_count", 0)
+                )
+                + 1,
                 "stale": False,
             }
             return name, 0, error, False
@@ -334,7 +373,10 @@ class InboxService:
         if not catalog:
             return
         results = await asyncio.gather(*(poll_one(source) for source, _ in catalog))
-        if any(ingested or error or checkpoints for _, ingested, error, checkpoints in results):
+        if any(
+            ingested or error or checkpoints
+            for _, ingested, error, checkpoints in results
+        ):
             self.state.save()
 
     def _ingest(
@@ -358,7 +400,9 @@ class InboxService:
         for m in messages:
             timestamp = m.timestamp or 0.0
             message_key = m.id or m.text
-            item_id = polled_item_id(source_name, m.channel_id, message_key, now=timestamp)
+            item_id = polled_item_id(
+                source_name, m.channel_id, message_key, now=timestamp
+            )
             legacy_id = f"{m.channel_id}_{m.timestamp}"
             if (
                 item_id in self.inbox.items
@@ -369,7 +413,11 @@ class InboxService:
                 continue
             thread_id = m.thread_id or m.id or m.text
             mute_key = thread_mute_key(source_name, m.channel_id, thread_id)
-            legacy_mute_keys = {m.thread_id or "", m.id or "", legacy_id.rsplit("_", 1)[-1]}
+            legacy_mute_keys = {
+                m.thread_id or "",
+                m.id or "",
+                legacy_id.rsplit("_", 1)[-1],
+            }
             if mute_key in self.state.muted_threads or any(
                 key and key in self.state.muted_threads for key in legacy_mute_keys
             ):
@@ -474,7 +522,9 @@ class InboxService:
         except Exception:
             return ""
 
-    async def draft_reply(self, item_id: str, *, instructions: str = "", evidence=None) -> InboxItem | None:
+    async def draft_reply(
+        self, item_id: str, *, instructions: str = "", evidence=None
+    ) -> InboxItem | None:
         """Draft a reply to a stored item in the user's voice; persist + return the item.
 
         Returns None if the item is unknown or the model call fails. Questions,
@@ -488,16 +538,33 @@ class InboxService:
             return None
         from gideon.integrations.llm_helpers import one_shot_completion
         from gideon.integrations.prompt_providers.runtime import render_use_case_prompt
+        from gideon.integrations.reply_grounding import (
+            DRAFT_INSTRUCTIONS_MAX_CHARS,
+            drafting_rules,
+            grounding,
+            note_prompt,
+        )
 
-        from gideon.integrations.reply_grounding import grounding, drafting_rules, note_prompt, DRAFT_INSTRUCTIONS_MAX_CHARS
-        if not isinstance(instructions, str) or len(instructions) > DRAFT_INSTRUCTIONS_MAX_CHARS:
-            raise ValueError("Reply instructions must be text of at most 2000 characters")
+        if (
+            not isinstance(instructions, str)
+            or len(instructions) > DRAFT_INSTRUCTIONS_MAX_CHARS
+        ):
+            raise ValueError(
+                "Reply instructions must be text of at most 2000 characters"
+            )
         evidence = evidence if evidence is not None else grounding(instructions)
         if any(not note["available"] for note in evidence.named_notes):
             return item
         from gideon.extensions.providers.prompt_use_cases import active_prompt_ref
+
         producer = active_prompt_ref("inbox_draft")
-        baseline = (item.draft, item.message, repr(item.thread_context), item.status, item.classification)
+        baseline = (
+            item.draft,
+            item.message,
+            repr(item.thread_context),
+            item.status,
+            item.classification,
+        )
         style = (
             f"Match this voice/style when replying:\n{self._style_rules}"
             if self._style_rules
@@ -519,28 +586,54 @@ class InboxService:
         try:
             with caller_scope("inbox_triage"):
                 raw = (
-                    await one_shot_completion(prompt + note_prompt(evidence) + drafting_rules(instructions), use_case="background") or ""
+                    await one_shot_completion(
+                        prompt + note_prompt(evidence) + drafting_rules(instructions),
+                        use_case="background",
+                    )
+                    or ""
                 ).strip()
         except Exception:
             logger.warning("inbox draft failed for %s", item_id, exc_info=True)
             return None
         if raw.upper().startswith("ASK:"):
-            evidence.question = " ".join(raw[4:].split())[:300] or "What should this reply say?"
+            evidence.question = (
+                " ".join(raw[4:].split())[:300] or "What should this reply say?"
+            )
             return item
         if not raw or raw.upper() == "SKIP":
             evidence.skipped = True
             return item
         evidence.words = len(raw.split())
         if evidence.word_limit is not None and evidence.words > evidence.word_limit:
-            evidence.warnings.append("The generated reply exceeded your word limit. Your existing draft is unchanged.")
+            evidence.warnings.append(
+                "The generated reply exceeded your word limit. Your existing draft is unchanged."
+            )
             return item
         current = self.inbox.items.get(item_id)
         if current is None:
             return None
-        if baseline != (current.draft, current.message, repr(current.thread_context), current.status, current.classification):
-            evidence.warnings.append("This item changed during generation. Your existing draft is unchanged.")
+        if baseline != (
+            current.draft,
+            current.message,
+            repr(current.thread_context),
+            current.status,
+            current.classification,
+        ):
+            evidence.warnings.append(
+                "This item changed during generation. Your existing draft is unchanged."
+            )
             return current
-        updates: dict = {"draft": raw, "drafted_by": producer, "context_summary": ("Drafted from " + ", ".join(note["name"] for note in evidence.named_notes) + ", as you asked." if evidence.named_notes else "Draft based on the quoted conversation")}
+        updates: dict = {
+            "draft": raw,
+            "drafted_by": producer,
+            "context_summary": (
+                "Drafted from "
+                + ", ".join(note["name"] for note in evidence.named_notes)
+                + ", as you asked."
+                if evidence.named_notes
+                else "Draft based on the quoted conversation"
+            ),
+        }
         evidence.wrote = True
         return self.inbox.update(item_id, **updates)
 
@@ -556,6 +649,7 @@ class InboxService:
         if not messages:
             return None
         from gideon.extensions.providers.prompt_use_cases import active_prompt_ref
+
         digest_producer = active_prompt_ref("inbox_digest")
         from gideon.integrations.llm_helpers import one_shot_completion
         from gideon.integrations.prompt_providers.runtime import render_use_case_prompt

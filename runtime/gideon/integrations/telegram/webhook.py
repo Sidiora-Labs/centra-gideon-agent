@@ -2,16 +2,19 @@
 
 import hmac
 import json
+
 from aiohttp import web
+
 from gideon.integrations.channel_delivery import delivery_for
+
 from .api import TelegramError
 
 
 async def receive_webhook(request):
     delivery = delivery_for("telegram")
-    if delivery is None or not delivery.transport.connected:
+    transport = getattr(delivery, "transport", None)
+    if transport is None or not transport.connected:
         raise web.HTTPServiceUnavailable()
-    transport = delivery.transport
     received = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
     if hasattr(transport, "bots"):
         transport = next(

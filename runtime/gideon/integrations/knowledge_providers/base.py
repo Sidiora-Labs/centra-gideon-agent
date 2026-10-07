@@ -11,7 +11,10 @@ contract-owner-before-consumer rule.
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from gideon.workspace.uploads.content_intake import IntakeRefused
 
 
 @dataclass
@@ -78,6 +81,7 @@ class SourceItem:
     metadata: dict[str, Any] = field(default_factory=dict)
     also_seen_in: list[str] = field(default_factory=list)
     change: str = CHANGE_CREATED
+    _intake_refusal: "IntakeRefused | None" = field(default=None, repr=False)
 
 
 @dataclass

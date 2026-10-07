@@ -37,7 +37,9 @@ SECRET_MASK = "[REDACTED: credential]"
 def is_credential_field_name(name):
     # Keep import-package writers above this low-level slot scanner in dependency order.
     from gideon.cognition.onboarding_import.floors import credential_field
+
     return credential_field(name)
+
 
 #: Flags whose NEXT argument is an HTTP header (``mcp-remote --header "Authorization: Bearer …"``,
 #: curl's ``-H``): its name stays, its value is the credential.
@@ -62,7 +64,9 @@ def looks_secret(text: str) -> bool:
     if SECRET_BINDING_RE.search(text) or redact_credentials(text)[1]:
         return True
     return any(
-        _TOKEN_RUN_RE.fullmatch(piece) and _LETTER_RE.search(piece) and _DIGIT_RE.search(piece)
+        _TOKEN_RUN_RE.fullmatch(piece)
+        and _LETTER_RE.search(piece)
+        and _DIGIT_RE.search(piece)
         for piece in text.split(".")
     )
 
@@ -71,7 +75,11 @@ def flag_carries(arg: str) -> str | None:
     """What the argument AFTER ``arg`` holds: ``"header"``, a credential ``"value"``, or neither."""
     if arg in HEADER_FLAGS:
         return "header"
-    if arg.startswith("-") and "=" not in arg and is_credential_field_name(arg.lstrip("-")):
+    if (
+        arg.startswith("-")
+        and "=" not in arg
+        and is_credential_field_name(arg.lstrip("-"))
+    ):
         return "value"
     return None
 
@@ -81,7 +89,8 @@ class Spot:
     """Where one credential sits in a text: ``text[start:end]``. ``kind`` and ``name`` say what it
     is in words that hold no value: ``flag`` (``name`` is the flag, ``--api-token``), ``header``
     (``name`` is the header), ``login`` (an address's), ``query`` (``name`` is the query key),
-    ``path`` (a part of an address's path) or ``key`` (an argument in a key's format)."""
+    ``path`` (a part of an address's path) or ``key`` (an argument in a key's format).
+    """
 
     start: int
     end: int
@@ -177,13 +186,17 @@ def address_spots(url: str) -> tuple[Spot, ...]:
     if parsed.username is not None or parsed.password is not None or parsed.fragment:
         raise ValueError("MCP URL userinfo and fragments are not supported")
     host = len(scheme) + 3
-    authority_end = min([i for i in (url.find(c, host) for c in "/?#") if i != -1] or [len(url)])
+    authority_end = min(
+        [i for i in (url.find(c, host) for c in "/?#") if i != -1] or [len(url)]
+    )
     at = url.rfind("@", host, authority_end)
     if at != -1 and _is_reference(url[host:at]):
         # A login kept in the credential store: the reference is the whole of it.
         spots.append(Spot(host, at, "login"))
         host = at + 1
-    path_end = min([i for i in (url.find(c, authority_end) for c in "?#") if i != -1] or [len(url)])
+    path_end = min(
+        [i for i in (url.find(c, authority_end) for c in "?#") if i != -1] or [len(url)]
+    )
     pos = authority_end
     for segment in url[authority_end:path_end].split("/"):
         if segment and looks_secret(unquote(segment)):
@@ -198,14 +211,21 @@ def address_spots(url: str) -> tuple[Spot, ...]:
             if (
                 eq
                 and value
-                and (is_credential_field_name(unquote(key)) or looks_secret(unquote(value)))
+                and (
+                    is_credential_field_name(unquote(key))
+                    or looks_secret(unquote(value))
+                )
             ):
-                spots.append(Spot(pos + len(key) + 1, pos + len(pair), "query", unquote(key)))
+                spots.append(
+                    Spot(pos + len(key) + 1, pos + len(pair), "query", unquote(key))
+                )
             pos += len(pair) + 1
     return tuple(spots)
 
 
-def replaced(text: str, spots: Iterable[Spot], value_for: Callable[[Spot, str], str]) -> str:
+def replaced(
+    text: str, spots: Iterable[Spot], value_for: Callable[[Spot, str], str]
+) -> str:
     """*text* with each spot's content replaced by ``value_for(spot, content)``."""
     out: list[str] = []
     pos = 0
@@ -246,11 +266,12 @@ def described(spot: Spot) -> str:
     return "a key in its arguments"
 
 
-
 def command_line(spec):
     """Yield executable texts and deterministic credential spots, retaining shape."""
     args = spec.get("args") or []
-    if not isinstance(args, (list, tuple)) or any(not isinstance(arg, str) or "\0" in arg for arg in args):
+    if not isinstance(args, (list, tuple)) or any(
+        not isinstance(arg, str) or "\0" in arg for arg in args
+    ):
         raise ValueError("MCP args must be NUL-free strings")
     for index, (text, spots) in enumerate(zip(args, argument_spots(args), strict=True)):
         yield "args", index, text, spots
@@ -264,10 +285,11 @@ def command_line(spec):
 def command_line_references(spec):
     """Flat owner reference values for exact store cleanup; no plaintext returned."""
     from gideon.core.config.secret_refs import _owned_reference
+
     refs = {}
     for field, index, text, spots in command_line(spec):
         for order, spot in enumerate(spots):
-            value = text[spot.start:spot.end]
+            value = text[spot.start : spot.end]
             if _owned_reference(value) is not None:
                 refs[f"{field}_{index}_{order}"] = value
     return refs
@@ -299,13 +321,16 @@ def _with_texts(spec, texts):
 
 
 def _validate_spot_reference(name, spot, value):
-    from gideon.core.config.secret_refs import _owned_reference, ForeignSecretReference
+    from gideon.core.config.secret_refs import ForeignSecretReference, _owned_reference
     from gideon.extensions.providers.mcp_instances import mcp_owner
+
     reference = _owned_reference(value)
     if "{{secret:" in value and reference is None:
         raise ValueError(f"MCP credential reference malformed at {described(spot)}")
     if reference is not None and not mcp_owner(name).owns(reference):
-        raise ForeignSecretReference(f"MCP credential belongs to another server at {described(spot)}")
+        raise ForeignSecretReference(
+            f"MCP credential belongs to another server at {described(spot)}"
+        )
     return reference
 
 
@@ -313,7 +338,7 @@ def validate_references(name, spec):
     """Validate owner identity in recognized slots without resolving secret values."""
     for _field, _index, text, spots in command_line(spec):
         for spot in spots:
-            _validate_spot_reference(name, spot, text[spot.start:spot.end])
+            _validate_spot_reference(name, spot, text[spot.start : spot.end])
         remainder = replaced(text, spots, lambda _spot, _value: "")
         if SECRET_BINDING_RE.search(remainder) or "{{secret:" in remainder:
             raise ValueError("MCP credential reference is outside a credential slot")
@@ -322,22 +347,29 @@ def validate_references(name, spec):
 def store_command_line(name, spec, previous=None):
     from gideon.core.config.secret_refs import store
     from gideon.extensions.providers.mcp_instances import mcp_owner
+
     validate_references(name, spec)
     old = {}
     for field, index, text, spots in command_line(previous or {}):
         for order, spot in enumerate(spots):
-            old[f"{field}_{index}_{order}"] = text[spot.start:spot.end]
+            old[f"{field}_{index}_{order}"] = text[spot.start : spot.end]
     texts = {}
     for field, index, text, spots in command_line(spec):
         order = 0
+
         def value_for(spot, value):
             nonlocal order
             key = f"{field}_{index}_{order}"
             order += 1
             try:
-                return store({key: value}, owner=mcp_owner(name), declared={key}, previous=old)[key]
+                return store(
+                    {key: value}, owner=mcp_owner(name), declared={key}, previous=old
+                )[key]
             except ValueError as exc:
-                raise ValueError(f"MCP credential unavailable at {described(spot)}") from exc
+                raise ValueError(
+                    f"MCP credential unavailable at {described(spot)}"
+                ) from exc
+
         texts[(field, index)] = replaced(text, spots, value_for)
     return _with_texts(spec, texts)
 
@@ -345,9 +377,11 @@ def store_command_line(name, spec, previous=None):
 def resolve_command_line(name, spec):
     from gideon.core.config.secret_refs import resolve
     from gideon.extensions.providers.mcp_instances import mcp_owner
+
     validate_references(name, spec)
     texts = {}
     for field, index, text, spots in command_line(spec):
+
         def value_for(spot, value):
             reference = _validate_spot_reference(name, spot, value)
             if reference is None:
@@ -355,27 +389,38 @@ def resolve_command_line(name, spec):
             try:
                 return resolve({"value": value}, owner=mcp_owner(name))["value"]
             except ValueError as exc:
-                raise ValueError(f"MCP credential unavailable at {described(spot)}") from exc
+                raise ValueError(
+                    f"MCP credential unavailable at {described(spot)}"
+                ) from exc
+
         texts[(field, index)] = replaced(text, spots, value_for)
     return _with_texts(spec, texts)
-
 
 
 def known_values(spec):
     """Resolved credential bytes eligible for diagnostic redaction, never for logging."""
     from gideon.core.config.secret_refs import _owned_reference
-    values = set()
+
+    values: set[str] = set()
     for _field, _index, text, spots in command_line(spec):
-        values.update(text[spot.start:spot.end] for spot in spots)
+        values.update(text[spot.start : spot.end] for spot in spots)
     for field in ("env", "headers", "oauth"):
         fields = spec.get(field) or {}
         for name, value in fields.items() if isinstance(fields, dict) else ():
-            if isinstance(value, str) and (field == "headers" or is_credential_field_name(name)):
+            if isinstance(value, str) and (
+                field == "headers" or is_credential_field_name(name)
+            ):
                 values.add(value)
     for value in tuple(values):
         if value.lower().startswith("bearer "):
             values.add(value[7:])
-    return tuple(sorted((value for value in values if value and _owned_reference(value) is None), key=len, reverse=True))
+    return tuple(
+        sorted(
+            (value for value in values if value and _owned_reference(value) is None),
+            key=len,
+            reverse=True,
+        )
+    )
 
 
 def scrub_text(text, values):
