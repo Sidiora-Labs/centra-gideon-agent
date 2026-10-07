@@ -6,7 +6,11 @@ directly. This keeps the dispatch logic in one place and makes the
 ``UNSUPPORTED`` path produce consistent error output.
 """
 
+import os
+import plistlib
+import shlex
 import sys
+from pathlib import Path
 
 from gideon.operations.service import linux, macos
 from gideon.operations.service.common import Platform, current_platform
@@ -155,3 +159,61 @@ def restart_service() -> bool:
             return True
         return False
     return False
+
+
+def _definition_home(path: Path, platform: Platform) -> Path | None:
+    """Read the home owned by a definition without starting or probing its service."""
+    try:
+        if platform == Platform.LAUNCHD:
+            document = plistlib.loads(path.read_bytes())
+            if not isinstance(document, dict):
+                return None
+            values = document.get("EnvironmentVariables")
+            if not isinstance(values, dict):
+                return None
+        elif platform == Platform.SYSTEMD:
+            values = {}
+            section = ""
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith(("#", ";")):
+                    continue
+                if line.startswith("[") and line.endswith("]"):
+                    section = line[1:-1]
+                elif section == "Service" and line.startswith("Environment="):
+                    assignments = shlex.split(line.partition("=")[2], posix=True)
+                    if not assignments:
+                        values.clear()
+                    for assignment in assignments:
+                        name, separator, value = assignment.partition("=")
+                        if not separator:
+                            return None
+                        values[name] = value.replace("%%", "%")
+        else:
+            return None
+    except (OSError, UnicodeError, ValueError, plistlib.InvalidFileException):
+        return None
+    if "GIDEON_HOME" in values:
+        home = values["GIDEON_HOME"]
+    else:
+        base = values.get("HOME")
+        home = str(Path(base) / ".gideon") if isinstance(base, str) and base else ""
+    if not isinstance(home, str) or not home or not os.path.isabs(home):
+        return None
+    return Path(home).resolve()
+
+
+def this_homes_service() -> Path | None:
+    """Return this home's installed service definition, including a stopped service."""
+    from gideon.core.config.loader import resolve_config_dir
+
+    platform = current_platform()
+    if platform == Platform.SYSTEMD:
+        path = Path(linux.UNIT_PATH)
+    elif platform == Platform.LAUNCHD:
+        path = Path(os.fspath(macos.PLIST_PATH))
+    else:
+        return None
+    if _definition_home(path, platform) == resolve_config_dir().resolve():
+        return path
+    return None
