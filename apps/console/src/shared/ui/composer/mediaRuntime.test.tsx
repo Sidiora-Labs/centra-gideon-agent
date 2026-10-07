@@ -159,7 +159,8 @@ describe('spoken trigger boundaries', () => {
   it('matches configurable contractions and long phrases as whole tokens', () => {
     expect(isConfirmation("don't wait", ["don't wait"], 1)).toBe(true)
     expect(isConfirmation('please do not wait for another confirmation before sending', ['do not wait for another confirmation before sending'])).toBe(true)
-    expect(isConfirmation('dont wait', ["don't wait"])).toBe(false)
+    expect(isConfirmation('dont wait', ["don't wait"])).toBe(true)
+    expect(isConfirmation('do wait', ["don't wait"])).toBe(false)
   })
 
   it('keeps words after a tail-window trigger in the submitted instruction', () => {
@@ -168,12 +169,13 @@ describe('spoken trigger boundaries', () => {
 
   it('retains punctuation outside the recognized suffix separators', () => {
     expect(stripTrailingPhrase('draft — send it!', phrases.confirmation)).toBe('draft —')
-    expect(stripTrailingPhrase('draft send it…', phrases.confirmation)).toBe('draft send it…')
+    expect(stripTrailingPhrase('draft send it…', phrases.confirmation)).toBe('draft')
+    expect(stripTrailingPhrase('draft… keep it', phrases.confirmation)).toBe('draft… keep it')
     expect(stripTrailingPhrase('draft: SEND, IT!?', phrases.confirmation)).toBe('draft')
   })
 
-  it('uses configured phrase priority when several triggers occur in the tail', () => {
-    expect(stripTrailingPhrase('send it then go ahead', phrases.confirmation)).toBe('send it then go ahead')
+  it('strips the ending trigger independently of configured phrase order', () => {
+    expect(stripTrailingPhrase('send it then go ahead', phrases.confirmation)).toBe('send it then')
     expect(stripTrailingPhrase('send it then go ahead', [...phrases.confirmation].reverse())).toBe('send it then')
   })
 })

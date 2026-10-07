@@ -3,6 +3,7 @@ import { render, screen, cleanup, act, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Composer } from './Composer'
+import { EditorView } from '@codemirror/view'
 
 
 
@@ -230,23 +231,31 @@ describe('the transcript', () => {
     expect(text).toContain('tail-audio')
   })
 
-  it('lands at the cursor rather than being appended, and keeps the draft', async () => {
+  it.each([0, 3])('lands at cursor %s after review rather than being appended, and keeps the draft', async (caret) => {
     const { fire } = installBridge()
     const { state } = mountComposer({ value: 'draft ', transcript: 'spoken words' })
+    const editor = EditorView.findFromDOM(screen.getByRole('textbox', { name: 'Message input' }))!
+    act(() => editor.dispatch({ selection: { anchor: caret } }))
 
     await chord(fire)
     await waitFor(() => expect(recorders.length).toBe(1))
     await chord(fire)
 
+    const review = await screen.findByRole('group', { name: 'Review speech transcription' })
+    expect(review).toBeTruthy()
+    expect(state.value).toBe('draft ')
+    expect(screen.getByRole('textbox', { name: 'Edit transcription' })).toHaveValue('spoken words')
+    await act(async () => { screen.getByRole('button', { name: 'Use text' }).click() })
+
     await waitFor(() => expect(state.value).toContain('spoken words'))
-    expect(state.value).toContain('draft ')
-    expect(state.value).toBe('spoken wordsdraft ')
+    expect(state.value.replace('spoken words', '')).toBe('draft ')
+    expect(state.value).toBe('draft '.slice(0, caret) + 'spoken words' + 'draft '.slice(caret))
     expect(state.value).not.toBe('draft spoken words')
   })
 
   it('routes the insertion through the composer’s caret API, not string concatenation', () => {
     const src = readFileSync(join(process.cwd(), "src/shared/ui/Composer.tsx"), 'utf8')
-    expect(src).toMatch(/insertAtCaret\(text\)/)
+    expect(src).toMatch(/insertAtCaret\(dictation\.edited\.trim\(\)\)/)
     expect(src).not.toMatch(/onChange\(value \+ text\)/)
   })
 })
