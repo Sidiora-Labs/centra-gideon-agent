@@ -14,25 +14,29 @@ describe('the task delete states what the backend really does', () => {
   it('claims the unblock, and the backend performs it', () => {
     const ui = web('features/tasks/TaskDetail.tsx')
     expect(ui, 'the sentence exists').toMatch(
-      /waiting on it \$\{dependents\.length === 1 \? 'becomes' : 'become'\} unblocked/,
+      /waiting on it \$\{count === 1 \? 'becomes' : 'become'\} unblocked/,
     )
     expect(ui, 'and the body interpolates it').toMatch(
-      /body: `This cannot be undone\.\$\{unblocks\}`/,
+      /body: `This cannot be undone\.\$\{consequence\}`/,
     )
     const impl = py('engine/tasks/native.py')
-    const del = impl.slice(impl.indexOf('async def delete_task'), impl.indexOf('def graph(self)'))
+    const del = pyMethod(impl, '    def _delete_locked')
+    expect(pyMethod(impl, '    async def delete_task'), 'the public delete reaches the mutation').toMatch(/TaskMutation\(self\)\.delete, task_id/)
+    expect(pyMethod(impl, '    def delete(self, identifier)'), 'the locked mutation reaches the deletion').toMatch(/self\._delete_locked\(identifier\)/)
     expect(del, 'edges pointing at the deleted task are dropped').toMatch(
-      /d\.depends_on_task_id != task_id/,
+      /edge\.depends_on_task_id != identifier/,
     )
     expect(del, 'and every former dependent is re-evaluated').toMatch(
-      /reconcile\.reconcile_blocked_status\(tasks, t\.id\)/,
+      /for key in list\(tasks\):[\s\S]*reconcile\.reconcile_blocked_status\(tasks, key\)/,
     )
   })
 
   it('the count comes from the set the Blocks section shows', () => {
     const ui = web('features/tasks/TaskDetail.tsx')
-    expect(ui).toMatch(/const dependents = allTasks\.filter\(\(t\) => prereqIds\(t\)\.includes\(task\.id\)\)/)
-    expect((ui.match(/allTasks\.filter\(\(t\) => prereqIds/g) ?? []).length, 'computed once').toBe(1)
+    expect(ui).toMatch(/const dependents = allTasks\.filter\(candidate => prereqIds\(candidate\)\.includes\(task\.id\)\)/)
+    expect(ui, 'the warning derives its count from those dependents').toMatch(/const count = dependents\.length/)
+    expect(ui, 'the Blocks section renders that same set').toMatch(/dependents\.map\(related =>/)
+    expect((ui.match(/allTasks\.filter\(candidate => prereqIds/g) ?? []).length, 'computed once').toBe(1)
   })
 
   it('names the task — it was the one dialog naming its subject nowhere', () => {
@@ -43,7 +47,7 @@ describe('the task delete states what the backend really does', () => {
 
   it('says NOTHING about comments, because the backend does not remove them', () => {
     const impl = py('engine/tasks/native.py')
-    const del = impl.slice(impl.indexOf('async def delete_task'), impl.indexOf('def graph(self)'))
+    const del = pyMethod(impl, '    def _delete_locked')
     expect(del, 'still no comments cleanup — if this fails, update the dialog copy too')
       .not.toMatch(/_comments_/)
     expect(web('features/tasks/TaskDetail.tsx'), 'so the dialog claims nothing about them')
@@ -63,8 +67,10 @@ describe('the knowledge delete states what the backend really takes', () => {
     expect(annotations, 'and its item_id must cascade').toMatch(
       /item_id TEXT NOT NULL REFERENCES items\(id\) ON DELETE CASCADE/,
     )
-    const connect = store.slice(store.indexOf('self.db = sqlite3.connect('))
-    expect(connect.slice(0, 400), 'the connection itself enables foreign keys')
+    const connect = pyMethod(store, '    def __init__(self, db_path: str)')
+    expect(connect, 'the active store uses the native shared connection').toMatch(/self\.db = connect_shared\(/)
+    expect(pyMethod(py('core/sqlite_compat.py'), 'def connect_shared'), 'the shared factory opens the selected SQLite driver').toMatch(/sqlite3\.connect\(database, \*args, factory=SharedConnection, \*\*kwargs\)/)
+    expect(connect, 'the connection itself enables foreign keys')
       .toMatch(/PRAGMA foreign_keys=ON/)
   })
 
@@ -155,11 +161,15 @@ describe('no destructive dialog names its subject NOWHERE', () => {
 describe('two more bodies: one corrected, one confirmed', () => {
   it('the bulk dismiss says what survives, and this page is what keeps them', () => {
     const ui = web('features/inbox/InboxPage.tsx')
-    expect(ui, 'the whole sentence').toContain(
-      'There is no undo — but they stay readable under Handled.',
+    const queue = web('features/inbox/inboxQueueState.ts')
+    expect(queue, 'the actual bulk-dismiss warning names both consequences').toContain(
+      'Every open item of every kind is dismissed at once, and skill proposals are rejected. There is no undo — but inbox rows stay readable under Handled.',
     )
-    expect(ui, "and the filter that makes the second half true").toMatch(
-      /filter === 'handled' \? \(it\.status === 'handled' \|\| it\.status === 'sent' \|\| it\.status === 'dismissed'\)/,
+    expect(ui, 'the page uses the native queue action').toMatch(/useInboxQueue\(openId, setOpenId\)/)
+    expect(queue, 'the warning precedes the real dismiss operation').toMatch(/confirm\([\s\S]*api\.dismissAllInbox\(\)/)
+    expect(ui, 'the page renders the native queue projection').toMatch(/projectInbox\(visibleItems, filter, kind, q\)/)
+    expect(web('features/inbox/inboxQueueState.ts'), 'the projection preserves all handled states').toMatch(
+      /case 'handled': return \['handled', 'sent', 'dismissed'\]\.includes\(item\.status\)/,
     )
   })
 
@@ -180,7 +190,9 @@ describe('two more bodies: one corrected, one confirmed', () => {
     expect(del.slice(0, 6000), 'the on-disk artifacts are purged').toMatch(
       /conversation_log\.delete_session\(history_key\)/,
     )
-    expect(del.slice(0, 6000)).toMatch(/letting it resurrect on reopen/)
+    expect(del.slice(0, 6000), 'the deleted chat cannot reopen from the live session cache').toMatch(/state\._sessions\.pop\(name, None\)/)
+    expect(del.slice(0, 6000), 'both stored and display session workspaces are purged').toMatch(/for _sid in \{history_key, name\}:[\s\S]*purge_session_workspace\(_sid\)/)
+    expect(del.slice(0, 6000), 'checkpoint artifacts are removed too').toMatch(/turn_checkpoints\.prune_session\(_sid\)/)
   })
 })
 
@@ -255,8 +267,8 @@ describe('four more bodies, all already true — pinned so they stay that way', 
     expect(ddl.slice(0, ddl.indexOf(');')), 'the self-FK sets null').toMatch(
       /parent_id INTEGER REFERENCES tags\(id\) ON DELETE SET NULL/,
     )
-    const connect = store.slice(store.indexOf('self.db = sqlite3.connect('))
-    expect(connect.slice(0, 400), 'and the connection enforces foreign keys').toMatch(/PRAGMA foreign_keys=ON/)
+    const connect = pyMethod(store, '    def __init__(self, db_path: str)')
+    expect(connect, 'and the connection enforces foreign keys').toMatch(/PRAGMA foreign_keys=ON/)
     expect(ui).toMatch(/This removes the tag from \$\{t\.usage_count\} item/)
     expect(pyMethod(store, '    def delete_tag'), 'the docstring states the same contract')
       .toMatch(/Children are re-parented to root rather than deleted/)
