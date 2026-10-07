@@ -62,7 +62,17 @@ afterAll(async () => {
 const base = '/api/capabilities/wellbeing/privacy'
 const password = 'private UI passphrase not stored'
 const secret = 'ui-person-81276@example.test'
-const change = async (label: string, value: string) => fireEvent.change(await screen.findByLabelText(label), { target: { value } })
+const change = async (label: string, value: string) => {
+  await screen.findByLabelText(label)
+  await waitFor(() => {
+    const control = screen.getByLabelText(label)
+    const submit = control.closest('form')?.querySelector('button[type="submit"]')
+    expect(submit).toBeTruthy()
+    expect(submit).not.toBeDisabled()
+    expect(submit).not.toHaveAttribute('aria-disabled', 'true')
+  })
+  fireEvent.change(screen.getByLabelText(label), { target: { value } })
+}
 
 test('owner grants scoped consent, creates encrypted fact and explicitly reveals, corrects, revokes and reloads', async () => {
   window.history.replaceState(null, '', '#/capabilities/wellbeing/privacy?shell=retained')
@@ -118,7 +128,10 @@ test('owner grants scoped consent, creates encrypted fact and explicitly reveals
   await change('Reveal passphrase', password)
   fireEvent.click(screen.getByRole('button', { name: 'Reveal selected fact' }))
   expect(await screen.findByText('revised-private-712@example.test')).toBeInTheDocument()
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Record consent decision' })).toBeEnabled())
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: 'Record consent decision' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Record consent decision' })).not.toHaveAttribute('aria-disabled', 'true')
+  })
   fireEvent.click(screen.getByLabelText('Grant consent'))
   fireEvent.click(screen.getByRole('button', { name: 'Record consent decision' }))
   await screen.findByText('reveal revision 2: revoked · Owner confirmed at console')

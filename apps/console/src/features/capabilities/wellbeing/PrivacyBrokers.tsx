@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useHashRoute } from '../../../app/shell/useHashRoute'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
-import { Field, TextInput } from '../../../shared/ui/forms'
+import { Field, TextInput, Select, Checkbox } from '../../../shared/ui/forms'
 import { WhitepagesBrokerPanel } from './WhitepagesBrokerPanel'
 import { BeenVerifiedBrokerPanel } from './BeenVerifiedBrokerPanel'
 
@@ -130,7 +130,7 @@ export default function PrivacyBrokers({ subject }: { subject: string }) {
     </form>
     <form onSubmit={addCase} className="space-y-m">
       <h3>Start subject case</h3>
-      <label>Broker<select className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Case broker" value={brokerId} onChange={event => setBrokerId(event.target.value)}>{brokers.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
+      <label>Broker<Select ariaLabel="Case broker" value={brokerId} onChange={next => setBrokerId(next)} options={[...brokers.map(row => ({ value: row.id, label: row.name }))]} /></label>
       <Button type="submit" disabled={busy || !brokerId} disabledReason={busy ? BUSY_REASON : undefined}>Start broker case</Button>
     </form>
     <div className="flex flex-wrap gap-s">{cases.map(row => <Button key={row.id} variant="secondary" onClick={() => setQuery({ broker_case: row.id })}>{row.broker?.name ?? row.broker_id} · {row.state}</Button>)}</div>
@@ -160,14 +160,14 @@ export default function PrivacyBrokers({ subject }: { subject: string }) {
         {spokeoPlan && <div role="status" className="space-y-2">
           <p>{providerStatus}</p>
           <p>Submission discloses: {spokeoPlan.disclosed_fields.join(', ')}.</p>
-          <label><input className="size-4 rounded border-outline-variant/40 text-primary focus:ring-primary" type="checkbox" checked={approved} onChange={event => setApproved(event.target.checked)} /> I approve this Spokeo opt-out submission</label>
+          <label><Checkbox checked={approved} onChange={next => setApproved(next)} ariaLabel={" I approve this Spokeo opt-out submission"} /> I approve this Spokeo opt-out submission</label>
           <Button disabled={busy || !approved || !spokeoPlan.live_submission_enabled} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => spokeo('submit')}>Submit approved opt-out</Button>
         </div>}
         {!spokeoPlan && providerStatus && <p role="status">{providerStatus}</p>}
       </section>}
       {selected.broker?.name.trim().toLowerCase() === 'whitepages' && <WhitepagesBrokerPanel brokerCase={selected} onChanged={row => setCases(current => current.map(item => item.id === row.id ? { ...item, ...row, broker: item.broker } : item))} />}
       {selected.broker?.name.trim().toLowerCase() === 'beenverified' && <BeenVerifiedBrokerPanel brokerCase={selected} onChanged={row => setCases(current => current.map(item => item.id === row.id ? { ...item, ...row, broker: item.broker } : item))} />}
-      <form onSubmit={observe} className="space-y-m"><label>Owner observation<select className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Owner observation" value={outcome} onChange={event => setOutcome(event.target.value)}>{['found', 'not_found', 'indirect_exposure', 'blocked'].map(value => <option key={value}>{value}</option>)}</select></label><Field label="Observation evidence"><TextInput value={evidence} onChange={setEvidence} required /></Field><Button type="submit" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>Record user-attested observation</Button></form>
+      <form onSubmit={observe} className="space-y-m"><label>Owner observation<Select ariaLabel="Owner observation" value={outcome} onChange={next => setOutcome(next)} options={[...['found', 'not_found', 'indirect_exposure', 'blocked'].map(value => ({ value: value, label: value }))]} /></label><Field label="Observation evidence"><TextInput value={evidence} onChange={setEvidence} required /></Field><Button type="submit" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>Record user-attested observation</Button></form>
       <Field label="Transition reason"><TextInput value={reason} onChange={setReason} /></Field>
       <div className="flex flex-wrap gap-s">{selected.allowed_transitions.map(state => <Button key={state} variant="secondary" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => transition(state)}>Move to {state}</Button>)}<Button variant="secondary" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={recheck}>Request re-check</Button></div>
     </section>}

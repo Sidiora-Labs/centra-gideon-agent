@@ -72,7 +72,7 @@ test('actual plan creation, explicit adherence and correction history', async ()
   expect(screen.getByText('Recorded schedule coverage: 33%')).toBeInTheDocument()
   fireEvent.click(row)
   await screen.findByRole('heading', { name: 'Correct adherence record' })
-  expect(screen.getByLabelText('Scheduled date')).toBeDisabled()
+  expectReadonlySource(screen.getByLabelText('Scheduled date'))
   change('Recorded status', 'skipped')
   change('Adherence notes', 'Corrected my mistaken observation')
   fireEvent.click(screen.getByRole('button', { name: 'Save adherence record' }))
@@ -134,3 +134,16 @@ test('archive keeps historical observations and enforces unique scheduled days',
   expect(records.records[0].plan_revision).toBe(1)
   expect(records.records[0].revision).toBe(3)
 })
+
+function expectReadonlySource(control: HTMLElement) {
+  expect(control).toHaveAttribute('readonly')
+  expect(control).not.toBeDisabled()
+  control.focus()
+  expect(document.activeElement).toBe(control)
+  const descriptionIds = control.getAttribute('aria-describedby')?.split(' ') ?? []
+  expect(descriptionIds.length).toBeGreaterThan(0)
+  for (const id of descriptionIds) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+  const original = (control as HTMLInputElement).value
+  fireEvent.change(control, { target: { value: 'Attempt to replace immutable provenance' } })
+  expect(control).toHaveValue(original)
+}

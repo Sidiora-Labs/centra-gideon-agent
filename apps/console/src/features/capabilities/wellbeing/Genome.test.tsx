@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from 'vitest'
+import { afterAll, beforeAll, expect, test, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -52,7 +52,7 @@ const tsv = '\ufeffrsid\tchromosome\tposition\tgenotype\r\nrs123\t1\t100\tAG\r\n
 test('real source preview, original bytes, annotation revisions and filters', async () => {
   const view = open()
   await screen.findByText('No genome sources.')
-  expect(screen.getByRole('button', { name: 'Preview genome' })).toBeDisabled()
+  expectGuardedPreview(screen.getByRole('button', { name: 'Preview genome' }))
   fireEvent.change(screen.getByLabelText('Choose genome file'), { target: { files: [new File([tsv], 'sample.tsv')] } })
   await screen.findByText('Selected: sample.tsv')
   change('Declared assembly', 'GRCh37')
@@ -142,3 +142,14 @@ test('VCF sample selection, replay and malformed files preserve sources', async 
   expect(screen.queryByRole('button', { name: 'Commit genome import' })).not.toBeInTheDocument()
   expect(await (await networkFetch(origin + base + '/sources')).json()).toEqual(catalog)
 })
+
+function expectGuardedPreview(button: HTMLElement) {
+  expect(button).toHaveAttribute('aria-disabled', 'true')
+  const ids = button.getAttribute('aria-describedby')?.split(' ') ?? []
+  expect(ids.length).toBeGreaterThan(0)
+  for (const id of ids) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+  button.focus()
+  expect(document.activeElement).toBe(button)
+  const actualFetch = vi.spyOn(globalThis, 'fetch')
+  try { fireEvent.click(button); expect(actualFetch).not.toHaveBeenCalled() } finally { actualFetch.mockRestore() }
+}

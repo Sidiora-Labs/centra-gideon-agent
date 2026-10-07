@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from 'vitest'
+import { afterAll, beforeAll, expect, test, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -51,7 +51,7 @@ const xml = '<HealthData><Record type="HKQuantityTypeIdentifierStepCount" source
 test('file selection, preview, commit and original download use the real importer', async () => {
   const view = render(<AppleHealth />)
   await screen.findByText('No imported metrics.')
-  expect(screen.getByRole('button', { name: 'Preview export' })).toBeDisabled()
+  expectGuardedPreview(screen.getByRole('button', { name: 'Preview export' }))
   fireEvent.change(screen.getByLabelText('Choose export'), { target: { files: [new File([xml], 'export.xml', { type: 'text/xml' })] } })
   await screen.findByText('Selected: export.xml')
   fireEvent.change(screen.getByLabelText('Export source'), { target: { value: 'personal export' } })
@@ -118,3 +118,14 @@ test('FHIR upload feeds canonical laboratory records and malformed input leaves 
   const unchanged = await (await networkFetch(`${origin}/api/capabilities/wellbeing/labs`)).json()
   expect(unchanged.records).toEqual(labs.records)
 })
+
+function expectGuardedPreview(button: HTMLElement) {
+  expect(button).toHaveAttribute('aria-disabled', 'true')
+  const ids = button.getAttribute('aria-describedby')?.split(' ') ?? []
+  expect(ids.length).toBeGreaterThan(0)
+  for (const id of ids) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+  button.focus()
+  expect(document.activeElement).toBe(button)
+  const actualFetch = vi.spyOn(globalThis, 'fetch')
+  try { fireEvent.click(button); expect(actualFetch).not.toHaveBeenCalled() } finally { actualFetch.mockRestore() }
+}

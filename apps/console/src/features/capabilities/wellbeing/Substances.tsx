@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useHashRoute } from '../../../app/shell/useHashRoute'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
-import { Field, TextInput } from '../../../shared/ui/forms'
+import { Field, TextInput, Select } from '../../../shared/ui/forms'
 
 type Product = { id: string; kind: 'alcohol' | 'nicotine'; name: string; details: { volume_ml?: number; abv_percent?: number; mg_per_unit?: number }; revision: number; deleted: boolean }
 type Entry = Product & { observed_at: string; source: string; notes: string; count: number; ethanol_g: number | null; nicotine_mg: number | null }
@@ -40,13 +40,13 @@ function Editor({ row, presets, presetMode, saved }: { row: Product | Entry | nu
   }
   return <form onSubmit={submit} className="space-y-m">
     <h2 data-type="title-m">{row ? 'Edit' : 'New'} {presetMode ? 'product preset' : 'consumption entry'}</h2>
-    {!presetMode && !row && <label className="block">Product preset<select className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Product preset" value={presetId} onChange={e => setPresetId(e.target.value)}><option value="">Enter product details</option>{presets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
+    {!presetMode && !row && <label className="block">Product preset<Select ariaLabel="Product preset" value={presetId} onChange={next => setPresetId(next)} options={[{ value: "", label: "Enter product details" }, ...presets.map(p => ({ value: p.id, label: p.name }))]} /></label>}
     {!presetId && <>
-      {!row && <label className="block">Kind<select className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label={presetMode ? 'Preset kind' : 'Entry kind'} value={kind} onChange={e => setKind(e.target.value as Product['kind'])}><option value="alcohol">Alcohol</option><option value="nicotine">Nicotine</option></select></label>}
+      {!row && <label className="block">Kind<Select ariaLabel={presetMode ? 'Preset kind' : 'Entry kind'} value={kind} onChange={next => setKind(next as Product['kind'])} options={[{ value: "alcohol", label: "Alcohol" }, { value: "nicotine", label: "Nicotine" }]} /></label>}
       <Field label="Product name"><TextInput value={name} onChange={setName} required /></Field>
       {kind === 'alcohol' ? <div className="grid gap-m sm:grid-cols-2"><Field label="Volume per serving (mL)"><TextInput value={volume} onChange={setVolume} required /></Field><Field label="ABV (%)"><TextInput value={abv} onChange={setAbv} required /></Field></div> : <Field label="Labeled nicotine per unit (mg)"><TextInput value={mg} onChange={setMg} required /></Field>}
     </>}
-    {!presetMode && <><Field label="Servings or units"><TextInput value={count} onChange={setCount} required /></Field><Field label="Observed at (with offset)"><TextInput value={observed} onChange={setObserved} required /></Field><Field label="Entry source" hint={!!row ? 'Create a new record to use another source' : undefined}><TextInput value={source} onChange={setSource} required disabled={!!row} disabledReason={!!row ? 'Create a new record to use another source' : undefined} /></Field><Field label="Entry notes"><TextInput value={notes} onChange={setNotes} /></Field></>}
+    {!presetMode && <><Field label="Servings or units"><TextInput value={count} onChange={setCount} required /></Field><Field label="Observed at (with offset)"><TextInput value={observed} onChange={setObserved} required /></Field><Field label="Entry source" hint={!!row ? 'Create a new record to use another source' : undefined}><TextInput value={source} onChange={setSource} required readOnly={!!row} readOnlyReason={!!row ? 'Create a new record to use another source' : undefined} /></Field><Field label="Entry notes"><TextInput value={notes} onChange={setNotes} /></Field></>}
     {error && <p role="alert" className="text-danger">{error}</p>}
     <Button type="submit" loading={busy} disabled={row?.deleted} disabledReason={busy ? BUSY_REASON : row?.deleted ? 'This entry has been deleted' : undefined}>{presetMode ? 'Save product preset' : 'Save consumption entry'}</Button>
   </form>

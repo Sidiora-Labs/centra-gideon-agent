@@ -97,19 +97,31 @@ test('canonical memory card reveal and self-grade persist schedule and reopen', 
 })
 
 test('content editing pins original artifact and archive preserves practice history', async () => {
+  const existing = await (await networkFetch(origin + base)).json()
+  if (!existing.cards.some((card: { front: string }) => card.front === 'Capital of France?')) {
+    const request = async (path: string, body: unknown) => {
+      const response = await networkFetch(origin + base + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      expect(response.status).toBe(200)
+      return response.json()
+    }
+    const created = await request('', { request_id: 'edit-card-fixture', front: 'Capital of France?', back: 'Paris', source: 'personal notes', tags: ['geography', 'practice'] })
+    const practiced = await request('/' + created.id + '/practice', { request_id: 'edit-card-good-fixture', revision: created.revision, grade: 'good' })
+    await request('/' + created.id + '/practice', { request_id: 'edit-card-again-fixture', revision: practiced.revision, grade: 'again' })
+  }
+
   open()
   fireEvent.click(await screen.findByRole('button', { name: 'Capital of France?' }))
   await screen.findByRole('heading', { name: 'Recall prompt' })
   fireEvent.click(screen.getByRole('button', { name: 'Edit selected card' }))
   await screen.findByRole('heading', { name: 'Edit memory card' })
-  expect(screen.getByLabelText('Memory source')).toBeDisabled()
+  expectReadonlySource(screen.getByLabelText('Memory source'))
   expect(screen.getByLabelText('Memory answer')).toHaveValue('Paris')
   change('Memory answer', 'Paris, France')
   fireEvent.click(screen.getByRole('button', { name: 'Save memory card' }))
   await screen.findByRole('heading', { name: 'Recall prompt' })
   expect(new URLSearchParams(location.hash.split('?')[1]).has('mode')).toBe(false)
   expect(screen.queryByText('Paris, France', { exact: true })).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: 'Reveal memory answer' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Reveal memory answer' }))
   expect(await screen.findByText('Paris, France', { exact: true })).toBeInTheDocument()
   const identity = new URLSearchParams(location.hash.split('?')[1]).get('card')
   const history = await (await networkFetch(origin + base + '/' + identity + '/history')).json()
@@ -137,3 +149,16 @@ test('content editing pins original artifact and archive preserves practice hist
   expect(new URLSearchParams(location.hash.split('?')[1]).has('card')).toBe(false)
   expect(new URLSearchParams(location.hash.split('?')[1]).get('shell')).toBe('retained')
 })
+
+function expectReadonlySource(control: HTMLElement) {
+  expect(control).toHaveAttribute('readonly')
+  expect(control).not.toBeDisabled()
+  control.focus()
+  expect(document.activeElement).toBe(control)
+  const descriptionIds = control.getAttribute('aria-describedby')?.split(' ') ?? []
+  expect(descriptionIds.length).toBeGreaterThan(0)
+  for (const id of descriptionIds) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+  const original = (control as HTMLInputElement).value
+  fireEvent.change(control, { target: { value: 'Attempt to replace immutable provenance' } })
+  expect(control).toHaveValue(original)
+}

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -97,6 +97,12 @@ test('user declared life projection, canonical reminder and completion suppressi
 })
 
 test('life events retain source and revisions and impossible budgets are rejected', async () => {
+  const savedConfig = await (await networkFetch(origin + base + '/config')).json()
+  if (!savedConfig) {
+    const seed = await networkFetch(origin + base + '/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: 'event-budget-fixture', revision: 0, birth_date: '2020-01-01', horizon_years: 10, sleep_hours: 8, timezone: 'UTC', source: 'my declared plan', budgets: [{ name: 'Learning', hours_per_week: 7 }], reminder: { enabled: true, time: '00:00' } }) })
+    expect(seed.status).toBe(200)
+  }
+
   open()
   await screen.findByRole('heading', { name: 'New life event' })
   change('Life event date', '2026-09-25')
@@ -106,8 +112,9 @@ test('life events retain source and revisions and impossible budgets are rejecte
   fireEvent.click(screen.getByRole('button', { name: 'Save life event' }))
   fireEvent.click(await screen.findByRole('button', { name: '2026-09-25: Finished course · recorded' }))
   await screen.findByRole('heading', { name: 'Edit life event' })
-  await screen.findByLabelText('Life event title')
-  expect(screen.getByLabelText('Life event source')).toBeDisabled()
+  await screen.findByLabelText('Life event source')
+  await waitFor(() => expect(screen.queryByText('Loading life calendar…')).not.toBeInTheDocument())
+  expectReadonlySource(screen.getByLabelText('Life event source'))
   expect(location.hash.split('?')[0]).toBe('#/capabilities/wellbeing/life')
   expect(new URLSearchParams(location.hash.split('?')[1]).get('shell')).toBe('retained')
   const identity = new URLSearchParams(location.hash.split('?')[1]).get('event')
@@ -135,3 +142,16 @@ test('life events retain source and revisions and impossible budgets are rejecte
   expect(config.budgets[0].hours_per_week).toBe(7)
   expect(config.revision).toBe(1)
 })
+
+function expectReadonlySource(control: HTMLElement) {
+  expect(control).toHaveAttribute('readonly')
+  expect(control).not.toBeDisabled()
+  control.focus()
+  expect(document.activeElement).toBe(control)
+  const descriptionIds = control.getAttribute('aria-describedby')?.split(' ') ?? []
+  expect(descriptionIds.length).toBeGreaterThan(0)
+  for (const id of descriptionIds) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+  const original = (control as HTMLInputElement).value
+  fireEvent.change(control, { target: { value: 'Attempt to replace immutable provenance' } })
+  expect(control).toHaveValue(original)
+}

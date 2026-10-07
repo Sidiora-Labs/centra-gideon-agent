@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useHashRoute } from '../../../app/shell/useHashRoute'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
-import { Field, TextInput } from '../../../shared/ui/forms'
+import { Field, TextInput, Select, TextArea } from '../../../shared/ui/forms'
 
 type Lab = { id: string; analyte: string; observed_at: string; value: number; unit: string; reference_low: number | null; reference_high: number | null; notes: string; source: string; artifact: { slug: string; version: number; sha256: string }; revision: number }
 type ImportInput = { filename: string; format: string; content: string; source: string }
@@ -96,8 +96,8 @@ export default function Labs() {
         <label className="block">Choose source file<input aria-label="Choose source file" type="file" accept=".csv,.json" className="block w-full" onChange={async e => { const file = e.target.files?.[0]; if (!file) return; if (file.size > 500000) { setError('Source file exceeds 500000 bytes'); return } try { setContent(await file.text()); setFilename(file.name); setFormat(file.name.endsWith('.json') ? 'json' : 'csv'); setPreview(null) } catch (err) { setError(String(err)) } }} /></label>
         <Field label="Filename"><TextInput value={filename} onChange={setFilename} required /></Field>
         <Field label="Laboratory source"><TextInput value={source} onChange={setSource} required /></Field>
-        <label className="block">Format<select className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Import format" value={format} onChange={e => setFormat(e.target.value)}><option value="csv">CSV</option><option value="json">JSON</option></select></label>
-        <label className="block">Source content<textarea className="w-full rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Source content" value={content} onChange={e => setContent(e.target.value)} rows={6} /></label>
+        <label className="block">Format<Select ariaLabel="Import format" value={format} onChange={next => setFormat(next)} options={[{ value: "csv", label: "CSV" }, { value: "json", label: "JSON" }]} /></label>
+        <label className="block">Source content<TextArea ariaLabel="Source content" value={content} onChange={next => setContent(next)} rows={6} /></label>
         <Button loading={busy} onClick={() => importAction(false)}>Preview import</Button>
         {preview && previewCurrent && <div className="space-y-2"><p>{preview.result.rows.length} rows; {preview.result.duplicates} duplicates.</p><ul>{preview.result.rows.map((row, index) => <li key={index}>{row.analyte}: {row.value} {row.unit} · {row.observed_at}</li>)}</ul><Button loading={busy} onClick={() => importAction(true)}>Commit import</Button></div>}
         {notice && <p role="status">{notice}</p>}

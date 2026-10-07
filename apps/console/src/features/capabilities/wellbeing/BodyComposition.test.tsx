@@ -16,7 +16,7 @@ beforeAll(async () => {
   document.documentElement.dir = 'ltr'
   home = mkdtempSync(join(tmpdir(), 'body-composition-ui-'))
   const root = resolve('../..')
-  child = spawn('/tmp/gideon-runtime-venv/bin/python', ['-u', '-c', `
+  child = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['-u', '-c', `
 import asyncio
 from aiohttp import web
 from gideon.workspace.capabilities.wellbeing.body_composition_http import register
@@ -71,7 +71,9 @@ test('authors, normalizes, corrects, reloads and exports a real canonical observ
   expect(screen.getByText('41.2% muscle · 18.4% fat · 6.6 lb bone · 98.6 °F')).toBeInTheDocument()
   expect(screen.getByText('2.993709642 kg bone · 37 °C · User-authored scale transcription')).toBeInTheDocument()
   expect(screen.getByText('v1: 98.6 °F · Morning observation')).toBeInTheDocument()
-  expect(screen.getByLabelText('Source')).toBeDisabled()
+  expect(screen.getByLabelText('Source')).toHaveAttribute('readonly')
+  expect(screen.getByLabelText('Source')).not.toBeDisabled()
+  expect(screen.getByLabelText('Source')).toHaveAccessibleDescription(/Create a new record to use another source/)
   change('Muscle percent', '40.9')
   change('Fat percent', '18.7')
   change('Bone mass', '2994')
@@ -134,7 +136,8 @@ test('invalid authored percentages retain the form and create no second record',
 test('five languages retain explicit unit controls and RTL direction', async () => {
   cleanup()
   const mounted = render(<BodyComposition baseUrl={origin} />)
-  await screen.findByRole('button', { name: /User-authored scale transcription/ })
+  await waitFor(() => expect(screen.queryByText('Loading…')).not.toBeInTheDocument())
+  fireEvent.click(screen.getAllByRole('button', { name: 'New observation' })[0])
   const languages = [
     ['es', 'Observaciones de composición corporal', 'Unidad de masa ósea', 'Unidad de temperatura'],
     ['ar', 'ملاحظات تكوين الجسم', 'وحدة كتلة العظام', 'وحدة الحرارة'],

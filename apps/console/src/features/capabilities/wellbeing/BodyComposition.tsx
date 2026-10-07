@@ -2,7 +2,7 @@ import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
-import { Field, Select, TextArea, TextInput, useFieldLabelId } from '../../../shared/ui/forms'
+import { Field, Select, TextArea, TextInput } from '../../../shared/ui/forms'
 import { Download, Plus, Scale } from 'lucide-react'
 
 type Values = { muscle_percent: number; fat_percent: number; bone_mass: { value: number; unit: string }; temperature: { value: number; unit: string } }
@@ -25,8 +25,7 @@ function uiLanguage(): 'en' | 'es' | 'ar' | 'hi' | 'zh-CN' {
 }
 
 function DecimalInput({ value, onChange, min, max }: { value: string; onChange: (value: string) => void; min?: number; max?: number }) {
-  const label = useFieldLabelId()
-  return <input aria-labelledby={label} className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" required type="number" step="any" min={min} max={max} value={value} onChange={event => onChange(event.target.value)} />
+  return <TextInput required type="number" step="any" min={min} max={max} value={value} onChange={next => onChange(next)} />
 }
 
 export default function BodyComposition({ baseUrl = '' }: { baseUrl?: string }) {
@@ -90,7 +89,7 @@ export default function BodyComposition({ baseUrl = '' }: { baseUrl?: string }) 
     <section className="rounded-lg border border-outline-variant/20 bg-surface-container p-l" aria-label={w[0]}>{!busy && records.length === 0 ? <div className="py-8 text-center"><Scale className="mx-auto mb-3 text-on-surface-low" /><p>{w[5]}</p><Button className="mt-4" onClick={reset}>{w[3]}</Button></div> : <ul className="divide-y divide-outline-variant/30">{records.map(row => <li key={row.id}><button className="flex w-full items-center justify-between py-3 text-left" onClick={() => void run(token => open(row.id, token))}><span>{new Date(row.observed_at).toLocaleDateString()} · {row.source}</span><strong>{row.original_values.muscle_percent}% {w[20]} · {row.original_values.fat_percent}% {w[21]}</strong></button></li>)}</ul>}</section>
     {editing && <form onSubmit={save} className="grid gap-m rounded-lg border border-outline-variant/20 bg-surface-container p-l sm:grid-cols-2">
       <Field label={w[6]}><TextInput required value={observed} onChange={setObserved} placeholder="2026-09-25T08:00:00Z" /></Field>
-      <Field label={w[7]} hint={!!selected ? 'Create a new record to use another source' : undefined}><TextInput required disabled={!!selected} disabledReason={!!selected ? 'Create a new record to use another source' : undefined} value={source} onChange={setSource} /></Field>
+      <Field label={w[7]} hint={!!selected ? 'Create a new record to use another source' : undefined}><TextInput required readOnly={!!selected} readOnlyReason={!!selected ? 'Create a new record to use another source' : undefined} value={source} onChange={setSource} /></Field>
       <Field label={w[8]}><DecimalInput min={0} max={100} value={muscle} onChange={setMuscle} /></Field>
       <Field label={w[9]}><DecimalInput min={0} max={100} value={fat} onChange={setFat} /></Field>
       <Field label={w[10]}><DecimalInput min={0} value={bone} onChange={setBone} /></Field>

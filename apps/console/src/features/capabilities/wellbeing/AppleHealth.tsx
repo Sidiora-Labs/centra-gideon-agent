@@ -2,7 +2,7 @@ import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useRef, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
-import { Field, TextInput } from '../../../shared/ui/forms'
+import { Field, TextInput, Select } from '../../../shared/ui/forms'
 
 type Metric = { id: string; metric: string; unit: string; value: number; observed_at: string; end_at: string | null; stage: string | null; device_source: string; source: string; artifact: { filename: string } }
 type Input = { filename: string; format: string; source: string; content_base64: string }
@@ -64,7 +64,7 @@ export default function AppleHealth() {
       <label className="block">Choose export<input aria-label="Choose export" type="file" accept=".xml,.zip,.json" className="block w-full" onChange={e => choose(e.target.files?.[0])} /></label>
       {file.filename && <p>Selected: {file.filename}</p>}
       <Field label="Export source"><TextInput value={source} onChange={setSource} required /></Field>
-      <label className="block">Format<select className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Export format" value={format} onChange={e => setFormat(e.target.value)}><option value="xml">Apple XML</option><option value="zip">Apple ZIP</option><option value="json">Health Auto Export JSON</option><option value="fhir">FHIR JSON</option></select></label>
+      <label className="block">Format<Select ariaLabel="Export format" value={format} onChange={next => setFormat(next)} options={[{ value: "xml", label: "Apple XML" }, { value: "zip", label: "Apple ZIP" }, { value: "json", label: "Health Auto Export JSON" }, { value: "fhir", label: "FHIR JSON" }]} /></label>
       <Button disabled={!file.content_base64} disabledReason={busy ? BUSY_REASON : !file.content_base64 ? 'Choose an Apple Health export file first' : undefined} loading={busy} onClick={() => run(false)}>Preview export</Button>
       {preview && current && <div className="space-y-m"><p>{preview.result.metric_count} metrics; {preview.result.lab_count} laboratory results.</p>{Object.entries(preview.result.skipped).map(([reason, count]) => <p key={reason}>{reason}: {count} skipped</p>)}<p>Preview shows at most 100 metric rows.</p><ul>{preview.result.metrics.map((row, index) => <li key={index}>{row.metric}: {row.value} {row.unit} · {row.stage ?? row.device_source}</li>)}</ul><Button loading={busy} onClick={() => run(true)}>Commit export import</Button></div>}
       {notice && <p role="status">{notice}</p>}

@@ -64,7 +64,7 @@ test('real entries preserve correction history and delete through the gateway', 
   expect(screen.getByText('Labeled nicotine: Not recorded mg · 0 logged days')).toBeInTheDocument()
   fireEvent.click(button)
   await screen.findByRole('heading', { name: 'Edit consumption entry' })
-  expect(screen.getByLabelText('Entry source')).toBeDisabled()
+  expectReadonlySource(screen.getByLabelText('Entry source'))
   expect(screen.getByLabelText('Entry notes')).toHaveValue('with lunch')
   expect(location.hash.split('?')[0]).toBe('#/capabilities/wellbeing/substances')
   expect(new URLSearchParams(location.hash.split('?')[1]).get('shell')).toBe('retained')
@@ -132,3 +132,16 @@ test('product presets snapshot labeled zero nicotine and survive preset changes'
   expect(result.entries[0].nicotine_mg).toBe(0)
   expect(result.entries[0].source).toBe('label')
 })
+
+function expectReadonlySource(control: HTMLElement) {
+  expect(control).toHaveAttribute('readonly')
+  expect(control).not.toBeDisabled()
+  control.focus()
+  expect(document.activeElement).toBe(control)
+  const descriptionIds = control.getAttribute('aria-describedby')?.split(' ') ?? []
+  expect(descriptionIds.length).toBeGreaterThan(0)
+  for (const id of descriptionIds) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+  const original = (control as HTMLInputElement).value
+  fireEvent.change(control, { target: { value: 'Attempt to replace immutable provenance' } })
+  expect(control).toHaveValue(original)
+}
