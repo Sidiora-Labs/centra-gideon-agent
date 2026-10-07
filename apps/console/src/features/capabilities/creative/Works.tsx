@@ -8,6 +8,7 @@ import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 import { EmptyState, ListScaffold } from '../../../shared/ui/ListScaffold'
 import { Surface } from '../../../shared/ui/Surface'
+import { ResultAnnouncement } from '../../../shared/ui/ListControls'
 import { SearchField } from '../../../shared/ui/SearchField'
 import { HeaderActions, HeaderControl } from '../../../shared/ui/HeaderActions'
 
@@ -41,6 +42,7 @@ export default function Works({ apiRoot = '/api/capabilities/creative/works', wo
   const [reload, setReload] = useState(0)
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [resultRequest, setResultRequest] = useState('')
   const [creating, setCreating] = useState(true)
   const [error, setError] = useState('')
   const [text, setText] = useState('')
@@ -48,6 +50,8 @@ export default function Works({ apiRoot = '/api/capabilities/creative/works', wo
   const [context, setContext] = useState('')
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
   const [draftRequestId, setDraftRequestId] = useState(() => crypto.randomUUID())
+  const resultKey = JSON.stringify([apiRoot, query, referenceQuery, offset, refresh])
+  const resultsReady = resultRequest === resultKey && !loading && !error
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : t('Unable to load writing works'))
   function choose(next: string) {
     if (!onSelectWork) location.hash = `/capabilities/creative?view=works${next ? `&work=${encodeURIComponent(next)}` : ''}`
@@ -70,11 +74,11 @@ export default function Works({ apiRoot = '/api/capabilities/creative/works', wo
   useEffect(() => { if (workId !== undefined) setId(workId) }, [workId])
   useEffect(() => { if (onSelectWork) return; const changed = () => setId(readId()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [onSelectWork])
   useEffect(() => {
-    let alive = true; setLoading(true)
+    let alive = true; setLoading(true); setResultRequest('')
     Promise.all([requestJson<{ items: Work[]; total: number }>(`${apiRoot}?q=${encodeURIComponent(query)}&offset=${offset}&limit=25`),
       requestJson<{ items: (Ref & { title: string })[] }>(`${apiRoot.replace(/works$/, 'authors')}?q=${encodeURIComponent(referenceQuery)}&limit=100`),
       requestJson<{ items: (Ref & { title: string })[] }>(`${apiRoot.replace(/works$/, 'universes')}?q=${encodeURIComponent(referenceQuery)}&limit=100`)])
-      .then(([list, a, u]) => { if (alive) { setItems(list.items); setTotal(list.total); setAuthors(a.items); setUniverses(u.items) } })
+      .then(([list, a, u]) => { if (alive) { setResultRequest(resultKey); setItems(list.items); setTotal(list.total); setAuthors(a.items); setUniverses(u.items) } })
       .catch(e => { if (alive) fail(e) }).finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
   }, [apiRoot, query, referenceQuery, offset, refresh])
@@ -110,14 +114,14 @@ export default function Works({ apiRoot = '/api/capabilities/creative/works', wo
   return <ListScaffold title={t('Writing works and exercises')} right={<HeaderActions><HeaderControl icon={FilePlus2} label={t('New work')} variant="primary" priority="primary" disabled={busy} onClick={startNew} /></HeaderActions>}>
     <p data-type="body-m" className="mb-l max-w-[48rem] text-on-surface-low">{t('Choose a work from your library, then write and preserve manuscript drafts with pinned creative context.')}</p>
     {error && <div role="alert">{error}<Button onClick={() => { setError(''); setReload(v => v + 1); setRefresh(v => v + 1) }}>{t('Retry')}</Button></div>}{loading && <p>{t('Loading writing works…')}</p>}
-    <div className="grid min-w-0 gap-l lg:grid-cols-[minmax(15rem,20rem)_minmax(0,1fr)]"><Surface className="h-fit p-l"><aside aria-label={t('Writing works')} className="space-y-m"><SearchField value={query} onChange={value => { setQuery(value); setOffset(0) }} placeholder={t('Search writing works')} ariaLabel={t('Search writing works')} surface="container" />
+    <div className="grid min-w-0 gap-l lg:grid-cols-[minmax(15rem,20rem)_minmax(0,1fr)]"><Surface className="h-fit p-l"><aside aria-label={t('Writing works')} className="space-y-m"><SearchField value={query} onChange={value => { setQuery(value); setOffset(0) }} placeholder={t('Search writing works')} ariaLabel={t('Search writing works')} surface="container" /><ResultAnnouncement count={items.length} noun="writing works" singular="writing work" active={resultsReady && !!query.trim()} />
       {!loading && !items.length && <p className="text-on-surface-low">{t('No writing works found.')}</p>}<div className="space-y-xs">{items.map(work => <Button key={work.id} variant={selected?.id === work.id ? 'tonal' : 'ghost'} className="w-full justify-start" ariaPressed={selected?.id === work.id} onClick={() => choose(work.id)}>{work.title}</Button>)}</div><p className="text-on-surface-low">{total} {t('writing works')}</p><div className="flex flex-wrap gap-s"><Button variant="secondary" size="sm" disabled={!offset} onClick={() => setOffset(v => Math.max(0, v - 25))}>{t('Previous page')}</Button><Button variant="secondary" size="sm" disabled={offset + 25 >= total} onClick={() => setOffset(v => v + 25)}>{t('Next page')}</Button></div>
     </aside></Surface><section className="min-w-0 space-y-l">{!showEditor ? <Surface className="p-xl"><EmptyState icon={BookOpen} title={t('Choose a writing work')} hint={t('Select a work to continue writing, or start a new manuscript.')} action={{ label: t('New work'), onClick: startNew, icon: FilePlus2 }} /></Surface> : <>{selected && <p className="text-on-surface-low">{t('Work revision')} {selected.revision}</p>}<Surface className="space-y-m p-l">
       <div><h2 data-type="title-m" className="text-on-surface">{selected ? draft.title || t('Untitled work') : t('New work')}</h2><p className="text-on-surface-low">{t('Set the writing brief and pin the context this manuscript should follow.')}</p></div>
       <label className="block">{t('Work title')}<input className={control} value={draft.title} onChange={e => setDraft({ ...draft, title: e.target.value })} /></label>
       <label className="block">{t('Writing type')}<select className={control} value={draft.kind} onChange={e => setDraft({ ...draft, kind: e.target.value })}><option value="work">{t('Work')}</option><option value="exercise">{t('Exercise')}</option></select></label>
       <label className="block">{t('Writing prompt')}<textarea className={control} value={draft.prompt} onChange={e => setDraft({ ...draft, prompt: e.target.value })} /></label>
-      <SearchField value={referenceQuery} onChange={setReferenceQuery} placeholder={t('Search writing context')} ariaLabel={t('Search writing context')} surface="container" />
+      <SearchField value={referenceQuery} onChange={setReferenceQuery} placeholder={t('Search writing context')} ariaLabel={t('Search writing context')} surface="container" /><ResultAnnouncement count={authors.length} noun="authors" active={resultsReady && !!referenceQuery.trim()} /><ResultAnnouncement count={universes.length} noun="universes" active={resultsReady && !!referenceQuery.trim()} />
       <label className="block">{t('Pin author')}<select className={control} value={draft.author_ref?.id || ''} onChange={e => { const a = authors.find(a => a.id === e.target.value); setDraft({ ...draft, author_ref: a ? { id: a.id, revision: a.revision } : null }) }}><option value="">{t('No author')}</option>{authors.map(a => <option key={a.id} value={a.id}>{a.title} · {t('revision')} {a.revision}</option>)}</select></label>
       <label className="block">{t('Pin universe')}<select className={control} value={draft.universe_ref?.id || ''} onChange={e => { const u = universes.find(u => u.id === e.target.value); setDraft({ ...draft, universe_ref: u ? { id: u.id, revision: u.revision } : null }) }}><option value="">{t('No universe')}</option>{universes.map(u => <option key={u.id} value={u.id}>{u.title} · {t('revision')} {u.revision}</option>)}</select></label>
       {draft.author_ref && <p>{t('Author pinned revision')} {draft.author_ref.revision}</p>}{draft.universe_ref && <p>{t('Universe pinned revision')} {draft.universe_ref.revision}</p>}

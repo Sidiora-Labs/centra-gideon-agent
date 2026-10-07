@@ -6,6 +6,7 @@ import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 import { EmptyState, ListScaffold } from '../../../shared/ui/ListScaffold'
 import { Surface } from '../../../shared/ui/Surface'
+import { ResultAnnouncement } from '../../../shared/ui/ListControls'
 import { SearchField } from '../../../shared/ui/SearchField'
 import { HeaderActions, HeaderControl } from '../../../shared/ui/HeaderActions'
 
@@ -36,10 +37,13 @@ export default function Universes({ apiRoot = '/api/capabilities/creative/univer
   const [reload, setReload] = useState(0)
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [resultRequest, setResultRequest] = useState('')
   const [creating, setCreating] = useState(true)
   const [error, setError] = useState('')
   const [exported, setExported] = useState('')
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
+  const resultKey = JSON.stringify([apiRoot, query, references, offset, refresh])
+  const resultsReady = resultRequest === resultKey && !loading && !error
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : t('Unable to load universes'))
   function apply(record: Universe) { setSelected(record); setDraft(values(record)); setPalette(record.visual_identity.colors.join(', ')) }
   function choose(next: string) {
@@ -53,11 +57,11 @@ export default function Universes({ apiRoot = '/api/capabilities/creative/univer
   useEffect(() => { if (onSelectUniverse) return; const changed = () => setId(readId()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [onSelectUniverse])
   useEffect(() => {
     let alive = true
-    setLoading(true)
+    setLoading(true); setResultRequest('')
     Promise.all([requestJson<{ items: Universe[]; total: number }>(`${apiRoot}?q=${encodeURIComponent(query)}&offset=${offset}&limit=25`),
       requestJson<{ items: { id: string; title: string }[] }>(`${apiRoot.replace(/universes$/, 'ingredients')}?q=${encodeURIComponent(references)}&limit=100`),
       requestJson<{ items: (Ref & { title: string })[] }>(`${apiRoot.replace(/universes$/, 'boards')}?q=${encodeURIComponent(references)}&limit=100`)])
-      .then(([list, catalog, moodboards]) => { if (alive) { setItems(list.items); setTotal(list.total); setIngredients(catalog.items); setBoards(moodboards.items) } })
+      .then(([list, catalog, moodboards]) => { if (alive) { setResultRequest(resultKey); setItems(list.items); setTotal(list.total); setIngredients(catalog.items); setBoards(moodboards.items) } })
       .catch(e => { if (alive) fail(e) }).finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
   }, [apiRoot, query, references, offset, refresh])
@@ -100,7 +104,7 @@ export default function Universes({ apiRoot = '/api/capabilities/creative/univer
     {error && <div role="alert">{error}<Button onClick={() => { setError(''); setRefresh(v => v + 1); setReload(v => v + 1) }}>{t('Retry')}</Button></div>}
     {loading && <p>{t('Loading universes…')}</p>}
     <div className="grid min-w-0 gap-l lg:grid-cols-[minmax(15rem,20rem)_minmax(0,1fr)]"><Surface className="h-fit p-l"><aside aria-label={t('Universes')} className="space-y-m">
-      <SearchField value={query} onChange={value => { setQuery(value); setOffset(0) }} placeholder={t('Search universes')} ariaLabel={t('Search universes')} surface="container" />
+      <SearchField value={query} onChange={value => { setQuery(value); setOffset(0) }} placeholder={t('Search universes')} ariaLabel={t('Search universes')} surface="container" /><ResultAnnouncement count={items.length} noun="universes" singular="universe" active={resultsReady && !!query.trim()} />
       {!loading && !items.length && <p className="text-on-surface-low">{t('No universes found.')}</p>}
       <div className="space-y-xs">{items.map(item => <Button key={item.id} variant={selected?.id === item.id ? 'tonal' : 'ghost'} ariaPressed={selected?.id === item.id} className="w-full justify-start" onClick={() => choose(item.id)}>{item.title}</Button>)}</div>
       <p className="text-on-surface-low">{total} {t('universes')}</p><div className="flex flex-wrap gap-s"><Button size="sm" variant="secondary" disabled={!offset} onClick={() => setOffset(v => Math.max(0, v - 25))}>{t('Previous page')}</Button><Button size="sm" variant="secondary" disabled={offset + 25 >= total} onClick={() => setOffset(v => v + 25)}>{t('Next page')}</Button></div>
@@ -118,7 +122,7 @@ export default function Universes({ apiRoot = '/api/capabilities/creative/univer
       <label className="block">{t('Universe colors')}<input className={control} value={palette} placeholder="#112233, #aabbcc" onChange={e => setPalette(e.target.value)} /></label>
       <div className="flex gap-2" aria-label={t('Universe palette')}>{palette.split(',').map(color => color.trim()).filter(color => /^#[0-9a-fA-F]{6}$/.test(color)).map((color, index) => <span key={index} className="h-6 w-6 rounded border" style={{ backgroundColor: color }} title={color} />)}</div>
       <label className="block">{t('Visual style notes')}<textarea className={control} value={draft.visual_identity.style_notes} onChange={e => setDraft({ ...draft, visual_identity: { ...draft.visual_identity, style_notes: e.target.value } })} /></label>
-      <SearchField value={references} onChange={setReferences} placeholder={t('Search library references')} ariaLabel={t('Search library references')} surface="container" />
+      <SearchField value={references} onChange={setReferences} placeholder={t('Search library references')} ariaLabel={t('Search library references')} surface="container" /><ResultAnnouncement count={ingredients.length} noun="ingredients" active={resultsReady && !!references.trim()} /><ResultAnnouncement count={boards.length} noun="moodboards" active={resultsReady && !!references.trim()} />
       <label className="block">{t('Link canon ingredient')}<select className={control} value="" onChange={e => { if (e.target.value && !draft.ingredient_ids.includes(e.target.value)) setDraft({ ...draft, ingredient_ids: [...draft.ingredient_ids, e.target.value] }) }}><option value="">{t('Choose ingredient')}</option>{ingredients.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
       {draft.ingredient_ids.map(link => <p key={link} className="break-all"><a href={`#/capabilities/creative?ingredient=${link}`}>{ingredients.find(i => i.id === link)?.title || link}</a>{selected?.ingredient_status?.find(s => s.id === link)?.missing && ` — ${t('Ingredient missing')}`}<Button onClick={() => setDraft({ ...draft, ingredient_ids: draft.ingredient_ids.filter(id => id !== link) })}>{t('Unlink ingredient')} {link}</Button></p>)}
       <label className="block">{t('Pin moodboard')}<select className={control} value="" onChange={e => { const board = boards.find(b => b.id === e.target.value); if (board && !draft.board_refs.some(r => r.id === board.id && r.revision === board.revision)) setDraft({ ...draft, board_refs: [...draft.board_refs, { id: board.id, revision: board.revision }] }) }}><option value="">{t('Choose moodboard')}</option>{boards.map(item => <option key={item.id} value={item.id}>{item.title} · {t('revision')} {item.revision}</option>)}</select></label>

@@ -4,6 +4,7 @@ import { api, type HypermidPrimaryContextInspectionWire, type HypermidSessionDet
 import { useQuery } from '../../shared/data/data'
 import { Button } from '../../shared/ui/Button'
 import { EmptyState, ListSkeleton, LoadError } from '../../shared/ui/ListScaffold'
+import { ResultAnnouncement } from '../../shared/ui/ListControls'
 import { SearchField } from '../../shared/ui/SearchField'
 import { Surface } from '../../shared/ui/Surface'
 import { StatusPill } from '../settings/bento'
@@ -129,6 +130,7 @@ export function SessionInspector() {
         {SESSION_STATES.map((value) => <option key={value || 'all'} value={value}>{value ? value.charAt(0).toUpperCase() + value.slice(1) : 'All states'}</option>)}
       </select>
     </div>
+    <ResultAnnouncement count={sessions.data?.items.length ?? 0} noun="sessions" active={!!(text.trim() || state) && !sessions.revalidating && !sessions.error && !!sessions.data && sessions.data.state !== 'unavailable' && sessions.data.state !== 'unreadable'} />
     {sessions.error && !sessions.data ? <LoadError what="Hypermid sessions" error={sessions.error} onRetry={sessions.refresh} />
       : !sessions.data ? <ListSkeleton what="Hypermid sessions" />
       : sessions.data.state === 'unavailable' || sessions.data.state === 'unreadable'

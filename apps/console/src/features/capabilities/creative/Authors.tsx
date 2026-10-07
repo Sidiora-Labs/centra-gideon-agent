@@ -4,6 +4,7 @@ import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 import { EmptyState, ListRow, ListScaffold } from '../../../shared/ui/ListScaffold'
 import { FilePenLine, Plus, UserRound } from 'lucide-react'
+import { ResultAnnouncement } from '../../../shared/ui/ListControls'
 import { SearchField } from '../../../shared/ui/SearchField'
 import { Field, Select, TextArea, TextInput } from '../../../shared/ui/forms'
 import { Surface } from '../../../shared/ui/Surface'
@@ -33,11 +34,14 @@ export default function Authors({ apiRoot = '/api/capabilities/creative/authors'
   const [reload, setReload] = useState(0)
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [resultRequest, setResultRequest] = useState('')
   const [error, setError] = useState('')
   const [brief, setBrief] = useState<Brief | null>(null)
   const [exported, setExported] = useState('')
   const [creating, setCreating] = useState(true)
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
+  const resultKey = JSON.stringify([apiRoot, query, sampleQuery, offset, refresh])
+  const resultsReady = resultRequest === resultKey && !loading && !error
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : t('Unable to load authors'))
   function choose(next: string) {
     if (onSelectAuthor) onSelectAuthor(next)
@@ -51,9 +55,9 @@ export default function Authors({ apiRoot = '/api/capabilities/creative/authors'
   useEffect(() => { if (authorId !== undefined) setId(authorId) }, [authorId])
   useEffect(() => { if (onSelectAuthor) return; const changed = () => setId(readId()); addEventListener('hashchange', changed); return () => removeEventListener('hashchange', changed) }, [onSelectAuthor])
   useEffect(() => {
-    let alive = true; setLoading(true)
+    let alive = true; setLoading(true); setResultRequest('')
     Promise.all([requestJson<{ items: Author[]; total: number }>(`${apiRoot}?q=${encodeURIComponent(query)}&offset=${offset}&limit=25`), requestJson<{ items: { id: string; title: string; version: number }[] }>(`${apiRoot}/sources?q=${encodeURIComponent(sampleQuery)}`)])
-      .then(([list, sources]) => { if (alive) { setItems(list.items); setTotal(list.total); setSamples(sources.items) } })
+      .then(([list, sources]) => { if (alive) { setResultRequest(resultKey); setItems(list.items); setTotal(list.total); setSamples(sources.items) } })
       .catch(e => { if (alive) fail(e) }).finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
   }, [apiRoot, query, sampleQuery, offset, refresh])
@@ -89,7 +93,7 @@ export default function Authors({ apiRoot = '/api/capabilities/creative/authors'
   return <ListScaffold title={t('Literary authors')} right={<Button onClick={startNew} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}><Plus size={16} aria-hidden/>{t('New author')}</Button>}><p data-type="body-m" className="mb-xl text-on-surface-low">{t('Build reusable voices from authored guidance and pinned writing samples.')}</p>
     {error && <div role="alert">{error}<Button onClick={() => { setError(''); setRefresh(v => v + 1); setReload(v => v + 1) }}>{t('Retry')}</Button></div>}
     {loading && <p>{t('Loading authors…')}</p>}
-    <Surface className="grid min-h-[32rem] lg:grid-cols-[19rem_minmax(0,1fr)]"><aside className="space-y-m border-b border-outline-variant/20 p-l lg:border-b-0 lg:border-r"><SearchField ariaLabel={t('Search authors')} placeholder={t('Search authors')} value={query} onChange={value => { setQuery(value); setOffset(0) }} />
+    <Surface className="grid min-h-[32rem] lg:grid-cols-[19rem_minmax(0,1fr)]"><aside className="space-y-m border-b border-outline-variant/20 p-l lg:border-b-0 lg:border-r"><SearchField ariaLabel={t('Search authors')} placeholder={t('Search authors')} value={query} onChange={value => { setQuery(value); setOffset(0) }} /><ResultAnnouncement count={items.length} noun="authors" singular="author" active={resultsReady && !!query.trim()} />
       {!loading && !items.length ? <EmptyState icon={UserRound} title={t('No authors found.')} hint={t(query ? 'Try a different search.' : 'Create an author to reuse a consistent voice across manuscripts.')} action={query ? undefined : { label: t('New author'), onClick: startNew, icon: Plus }}/> : <div className="space-y-2">{items.map((item, index) => <ListRow key={item.id} index={index} onClick={() => choose(item.id)} label={item.title} accent={item.id === id ? 'var(--color-primary)' : undefined}><FilePenLine size={17} className="shrink-0 text-on-surface-low" aria-hidden/><div className="min-w-0 flex-1"><p className="truncate font-medium">{item.title}</p><p className="truncate text-xs text-on-surface-low">{item.voice.perspective} · {item.voice.tense} · {t('revision')} {item.revision}</p></div></ListRow>)}</div>}
       <div className="flex flex-wrap items-center gap-2 border-t border-outline-variant/20 pt-3"><p className="mr-auto text-xs text-on-surface-low">{total} {t('authors')}</p><Button size="sm" variant="ghost" disabled={!offset} onClick={() => setOffset(v => Math.max(0, v - 25))}>{t('Previous page')}</Button><Button size="sm" variant="ghost" disabled={offset + 25 >= total} onClick={() => setOffset(v => v + 25)}>{t('Next page')}</Button></div>
     </aside><section className="min-w-0 space-y-l p-l lg:p-2xl">
@@ -101,6 +105,7 @@ export default function Authors({ apiRoot = '/api/capabilities/creative/authors'
       <Field label={t('Tense')}><Select value={draft.voice.tense} onChange={value => setDraft({ ...draft, voice: { ...draft.voice, tense: value } })} options={[{ value: 'any', label: t('Any tense') }, { value: 'past', label: t('Past') }, { value: 'present', label: t('Present') }]} /></Field></div>
       {(['tone', 'diction', 'rhythm', 'avoid'] as const).map(field => <Field key={field} label={t(field === 'avoid' ? 'Avoid in writing' : field[0].toUpperCase() + field.slice(1))}><TextArea value={draft.voice[field]} onChange={value => setDraft({ ...draft, voice: { ...draft.voice, [field]: value } })} /></Field>)}
       <Field label={t('Search writing samples')}><TextInput value={sampleQuery} onChange={setSampleQuery} /></Field>
+      <ResultAnnouncement count={samples.length} noun="writing samples" active={resultsReady && !!sampleQuery.trim()} />
       <Field label={t('Pin writing sample')}><Select value="" onChange={value => { const sample = samples.find(s => s.id === value); if (sample && !draft.sample_refs.some(s => s.artifact_id === sample.id && s.artifact_version === sample.version)) setDraft({ ...draft, sample_refs: [...draft.sample_refs, { artifact_id: sample.id, artifact_version: sample.version }] }) }} options={[{ value: '', label: t('Choose text artifact') }, ...samples.map(sample => ({ value: sample.id, label: `${sample.title} · ${t('version')} ${sample.version}` }))]} /></Field>
       {draft.sample_refs.map(ref => <p key={`${ref.artifact_id}:${ref.artifact_version}`} className="break-all">{selected?.sample_status?.find(s => s.artifact_id === ref.artifact_id && s.artifact_version === ref.artifact_version)?.title || ref.artifact_id} · {t('pinned version')} {ref.artifact_version}{selected?.sample_status?.some(s => s.artifact_id === ref.artifact_id && s.artifact_version === ref.artifact_version && s.missing) && ` — ${t('Sample missing')}`}<Button onClick={() => setDraft({ ...draft, sample_refs: draft.sample_refs.filter(s => s !== ref) })}>{t('Unpin sample')} {ref.artifact_id}</Button></p>)}
       <Button disabled={busy || (!!id && !selected)} onClick={() => void save()} disabledReason={busy ? BUSY_REASON : undefined}>{t('Save author')}</Button>

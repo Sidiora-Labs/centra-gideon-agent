@@ -5,6 +5,7 @@ import { useQuery } from '../../shared/data/data'
 import { Button } from '../../shared/ui/Button'
 import { confirm } from '../../shared/ui/dialog'
 import { EmptyState, ListSkeleton, LoadError } from '../../shared/ui/ListScaffold'
+import { ResultAnnouncement } from '../../shared/ui/ListControls'
 import { SearchField } from '../../shared/ui/SearchField'
 import { Surface } from '../../shared/ui/Surface'
 import { TextArea } from '../../shared/ui/forms'
@@ -140,6 +141,7 @@ export function MemoryInspector() {
         {KINDS.map((value) => <option key={value || 'all'} value={value}>{value ? value.replaceAll('_', ' ') : 'All memory types'}</option>)}
       </select>
     </div>
+    <ResultAnnouncement count={memory.data?.items.length ?? 0} noun="memories" singular="memory" active={!!(query.trim() || kind) && !memory.revalidating && !memory.error && !!memory.data && memory.data.state !== 'unavailable' && memory.data.state !== 'unreadable'} />
     {memory.error && !memory.data ? <LoadError what="Hypermid memory" error={memory.error} onRetry={memory.refresh} />
       : !memory.data ? <ListSkeleton what="Hypermid memory" />
       : memory.data.state === 'unavailable' || memory.data.state === 'unreadable'

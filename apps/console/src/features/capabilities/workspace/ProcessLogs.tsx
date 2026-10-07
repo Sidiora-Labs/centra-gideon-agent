@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 import { Field, TextInput } from '../../../shared/ui/forms'
+import { ResultAnnouncement } from '../../../shared/ui/ListControls'
 import { Surface } from '../../../shared/ui/Surface'
 
 type Window = { text: string; start: number; next: number; end: number; dropped: number; status: string }
@@ -12,6 +13,7 @@ export default function ProcessLogs({ id }: { id: string }) {
   const [dropped, setDropped] = useState(0)
   const [error, setError] = useState('')
   const [status, setStatus] = useState('Not read')
+  const [readFor, setReadFor] = useState('')
   const cursor = useRef(0)
   useEffect(() => {
     if (!following) return
@@ -24,7 +26,7 @@ export default function ProcessLogs({ id }: { id: string }) {
         cursor.current = value.next
         setDropped(old => old + value.dropped)
         setText(old => (old + value.text).slice(-65536))
-        setStatus(value.status); setError('')
+        setStatus(value.status); setError(''); setReadFor(id)
         if (value.next < value.end || ['starting', 'running'].includes(value.status)) timer = setTimeout(poll, 1000)
         else setFollowing(false)
       } catch (e) { if (active) { setError(String(e)); setFollowing(false) } }
@@ -38,10 +40,12 @@ export default function ProcessLogs({ id }: { id: string }) {
     link.href = url; link.download = `process-${id}.log`; link.click()
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
-  const visible = query ? text.split('\n').filter(line => line.toLowerCase().includes(query.toLowerCase())).join('\n') : text
+  const visibleLines = text ? text.split('\n').filter(line => !query || line.toLowerCase().includes(query.toLowerCase())) : []
+  const visible = visibleLines.join('\n')
   return <Surface className="p-l"><section aria-label="Live process log" className="space-y-m">
     <div className="flex flex-wrap items-center justify-between gap-m"><h3 data-type="title-m">Live process log</h3><div className="flex flex-wrap gap-s"><Button size="sm" onClick={() => setFollowing(value => !value)}>{following ? 'Pause live log' : 'Follow process log'}</Button><Button size="sm" variant="secondary" disabled={!text} onClick={download}>Download retained log</Button></div></div>
     <Field label="Filter retained lines"><TextInput ariaLabel="Filter retained log lines" maxLength={256} value={query} onChange={setQuery}/></Field>
+    <ResultAnnouncement count={visibleLines.length} noun="log lines" active={readFor === id && !error && !!query.trim()} />
     <p data-type="body-s" className="text-on-surface-low">Status: {status} · Cursor: {cursor.current} · {dropped} characters missed before retained window. Displays the latest 65,536 characters.</p>
     {error && <p role="alert">{error}</p>}
     <pre aria-label="Live log output" className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface p-m">{visible || 'No matching output yet.'}</pre>

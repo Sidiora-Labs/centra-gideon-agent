@@ -4,6 +4,7 @@ import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 import { Surface } from '../../../shared/ui/Surface'
 import { Field, Select } from '../../../shared/ui/forms'
+import { ResultAnnouncement } from '../../../shared/ui/ListControls'
 import { SearchField } from '../../../shared/ui/SearchField'
 
 type Entry = { id: string; title: string; body: string }
@@ -17,6 +18,7 @@ export default function UniverseGraph({ id, revision, apiRoot = '/api/capabiliti
   const t = (value: string) => value
   const [graph, setGraph] = useState<Graph | null>(null)
   const [sources, setSources] = useState<Universe[]>([])
+  const [sourceRequest, setSourceRequest] = useState('')
   const [query, setQuery] = useState('')
   const [source, setSource] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null)
@@ -26,6 +28,7 @@ export default function UniverseGraph({ id, revision, apiRoot = '/api/capabiliti
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [refresh, setRefresh] = useState(0)
+  const sourceKey = JSON.stringify([apiRoot, id, query, refresh])
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : t('Unable to load universe graph'))
   useEffect(() => {
     let alive = true
@@ -35,7 +38,8 @@ export default function UniverseGraph({ id, revision, apiRoot = '/api/capabiliti
   }, [apiRoot, id, revision, refresh])
   useEffect(() => {
     let alive = true
-    requestJson<{ items: Universe[] }>(`${apiRoot}?q=${encodeURIComponent(query)}&limit=100`).then(value => { if (alive) setSources(value.items.filter(item => item.id !== id)) }).catch(e => { if (alive) fail(e) })
+    setSourceRequest('')
+    requestJson<{ items: Universe[] }>(`${apiRoot}?q=${encodeURIComponent(query)}&limit=100`).then(value => { if (alive) { setSources(value.items.filter(item => item.id !== id)); setSourceRequest(sourceKey) } }).catch(e => { if (alive) fail(e) })
     return () => { alive = false }
   }, [apiRoot, id, query, refresh])
   async function prepare() {
@@ -67,7 +71,7 @@ export default function UniverseGraph({ id, revision, apiRoot = '/api/capabiliti
       <ul>{graph.edges.map((edge, index) => <li key={index}>{graph.nodes.find(n => n.id === edge.source)?.title} → {edge.kind} → {graph.nodes.find(n => n.id === edge.target)?.title}</li>)}</ul>
       {!!graph.merges.length && <section aria-label={t('Universe merge history')}><h3 data-type="title-s">{t('Universe merge history')}</h3>{graph.merges.map(event => <p key={event.request_id} className="break-all">{t('Source')} {event.source_id} {t('revision')} {event.source_revision} → {t('universe revision')} {event.result_revision}</p>)}</section>}
     </Surface>}
-    <Surface className="h-fit space-y-m p-l"><h3 data-type="title-m" className="text-on-surface">{t('Merge another universe')}</h3><p data-type="body-m" className="text-on-surface-low">{t('The preview lists additions and requires an explicit choice for every conflict. The source remains unchanged.')}</p><SearchField value={query} onChange={setQuery} placeholder={t('Search merge sources')} ariaLabel={t('Search merge sources')} surface="container" />
+    <Surface className="h-fit space-y-m p-l"><h3 data-type="title-m" className="text-on-surface">{t('Merge another universe')}</h3><p data-type="body-m" className="text-on-surface-low">{t('The preview lists additions and requires an explicit choice for every conflict. The source remains unchanged.')}</p><SearchField value={query} onChange={setQuery} placeholder={t('Search merge sources')} ariaLabel={t('Search merge sources')} surface="container" /><ResultAnnouncement count={sources.length} noun="merge sources" active={sourceRequest === sourceKey && !error && !!query.trim()} />
     <Field label={t('Source universe')}><Select value={source} onChange={value => { setSource(value); setPreview(null) }} options={[{ value: '', label: t('Choose universe') }, ...sources.map(item => ({ value: item.id, label: `${item.title} · ${t('revision')} ${item.revision}` }))]} /></Field>
     <Button disabled={busy || !source} onClick={() => void prepare()} disabledReason={busy ? BUSY_REASON : undefined}>{t('Preview merge')}</Button>
     {preview && <section aria-label={t('Merge preview')} className="space-y-3 border-t border-outline-variant/30 pt-l"><h3 data-type="title-s">{t('Merge preview')}</h3><p>{preview.source.title} {t('revision')} {preview.source.revision} → {preview.target.title} {t('revision')} {preview.target.revision}</p>
