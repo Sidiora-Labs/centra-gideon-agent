@@ -1,12 +1,13 @@
 # Gideon Provider Reference
 
-The extension-provider taxonomy (the capability types an app can contribute) and the providers currently registered in this build.
+The extension-provider taxonomy (the capability types an app can contribute) and the provider declarations bundled in this build. These declarations do not indicate runtime activation or readiness.
 
 ## Provider types
 
 - `action`
 - `agent`
 - `channel`
+- `context_engine`
 - `duty_gate`
 - `inbox`
 - `knowledge`
@@ -25,35 +26,96 @@ The extension-provider taxonomy (the capability types an app can contribute) and
 - `vector_store`
 - `workflow`
 
-## Registered providers
+## Bundled provider declarations
 
-- **bash-action** — type `action` / `` (enabled); capabilities: execute, blocking
-- **browse-action** — type `action` / `` (enabled); capabilities: execute
-- **create-task-action** — type `action` / `` (enabled); capabilities: execute
-- **inbox-op-action** — type `action` / `` (enabled); capabilities: execute, reverse
-- **invoke-agent-action** — type `action` / `` (enabled); capabilities: execute
-- **notify-action** — type `action` / `` (enabled); capabilities: execute
-- **run-prompt-action** — type `action` / `` (enabled); capabilities: execute
-- **run-script-action** — type `action` / `` (enabled); capabilities: execute
-- **send-message-action** — type `action` / `` (enabled); capabilities: execute
-- **native-agents** — type `agent` / `` (enabled); capabilities: crud, acp
-- **filesystem-inbox** — type `inbox` / `` (enabled); capabilities: approvals, inputs
-- **native-knowledge** — type `knowledge` / `` (enabled); capabilities: bookmarks, documents, search
-- **native-vector-memory** — type `memory` / `` (enabled); capabilities: semantic_search, episodic, preferences
-- **native-prompts** — type `prompt` / `` (enabled); capabilities: list, read, write, render
-- **native-skills** — type `skills` / `` (enabled); capabilities: crud, triggers, auto_generation
-- **native-tasks** — type `task` / `` (enabled); capabilities: crud, comments, labels, dependencies
-- **gideon-artifacts** — type `tool` / `` (enabled); capabilities: artifacts
-- **gideon-automation-tools** — type `tool` / `` (enabled); capabilities: automation_management
-- **gideon-code-map** — type `tool` / `` (enabled); capabilities: code_map
-- **gideon-computer-use-tools** — type `tool` / `` (enabled); capabilities: desktop_automation
-- **gideon-inbox-tools** — type `tool` / `` (enabled); capabilities: inbox
-- **gideon-knowledge-tools** — type `tool` / `` (enabled); capabilities: knowledge
-- **gideon-memory** — type `tool` / `` (enabled); capabilities: memory
-- **gideon-project-tools** — type `tool` / `` (enabled); capabilities: projects
-- **gideon-prompts** — type `tool` / `` (enabled); capabilities: prompts
-- **gideon-subagents** — type `tool` / `` (enabled); capabilities: subagents
-- **gideon-tasks-tools** — type `tool` / `` (enabled); capabilities: task
-- **gideon-tools** — type `tool` / `` (enabled); capabilities: skills, notification, system
-- **gideon-ui-docs** — type `tool` / `` (enabled); capabilities: ui_docs
-- **gideon-workflows** — type `tool` / `` (enabled); capabilities: workflows
+- **bash-action** — type `action` / `` (bundled declaration); capabilities: execute, blocking
+- **browse-action** — type `action` / `` (bundled declaration); capabilities: execute
+- **create-task-action** — type `action` / `` (bundled declaration); capabilities: execute
+- **gideon-creative-commissions** — type `action` / `` (bundled declaration); capabilities: execute
+- **heartbeat-tasks-action** — type `action` / `` (bundled declaration); capabilities: execute
+- **inbox-op-action** — type `action` / `` (bundled declaration); capabilities: execute, reverse
+- **invoke-agent-action** — type `action` / `` (bundled declaration); capabilities: execute
+- **notify-action** — type `action` / `` (bundled declaration); capabilities: execute
+- **run-prompt-action** — type `action` / `` (bundled declaration); capabilities: execute
+- **run-script-action** — type `action` / `` (bundled declaration); capabilities: execute
+- **run-workflow-action** — type `action` / `` (bundled declaration); capabilities: execute
+- **send-message-action** — type `action` / `` (bundled declaration); capabilities: execute
+- **native-agents** — type `agent` / `` (bundled declaration); capabilities: crud, acp
+- **dingtalk-channel** — type `channel` / `` (bundled declaration); capabilities: messaging
+- **feishu-channel** — type `channel` / `` (bundled declaration); capabilities: messaging
+- **gideonai-discord-desk** — type `channel` / `` (bundled declaration); capabilities: messaging, reactions, threads
+- **gideonai-mail-desk** — type `channel` / `` (bundled declaration); capabilities: messaging, threads, attachments
+- **gideonai-slack-desk** — type `channel` / `` (bundled declaration); capabilities: messaging, reactions, threads
+- **matrix-channel** — type `channel` / `` (bundled declaration); capabilities: messaging, threads
+- **mochat-channel** — type `channel` / `` (bundled declaration); capabilities: messaging
+- **qq-channel** — type `channel` / `` (bundled declaration); capabilities: messaging
+- **telegram-channel** — type `channel` / `` (bundled declaration); capabilities: messaging, threads, attachments, voice, approvals, topics, interactive-questions, group-observation, drafts, rich-messages
+- **wecom-channel** — type `channel` / `` (bundled declaration); capabilities: messaging
+- **weixin-channel** — type `channel` / `` (bundled declaration); capabilities: messaging, qr-pairing
+- **whatsapp-channel** — type `channel` / `` (bundled declaration); capabilities: messaging, qr-pairing
+- **filesystem-inbox** — type `inbox` / `` (bundled declaration); capabilities: approvals, inputs
+- **gideonai-slack-desk** — type `inbox` / `` (bundled declaration); capabilities: poll, reply, reactions, history
+- **native-knowledge** — type `knowledge` / `` (bundled declaration); capabilities: bookmarks, documents, search
+- **native-vector-memory** — type `memory` / `` (bundled declaration); capabilities: semantic_search, episodic, preferences
+- **gideon-fal-video** — type `model` / `` (bundled declaration); capabilities: video_gen
+- **ollama-models** — type `model` / `ollama` (bundled declaration); capabilities: chat, embedding
+- **gideon-telegram-ops** — type `notification` / `` (bundled declaration); capabilities: telegram-notifications
+- **native-prompts** — type `prompt` / `` (bundled declaration); capabilities: list, read, write, render
+- **native-skills** — type `skills` / `` (bundled declaration); capabilities: crud, triggers, auto_generation
+- **native-tasks** — type `task` / `` (bundled declaration); capabilities: crud, comments, labels, dependencies
+- **gideon-artifacts** — type `tool` / `` (bundled declaration); capabilities: artifacts
+- **gideon-automation-tools** — type `tool` / `` (bundled declaration); capabilities: automation_management
+- **gideon-body-composition** — type `tool` / `` (bundled declaration); capabilities: body-composition-records
+- **gideon-code-map** — type `tool` / `` (bundled declaration); capabilities: code_map
+- **gideon-computer-use-tools** — type `tool` / `` (bundled declaration); capabilities: desktop_automation
+- **gideon-creative** — type `tool` / `` (bundled declaration); capabilities: creative
+- **gideon-creative-commissions** — type `tool` / `` (bundled declaration); capabilities: creative-commissions, creative-commission-peer-feedback
+- **gideon-creative-direction** — type `tool` / `` (bundled declaration); capabilities: creative-direction-plans
+- **gideon-creative-exports** — type `tool` / `` (bundled declaration); capabilities: creative-manuscript-export
+- **gideon-experience** — type `tool` / `` (bundled declaration); capabilities: experience
+- **gideon-experience** — type `tool` / `` (bundled declaration); capabilities: experience_foundations_get, experience_controller_install, experience_controller_control
+- **gideon-experience** — type `tool` / `` (bundled declaration); capabilities: experience_game_assets_get, experience_game_assets_compile, experience_game_assets_publish
+- **gideon-experience** — type `tool` / `` (bundled declaration); capabilities: experience_moltworld_get, experience_moltworld_configure, experience_moltworld_status, experience_moltworld_observe, experience_moltworld_action
+- **gideon-identity** — type `tool` / `` (bundled declaration); capabilities: stories, human_identity, literal_fidelity
+- **gideon-inbox-tools** — type `tool` / `` (bundled declaration); capabilities: inbox
+- **gideon-integration-apps** — type `tool` / `` (bundled declaration); capabilities: jira, datadog, github
+- **gideon-knowledge-tools** — type `tool` / `` (bundled declaration); capabilities: knowledge
+- **gideon-lifestyle-profile** — type `tool` / `` (bundled declaration); capabilities: lifestyle-profile-observations
+- **gideon-media** — type `tool` / `` (bundled declaration); capabilities: media
+- **gideon-media-sharing** — type `tool` / `` (bundled declaration); capabilities: platform_media_shares_list, platform_media_share, platform_media_share_revoke
+- **gideon-memory** — type `tool` / `` (bundled declaration); capabilities: memory
+- **gideon-moltbook** — type `tool` / `` (bundled declaration); capabilities: moltbook-read, moltbook-write
+- **gideon-music-assemblies** — type `tool` / `` (bundled declaration); capabilities: music-assemblies
+- **gideon-music-decks** — type `tool` / `` (bundled declaration); capabilities: music-decks
+- **gideon-music-generation** — type `tool` / `` (bundled declaration); capabilities: music-generation
+- **gideon-music-listening** — type `tool` / `` (bundled declaration); capabilities: music-listening
+- **gideon-music-midi** — type `tool` / `` (bundled declaration); capabilities: music-midi
+- **gideon-music-models3d** — type `tool` / `` (bundled declaration); capabilities: music-models3d
+- **gideon-music-rounds** — type `tool` / `` (bundled declaration); capabilities: music-rounds
+- **gideon-music-tools** — type `tool` / `` (bundled declaration); capabilities: music-repertoire, music-catalog
+- **gideon-music-video** — type `tool` / `` (bundled declaration); capabilities: music-video
+- **gideon-outbound-email** — type `tool` / `` (bundled declaration); capabilities: approved-outbound-email
+- **gideon-peers** — type `tool` / `` (bundled declaration); capabilities: platform_peer_projection
+- **gideon-people** — type `tool` / `` (bundled declaration); capabilities: people, contact-import, relationship-care, mail-mirror, desktop-message-import, beeper-outbox, telegram-operations, calendar-mirror, social-account-registry, x-read-compose-handoff, stacker-territory-actions, agent-platform-assignments, recorded-activity-timeline
+- **gideon-personal-knowledge** — type `tool` / `` (bundled declaration); capabilities: personal-knowledge
+- **gideon-platform** — type `tool` / `` (bundled declaration); capabilities: platform_api_catalog, prompt_dependency_usage, provider_connections_get, platform_harness_inventory, platform_model_comparisons, platform_reference_repositories, platform_feature_ownership, platform_feature_claim, platform_gsd_project, platform_gsd_phase_task, platform_maintenance, platform_maintenance_control, platform_pr_screening, platform_pr_capture, platform_task_cadence, platform_task_cadence_set, platform_schedule_forecast, platform_dashboard_compositions, platform_dashboard_select, platform_usage_accounting, platform_personal_scorecard, platform_inference_host
+- **gideon-privacy-broker-beenverified** — type `tool` / `` (bundled declaration); capabilities: beenverified-approved-deletion-email
+- **gideon-privacy-broker-spokeo** — type `tool` / `` (bundled declaration); capabilities: privacy-broker-spokeo
+- **gideon-privacy-broker-whitepages** — type `tool` / `` (bundled declaration); capabilities: whitepages-approved-email-optout
+- **gideon-project-tools** — type `tool` / `` (bundled declaration); capabilities: projects
+- **gideon-prompts** — type `tool` / `` (bundled declaration); capabilities: prompts
+- **gideon-remote-media** — type `tool` / `` (bundled declaration); capabilities: remote_media_list, remote_media_dispatch, remote_media_cancel
+- **gideon-replication** — type `tool` / `` (bundled declaration); capabilities: platform_replication_status
+- **gideon-subagents** — type `tool` / `` (bundled declaration); capabilities: subagents
+- **gideon-tasks-tools** — type `tool` / `` (bundled declaration); capabilities: task
+- **gideon-tools** — type `tool` / `` (bundled declaration); capabilities: skills, notification, system
+- **gideon-ui-docs** — type `tool` / `` (bundled declaration); capabilities: ui_docs
+- **gideon-wellbeing** — type `tool` / `` (bundled declaration); capabilities: wellbeing_records
+- **gideon-wellbeing-epigenetic** — type `tool` / `` (bundled declaration); capabilities: wellbeing-epigenetic-results
+- **gideon-wellbeing-eyes** — type `tool` / `` (bundled declaration); capabilities: wellbeing-eye-prescriptions
+- **gideon-workflows** — type `tool` / `` (bundled declaration); capabilities: workflows
+- **gideon-workspace** — type `tool` / `` (bundled declaration); capabilities: workspace_contexts, managed_processes, port_reservations, project_discovery, project_git, isolated_desktops, external_terminal_mirror
+- **remote-agent-sessions** — type `tool` / `` (bundled declaration); capabilities: remote-sessions, history, streaming
+- **gideonai-discord-desk** — type `trigger_source` / `` (bundled declaration); capabilities: direct_message, guild_message
+- **gideonai-mail-desk** — type `trigger_source` / `` (bundled declaration); capabilities: mail_received
+- **gideonai-slack-desk** — type `trigger_source` / `` (bundled declaration); capabilities: direct_message, channel_message

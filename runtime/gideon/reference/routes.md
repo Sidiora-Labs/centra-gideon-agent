@@ -1,13 +1,14 @@
 # Gideon HTTP Route Reference
 
-The gateway's HTTP surface. **Agent-callable routes** (`/api/*`, non-websocket) are the ones an agent drives directly; the rest are websocket / internal and listed after for completeness.
+Statically discovered HTTP route declarations. **Agent-callable routes** (`/api/*`, non-websocket) are the ones an agent drives directly; the rest are websocket / internal and listed after for completeness. This classification does not grant access or guarantee that a route is mounted in a running gateway.
 
-After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to confirm the change took — the mandatory verify loop.
+Mutating endpoints retain their native authentication, review, and grant checks.
 
 ## Agent-callable routes
 
 - `GET /api/action-providers` — the registered action providers + their
 - `GET /api/agent-hooks` — read-only view of agent hooks from gideon.json.
+- `POST /api/agent-hooks/allow` — allow one current configured hook revision.
 - `GET /api/agent-marketplace/agents` — list agents from a marketplace.
 - `POST /api/agent-marketplace/agents` — create a new agent definition.
 - `DELETE /api/agent-marketplace/agents/{name}` — delete an agent definition.
@@ -20,8 +21,9 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `GET /api/agent-metadata/{name}` — read agent routing metadata.
 - `PUT /api/agent-metadata/{name}` — write agent routing metadata.
 - `GET /api/agent-providers` — the single list of agent runtimes + readiness.
-- `GET /api/agent-providers/{id}/agents` — list a runtime's discoverable agents.
+- `GET /api/agent-providers/{id}/agents` — read previously tested agents.
 - `GET /api/agent-runners` — the BYO runner catalog with measured health evidence.
+- `POST /api/agent-runners/{id}/grant` — for an authenticated owner decision.
 - `GET /api/agent/config` — read or write the installed agent config.
 - `PUT /api/agent/config` — read or write the installed agent config.
 - `GET /api/agents` — list all Gideon agent definitions.
@@ -29,6 +31,8 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `DELETE /api/agents/detail/{name}` — view, delete, or update agent config.
 - `GET /api/agents/detail/{name}` — view, delete, or update agent config.
 - `PATCH /api/agents/detail/{name}` — view, delete, or update agent config.
+- `POST /api/agents/export` — Write exactly the still-current owner export from an unexpired preview.
+- `POST /api/agents/export/preview` — Preview an OSS-only Claude Code export without creating files.
 - `GET /api/agents/installed` — list installed agent provider names.
 - `POST /api/agents/routing/dismiss` — {agent} — bump the dismissal counter; the
 - `GET /api/agents/routing/status` — enabled flag + muted/dismissal state.
@@ -39,13 +43,14 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `GET /api/approvals` — list pending tool approvals.
 - `POST /api/approvals/{id}/{action}` — approve or reject.
 - `GET /api/apps` — installed apps with manifest summary + runtime state.
-- `POST /api/apps` — install from ``{source, confirm?}``.
+- `POST /api/apps` — _(no summary)_
 - `GET /api/apps/catalog` — available-to-install apps (Store): bundled-but-not-
 - `DELETE /api/apps/local-sources` — remove a local app-source dir.
 - `GET /api/apps/local-sources` — the configured local app-source directories.
 - `POST /api/apps/local-sources` — add a local app-source dir ``{path}`` (a
 - `GET /api/apps/message` — drain THIS app's inbox (read-once).
 - `POST /api/apps/message` — send a typed message ``{to, type, payload}`` to
+- `POST /api/apps/preview` — _(no summary)_
 - `DELETE /api/apps/sources` — remove a user git source URL.
 - `GET /api/apps/sources` — the configured git source URLs (defaults + user).
 - `POST /api/apps/sources` — add a user git source URL ``{url}``.
@@ -59,9 +64,10 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/apps/{name}/enable` — _(no summary)_
 - `POST /api/apps/{name}/token` — mint an app-scoped identity token.
 - `GET /api/apps/{name}/uninstall-preview` — classify shared deps (A3) and report what the app's ``data/`` holds.
-- `POST /api/apps/{name}/update` — atomic update from ``{source, confirm?}``.
+- `POST /api/apps/{name}/update` — Preview source updates; apply with the reviewed bundle's review_digest.
 - `GET /api/artifacts` — list (no content). Filters: tag, kind, q, source, source_path, project_id.
 - `POST /api/artifacts` — create (or bump an existing file-backed artifact).
+- `POST /api/artifacts/deck` — Render a deck model into a new, versioned PPTX artifact.
 - `GET /api/artifacts/deployed` — the deployed-app listing (slug + in-gateway URL).
 - `GET /api/artifacts/folders` — the library folder tree (flat, parent_id-linked).
 - `POST /api/artifacts/folders` — create a folder (``{name, parent_id?, icon?}``).
@@ -71,10 +77,12 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `DELETE /api/artifacts/{slug}` — _(no summary)_
 - `GET /api/artifacts/{slug}` — full content (live-pointer read for file-backed).
 - `PATCH /api/artifacts/{slug}` — save (silent) or snapshot; or metadata-only.
+- `POST /api/artifacts/{slug}/deck-preview` — Render a saved PPTX's editable slide model in Chromium for visual review.
 - `DELETE /api/artifacts/{slug}/deploy` — tear the deployment down.
 - `POST /api/artifacts/{slug}/deploy` — publish the artifact at its stable serve URL.
 - `GET /api/artifacts/{slug}/events` — activity timeline (drops dashboard:ui).
 - `POST /api/artifacts/{slug}/events` — record a 'referenced' impression.
+- `GET /api/artifacts/{slug}/export.csv` — Authenticated derived CSV download, including untouched historical/source text.
 - `GET /api/artifacts/{slug}/extract` — extracted text for a binary document artifact.
 - `PATCH /api/artifacts/{slug}/folder` — file an artifact (``{folder_id}``; "" = unfiled).
 - `GET /api/artifacts/{slug}/model` — the parsed document model + its loss report.
@@ -85,8 +93,11 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/artifacts/{slug}/regenerate` — re-run image generation at this slug.
 - `GET /api/artifacts/{slug}/versions` — _(no summary)_
 - `GET /api/artifacts/{slug}/versions/{version}` — immutable historical content.
+- `GET /api/assistant/ideas/decisions` — Decisions, newest first. ``status="overdue"`` is a derived filter, not a stored one.
+- `POST /api/assistant/ideas/{idea_id}/decision` — _(no summary)_
 - `GET /api/attachment-extract` — the extracted text content for an
 - `GET /api/auth-status` — Auth configuration status — mode, bind_host, and session validity.
+- `POST /api/auth/confirm` — Verify the owner now and replace only this session; failed proof leaves it live.
 - `POST /api/auth/enroll/complete` — redeem a code for a device session.
 - `POST /api/auth/enroll/start` — mint a single-use device enrollment code.
 - `POST /api/auth/login` — verify the owner credential and mint a session cookie.
@@ -112,24 +123,205 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/browse/kill` — stop unattended browsing. Body: ``{reason?: str}``.
 - `POST /api/browse/kill/release` — re-enable unattended browsing.
 - `GET /api/browse/status` — the mirror's read model: kill state + expired sites.
+- `POST /api/browser/sessions` — _(no summary)_
+- `GET /api/browser/sessions/{session_id}` — The strategy for ``kind``. Raises KeyError if the kind isn't registered —
+- `POST /api/browser/sessions/{session_id}/control/{action}` — _(no summary)_
+- `GET /api/browser/sessions/{session_id}/preview` — _(no summary)_
+- `POST /api/browser/sessions/{session_id}/start` — _(no summary)_
+- `POST /api/browser/sessions/{session_id}/{action}` — _(no summary)_
+- `GET /api/capabilities/communications/activity-timeline` — _(no summary)_
+- `POST /api/capabilities/communications/import/commit` — _(no summary)_
+- `POST /api/capabilities/communications/import/preview` — _(no summary)_
+- `GET /api/capabilities/communications/threads` — _(no summary)_
+- `POST /api/capabilities/communications/threads/evidence` — _(no summary)_
+- `GET /api/capabilities/creative/authors` — _(no summary)_
+- `POST /api/capabilities/creative/authors` — _(no summary)_
+- `GET /api/capabilities/creative/authors/sources` — _(no summary)_
+- `GET /api/capabilities/creative/authors/{id}` — _(no summary)_
+- `PATCH /api/capabilities/creative/authors/{id}` — _(no summary)_
+- `GET /api/capabilities/creative/authors/{id}/brief` — _(no summary)_
+- `GET /api/capabilities/creative/authors/{id}/export` — _(no summary)_
+- `POST /api/capabilities/creative/authors/{id}/restore` — _(no summary)_
+- `GET /api/capabilities/creative/authors/{id}/revisions` — _(no summary)_
+- `GET /api/capabilities/creative/boards` — _(no summary)_
+- `POST /api/capabilities/creative/boards` — _(no summary)_
+- `GET /api/capabilities/creative/boards/sources` — _(no summary)_
+- `GET /api/capabilities/creative/boards/{id}` — _(no summary)_
+- `PATCH /api/capabilities/creative/boards/{id}` — _(no summary)_
+- `GET /api/capabilities/creative/boards/{id}/export` — _(no summary)_
+- `POST /api/capabilities/creative/boards/{id}/restore` — _(no summary)_
+- `GET /api/capabilities/creative/boards/{id}/revisions` — _(no summary)_
+- `GET /api/capabilities/creative/series` — _(no summary)_
+- `POST /api/capabilities/creative/series` — _(no summary)_
+- `GET /api/capabilities/creative/series/{id}` — _(no summary)_
+- `PATCH /api/capabilities/creative/series/{id}` — _(no summary)_
+- `POST /api/capabilities/creative/series/{id}/chapters/{chapter_id}/draft` — _(no summary)_
+- `POST /api/capabilities/creative/series/{id}/chapters/{chapter_id}/prepare` — _(no summary)_
+- `POST /api/capabilities/creative/series/{id}/chapters/{chapter_id}/review` — _(no summary)_
+- `GET /api/capabilities/creative/series/{id}/export` — _(no summary)_
+- `POST /api/capabilities/creative/series/{id}/restore` — _(no summary)_
+- `GET /api/capabilities/creative/series/{id}/revisions` — _(no summary)_
+- `GET /api/capabilities/creative/series/{id}/voice` — _(no summary)_
+- `PATCH /api/capabilities/creative/series/{id}/voice` — _(no summary)_
+- `GET /api/capabilities/creative/series/{id}/voice/export` — _(no summary)_
+- `GET /api/capabilities/creative/stories` — _(no summary)_
+- `POST /api/capabilities/creative/stories` — _(no summary)_
+- `GET /api/capabilities/creative/stories/{id}` — _(no summary)_
+- `PATCH /api/capabilities/creative/stories/{id}` — _(no summary)_
+- `POST /api/capabilities/creative/stories/{id}/adopt` — _(no summary)_
+- `GET /api/capabilities/creative/stories/{id}/export` — _(no summary)_
+- `POST /api/capabilities/creative/stories/{id}/restore` — _(no summary)_
+- `GET /api/capabilities/creative/stories/{id}/revisions` — _(no summary)_
+- `GET /api/capabilities/creative/stories/{id}/suggestions` — _(no summary)_
+- `POST /api/capabilities/creative/stories/{id}/suggestions` — _(no summary)_
+- `POST /api/capabilities/creative/stories/{id}/work` — _(no summary)_
+- `GET /api/capabilities/creative/universes` — _(no summary)_
+- `POST /api/capabilities/creative/universes` — _(no summary)_
+- `GET /api/capabilities/creative/universes/{id}` — _(no summary)_
+- `PATCH /api/capabilities/creative/universes/{id}` — _(no summary)_
+- `GET /api/capabilities/creative/universes/{id}/export` — _(no summary)_
+- `GET /api/capabilities/creative/universes/{id}/graph` — _(no summary)_
+- `POST /api/capabilities/creative/universes/{id}/merge` — _(no summary)_
+- `POST /api/capabilities/creative/universes/{id}/merge-preview` — _(no summary)_
+- `POST /api/capabilities/creative/universes/{id}/restore` — _(no summary)_
+- `GET /api/capabilities/creative/universes/{id}/revisions` — _(no summary)_
+- `GET /api/capabilities/creative/works` — _(no summary)_
+- `POST /api/capabilities/creative/works` — _(no summary)_
+- `GET /api/capabilities/creative/works/{id}` — _(no summary)_
+- `PATCH /api/capabilities/creative/works/{id}` — _(no summary)_
+- `GET /api/capabilities/creative/works/{id}/context` — _(no summary)_
+- `GET /api/capabilities/creative/works/{id}/continuity` — _(no summary)_
+- `GET /api/capabilities/creative/works/{id}/continuity/export` — _(no summary)_
+- `POST /api/capabilities/creative/works/{id}/continuity/proposals` — _(no summary)_
+- `POST /api/capabilities/creative/works/{id}/continuity/proposals/{proposal_id}/accept` — _(no summary)_
+- `GET /api/capabilities/creative/works/{id}/drafts` — _(no summary)_
+- `POST /api/capabilities/creative/works/{id}/drafts` — _(no summary)_
+- `GET /api/capabilities/creative/works/{id}/drafts/{draft_id}` — _(no summary)_
+- `GET /api/capabilities/creative/works/{id}/editorial` — _(no summary)_
+- `POST /api/capabilities/creative/works/{id}/editorial/context` — _(no summary)_
+- `POST /api/capabilities/creative/works/{id}/editorial/custom-checks` — _(no summary)_
+- `DELETE /api/capabilities/creative/works/{id}/editorial/custom-checks/{custom_id}` — _(no summary)_
+- `PATCH /api/capabilities/creative/works/{id}/editorial/custom-checks/{custom_id}` — _(no summary)_
+- `POST /api/capabilities/creative/works/{id}/editorial/cuts/{cut_id}/apply` — _(no summary)_
+- `POST /api/capabilities/creative/works/{id}/editorial/cuts/{cut_id}/undo` — _(no summary)_
+- `PATCH /api/capabilities/creative/works/{id}/editorial/policy` — _(no summary)_
+- `POST /api/capabilities/creative/works/{id}/editorial/reviews` — _(no summary)_
+- `POST /api/capabilities/creative/works/{id}/editorial/runs` — _(no summary)_
+- `POST /api/capabilities/creative/works/{id}/editorial/runs/{run_id}/findings/{finding_id}/cut` — _(no summary)_
+- `POST /api/capabilities/creative/works/{id}/editorial/runs/{run_id}/findings/{finding_id}/repair` — _(no summary)_
+- `GET /api/capabilities/creative/works/{id}/export` — _(no summary)_
+- `GET /api/capabilities/creative/works/{id}/polishing` — _(no summary)_
+- `POST /api/capabilities/creative/works/{id}/polishing` — _(no summary)_
+- `GET /api/capabilities/creative/works/{id}/polishing/{proposal_id}` — _(no summary)_
+- `POST /api/capabilities/creative/works/{id}/polishing/{proposal_id}/promote` — _(no summary)_
+- `POST /api/capabilities/creative/works/{id}/restore` — _(no summary)_
+- `GET /api/capabilities/creative/works/{id}/revisions` — _(no summary)_
+- `GET /api/capabilities/experience/ambient` — _(no summary)_
+- `PUT /api/capabilities/experience/ambient` — _(no summary)_
+- `GET /api/capabilities/knowledge/anniversaries` — _(no summary)_
+- `GET /api/capabilities/knowledge/journals` — _(no summary)_
+- `POST /api/capabilities/knowledge/journals` — _(no summary)_
+- `GET /api/capabilities/knowledge/journals/draft` — _(no summary)_
+- `GET /api/capabilities/knowledge/sources/{source_type}/{source_id}` — _(no summary)_
+- `GET /api/capabilities/media/images` — Route one node to its dispatcher.
+- `POST /api/capabilities/media/images` — Route one node to its dispatcher.
+- `GET /api/capabilities/media/jobs/{job_id}/animation` — _(no summary)_
+- `GET /api/capabilities/media/jobs/{job_id}/atlas` — Route one node to its dispatcher.
+- `GET /api/capabilities/media/jobs/{job_id}/checkpoints` — Route one node to its dispatcher.
+- `GET /api/capabilities/media/jobs/{job_id}/frames` — Route one node to its dispatcher.
+- `GET /api/capabilities/media/jobs/{job_id}/scenes` — Route one node to its dispatcher.
+- `GET /api/capabilities/media/loras` — Route one node to its dispatcher.
+- `GET /api/capabilities/media/loras/{adapter_id}` — Route one node to its dispatcher.
+- `GET /api/capabilities/media/readiness` — Route one node to its dispatcher.
+- `POST /api/capabilities/media/readiness` — Route one node to its dispatcher.
+- `GET /api/capabilities/media/source-download` — Route one node to its dispatcher.
+- `POST /api/capabilities/media/sprites/inspect` — Route one node to its dispatcher.
+- `GET /api/capabilities/media/training` — Route one node to its dispatcher.
+- `GET /api/capabilities/media/videos` — Route one node to its dispatcher.
+- `POST /api/capabilities/media/videos` — Route one node to its dispatcher.
+- `GET /api/capabilities/platform/accounting` — _(no summary)_
+- `POST /api/capabilities/platform/accounting/import` — _(no summary)_
+- `GET /api/capabilities/platform/cadence` — _(no summary)_
+- `PUT /api/capabilities/platform/cadence/{id}` — _(no summary)_
+- `GET /api/capabilities/platform/comparisons` — _(no summary)_
+- `POST /api/capabilities/platform/comparisons` — _(no summary)_
+- `DELETE /api/capabilities/platform/comparisons/{id}` — _(no summary)_
+- `GET /api/capabilities/platform/forecast` — _(no summary)_
+- `GET /api/capabilities/platform/harnesses` — _(no summary)_
+- `POST /api/capabilities/platform/harnesses/{id}` — _(no summary)_
+- `GET /api/capabilities/platform/inference-host` — _(no summary)_
+- `POST /api/capabilities/platform/inference-host` — _(no summary)_
+- `GET /api/capabilities/platform/insights` — _(no summary)_
+- `POST /api/capabilities/platform/insights` — _(no summary)_
+- `GET /api/capabilities/platform/maintenance` — _(no summary)_
+- `POST /api/capabilities/platform/maintenance` — _(no summary)_
+- `POST /api/capabilities/platform/maintenance/{id}` — _(no summary)_
+- `GET /api/capabilities/platform/migration` — _(no summary)_
+- `POST /api/capabilities/platform/migration` — _(no summary)_
+- `GET /api/capabilities/platform/ownership` — _(no summary)_
+- `POST /api/capabilities/platform/ownership` — _(no summary)_
+- `GET /api/capabilities/platform/peers` — _(no summary)_
+- `POST /api/capabilities/platform/peers/proofs/verify` — _(no summary)_
+- `DELETE /api/capabilities/platform/peers/{peer_id}` — _(no summary)_
+- `PUT /api/capabilities/platform/peers/{peer_id}` — _(no summary)_
+- `POST /api/capabilities/platform/peers/{peer_id}/probe` — _(no summary)_
+- `GET /api/capabilities/platform/pr-screening` — _(no summary)_
+- `POST /api/capabilities/platform/pr-screening` — _(no summary)_
+- `POST /api/capabilities/platform/pr-screening/{id}` — _(no summary)_
+- `GET /api/capabilities/platform/replication` — Run status plus node-level progress. Pure read — constructs no controller.
+- `POST /api/capabilities/platform/replication/conflicts/{conflict_id}/restore-fields` — _(no summary)_
+- `POST /api/capabilities/platform/replication/peers/{peer_id}/push` — _(no summary)_
+- `POST /api/capabilities/platform/replication/receive` — _(no summary)_
+- `GET /api/capabilities/wellbeing/privacy/broker-cases/{id}/providers/beenverified` — Run status plus node-level progress. Pure read — constructs no controller.
+- `POST /api/capabilities/wellbeing/privacy/broker-cases/{id}/providers/beenverified/{action}` — _(no summary)_
+- `POST /api/capabilities/wellbeing/privacy/broker-cases/{id}/providers/spokeo/{action}` — _(no summary)_
+- `GET /api/capabilities/wellbeing/privacy/broker-cases/{id}/providers/whitepages` — Run status plus node-level progress. Pure read — constructs no controller.
+- `POST /api/capabilities/wellbeing/privacy/broker-cases/{id}/providers/whitepages/{action}` — _(no summary)_
+- `GET /api/capabilities/workspace/desktops` — _(no summary)_
+- `POST /api/capabilities/workspace/desktops` — _(no summary)_
+- `GET /api/capabilities/workspace/desktops/{id}` — _(no summary)_
+- `GET /api/capabilities/workspace/desktops/{id}/{operation}` — _(no summary)_
+- `POST /api/capabilities/workspace/desktops/{id}/{operation}` — _(no summary)_
+- `GET /api/capabilities/workspace/desktops/{operation}` — _(no summary)_
+- `GET /api/capabilities/workspace/external-terminals` — _(no summary)_
+- `GET /api/capabilities/workspace/external-terminals/{id}` — _(no summary)_
+- `POST /api/capabilities/workspace/git/operations` — _(no summary)_
+- `GET /api/capabilities/workspace/git/{project_id}` — _(no summary)_
+- `GET /api/capabilities/workspace/git/{project_id}/{history}` — _(no summary)_
+- `GET /api/capabilities/workspace/provider-terminals` — _(no summary)_
+- `POST /api/capabilities/workspace/provider-terminals/images` — _(no summary)_
+- `GET /api/capabilities/workspace/storage` — _(no summary)_
+- `POST /api/capabilities/workspace/storage/scan` — _(no summary)_
 - `GET /api/changelog` — read full CHANGELOG.md from project.
 - `POST /api/channel/profile` — read a channel user's profile.
 - `POST /api/channel/upload-file` — upload a file to the active channel (internal, called by notify_attachment).
 - `GET /api/channels` — all comms transports with info + health.
 - `GET /api/channels/reply-targets` — list channels the bot can reply in.
+- `POST /api/channels/telegram/pairing` — _(no summary)_
 - `GET /api/channels/trust` — the whole sender-trust posture, per provider.
+- `POST /api/channels/trust/{provider}/channels` — _(no summary)_
+- `DELETE /api/channels/trust/{provider}/channels/{channel_id}` — _(no summary)_
+- `DELETE /api/channels/trust/{provider}/pairing` — _(no summary)_
+- `POST /api/channels/trust/{provider}/pairing` — _(no summary)_
+- `PUT /api/channels/trust/{provider}/policies` — _(no summary)_
 - `DELETE /api/channels/trust/{provider}/senders/{sender_id}` — revoke one sender.
 - `GET /api/channels/{name}` — one transport's info + health.
 - `POST /api/channels/{name}/connect` — bring the transport online.
 - `POST /api/channels/{name}/disconnect` — take the transport offline.
 - `POST /api/channels/{name}/test` — active probe (e.g. Slack auth.test).
+- `GET /api/channels/{provider}/owner` — Read redacted owner-binding state for one registered provider.
+- `DELETE /api/channels/{provider}/owner/pairing` — _(no summary)_
+- `POST /api/channels/{provider}/owner/pairing` — Issue a short-lived code. The code is returned once and never stored in cleartext.
 - `POST /api/chat` — send message to a session, stream response via SSE.
 - `GET /api/chat/folders` — list all project folders.
 - `POST /api/chat/folders` — create a project folder.
 - `DELETE /api/chat/folders/{id}` — delete a folder, ungroup its sessions.
 - `PATCH /api/chat/folders/{id}` — rename or reorder a folder.
+- `GET /api/chat/image-input` — Describe how one uploaded image will reach this chat's model.
 - `POST /api/chat/mode` — set the tool APPROVAL mode (whether tools auto-approve).
 - `POST /api/chat/nav/resolve-links` — batch-summarize bare links.
+- `GET /api/chat/questions` — _(no summary)_
+- `POST /api/chat/questions/answer` — _(no summary)_
 - `GET /api/chat/screen-frame` — can this session share its screen?
 - `POST /api/chat/screen-frame` — stage one screen frame for the next chat turn.
 - `POST /api/chat/screen-frame/pin` — promote one frame to an ordinary attachment.
@@ -180,6 +372,9 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `GET /api/chat/sessions/{session}/rewind` — what a rewind would do. Read-only.
 - `POST /api/chat/sessions/{session}/rewind` — restore files to the end of turn N.
 - `POST /api/chat/sessions/{session}/share` — a redacted, read-only artifact of a chat.
+- `GET /api/chat/sessions/{session}/shares` — List private, read-only snapshots owned by this authenticated allocation.
+- `DELETE /api/chat/sessions/{session}/shares/{slug}` — Revoke only a snapshot proven to originate from the selected session.
+- `GET /api/chat/sessions/{session}/shares/{slug}` — Read a preview from the frozen redacted snapshot, never live chat turns.
 - `POST /api/chat/sessions/{session}/side/close` — drop the buffer + destroy
 - `POST /api/chat/sessions/{session}/side/open` — open (or reset) the side buffer.
 - `POST /api/chat/sessions/{session}/side/turn` — ask one side question.
@@ -232,10 +427,16 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `GET /api/desktop/state` — what the desktop shell can actually do, right now.
 - `POST /api/desktop/state` — the shell pushes a refreshed capability manifest.
 - `POST /api/desktop/unregister` — the shell is quitting; forget its capabilities.
-- `GET /api/devices` — every paired device with a live session.
+- `GET /api/devices` — every owner sign-in with a live session.
 - `POST /api/devices/pair/complete` — redeem a code for a durable device session.
 - `POST /api/devices/pair/start` — mint a single-use pairing code + QR payload.
+- `POST /api/devices/revoke-others` — keep this authenticated session only.
 - `POST /api/devices/{id}/revoke` — lock one device out.
+- `DELETE /api/doc-comments` — _(no summary)_
+- `GET /api/doc-comments` — _(no summary)_
+- `POST /api/doc-comments` — _(no summary)_
+- `DELETE /api/doc-comments/{comment_id}` — _(no summary)_
+- `PATCH /api/doc-comments/{comment_id}` — _(no summary)_
 - `GET /api/doctor` — all probes, grouped by capability, cached 30s.
 - `GET /api/doctor/crash/{filename}` — the full JSON of one crash artifact.
 - `POST /api/doctor/fix/{fix_id}` — apply a confirm-gated fix.
@@ -265,10 +466,19 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/evals/retrieval/labels` — save a completed hand-label card.
 - `GET /api/evals/studies` — one compact row per pre-registered study (§2.4 / ES-5).
 - `GET /api/evals/studies/{study_id}` — one study's verdict, agreement and per-run rows.
+- `GET /api/experiments/campaigns` — _(no summary)_
+- `POST /api/experiments/campaigns` — _(no summary)_
+- `GET /api/experiments/campaigns/{campaign_id}` — _(no summary)_
+- `POST /api/experiments/campaigns/{campaign_id}/advance` — _(no summary)_
+- `POST /api/experiments/campaigns/{campaign_id}/attempts/{ordinal}/observation` — _(no summary)_
+- `POST /api/experiments/campaigns/{campaign_id}/stop` — _(no summary)_
+- `GET /api/experiments/replays/{replay_id}` — _(no summary)_
+- `POST /api/experiments/runs/{run_id}/record` — _(no summary)_
 - `GET /api/external-access` — the whole operator view of the inbound seam.
 - `POST /api/external-access/clients` — create; DELETE …/{client_id} — revoke.
 - `DELETE /api/external-access/clients/{client_id}` — create; DELETE …/{client_id} — revoke.
 - `POST /api/external-access/clients/{client_id}/disabled` — kill-switch layer (c).
+- `POST /api/external-access/clients/{client_id}/persistent-sessions` — _(no summary)_
 - `POST /api/feedback` — record one verdict.
 - `GET /api/feedback/producers` — per-producer accuracy.
 - `POST /api/feedback/producers/clear` — un-suppress after an artifact edit.
@@ -294,7 +504,64 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `GET /api/guardrails/project-trust` — the whole store;
 - `POST /api/guardrails/project-trust` — the whole store;
 - `GET /api/healthz` — Liveness probe — auth-exempt, returns 200 once gateway is serving HTTP.
+- `GET /api/heartbeat/tasks` — show current tasks and their grant state.
+- `POST /api/heartbeat/tasks/{task_id}/allow` — allow one reviewed revision.
 - `POST /api/hooks/agent` — run an agent turn from an external webhook.
+- `GET /api/hooks/pending` — show callbacks awaiting the owner's decision.
+- `POST /api/hooks/{hook_id}/allow` — confirm one current callback revision.
+- `POST /api/hypermid/authority/apply` — _(no summary)_
+- `POST /api/hypermid/authority/plan` — _(no summary)_
+- `GET /api/hypermid/authority/status` — _(no summary)_
+- `GET /api/hypermid/caches` — _(no summary)_
+- `POST /api/hypermid/caches/{cache_id}/plan` — _(no summary)_
+- `GET /api/hypermid/config/credentials` — _(no summary)_
+- `PUT /api/hypermid/config/credentials/{name}` — _(no summary)_
+- `POST /api/hypermid/config/credentials/{name}/delete` — _(no summary)_
+- `GET /api/hypermid/config/credentials/{name}/delete-plan` — _(no summary)_
+- `POST /api/hypermid/config/credentials/{name}/validate` — _(no summary)_
+- `GET /api/hypermid/config/models` — _(no summary)_
+- `PUT /api/hypermid/config/models` — _(no summary)_
+- `POST /api/hypermid/config/models/plan` — _(no summary)_
+- `POST /api/hypermid/config/models/{model_id}/probe` — _(no summary)_
+- `GET /api/hypermid/config/runtime` — _(no summary)_
+- `PUT /api/hypermid/config/runtime` — _(no summary)_
+- `GET /api/hypermid/connections` — _(no summary)_
+- `POST /api/hypermid/connections/{connection_id}/actions` — _(no summary)_
+- `GET /api/hypermid/diagnostics` — _(no summary)_
+- `GET /api/hypermid/effects` — _(no summary)_
+- `GET /api/hypermid/effects/{effect_id}` — _(no summary)_
+- `POST /api/hypermid/effects/{effect_id}/reconcile` — _(no summary)_
+- `POST /api/hypermid/effects/{effect_id}/review` — _(no summary)_
+- `GET /api/hypermid/logs` — _(no summary)_
+- `GET /api/hypermid/memory` — _(no summary)_
+- `GET /api/hypermid/memory/{record_id}` — _(no summary)_
+- `PATCH /api/hypermid/memory/{record_id}` — _(no summary)_
+- `GET /api/hypermid/operations/lifecycle/jobs/{job_id}` — _(no summary)_
+- `POST /api/hypermid/operations/lifecycle/jobs/{job_id}/recover` — _(no summary)_
+- `POST /api/hypermid/operations/lifecycle/jobs/{job_id}/resume` — _(no summary)_
+- `POST /api/hypermid/operations/lifecycle/{action}/apply` — _(no summary)_
+- `POST /api/hypermid/operations/lifecycle/{action}/plan` — _(no summary)_
+- `POST /api/hypermid/operations/maintenance/apply` — _(no summary)_
+- `GET /api/hypermid/operations/maintenance/jobs/{job_id}` — _(no summary)_
+- `POST /api/hypermid/operations/maintenance/jobs/{job_id}/cancel` — _(no summary)_
+- `POST /api/hypermid/operations/maintenance/plan` — _(no summary)_
+- `GET /api/hypermid/operations/security/credentials` — _(no summary)_
+- `GET /api/hypermid/operations/security/jobs/{job_id}` — _(no summary)_
+- `POST /api/hypermid/operations/security/jobs/{job_id}/recover` — _(no summary)_
+- `POST /api/hypermid/operations/security/{action}/apply` — _(no summary)_
+- `POST /api/hypermid/operations/security/{action}/plan` — _(no summary)_
+- `GET /api/hypermid/overview` — _(no summary)_
+- `GET /api/hypermid/remote` — _(no summary)_
+- `POST /api/hypermid/remote/devices/{device_id}/revoke` — _(no summary)_
+- `POST /api/hypermid/remote/enable` — _(no summary)_
+- `POST /api/hypermid/remote/plan` — _(no summary)_
+- `GET /api/hypermid/security` — _(no summary)_
+- `POST /api/hypermid/security/grants/{grant_id}/revoke` — _(no summary)_
+- `POST /api/hypermid/security/memory/{memory_id}/promote` — _(no summary)_
+- `GET /api/hypermid/security/memory/{memory_id}/provenance` — _(no summary)_
+- `GET /api/hypermid/sessions` — _(no summary)_
+- `GET /api/hypermid/sessions/{session_id}` — _(no summary)_
+- `GET /api/hypermid/sessions/{session_id}/primary-context` — _(no summary)_
 - `GET /api/inbox` — list all inbox items (recency, optionally engagement-weighted).
 - `GET /api/inbox/digest` — on-demand channel digest.
 - `POST /api/inbox/dismiss-all` — dismiss every OPEN item (pending or seen).
@@ -302,6 +569,7 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/inbox/notes` — the USER writes their own inbox item (INU-9).
 - `GET /api/inbox/open` — list unresolved items (recency, optionally weighted).
 - `POST /api/inbox/proposals` — an APP raises a proposal (INU-7 T7.2).
+- `DELETE /api/inbox/proposals/reviewed` — _(no summary)_
 - `GET /api/inbox/providers` — list registered inbox message source providers.
 - `POST /api/inbox/restart` — stop and reinitialize the inbox service.
 - `POST /api/inbox/seen` — mark items SEEN (the read/unread boundary).
@@ -314,7 +582,9 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/inbox/{id}/draft` — generate draft reply on demand.
 - `POST /api/inbox/{id}/favorite` — {favorited: bool} — set the favorite flag + record a
 - `POST /api/inbox/{id}/open` — record that the user opened/read this item (a moderate
+- `POST /api/inbox/{id}/pair` — Explicitly grant one held owner-voice sender access to their next message.
 - `POST /api/inbox/{id}/restore` — undo a verification filter (INU-6).
+- `POST /api/inbox/{id}/sort` — Retry an open unsorted source message without fabricating a verdict.
 - `GET /api/incident` — current state; POST /api/incident — activate.
 - `POST /api/incident` — current state; POST /api/incident — activate.
 - `POST /api/incident/resume` — turn incident mode OFF.
@@ -337,7 +607,7 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `GET /api/knowledge/entities/by-name/{name}/related` — - entities directly connected
 - `GET /api/knowledge/entities/{id}/graph` — - D3-compatible subgraph.
 - `GET /api/knowledge/graph` — - the whole entity graph, positioned and edge-thinned.
-- `POST /api/knowledge/ingest` — - multipart file upload. Each file becomes ONE
+- `POST /api/knowledge/ingest` — approve one upload before native storage.
 - `GET /api/knowledge/intents` — - natural-language intents (Tier 3) + outcome counts.
 - `POST /api/knowledge/intents` — - create or update an intent.
 - `DELETE /api/knowledge/intents/{id}` — - removes the intent and its outcomes.
@@ -405,12 +675,14 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `GET /api/legibility/always-on/doc` — one body, verbatim, for the editor.
 - `PUT /api/legibility/always-on/doc` — replace an editable project instruction.
 - `GET /api/legibility/discover` — the curated Discover tips still worth showing.
-- `POST /api/legibility/discover/dismiss` — hide a Discover tip forever.
+- `DELETE /api/legibility/discover/dismiss` — Change persisted Discover dismissals.
+- `POST /api/legibility/discover/dismiss` — Change persisted Discover dismissals.
 - `DELETE /api/lessons` — remove lessons by substring.
 - `GET /api/lessons` — _(no summary)_
 - `POST /api/lessons` — add a lesson to memory.db ``lesson.*``.
 - `GET /api/lexicon/corrections` — list learned corrections (most-corrected first).
 - `POST /api/lexicon/corrections` — {heard, meant, always?} — record a learned fix
+- `DELETE /api/lexicon/corrections/{id}` — remove one learned correction.
 - `PATCH /api/lexicon/corrections/{id}` — {auto_apply} — toggle 'always fix this'.
 - `POST /api/lexicon/rebuild` — resync graph-sourced terms from knowledge entities
 - `POST /api/lexicon/reset` — drop all terms + corrections (rebuild repopulates graph).
@@ -423,7 +695,7 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `GET /api/logs/level` — current backend logger level.
 - `POST /api/logs/level` — change the backend logger level at runtime.
 - `GET /api/loops` — loops (redacted), newest first.
-- `POST /api/loops` — {kind, task|goal, …} — create a READY loop of any kind.
+- `POST /api/loops` — Start a workflow for ported kinds; create a READY loop for other kinds.
 - `POST /api/loops/classify` — {kind, task|goal} — the kind-aware intake analyze
 - `POST /api/loops/validate` — deterministic pre-flight on a create payload
 - `DELETE /api/loops/{id}` — _(no summary)_
@@ -431,6 +703,8 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `PATCH /api/loops/{id}` — {action: start|pause|resume|stop}.
 - `PUT /api/loops/{id}` — edit a pre-launch spec, or a name-only rename in any
 - `POST /api/loops/{id}/autopilot` — {on: bool} — toggle the execution drive live.
+- `GET /api/loops/{id}/design/preview` — Version-bound review of a React artifact actually rendered on the Design canvas.
+- `POST /api/loops/{id}/design/preview` — Version-bound review of a React artifact actually rendered on the Design canvas.
 - `GET /api/loops/{id}/design/tokens` — the RESOLVED token tree
 - `POST /api/loops/{id}/grill-tree` — guided-decomposition intake (grill's ``tree``
 - `POST /api/loops/{id}/nudge` — {text, task_id?} — steer; resume if awaiting input.
@@ -448,6 +722,7 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `GET /api/mcp/active` — return MCP servers for the current agent.
 - `POST /api/mcp/apply` — batched per-scope apply for MCP servers.
 - `GET /api/mcp/importable` — MCP servers configured in an external backend
+- `GET /api/mcp/oauth/callback` — _(no summary)_
 - `GET /api/mcp/pool-stats` — the in-process MCP connection-pool observability tile
 - `GET /api/mcp/probe` — return cached probe results (non-blocking).
 - `POST /api/mcp/probe` — probe all MCP servers and return live status.
@@ -455,6 +730,16 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/mcp/remove` — uninstall an MCP server.
 - `DELETE /api/mcp/servers/{name}` — register or remove an MCP server.
 - `PUT /api/mcp/servers/{name}` — register or remove an MCP server.
+- `POST /api/mcp/servers/{name}/allow` — Allow the exact current owner-managed MCP definition after explicit review.
+- `DELETE /api/mcp/servers/{name}/oauth` — _(no summary)_
+- `GET /api/mcp/servers/{name}/oauth` — _(no summary)_
+- `POST /api/mcp/servers/{name}/oauth/start` — _(no summary)_
+- `GET /api/mcp/servers/{name}/prompts` — _(no summary)_
+- `POST /api/mcp/servers/{name}/prompts/get` — _(no summary)_
+- `DELETE /api/mcp/servers/{name}/read-only-trust` — _(no summary)_
+- `POST /api/mcp/servers/{name}/read-only-trust` — _(no summary)_
+- `GET /api/mcp/servers/{name}/resources` — _(no summary)_
+- `GET /api/mcp/servers/{name}/resources/read` — _(no summary)_
 - `POST /api/mcp/sync` — apply MCP config changes and restart sessions.
 - `POST /api/mcp/toggle` — enable or disable an MCP server globally.
 - `POST /api/mcp/toggle-all` — enable or disable all MCP servers.
@@ -469,12 +754,14 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/memory/entities` — declare an entity, then re-link the store.
 - `GET /api/memory/entities/proposals` — the accept queue (§7.1).
 - `POST /api/memory/entities/proposals` — accept or reject a proposed entity.
+- `DELETE /api/memory/entities/{entity_id}` — retain a deletion tombstone.
 - `GET /api/memory/entities/{entity_id}/backlinks` — what mentions this entity.
 - `GET /api/memory/episodic` — paginated list of episodic memories.
 - `GET /api/memory/episodic/search` — search episodic memories.
 - `DELETE /api/memory/episodic/{id}` — tombstone an episodic memory.
 - `GET /api/memory/events` — paginated audit trail.
 - `POST /api/memory/events/{event_id}/undo` — reverse a logged memory mutation.
+- `POST /api/memory/facets` — _(no summary)_
 - `GET /api/memory/graph` — return all memory as nodes + edges for graph visualization.
 - `GET /api/memory/graph/entities` — the entity topology (§7.2).
 - `GET /api/memory/graph/export` — the entity graph as ONE self-contained HTML file (§7.2).
@@ -484,7 +771,7 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/memory/import` — import memory from JSON (export format).
 - `GET /api/memory/lint` — run the memory-health sweep, return its report.
 - `POST /api/memory/migrate` — migrate legacy markdown memory to vector store.
-- `GET /api/memory/observability` — memory health metrics and context preview.
+- `GET /api/memory/observability` — _(no summary)_
 - `GET /api/memory/preferences` — _(no summary)_
 - `PUT /api/memory/preferences` — _(no summary)_
 - `GET /api/memory/projects` — _(no summary)_
@@ -537,9 +824,14 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `GET /api/models/loaded` — every resident model + the memory-pressure snapshot.
 - `GET /api/models/local/availability` — bounded, typed provider availability.
 - `GET /api/models/local/health` — readiness, loaded models, and sidecar state.
+- `GET /api/models/local/waits` — _(no summary)_
+- `POST /api/models/local/waits/{wait_id}/move-on` — _(no summary)_
 - `GET /api/models/local/{provider}/search` — search a searchable provider's
 - `POST /api/models/local/{provider}/selftest` — run real capability probes.
 - `DELETE /api/models/local/{provider}/{model}` — delete a downloaded local model.
+- `DELETE /api/models/rates` — _(no summary)_
+- `GET /api/models/rates` — _(no summary)_
+- `PUT /api/models/rates` — _(no summary)_
 - `GET /api/models/routing-policy` — the inspectable routing table (§6.1).
 - `PUT /api/models/routing-policy` — set one of the three user levers (§6.2).
 - `GET /api/models/routing-proposals` — the propose-don't-write review queue (§6.3).
@@ -549,6 +841,7 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/models/sidecar/{provider}/install` — start the resumable install.
 - `GET /api/models/sidecar/{provider}/install/status` — the rich install poll shape.
 - `GET /api/models/telemetry` — per-model efficiency rows.
+- `POST /api/models/test` — _(no summary)_
 - `POST /api/models/unload` — {provider} — free what a provider holds. Idempotent.
 - `GET /api/models/use-cases/{use_case}/settings` — _(no summary)_
 - `PUT /api/models/use-cases/{use_case}/settings` — _(no summary)_
@@ -561,10 +854,17 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `PUT /api/notifications/rules` — replace rules for the keys named in the body.
 - `GET /api/notifications/settings` — _(no summary)_
 - `PUT /api/notifications/settings` — _(no summary)_
+- `POST /api/notifications/trust` — Apply the owner's Allow or Deny to a trust-gate unknown-sender notice.
 - `POST /api/notifications/unack` — mark a single notification as unread.
 - `GET /api/onboarding` — First-run onboarding signal — model readiness plus persisted flow progress.
 - `GET /api/onboarding/import` — what each source holds, and what is already ours.
-- `POST /api/onboarding/import` — import the picked categories and report outcomes.
+- `POST /api/onboarding/import` — _(no summary)_
+- `DELETE /api/onboarding/import/job` — _(no summary)_
+- `GET /api/onboarding/import/job` — _(no summary)_
+- `GET /api/onboarding/local-model` — _(no summary)_
+- `POST /api/onboarding/local-model/bind` — _(no summary)_
+- `POST /api/onboarding/local-model/scan` — _(no summary)_
+- `GET /api/onboarding/model-check` — _(no summary)_
 - `POST /api/onboarding/state` — Record first-run progress — a partial merge into the onboarding entity state.
 - `POST /api/optimizer/optimize` — rewrite a prompt using session context.
 - `GET /api/outbox` — list files in the outbox.
@@ -581,6 +881,7 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/packs/{name}/finish-setup` — Return a pack's re-runnable setup interview (the "Finish setup" chip).
 - `POST /api/packs/{name}/roster/deploy` — One-click team deploy: promote a pack's ``always`` roster tier (§4.2).
 - `POST /api/packs/{name}/triggers/deploy` — Promote valid staged triggers, always disabled for explicit user arming.
+- `POST /api/packs/{name}/uninstall` — Plan pack removal by default; apply only the exact current plan after confirmation.
 - `POST /api/packs/{name}/update` — The §1 ``pack_owned`` update flow. DRY-RUN unless ``confirm`` is true.
 - `GET /api/proactive/digest` — §5.1's card, assembled from the last digest run.
 - `POST /api/proactive/digest/reply` — one tap or one typed reply. Body ``{run_id, text}``.
@@ -616,6 +917,7 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/prompts/{name}/render` — render a prompt template with the
 - `GET /api/providers` — _(no summary)_
 - `GET /api/providers/{name}` — _(no summary)_
+- `POST /api/providers/{name}/availability` — _(no summary)_
 - `GET /api/providers/{name}/config` — _(no summary)_
 - `PATCH /api/providers/{name}/config` — _(no summary)_
 - `POST /api/providers/{name}/disable` — _(no summary)_
@@ -635,6 +937,19 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `GET /api/recent-projects` — list recently used project directories.
 - `GET /api/resilience/degraded` — per-surface no-model floor + availability.
 - `POST /api/reveal` — reveal a file/folder in Finder or open with default app.
+- `GET /api/rooms` — _(no summary)_
+- `POST /api/rooms` — _(no summary)_
+- `POST /api/rooms/enable` — _(no summary)_
+- `DELETE /api/rooms/{room_id}` — _(no summary)_
+- `GET /api/rooms/{room_id}` — _(no summary)_
+- `PATCH /api/rooms/{room_id}` — _(no summary)_
+- `POST /api/rooms/{room_id}/cancel` — _(no summary)_
+- `POST /api/rooms/{room_id}/continue` — _(no summary)_
+- `GET /api/rooms/{room_id}/export` — _(no summary)_
+- `POST /api/rooms/{room_id}/messages` — _(no summary)_
+- `GET /api/rooms/{room_id}/transcript` — _(no summary)_
+- `GET /api/rooms/{room_id}/turn` — _(no summary)_
+- `POST /api/rooms/{room_id}/turns` — _(no summary)_
 - `GET /api/sandbox/providers` — the sandbox tiers the terminal picker offers (EI-4 §1.3(3)).
 - `POST /api/screenshot` — capture screen region and return file path.
 - `GET /api/search/active` — bound provider name per use-case.
@@ -650,6 +965,7 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/security/credentials/rollback` — restore the pre-migration ``.env``.
 - `GET /api/security/denied-commands` — the bash denylist for the Security panel.
 - `GET /api/security/egress` — the operator's outbound-egress overrides for the
+- `GET /api/security/outside-home` — Return named, read-only locations available to the owner.
 - `GET /api/security/stats` — live security feature counts.
 - `POST /api/sel/rotate` — archive existing SEL log and start a fresh chain.
 - `POST /api/send-message` — deliver a message to the messaging channel and/or dashboard.
@@ -688,6 +1004,7 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `DELETE /api/skills/{name}` — remove a locally installed skill.
 - `GET /api/skills/{name}` — get or update a skill. (Listing is served by
 - `PUT /api/skills/{name}` — get or update a skill. (Listing is served by
+- `POST /api/skills/{name}/bundled/{choice}` — _(no summary)_
 - `GET /api/skills/{name}/files` — provider-backed file browser.
 - `POST /api/skills/{name}/verify` — S6 integrity lint for one installed skill.
 - `GET /api/slash-commands` — the slash commands the composer "/" menu offers.
@@ -697,6 +1014,8 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/spawn/cancel-fanout` — kill EVERY child of one parent/run in one
 - `DELETE /api/spawn/{agent_id}` — cancel a running subagent or remove a finished one.
 - `GET /api/spawn/{agent_id}` — poll subagent status.
+- `GET /api/spawn/{agent_id}/control` — Inspect or change a control advertised by the active delegated agent.
+- `PATCH /api/spawn/{agent_id}/control` — Inspect or change a control advertised by the active delegated agent.
 - `GET /api/status` — _(no summary)_
 - `POST /api/stt/transcribe` — transcribe uploaded audio via the active STT model.
 - `GET /api/suggestions` — _(no summary)_
@@ -739,14 +1058,19 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/tools/toggle` — enable/disable a native-provider tool.
 - `GET /api/triggers` — every trigger, both kinds.
 - `POST /api/triggers` — create a schedule or lifecycle trigger.
+- `GET /api/triggers/budget` — _(no summary)_
 - `GET /api/triggers/doctor` — structural problems across every trigger (§7 criterion 12).
 - `GET /api/triggers/history` — the run feed across ALL THREE kinds (AUTO crit 4).
+- `GET /api/triggers/review` — _(no summary)_
+- `POST /api/triggers/review` — _(no summary)_
 - `GET /api/triggers/variables` — the ``$variables`` each trigger kind exposes.
 - `POST /api/triggers/view/render` — the `view` kind's production render caller (WF2AUT-6).
 - `GET /api/triggers/week` — the week-grid projection, from `?start=` (AUTO-A1 — S70).
 - `DELETE /api/triggers/{id}` — DELETE /api/triggers/{id}.
 - `PUT /api/triggers/{id}` — DELETE /api/triggers/{id}.
+- `POST /api/triggers/{id}/answer` — Consume one owner answer for a parked store trigger and resume its action.
 - `POST /api/triggers/{id}/fire` — fire a `webhook` trigger from an EXTERNAL caller (WF2AUT-12).
+- `POST /api/triggers/{id}/grant` — Record owner consent for the exact action revision visible in the trigger row.
 - `GET /api/triggers/{id}/history` — run records; other kinds answer `supported: false`.
 - `GET /api/triggers/{id}/history/{run_id}` — one full run record.
 - `POST /api/triggers/{id}/run` — fire now.
@@ -755,9 +1079,10 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/triggers/{id}/toggle` — enable/disable.
 - `POST /api/update` — apply an update, or roll back the last one.
 - `POST /api/update/auto` — toggle auto-update on/off.
-- `POST /api/update/cancel` — dismiss a stuck/failed update overlay.
+- `POST /api/update/cancel` — Stop the owned update and report only confirmed process retirement.
 - `GET /api/update/check` — kind-aware update check (contract C2).
 - `POST /api/update/dev-mode` — toggle git dev-mode (track commits vs tags).
+- `POST /api/update/dismiss` — Clear terminal progress without pretending to stop an active operation.
 - `POST /api/update/simulate` — walk through update steps with delays.
 - `POST /api/upload` — open native file picker and return selected paths.
 - `POST /api/upload/file` — cross-platform multipart file upload.
@@ -790,35 +1115,38 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `POST /api/workflows` — _(no summary)_
 - `GET /api/workflows/attention` — per-template §4.4 attention summaries.
 - `GET /api/workflows/audit` — Diagnose/heal. `dry_run` defaults TRUE — a GET-shaped repair that ran by default
+- `POST /api/workflows/batches` — _(no summary)_
+- `GET /api/workflows/batches/{name}` — _(no summary)_
 - `GET /api/workflows/manifest` — _(no summary)_
 - `GET /api/workflows/runs` — Paginated run list. Reads the store directly: this is a projection for a table, not
 - `POST /api/workflows/runs` — _(no summary)_
-- `DELETE /api/workflows/runs/{run_id}` — Delete a terminal run and its artifacts, tearing its workspace down first.
+- `DELETE /api/workflows/runs/{run_id}` — _(no summary)_
 - `GET /api/workflows/runs/{run_id}` — _(no summary)_
 - `POST /api/workflows/runs/{run_id}/cancel` — _(no summary)_
-- `POST /api/workflows/runs/{run_id}/confirm` — Resolve a pending confirmation by verb — the seam the DagView's Approve/Deny binds to.
-- `GET /api/workflows/runs/{run_id}/continuations` — The pending resume tokens for a run — what a needs-input inbox renders.
-- `GET /api/workflows/runs/{run_id}/deliverable` — GET the run's document deliverable + working log (PP-16 unit 1).
-- `GET /api/workflows/runs/{run_id}/drop` — GET the run's file-drop policy + what has been dropped (WORK-CONTAINERS §2.5).
-- `POST /api/workflows/runs/{run_id}/drop` — POST multipart to the run's approval-gated file drop (WORK-CONTAINERS §2.5, R17).
+- `POST /api/workflows/runs/{run_id}/confirm` — _(no summary)_
+- `GET /api/workflows/runs/{run_id}/continuations` — _(no summary)_
+- `GET /api/workflows/runs/{run_id}/deliverable` — _(no summary)_
+- `GET /api/workflows/runs/{run_id}/drop` — _(no summary)_
+- `POST /api/workflows/runs/{run_id}/drop` — _(no summary)_
 - `POST /api/workflows/runs/{run_id}/edit` — _(no summary)_
-- `GET /api/workflows/runs/{run_id}/events` — Per-run event stream, snapshot-then-subscribe.
+- `GET /api/workflows/runs/{run_id}/events` — _(no summary)_
 - `POST /api/workflows/runs/{run_id}/fork` — _(no summary)_
-- `GET /api/workflows/runs/{run_id}/introspect` — The §6.4 nine-question introspection projection for one run (WORK-CONTAINERS R6).
-- `GET /api/workflows/runs/{run_id}/ledger-rails` — GET the run's two ledger rails — findings and verdict/ROI (PP-16 seam 4).
-- `GET /api/workflows/runs/{run_id}/nodes/{node_id}/inspect` — The §5 reconstructability set for one terminal node (WF2-A2).
-- `GET /api/workflows/runs/{run_id}/outbox` — GET the run's published-artifact listing — the §2.5 outbox half of R17.
+- `GET /api/workflows/runs/{run_id}/introspect` — _(no summary)_
+- `GET /api/workflows/runs/{run_id}/ledger-rails` — _(no summary)_
+- `GET /api/workflows/runs/{run_id}/nodes/{node_id}/inspect` — _(no summary)_
+- `GET /api/workflows/runs/{run_id}/outbox` — _(no summary)_
 - `GET /api/workflows/runs/{run_id}/outputs/{node_id}` — _(no summary)_
 - `POST /api/workflows/runs/{run_id}/pause` — _(no summary)_
-- `PUT /api/workflows/runs/{run_id}/policy-overrides` — PUT the run's sparse SupervisorPolicy overlay (PP-16 seam 4f) — prelaunch only.
-- `POST /api/workflows/runs/{run_id}/resume` — Answer a gate, or clear a pause.
-- `GET /api/workflows/runs/{run_id}/review` — GET this run's review findings, anchored against its workspace diff as it is right now.
-- `POST /api/workflows/runs/{run_id}/review/triage` — POST accept/reject decisions; dispatch the accepted subset to the originating worker.
+- `PUT /api/workflows/runs/{run_id}/policy-overrides` — _(no summary)_
+- `POST /api/workflows/runs/{run_id}/resume` — _(no summary)_
+- `GET /api/workflows/runs/{run_id}/review` — _(no summary)_
+- `POST /api/workflows/runs/{run_id}/review/triage` — _(no summary)_
 - `POST /api/workflows/runs/{run_id}/rewind` — _(no summary)_
 - `POST /api/workflows/runs/{run_id}/run-from` — _(no summary)_
-- `POST /api/workflows/runs/{run_id}/steer` — POST a mid-run steering instruction (LOOPS-EVOLUTION R14).
-- `GET /api/workflows/runs/{run_id}/steering` — GET what is queued but unconsumed — so the UI can show it as pending.
-- `GET /api/workflows/runs/{run_id}/workspace` — GET the run's workspace review: changed files + the two reintegration verbs (§4.1).
+- `POST /api/workflows/runs/{run_id}/start` — _(no summary)_
+- `POST /api/workflows/runs/{run_id}/steer` — _(no summary)_
+- `GET /api/workflows/runs/{run_id}/steering` — _(no summary)_
+- `GET /api/workflows/runs/{run_id}/workspace` — _(no summary)_
 - `GET /api/workflows/surfacing` — The templates list with its surfacing state — what the UX renders.
 - `DELETE /api/workflows/{name}` — _(no summary)_
 - `GET /api/workflows/{name}` — _(no summary)_
@@ -829,13 +1157,26 @@ After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to con
 - `GET /api/workflows/{name}/versions` — the monotonic version history + pin + maturity.
 - `GET /api/workflows/{name}/versions/diff` — the typed-op diff between two versions.
 - `POST /api/workflows/{name}/versions/repin` — {version} — rollback / re-pin the active version.
+- `GET /api/workflows/{name}/versions/{version}` — Return one immutable, secret-stripped workflow version for restore-as-new.
 
 ## Websocket / internal routes
 
+- `GET /THIRD_PARTY_NOTICES.txt` — Serve the customer-facing notice artifact delivered with the console build.
 - `POST /action` — invoke one semantic action (control bridge, loopback).
 - `GET /actions` — the self-describing action catalogue (control bridge, loopback).
 - `GET /api/ws` — single multiplexed WebSocket for all real-time events.
 - `GET /api/ws/terminal/{session_id}` — WebSocket PTY for the built-in CLI panel.
+- `GET /callback` — _(no summary)_
 - `POST /confirm` — redeem a confirm_token, running the action the user approved.
 - `GET /mcp` — `GET /mcp` → 405. No SSE stream in v1 (spec-permitted).
 - `POST /mcp` — _(no summary)_
+- `POST /v1/chat/completions` — Both sinks landed. The Task is the marker: it is written second.
+- `GET /v1/identity` — _(no summary)_
+- `GET /v1/models` — _(no summary)_
+- `POST /v1/provider/images` — _(no summary)_
+- `GET /v1/provider/launches` — _(no summary)_
+- `POST /v1/provider/launches` — _(no summary)_
+- `GET /v1/provider/profiles` — _(no summary)_
+- `GET /v1/terminals` — _(no summary)_
+- `GET /v1/terminals/{id}` — _(no summary)_
+- `POST /v1/voice/duplex/{operation}` — _(no summary)_

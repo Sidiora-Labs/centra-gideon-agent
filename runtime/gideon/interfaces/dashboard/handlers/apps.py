@@ -698,6 +698,7 @@ async def api_app_install(request: web.Request) -> web.Response:
 
 
 async def api_app_update(request: web.Request) -> web.Response:
+    """Preview source updates; apply with the reviewed bundle's review_digest."""
     from gideon.extensions.apps import app_manager
     from gideon.extensions.apps import source as app_source
 

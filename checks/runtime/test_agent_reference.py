@@ -203,6 +203,71 @@ def test_offline_reference_includes_live_table_registered_routes():
         for route in app.router.routes()
         if route.method != "HEAD"
     }
-    assert len(expected) == 39
+    assert len(expected) == 40
+    assert sum(path.startswith("/api/tasks") for _, path in expected) == 13
+    assert sum(path.startswith("/api/projects") for _, path in expected) == 11
+    assert sum(path.startswith("/api/task-lists") for _, path in expected) == 6
+    assert sum(path.startswith("/api/lexicon") for _, path in expected) == 10
     actual = {(row["method"], row["path"]) for row in ref_mod._routes_from_ast()}
     assert expected <= actual, sorted(expected - actual)
+
+
+def test_bundled_render_is_repeatable_and_preserves_runtime_registrations(monkeypatch):
+    from gideon.extensions.providers import registry as providers
+    from gideon.integrations.tool_providers import registry as tools
+
+    opaque = object()
+    names = (
+        "_providers",
+        "_registrations",
+        "_ownership_refusals",
+        "_load_failures",
+        "_mcp_provider_instances",
+        "_catalog_lock",
+    )
+    state = {name: getattr(tools, name) for name in names}
+    state["_providers"] = {"runtime-only": opaque}
+    state["_registrations"] = {id(opaque): opaque}
+    for name, value in state.items():
+        monkeypatch.setattr(tools, name, value)
+    runtime_registry = providers.ProviderRegistry()
+    monkeypatch.setattr(providers, "_registry", runtime_registry)
+
+    first = render_reference()
+    assert render_reference() == first
+    assert "runtime-only" not in first["tools.md"]
+    assert providers._registry is runtime_registry
+    for name, value in state.items():
+        assert getattr(tools, name) is value
+    assert tools._providers["runtime-only"] is opaque
+    assert tools._registrations[id(opaque)] is opaque
+
+
+def test_bundled_render_restores_registrations_when_factory_loading_fails(monkeypatch):
+    import pytest
+
+    from gideon.extensions.providers import loader
+    from gideon.extensions.providers import registry as providers
+    from gideon.integrations.tool_providers import registry as tools
+
+    names = (
+        "_providers",
+        "_registrations",
+        "_ownership_refusals",
+        "_load_failures",
+        "_mcp_provider_instances",
+        "_catalog_lock",
+    )
+    state = {name: getattr(tools, name) for name in names}
+    runtime_registry = providers.ProviderRegistry()
+    monkeypatch.setattr(providers, "_registry", runtime_registry)
+
+    def refuse_factory(ext):
+        raise RuntimeError("bundled factory unavailable")
+
+    monkeypatch.setattr(loader, "load_factory", refuse_factory)
+    with pytest.raises(RuntimeError, match="bundled factory unavailable"):
+        render_reference()
+    assert providers._registry is runtime_registry
+    for name, value in state.items():
+        assert getattr(tools, name) is value

@@ -1,28 +1,12 @@
-"""Build-time offline API/tool reference (PLATFORM-LEGIBILITY §3.1).
+"""Build-time API reference from bundled declarations and static route registrations.
 
-One source, two renderings — the CLI-as-truth rule. The gateway serves the live
-manifest at ``GET /api/manifest`` (walking the running aiohttp route table); this
-module renders the SAME :func:`gideon.extensions.manifest.build_manifest` output as a
-set of offline markdown files shipped in the distribution, so an agent driving
-Gideon from outside a running gateway (an external Claude Code session, a
-code loop working on a contributed app, a subagent) reads exact signatures
-instead of guessing them — the dominant failure Quarkdown measured.
+The four Markdown files are generated, sorted, and checked for byte-level drift
+by ``checks/runtime/test_agent_reference.py``. Tool schemas come from bundled
+provider factories; route paths and handler summaries come from a package-wide
+AST walk. This catalog does not represent a running gateway's installed apps,
+configured remote tools, authorization, or service readiness.
 
-**Generated, never hand-written.** :func:`render_reference` returns
-``{filename: markdown}`` deterministically (sorted, no timestamps), and the
-checked-in copy under :mod:`gideon.reference` is byte-compared against a
-fresh render by ``tests/test_agent_reference.py`` — a tool or route added without
-its ``TOOL_META`` / route entry drifts the reference and reddens the build, the
-same drift discipline as the live manifest. Regenerate with
-``python -m gideon.extensions.manifest_reference``.
-
-**Routes resolve from the AST, not a running app** (the design rule
-:mod:`gideon.extensions.manifest` states): booting the dashboard has security-critical
-startup side effects (extension load, binding migration), so route paths +
-handler docstrings are read statically from ``dashboard/*.py`` — the house
-route-handler-guard precedent, extended to carry each handler's docstring
-summary. Tools + providers come from the offline registry registration the drift
-test already uses (native manifests loaded straight from ``BUNDLED_DIR``).
+Regenerate with ``python -m gideon.extensions.manifest_reference``.
 """
 
 from __future__ import annotations
@@ -36,8 +20,11 @@ from pathlib import Path
 from typing import Any
 
 from gideon.assurance.api_version import API_VERSION
-from gideon.extensions.manifest import build_manifest
-from gideon.extensions.manifest_meta import canonical_route, is_excluded_route
+from gideon.extensions.manifest_meta import (
+    TOOL_META,
+    canonical_route,
+    is_excluded_route,
+)
 
 _VERB_PATH_ARG = {
     "add_get": 0,
@@ -66,8 +53,7 @@ def reference_dir() -> Path:
     """On-disk path of the shipped reference directory (wheel / editable / source).
 
     Uses ``importlib.resources.files`` so ``gideon doctor --paths`` can point
-    an external agent at the docs from the installed binary alone — the Quarkdown
-    ``doctor get install-dir`` pattern.
+    clients at the docs from the installed binary alone.
     """
     return Path(str(resources.files(_REFERENCE_PKG)))
 
@@ -299,13 +285,12 @@ def _render_tools(tools: list[dict[str, Any]]) -> str:
     lines = [
         "# Gideon Tool Reference",
         "",
-        f"Generated from the live tool registry (manifest apiVersion {API_VERSION}). "
-        "Every registered in-process tool, grouped by provider, with its exact input "
+        f"Generated from bundled tool declarations (manifest apiVersion {API_VERSION}). "
+        "Bundled in-process tools, grouped by provider, with their exact input "
         "schema and worked examples.",
         "",
-        "**Never guess a tool signature — copy it from here.** A hallucinated "
-        "parameter is the dominant driving failure; the arg names below are "
-        "schema-verified against the registered tool by the drift test.",
+        "Input schemas and examples describe the bundled declarations. Runtime "
+        "tool ownership, grants, and availability are checked separately.",
         "",
     ]
     by_provider: dict[str, list[dict[str, Any]]] = {}
@@ -359,12 +344,12 @@ def _render_routes(routes: list[dict[str, Any]]) -> str:
     lines = [
         "# Gideon HTTP Route Reference",
         "",
-        "The gateway's HTTP surface. **Agent-callable routes** (`/api/*`, non-websocket) "
+        "Statically discovered HTTP route declarations. **Agent-callable routes** (`/api/*`, non-websocket) "
         "are the ones an agent drives directly; the rest are websocket / internal and "
-        "listed after for completeness.",
+        "listed after for completeness. This classification does not grant access or "
+        "guarantee that a route is mounted in a running gateway.",
         "",
-        "After any mutating call (POST/PUT/PATCH/DELETE), **read the entity back** to "
-        "confirm the change took — the mandatory verify loop.",
+        "Mutating endpoints retain their native authentication, review, and grant checks.",
         "",
         "## Agent-callable routes",
         "",
@@ -386,7 +371,8 @@ def _render_providers(providers: dict[str, Any]) -> str:
         "# Gideon Provider Reference",
         "",
         "The extension-provider taxonomy (the capability types an app can contribute) "
-        "and the providers currently registered in this build.",
+        "and the provider declarations bundled in this build. These declarations do not "
+        "indicate runtime activation or readiness.",
         "",
         "## Provider types",
         "",
@@ -394,14 +380,14 @@ def _render_providers(providers: dict[str, Any]) -> str:
     for t in providers.get("types", []):
         lines.append(f"- `{t}`")
     lines.append("")
-    lines.append("## Registered providers")
+    lines.append("## Bundled provider declarations")
     lines.append("")
     registered = providers.get("registered", [])
     if not registered:
-        lines.append("_(none registered in this build)_")
+        lines.append("_(no bundled declarations)_")
     else:
         for p in registered:
-            state = "enabled" if p.get("enabled") else "disabled"
+            state = "bundled declaration"
             if p.get("error"):
                 state += f", error: {p['error']}"
             caps = ", ".join(p.get("capabilities", [])) or "—"
@@ -422,20 +408,21 @@ def _render_index(manifest: dict[str, Any]) -> str:
         "# Gideon Agent Reference",
         "",
         f"Offline API/tool reference for Gideon (manifest apiVersion "
-        f"{API_VERSION}). Generated from the live registries — the same source as "
-        "`GET /api/manifest`. Load the `gideon-api` skill for the driving methodology; "
+        f"{API_VERSION}). Generated from bundled tool/provider declarations and static "
+        "route registrations. `GET /api/manifest` describes the running gateway. "
+        "Load the `gideon-api` skill for API usage; "
         "this reference is the exact-signature lookup it points to.",
         "",
         "## How to use this (orient, then drill)",
         "",
         "1. Read this index to locate the surface you need — don't read every file.",
         "2. Drill into the one relevant section:",
-        f"   - **[tools.md](tools.md)** — {len(tools)} registered tools across "
+        f"   - **[tools.md](tools.md)** — {len(tools)} bundled tools across "
         f"{len(provider_names)} providers, with exact input schemas + examples.",
         f"   - **[routes.md](routes.md)** — {n_agent_routes} agent-callable HTTP routes "
         f"(of {len(routes)} total), with summaries.",
         f"   - **[providers.md](providers.md)** — the provider-type taxonomy + "
-        f"{len(providers.get('registered', []))} registered providers.",
+        f"{len(providers.get('registered', []))} bundled provider declarations.",
         "3. Copy the exact signature — never guess a parameter name.",
         "4. After a mutating call, read the entity back to confirm it took.",
         "",
@@ -450,66 +437,104 @@ def _render_index(manifest: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "## Repo gotchas that keep resurfacing",
+            "## App updates and frontend assets",
             "",
-            "These are environment invariants, not API facts — but they cost more "
-            "driving turns than any signature:",
-            "",
-            "- **Installed apps run from `$GIDEON_HOME/apps/<name>/`, not the "
-            "workspace tree.** Push code edits with `POST /api/apps/{name}/update` "
-            "`{source, confirm:true}` — editing the workspace clone does nothing to "
-            "the running app.",
-            "- **`static/dist` is a SYMLINK to `web/dist`, not a copy.** A `cp -R` "
-            "leaves a frozen dir that shadows it and serves a stale SPA. Rebuild the "
-            "frontend in place; never replace the symlink with a copy.",
-            "- **Use the venv interpreter.** Run the gateway and tools through the "
-            "project's `.venv` (`.venv/bin/gideon`), not a system Python that "
-            "lacks the installed dependencies.",
-            "- **Locate this reference from the binary:** `gideon doctor --paths` "
-            "prints the reference directory (and the config / skills / install dirs) so "
-            "an external agent can find these files without knowing the install layout.",
-            "",
-            "## Scope — what NOT to do",
-            "",
-            "- Don't hand-roll UI when a tool or route already does the job; the "
-            "manifest is the inventory of what already exists.",
-            "- Don't bypass `POST /api/apps/{name}/update` by editing an installed "
-            "app's files directly.",
-            "- Don't call a route the manifest does not mark `agent_callable` as if it "
-            "were an agent API.",
+            "- `POST /api/apps/{name}/update` previews `{source}`. Submit the "
+            "reviewed `{source, review_digest}` to apply it; a changed staged bundle "
+            "requires another review. A `confirm` flag does not replace this digest.",
+            "- The console build is `apps/console/dist`. In a source checkout, "
+            "`make web-build` links `runtime/gideon/static/dist` to that build. "
+            "Packaged distributions include the assets at `gideon/static/dist`; "
+            "they need not use a symlink.",
+            "- `gideon doctor --paths` reports the installed reference directory.",
         ]
     )
     return "\n".join(lines).rstrip() + "\n"
 
 
 def render_reference() -> dict[str, str]:
-    """Render the full offline reference as ``{filename: markdown}``.
-
-    Deterministic (sorted, no timestamps) so the checked-in copy byte-compares
-    against a fresh render in CI. Tools + providers come from the offline registry
-    (native manifests registered straight from ``BUNDLED_DIR``, the drift-test
-    seam); routes from the static AST walk. No running gateway.
-    """
-    from gideon.extensions.apps.manifest import AppManifest
+    """Render the bundled catalog without activating runtime domain providers."""
+    from gideon.extensions.apps.manifest import PROVIDER_TYPES, AppManifest
     from gideon.extensions.providers import registry as prov_reg
-    from gideon.extensions.providers.loader import BUNDLED_DIR
+    from gideon.extensions.providers.loader import BUNDLED_DIR, load_factory
     from gideon.integrations.tool_providers import registry as tool_reg
 
-    tool_reg._providers.clear()
+    # Keep factory-import registrations local to this synchronous build operation.
+    # Existing runtime registrations, callbacks, and locks retain their identity.
+    names = (
+        "_providers",
+        "_registrations",
+        "_ownership_refusals",
+        "_load_failures",
+        "_mcp_provider_instances",
+        "_catalog_lock",
+    )
+    prior = {name: getattr(tool_reg, name) for name in names}
+    prior_registry = prov_reg._registry
+    tool_reg._providers = {}
+    tool_reg._registrations = {}
+    tool_reg._ownership_refusals = []
+    tool_reg._load_failures = []
+    tool_reg._mcp_provider_instances = {}
+    tool_reg._catalog_lock = asyncio.Lock()
     prov_reg._registry = None
-    try:
-        reg = prov_reg.get_provider_registry()
-        for d in sorted(BUNDLED_DIR.iterdir()):
-            mf = d / "app.json"
-            if not mf.exists():
+
+    async def bundled_catalog() -> dict[str, Any]:
+        tools: list[dict[str, Any]] = []
+        registered: list[dict[str, Any]] = []
+        for directory in sorted(BUNDLED_DIR.iterdir()):
+            manifest_path = directory / "app.json"
+            if not manifest_path.exists():
                 continue
-            manifest = AppManifest.from_json_file(mf)
-            if manifest.provider:
-                reg.register(manifest, enabled=True)
-        doc = asyncio.run(build_manifest(app=None))
+            manifest = AppManifest.from_json_file(manifest_path)
+            for config in manifest.all_providers():
+                registered.append(
+                    {
+                        "app": manifest.name,
+                        "type": config.type,
+                        "provider_type": config.providerType,
+                        "capabilities": list(config.capabilities),
+                    }
+                )
+                if config.type != "tool":
+                    continue
+                ext = prov_reg.RegisteredProvider(manifest.name, manifest, config)
+                provider = load_factory(ext)({})
+                if provider is None:
+                    raise ValueError(
+                        f"Bundled tool provider {manifest.name} returned no catalog"
+                    )
+                for tool in await provider.list_tools():
+                    meta = TOOL_META.get(tool.name, {})
+                    tools.append(
+                        {
+                            "name": tool.name,
+                            "provider": provider.name,
+                            "description": tool.description,
+                            "parameters": tool.parameters,
+                            "requires_approval": tool.requires_approval,
+                            "risk_level": getattr(
+                                tool.risk_level, "value", tool.risk_level
+                            )
+                            or "safe",
+                            "response_type": meta.get("response_type", ""),
+                            "error_codes": list(meta.get("error_codes", ())),
+                            "examples": list(meta.get("examples", ())),
+                        }
+                    )
+        tools.sort(key=lambda row: (row["provider"], row["name"]))
+        registered.sort(key=lambda row: (row["type"], row["app"], row["provider_type"]))
+        return {
+            "tools": tools,
+            "providers": {"types": sorted(PROVIDER_TYPES), "registered": registered},
+        }
+
+    try:
+        doc = asyncio.run(bundled_catalog())
     finally:
-        tool_reg._providers.clear()
-        prov_reg._registry = None
+        for name, value in prior.items():
+            setattr(tool_reg, name, value)
+        prov_reg._registry = prior_registry
 
     doc["routes"] = _routes_from_ast()
     return {
