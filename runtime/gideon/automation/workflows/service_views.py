@@ -5,11 +5,10 @@ from __future__ import annotations
 import math
 import re
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 from gideon.automation.workflows.failure_taxonomy import with_breaker_window
-from gideon.automation.workflows.models import InstanceState, sibling_group
-from gideon.automation.workflows.service import Any as Any
-from gideon.automation.workflows.service import RunStatus as RunStatus
+from gideon.automation.workflows.models import InstanceState, RunStatus, sibling_group
 
 
 async def fork_run_checked(

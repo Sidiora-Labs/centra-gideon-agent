@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import calendar
+from typing import Any
 
-from gideon.automation.workflows.controller import Any as Any
-from gideon.automation.workflows.controller import Node as Node
+from gideon.automation.workflows.models import Node
 
 
 def _confirmation_id(run_id: str, gate_id: str, epoch: int) -> str:
