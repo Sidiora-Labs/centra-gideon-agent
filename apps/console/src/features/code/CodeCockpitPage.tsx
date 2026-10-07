@@ -15,7 +15,7 @@ import { TextLink } from '../../shared/ui/TextLink'
 import { Eyebrow } from '../../shared/ui/Eyebrow'
 import { IconButton } from '../../shared/ui/IconButton'
 import { LoadError } from '../../shared/ui/ListScaffold'
-import { FieldError } from '../../shared/ui/forms'
+import { FieldError, TextArea, TextInput } from '../../shared/ui/forms'
 import { Centered } from '../../shared/ui/Centered'
 import { UnifiedDiff } from '../../shared/ui/UnifiedDiff'
 import { confirm, confirmDelete } from '../../shared/ui/dialog'
@@ -393,10 +393,10 @@ export function CodeCockpitPage({ id, onBack, onDeleted, onNewTarget, onOpenProj
           )}
           <Code2 size={18} className="shrink-0 text-primary" />
           {editingTitle ? (
-            <input autoFocus value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)}
+            <TextInput size="lg" autoFocus value={titleDraft} onChange={setTitleDraft}
               onBlur={commitRename} onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); else if (e.key === 'Escape') abortRename() }}
-              aria-label="Rename project"
-              data-type="body-m" className="min-w-[14rem] h-7 rounded-md bg-surface-high px-2 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+              ariaLabel="Rename project"
+              className="h-7! w-auto! min-w-[14rem] h-7 rounded-md bg-surface-high px-2 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
           ) : (
             <button type="button" onClick={startRename} title="Rename project"
               data-type="title-l" className="truncate text-on-surface text-left hover:text-on-surface-var">
@@ -1482,10 +1482,10 @@ function TaskDetailView({ project, task, doneIds, stageOpen, knownIds, findings,
               </div>
             )}
             <div className="flex items-end gap-1.5 rounded-xl bg-surface-container px-2.5 py-1.5 focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary">
-              <textarea ref={steerRef} value={text} onChange={(e) => setText(e.target.value)} rows={1}
+              <TextArea ariaLabel="Task steer" size="sm" ref={steerRef} value={text} onChange={nextValue => setText(nextValue)} rows={1}
                 placeholder={project.status === 'needs_input' ? 'Answer for this task…' : `Steer “${task.title.slice(0, 24)}${task.title.length > 24 ? '…' : ''}”…`}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); steer() } }}
-                data-type="body-s" className="max-h-24 min-h-0 flex-1 resize-none overflow-y-auto bg-transparent text-on-surface outline-none placeholder:text-on-surface-low" />
+                className="max-h-24 min-h-0 flex-1 resize-none overflow-y-auto bg-transparent text-on-surface outline-none placeholder:text-on-surface-low bg-transparent! border-0! px-0! py-0!" />
               {
 }
               <IconButton icon={Send} label="Send steer" filled size={28} iconSize={13}
@@ -1606,10 +1606,10 @@ function WorkspaceTree({ ws, running, isProjectDir }: { ws: string; running: boo
         <div className="flex flex-col gap-1 px-1.5 pb-1">
           <div className="flex items-center gap-1">
           {creating ? (
-            <input autoFocus value={newName} onChange={(e) => { setNewName(e.target.value); if (createErr) setCreateErr('') }}
+            <TextInput ariaLabel="New workspace entry name" size="sm" autoFocus value={newName} onChange={nextValue => { setNewName(nextValue); if (createErr) setCreateErr('') }}
               onKeyDown={(e) => { if (e.key === 'Enter') submitCreate(); if (e.key === 'Escape') cancelCreate() }}
               onBlur={() => { if (!createErr) submitCreate() }} placeholder={creating === 'file' ? 'new-file.ext' : 'new-folder'}
-              data-type="body-s" className={`h-7 min-w-0 flex-1 rounded-md bg-surface-high px-2 text-on-surface outline-none focus:ring-2 placeholder:text-on-surface-low ${createErr ? 'focus:ring-danger/50 ring-2 ring-danger/40' : 'focus:ring-primary'}`} />
+              className={`h-7 min-w-0 flex-1 rounded-md bg-surface-high px-2 text-on-surface outline-none focus:ring-2 placeholder:text-on-surface-low ${createErr ? 'focus:ring-danger/50 ring-2 ring-danger/40' : 'focus:ring-primary'} h-7!`} />
           ) : (
             <>
               { }
@@ -2447,10 +2447,10 @@ function ProjectFooter({ project, gateFail, stalled, onNudged, onStartNew }: { p
       <div className="p-2">
         {STEERABLE.has(project.status) ? (
           <div className="flex items-end gap-1.5 rounded-xl bg-surface-container px-2.5 py-1.5 focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary">
-            <textarea ref={steerRef} value={text} onChange={(e) => setText(e.target.value)} rows={1}
+            <TextArea ariaLabel="Worker steer" size="sm" ref={steerRef} value={text} onChange={nextValue => setText(nextValue)} rows={1}
               placeholder={project.status === 'needs_input' ? 'Answer the worker…' : 'Steer the worker…'}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); steer() } }}
-              data-type="body-s" className="max-h-24 min-h-0 flex-1 resize-none overflow-y-auto bg-transparent text-on-surface outline-none placeholder:text-on-surface-low" />
+              className="max-h-24 min-h-0 flex-1 resize-none overflow-y-auto bg-transparent text-on-surface outline-none placeholder:text-on-surface-low bg-transparent! border-0! px-0! py-0!" />
             {
 }
             <IconButton icon={Send} label="Send steer" filled size={28} iconSize={13}

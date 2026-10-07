@@ -6,7 +6,7 @@ import { TopBar } from '../../shared/ui/TopBar'
 import { IconButton } from '../../shared/ui/IconButton'
 import { SquareIconButton } from '../../shared/ui/SquareIconButton'
 import { Button } from '../../shared/ui/Button'
-import { ChipInput } from '../../shared/ui/forms'
+import { ChipInput, TextInput, TextArea } from '../../shared/ui/forms'
 import { PageTitle } from '../../shared/ui/PageTitle'
 import { Meter } from '../../shared/ui/Meter'
 import { api, type KnowledgeType } from '../../shared/data/api'
@@ -124,7 +124,7 @@ function CreateForm({ type, onBack, onClose, onCreated }: { type: KnowledgeType;
           {kind === 'bookmark' && (
             <div className="shrink-0 flex items-center gap-s rounded-md bg-surface-container px-m h-10 focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary">
               <Link2 size={15} className="text-on-surface-low shrink-0" />
-              <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" autoFocus aria-label="Bookmark URL" data-type="body-m" className="flex-1 bg-transparent text-on-surface outline-none placeholder:text-on-surface-low" />
+              <TextInput size="lg" value={url} onChange={nextValue => setUrl(nextValue)} placeholder="https://…" autoFocus ariaLabel="Bookmark URL" className="flex-1 bg-transparent text-on-surface outline-none placeholder:text-on-surface-low bg-transparent! border-0! px-0! h-auto!" />
             </div>
           )}
 
@@ -162,8 +162,8 @@ function CreateForm({ type, onBack, onClose, onCreated }: { type: KnowledgeType;
             <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-outline-variant/40 bg-surface-container focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary">
               {
 }
-              <textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="Markdown supported…" autoFocus={!titleEditable} aria-label="Note content"
-                data-type="body-s" className="h-full w-full resize-none bg-transparent px-m py-2 text-on-surface leading-relaxed outline-none" />
+              <TextArea size="sm" value={content} onChange={nextValue => setContent(nextValue)} placeholder="Markdown supported…" autoFocus={!titleEditable} ariaLabel="Note content"
+                className="h-full w-full resize-none bg-transparent px-m py-2 text-on-surface leading-relaxed outline-none bg-transparent! border-0!" />
             </div>
           )}
           {kind === 'file' && (

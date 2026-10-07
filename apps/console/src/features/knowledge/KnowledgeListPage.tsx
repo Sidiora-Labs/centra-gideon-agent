@@ -9,7 +9,7 @@ import { Button } from '../../shared/ui/Button'
 import { EmptyState, ListRow, ListSkeleton, LoadError } from '../../shared/ui/ListScaffold'
 import { DecisionJournal } from './DecisionJournal'
 import { WindowedList } from '../../shared/ui/WindowedList'
-import { Checkbox, FieldError } from '../../shared/ui/forms'
+import { Checkbox, FieldError, TextArea, TextInput } from '../../shared/ui/forms'
 import { TagManager } from './TagManager'
 import { ConflictPanel } from './ConflictPanel'
 import { SidePanel } from '../../shared/ui/SidePanel'
@@ -946,18 +946,18 @@ function IntentEditor({ intent, onClose, onSaved }: { intent: KnowledgeIntent; o
       </div>
       <div className="flex flex-col gap-1.5">
         <label data-type="caption" className="text-on-surface-low uppercase tracking-wide">What do you want to track?</label>
-        <textarea aria-label="What do you want to track?" value={goal} onChange={(e) => setGoal(e.target.value)} rows={4} autoFocus
+        <TextArea size="sm" ariaLabel="What do you want to track?" value={goal} onChange={nextValue => setGoal(nextValue)} rows={4} autoFocus
           placeholder={'e.g. "anything that could improve my homelab self-hosted setup"'}
-          data-type="body-s" className="rounded-md bg-surface p-3 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary resize-none" />
+          className="rounded-md bg-surface p-3 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary resize-none" />
         <p data-type="caption" className="text-on-surface-low">Plain language. As items are saved, Gideon decides what's relevant and pulls out the useful specifics for you — no need to define fields.</p>
       </div>
       <div className="flex flex-col gap-1.5">
         <label data-type="caption" className="text-on-surface-low uppercase tracking-wide">Limit to types (optional)</label>
-        <input aria-label="Limit to types (optional)" value={enabledFor} onChange={(e) => setEnabledFor(e.target.value)} placeholder="comma-separated, blank = all types"
-          data-type="body-s" className="h-9 rounded-md bg-surface px-3 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+        <TextInput size="md" ariaLabel="Limit to types (optional)" value={enabledFor} onChange={nextValue => setEnabledFor(nextValue)} placeholder="comma-separated, blank = all types"
+          className="h-9 rounded-md bg-surface px-3 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
       </div>
       <label data-type="body-s" className="flex items-start gap-2 text-on-surface-var">
-        <input type="checkbox" className="mt-0.5" checked={proposeSkill} onChange={(e) => setProposeSkill(e.target.checked)} />
+        <Checkbox ariaLabel="Offer to build a skill from this intent" className="mt-0.5" checked={proposeSkill} onChange={nextValue => setProposeSkill(nextValue)} />
         <span>Offer to build a skill from this intent — adds a “Generate skill” action that distills what it has gathered into a reusable skill.</span>
       </label>
       {err && <FieldError>{err}</FieldError>}

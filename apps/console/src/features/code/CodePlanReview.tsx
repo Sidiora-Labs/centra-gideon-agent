@@ -1,3 +1,4 @@
+import { TextInput, TextArea } from '../../shared/ui/forms'
 import { IconButton } from '../../shared/ui/IconButton'
 import { useEffect, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
@@ -408,15 +409,15 @@ function StageQualityGate({ stage, onPatch }: { stage: CodeStage; onPatch: (p: P
         <div data-type="caption" className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md bg-surface-high/60 px-2.5 py-2 text-on-surface-var">
           <label className="flex items-center gap-1.5">
             <span className="text-on-surface-low">Pass ≥</span>
-            <input type="number" min={0} max={5} step={0.5} value={pass}
-              onChange={(e) => setPass(parseFloat(e.target.value))} aria-label="Quality pass score"
-              className="w-14 rounded bg-surface-high px-1.5 py-0.5 text-on-surface tabular-nums outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+            <TextInput size="sm" type="number" min={0} max={5} step={0.5} value={String(pass)}
+              onChange={nextValue => setPass(parseFloat(nextValue))} ariaLabel="Quality pass score"
+              className="w-14 rounded bg-surface-high px-1.5 py-0.5 text-on-surface tabular-nums outline-none focus:ring-2 focus:ring-inset focus:ring-primary w-14! h-auto! border-0!" />
           </label>
           <label className="flex items-center gap-1.5">
             <span className="text-on-surface-low">Hold ≥</span>
-            <input type="number" min={0} max={pass} step={0.5} value={hold}
-              onChange={(e) => setHold(parseFloat(e.target.value))} aria-label="Quality hold floor"
-              className="w-14 rounded bg-surface-high px-1.5 py-0.5 text-on-surface tabular-nums outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+            <TextInput size="sm" type="number" min={0} max={pass} step={0.5} value={String(hold)}
+              onChange={nextValue => setHold(parseFloat(nextValue))} ariaLabel="Quality hold floor"
+              className="w-14 rounded bg-surface-high px-1.5 py-0.5 text-on-surface tabular-nums outline-none focus:ring-2 focus:ring-inset focus:ring-primary w-14! h-auto! border-0!" />
           </label>
           <span data-type="caption" className="text-on-surface-low">score 0–5 · below hold rolls back</span>
         </div>
@@ -464,8 +465,8 @@ function StageCard({ index, count, stage, onPatch, onRemove, onMove }: {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <input value={stage.title} onChange={(e) => onPatch({ title: e.target.value })} placeholder="Stage title"
-              data-type="body-s" className="min-w-0 flex-1 rounded-md bg-surface-high px-2.5 py-1.5 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+            <TextInput ariaLabel="Stage title" size="sm" value={stage.title} onChange={nextValue => onPatch({ title: nextValue })} placeholder="Stage title"
+              className="min-w-0 flex-1 rounded-md bg-surface-high px-2.5 py-1.5 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
             {
 }
             <select value={SDLC_STAGES.includes(stage.stage as typeof SDLC_STAGES[number]) ? stage.stage : ''}
@@ -476,8 +477,8 @@ function StageCard({ index, count, stage, onPatch, onRemove, onMove }: {
             </select>
             <SquareIconButton icon={Trash2} iconSize={13} tone="danger" label="Remove stage" onClick={onRemove} className="shrink-0" />
           </div>
-          <textarea value={stage.objective} onChange={(e) => onPatch({ objective: e.target.value })} rows={2} placeholder="What this stage accomplishes…"
-            data-type="body-s" className="mt-2 w-full resize-none rounded-md bg-surface-high px-2.5 py-1.5 text-on-surface-var outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+          <TextArea ariaLabel="Stage objective" size="sm" value={stage.objective} onChange={nextValue => onPatch({ objective: nextValue })} rows={2} placeholder="What this stage accomplishes…"
+            className="mt-2 w-full resize-none rounded-md bg-surface-high px-2.5 py-1.5 text-on-surface-var outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
           { }
           <div className="mt-2 flex flex-col gap-1">
             <span data-type="caption" className="text-on-surface-low uppercase tracking-wide">Done when</span>
@@ -489,10 +490,10 @@ function StageCard({ index, count, stage, onPatch, onRemove, onMove }: {
             ))}
             {
 }
-            <input value={crit} onChange={(e) => setCrit(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCrit() } }}
+            <TextInput ariaLabel="Add acceptance criterion" size="sm" value={crit} onChange={nextValue => setCrit(nextValue)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCrit() } }}
               onBlur={addCrit}
               placeholder="Add a concrete, checkable condition…"
-              data-type="body-s" className="rounded-md bg-surface-high px-2.5 py-1.5 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary placeholder:text-on-surface-low" />
+              className="rounded-md bg-surface-high px-2.5 py-1.5 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary placeholder:text-on-surface-low" />
           </div>
           {
 }
@@ -505,24 +506,24 @@ function StageCard({ index, count, stage, onPatch, onRemove, onMove }: {
               <div key={ti} data-type="body-s" className="flex items-start gap-1.5 rounded-md bg-surface-high/60 px-2 py-1">
                 <span className="mt-1.5 size-3 shrink-0 rounded-full border border-outline-variant/60" />
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <input value={t.title} onChange={(e) => patchTask(ti, { title: e.target.value })}
+                  <TextInput ariaLabel="Task title" size="sm" value={t.title} onChange={nextValue => patchTask(ti, { title: nextValue })}
                     placeholder="Task…"
-                    className="min-w-0 flex-1 bg-transparent text-on-surface-var outline-none placeholder:text-on-surface-low focus:ring-2 focus:ring-inset focus:ring-primary" />
+                    className="min-w-0 flex-1 bg-transparent text-on-surface-var outline-none placeholder:text-on-surface-low focus:ring-2 focus:ring-inset focus:ring-primary bg-transparent! border-0!" />
                   {
 }
-                  <input value={t.description ?? ''} onChange={(e) => patchTask(ti, { description: e.target.value })}
+                  <TextInput ariaLabel="Task details" size="sm" value={t.description ?? ''} onChange={nextValue => patchTask(ti, { description: nextValue })}
                     placeholder="how / details (optional)…"
-                    data-type="caption" className="min-w-0 flex-1 bg-transparent text-on-surface-low outline-none placeholder:text-on-surface-low/60 focus:ring-2 focus:ring-inset focus:ring-primary" />
+                    className="min-w-0 flex-1 bg-transparent text-on-surface-low outline-none placeholder:text-on-surface-low/60 focus:ring-2 focus:ring-inset focus:ring-primary bg-transparent! border-0! text-xs!" />
                 </div>
                 <IconButton icon={X} iconSize={12} size={24} label="Remove task" onClick={() => removeTask(ti)} className="mt-1 shrink-0 text-on-surface-low hover:text-danger" />
               </div>
             ))}
             <div className="flex items-center gap-1.5 rounded-md px-2 py-1">
               <span className="size-3 shrink-0 rounded-full border border-dashed border-outline-variant/50" />
-              <input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTask() } }}
+              <TextInput ariaLabel="Add task" size="sm" value={taskTitle} onChange={nextValue => setTaskTitle(nextValue)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTask() } }}
                 onBlur={addTask}
                 placeholder="Add a task…"
-                data-type="body-s" className="min-w-0 flex-1 bg-transparent text-on-surface outline-none placeholder:text-on-surface-low focus:ring-2 focus:ring-inset focus:ring-primary" />
+                className="min-w-0 flex-1 bg-transparent text-on-surface outline-none placeholder:text-on-surface-low focus:ring-2 focus:ring-inset focus:ring-primary bg-transparent! border-0!" />
             </div>
           </div>
         </div>

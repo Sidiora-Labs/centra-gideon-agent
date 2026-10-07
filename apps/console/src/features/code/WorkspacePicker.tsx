@@ -1,3 +1,4 @@
+import { TextInput } from '../../shared/ui/forms'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ResultAnnouncement } from '../../shared/ui/ListControls'
 import { Check, CornerDownLeft, CornerLeftUp, Folder, FolderPlus, GitBranch, Loader2 } from 'lucide-react'
@@ -162,10 +163,10 @@ export function WorkspacePicker({ mode, allowCreate, onPick, onClose }: {
         {canCreate && (
           creating ? (
             <div className="flex items-center gap-2">
-              <input autoFocus value={newName} onChange={(e) => { setNewName(e.target.value); if (error) setError(null) }}
+              <TextInput ariaLabel="New folder name" size="md" autoFocus value={newName} onChange={nextValue => { setNewName(nextValue); if (error) setError(null) }}
                 onKeyDown={(e) => { if (e.key === 'Enter') createFolder(); else if (e.key === 'Escape' && !submitting) { setCreating(false); setError(null) } }}
                 disabled={submitting} placeholder="new-project-folder"
-                data-type="body-s" className="h-9 min-w-0 flex-1 rounded-md bg-surface-high px-2.5 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary disabled:opacity-60" />
+                className="h-9 min-w-0 flex-1 rounded-md bg-surface-high px-2.5 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary disabled:opacity-60" />
               <Button size="sm" onClick={createFolder} loading={submitting} disabled={!newName.trim() || submitting}
                 disabledReason={!newName.trim() ? 'Enter a folder name first' : undefined}><Check size={14} /> Create + use
               </Button>

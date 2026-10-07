@@ -7,7 +7,7 @@ import { useFocusTrap } from '../../shared/ui/useFocusTrap'
 import { investigate } from '../../shared/data/investigate'
 import { Button } from '../../shared/ui/Button'
 import { Markdown } from '../../shared/ui/Markdown'
-import { ChipInput, FieldError } from '../../shared/ui/forms'
+import { ChipInput, FieldError, Checkbox, TextInput, TextArea } from '../../shared/ui/forms'
 import type { KnowledgeAnnotation, KnowledgeItem, IntentOutcome, IntentOutcomeField, KnowledgeStaleness, PhaseOutcome } from '../../shared/data/api'
 import { ReadingView } from './ReadingView'
 import { PhaseOutcomes, outcomeSentence, stepLabel } from './PhaseOutcomes'
@@ -339,7 +339,7 @@ export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShow
   const reingestApplies = tm.group === 'text' || tm.key === 'bookmark'
   const editBar = reingestApplies ? (
     <label data-type="body-s" className="flex items-center gap-1.5 text-on-surface-var cursor-pointer select-none">
-      <input type="checkbox" checked={reingest} onChange={(e) => setReingest(e.target.checked)} className="size-4 accent-[var(--color-primary)]" />
+      <Checkbox ariaLabel="Re-process on save" checked={reingest} onChange={nextValue => setReingest(nextValue)} className="size-4 accent-[var(--color-primary)]" />
       Re-process on save
     </label>
   ) : null
@@ -370,8 +370,8 @@ export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShow
         {tm.key === 'bookmark' && (
           <div className="shrink-0 flex items-center gap-s rounded-md bg-surface-container px-m h-10 focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary">
             <ExternalLink size={15} className="shrink-0 text-on-surface-low" />
-            <input value={draft.url} onChange={(e) => setDraft({ ...draft, url: e.target.value })} placeholder="https://…"
-              data-type="body-m" className="flex-1 bg-transparent text-on-surface outline-none placeholder:text-on-surface-low" />
+            <TextInput ariaLabel="Bookmark URL" size="lg" value={draft.url} onChange={nextValue => setDraft({ ...draft, url: nextValue })} placeholder="https://…"
+              className="flex-1 bg-transparent text-on-surface outline-none placeholder:text-on-surface-low bg-transparent! border-0! px-0! h-auto!" />
           </div>
         )}
         { }
@@ -385,9 +385,9 @@ export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShow
           </div>
         ) : tm.group === 'text' ? (
           <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-outline-variant/40 bg-surface-container focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary">
-            <textarea value={draft.content} onChange={(e) => setDraft({ ...draft, content: e.target.value })} readOnly={journalLocked}
+            <TextArea ariaLabel="Note content" size="sm" value={draft.content} onChange={nextValue => setDraft({ ...draft, content: nextValue })} readOnly={journalLocked}
               placeholder="Markdown supported…"
-              data-type="body-s" className={`h-full w-full resize-none bg-transparent px-m py-2 text-on-surface leading-relaxed outline-none ${journalLocked ? 'opacity-60 cursor-not-allowed' : ''}`} />
+              className={`h-full w-full resize-none bg-transparent px-m py-2 text-on-surface leading-relaxed outline-none ${journalLocked ? 'opacity-60 cursor-not-allowed' : ''} bg-transparent! border-0!`} />
           </div>
         ) : (
           <div className="relative flex min-h-0 flex-1 overflow-hidden">
