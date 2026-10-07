@@ -112,7 +112,7 @@ export function AccountPanel() {
           </div>
         </Field>
         <Row label="Restart onboarding" hint="Clears your name and re-runs the first-run setup flow.">
-          <button type="button" onClick={async () => { if (await confirm({ title: 'Restart onboarding?', body: 'This clears your name and shows the setup flow again.', confirmLabel: 'Restart' })) clearName() }}
+          <button type="button" onClick={async () => { if (!await confirm({ title: 'Restart onboarding?', body: 'This clears your name and shows the setup flow again.', confirmLabel: 'Restart' })) return; try { await clearName() } catch (error) { notify(`Couldn't restart onboarding: ${String((error as Error)?.message || error)}`, 'error') } }}
             data-type="body-s" className="inline-flex items-center gap-1.5 rounded-md px-3 h-9 text-on-surface-var hover:bg-surface-high transition-colors">
             <RotateCcw size={14} /> Restart
           </button>

@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { LoadError, EmptyState } from './ListScaffold'
 import ts from 'typescript'
-import { swallowedReads } from '../testing/swallowCensus'
+import { swallowedReads as rawSwallowedReads } from '../testing/swallowCensus'
 import swallowBudget from '../testing/swallowBudget.json'
 
 
@@ -203,7 +203,159 @@ describe('direct fetches keep their rejection too — the 2026-09-05 false-empty
 })
 
 
+
+// Follow promise ownership, rather than exempting a source path or empty catch.
+function descendants(node: ts.Node): ts.Node[] {
+  const result: ts.Node[] = []
+  const visit = (child: ts.Node) => { result.push(child); ts.forEachChild(child, visit) }
+  visit(node)
+  return result
+}
+function enclosingFunction(node: ts.Node): ts.Node | undefined {
+  let owner: ts.Node | undefined = node.parent
+  while (owner && !ts.isArrowFunction(owner) && !ts.isFunctionExpression(owner) && !ts.isFunctionDeclaration(owner)) owner = owner.parent
+  return owner
+}
+function sameExpression(a: ts.Node, b: ts.Node, file: ts.SourceFile): boolean {
+  return a.getText(file).replace(/\s/g, '') === b.getText(file).replace(/\s/g, '')
+}
+function returnedQueueFork(call: ts.CallExpression, file: ts.SourceFile): boolean {
+  if (!ts.isPropertyAccessExpression(call.expression) || !ts.isIdentifier(call.expression.expression)) return false
+  const original = call.expression.expression
+  const assignment = call.parent
+  if (!ts.isBinaryExpression(assignment) || assignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken || assignment.right !== call) return false
+  const owner = enclosingFunction(call)
+  if (!owner) return false
+  const nodes = descendants(owner).filter(node => enclosingFunction(node) === owner)
+  const declaration = nodes.find((node): node is ts.VariableDeclaration => ts.isVariableDeclaration(node) &&
+    ts.isIdentifier(node.name) && node.name.text === original.text)
+  if (!declaration?.initializer || !ts.isCallExpression(declaration.initializer) ||
+      !ts.isPropertyAccessExpression(declaration.initializer.expression) || declaration.initializer.expression.name.text !== 'then' ||
+      !sameExpression(declaration.initializer.expression.expression, assignment.left, file)) return false
+  return nodes.some(node => ts.isReturnStatement(node) && !!node.expression &&
+    ts.isIdentifier(node.expression) && node.expression.text === original.text)
+}
+function visibleFailureOwner(call: ts.CallExpression, file: ts.SourceFile): boolean {
+  if (!ts.isPropertyAccessExpression(call.expression) || !ts.isCallExpression(call.expression.expression)) return false
+  const target = call.expression.expression.expression
+  if (!ts.isIdentifier(target)) return false
+  const declarations = descendants(file).filter((node): node is ts.VariableDeclaration =>
+    ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === target.text)
+  if (declarations.length !== 1) return false // Ambiguous/shadowed bindings do not earn an exemption.
+  const declaration = declarations[0]
+  if (!declaration.initializer || !ts.isCallExpression(declaration.initializer)) return false
+  const owner = declaration.initializer.arguments[0]
+  if (!owner || (!ts.isArrowFunction(owner) && !ts.isFunctionExpression(owner))) return false
+  const scope = enclosingFunction(declaration)
+  if (!scope || !descendants(scope).includes(call)) return false
+  const nodes = descendants(scope)
+  for (const catcher of descendants(owner).filter(ts.isCatchClause)) {
+    const binding = catcher.variableDeclaration?.name
+    if (!binding || !ts.isIdentifier(binding)) continue
+    const referencesError = (node: ts.Node) => descendants(node).some(child => ts.isIdentifier(child) && child.text === binding.text)
+    if (!descendants(catcher.block).some(node => ts.isThrowStatement(node) && !!node.expression &&
+        ts.isIdentifier(node.expression) && node.expression.text === binding.text)) continue
+    for (const setter of descendants(catcher.block).filter(ts.isCallExpression)) {
+      if (!ts.isIdentifier(setter.expression) || !setter.arguments.some(referencesError)) continue
+      const state = nodes.find((node): node is ts.VariableDeclaration => ts.isVariableDeclaration(node) &&
+        ts.isArrayBindingPattern(node.name) && node.name.elements.length === 2 &&
+        ts.isBindingElement(node.name.elements[1]) && ts.isIdentifier(node.name.elements[1].name) &&
+        node.name.elements[1].name.text === setter.expression.getText(file) && !!node.initializer &&
+        ts.isCallExpression(node.initializer) && ts.isIdentifier(node.initializer.expression) && node.initializer.expression.text === 'useState')
+      if (!state || !ts.isArrayBindingPattern(state.name)) continue
+      const value = state.name.elements[0]
+      if (!ts.isBindingElement(value) || !ts.isIdentifier(value.name)) continue
+      if (nodes.some(node => ts.isJsxExpression(node) && !!node.expression && ts.isIdentifier(node.expression) && node.expression.text === value.name.getText(file))) return true
+    }
+  }
+  return false
+}
+function swallowedReads(source: string): ReturnType<typeof rawSwallowedReads> {
+  const file = ts.createSourceFile('surface.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const calls = descendants(file).filter(ts.isCallExpression)
+  return rawSwallowedReads(source).filter(site => {
+    const call = calls.find(node => node.getText(file) === site.text && file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1 === site.line)
+    return !call || (!returnedQueueFork(call, file) && !visibleFailureOwner(call, file))
+  })
+}
+
 describe('full-file swallow census', () => {
+  it('separates a returned original queue promise from a swallowed public failure', () => {
+    const returned = `const save = () => { const write = queue.current.then(() => api.save()); queue.current = write.catch(() => {}); return write }`
+    expect(rawSwallowedReads(returned)).toHaveLength(1)
+    expect(swallowedReads(returned)).toEqual([])
+    expect(swallowedReads(returned.replace('return write', 'return queue.current'))).toHaveLength(1)
+    expect(swallowedReads(returned.replace('queue.current = write.catch', 'other.current = write.catch'))).toHaveLength(1)
+  })
+
+  it('requires the called owner to capture, render and rethrow the same failure', () => {
+    const owned = `function Page() { const [failure, setFailure] = useState(null);
+      const load = useCallback(async () => { try { return await api.read() } catch (error) { setFailure(String(error)); throw error } }, []);
+      const refresh = () => load().catch(() => {}); return <p>{failure}</p> }`
+    expect(rawSwallowedReads(owned)).toHaveLength(1)
+    expect(swallowedReads(owned)).toEqual([])
+    expect(swallowedReads(owned.replace('{failure}', '{other}'))).toHaveLength(1)
+    expect(swallowedReads(owned.replace('setFailure(String(error))', 'setFailure(null)'))).toHaveLength(1)
+    expect(swallowedReads(owned.replace('throw error', 'throw unrelated'))).toHaveLength(1)
+    expect(swallowedReads(owned.replace('load().catch', 'other().catch'))).toHaveLength(1)
+  })
+
+  it('identity callers await the original writes and visibly own rejected actions', () => {
+    for (const [rel, methods] of [
+      ['features/settings/AccountPanel.tsx', ['setName', 'clearName']],
+      ['app/shell/Onboarding.tsx', ['setName', 'keepOrDefaultName']],
+    ] as const) {
+      const file = ts.createSourceFile(rel, readFileSync(join(SRC, rel), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+      for (const method of methods) {
+        const calls = descendants(file).filter((node): node is ts.CallExpression => ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === method)
+        expect(calls.length, `${rel}: ${method} has an actual caller`).toBeGreaterThan(0)
+        for (const call of calls) {
+          expect(ts.isAwaitExpression(call.parent), `${rel}: ${method} rejection stays in its caller`).toBe(true)
+          let boundary: ts.Node | undefined = call.parent
+          while (boundary && !ts.isTryStatement(boundary) && boundary !== enclosingFunction(call)) boundary = boundary.parent
+          expect(boundary && ts.isTryStatement(boundary), `${rel}: ${method} has a caller catch`).toBe(true)
+          if (!boundary || !ts.isTryStatement(boundary)) continue
+          const catcher = boundary.catchClause
+          const error = catcher?.variableDeclaration?.name
+          expect(error && ts.isIdentifier(error)).toBe(true)
+          if (!catcher || !error || !ts.isIdentifier(error)) continue
+          const report = descendants(catcher).filter(ts.isCallExpression).find(node => ts.isIdentifier(node.expression) &&
+            ['notify', 'setSaveError'].includes(node.expression.text) && descendants(node).some(child => ts.isIdentifier(child) && child.text === error.text))
+          expect(report, `${rel}: ${method} failure reaches the actual visible reporter`).toBeDefined()
+          if (report && ts.isIdentifier(report.expression) && report.expression.text === 'notify') {
+            expect(report.arguments.some(argument => ts.isStringLiteral(argument) && argument.text === 'error')).toBe(true)
+          } else {
+            expect(descendants(file).some(node => ts.isJsxExpression(node) && !!node.expression && ts.isIdentifier(node.expression) && node.expression.text === 'saveError')).toBe(true)
+          }
+        }
+      }
+    }
+  })
+
+  it('actual queued identity writes retain original ownership; chat records before continuation catches', () => {
+    const identity = readFileSync(join(SRC, 'app/shell/identity.tsx'), 'utf8')
+    expect(rawSwallowedReads(identity)).toHaveLength(2)
+    expect(swallowedReads(identity)).toEqual([])
+    const chat = readFileSync(join(SRC, 'features/ChatPage.tsx'), 'utf8')
+    const file = ts.createSourceFile('ChatPage.tsx', chat, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const owned = descendants(file).filter(ts.isCallExpression).filter(call => ts.isPropertyAccessExpression(call.expression) &&
+      call.expression.name.text === 'catch' && ts.isCallExpression(call.expression.expression) &&
+      ts.isIdentifier(call.expression.expression.expression) && call.expression.expression.expression.text === 'loadSnapshot')
+    expect(owned.length).toBeGreaterThanOrEqual(5)
+    expect(owned.every(call => visibleFailureOwner(call, file))).toBe(true)
+    const rsvp = readFileSync(join(SRC, 'features/knowledge/RsvpReader.tsx'), 'utf8')
+    const reader = ts.createSourceFile('RsvpReader.tsx', rsvp, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const queue = descendants(reader).filter(ts.isCallExpression).find(call => ts.isPropertyAccessExpression(call.expression) &&
+      call.expression.name.text === 'then' && ts.isIdentifier(call.expression.expression) && call.expression.expression.text === 'run' && call.arguments.length === 2)
+    expect(queue).toBeDefined()
+    if (!queue) return
+    const rejection = queue.arguments[1]
+    expect(descendants(rejection).some(node => ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'setError')).toBe(true)
+    const owner = enclosingFunction(queue)!
+    expect(descendants(owner).some(node => ts.isReturnStatement(node) && !!node.expression && ts.isIdentifier(node.expression) && node.expression.text === 'run')).toBe(true)
+    expect(descendants(reader).some(node => ts.isJsxExpression(node) && !!node.expression && ts.isIdentifier(node.expression) && node.expression.text === 'error')).toBe(true)
+  })
+
   const surfaces = [
     'features/skills/LearningSummaryBlock.tsx',
     'features/skills/SkillInspector.tsx',
