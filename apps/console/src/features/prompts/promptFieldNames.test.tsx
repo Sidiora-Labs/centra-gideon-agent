@@ -51,10 +51,10 @@ describe('VariableRow names each row after the variable it edits', () => {
   it('a constant name would regress this — pinned at the source', () => {
     const src = code('VariableRow.tsx')
     for (const re of [
-      /aria-label=\{`Name of variable \$\{which\}`\}/,
-      /aria-label=\{`Type of variable \$\{which\}`\}/,
-      /aria-label=\{`Description of variable \$\{which\}`\}/,
-      /aria-label=\{`Default value of variable \$\{which\}`\}/,
+      /aria(?:Label|-label)=\{`Name of variable \$\{which\}`\}/,
+      /aria(?:Label|-label)=\{`Type of variable \$\{which\}`\}/,
+      /aria(?:Label|-label)=\{`Description of variable \$\{which\}`\}/,
+      /aria(?:Label|-label)=\{`Default value of variable \$\{which\}`\}/,
     ]) expect(src).toMatch(re)
     expect(/aria-label="Variable (name|type|description|default value|choices)"/.test(src)).toBe(false)
   })
@@ -72,7 +72,7 @@ describe('the controls that had no name at all', () => {
   it('PromptEditFields names all four (its Section is an injected prop that publishes nothing)', () => {
     const src = code('PromptEditFields.tsx')
     for (const n of ['Prompt title', 'Prompt description', 'Prompt template']) {
-      expect(src).toContain(`aria-label="${n}"`)
+      expect(src).toContain(`ariaLabel="${n}"`)
     }
     expect(src).toContain(`ariaLabel="Prompt tags"`)
   })
@@ -80,18 +80,18 @@ describe('the controls that had no name at all', () => {
   it('PromptDetail Try-it inputs name themselves — the id was DANGLING', () => {
     const src = code('PromptDetail.tsx')
     expect(src).toMatch(/const label = `\$\{v\.name\} value`/)
-    expect((src.match(/aria-label=\{label\}/g) ?? []).length).toBe(4)
+    expect((src.match(/ariaLabel=\{label\}/g) ?? []).length).toBe(4)
     expect(/htmlFor=\{fid\}/.test(src), 'no label[for] exists — do not claim the id names it').toBe(false)
   })
 
   it('SnippetDetail preview inputs match PromptDetail wording', () => {
-    expect(code('SnippetDetail.tsx')).toMatch(/aria-label=\{`\$\{v\.name\} value`\}/)
+    expect(code('SnippetDetail.tsx')).toMatch(/aria(?:Label|-label)=\{`\$\{v\.name\} value`\}/)
   })
 
   it('SnippetForm body is named, and keeps its ref', () => {
     const src = code('SnippetForm.tsx')
-    expect(src).toContain('aria-label="Snippet content"')
-    expect(src).toMatch(/<textarea ref=\{taRef\}/)
+    expect(src).toContain('ariaLabel="Snippet content"')
+    expect(src).toMatch(/<TextArea ref=\{taRef\}/)
   })
 })
 

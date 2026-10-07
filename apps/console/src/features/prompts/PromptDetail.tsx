@@ -12,7 +12,7 @@ import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { api, type PromptItem, type PromptVariable } from '../../shared/data/api'
 import { useStaleWriteGuard } from '../../shared/data/useStaleWriteGuard'
 import { HeldChange, StaleWriteNotice } from '../../shared/ui/StaleWriteNotice'
-import { Field, FieldError } from '../../shared/ui/forms'
+import { Field, FieldError, TextArea, TextInput, Select } from '../../shared/ui/forms'
 import { isReadOnly, sourceTone, sourceLabel, promptVars, mergePromptVariables, variableTypeLabel } from './promptMeta'
 import { toDraft, draftToPayload, type PromptDraft } from './PromptForm'
 import { PromptEditFields } from './PromptEditFields'
@@ -278,10 +278,10 @@ function RenderInput({ v, value, onChange }: { v: PromptVariable; value: unknown
   const common = { id: fid, name: v.name, 'data-type': 'body-s', className: base }
   switch (v.type) {
     case 'boolean': return <Toggle on={Boolean(value)} onChange={onChange} size="sm" />
-    case 'select': return <select {...common} aria-label={label} value={text} onChange={event => onChange(event.target.value)}><option value="">—</option>{(v.options ?? []).map(option => <option key={option} value={option}>{option}</option>)}</select>
-    case 'textarea': return <textarea {...common} aria-label={label} value={text} onChange={event => onChange(event.target.value)} rows={3} placeholder={v.description} />
-    case 'number': return <input {...common} aria-label={label} type="number" value={value === '' || value == null ? '' : Number(value)} onChange={event => onChange(event.target.value === '' ? '' : Number(event.target.value))} placeholder={v.description} />
-    default: return <input {...common} aria-label={label} value={text} onChange={event => onChange(event.target.value)} placeholder={v.description} />
+    case 'select': return <Select {...common} ariaLabel={label} value={text} onChange={onChange} size="sm" options={[{ value: '', label: '—' }, ...(v.options ?? []).map(option => ({ value: option, label: option }))]} />
+    case 'textarea': return <TextArea {...common} ariaLabel={label} value={text} onChange={nextValue => onChange(nextValue)} rows={3} placeholder={v.description} size="sm" surface="container" />
+    case 'number': return <TextInput {...common} ariaLabel={label} type="number" value={value === '' || value == null ? '' : String(Number(value))} onChange={nextValue => onChange(nextValue === '' ? '' : Number(nextValue))} placeholder={v.description} size="sm" surface="container" />
+    default: return <TextInput {...common} ariaLabel={label} value={text} onChange={nextValue => onChange(nextValue)} placeholder={v.description} size="sm" surface="container" />
   }
 }
 

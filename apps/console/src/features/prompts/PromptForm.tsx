@@ -1,7 +1,7 @@
 import { useTemplateEditing, serializeTemplate, templateDraft } from './promptEditorState'
 import { Plus, Wand2, Puzzle } from 'lucide-react'
 import type { PromptItem, PromptKind, PromptVariable, LaunchSpec } from '../../shared/data/api'
-import { Field, TextInput, ChipInput } from '../../shared/ui/forms'
+import { Field, TextInput, ChipInput, TextArea } from '../../shared/ui/forms'
 import { AddItemButton } from '../../shared/ui/AddItemButton'
 import { RunnableTemplateField } from './RunnableTemplateField'
 import { VariableRow } from './VariableRow'
@@ -25,11 +25,11 @@ export function PromptForm({ draft, onChange, compact, nameLocked, registerInser
       <Field label="Description"><TextInput value={draft.description} onChange={(v) => set('description', v)} placeholder="One line: what this prompt does" /></Field>
 
       <Field label="Template" hint="The prompt body. {{variable}} placeholders, {% if %}/{% for %} logic, {{ fn() }} functions, and {{> snippet}} includes.">
-        <textarea ref={taRef} value={draft.content} onChange={(e) => set('content', e.target.value)} rows={compact ? 6 : 12}
-          spellCheck={false} name="prompt-template" aria-label="Prompt template body"
+        <TextArea ref={taRef} value={draft.content} onChange={nextValue => set('content', nextValue)} rows={compact ? 6 : 12}
+          spellCheck={false} name="prompt-template" ariaLabel="Prompt template body"
           placeholder={'Summarize the thread {{thread_url}} in {{style}} style.\n{{> signature}}'}
-          data-type="body-s"
-          className="w-full rounded-md border border-outline-variant/30 bg-surface-container/40 px-m py-2.5 font-mono leading-relaxed text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary resize-y" />
+
+          className="w-full rounded-md border border-outline-variant/30 bg-surface-container/40 px-m py-2.5 font-mono leading-relaxed text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary resize-y" size="sm" surface="container" />
       </Field>
 
       {includes.length > 0 && (

@@ -1,3 +1,4 @@
+import { TextArea, TextInput, Select } from '../../shared/ui/forms'
 import { useTemplatePreview } from './promptEditorState'
 import { Eye, AlertTriangle, Loader2, Puzzle } from 'lucide-react'
 import { type PromptVariable } from '../../shared/data/api'
@@ -50,9 +51,9 @@ function SampleField({ v, value, onChange }: { v: PromptVariable; value: unknown
   const label = <span data-type="caption" className="inline-flex items-center gap-xs text-on-surface-var"><code className="font-mono">{v.name}</code>{v.required && <span className="text-danger">*</span>}</span>
   if (v.type === 'boolean') return <div className="flex items-center justify-between gap-s">{label}<button type="button" aria-label={v.name} aria-pressed={Boolean(value)} onClick={() => onChange(!value)} data-type="caption" className="min-h-7 rounded-md border border-outline-variant/30 px-m" style={{ background: value ? 'var(--color-primary)' : 'var(--color-surface-high)', color: value ? 'var(--color-on-primary)' : 'var(--color-on-surface-low)' }}>{value ? 'true' : 'false'}</button></div>
   const control = v.type === 'select'
-    ? <select value={text} onChange={event => onChange(event.target.value)} aria-label={v.name} data-type="body-s" className={`${base} h-8`}><option value="">—</option>{(v.options ?? []).map(option => <option key={option} value={option}>{option}</option>)}</select>
+    ? <Select value={text} onChange={onChange} ariaLabel={v.name} size="sm" surface="base" className={`${base} h-8`} options={[{ value: '', label: '—' }, ...(v.options ?? []).map(option => ({ value: option, label: option }))]} />
     : v.type === 'textarea'
-      ? <textarea value={text} onChange={event => onChange(event.target.value)} rows={2} aria-label={v.name} data-type="body-s" className={`${base} resize-y py-s`} />
-      : <input type={v.type === 'number' ? 'number' : 'text'} value={text} onChange={event => onChange(event.target.value)} aria-label={v.name} data-type="body-s" className={`${base} h-8`} />
+      ? <TextArea value={text} onChange={nextValue => onChange(nextValue)} rows={2} ariaLabel={v.name}  className={`${base} resize-y py-s`} size="sm" surface="container" />
+      : <TextInput type={v.type === 'number' ? 'number' : 'text'} value={text} onChange={nextValue => onChange(nextValue)} ariaLabel={v.name}  className={`${base} h-8`} size="sm" surface="container" />
   return <div className="grid gap-xs">{label}{control}</div>
 }

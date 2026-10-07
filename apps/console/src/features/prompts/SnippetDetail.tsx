@@ -5,7 +5,7 @@ import { Pencil, Trash2, Check, X, Play, Loader2, Lock } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
 import { FormFooter } from '../../shared/ui/FormFooter'
 import { Markdown } from '../../shared/ui/Markdown'
-import { Field, FieldError } from '../../shared/ui/forms'
+import { Field, FieldError, TextInput } from '../../shared/ui/forms'
 import { confirmDelete } from '../../shared/ui/dialog'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { api, type PromptSnippet, type PromptVariable } from '../../shared/data/api'
@@ -177,10 +177,10 @@ function SnippetRenderPanel({ name, vars }: { name: string; vars: PromptVariable
         {vars.map((v) => (
           <Field key={v.name} label={`${v.name}${v.required ? ' *' : ''}`}>
 
-            <input value={String(values[v.name] ?? '')} aria-label={`${v.name} value`}
-              onChange={(e) => setValues((s) => ({ ...s, [v.name]: e.target.value }))} placeholder={v.description}
-              data-type="body-s"
-              className="w-full rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-s text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+            <TextInput value={String(values[v.name] ?? '')} ariaLabel={`${v.name} value`}
+              onChange={nextValue => setValues((s) => ({ ...s, [v.name]: nextValue }))} placeholder={v.description}
+
+              className="w-full rounded-md border border-outline-variant/25 bg-surface-container/40 px-m py-s text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary" size="sm" surface="container" />
           </Field>
         ))}
         <Button size="sm" onClick={render} loading={loading} className="self-start"><Play size={15} /> Render</Button>

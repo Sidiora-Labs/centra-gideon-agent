@@ -1,7 +1,7 @@
 import { useTemplateEditing, serializeTemplate, templateDraft } from './promptEditorState'
 import { Plus, Wand2, Puzzle } from 'lucide-react'
 import type { PromptSnippet, PromptVariable } from '../../shared/data/api'
-import { Field, TextInput, ChipInput } from '../../shared/ui/forms'
+import { Field, TextInput, ChipInput, TextArea } from '../../shared/ui/forms'
 import { AddItemButton } from '../../shared/ui/AddItemButton'
 import { VariableRow } from './VariableRow'
 import { TextLink } from '../../shared/ui/TextLink'
@@ -26,10 +26,10 @@ export function SnippetForm({ draft, onChange, nameLocked, registerInsert }: { d
 
       <Field label="Content" hint="The fragment body. {{variable}} placeholders, logic, functions, and nested {{> snippet}} includes.">
 
-        <textarea ref={taRef} value={draft.content} onChange={(e) => set('content', e.target.value)} rows={8}
-          aria-label="Snippet content" spellCheck={false} placeholder={'— {{author}}, {{role}}'}
-          data-type="body-s"
-          className="w-full rounded-md border border-outline-variant/30 bg-surface-container/40 px-m py-2.5 font-mono leading-relaxed text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary resize-y" />
+        <TextArea ref={taRef} value={draft.content} onChange={nextValue => set('content', nextValue)} rows={8}
+          ariaLabel="Snippet content" spellCheck={false} placeholder={'— {{author}}, {{role}}'}
+
+          className="w-full rounded-md border border-outline-variant/30 bg-surface-container/40 px-m py-2.5 font-mono leading-relaxed text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary resize-y" size="sm" surface="container" />
       </Field>
 
       {includes.length > 0 && (

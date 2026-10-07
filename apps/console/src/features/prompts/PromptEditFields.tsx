@@ -1,7 +1,7 @@
 import { useTemplateEditing } from './promptEditorState'
 import { Plus, Wand2, Puzzle } from 'lucide-react'
 import { AddItemButton } from '../../shared/ui/AddItemButton'
-import { ChipInput } from '../../shared/ui/forms'
+import { ChipInput, TextInput, TextArea } from '../../shared/ui/forms'
 import type { PromptDraft } from './PromptForm'
 import { PromptPreviewPane } from './PromptPreviewPane'
 import { SyntaxReference } from './SyntaxReference'
@@ -19,13 +19,13 @@ export function PromptEditFields({ draft, onChange, Section }: {
   return (
     <div className="grid gap-l">
       <Section label="Title">
-        <input value={draft.title} onChange={(e) => set('title', e.target.value)} aria-label="Prompt title"
-          placeholder="A human-readable label" data-type="body-s" className={inputCls} />
+        <TextInput value={draft.title} onChange={nextValue => set('title', nextValue)} ariaLabel="Prompt title"
+          placeholder="A human-readable label"  className={inputCls} size="sm" surface="container" />
       </Section>
 
       <Section label="Description">
-        <input value={draft.description} onChange={(e) => set('description', e.target.value)} aria-label="Prompt description"
-          placeholder="One line: what this prompt does" data-type="body-s" className={inputCls} />
+        <TextInput value={draft.description} onChange={nextValue => set('description', nextValue)} ariaLabel="Prompt description"
+          placeholder="One line: what this prompt does"  className={inputCls} size="sm" surface="container" />
       </Section>
 
       <Section label="Tags">
@@ -45,10 +45,10 @@ export function PromptEditFields({ draft, onChange, Section }: {
 
       <Section label="Template">
 
-        <textarea ref={taRef} value={draft.content} onChange={(e) => set('content', e.target.value)} rows={12}
-          aria-label="Prompt template" spellCheck={false} placeholder={'The prompt body. {{variable}} placeholders, {% if %}/{% for %} logic, {{ fn() }} functions, and {{> snippet}} includes.'}
-          data-type="body-s"
-          className="w-full rounded-md border border-outline-variant/30 bg-surface-container/40 px-m py-2.5 font-mono leading-relaxed text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary resize-y" />
+        <TextArea ref={taRef} value={draft.content} onChange={nextValue => set('content', nextValue)} rows={12}
+          ariaLabel="Prompt template" spellCheck={false} placeholder={'The prompt body. {{variable}} placeholders, {% if %}/{% for %} logic, {{ fn() }} functions, and {{> snippet}} includes.'}
+
+          className="w-full rounded-md border border-outline-variant/30 bg-surface-container/40 px-m py-2.5 font-mono leading-relaxed text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary resize-y" size="sm" surface="container" />
         {includes.length > 0 && (
           <div className="mt-2 rounded-md px-m py-s" style={{ background: 'color-mix(in srgb, var(--color-info) 10%, transparent)' }}>
             <div data-type="body-s" className="flex items-center gap-1.5 text-on-surface-var mb-1.5"><Puzzle size={13} className="text-info" /> Includes snippets (their variables merge in):</div>
