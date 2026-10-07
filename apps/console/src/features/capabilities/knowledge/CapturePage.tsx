@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { gatewayHeaders, requestJson, readJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 import { ListScaffold } from '../../../shared/ui/ListScaffold'
-import { Field, Select, TextInput } from '../../../shared/ui/forms'
+import { Field, Select, TextArea, TextInput } from '../../../shared/ui/forms'
 import { AudioRecorder } from '../../knowledge/AudioRecorder'
 
 type Capture = { id: string; text: string; input_origin: string; captured_at: string; status: string; transcript: string | null; error: string | null; revision: number; audio_item_id: string | null; source_link: string | null; events: { event: string; happened_at: string; payload: { title: string; content: string; destination: string } }[] }
@@ -55,7 +55,7 @@ export default function CapturePage() {
   return <main className="h-full"><ListScaffold title="Capture inbox" bodyClassName="mx-auto px-l py-l"><div className="flex flex-col gap-xl">
     <p data-type="body-m" className="max-w-[42rem] text-on-surface-var">Your original words and recordings stay preserved as you review and organize them.</p>
     {error ? <div role="alert" className="flex flex-wrap items-center gap-s border-l-2 border-danger/40 pl-s text-danger"><p>{error}</p><Button variant="secondary" onClick={() => setReload(value => value + 1)}>Reload captures</Button></div> : null}
-    <section className="flex flex-col gap-m rounded-lg bg-surface-container p-l"><label data-type="label-s" className="grid gap-xs text-on-surface-var">Capture text<textarea className="min-h-40 rounded-md border border-outline-variant/30 bg-surface-high p-m text-on-surface" value={text} maxLength={100000} onChange={event => { setText(event.target.value); captureKey.current = crypto.randomUUID() }} /></label>
+    <section className="flex flex-col gap-m rounded-lg bg-surface-container p-l"><label data-type="label-s" className="grid gap-xs text-on-surface-var">Capture text<TextArea className="min-h-40 rounded-md border border-outline-variant/30 bg-surface-high p-m text-on-surface" value={text} maxLength={100000} onChange={value => { setText(value); captureKey.current = crypto.randomUUID() }} /></label>
     <Button className="w-fit" disabled={busy || !text.trim()} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => act(() => requestJson<Capture>(root, 'POST', { request_id: captureKey.current, text }), true)}>Save text</Button></section>
     <details className="rounded-lg bg-surface-container"><summary data-type="label-l" className="cursor-pointer px-l py-m">Capture voice</summary><div className="flex flex-col gap-m border-t border-outline-variant/20 p-l"><AudioRecorder onRecorded={file => { setAudio(file); captureKey.current = crypto.randomUUID() }} onClear={() => setAudio(null)} />
       <label data-type="label-s" className="grid gap-xs text-on-surface-var">Audio file<input className="rounded-md border border-outline-variant/30 bg-surface-high p-s" type="file" accept="audio/*" onChange={event => { setAudio(event.target.files?.[0] || null); captureKey.current = crypto.randomUUID() }} /></label>
@@ -71,7 +71,7 @@ export default function CapturePage() {
       {selected.error ? <p role="status">{selected.error}</p> : null}
       <Field label="Destination"><Select value={destination} surface="high" onChange={value => revise(() => setDestination(value))} options={[{value:'note',label:'Note'},{value:'journal',label:'Journal'},{value:'fleeting',label:'Fleeting idea'}]} /></Field>
       <Field label="Title"><TextInput value={title} maxLength={300} surface="high" onChange={value => revise(() => setTitle(value))} /></Field>
-      <label data-type="label-s" className="grid gap-xs text-on-surface-var">Reviewed text<textarea className="min-h-56 rounded-md border border-outline-variant/30 bg-surface-high p-m text-on-surface" value={content} maxLength={100000} onChange={event => revise(() => setContent(event.target.value))} /></label>
+      <label data-type="label-s" className="grid gap-xs text-on-surface-var">Reviewed text<TextArea className="min-h-56 rounded-md border border-outline-variant/30 bg-surface-high p-m text-on-surface" value={content} maxLength={100000} onChange={value => revise(() => setContent(value))} /></label>
       <Button disabled={busy || !title.trim() || !content.trim()} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => act(() => requestJson<Capture>(`${root}/${selected.id}/route`, 'POST', { request_id: routeKey.current, revision: selected.revision, destination, title, content }))}>Save reviewed destination</Button>
       {selected.source_link ? <a className="text-primary underline" href={selected.source_link}>Open saved knowledge</a> : null}
       <p>{selected.events.length} routing revisions · original captured {selected.captured_at}</p>

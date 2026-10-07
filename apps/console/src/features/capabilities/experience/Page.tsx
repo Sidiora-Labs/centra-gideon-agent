@@ -17,7 +17,7 @@ import { requestJson } from '../../../shared/data/gatewayRequest'
 import { TopBar } from '../../../shared/ui/TopBar'
 import { PageTitle } from '../../../shared/ui/PageTitle'
 import { HeaderActions } from '../../../shared/ui/HeaderActions'
-import { Field, Select, TextInput } from '../../../shared/ui/forms'
+import { Field, Select, TextArea, TextInput } from '../../../shared/ui/forms'
 import { Surface } from '../../../shared/ui/Surface'
 import { AreaNavigation } from '../AreaNavigation'
 import { BookOpen, Boxes, Gamepad2, Globe2, Mic2, Phone, Radio, Sparkles } from 'lucide-react'
@@ -125,7 +125,7 @@ export default function Page({ baseUrl = '/api/capabilities/experience' }: { bas
         <div className="grid gap-m md:grid-cols-2"><Field label="Story title"><TextInput required maxLength={200} value={draft.title} onChange={title => setDraft(d => ({ ...d, title }))} /></Field>
         <Field label="Start scene"><Select value={draft.start_node} onChange={start_node => setDraft(d => ({ ...d, start_node }))} options={draft.nodes.map(n => ({ value: n.id, label: n.id }))} /></Field></div>
         <div className="grid gap-m lg:grid-cols-2">{draft.nodes.map((n, i) => <section key={n.id} aria-label={`Scene ${i + 1}`}><Surface className="h-full space-y-m p-m">
-          <h3 data-type="title-m">{n.id}</h3><Field label={`Scene ${i + 1} text`}><textarea aria-label={`Scene ${i + 1} text`} required maxLength={10000} value={n.text} onChange={event => editNode(n.id, { text: event.target.value })} className="min-h-28 w-full resize-y rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" /></Field>
+          <h3 data-type="title-m">{n.id}</h3><Field label={`Scene ${i + 1} text`}><TextArea ariaLabel={`Scene ${i + 1} text`} required maxLength={10000} value={n.text} onChange={value => editNode(n.id, { text: value })} className="min-h-28 w-full resize-y rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" /></Field>
           <Field label={`Scene ${i + 1} kind`}><Select value={n.kind} onChange={kind => editNode(n.id, { kind: kind as Node['kind'], choices: [] })} options={[{ value: 'scene', label: 'Scene' }, { value: 'ending', label: 'Ending' }]} /></Field>
           {n.choices.map((c, j) => <div key={c.id} className="flex flex-wrap gap-2">
             <div className="min-w-0 flex-1"><Field label={`Choice ${i + 1}.${j + 1}`}><TextInput required maxLength={200} value={c.label} onChange={label => editNode(n.id, { choices: n.choices.map(x => x.id === c.id ? { ...x, label } : x) })} /></Field></div>
