@@ -1,91 +1,75 @@
 # Tasks, triggers and workflows
 
-This is the "get things done" layer: a task hierarchy shared by chat and the UI,
-cron and event triggers with pluggable actions, and SOP-style workflows. Paths
-are relative to `Gideon/src/gideon/`.
+Tasks describe work and its completion criteria. Triggers decide when an accepted action
+may run. Workflows describe a graph of execution. Their stores, identities and authority
+are distinct even when one creates or refers to another. Paths below are relative to
+the repository root.
 
-## Tasks
+## Tasks and projects
 
-`tasks/` implements a Project → TaskList → Task hierarchy:
+`runtime/gideon/engine/tasks` implements the Project → TaskList → Task hierarchy.
+Tasks are stored under the home's `tasks` directory; task lists are under
+`tasks/task_lists`. Projects live under the home's `projects/<id>` directory and
+own their context and worktree locations. `hierarchy.py` and `native.py` are the
+store/implementation entrypoints; `registry.py` supplies the provider seam used
+by chat tools and console handlers.
 
-- **Persistence**: tasks are one JSON file each under `~/.gideon/tasks/` (ids
-  `t-<hex8>`, `tasks/native.py`); task lists live under `tasks/task_lists/`;
-  projects are top-level entities at `~/.gideon/projects/<id>/` (`project.json`
-  plus `context/`, ids `p-<hex8>`, in `tasks/hierarchy.py`). Projects own context
-  and worktrees, which is why they sit at the config root rather than under
-  `tasks/`.
-- **Rich task model** (`tasks/models.py`): dependencies, structured exit
-  criteria, priorities, an action plan, comments.
-- **Dependency reconciliation** (`tasks/reconcile.py`): on any task change, the
-  changed task and its transitive dependents are re-evaluated. A task
-  auto-blocks while its prerequisites are not all terminal, and auto-unblocks
-  once they are. Cancelling a prerequisite counts as terminal, because a
-  cancelled blocker is resolved. The graph walk tolerates cycles.
-- **Honest APIs**: completing a task with unfinished exit criteria fails
-  loudly at the provider layer (`tasks/native.py`: "cannot complete: unfinished
-  exit criteria: …"); an invalid status on update is a 400 naming the valid set.
-- **One registry, every surface** (`tasks/registry.py`): the chat `task_create`
-  tool and the Tasks UI share the same provider registry, so a task created in
-  conversation is the same object the board shows.
+Tasks include dependencies, status, priority, structured exit criteria and comments.
+`reconcile.py` recalculates dependent work when prerequisites change. Completion
+validation happens at the provider, not merely in a disabled UI control. Revisioned
+writes retain the original read's revision; a later timestamp must distinguish an
+immediate second mutation from its predecessor.
 
-## Triggers and schedules
+Workflow-produced tasks are projections of actual run state with engine-owned fields.
+An owner-authored task and a managed run projection do not have the same mutation
+contract. Deleting or completing a card must use the provider's applicable operation.
 
-- **`schedule.py`**: `CronStore` (file-locked via fcntl, with mtime-based
-  `_sync()` so external writes to the store are picked up) plus
-  `ScheduleService`. Jobs carry a `silent` flag: a silent job suppresses
-  auto-delivery (no dashboard notification, no channel post), and the agent
-  decides what, if anything, to send.
-- **`schedule_history.py`**: run history; **`schedule_script.py`** and
-  **`schedule_trigger.py`**: script-shaped and trigger-shaped jobs.
-- **`event_triggers.py`**: data-event triggers. `MemoryUpdate` fires on any
-  memory write, `MemoryKeyPattern` on a write whose key matches a glob (for
-  example `project.acme.*`), and `ContentMatch` on a value that matches a
-  regex or substring. A `max_fires` budget auto-disables a trigger once it is
-  exhausted, which is how "alert me the next time X" works.
-- **`nl_to_cron.py`**: natural language to 5-field cron through a constrained
-  one-shot LLM call, **validated with croniter before use**, so a hallucinated
-  expression never reaches the store.
+## Scheduled and event work
 
-### Action providers
+`runtime/gideon/automation/schedule.py` defines schedule records and shared clock/display
+policy. The active trigger substrate lives in `automation/triggers`, including store,
+service, dispatch, delivery and action-provider consumers. Schedule view and migration
+helpers are distinct from the canonical trigger's accepted execution state.
 
-`action_providers/` is the pluggable "what a trigger does" registry: `bash`,
-`create_task`, `invoke_agent`, `notify`, `run_prompt`, `run_script`,
-`run_workflow`, `send_message` (each in its own `*_provider.py`, with `base.py`
-and `registry.py`). Template variables are exported as environment variables for
-the bash action.
+Clock, lifecycle and data-event triggers can invoke registered actions. Natural-language
+cadence conversion (`automation/nl_to_cron.py`) validates the resulting cron expression
+before it is admitted. An enabled stored record is not by itself permission to execute:
+current protected acceptance, action revision, provider/template pins and applicable
+grants are consulted on dispatch.
 
-**Dry-run is honest.** Only providers that declare `supports_dry_run`
-(run-prompt, run-workflow) actually execute in observe mode. Every other action
-records a `[dry run]` preview and refuses to run.
+`runtime/gideon/integrations/action_providers` defines the action contracts. Actual
+providers decide whether they support dry run. A preview must not be described as an
+executed action, and unsupported dry-run behavior must not silently perform the effect.
+Actions can report tracked completion so running history follows actual work, rather
+than treating a background launch acknowledgement as terminal success.
 
-### App-manifest crons
+## App-declared jobs
 
-Apps can declare crons in their manifest. `apps/app_crons.py` reconciles them on
-every app lifecycle transition and always registers them `silent=True`, because
-app crons are headless: the manifest flag is advisory, and a failing app cron
-must not spam the owner's DM. See [APP_PLATFORM.md](APP_PLATFORM.md).
+`runtime/gideon/extensions/apps/app_crons.py` reconciles manifest jobs on app lifecycle
+changes. App jobs are silent/headless: silence controls automatic notifications and
+result delivery, not authority to invoke tools.
 
-## Workflows
+The canonical stored job must match the installed enabled app and its current declared
+agent tier. Protected accepted action identity remains the original trigger origin;
+app execution is an effective narrowing of that origin. Descendants cannot acquire
+owner authority by dropping the trigger actor or supplying an app-shaped string.
 
-`workflows/` holds SOP-style reusable procedures:
+App jobs cannot choose their own `approval_mode` or `capability` to widen the manifest
+tier. Unsupported posture is refused explicitly. Supported owner edits to cadence,
+message and display name do not grant additional capabilities. Disabling the app or
+revoking the relevant acceptance refuses subsequent work.
 
-- **Store and lifecycle** (`models.py`, `lifecycle.py`, `registry.py`):
-  workflow names follow the skill-name rule (`^[a-z0-9][a-z0-9-]{0,62}$`).
-- **Surfacing** (`surfacing.py`): when a chat message resembles a stored SOP's
-  match text, the workflow is offered. The match is embedding-based behind an
-  honest cosine gate (`DEFAULT_MATCH_THRESHOLD = 0.62`, tunable via
-  `config.workflows.match_threshold`), and it degrades to keyword word-overlap
-  when no embedding provider is bound.
-- **Invocation**: the `workflow_run` and `workflow_get` tools accept an id or a
-  name (names resolve through the list), so agents can call workflows the way
-  users refer to them.
-- MCP exposure for agents is `mcp_workflows.py`, and the schedule tools are
-  `mcp_schedule.py`. See the tool-category list in
-  [OVERVIEW.md](OVERVIEW.md#capability-seams).
+## Workflow runs
 
-## Related docs
+`runtime/gideon/automation/workflows` implements declarative graph runs. `service.py`
+accepts starts, `store.py` persists definitions and runs, `controller.py` owns scheduling,
+and `engine.py` dispatches actual nodes/actions. Template surfacing can offer a procedure;
+it does not automatically grant execution.
 
-- Loops provision per-phase TaskLists under a project: [LOOPS.md](LOOPS.md)
-- Memory writes that event triggers observe:
-  [KNOWLEDGE_MEMORY.md](KNOWLEDGE_MEMORY.md)
-- Where trigger results get delivered: [INBOX_CHANNELS.md](INBOX_CHANNELS.md)
+Accepted version bounds and verified origin travel with child runs. App work ceilings,
+action deny rules, egress and tool approvals remain separate checks. Temporary runs
+require native private-work issuance, a live receipt and actual lifecycle cleanup.
+Mutable run metadata or a privacy label cannot recreate a missing receipt.
+
+See [Workflows](WORKFLOWS.md), [Loops](LOOPS.md), [App platform](APP_PLATFORM.md),
+[Knowledge and memory](KNOWLEDGE_MEMORY.md) and [Security architecture](SECURITY.md).

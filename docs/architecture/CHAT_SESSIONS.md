@@ -1,136 +1,85 @@
 # Chat and sessions
 
-How a message becomes a turn: the session model, the dashboard chat pipeline,
-persistence, and the memory-privacy modes. Paths are relative to
-`Gideon/src/gideon/`.
+A session is one conversation thread for dashboard chat, a channel, a loop worker,
+a webhook or a subagent. The gateway owns accepted turns and runtime acquisition;
+console projections and external channel messages are consumers of that state.
+Paths below are relative to the repository root.
 
 ## Session model
 
-A session is one conversation thread, whatever surface it lives on (dashboard
-chat, channel thread, loop worker, webhook, subagent).
+`runtime/gideon/engine/session.py` implements `ConversationDirectory` and the live
+conversation queues. Work on one conversation is serialized, while runtime/provider
+capabilities determine concurrency across conversations. `engine/session_workspace.py`
+and `session_pid.py` handle working-directory and process tracking.
 
-- **`session.py`: `ConversationDirectory`.** Owns live session state. Each
-  session has a FIFO message queue (a `deque` of pending messages) guarded by a
-  semaphore, so messages arriving on the same channel thread are serialized: a
-  turn finishes before the next queued message starts.
-- **`session_map.py`: the persistent session↔thread map.** Stored at
-  `~/.gideon/session_map.json` with atomic tmp+rename writes. Each entry carries
-  `sid`, `thread_ts` and `channel_id`, which are generic keys: no channel-vendor
-  shape is assumed. `set_channel_link` / `get_channel_link` are the one API for
-  linking a dashboard session to a channel thread, and a reverse index maps
-  `thread_ts` to a session key.
-- **`session_restrictions.py`: memory modes.** Two restriction registries,
-  kept in core because any surface can request them:
-  - **temporary**: a blank-slate thread. Memory reads are suppressed
-    (`blocks_reads`) and writes are suppressed too.
-  - **incognito**: ephemeral. Memory writes are suppressed, reads are allowed.
+`runtime/gideon/engine/session_map.py` persists channel/thread links under the home.
+Thread and channel identifiers are generic transport data. A stored link describes a
+conversation association; it does not prove the authority of a new caller.
 
-  `is_restricted()` (either mode) gates the after-turn learning path, session
-  listing and search, and memory recall (see
-  [KNOWLEDGE_MEMORY.md](KNOWLEDGE_MEMORY.md)). Restricted sessions never write
-  lessons: `after_turn_review.py` checks `session.is_restricted`.
-- **`session_workspace.py` / `session_pid.py`**: per-session working directory
-  resolution and process-id tracking.
+Session privacy modes suppress different memory operations:
 
-## History and persistence
+- **Temporary** blocks persistent memory reads and writes.
+- **Incognito** allows otherwise authorized reads and blocks writes.
 
-- **`history.py`**: one JSONL file per session at
-  `~/.gideon/sessions/{safe_key}.jsonl`. Files rotate at 2 MB
-  (`_SESSION_MAX_BYTES`), dropped lines are archived to `sessions/archive/`, and
-  the archive has a 7-day retention sweep (`ARCHIVE_RETENTION_DAYS`,
-  rate-limited to once per hour). Archive reads are redacted through
-  `redact_credentials` / `redact_exfiltration_urls` before anything leaves the
-  store.
-- **`resolve_history_key()`** resolves whether a bare key is a channel-thread
-  key or lives in the `dashboard:` namespace by asking the store. Core assumes
-  no key shape and names no provider.
-- **`dashboard/chat_persistence.py`**: the dashboard-side persistence contract
-  over the JSONL store (message append, metadata, variants). Model-to-provider
-  matching is data-driven via `catalog.model_family_provider_types(model)`, so
-  there are no vendor names at the call site and unknown model families are
-  never restricted.
+The actual work principal, origin and execution lineage are bound through
+`runtime/gideon/security/session_credentials.py`. An `X-Session-Key`, app label or
+parent identifier supplied by a caller is not a replacement for verified work.
+App-origin turns also retain current app tiers and consent. Memory and learning
+consumers must use the actual reach and privacy policy.
 
-## The dashboard chat pipeline
+## History and derived context
 
-`dashboard/chat_runner.py` is the turn engine. A turn flows like this:
+`runtime/gideon/cognition/history.py` stores conversation journals under the home.
+`interfaces/dashboard/chat_persistence.py` handles dashboard persistence, metadata
+and variants. The journal is authoritative; a derived compressed summary is useful
+only while its covered-prefix digest still matches. Editing or rewinding a transcript
+must not turn an old summary into current history.
 
-1. **Prompt-mention expansion**: a leading `@name key=value` expands a saved
-   prompt via `_expand_prompt_mention` (user prompts live at
-   `~/.gideon/prompts/`, snippets at `prompt_snippets/`; the composer's @-menu
-   suggests prompts only at message start).
-2. **Context assembly**: `context.py` (`PromptAssembler`) builds the system
-   context: the `{{bot_name}}` variable (live-resolved from `agent.bot_name`),
-   memory context, and, for channel-linked sessions, the
-   `channel-thread-context` snippet. `context_engine.py` and
-   `context_compaction.py` manage sizing and compaction.
-3. **Agent resolution**: the selected agent's prompt governs. Task-mode
-   posture is layered as a `system_prompt_suffix` on top of the resolved agent
-   prompt, never as a replacement (see `chat_runner.py` around the
-   `system_prompt_suffix` call site).
-4. **Model resolution**: the `chat` use-case binding from
-   `active_models.json`, unless the agent pins a model or the composer
-   overrides per-session. The `model` kwarg threads through `llm/registry.py`
-   `registry.build`, and every factory honors it.
-5. **Streaming and persistence**: chunks stream over the dashboard WebSocket,
-   and the finished turn appends to the session JSONL.
+Replay includes the authoritative epoch, turn and sequence cursor. Completed assistant
+content must not be emitted again as a second streaming projection when adopting a
+snapshot. The console implements this in its chat snapshot/stream helpers.
 
-Around the engine:
+## Accepted turn pipeline
 
-- **`dashboard/chat_handlers.py`**: session listing and history. Channel-linked
-  rows carry `origin="channel"`, computed at list time from the session map and
-  never persisted; the frontend `ChatPage.tsx` switches tabs on that literal.
-- **`dashboard/chat_title.py`**: auto-title plus optional auto-tagging in one
-  background LLM call (config `dashboard.auto_tag_sessions`); `chat_retag.py`
-  is the batch re-tag job (cancellable, board-triggered).
-- **`dashboard/chat_folders.py` / `chat_tags.py`**: organization, persisted in
-  `folders.json` / `tags.json`.
-- **`dashboard/chat_channel.py`**: channel link and handoff routes
-  (`POST /api/chat/sessions/{session}/channel-link`,
-  `GET /api/channels/reply-targets`). They are provider-blind and built on
-  `ChannelDelivery` only (see [INBOX_CHANNELS.md](INBOX_CHANNELS.md)).
-- **`dashboard/chat_voice.py`**: `POST /api/voice/synthesize`, sentence-chunked
-  TTS through `tts.registry.active_voice_params` (whatever TTS provider is
-  bound).
+`runtime/gideon/interfaces/dashboard/chat_runner.py` coordinates the turn:
 
-## Variant branching (regenerate)
+1. Resolve the actual conversation, ingress and accepted work identity.
+2. Expand applicable prompt mentions and resolve agent/runtime/model bindings.
+3. Assemble context through the configured engine, subject to memory reach, profile
+   skill limits and app/task ceilings.
+4. Stream provider events, route permission requests and retain accepted outcomes.
+5. Persist the completed result and run permitted after-turn work.
 
-`dashboard/chat_regenerate.py`: regenerating an assistant message preserves the
-prior answer as a **variant**. The message's `variants[]` list (capped at
-`_MAX_VARIANTS`) plus `variant_idx` are persisted in the session JSONL, so the
-user can flip between alternative answers and the choice survives a reload. The
-backend broadcasts variant switches, and the frontend renders prev/next
-navigation on the message.
+Ordinary context assembly lives under `runtime/gideon/cognition`. Configured Hypermid
+primary mode uses `runtime/gideon/hypermid/primary_engine.py`; it must retain the same
+work reach constraints. Text-tier app work supplies task text without persistent-memory
+context or tool execution. A model binding does not grant additional tools or memory.
 
-## Forking
+Native and ACP runtimes have different provider contracts. ACP can forward permission,
+options and compaction events only when its adapter supports them. See
+[ACP comparison](../agents/acp-parity.md).
 
-`dashboard/chat_fork.py`: `POST /api/chat/sessions/{session}/fork` copies a
-session into a new tab. App-scoped callers may only fork sessions they own: the
-`app` claim is checked, and unscoped sessions are denied to apps.
+## Editing, stopping and branching
 
-## Channel-linked sessions
+Chat actions are transactions over actual state. Stop, interrupt, edit/resend and
+regenerate consumers adopt a result only when the handler accepts it and returns the
+appropriate snapshot. A refused request retains the current transcript and draft.
 
-A dashboard session can be linked to a channel thread, and the other way round:
+`interfaces/dashboard/chat_regenerate.py` preserves previous answers as variants.
+Fork handling creates a separate conversation and retains the original ownership/privacy
+constraints; an app-scoped caller cannot use a fork to acquire an owner's session.
+Persisted variants, titles, tags and folders survive reload through their native stores.
 
-- Linking goes through core `session_map.set_channel_link`; the channel app
-  never touches the map file directly.
-- `sync_bridge.py` implements the dashboard↔channel handoff
-  (`handoff_to_channel` over `ChannelDelivery`), so the conversation continues in
-  the channel with context intact.
-- `voice_reply.py` uploads TTS voice replies to the channel
-  (`upload_voice_to_channel`); markdown deep links are stripped generically
-  before synthesis.
+## Channels and prompts
 
-## Prompt entities
+Channel linking and handoff use the generic delivery contract, session map and
+`runtime/gideon/integrations/sync_bridge.py`. Speech replies use the bound speech
+provider through `integrations/voice_reply.py`. A successful dashboard event does not
+itself prove channel delivery or remote handset receipt.
 
-`prompt_providers/` is the prompt-catalog subsystem (bundled use-case prompts
-plus user prompts). Use-case prompts include, for example, `task-channel-title`
-(use case `channel_title`) for naming channel-originated tasks. All bundled
-prompts are provider-blind.
+Prompt catalogs live under `runtime/gideon/integrations/prompt_providers`; bundled
+prompt text lives under `runtime/gideon/core/config/prompts`. User prompts and snippets
+are entities in the selected home. Prompt text supplies instructions, not authorization.
 
-## Related docs
-
-- Memory recall and write rules per session mode:
-  [KNOWLEDGE_MEMORY.md](KNOWLEDGE_MEMORY.md)
-- Channel delivery and thread linking: [INBOX_CHANNELS.md](INBOX_CHANNELS.md)
-- The agent and tool layer a turn can reach:
-  [OVERVIEW.md](OVERVIEW.md#capability-seams)
+See [Knowledge and memory](KNOWLEDGE_MEMORY.md), [App platform](APP_PLATFORM.md),
+[Security architecture](SECURITY.md) and [Architecture overview](OVERVIEW.md).

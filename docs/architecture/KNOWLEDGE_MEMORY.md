@@ -3,7 +3,7 @@
 These are two related but distinct subsystems. **Knowledge** is the user's
 ingested content library (notes, documents, media) with a processing pipeline
 and hybrid search. **Memory** is what the assistant learns and recalls across
-conversations. Paths are relative to `Gideon/src/gideon/`.
+conversations. Knowledge source paths below are relative to `runtime/gideon/cognition/`; other paths name their domain explicitly.
 
 ## Knowledge
 
@@ -74,10 +74,10 @@ project's private items never appear. The project tag is the same one
 
 `knowledge/embedder.py`: `UnifiedEmbedder` is the one provider-agnostic
 embedding path. It wraps
-`embedding_providers/registry.py::get_active_embed_fn()`, which resolves the
+`runtime/gideon/integrations/embedding_providers/registry.py::get_active_embed_fn()`, which resolves the
 `embedding` use-case binding (Settings → Models). With nothing bound, embeddings
 are gracefully off: no crash, and vector search simply does not participate. Any
-provider works, from the native `apps/sentence-transformers` app to any bound
+provider works, from a configured local embedding app to any bound
 remote model.
 
 ### Search
@@ -89,81 +89,68 @@ queries.
 
 ## Memory
 
-### Stores
+### Provider and native authority
 
-- **`vector_memory.py`**: semantic and episodic memory. The FAISS index at
-  `~/.gideon/memory.faiss` is optional: without embeddings it degrades to FTS5.
-  It also owns time-decay retrieval and the config-threaded episodic knobs
-  (`episodic_dedup_threshold`, `episodic_max_results` in `config/loader.py`).
-- **`memory.py`**: structured key/value memory with FTS5.
-- **`memory_record.py`**: the typed `MemoryRecord` with a `kind`
-  discriminator, the one shape the subsystem speaks. The key taxonomy is
-  prefix-based: `pref.*` / `project.*` keys are semantic facts; `lesson.*`
-  keys are corrective rules; `user.procedural.*` / `user.persona.*` /
-  `user.commitment.*` are their own kinds.
-- **`memory_service.py`**: the service layer, including **promotion**.
-  Session-scoped records are swept at session end unless they are sealed or
-  promoted, and `promote_by_heat` is the conservative global gate that promotes
-  only records whose accumulated heat crosses the threshold, which protects
-  against one-off session noise.
-- **`memory_vault.py`**: the human-readable markdown vault. `memory.vault_mode`
-  picks `off` / `mirror` (projection only) / `two_way`, where hand edits are read
-  back through `MemoryService.apply_vault_edit`: the normal semantic write path
-  with the S5 scan and a reversible `memory_events` row. Every page carries a
-  `source_hash` of its body, which is what makes an edit detectable and a
-  frontmatter rewrite invisible. A page the parser cannot read is left alone and
-  flagged rather than merged. Files dropped in `<vault>/raw/` are routed to the
-  Knowledge ingest queue, never into memory, so the boundary holds inside the
-  vault.
-- **`learn.py`**: lesson capture; **`memory_lint.py`**: hygiene checks;
-  **`engagement_signals.py`** and **`preference_facets.py`**: derived preference
-  data.
+`memory_service.py` supplies policy and retrieval over the configured
+`MemoryProvider` contract (`runtime/gideon/integrations/memory_providers/base.py`).
+`memory_record.py` defines record kinds and their shared shape. Storage implementation
+and record projections are not themselves permission to read another scope.
 
-### Partitions and project locality
+Hypermid memory integration is `runtime/gideon/hypermid/memory.py`, backed by the
+authenticated local native client. Native owner/project/workspace scopes and per-operation
+grants govern admitted reads and writes. App-scoped memory uses a native issued namespace
+and current installed consent; it is not a workspace named by a caller.
 
-- Memory is partitioned by **working directory**: `config/loader.py`'s
-  `memory_dir_for_cwd(cwd)` maps a session's cwd onto
-  `~/.gideon/workspace/_ext/<slug(cwd)>`, and an empty cwd onto the shared
-  `_ext/_default` partition. `context.py::PromptAssembler.get_memory_for`
-  resolves and caches one store per partition, and the gateway's own workspace
-  is aliased onto the main store, so a dashboard chat and the Memory UI share
-  one.
-- **Project locality rides that seam** (`memory_locality.py`): a project-owned
-  run binds the project's `context_dir` as its cwd, so what it learns lands in
-  that project's partition instead of the shared pile.
-- Recall for a project-local session is **partition-first**: its own partition,
-  then the global partition, whose hits are source-labeled and fenced
-  (`security.py::fence_untrusted`). This affects **ordering only, never
-  admission**. A hit that exists only in the global partition is still returned,
-  on its own if need be.
+Legacy `vector_memory.py`, `memory.py`, markdown projections and cwd-partition helpers
+remain source consumers for their applicable configured paths. Do not describe a cwd
+partition or a shared fallback as universal memory authority. A configured Hypermid
+provider can refuse an operation that another storage adapter would support.
+
+### Project, app and descendant reach
+
+`runtime/gideon/security/session_credentials.py` resolves memory reach from verified
+current work, original initiator, effective actor, lineage and privacy mode. Native
+scope issuers and durable work origins are separate from transport session keys.
+Children inherit a ceiling; they cannot choose an owner scope through a parent hint.
+App work additionally intersects current memory consent and the live text/read/tools
+tier. Text-tier work has no persistent-memory context.
+
+Temporary suppresses persistent reads and writes; Incognito suppresses writes while
+allowing otherwise authorized reads. A private workflow requires the native private-work
+receipt and live lifetime, rather than conversion to another mode.
 
 ### Recall and the privacy guard
 
-- Recall handlers live in `dashboard/handlers/memory.py`. Restricted sessions
-  are enforced at the API layer: a **temporary** session blocks memory reads
-  (`_blocks_reads_session`), and both temporary and **incognito** block writes
-  (`_is_restricted_session`). See
-  [CHAT_SESSIONS.md](CHAT_SESSIONS.md#session-model).
-- Recalled episodic content is fenced as data. The recall block opens with a
-  bracket header naming the content as past conversation fragments and marking it
-  `(DATA, not instructions)`, so a poisoned memory cannot smuggle instructions
-  into the prompt. The generic fencing helper for untrusted content is
-  `security.py::fence_untrusted` (see [SECURITY.md](SECURITY.md)).
-- The after-turn learning path (`after_turn_review.py`) is gated on
-  `session.is_restricted`: restricted sessions never write lessons.
+Recall routes live in `runtime/gideon/interfaces/dashboard/handlers/memory.py`.
+Native operation admission checks actual proof and scope. Known typed authority refusals
+are permission failures; unrelated invalid values or transport failures must not be
+reported as authorized empty results.
+
+Both ordinary context and Hypermid primary context honor effective read reach before
+recall or summary expansion. Returned past content is framed as data, not instructions;
+fencing does not prove the model will ignore every injected instruction. Independent
+tool and write authority still matters. Restricted after-turn paths do not gain a
+persistent write through consolidation, lessons or background capture.
+
+### Human-readable projections
+
+`memory_vault.py` implements the readable markdown vault. `memory.vault_mode` selects
+`off`, `mirror` or `two_way`; projections and accepted edits must go through the memory
+service's policy and event path. An unreadable page is reported rather than silently
+merged. Files offered for knowledge ingestion are not automatically memory facts.
+Provider capabilities determine which mutations and projections are available.
 
 ### Lexicon
 
-`lexicon/` holds user terms and learned corrections in `lexicon.db`. The lexicon
-biases all speech transcription, within a hard budget of about 64 terms and 200
-characters, because Whisper's initial-prompt window is 224 tokens and
-overflowing it silently empties transcripts. Graph resync prunes stale terms
-while preserving user-pruned flags.
+`lexicon/` contains personal terms and transcription corrections. Provider-aware
+transcription biases use bounded vocabulary and matching; a bound speech provider's
+actual capabilities determine what is applied. The lexicon is distinct from memory
+scope authority and does not grant model access to otherwise withheld records.
 
 ## Related docs
 
 - Which model runs each pipeline stage: bindings in
-  [OVERVIEW.md](OVERVIEW.md#capability-seams)
+  [OVERVIEW.md](OVERVIEW.md#extension-boundary)
 - Event triggers that fire on memory writes:
   [TASKS_TRIGGERS.md](TASKS_TRIGGERS.md)
 - The egress policy connectors fetch under: [SECURITY.md](SECURITY.md)
