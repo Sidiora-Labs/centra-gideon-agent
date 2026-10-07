@@ -67,7 +67,7 @@ from gideon.integrations.channel_history import ChannelHistory
 from gideon.integrations.llm.base import LLMEvent
 from gideon.integrations.llm_helpers import PromptBusyExhaustedError, stream_and_collect
 from gideon.interfaces.dashboard import start_dashboard
-from gideon.interfaces.dashboard.chat_runner import run_chat
+from gideon.interfaces.dashboard.chat_runner import make_channel_turn_runner, run_chat
 from gideon.interfaces.dashboard.handlers import MAX_PROMPT_BYTES
 from gideon.interfaces.dashboard.handlers.autonudge import render_nudge_message
 from gideon.interfaces.dashboard.state import ConsoleState
@@ -773,7 +773,7 @@ class RuntimeCoordinator:
             provider,
             msg,
             is_dm=is_dm,
-            turn_runner=functools.partial(run_chat, arrived_from_channel=True),
+            turn_runner=make_channel_turn_runner(run_chat),
         )
 
     def _interactive_approval(

@@ -223,7 +223,7 @@ class CapturingState:
         self._background_tasks: set[Any] = set()
         self.sessions_created: list[CapturedSession] = []
         self.links: list[tuple[str, str, str]] = []
-        self._by_thread: dict[str, CapturedSession] = {}
+        self._by_thread: dict[tuple[str, str], CapturedSession] = {}
         self._counter = 0
 
     def notify(
@@ -233,8 +233,10 @@ class CapturingState:
             {"kind": kind, "title": title, "body": body, "meta": dict(meta or {})}
         )
 
-    def get_linked_session(self, thread_key: str) -> "CapturedSession | None":
-        return self._by_thread.get(thread_key)
+    def get_linked_session(
+        self, thread_key: str, provider: str = ""
+    ) -> "CapturedSession | None":
+        return self._by_thread.get((provider, thread_key))
 
     def get_or_create_session(self, name: str | None = None, app: str = "", **kw: Any):
         self._counter += 1
@@ -242,11 +244,13 @@ class CapturingState:
         self.sessions_created.append(session)
         return session
 
-    def link_channel(self, session_key: str, thread_key: str, channel_id: str) -> None:
+    def link_channel(
+        self, session_key: str, thread_key: str, channel_id: str, provider: str = ""
+    ) -> None:
         self.links.append((session_key, thread_key, channel_id))
         for s in self.sessions_created:
             if s.key == session_key:
-                self._by_thread[thread_key] = s
+                self._by_thread[(provider, thread_key)] = s
 
     def with_actions(self) -> list[dict[str, Any]]:
         """Notifications carrying owner Allow/Deny meta-actions."""

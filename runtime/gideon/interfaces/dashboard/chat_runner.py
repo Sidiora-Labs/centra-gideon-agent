@@ -1986,6 +1986,22 @@ def commit_consumed_steering(
     )
 
 
+def make_channel_turn_runner(runner):
+    """Adapt the HTTP turn engine to the guarded door's explicit origin contract."""
+    from gideon.integrations.channel_inbound import OriginTurnRunner
+
+    async def run_recorded_turn(state, session, message, origin_message):
+        await runner(
+            state,
+            session,
+            message,
+            arrived_from_channel=True,
+            _origin_message=origin_message,
+        )
+
+    return OriginTurnRunner(run_recorded_turn)
+
+
 async def run_chat(
     state: ConsoleState,
     session: _ChatSession,

@@ -565,3 +565,46 @@ def test_the_door_is_on_the_gateway_services_contract():
     assert hasattr(GatewayServices, "deliver_channel_inbound")
     assert inspect.iscoroutinefunction(RuntimeCoordinator.deliver_channel_inbound)
     assert not hasattr(ChannelTransportProvider, "deliver_channel_inbound")
+
+
+@pytest.mark.asyncio
+async def test_composed_runner_receives_the_exact_recorded_origin_before_task_runs():
+    from gideon.interfaces.dashboard.chat_runner import make_channel_turn_runner
+    from gideon.interfaces.dashboard.state import _ChatSession
+
+    session = _ChatSession("channel-origin-adapter")
+    state = CapturingState()
+    received = []
+
+    async def engine(state_arg, session_arg, text, **kwargs):
+        received.append((state_arg, session_arg, text, kwargs))
+
+    ingress = ci._SessionIngress(state, PROVIDER, _msg(sender="friend"), "first turn")
+    ingress.dispatch(session, make_channel_turn_runner(engine))
+    origin = session.messages[-1]
+    session.append("user", "later turn", "msg msg-u")
+    await asyncio.wait_for(session.task, timeout=5)
+
+    assert received[0][:3] == (state, session, "first turn")
+    assert received[0][3]["arrived_from_channel"] is True
+    assert received[0][3]["_origin_message"] is origin
+    assert origin is not session.messages[-1]
+    assert "ingress" in origin["meta"]
+
+
+@pytest.mark.asyncio
+async def test_alternative_three_argument_runner_needs_no_origin_keyword():
+    from gideon.interfaces.dashboard.state import _ChatSession
+
+    session = _ChatSession("channel-three-argument-runner")
+    state = CapturingState()
+    received = []
+
+    async def alternate(state_arg, session_arg, text):
+        received.append((state_arg, session_arg, text))
+
+    ci._SessionIngress(state, PROVIDER, _msg(sender="friend"), "alternate turn").dispatch(
+        session, alternate
+    )
+    await asyncio.wait_for(session.task, timeout=5)
+    assert received == [(state, session, "alternate turn")]

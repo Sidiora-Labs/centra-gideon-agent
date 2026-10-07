@@ -165,6 +165,13 @@ def _hold_unknown_sender(state: Any, provider: str, msg: ChannelMessage) -> bool
 
 
 @dataclass(frozen=True)
+class OriginTurnRunner:
+    """Composition-owned callback accepting the exact recorded inbound row."""
+
+    callback: Callable[[Any, Any, str, dict], Awaitable[None]]
+
+
+@dataclass(frozen=True)
 class _SessionIngress:
     state: Any
     provider: str
@@ -271,7 +278,7 @@ class _SessionIngress:
             refresh()
 
     def dispatch(
-        self, session: Any, runner: Callable[[Any, Any, str], Awaitable[None]]
+        self, session: Any, runner: Callable[[Any, Any, str], Awaitable[None]] | OriginTurnRunner
     ) -> None:
         if getattr(session, "running", False):
             from gideon.security.approval_answer import ingress_record, on_channel
@@ -337,12 +344,10 @@ class _SessionIngress:
             return
 
         self.record(session)
-        from gideon.interfaces.dashboard.chat_runner import run_chat
-
         running: Awaitable[None]
-        if runner is run_chat:
-            running = runner(
-                self.state, session, self.text, _origin_message=session.messages[-1]
+        if isinstance(runner, OriginTurnRunner):
+            running = runner.callback(
+                self.state, session, self.text, session.messages[-1]
             )
         else:
             running = runner(self.state, session, self.text)
@@ -360,7 +365,7 @@ async def deliver_inbound(
     msg: ChannelMessage,
     *,
     is_dm: bool = True,
-    turn_runner: Callable[[Any, Any, str], Awaitable[None]],
+    turn_runner: Callable[[Any, Any, str], Awaitable[None]] | OriginTurnRunner,
 ) -> TrustVerdict:
     """Return the gate's verdict and deliver only explicitly admitted content."""
     decision = admit(
@@ -389,7 +394,7 @@ async def _route_to_session(
     provider: str,
     msg: ChannelMessage,
     text: str,
-    turn_runner: Callable[[Any, Any, str], Awaitable[None]],
+    turn_runner: Callable[[Any, Any, str], Awaitable[None]] | OriginTurnRunner,
 ) -> None:
     state = getattr(services, "dashboard_state", None)
     if state is not None:
