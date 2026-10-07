@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { navigationItems, ROUTABLE_ROOTS } from '../../app/shell/navigationModel'
+import { ROUTES, NON_NAV_ROUTES } from '../../../e2e/routes'
 
 const EXEMPT_FROM_THE_HARNESS: Record<string, string> = {
   loop: 'loop detail — needs a loop to address; also carries the logged overflowing-control-row taste call',
@@ -11,24 +13,15 @@ const EXEMPT_FROM_THE_HARNESS: Record<string, string> = {
 const WEB = process.cwd()
 
 function navIds(): string[] {
-  const src = readFileSync(join(WEB, 'src/app/shell/App.tsx'), 'utf8')
-  const block = src.match(/const NAV: NavItem\[\] = \[(.*?)\n\]/s)
-  if (!block) throw new Error('could not locate the NAV literal in App.tsx')
-  return [...block[1].matchAll(/\{\s*id: '([^']+)'/g)].map((m) => m[1])
+  return navigationItems().map(item => item.id)
 }
 
 function manifestRoutes(): string[] {
-  const src = readFileSync(join(WEB, 'e2e/routes.ts'), 'utf8')
-  const block = src.match(/export const ROUTES: RouteEntry\[\] = \[(.*?)\n\]/s)
-  if (!block) throw new Error('could not locate the ROUTES literal in e2e/routes.ts')
-  return [...block[1].matchAll(/route: '([^']+)'/g)].map((m) => m[1])
+  return ROUTES.map(entry => entry.route)
 }
 
 function nonNavRoutes(): string[] {
-  const src = readFileSync(join(WEB, 'e2e/routes.ts'), 'utf8')
-  const block = src.match(/export const NON_NAV_ROUTES: RouteEntry\[\] = \[(.*?)\n\]/s)
-  if (!block) throw new Error('could not locate the NON_NAV_ROUTES literal in e2e/routes.ts')
-  return [...block[1].matchAll(/route: '([^']+)'/g)].map((m) => m[1])
+  return NON_NAV_ROUTES.map(entry => entry.route)
 }
 
 function scannedRoutes(): string[] {
@@ -36,10 +29,7 @@ function scannedRoutes(): string[] {
 }
 
 function routableExtras(): string[] {
-  const src = readFileSync(join(WEB, 'src/app/shell/App.tsx'), 'utf8')
-  const block = src.match(/const ROUTABLE = new Set\(\[(.*?)\]\)/s)
-  if (!block) throw new Error('could not locate the ROUTABLE literal in App.tsx')
-  return [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1])
+  return [...ROUTABLE_ROOTS]
 }
 
 describe('e2e route manifest vs NAV', () => {
