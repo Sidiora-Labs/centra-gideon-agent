@@ -30,6 +30,8 @@ from gideon.security.security import (
     redact_for_display,
 )
 
+from gideon.security.session_credentials import memory_tool_endpoint
+
 logger = logging.getLogger(__name__)
 _MEMORY_DOCUMENT_LOCK = threading.RLock()
 
@@ -752,9 +754,6 @@ async def api_memory_episodic_search(request: web.Request) -> web.Response:
         d = {k: v for k, v in dict(e).items() if not isinstance(v, (bytes, memoryview))}
         results.append(_redact_memory_field(d))
     return web.json_response({"results": results})
-
-
-from gideon.security.session_credentials import memory_tool_endpoint
 
 
 @memory_tool_endpoint("memory_recall")

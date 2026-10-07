@@ -1575,13 +1575,7 @@ async def api_mcp_oauth_callback(request: web.Request) -> web.Response:
             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
         )
     try:
-        from gideon.integrations.mcp_oauth import (
-            OAuthCallbackError,
-            _canonical_resource,
-            callback_binding,
-            complete_dashboard_callback,
-            purge_server,
-        )
+        from gideon.integrations.mcp_oauth import OAuthCallbackError, callback_binding, complete_dashboard_callback, purge_server
 
         binding = callback_binding(state, principal)
         async with _get_mcp_lock():
@@ -1609,7 +1603,7 @@ async def api_mcp_oauth_callback(request: web.Request) -> web.Response:
                 raise OAuthCallbackError(
                     "MCP server definition changed during authorization"
                 )
-        result = await complete_dashboard_callback(
+        await complete_dashboard_callback(
             state,
             code,
             principal,

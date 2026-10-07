@@ -4427,7 +4427,6 @@ async def run_chat(
                         provider=_record_provider,
                         model=_record_model or "",
                     )
-                    from gideon.operations.pricing import has_pricing as _has_pricing
 
                     _turn_input_tokens = int(event.input_tokens or 0)
                     _turn_output_tokens = int(event.output_tokens or 0)

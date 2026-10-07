@@ -26,14 +26,7 @@ from gideon.automation.loop.watchdog import registry_key
 from gideon.core.config.loader import AppConfig
 from gideon.core.http_request import read_json_body, string_field
 from gideon.http_errors import json_error
-from gideon.security.security import (
-    MASK_CONFLICT,
-    MaskConflict,
-    keep_masked_spans,
-    keep_masked_values,
-    redact_for_display,
-    redact_values_for_display,
-)
+from gideon.security.security import MASK_CONFLICT, MaskConflict, keep_masked_spans, keep_masked_values, redact_for_display
 
 logger = logging.getLogger(__name__)
 

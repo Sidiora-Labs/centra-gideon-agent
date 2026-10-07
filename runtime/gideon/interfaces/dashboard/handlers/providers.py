@@ -1024,7 +1024,6 @@ async def api_provider_test(request: web.Request) -> web.Response:
             entry_fingerprint,
             get_connection_board,
         )
-        from gideon.extensions.providers.failure_copy import relayed_failure_copy
 
         tested = await test_runtime(name, entry, tenant=tenant)
         status_d = {

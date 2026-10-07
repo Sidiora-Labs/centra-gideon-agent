@@ -4,13 +4,10 @@ import asyncio
 import json
 import logging
 import re
-import shutil
-import tempfile
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 from aiohttp import BodyPartReader, web
 
@@ -29,7 +26,7 @@ from gideon.cognition.knowledge.embedder import (
     floats_to_bytes,
 )
 from gideon.cognition.knowledge.llm_pool import LLMPool
-from gideon.cognition.knowledge.media import classify, guess_mime, make_image_thumbnail
+from gideon.cognition.knowledge.media import classify, guess_mime
 from gideon.cognition.knowledge.retrieval import HybridRetriever, _bytes_to_floats
 from gideon.cognition.knowledge.semantics import DEFAULT_LIST_EXCLUDED_KINDS
 from gideon.cognition.knowledge.staleness import is_synthesized, staleness_for

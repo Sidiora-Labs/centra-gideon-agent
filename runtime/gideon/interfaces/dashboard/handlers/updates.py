@@ -6,9 +6,7 @@ import json
 import logging
 import os
 import re
-import sys
 import time
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from aiohttp import web
@@ -376,7 +374,6 @@ async def _apply_pip_update(request: web.Request, state: ConsoleState) -> web.Re
     auth_mode = _live_auth_mode(request)
 
     async def _apply() -> None:
-        global _apply_in_flight
         try:
             from gideon.operations._installer import NoInstallerError, install_argv
 
@@ -504,7 +501,6 @@ async def _run_rollback(request: web.Request, state: ConsoleState) -> web.Respon
     auth_mode = _live_auth_mode(request)
 
     async def _rollback() -> None:
-        global _apply_in_flight
         try:
             if kind == "pip":
                 from gideon.operations._installer import NoInstallerError, install_argv
@@ -767,7 +763,6 @@ async def api_update_apply(request: web.Request) -> web.Response:
         )
 
     async def _apply() -> None:
-        global _apply_in_flight
         try:
             state.push_update_progress("pulling", "Pulling latest changes…")
             pull = await self_update.launch_update_process(

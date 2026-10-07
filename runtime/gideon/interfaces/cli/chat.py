@@ -326,7 +326,6 @@ def _printable(text: str) -> str:
     return "".join(ch for ch in text if ch == "\n" or ch.isprintable())
 
 
-
 def _ensure_default_agent_in_config() -> None:
     """Ensure config.json includes a default Gideon agent for fresh installs."""
     from gideon.core.config.transactions import mutate_config

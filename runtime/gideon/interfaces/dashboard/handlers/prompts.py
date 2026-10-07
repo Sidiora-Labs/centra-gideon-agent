@@ -4,7 +4,6 @@ import json
 import logging
 import re
 import threading
-from pathlib import Path
 from typing import Any
 
 from aiohttp import web
@@ -12,10 +11,7 @@ from aiohttp import web
 from gideon.core.http_request import read_json_body
 from gideon.extensions.skills.loader import validate_skill_md
 from gideon.http_errors import json_error
-from gideon.interfaces.dashboard.handlers._shared import (
-    _get_skills,
-    _list_marketplace_skills,
-)
+from gideon.interfaces.dashboard.handlers._shared import _get_skills
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.security import (
     MASK_CONFLICT,

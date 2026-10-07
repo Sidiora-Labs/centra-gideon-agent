@@ -697,13 +697,13 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
             continue
         d = s.to_dict()
         d.update(_app_origin_fields(getattr(s, "created_by_app", ""), app_destinations))
-        link_thread = link_channel = None
+        link_thread = None
         try:
-            link_thread, link_channel = state.sessions.get_channel_link(
+            link_thread, _ = state.sessions.get_channel_link(
                 _history_key_for(s.key)
             )
         except Exception:
-            link_thread = link_channel = None
+            link_thread = None
         if link_thread:
             origin, sid = "channel", state.channel_provider_for(s.key)
         else:
@@ -732,11 +732,11 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
             else:
                 name = raw_key
             try:
-                link_thread, link_channel = state.sessions.get_channel_link(
+                link_thread, _ = state.sessions.get_channel_link(
                     _history_key_for(name)
                 )
             except Exception:
-                link_thread = link_channel = None
+                link_thread = None
             if (
                 not link_thread
                 and raw_key == name

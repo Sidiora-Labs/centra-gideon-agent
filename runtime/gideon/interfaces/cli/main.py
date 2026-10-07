@@ -31,7 +31,6 @@ from pathlib import Path
 
 from gideon import __version__
 from gideon.core.config import AppConfig, config_dir
-from gideon.core.config.loader import DASHBOARD_PORT
 from gideon.operations.seed import seed_cmd
 
 BANNER = "GIDEON\nYour personal AI agent\n"
@@ -1759,7 +1758,6 @@ def _handle_skills(args) -> None:  # noqa: ANN001
         get_default_skills_registry,
         list_local_skills,
     )
-    from gideon.security.supply_chain import rule_gloss
 
     cmd = getattr(args, "skills_command", None)
 

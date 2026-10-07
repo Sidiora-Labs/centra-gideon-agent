@@ -20,12 +20,7 @@ from gideon.engine.subagent_persistence import _agent_dir, read_state
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.chat_persistence import _rehydrate_session_from_history
 from gideon.interfaces.dashboard.chat_utils import _remove_queued_by_id
-from gideon.interfaces.dashboard.state import (
-    CRON_NOTIFY_END,
-    CRON_NOTIFY_PREFIX,
-    ConsoleState,
-    _rewrite_notifications,
-)
+from gideon.interfaces.dashboard.state import CRON_NOTIFY_END, CRON_NOTIFY_PREFIX, ConsoleState
 from gideon.security.security import (
     is_sensitive_path,
     redact_credentials,

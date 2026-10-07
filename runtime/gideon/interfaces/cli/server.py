@@ -18,7 +18,6 @@ from gideon.cognition.memory import MemoryJournal
 from gideon.cognition.vector_memory import SemanticArchive
 from gideon.core.config import AppConfig
 from gideon.core.config import loader as config_loader
-from gideon.core.config.loader import _DEFAULT_PORT
 from gideon.core.constants import DATA_WARNING
 from gideon.core.layout import package_path
 from gideon.engine import gateway_base
@@ -26,7 +25,7 @@ from gideon.engine.gateway import run_gateway
 from gideon.engine.home_gateway import open_loopback
 from gideon.engine.session import ConversationDirectory
 from gideon.extensions.skills import ProcedureLibrary
-from gideon.interfaces.dashboard.origin import dashboard_origin, parse_dashboard_url
+from gideon.interfaces.dashboard.origin import dashboard_origin
 from gideon.interfaces.dashboard.token_auth import parse_duration
 from gideon.operations import container_host, self_update
 from gideon.operations.frontend import build_frontend_sync, ensure_dev_dist_symlink

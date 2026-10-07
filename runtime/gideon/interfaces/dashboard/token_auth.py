@@ -36,12 +36,7 @@ from aiohttp import web
 
 from gideon.core.config.loader import _DEFAULT_PORT
 from gideon.interfaces.dashboard.origin import is_loopback, is_private_network
-from gideon.security.auth.lifetimes import (
-    DEFAULT_BROWSER_SESSION_TTL_SECS,
-    MAX_SESSION_TTL_SECS,
-    cap_legacy_expiry,
-    parse_lifetime,
-)
+from gideon.security.auth.lifetimes import MAX_SESSION_TTL_SECS, cap_legacy_expiry, parse_lifetime
 from gideon.security.sel import sel as _sel_fn
 from gideon.workspace.artifacts.deploy import SERVED_PATH, redacted_serve_path
 
@@ -1467,7 +1462,6 @@ def token_auth_middleware(
             return _deny(request, credentials.error)
         token = credentials.token
         user_id = credentials.user_id
-        app_name = credentials.app
         from_query = credentials.source == "query"
         cookie_name = session_cookie_name(request, port)
 

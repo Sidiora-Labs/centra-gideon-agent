@@ -1,7 +1,6 @@
 """Aggregated tools listing + invocation endpoints — surface and run tools
 from all registered tool providers (the Tool entity)."""
 
-import asyncio
 import logging
 
 from aiohttp import web

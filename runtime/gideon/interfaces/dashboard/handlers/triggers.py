@@ -2876,10 +2876,6 @@ async def _settle_manual_action(
 ) -> None:
     import asyncio
 
-    from gideon.automation.triggers.review import (
-        TriggerReviewStore,
-        record_review_outcome,
-    )
     from gideon.automation.triggers.routing import routed
     from gideon.automation.triggers.service import retire_after_run
     from gideon.engine.trigger_outcomes import status_for_result

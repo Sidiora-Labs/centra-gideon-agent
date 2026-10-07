@@ -33,6 +33,9 @@ from gideon.interfaces.dashboard.desktop_registry import DesktopRegistry
 from gideon.interfaces.dashboard.sse import SseRegistry
 from gideon.interfaces.dashboard.ws_state import NOTE_TYPE_NOTIFICATION, WebSocketState
 from gideon.security import trust_mode
+from gideon.security.guardrails.loop_breaker import LoopBreaker
+from gideon.security.security import redact_credentials, redact_exfiltration_urls
+from gideon.security.sel import sel
 
 
 async def _deliver_named_channel(
@@ -105,11 +108,6 @@ def _log_channel_send_failure(task: Any) -> None:
     error = task.exception()
     if error:
         logger.warning("channel notification delivery failed", exc_info=error)
-
-
-from gideon.security.guardrails.loop_breaker import LoopBreaker
-from gideon.security.security import redact_credentials, redact_exfiltration_urls
-from gideon.security.sel import sel
 
 
 def config_dir() -> Path:
@@ -1140,8 +1138,6 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
         """
         if reason == "expired":
             try:
-                from gideon.security.sel import sel
-
                 sel().log_api_access(
                     caller="dashboard:yolo_ttl",
                     operation="mode_change:yolo_expired",
