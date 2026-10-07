@@ -6,6 +6,7 @@ const doc: UiDoc = {
   description:
     'The floating action pill anchored at a text selection inside a scrolling transcript/preview — the small "Quote" / "Comment" affordance that pops above a highlighted passage. The parent owns selection detection and positioning (content-relative x/y within its scroll root) and forwards a ref so it can exclude clicks on the pill from its own selection handlers. It preventDefaults + stopPropagates on mousedown before firing onPress, so the browser selection survives the click that acts on it. The sibling export SelectionToolbar is the multi-action variant (same anchoring + selection-survival contract) carrying 2+ segmented actions (e.g. Quote + Copy) in one pill.',
   props: [
+    { name: 'ref', description: 'Ref to the pill HTMLButtonElement so selection handlers can exclude clicks inside the action.' },
     { name: 'icon', description: 'Leading Lucide icon (tinted primary), e.g. a quote/comment glyph.' },
     { name: 'label', description: 'The action label shown beside the icon (e.g. "Quote").' },
     { name: 'onPress', description: 'Fires on activation; runs AFTER preventDefault + stopPropagation so the text selection is still live when it executes.' },
@@ -27,6 +28,7 @@ const toolbarDoc: UiDoc = {
   description:
     'The multi-action floating toolbar anchored at a text selection — the same anchoring + selection-survival contract as SelectionPill (content-relative x/y, ref-forwarded so the parent excludes its own clicks, mousedown preventDefault + stopPropagation so the selection survives), but carrying 2+ segmented actions (e.g. Quote + Copy) in one pill. Reach for it when a selection affords more than one verb; use SelectionPill for a single action.',
   props: [
+    { name: 'ref', description: 'Ref to the toolbar HTMLDivElement so selection handlers can exclude clicks inside its actions.' },
     { name: 'actions', description: 'The ordered actions rendered as segmented buttons (each { icon, label, onPress }); each onPress runs after preventDefault + stopPropagation so the selection is still live.' },
     { name: 'x', description: 'Content-relative left position within the parent scroll root; the toolbar is centered horizontally on it.' },
     { name: 'y', description: 'Content-relative top position; the toolbar sits ABOVE this point (translated up by its full height).' },

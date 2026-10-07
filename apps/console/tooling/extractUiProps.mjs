@@ -2,7 +2,7 @@ import ts from 'typescript'
 import { readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-const REACT_INJECTED = new Set(['key', 'ref'])
+const REACT_INJECTED = new Set(['key'])
 
 /**
  * @param {string} uiDir absolute path to web/src/ui
@@ -37,6 +37,16 @@ export function extractUiProps(uiDir) {
     })
   }
 
+  const isReactForwardRef = (node) => {
+    if (!ts.isCallExpression(node)) return false
+    const callee = ts.isPropertyAccessExpression(node.expression) ? node.expression.name : node.expression
+    let symbol = checker.getSymbolAtLocation(callee)
+    if (symbol && (symbol.flags & ts.SymbolFlags.Alias)) symbol = checker.getAliasedSymbol(symbol)
+    return symbol?.getName() === 'forwardRef' && (symbol.getDeclarations() || []).some((declaration) =>
+      /[/\\]node_modules[/\\](?:@types[/\\])?react[/\\]/.test(declaration.getSourceFile().fileName),
+    )
+  }
+
   const propsFor = (sym) => {
     for (const d of sym.getDeclarations() || []) {
       let fnNode
@@ -52,9 +62,10 @@ export function extractUiProps(uiDir) {
       if (!params.length) return []
       const pSym = params[0]
       const pType = checker.getTypeOfSymbolAtLocation(pSym, pSym.valueDeclaration || fnNode)
+      const exposesForwardedRef = isReactForwardRef(fnNode)
       return checker
         .getPropertiesOfType(pType)
-        .filter(isOwnProp)
+        .filter((p) => isOwnProp(p) || (exposesForwardedRef && p.getName() === 'ref'))
         .filter((p) => !p.getName().startsWith('__') && !REACT_INJECTED.has(p.getName()))
         .map((p) => {
           const t = checker.getTypeOfSymbolAtLocation(p, p.valueDeclaration || fnNode)

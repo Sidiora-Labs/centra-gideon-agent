@@ -63,6 +63,14 @@ describe('ui-docs: documentation-as-data drift guard', () => {
     ).toEqual({})
   })
 
+  it('recognizes exposed refs without inventing them on ordinary components', () => {
+    for (const name of ['Button', 'Checkbox', 'Select', 'TextArea', 'TextInput']) {
+      expect(derived[name].map((prop) => prop.name), `${name} exposes its actual element ref`).toContain('ref')
+    }
+    expect(derived.TextLink.map((prop) => prop.name)).not.toContain('ref')
+    for (const props of Object.values(derived)) expect(props.map((prop) => prop.name)).not.toContain('key')
+  })
+
   it('each doc carries the required semantic fields', () => {
     const thin: Record<string, string[]> = {}
     for (const [name, doc] of authored) {

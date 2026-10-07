@@ -6,6 +6,7 @@ const doc: UiDoc = {
   description:
     'The Composer wrapped as a single persistent, shared-layout element (`layoutId="composer-stage"`). It forwards a ref to its outer box so a full-bleed DotGlow can measure it live each frame and cast a synced glow from its edges, and passes every Composer prop straight through. Its signature motion: the composer FLIES from the screen-centered new-chat hero down into the bottom dock when a chat starts, settling with an expressiveness-scaled spring. Use it wherever the composer must animate between two page positions rather than sit in one place.',
   props: [
+    { name: 'ref', description: 'Ref to the outer HTMLDivElement, forwarded for live measurements and positioning.' },
     { name: "attachments", description: "Attachment chips with their current upload state." },
     { name: "auiModelSelector", description: "Configures the assistant UI model selector; false hides it." },
     { name: "contextUsage", description: "Measured context usage and context window data for the context display." },
