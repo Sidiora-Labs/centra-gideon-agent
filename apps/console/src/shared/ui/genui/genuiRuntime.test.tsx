@@ -193,7 +193,7 @@ describe('real chat action dispatch', () => {
     window.addEventListener(WIDGET_ACTION_EVENT, listener)
     try {
       const dual = composeDualPayload({ action: 'refresh', label: 'Refresh results' })!
-      expect(await routeGenUiAction(dual, { kind: 'chat' }, { action: 'refresh' })).toEqual({ ok: true, outcome: 'chat-turn' })
+      expect(await routeGenUiAction(dual, { kind: 'chat' }, { action: 'refresh' })).toEqual({ ok: true, outcome: 'chat-turn', message: 'Queued for this conversation.' })
       expect(events).toEqual([{ text: '[UI] refresh', label: 'Refresh results' }])
     } finally { window.removeEventListener(WIDGET_ACTION_EVENT, listener) }
   })

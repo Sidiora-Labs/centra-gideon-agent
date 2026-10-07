@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { Compartment, EditorState } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
 import { typeaheadAttributes, updateTypeaheadCursor } from './editorState'
 
 vi.mock('../../data/api', async (orig) => {
@@ -80,7 +82,19 @@ describe('both typeahead menus, and the editor that speaks for them', () => {
       'aria-activedescendant': 'composer-slash-opt-2', 'aria-controls': 'composer-slash-list', 'aria-haspopup': 'listbox',
     })
     expect(typeaheadAttributes('composer', null)).toEqual({})
-    expect(codeOf('MarkdownInput.tsx')).toContain('EditorView.contentAttributes.of(typeaheadAttributes(comboId, cursor))')
+    const code = codeOf('MarkdownInput.tsx')
+    expect(code).toContain('} : typeaheadAttributes(comboId, cursor)')
+    expect(code).toContain('compartments.current.typeahead.reconfigure(EditorView.contentAttributes.of(attributes))')
+    const compartment = new Compartment()
+    const view = new EditorView({ state: EditorState.create({ extensions: [compartment.of(EditorView.contentAttributes.of(typeaheadAttributes('composer', { list: 'slash', index: 2 })))] }), parent: document.body })
+    try {
+      expect(view.contentDOM).toHaveAttribute('aria-activedescendant', 'composer-slash-opt-2')
+      expect(view.contentDOM).toHaveAttribute('aria-controls', 'composer-slash-list')
+      view.dispatch({ effects: compartment.reconfigure(EditorView.contentAttributes.of(typeaheadAttributes('composer', null))) })
+      expect(view.contentDOM).not.toHaveAttribute('aria-activedescendant')
+      expect(view.contentDOM).not.toHaveAttribute('aria-controls')
+      expect(view.contentDOM).not.toHaveAttribute('aria-haspopup')
+    } finally { view.destroy() }
     expect(codeOf('editorState.ts')).not.toContain("'aria-expanded'")
   })
 

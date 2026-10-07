@@ -16,6 +16,7 @@ import { LayerBoundary } from './LayerBoundary'
 import {
   allComponents,
   componentLayer,
+  defineComponent,
   getComponent,
   library,
   registerLayerComponent,
@@ -209,7 +210,12 @@ describe('the layer boundary', () => {
 
   it('wraps ONLY the layers above core, so a real L0 crash stays loud', () => {
     const src = readFileSync(join(process.cwd(), "src/shared/ui/genui/GenUiWidget.tsx"), 'utf8')
-    expect(src).toContain('if (def.layer <= LAYER_CORE) return node')
+    expect(src.match(/def\.layer <= LAYER_CORE \? (?:node|component) : <LayerBoundary/g)).toHaveLength(2)
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    defineComponent({ ...gauge, name: 'CoreBoundaryCrash', component: Boom })
+    try {
+      expect(() => render(<GenUiWidget content={'core = CoreBoundaryCrash(value: 1)'} title="Core failure" />)).toThrow('app component exploded')
+    } finally { spy.mockRestore() }
     expect(src).toMatch(/<LayerBoundary[^>]*layer=\{def\.layer\}/)
   })
 })

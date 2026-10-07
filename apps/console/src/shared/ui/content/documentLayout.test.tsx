@@ -284,7 +284,7 @@ describe('a layout edit is what gets saved', () => {
     expect(screen.queryByLabelText('Page size')).toBeNull()
     expect(screen.queryByLabelText('Orientation')).toBeNull()
     expect(screen.queryByRole('switch', { name: /number the pages/i })).toBeNull()
-    expect(screen.getByText(/read-only/i)).toBeInTheDocument()
+    expect(screen.getByText('This version is read-only — open the current version to edit it.', { selector: 'p' })).toBeVisible()
     expect(screen.getByRole('img', { name: /approximate a4 landscape page/i })).toBeInTheDocument()
   })
 
