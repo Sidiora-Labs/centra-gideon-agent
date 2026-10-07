@@ -47,6 +47,10 @@ include = ["gideon*"]
 "gideon" = ["extensions/apps/native/*/*.py", "extensions/apps/native/*/*/*.py", "extensions/apps/native/*/LICENSE", "extensions/apps/native/*/README.md"]
 "*" = ["*.json", "*.md", "*.yaml", "*.yml", "*.pub", "py.typed", "*.html", "*.css", "*.js", "*.mjs", "*.svg", "*.png", "*.woff2", "**/*.json", "**/*.md", "**/*.yaml", "**/*.yml", "**/*.pub", "**/*.html", "**/*.css", "**/*.js", "**/*.mjs", "**/*.svg", "**/*.png", "**/*.woff2"]
 
+[tool.gideon.installer]
+# Compatibility boundary for configured wheels/checkouts; not publication history.
+minimum-supported-version = "0.1.2"
+
 [tool.black]
 line-length = 88
 target-version = ["py312"]

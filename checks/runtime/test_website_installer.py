@@ -53,8 +53,8 @@ What this module asserts, and why each half exists:
   next person who writes "CI-smoke-tested" without writing the job gets a red.
 * **Integrity of the two things it downloads** (#2582, added 2026-09-07). The one-liner makes
   two network fetches and used to verify neither. Three rails, one per fix that does not trade
-  away what the script is built around: the PyPI install carries a downgrade floor derived from
-  ``CHANGELOG.md`` so it cannot rot into a hand-typed constant (#2554's defect); the comment
+  away what the script is built around: the configured distribution carries a downgrade floor checked against
+  the explicit compatibility policy in ``pyproject.toml``; the comment
   attached to the unverified ``astral.sh`` fetch must not claim verification AND must disclose
   the trust boundary, checked against the code either way; and the documented user verify path
   must fetch its digest from an origin OTHER than the one serving the script, which is the only
@@ -72,13 +72,17 @@ same functions with synthetic workflows and watch each answer change.
 
 from __future__ import annotations
 
+import base64
+import csv
 import hashlib
+import io
 import os
 import pathlib
 import re
 import shutil
 import subprocess
 import tomllib
+import zipfile
 
 import pytest
 
@@ -88,7 +92,6 @@ _PIN = _ROOT / "infrastructure" / "website" / "install.sh.sha256"
 _CI = _ROOT / ".github" / "workflows" / "ci.yml"
 _FULL = _ROOT / ".github" / "workflows" / "full.yml"
 _PYPROJECT = _ROOT / "pyproject.toml"
-_CHANGELOG = _ROOT / "CHANGELOG.md"
 _GUIDE = _ROOT / "docs" / "guides" / "GETTING_STARTED.md"
 _REPO_README = _ROOT / "README.md"
 _WEBSITE_README = _ROOT / "infrastructure" / "website" / "README.md"
@@ -104,8 +107,6 @@ UV_FETCH = r'UV_INSTALLER_URL"?\s*\|\s*sh\b'
 UV_FETCH_GUARD = r"^\s*if have curl; then\s*$"
 
 VERIFY_HEADING = "Verify the one-liner"
-
-LONG_STANDING_RELEASES = frozenset({"0.1.0", "0.1.1", "0.1.2", "0.1.3"})
 
 REQUIRE_ENV = "GIDEON_REQUIRE_INSTALL_PROOF"
 
@@ -224,6 +225,49 @@ def uv_tool_install_lines(text: str) -> list[str]:
         for line in text.splitlines()
         if not line.lstrip().startswith("#") and re.search(r"\buv tool install\b", line)
     ]
+
+
+def minimum_supported_version(text: str) -> str:
+    """Read an explicit compatibility boundary; missing/malformed policy is an error."""
+    try:
+        version = tomllib.loads(text)["tool"]["gideon"]["installer"][
+            "minimum-supported-version"
+        ]
+    except KeyError as exc:
+        raise ValueError("installer compatibility policy is missing") from exc
+    if not isinstance(version, str):
+        raise ValueError("installer compatibility version must be a string")
+    version_key(version)
+    return version
+
+
+def write_distribution_wheel(
+    directory: pathlib.Path, distribution: str, version: str
+) -> None:
+    """Create an actual temporary wheel for resolver semantics, not a published release."""
+    normalized = distribution.replace("-", "_")
+    info = f"{normalized}-{version}.dist-info"
+    files = {
+        f"{info}/METADATA": f"Metadata-Version: 2.1\nName: {distribution}\nVersion: {version}\n\n".encode(),
+        f"{info}/WHEEL": b"Wheel-Version: 1.0\nGenerator: installer-policy-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        "installer_policy_fixture/__init__.py": b"",
+    }
+    records = io.StringIO(newline="")
+    writer = csv.writer(records)
+    for name, content in files.items():
+        digest = (
+            base64.urlsafe_b64encode(hashlib.sha256(content).digest())
+            .rstrip(b"=")
+            .decode()
+        )
+        writer.writerow((name, "sha256=" + digest, len(content)))
+    writer.writerow((f"{info}/RECORD", "", ""))
+    files[f"{info}/RECORD"] = records.getvalue().encode()
+    with zipfile.ZipFile(
+        directory / f"{normalized}-{version}-py3-none-any.whl", "w"
+    ) as wheel:
+        for name, content in files.items():
+            wheel.writestr(name, content)
 
 
 def released_versions(text: str) -> list[str]:
@@ -649,32 +693,14 @@ class TestServedDigestPin:
         ), f"the pin must name install.sh, not {name.strip()!r}"
 
 
-class TestInstallFloorTracksTheReleaseHistory:
-    """``uv tool install --upgrade gideon`` had no floor, so a rolled-back index won.
+class TestInstallFloorTracksCompatibilityPolicy:
+    """Configured sources must meet the explicit minimum supported distribution version.
 
-    MEASURED 2026-09-07 against the real index (uv 0.12.5, ``uv pip install --dry-run``):
-
-        no floor,  index offers only 0.1.0    exit 0   ``+ gideon==0.1.0``   silent
-        `>=0.1.2`, index offers only 0.1.0    exit 1   "unsatisfiable"             loud
-        `>=0.1.2`, healthy index + --upgrade  exit 0   ``+ gideon==0.1.3``   costs nothing
-
-    So the floor forbids nothing while PyPI is honest — ``--upgrade`` still resolves to the
-    newest release — and turns a yanked-and-replaced or rolled-back index from a silent old
-    install into a resolver error.
-
-    WHY THE FLOOR LAGS BY ONE RELEASE. A floor equal to ``pyproject``'s version is unsatisfiable
-    for as long as it takes that release to reach PyPI and its mirrors: measured the same day,
-    ``>=0.1.4`` exits 1 with "only gideon<=0.1.3 is available". That window would break
-    every user's install AND ``full.yml``'s ``install-smoke``, which runs this file for real on
-    every push to ``main``. The previous release has always shipped already, so a lagging floor
-    can never demand a version that does not exist yet. The price is exactly one unguarded step
-    — a rollback to the immediately-previous release still installs — which is the attacker's
-    weakest move and the cheapest thing to give up.
-
-    WHY THE VALUE IS NOT PINNED HERE. A hand-typed version in a shell script, checked by
-    nothing, is the defect in #2554 (two copies drifted for three weeks). So the constant is
-    derived: it must equal ``CHANGELOG.md``'s second-newest release heading, the repo's own
-    record of what has shipped. It reds the release after it goes stale, in both directions.
+    Editorial changelog headings and desktop tags do not establish Python publication.
+    The policy is reviewed independently of publication destinations. The copied shell
+    installer must agree with it, retain --upgrade, and constrain every supplied source.
+    A real offline resolver checks temporary distribution artifacts on both sides of
+    the boundary; these artifacts make no claim about historical published releases.
     """
 
     @staticmethod
@@ -731,30 +757,21 @@ class TestInstallFloorTracksTheReleaseHistory:
                 f"documented upgrade path:\n    {line}"
             )
 
-    def test_the_floor_is_the_previous_release(self, installer_text: str) -> None:
-        history = released_versions(_CHANGELOG.read_text(encoding="utf-8"))
-        assert len(history) >= 2, (
-            f"CHANGELOG.md yields {history!r} — fewer than two releases, so 'the previous "
-            "release' has no referent and the derivation below cannot mean anything."
+    def test_the_floor_matches_distribution_compatibility_policy(
+        self, installer_text: str
+    ) -> None:
+        project = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["project"]
+        assert (
+            installer_constant(installer_text, "GIDEON_DISTRIBUTION") == project["name"]
         )
-        floor = self._floor(installer_text)
-        assert floor == history[1], (
-            f"{FLOOR_CONST}={floor!r} is not the previous release ({history[1]!r}; newest is "
-            f"{history[0]!r}). Bump it in the same change as the version, and regenerate "
-            "install.sh.sha256 — see GIDEON_MIN_VERSION in the installer for why it lags by one."
+        assert self._floor(installer_text) == minimum_supported_version(
+            _PYPROJECT.read_text(encoding="utf-8")
         )
 
     def test_the_floor_is_never_the_version_this_tree_builds(
         self, installer_text: str
     ) -> None:
-        """Stated separately from the case above because it names a DIFFERENT failure.
-
-        The equality above keeps the floor from rotting. This one keeps it from being too
-        aggressive: the moment the floor reaches the version in ``pyproject.toml``, the window
-        between that version landing on ``main`` and PyPI serving it becomes a window in which
-        the one-liner cannot install anything at all (measured: ``>=0.1.4`` exits 1 today). If
-        the CHANGELOG derivation is ever relaxed, this is the property that must survive.
-        """
+        """Do not require an unpublished current build from an operator's repository."""
         floor = self._floor(installer_text)
         building = pyproject_version(_PYPROJECT.read_text(encoding="utf-8"))
         assert version_key(floor) < version_key(building), (
@@ -763,21 +780,55 @@ class TestInstallFloorTracksTheReleaseHistory:
             "that release reaches PyPI, which breaks every install and install-smoke with it."
         )
 
-    def test_the_floor_actually_forbids_something(self, installer_text: str) -> None:
-        """The other direction of vacuity: a floor that excludes nothing is decoration.
-
-        ``>=0.1`` and ``>=0.1.0`` both read like protection and forbid none of the four versions
-        PyPI actually holds. Measured against the release history rather than asserted, so the
-        number this prints is the real count of downgrade targets the floor closes.
-        """
+    def test_the_floor_rejects_below_boundary_with_real_resolver(
+        self, installer_text: str, tmp_path: pathlib.Path
+    ) -> None:
+        uv = shutil.which("uv")
+        assert uv, "real uv is required to prove the offline distribution boundary"
+        project = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["project"]
+        distribution = project["name"]
         floor = self._floor(installer_text)
-        history = released_versions(_CHANGELOG.read_text(encoding="utf-8"))
-        forbidden = [v for v in history if version_key(v) < version_key(floor)]
-        assert forbidden, (
-            f"{FLOOR_CONST}={floor!r} excludes none of the releases this project has published "
-            f"({history!r}), so it bounds no downgrade at all. A floor that forbids nothing is "
-            "the #2582 item-1 defect in a new place: copy asserting a capability that is absent."
+        assert floor == minimum_supported_version(
+            _PYPROJECT.read_text(encoding="utf-8")
         )
+        major, minor, patch = version_key(floor)
+        assert (
+            patch > 0
+        ), "boundary fixture needs a predecessor version below the policy floor"
+        below = f"{major}.{minor}.{patch - 1}"
+        for version in (below, floor):
+            write_distribution_wheel(tmp_path, distribution, version)
+        constraints = tmp_path / "constraints.txt"
+        constraints.write_text(f"{distribution}>={floor}\n", encoding="utf-8")
+        for version, accepted in ((below, False), (floor, True)):
+            requirements = tmp_path / "requirements.txt"
+            requirements.write_text(f"{distribution}=={version}\n", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    uv,
+                    "--offline",
+                    "--no-cache",
+                    "pip",
+                    "compile",
+                    "--no-index",
+                    "--find-links",
+                    str(tmp_path),
+                    "--constraints",
+                    str(constraints),
+                    str(requirements),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env={**os.environ, "UV_PYTHON_DOWNLOADS": "never"},
+            )
+            if accepted:
+                assert result.returncode == 0, result.stderr
+                assert f"{distribution}=={version}" in result.stdout
+            else:
+                assert result.returncode != 0, result.stdout
+                assert "No solution found" in result.stderr, result.stderr
+                assert distribution in result.stderr and below in result.stderr
 
 
 class TestUvBootstrapCommentIsHonestAboutWhatIsVerified:
@@ -1436,17 +1487,23 @@ class TestParsersAreNotVacuous:
         found = defined_funcs(installer_text)
         assert {"main", "ensure_uv", "install_gideon", "offer_setup"} <= found
 
-    def test_released_versions_reads_the_real_history_newest_first(self) -> None:
-        history = released_versions(_CHANGELOG.read_text(encoding="utf-8"))
-        assert LONG_STANDING_RELEASES <= set(history), (
-            f"parser lost published releases: {sorted(LONG_STANDING_RELEASES - set(history))}. "
-            "The floor derivation reads history[1], so a parser that drops a heading silently "
-            "moves the floor."
+    def test_compatibility_policy_parser_requires_explicit_valid_boundary(self) -> None:
+        assert (
+            minimum_supported_version(_PYPROJECT.read_text(encoding="utf-8")) == "0.1.2"
         )
-        assert history == sorted(history, key=version_key, reverse=True), (
-            f"releases came back out of order ({history!r}), so history[1] is not 'the previous "
-            "release' and the floor would be pinned to the wrong version."
+        assert (
+            minimum_supported_version(
+                '[tool.gideon.installer]\nminimum-supported-version = "9.8.7"\n'
+            )
+            == "9.8.7"
         )
+        for text in (
+            '[project]\nversion = "0.1.3"\n',
+            "[tool.gideon.installer]\nminimum-supported-version = 123\n",
+            '[tool.gideon.installer]\nminimum-supported-version = "0.1"\n',
+        ):
+            with pytest.raises(ValueError):
+                minimum_supported_version(text)
 
     def test_released_versions_ignores_unreleased_and_prereleases(self) -> None:
         text = "## [Unreleased]\n\n## [9.9.9] — 2030-01-01\n\n## [9.9.8-rc1] — 2029-12-01\n"

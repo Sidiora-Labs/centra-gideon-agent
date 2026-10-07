@@ -107,8 +107,9 @@ and pin before offering this recipe; an unpublished revision cannot be verified.
 The installer may fetch Astral's `uv` bootstrap over TLS when uv is absent; those
 script bytes are unverified and are not covered by Gideon's digest. Preinstall uv
 from a trusted source to avoid that fetch. The configured Gideon distribution is
-constrained to at least the previous recorded release, including for wheel and
-checkout sources; this does not establish the source's authenticity.
+constrained to the minimum supported version (currently `0.1.2`), declared in
+`pyproject.toml` under `[tool.gideon.installer]`, including for wheel and checkout
+sources; this compatibility policy does not establish the source's authenticity.
 
 ### Optional extras
 
