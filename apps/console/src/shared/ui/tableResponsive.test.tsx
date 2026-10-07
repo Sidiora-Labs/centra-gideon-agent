@@ -55,10 +55,10 @@ describe('narrow settings tables', () => {
       model: longRef, input_tokens: 12000, output_tokens: 400,
       cache_read_tokens: 0, cache_creation_tokens: 0, cost_usd: 2.5, turns: 3, priced: true,
     }]} /></div>)
-    const table = screen.getByRole('table', { name: 'Token usage and cost per model' })
-    expectConfined(table, 'Token usage and cost per model')
-    expect(within(table).getAllByRole('columnheader')).toHaveLength(4)
-    expect(within(table).getAllByRole('cell')).toHaveLength(4)
+    const table = screen.getByRole('table', { name: 'Token and media usage and cost per model' })
+    expectConfined(table, 'Token and media usage and cost per model')
+    expect(within(table).getAllByRole('columnheader')).toHaveLength(5)
+    expect(within(table).getAllByRole('cell')).toHaveLength(5)
     const model = within(table).getByRole('cell', { name: longRef })
     expect(model.classList.contains('break-all')).toBe(true)
     expect(model.classList.contains('max-w-64')).toBe(true)

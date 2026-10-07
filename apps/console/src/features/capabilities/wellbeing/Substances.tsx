@@ -1,3 +1,4 @@
+import { Table, THead, Th, Td } from '../../../shared/ui/Table'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useHashRoute } from '../../../app/shell/useHashRoute'
 import { requestJson } from '../../../shared/data/gatewayRequest'
@@ -104,6 +105,6 @@ export default function Substances() {
       </section>
     </div>
     <form className="flex flex-wrap items-end gap-m" onSubmit={e => { e.preventDefault(); setZone(timezone) }}><Field label="Summary timezone"><TextInput value={timezone} onChange={setTimezone} /></Field><Button type="submit">Apply summary timezone</Button></form>
-    {summary && <section className="space-y-m"><h2 data-type="title-m">Last 30 local calendar days</h2><p>Ethanol: {quantity(summary.totals.ethanol_g)} g · {summary.logged_days.alcohol} logged days</p><p>Labeled nicotine: {quantity(summary.totals.nicotine_mg)} mg · {summary.logged_days.nicotine} logged days</p><p>Per logged day: {quantity(summary.averages_per_logged_day.ethanol_g)} g ethanol; {quantity(summary.averages_per_logged_day.nicotine_mg)} mg nicotine.</p><div className="overflow-x-auto"><table className="w-full text-left"><thead><tr><th>Date</th><th>Entries</th><th>Ethanol (g)</th><th>Nicotine (mg)</th></tr></thead><tbody>{summary.days.map(day => <tr key={day.date}><td>{day.date}</td><td>{day.entry_count}</td><td>{quantity(day.ethanol_g)}</td><td>{quantity(day.nicotine_mg)}</td></tr>)}</tbody></table></div></section>}
+    {summary && <section className="space-y-m"><h2 data-type="title-m">Last 30 local calendar days</h2><p>Ethanol: {quantity(summary.totals.ethanol_g)} g · {summary.logged_days.alcohol} logged days</p><p>Labeled nicotine: {quantity(summary.totals.nicotine_mg)} mg · {summary.logged_days.nicotine} logged days</p><p>Per logged day: {quantity(summary.averages_per_logged_day.ethanol_g)} g ethanol; {quantity(summary.averages_per_logged_day.nicotine_mg)} mg nicotine.</p><Table wrapClassName="overflow-x-auto" caption="Substance observations for the last 30 local calendar days" className="w-full text-left"><THead><tr><Th>Date</Th><Th>Entries</Th><Th>Ethanol (g)</Th><Th>Nicotine (mg)</Th></tr></THead><tbody>{summary.days.map(day => <tr key={day.date}><Td>{day.date}</Td><Td>{day.entry_count}</Td><Td>{quantity(day.ethanol_g)}</Td><Td>{quantity(day.nicotine_mg)}</Td></tr>)}</tbody></Table></section>}
   </main>
 }
