@@ -1631,7 +1631,7 @@ async def _reentry(request: web.Request, operation: str, fn: Any) -> web.Respons
                 message="only the authenticated owner can retry this call",
                 status=403,
             )
-        from gideon.interfaces.dashboard.auto_denials import unanswered_note
+        from gideon.security.auto_denials import unanswered_note
 
         denial = unanswered_note(request.app.get("state"), retry_note_id)
         refs = (

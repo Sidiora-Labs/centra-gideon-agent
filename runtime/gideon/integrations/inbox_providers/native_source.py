@@ -132,7 +132,7 @@ def hold_from_someone_new(
     store.add(item)
     store.flush()
     try:
-        from gideon.interfaces.dashboard.handlers_inbox import _redact_item
+        from gideon.integrations.inbox import redact_item as _redact_item
 
         state.broadcast_ws("inbox_new_item", _redact_item(item.to_dict()))
     except Exception:
@@ -184,7 +184,7 @@ def _evaluate_item_alert(state: Any, item: InboxItem) -> None:
 
 
 def _announce_item(state: Any, item: InboxItem) -> None:
-    from gideon.interfaces.dashboard.handlers_inbox import _redact_item
+    from gideon.integrations.inbox import redact_item as _redact_item
 
     state.broadcast_ws("inbox_new_item", _redact_item(item.to_dict()))
 

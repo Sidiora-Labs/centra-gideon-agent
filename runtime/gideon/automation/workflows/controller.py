@@ -2802,7 +2802,7 @@ class RunController:
             and reentry.get("node_id") == item.node.id
         )
         if reentry is not None and reentry_matches:
-            from gideon.interfaces.dashboard.auto_denials import owner_reentry_attempt
+            from gideon.security.auto_denials import owner_reentry_attempt
 
             attention_state = getattr(self.services, "attention_state", None)
             execution_attempt = (

@@ -28,7 +28,6 @@ from gideon.security.security import (
     MASK_CONFLICT,
     MaskConflict,
     keep_masked_spans,
-    redact_for_display,
 )
 from gideon.security.sel import sel
 
@@ -37,45 +36,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+from gideon.integrations import inbox_projection
+
+_owner_item = inbox_projection.owner_item
+_mask_inbox_projection = inbox_projection.mask_inbox_projection
+
 _UPDATABLE_FIELDS = {"status", "draft", "classification", "confidence", "favorited"}
 
 
-def _owner_item(item, owner: str) -> dict:
-    return _mask_inbox_projection(_redact_item(item.to_owner_dict(owner)))
 
 
-_OPAQUE_INBOX_FIELDS = frozenset(
-    {
-        "id",
-        "channel",
-        "thread_ts",
-        "sender_id",
-        "reply_target",
-        "source",
-        "status",
-        "owner",
-        "created_at",
-    }
-)
 
 
-def _mask_inbox_projection(value):
-    if isinstance(value, dict):
-        return {
-            key: (
-                item
-                if key in _OPAQUE_INBOX_FIELDS
-                or key.endswith("_id")
-                or key.endswith("_ts")
-                else _mask_inbox_projection(item)
-            )
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_mask_inbox_projection(item) for item in value]
-    if isinstance(value, str):
-        return redact_for_display(value)
-    return value
 
 
 def _get_inbox(state: "ConsoleState") -> tuple[InboxState, InboxStore]:

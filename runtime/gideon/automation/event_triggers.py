@@ -816,8 +816,11 @@ class EventTriggerEngine:
                     acquire_claim,
                     release_claim,
                 )
-                from gideon.interfaces.dashboard.handlers.triggers import (
-                    _dispatch_store_action,
+                from gideon.automation.triggers.action_dispatch import TriggerDispatcher
+                from gideon.automation.schedule_history import ExecutionJournal
+
+                dispatcher = TriggerDispatcher(
+                    lambda: store, lambda: ExecutionJournal(store.base_dir), logger
                 )
 
                 if not acquire_claim(
@@ -830,7 +833,7 @@ class EventTriggerEngine:
                     )
                     return
                 try:
-                    ran, note = await _dispatch_store_action(
+                    ran, note = await dispatcher._dispatch_store_action(
                         current,
                         payload,
                         event=f"{source}.{event_type}",
