@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { chromium, type Browser, type Page } from 'playwright'
 import { createServer as createViteServer, type ViteDevServer } from 'vite'
+import ts from 'typescript'
 import { identityReducer, initialIdentity } from './identityState'
 
 const sourceDir = dirname(fileURLToPath(import.meta.url))
@@ -31,6 +32,9 @@ let origin = ''
 const requests: Array<{ method: string; path: string }> = []
 let browserFailures: string[] = []
 const apiResponses: Array<{ method: string; path: string; status: number }> = []
+let navigationPhase = 'startup'
+const pendingResources = new Map<object, { type: string; path: string }>()
+const resourceResponses: Array<{ phase: string; type: string; path: string; status: number }> = []
 
 async function unusedPort(): Promise<number> {
   const probe = createTcpServer()
@@ -93,6 +97,31 @@ async function stopGateway(): Promise<void> {
   gatewayToken = ''
 }
 
+async function warmConsoleModules(server: ViteDevServer): Promise<void> {
+  const pending = ['/src/app/bootstrap/main.tsx']
+  const visited = new Set<string>()
+  while (pending.length) {
+    const batch = pending.splice(0, 8).filter(url => {
+      if (visited.has(url)) return false
+      visited.add(url)
+      return true
+    })
+    await Promise.all(batch.map(async url => {
+      const transformed = await server.transformRequest(url)
+      if (!transformed) throw new Error('Console module transformation returned no source')
+      const source = ts.createSourceFile(url, transformed.code, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
+      for (const statement of source.statements) {
+        if (!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) continue
+        const specifier = statement.moduleSpecifier
+        if (!specifier || !ts.isStringLiteral(specifier)) continue
+        const child = await server.moduleGraph.getModuleByUrl(specifier.text)
+        if (child && !visited.has(child.url)) pending.push(child.url)
+      }
+    }))
+  }
+  await server.waitForRequestsIdle()
+}
+
 beforeAll(async () => {
   if (!existsSync(gatewayPython)) throw new Error('The isolated Gideon runtime Python executable is unavailable')
   mkdirSync(workspace, { recursive: true })
@@ -114,6 +143,9 @@ beforeAll(async () => {
     else process.env.GIDEON_PORT = previousPort
   }
   await vite.listen()
+  await vite.warmupRequest('/src/app/bootstrap/main.tsx')
+  await vite.waitForRequestsIdle()
+  await warmConsoleModules(vite)
   const address = vite.httpServer?.address()
   if (!address || typeof address === 'string') throw new Error('The isolated Gideon console did not bind')
   origin = `http://127.0.0.1:${address.port}`
@@ -127,12 +159,24 @@ beforeAll(async () => {
   page.on('request', (request) => {
     const url = new URL(request.url())
     if (url.pathname.startsWith('/api/')) requests.push({ method: request.method(), path: url.pathname })
+    if (url.origin === origin && ['document', 'script', 'stylesheet'].includes(request.resourceType())) {
+      pendingResources.set(request, { type: request.resourceType(), path: url.pathname })
+    }
   })
   browserFailures = []
-  page.on('requestfailed', (request) => browserFailures.push(`${new URL(request.url()).pathname}: ${request.failure()?.errorText ?? 'request failed'}`))
+  page.on('requestfinished', (request) => pendingResources.delete(request))
+  page.on('requestfailed', (request) => {
+    pendingResources.delete(request)
+    browserFailures.push(`${new URL(request.url()).pathname}: ${request.failure()?.errorText ?? 'request failed'}`)
+  })
   page.on('response', (response) => {
     const url = new URL(response.url())
     if (url.pathname.startsWith('/api/')) apiResponses.push({ method: response.request().method(), path: url.pathname, status: response.status() })
+    const type = response.request().resourceType()
+    if (url.origin === origin && ['document', 'script', 'stylesheet'].includes(type)) {
+      resourceResponses.push({ phase: navigationPhase, type, path: url.pathname, status: response.status() })
+      if (resourceResponses.length > 50) resourceResponses.shift()
+    }
   })
   const redact = (value: string) => value.replace(/([?&]token=)[^&\s]+/gi, '$1[redacted]').slice(0, 500)
   page.on('console', (message) => { if (message.type() === 'error') browserFailures.push(`console: ${redact(message.text())}`) })
@@ -168,16 +212,19 @@ describe('live account identity failure and retry', () => {
     const currentPage = page!
     apiResponses.length = 0
     try {
+      navigationPhase = 'authenticated bootstrap'
       await currentPage.goto(`${origin}/?token=${encodeURIComponent(gatewayToken)}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-    await currentPage.goto(`${origin}/#/dashboard`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+      navigationPhase = 'dashboard'
+      await currentPage.goto(`${origin}/#/dashboard`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
     } catch (error) {
-      throw new Error(`The isolated console navigation failed: ${error instanceof Error ? error.message.split('Call log:')[0].trim() : String(error)}; browser diagnostics: ${JSON.stringify(browserFailures)}`)
+      throw new Error(`The isolated console navigation failed (${error instanceof Error ? error.name : 'unknown error'}): ${JSON.stringify({ phase: navigationPhase, pending: [...pendingResources.values()], resources: resourceResponses, browserFailures })}`)
     }
     await currentPage.locator('nav[data-tour="rail"]').waitFor({ timeout: 30_000 })
 
     await stopGateway()
     requests.length = 0
     apiResponses.length = 0
+    navigationPhase = 'gateway outage reload'
     await currentPage.reload({ waitUntil: 'domcontentloaded' })
     await expectHeading(currentPage, "Couldn't load your account")
     await currentPage.getByRole('button', { name: 'Retry', exact: true }).waitFor()
@@ -189,6 +236,7 @@ describe('live account identity failure and retry', () => {
     expect(storedWhileDown.dashboard).toMatchObject({ user_name: 'Ada Lovelace', username: 'ada-lovelace' })
 
     await startGateway()
+    navigationPhase = 'gateway restart retry'
     await currentPage.getByRole('button', { name: 'Retry', exact: true }).click()
     await currentPage.locator('nav[data-tour="rail"]').waitFor({ timeout: 30_000 })
     expect(requests.some((request) => request.method === 'GET' && request.path === '/api/dashboard/config')).toBe(true)
