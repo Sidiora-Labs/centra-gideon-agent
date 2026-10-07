@@ -67,13 +67,13 @@ export function AgentCard({
             v{version}
           </span>}
           </span>
-          <span className="text-foreground/45 truncate text-xs">
+          <span className="text-on-surface-low truncate text-xs">
             {provider}
           </span>
         </div>
       </div>
 
-      {description && <p className="text-foreground/60 text-xs leading-relaxed">
+      {description && <p className="text-on-surface-low text-xs leading-relaxed">
         {description}
       </p>}
 
@@ -84,7 +84,7 @@ export function AgentCard({
               className={cn(
                 field,
                 mono,
-                "text-foreground/55 shrink-0 rounded-md px-1.5 py-0.5",
+                "text-on-surface-low shrink-0 rounded-md px-1.5 py-0.5",
               )}
             >
               {skill.name}

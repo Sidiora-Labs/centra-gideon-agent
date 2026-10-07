@@ -173,7 +173,7 @@ export const MarkdownInput = forwardRef<MarkdownInputHandle, Props>(function Mar
   useEffect(() => {
     const donor = props.donorAria
     const attributes = donor?.['aria-controls'] ? {
-      role: 'combobox', 'aria-controls': donor['aria-controls'], 'aria-expanded': 'true',
+      role: 'textbox', 'aria-controls': donor['aria-controls'], 'aria-autocomplete': 'list',
       'aria-haspopup': 'listbox', ...(donor['aria-activedescendant'] ? { 'aria-activedescendant': donor['aria-activedescendant'] } : {}),
     } : typeaheadAttributes(comboId, cursor)
     editor.current?.dispatch({ effects: compartments.current.typeahead.reconfigure(EditorView.contentAttributes.of(attributes)) })

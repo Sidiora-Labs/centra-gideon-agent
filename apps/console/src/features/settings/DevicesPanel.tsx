@@ -274,7 +274,7 @@ export function DevicesPanel() {
                         <span>{issuerLabel(d.issuer)}</span>
                         {d.current ? <><span> · </span><span className="text-primary">This client</span></> : null}
                       </div>
-                      <div data-type="caption" className="mt-0.5 text-on-surface-low/80">
+                      <div data-type="caption" className="mt-0.5 text-on-surface-low">
                         First seen {d.minted_at > 0 ? relPast(d.minted_at) : 'unknown'}
                         {d.ip ? ` · IP ${d.ip}` : ''}
                         {d.expires_at > 0 ? ` · session expires ${absTime(d.expires_at)}` : ''}
