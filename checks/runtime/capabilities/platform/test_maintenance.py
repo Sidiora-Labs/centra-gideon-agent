@@ -48,7 +48,7 @@ def project(tmp_path, monkeypatch):
 def authenticated_maintenance(project):
     """Author and accept the actual maintenance sequence through owner HTTP."""
 
-    async def create(watchdog):
+    async def create(watchdog, *, wait=False, author=True):
         from gideon.automation.workflows.handlers import api_def_save
         from gideon.interfaces.dashboard.handlers.capabilities_maintenance import (
             endpoint,
@@ -65,25 +65,33 @@ def authenticated_maintenance(project):
         app.router.add_post(PREFIX, endpoint)
         headers = {"Authorization": "Bearer " + generate_token("owner")}
         async with TestClient(TestServer(app)) as client:
-            response = await client.post(
-                "/api/workflows",
-                headers=headers,
-                json={
-                    "name": "code-project",
-                    "create_only": True,
-                    "strict": False,
-                    "inputs": {
-                        key: {"required": True}
-                        for key in ("task", "cwd", "verify_command", "guard_command")
+            if author:
+                response = await client.post(
+                    "/api/workflows",
+                    headers=headers,
+                    json={
+                        "name": "code-project",
+                        "create_only": True,
+                        "strict": False,
+                        "inputs": {
+                            key: {"required": True}
+                            for key in (
+                                "task",
+                                "cwd",
+                                "verify_command",
+                                "guard_command",
+                            )
+                        },
+                        "root": {
+                            "kind": "wait" if wait else "transform",
+                            "id": "actual",
+                            "config": (
+                                {"duration_secs": 300} if wait else {"expr": "done"}
+                            ),
+                        },
                     },
-                    "root": {
-                        "kind": "transform",
-                        "id": "actual",
-                        "config": {"expr": "done"},
-                    },
-                },
-            )
-            assert response.status == 201, await response.text()
+                )
+                assert response.status == 201, await response.text()
             response = await client.post(PREFIX, headers=headers, json=body(project))
             assert response.status == 200, await response.text()
             return await response.json()
@@ -228,11 +236,12 @@ async def test_launch_write_crash_recovers_existing_real_child(
 
 
 @pytest.mark.asyncio
-async def test_cancel_sticky_wait_child_then_resume_new_attempt(project):
-    await definition(wait=True)
+async def test_cancel_sticky_wait_child_then_resume_new_attempt(
+    project, authenticated_maintenance
+):
     watchdog = WorkflowWatchdog()
     try:
-        row = await m.create(body(project), "user:owner", watchdog)
+        row = await authenticated_maintenance(watchdog, wait=True)
         row = await m.advance(row["id"], watchdog)
         original = row["child_id"]
         assert watchdog.controller(original)
@@ -255,17 +264,18 @@ async def test_cancel_sticky_wait_child_then_resume_new_attempt(project):
 
 
 @pytest.mark.asyncio
-async def test_definition_pin_and_workspace_binding_fail_before_new_launch(project):
-    await definition()
+async def test_definition_pin_and_workspace_binding_fail_before_new_launch(
+    project, authenticated_maintenance
+):
     watchdog = WorkflowWatchdog()
     try:
-        row = await m.create(body(project), "user:owner", watchdog)
+        row = await authenticated_maintenance(watchdog)
         await definition(wait=True)
         failed = await m.advance(row["id"], watchdog)
         assert failed["status"] == "failed"
         assert "definition changed" in failed["error"]
         assert store.list_runs(project_id=project.id)[1] == 0
-        row = await m.create(body(project), "user:owner", watchdog)
+        row = await authenticated_maintenance(watchdog, author=False)
         Path(project.workspace_dir).rename(
             Path(project.workspace_dir).with_name("offline")
         )
