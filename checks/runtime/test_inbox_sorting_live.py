@@ -338,21 +338,26 @@ async def test_real_api_contract_snapshots_for_native_sorting_consumer(
         api_inbox_status,
     )
 
+    from gideon.interfaces.dashboard.token_auth import (
+        generate_token,
+        token_auth_middleware,
+    )
+
     store = store_at(tmp_path)
     store.update("row0", can_reply=True, draft="My retained draft")
     svc = InboxService(state=InboxState(tmp_path / "state.json"), store=store)
 
-    @web.middleware
-    async def identity(request, handler):
-        request["user"] = "owner"
-        return await handler(request)
-
-    app = web.Application(middlewares=[identity])
+    app = web.Application(middlewares=[token_auth_middleware()])
     app["state"] = SimpleNamespace(_inbox_svc=svc, broadcast_ws=lambda *_: None)
     app.router.add_get("/api/inbox", api_inbox_list)
     app.router.add_get("/api/inbox/status", api_inbox_status)
     app.router.add_post("/api/inbox/{id}/sort", api_inbox_sort)
     async with TestClient(TestServer(app)) as client:
+        assert (await client.get("/api/inbox")).status == 403
+        client.session.headers["Authorization"] = "Bearer " + generate_token(
+            "inbox-owner"
+        )
+        client.session.headers["Origin"] = str(client.make_url("/")).rstrip("/")
         unsorted = (await (await client.get("/api/inbox")).json())[0]
         assert unsorted["classification"] == "" and "feedback_producers" not in unsorted
         async with configured_completion(lambda *_: '{"verdicts":[]}'):

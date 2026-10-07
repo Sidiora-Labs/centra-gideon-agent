@@ -384,6 +384,14 @@ jobs:
           npx playwright install --with-deps chromium
           chromium_path=$(node -e "process.stdout.write(require('playwright').chromium.executablePath())")
           echo "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=$chromium_path" >> "$GITHUB_ENV"
+      - name: Produce authenticated Inbox API snapshots
+        env:
+          GIDEON_HOME: ${{ runner.temp }}/gideon-inbox-fixture
+          INBOX_CONSUMER_FIXTURE: ${{ runner.temp }}/inbox-api-snapshots.json
+          PYTHONPATH: runtime
+        run: |
+          .venv/bin/python -m pytest checks/runtime/test_inbox_sorting_live.py::test_real_api_contract_snapshots_for_native_sorting_consumer -q
+          echo "INBOX_CONSUMER_FIXTURE=$INBOX_CONSUMER_FIXTURE" >> "$GITHUB_ENV"
       - name: test (vitest)
         env:
           VITEST_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-web-vitest.junit.xml
@@ -811,7 +819,6 @@ jobs:
           path: reports/
           if-no-files-found: ignore
           retention-days: 7
-
 
 
 
