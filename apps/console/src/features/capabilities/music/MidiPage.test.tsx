@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, expect, it } from 'vitest'
+import { afterAll, beforeAll, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import MidiPage from './MidiPage'
 let server:ChildProcess
@@ -36,7 +36,7 @@ it('measures actual audio, edits notes through the piano roll, saves and exports
  expect(screen.getByLabelText('Note 1 pitch')).toHaveFocus()
  fireEvent.change(screen.getByLabelText('Note 1 pitch'),{target:{value:'67'}})
  expect(screen.getByRole('button',{name:'Select note 1, pitch 67'})).toHaveAttribute('y','290')
- expect(screen.getByRole('button',{name:'Export MIDI'})).toBeDisabled()
+ expectGuardedButton(screen.getByRole('button',{name:'Export MIDI'}))
  fireEvent.change(screen.getByLabelText('Note 1 velocity'),{target:{value:'100'}})
  fireEvent.click(screen.getByRole('button',{name:'Save notes'}))
  await screen.findByText(/Saved revision 2/)
@@ -64,11 +64,11 @@ it('retains invalid timing edits for correction without overwriting saved notes'
  fireEvent.click(screen.getByRole('button',{name:'Save notes'}))
  expect(await screen.findByRole('alert')).toHaveTextContent('Note extends beyond source recording')
  expect(screen.getByLabelText('Note 1 duration_seconds')).toHaveValue(20)
- expect(screen.getByRole('button',{name:'Export MIDI'})).toBeDisabled()
+ expectGuardedButton(screen.getByRole('button',{name:'Export MIDI'}))
  fireEvent.change(screen.getByLabelText('Note 1 duration_seconds'),{target:{value:'0.3'}})
  fireEvent.click(screen.getByRole('button',{name:'Save notes'}))
  await screen.findByText(/Saved revision 3/)
- await waitFor(()=>expect(screen.getByRole('button',{name:'Export MIDI'})).not.toBeDisabled())
+ await waitFor(()=>expectAvailableButton(screen.getByRole('button',{name:'Export MIDI'})))
  fireEvent.click(screen.getByRole('button',{name:'Delete note 2'}))
  expect(screen.queryByLabelText('Note 2 pitch')).not.toBeInTheDocument()
  fireEvent.click(screen.getByRole('button',{name:'Add note'}))
@@ -76,3 +76,24 @@ it('retains invalid timing edits for correction without overwriting saved notes'
  fireEvent.keyDown(screen.getByRole('button',{name:'Select note 2, pitch 60'}),{key:'Enter'})
  expect(screen.getByLabelText('Note 2 pitch')).toHaveFocus()
 })
+
+function expectGuardedButton(button: HTMLElement) {
+  expect(button).toHaveAttribute('aria-disabled', 'true')
+  const descriptionIds = button.getAttribute('aria-describedby')?.split(' ') ?? []
+  expect(descriptionIds.length).toBeGreaterThan(0)
+  for (const id of descriptionIds) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+  button.focus()
+  expect(document.activeElement).toBe(button)
+  const actualFetch = vi.spyOn(globalThis, 'fetch')
+  try {
+    fireEvent.click(button)
+    expect(actualFetch).not.toHaveBeenCalled()
+  } finally {
+    actualFetch.mockRestore()
+  }
+}
+
+function expectAvailableButton(button: HTMLElement) {
+  expect(button).not.toBeDisabled()
+  expect(button).not.toHaveAttribute('aria-disabled', 'true')
+}

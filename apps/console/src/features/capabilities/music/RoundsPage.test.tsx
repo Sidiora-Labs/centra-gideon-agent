@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, expect, it } from 'vitest'
+import { afterAll, beforeAll, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import RoundsPage from './RoundsPage'
 let server: ChildProcess
@@ -47,10 +47,10 @@ it('authors timed voice parts, pins a real recording and preserves saved practic
   fireEvent.click(screen.getByRole('button', { name: 'Log part practice' }))
   await screen.findByText('Grade 0 · 2 parts · revision 1 · Repeat the entrance')
   fireEvent.change(screen.getByLabelText('Part 1 notation'), { target: { value: 'G F E D' } })
-  expect(screen.getByRole('button', { name: 'Log part practice' })).toBeDisabled()
+  expectGuardedButton(screen.getByRole('button', { name: 'Log part practice' }))
   fireEvent.click(screen.getByRole('button', { name: 'Save arrangement' }))
   await screen.findByText('Practice uses saved arrangement revision 2.')
-  expect(screen.getByRole('button', { name: 'Log part practice' })).not.toBeDisabled()
+  expectAvailableButton(screen.getByRole('button', { name: 'Log part practice' }))
   const id = window.location.hash.split('/rounds/')[1]
   const history = await (await fetch(apiBase + '/' + id + '/practice')).json()
   expect(history.items).toHaveLength(1)
@@ -73,8 +73,8 @@ it('keeps an unsaved arrangement visible after a real revision conflict', async 
   fireEvent.click(screen.getByRole('button', { name: 'Save arrangement' }))
   await screen.findByRole('alert')
   expect(screen.getByLabelText('Canon title')).toHaveValue('Unsaved title')
-  expect(screen.getByRole('button', { name: 'Log part practice' })).toBeDisabled()
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Save arrangement' })).not.toBeDisabled())
+  expectGuardedButton(screen.getByRole('button', { name: 'Log part practice' }))
+  await waitFor(() => expectAvailableButton(screen.getByRole('button', { name: 'Save arrangement' })))
   const persisted = (await (await fetch(apiBase + '/' + id)).json()).item
   expect(persisted.title).toBe('Evening voices')
   expect(persisted.notes).toBe('Concurrent edit')
@@ -98,5 +98,26 @@ it('shows real catalog load failures and recovers without losing the arrangement
   expect(screen.queryByRole('alert')).toBeNull()
   expect(screen.queryByRole('button', { name: 'Retry recordings' })).toBeNull()
   expect(screen.getByLabelText('Canon title')).toHaveValue('Keep this draft')
-  expect(screen.getByRole('button', { name: 'Create canon' })).not.toBeDisabled()
+  expectAvailableButton(screen.getByRole('button', { name: 'Create canon' }))
 })
+
+function expectGuardedButton(button: HTMLElement) {
+  expect(button).toHaveAttribute('aria-disabled', 'true')
+  const descriptionIds = button.getAttribute('aria-describedby')?.split(' ') ?? []
+  expect(descriptionIds.length).toBeGreaterThan(0)
+  for (const id of descriptionIds) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+  button.focus()
+  expect(document.activeElement).toBe(button)
+  const actualFetch = vi.spyOn(globalThis, 'fetch')
+  try {
+    fireEvent.click(button)
+    expect(actualFetch).not.toHaveBeenCalled()
+  } finally {
+    actualFetch.mockRestore()
+  }
+}
+
+function expectAvailableButton(button: HTMLElement) {
+  expect(button).not.toBeDisabled()
+  expect(button).not.toHaveAttribute('aria-disabled', 'true')
+}

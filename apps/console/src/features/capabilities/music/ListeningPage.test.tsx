@@ -1,6 +1,6 @@
 import { spawn,type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
-import { afterAll,beforeAll,expect,it } from 'vitest'
+import { afterAll,beforeAll,expect,it, vi } from 'vitest'
 import { fireEvent,render,screen,waitFor } from '@testing-library/react'
 import ListeningPage from './ListeningPage'
 let server:ChildProcess,apiBase:string
@@ -30,7 +30,7 @@ it('imports pinned privacy evidence and displays precise counts and ordered dupl
  expect(screen.getByText('Actual artist')).toBeInTheDocument()
  expect(screen.getByText('12500')).toBeInTheDocument()
  expect(screen.getByText('2026-01-02T03:04:05+00:00 (ended_at)')).toBeInTheDocument()
- await waitFor(()=>expect(screen.getByRole('button',{name:'Import evidence'})).not.toBeDisabled())
+ await waitFor(()=>expectAvailableButton(screen.getByRole('button',{name:'Import evidence'})))
  fireEvent.click(screen.getByRole('button',{name:'Import evidence'}))
  await screen.findByText('Imported 0 events; 1 duplicates; 1 skipped.')
  fireEvent.change(screen.getByLabelText('Search listening history'),{target:{value:'No match'}})
@@ -45,8 +45,8 @@ it('imports pinned privacy evidence and displays precise counts and ordered dupl
  await screen.findByLabelText('Playlist snapshot')
  expect(screen.getAllByText('One — First')).toHaveLength(2)
  expect(screen.getByLabelText('Playlist snapshot')).toHaveTextContent('2026-01-01')
- expect(screen.getByRole('button',{name:'Previous history'})).toBeDisabled()
- expect(screen.getByRole('button',{name:'Next history'})).toBeDisabled()
+ expectGuardedButton(screen.getByRole('button',{name:'Previous history'}))
+ expectGuardedButton(screen.getByRole('button',{name:'Next history'}))
 })
 it('persists connection configuration, refuses absent credentials, and builds actual PKCE authorization URL',async()=>{
  render(<ListeningPage apiBase={apiBase}/>)
@@ -55,7 +55,7 @@ it('persists connection configuration, refuses absent credentials, and builds ac
  fireEvent.change(screen.getByLabelText('Connection label'),{target:{value:'Personal'}})
  fireEvent.click(screen.getByLabelText('Enable Spotify'))
  fireEvent.click(screen.getByRole('button',{name:'Save Spotify connection'}))
- await waitFor(()=>expect(screen.getByRole('button',{name:'Save Spotify connection'})).not.toBeDisabled())
+ await waitFor(()=>expectAvailableButton(screen.getByRole('button',{name:'Save Spotify connection'})))
  const saved=await(await fetch(apiBase+'/spotify/config')).json()
  expect(saved.config.credential_name).toBe('spotify-ui')
  expect(saved.config.enabled).toBe(true)
@@ -78,3 +78,24 @@ it('persists connection configuration, refuses absent credentials, and builds ac
  expect(ready.credential_available).toBe(false)
  expect(ready.remote_status).toBe('unverified')
 })
+
+function expectGuardedButton(button: HTMLElement) {
+  expect(button).toHaveAttribute('aria-disabled', 'true')
+  const descriptionIds = button.getAttribute('aria-describedby')?.split(' ') ?? []
+  expect(descriptionIds.length).toBeGreaterThan(0)
+  for (const id of descriptionIds) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+  button.focus()
+  expect(document.activeElement).toBe(button)
+  const actualFetch = vi.spyOn(globalThis, 'fetch')
+  try {
+    fireEvent.click(button)
+    expect(actualFetch).not.toHaveBeenCalled()
+  } finally {
+    actualFetch.mockRestore()
+  }
+}
+
+function expectAvailableButton(button: HTMLElement) {
+  expect(button).not.toBeDisabled()
+  expect(button).not.toHaveAttribute('aria-disabled', 'true')
+}

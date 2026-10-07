@@ -34,6 +34,7 @@ it('authors a piece through real HTTP, practices, and reopens its persisted read
   fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'guitar' } })
   fireEvent.change(screen.getByLabelText('Song key'), { target: { value: 'Em' } })
   fireEvent.change(screen.getByLabelText('Capo'), { target: { value: '2' } })
+  fireEvent.blur(screen.getByLabelText('Capo'))
   fireEvent.change(screen.getByLabelText('Tuning'), { target: { value: 'Drop D' } })
   fireEvent.change(screen.getByLabelText('Notation format'), { target: { value: 'tab' } })
   fireEvent.change(screen.getByLabelText('Notation'), { target: { value: 'Em C G D\nRepeat softly' } })

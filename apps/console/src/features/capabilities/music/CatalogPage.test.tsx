@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, expect, it } from 'vitest'
+import { afterAll, beforeAll, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import CatalogPage from './CatalogPage'
 
@@ -41,7 +41,7 @@ it('creates metadata, attaches canonical measured audio, and preserves selected 
   await screen.findByText(/1.000 seconds · imported/)
   expect(screen.getByText('Our rehearsal · Owned recording (user supplied)')).toBeInTheDocument()
   expect(screen.getByLabelText(`Play ${audioSlug}`)).toHaveAttribute('src', `/api/artifacts/${audioSlug}/raw?version=1`)
-  expect(screen.getByRole('button', { name: 'Selected render' })).toBeDisabled()
+  expectGuardedButton(screen.getByRole('button', { name: 'Selected render' }))
   const hash = window.location.hash
   page.unmount()
   render(<CatalogPage apiBase={apiBase} />)
@@ -80,3 +80,19 @@ it('authors artists and an ordered album and archives through real HTTP', async 
   fireEvent.change(screen.getByLabelText('Filter catalog'), { target: { value: 'no match' } })
   await waitFor(() => expect(screen.queryByRole('link', { name: 'Studio collection' })).not.toBeInTheDocument())
 })
+
+function expectGuardedButton(button: HTMLElement) {
+  expect(button).toHaveAttribute('aria-disabled', 'true')
+  const descriptionIds = button.getAttribute('aria-describedby')?.split(' ') ?? []
+  expect(descriptionIds.length).toBeGreaterThan(0)
+  for (const id of descriptionIds) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+  button.focus()
+  expect(document.activeElement).toBe(button)
+  const actualFetch = vi.spyOn(globalThis, 'fetch')
+  try {
+    fireEvent.click(button)
+    expect(actualFetch).not.toHaveBeenCalled()
+  } finally {
+    actualFetch.mockRestore()
+  }
+}

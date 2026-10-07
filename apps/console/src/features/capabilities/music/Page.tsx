@@ -13,7 +13,7 @@ import { Button } from '../../../shared/ui/Button'
 import {Album,Boxes,Disc3,Layers3,ListMusic,Music2,Piano,Video,Waves} from 'lucide-react'
 import {AreaNavigation} from '../AreaNavigation'
 import {ListScaffold} from '../../../shared/ui/ListScaffold'
-import {Field,NumberField,Select,TextArea,TextInput} from '../../../shared/ui/forms'
+import { Field, NumberField, Select, TextArea, TextInput } from '../../../shared/ui/forms'
 import {Surface} from '../../../shared/ui/Surface'
 
 type Attachment = { slug: string; version: number }
@@ -23,7 +23,6 @@ type Notation = { format: 'chordpro' | 'tab' | 'plain' | 'drum'; text: string }
 type SongLink = { type: string; id: string; label: string }
 type Item = { id: string; title: string; artist: string; instrument: string; body: string; tags: string[]; key: string; capo: number; tuning: string; notation: Notation; source_url: string; links: SongLink[]; scroll_duration_seconds: number | null; attachment_refs: Attachment[]; attachment_availability: AttachmentAvailability[]; stage: string; due_at: string | null; revision: number; practice_history: Attempt[] }
 const selected = () => window.location.hash.split('/music/')[1]?.split('?')[0] || ''
-const urlClass='h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors placeholder:text-on-surface-low focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 
 function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: string }) {
   const [items, setItems] = useState<Item[]>([])
@@ -127,7 +126,7 @@ function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: str
         <Field label="Notation format"><Select value={notationFormat} onChange={value=>setNotationFormat(value as Notation['format'])} options={['chordpro','tab','plain','drum'].map(value=>({value,label:value}))}/></Field>
         <div className="sm:col-span-2"><Field label="Notation"><TextArea mono rows={10} value={notationText} onChange={value=>setNotationText(value.slice(0,200000))}/></Field></div>
         <div className="sm:col-span-2"><Field label="Practice notes"><TextArea rows={4} value={body} onChange={value=>setBody(value.slice(0,100000))}/></Field></div>
-        <label className="min-w-0"><span data-type="caption" className="mb-1.5 block uppercase tracking-wide text-on-surface-low">Source URL</span><input className={urlClass} type="url" maxLength={2000} value={sourceUrl} onChange={event=>setSourceUrl(event.target.value)}/></label>
+        <label className="min-w-0"><span data-type="caption" className="mb-1.5 block uppercase tracking-wide text-on-surface-low">Source URL</span><TextInput type="url" maxLength={2000} value={sourceUrl} onChange={(nextValue) => setSourceUrl(nextValue)}/></label>
         <Field label="Scroll duration seconds"><TextInput type="number" min={15} max={3600} value={scrollDuration} onChange={setScrollDuration}/></Field>
         <div className="sm:col-span-2"><Field label="Related records JSON"><TextArea mono rows={4} value={links} onChange={setLinks}/></Field></div>
         <div className="sm:col-span-2"><Field label="Artifact attachments (slug@version)"><TextArea mono value={refs} onChange={setRefs}/></Field></div>

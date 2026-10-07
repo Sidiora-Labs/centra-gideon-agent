@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, expect, it } from 'vitest'
+import { afterAll, beforeAll, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import VideoPage from './VideoPage'
 let server:ChildProcess
@@ -45,7 +45,7 @@ it('authors a beat-cut project and renders actual audio/images to a playable can
  expect(jobs[0].snapshot.scenes[1].start_seconds).toBe(.5)
  expect(jobs[0].snapshot.audio_ref.version).toBe(1)
  fireEvent.change(screen.getByLabelText('Grid tempo BPM'),{target:{value:'100'}})
- expect(screen.getByRole('button',{name:'Render music video'})).toBeDisabled()
+ expectGuardedButton(screen.getByRole('button',{name:'Render music video'}))
  fireEvent.click(screen.getByRole('button',{name:'Save video project'}))
  await screen.findByText('Saved video revision 2')
  expect(screen.getByText('Total video 1.20 seconds')).toBeInTheDocument()
@@ -64,9 +64,30 @@ it('preserves an invalid authored grid for correction and leaves the saved proje
  fireEvent.click(screen.getByRole('button',{name:'Save video project'}))
  expect(await screen.findByRole('alert')).toHaveTextContent('Beat arrangement exceeds recording or sixty seconds')
  expect(screen.getByLabelText('Scene 1 beats')).toHaveValue(64)
- expect(screen.getByRole('button',{name:'Render music video'})).toBeDisabled()
+ expectGuardedButton(screen.getByRole('button',{name:'Render music video'}))
  const items=(await(await fetch(apiBase)).json()).items
  expect(items[0].revision).toBe(2)
  expect(items[0].scenes[0].beats).toBe(1)
- await waitFor(()=>expect(screen.getByRole('button',{name:'Save video project'})).not.toBeDisabled())
+ await waitFor(()=>expectAvailableButton(screen.getByRole('button',{name:'Save video project'})))
 })
+
+function expectGuardedButton(button: HTMLElement) {
+  expect(button).toHaveAttribute('aria-disabled', 'true')
+  const descriptionIds = button.getAttribute('aria-describedby')?.split(' ') ?? []
+  expect(descriptionIds.length).toBeGreaterThan(0)
+  for (const id of descriptionIds) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+  button.focus()
+  expect(document.activeElement).toBe(button)
+  const actualFetch = vi.spyOn(globalThis, 'fetch')
+  try {
+    fireEvent.click(button)
+    expect(actualFetch).not.toHaveBeenCalled()
+  } finally {
+    actualFetch.mockRestore()
+  }
+}
+
+function expectAvailableButton(button: HTMLElement) {
+  expect(button).not.toBeDisabled()
+  expect(button).not.toHaveAttribute('aria-disabled', 'true')
+}

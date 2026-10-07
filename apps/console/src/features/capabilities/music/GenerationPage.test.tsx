@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, expect, it } from 'vitest'
+import { afterAll, beforeAll, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import GenerationPage from './GenerationPage'
 let server: ChildProcess
@@ -26,14 +26,14 @@ afterAll(() => { server?.kill('SIGTERM') })
 it('persists a named engine configuration while keeping absent provider submission disabled', async () => {
   const page = render(<GenerationPage apiBase={apiBase} />)
   await screen.findByLabelText('Named credential')
-  expect(screen.getByRole('button', { name: 'Compose music' })).toBeDisabled()
+  expectGuardedButton(screen.getByRole('button', { name: 'Compose music' }))
   expect(screen.getByText(/Remote availability and account entitlement remain unverified/)).toBeInTheDocument()
   expect(screen.getByLabelText('Enable music engine')).not.toBeChecked()
   fireEvent.click(screen.getByLabelText('Enable music engine'))
   fireEvent.change(screen.getByLabelText('Named credential'), { target: { value: 'missing-composer-key' } })
   fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'music_v2' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save engine settings' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Save engine settings' })).not.toBeDisabled())
+  await waitFor(() => expectAvailableButton(screen.getByRole('button', { name: 'Save engine settings' })))
   const configResponse = await fetch(apiBase + '/config')
   const config = (await configResponse.json()).config
   expect(config.credential_name).toBe('missing-composer-key')
@@ -51,7 +51,7 @@ it('persists a named engine configuration while keeping absent provider submissi
   fireEvent.change(screen.getByLabelText('License or rights statement'), { target: { value: 'Review account terms' } })
   fireEvent.click(screen.getByRole('button', { name: 'Refresh readiness' }))
   await screen.findByText('Engine disabled or named credential unavailable.')
-  expect(screen.getByRole('button', { name: 'Compose music' })).toBeDisabled()
+  expectGuardedButton(screen.getByRole('button', { name: 'Compose music' }))
   const jobs = await fetch(apiBase + '/jobs')
   expect((await jobs.json()).jobs).toEqual([])
 })
@@ -66,7 +66,28 @@ it('keeps unsaved credential references visible after a real optimistic conflict
   fireEvent.click(screen.getByRole('button', { name: 'Save engine settings' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('Engine configuration changed')
   expect(screen.getByLabelText('Named credential')).toHaveValue('unsaved-reference')
-  expect(screen.getByRole('button', { name: 'Compose music' })).toBeDisabled()
+  expectGuardedButton(screen.getByRole('button', { name: 'Compose music' }))
   const unchanged = await fetch(apiBase + '/config')
   expect((await unchanged.json()).config.credential_name).toBe(current.credential_name)
 })
+
+function expectGuardedButton(button: HTMLElement) {
+  expect(button).toHaveAttribute('aria-disabled', 'true')
+  const descriptionIds = button.getAttribute('aria-describedby')?.split(' ') ?? []
+  expect(descriptionIds.length).toBeGreaterThan(0)
+  for (const id of descriptionIds) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+  button.focus()
+  expect(document.activeElement).toBe(button)
+  const actualFetch = vi.spyOn(globalThis, 'fetch')
+  try {
+    fireEvent.click(button)
+    expect(actualFetch).not.toHaveBeenCalled()
+  } finally {
+    actualFetch.mockRestore()
+  }
+}
+
+function expectAvailableButton(button: HTMLElement) {
+  expect(button).not.toBeDisabled()
+  expect(button).not.toHaveAttribute('aria-disabled', 'true')
+}
