@@ -40,7 +40,13 @@ async def main():
     listener = web.TCPSite(runner, "127.0.0.1", 0)
     await listener.start()
     print(
-        json.dumps({"port": listener._server.sockets[0].getsockname()[1], "token": generate_token("knowledge-test-owner")}), flush=True
+        json.dumps(
+            {
+                "port": listener._server.sockets[0].getsockname()[1],
+                "token": generate_token("knowledge-test-owner"),
+            }
+        ),
+        flush=True,
     )
     try:
         await asyncio.Event().wait()

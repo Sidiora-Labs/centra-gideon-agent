@@ -216,7 +216,8 @@ def test_conflict_preview_stale_token_and_request_mismatch_preserve_existing_sou
 
 
 def test_agent_definition_whitelist_preserves_destination_credentials_and_authority(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     source = ExtendedBundleService(tmp_path / "source")
     source_config = {

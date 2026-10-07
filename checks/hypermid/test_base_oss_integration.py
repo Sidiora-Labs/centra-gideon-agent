@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sqlite3
+from pathlib import Path
+
+import pytest
 
 from gideon.hypermid.bus import BusMessage
 from gideon.hypermid.compaction import CompactionProvider
@@ -21,14 +23,15 @@ from gideon.hypermid.observability import (
     parse_line,
 )
 from gideon.hypermid.transforms import TransformProvider
-import pytest
 
 
 def _trace(name: str) -> Trace:
     return Trace(Id("integration-trace"), Id(name))
 
 
-def test_authored_trace_level_survives_durable_foundation_logging(tmp_path: Path) -> None:
+def test_authored_trace_level_survives_durable_foundation_logging(
+    tmp_path: Path,
+) -> None:
     scope = Scope(Id("owner-1"), Id("project-1"), Id("workspace-1"))
     policy = LogFilter.parse("hypermid=trace,*=info")
     level = LogLevel.parse("trace")
@@ -108,7 +111,9 @@ def _step(session_handle: str) -> dict[str, object]:
     }
 
 
-def test_complete_oss_foundation_journey_uses_real_durable_components(tmp_path: Path) -> None:
+def test_complete_oss_foundation_journey_uses_real_durable_components(
+    tmp_path: Path,
+) -> None:
     scope = Scope(Id("owner-1"), Id("project-1"), Id("workspace-1"))
     other_scope = Scope(Id("owner-1"), Id("project-2"), Id("workspace-1"))
     payload = b'{"event":"ready"}'

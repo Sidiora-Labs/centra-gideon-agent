@@ -9,8 +9,6 @@ from aiohttp import web
 
 from gideon.core.config import AppConfig
 from gideon.engine.session import ConversationDirectory
-from gideon.interfaces.dashboard.state import ConsoleState
-
 from gideon.interfaces.dashboard.handlers.capabilities_comparisons import (
     register as register_comparisons,
 )
@@ -28,6 +26,7 @@ from gideon.interfaces.dashboard.handlers.capabilities_references import (
     register as register_references,
 )
 from gideon.interfaces.dashboard.handlers.prompts import api_prompt_syntax
+from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 
@@ -47,7 +46,12 @@ async def main():
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
     print(
-        json.dumps({"url": f"http://127.0.0.1:{runner.addresses[0][1]}", "token": generate_token("platform-owner")}),
+        json.dumps(
+            {
+                "url": f"http://127.0.0.1:{runner.addresses[0][1]}",
+                "token": generate_token("platform-owner"),
+            }
+        ),
         flush=True,
     )
     stopped = asyncio.Event()

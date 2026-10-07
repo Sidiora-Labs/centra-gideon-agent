@@ -36,7 +36,11 @@ async def main():
     await listener.start()
     print(
         json.dumps(
-            {"port": listener._server.sockets[0].getsockname()[1], "item": item, "token": generate_token("rsvp-test-owner")}
+            {
+                "port": listener._server.sockets[0].getsockname()[1],
+                "item": item,
+                "token": generate_token("rsvp-test-owner"),
+            }
         ),
         flush=True,
     )
