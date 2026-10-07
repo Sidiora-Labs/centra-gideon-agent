@@ -28,11 +28,11 @@ describe('the routing panel describes what it actually does', () => {
     expect(headerHint(routing()), 'a reader should be told where the decision is made').toMatch(/Routing policy/)
   })
 
-  it('the file-level doc comment does not contradict it either', () => {
-    const doc = routing().slice(0, routing().indexOf('export function RoutingPanel'))
-    expect(/ONLY visualizes/.test(doc), 'the doc comment carried the same stale claim').toBe(false)
-    expect(/never changes routing/.test(doc)).toBe(false)
-    expect(doc, 'and it should name both halves').toMatch(/DECIDES/)
+  it('renders both observed model efficiency and policy for the selected request', () => {
+    const src = routing()
+    expect(src).toMatch(/<Section title="Model efficiency">/)
+    expect(src).toMatch(/<RoutingPolicySection useCase=\{useCase\} queryClass=\{queryClass\} \/>/)
+    expect(headerHint(src)).toMatch(/observation into a decision/)
   })
 
   it('the policy controls really do write — the reason the old copy was false', () => {

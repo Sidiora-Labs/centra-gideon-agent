@@ -109,8 +109,9 @@ describe('all three tiers acknowledge a press', () => {
 
 describe('the two call sites whose gate was invisible', () => {
   const SRC = join(process.cwd(), "src")
-  const code = (rel: string) =>
-    readFileSync(join(SRC, rel), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const stripComments = (src: string) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const code = (rel: string) => stripComments(readFileSync(join(SRC, rel), 'utf8'))
 
   it('OutboxPanel gates "Choose files" on the same flag as the input it forwards to', () => {
     const src = code('features/workflows/OutboxPanel.tsx')
@@ -127,12 +128,14 @@ describe('the two call sites whose gate was invisible', () => {
     expect(src).toMatch(/<QuietButton[\s\S]{0,400}?disabledReason="A refinement is already in flight"/)
   })
 
-  it('the comment-stripping is load-bearing, not decorative', () => {
+  it('strips planted gate examples while retaining the actual Outbox gate', () => {
     const raw = readFileSync(join(SRC, 'features/workflows/OutboxPanel.tsx'), 'utf8')
-    expect(raw).toMatch(/disabled=\{dropBusy\}/)
-    expect(raw.length, 'the file must actually carry comments').toBeGreaterThan(
-      code('features/workflows/OutboxPanel.tsx').length,
-    )
+    const prose = '/* disabled={inventedGate} */\n// disabled={inventedGate}\n'
+    expect(prose + raw).toMatch(/disabled=\{inventedGate\}/)
+    const stripped = stripComments(prose + raw)
+    expect(stripped).not.toMatch(/disabled=\{inventedGate\}/)
+    expect(stripped).toBe(stripComments(prose) + code('features/workflows/OutboxPanel.tsx'))
+    expect(stripped).toMatch(/<QuietButton[\s\S]{0,400}?disabled=\{dropBusy\}/)
   })
 })
 

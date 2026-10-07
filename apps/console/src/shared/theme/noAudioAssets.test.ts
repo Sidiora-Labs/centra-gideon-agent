@@ -73,9 +73,12 @@ describe('the cue module reaches for no audio file', () => {
     expect(stripComments('const a = new Audio()')).toMatch(/new Audio\(/)
   })
 
-  it("the module's own comments DO discuss the banned APIs — so stripping is load-bearing", () => {
-    expect(raw).toMatch(/HTMLAudioElement/)
-    expect(code).not.toMatch(/HTMLAudioElement/)
+  it('ignores banned API names in comments while retaining executable references', () => {
+    const prose = '/* HTMLAudioElement */\n// new Audio()\n'
+    expect(stripComments(prose + raw)).toBe(stripComments(prose) + code)
+    expect(stripComments(prose)).not.toMatch(/HTMLAudioElement|new Audio\(/)
+    expect(stripComments(prose + 'const cue = new Audio()')).toMatch(/new Audio\(/)
+    expect(stripComments(prose + 'let cue: HTMLAudioElement')).toMatch(/HTMLAudioElement/)
   })
 
   it('uses no HTMLAudioElement, no <audio>, no asset import, no fetch-and-decode', () => {

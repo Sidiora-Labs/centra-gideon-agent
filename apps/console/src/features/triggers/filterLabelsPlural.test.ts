@@ -17,7 +17,17 @@ describe('the triggers filter labels are plural categories', () => {
     expect(labels, 'the lifecycle chip must be the plural category').not.toContain('Lifecycle')
   })
 
-  it('the plural convention is documented at the source, so a future edit knows the rule', () => {
-    expect(page()).toMatch(/PLURAL of its kind/)
+  it('each plural label stays attached to the kind used by the live filter', () => {
+    const src = page()
+    const block = src.match(/const FILTERS[\s\S]*?\]\n/)?.[0] ?? ''
+    const pairs = [...block.matchAll(/key: '([^']+)', label: '([^']+)'/g)]
+      .map(m => [m[1], m[2]])
+    expect(pairs).toEqual([
+      ['all', 'All'], ['schedule', 'Schedules'], ['lifecycle', 'Lifecycle events'],
+      ['event', 'Data events'], ['store', 'Automations'],
+    ])
+    expect(src).toMatch(/filter === 'all' \|\| t\.kind === filter/)
+    expect(src).toMatch(/onChange: setFilter/)
+    expect(src).toMatch(/options: FILTERS\.map/)
   })
 })
