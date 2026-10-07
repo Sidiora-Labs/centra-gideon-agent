@@ -21,7 +21,7 @@ export default function WorldFoundations({ baseUrl = '/api/capabilities/experien
   }
   return <section aria-label="World foundations" className="space-y-m">
     <header className="space-y-xs"><h2 data-type="title-m">World foundations and controllers</h2>
-    <p className="text-on-surface-variant">Foundation style remains local. Controller status reflects operations acknowledged by the installed world engine.</p></header>
+    <p className="text-on-surface-var">Foundation style remains local. Controller status reflects operations acknowledged by the installed world engine.</p></header>
     {error && <p role="alert">{error}</p>}
     {!snapshot ? <p>Loading foundations…</p> : <>
       <p role="status">{snapshot.foundations.length} foundations · {snapshot.controllers.length} controllers</p>

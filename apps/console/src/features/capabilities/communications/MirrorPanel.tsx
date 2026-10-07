@@ -29,7 +29,7 @@ export function MirrorPanel() {
     <h2 data-type="title-m">Account mirrors</h2>
     <p>Read mail into this runtime. Local archives cover only uploaded data. Remote account access requires an existing credential connection.</p>
     <details><summary>Adapter coverage</summary>{adapters.map(row => <p key={row.adapter}>{row.adapter}: {row.implemented ? 'available' : 'unavailable'} — {row.qualification}</p>)}</details>
-    {error && <p role="alert" className="rounded-lg bg-danger-container p-m text-on-danger-container">{error}</p>}
+    {error && <p role="alert" className="rounded-lg bg-error-container p-m text-on-error-container">{error}</p>}
     <form className="space-y-m rounded-lg bg-surface-container px-l py-l" onSubmit={e => { e.preventDefault(); void run(async () => { const data = await requestJson<{ account: Account }>(base + '/accounts', 'POST', form); await reload(); selectAccount(data.account.id); setMessages([]); setForm(initial) }) }}>
       <label className="block">Account name<input className={nativeControl} required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
       <label className="block">Owner email<input className={nativeControl} required type="email" value={form.owner_email} onChange={e => setForm({ ...form, owner_email: e.target.value })} /></label>

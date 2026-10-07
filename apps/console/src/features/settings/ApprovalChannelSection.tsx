@@ -38,7 +38,7 @@ export function ApprovalChannelSection() {
         <span className="text-on-surface">Default channel for approvals</span>
         <select
           aria-label="Default channel for approvals"
-          className="min-h-10 rounded-md border border-outline-low bg-surface px-3 text-on-surface"
+          className="min-h-10 rounded-md border border-outline-variant bg-surface px-3 text-on-surface"
           value={selected}
           disabled={busy}
           onChange={event => void save(event.currentTarget.value)}

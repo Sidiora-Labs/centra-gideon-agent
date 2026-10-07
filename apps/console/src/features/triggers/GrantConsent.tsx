@@ -20,7 +20,7 @@ export function GrantConsent({ id, question, required, satisfied, readOnly, onCh
       onChanged()
     } finally { setBusy(false) }
   }
-  return <div className="rounded-lg border border-outline-var px-m py-m flex flex-col gap-2">
+  return <div className="rounded-lg border border-outline-variant px-m py-m flex flex-col gap-2">
     <div className="text-on-surface text-[0.8125rem]">{question?.sentence ?? 'The workflow could not be read. Review it before allowing this automation.'}</div>
     {question && <div><Button size="sm" loading={busy} onClick={allow}>{satisfied ? 'Use these versions' : 'Allow'}</Button></div>}
     {error && <FieldError>{error}</FieldError>}

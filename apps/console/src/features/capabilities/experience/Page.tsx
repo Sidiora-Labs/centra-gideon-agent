@@ -115,7 +115,7 @@ export default function Page({ baseUrl = '/api/capabilities/experience' }: { bas
     </nav>
     {!loading && stories.length === 0 && <p>No stories yet. Write an opening below.</p>}
     {view ? <section aria-label="Story player"><Surface className="space-y-m p-m">
-      <h2 data-type="title-m">{view.story.title}</h2><p className="text-on-surface-variant">Story revision {view.session.story_revision} · {view.session.history.length} choices</p>
+      <h2 data-type="title-m">{view.story.title}</h2><p className="text-on-surface-var">Story revision {view.session.story_revision} · {view.session.history.length} choices</p>
       <p style={{ whiteSpace: 'pre-wrap' }}>{view.node.text}</p>
       <Narration sessionId={view.session.id} revision={view.session.revision} baseUrl={baseUrl} />
       {view.node.kind === 'ending' && <p role="status">The end</p>}

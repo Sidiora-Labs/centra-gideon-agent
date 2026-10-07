@@ -16,7 +16,7 @@ export function LocalInferenceWaitRegion() {
   }
   return <section aria-label="Waiting for local inference" aria-live="polite" className="border-b border-outline-variant/40 px-l py-m text-[0.8125rem]">
     {waits.map(wait => <div key={wait.id} className="flex flex-wrap items-center justify-between gap-m py-s">
-      <div><strong>{wait.step}</strong><p className="text-on-surface-variant">Waiting for {wait.model} on {wait.provider}; {wait.holder} is using it. Position {wait.position}{wait.seconds_left !== null ? ` · ${Math.ceil(wait.seconds_left)} seconds left` : ''}.</p></div>
+      <div><strong>{wait.step}</strong><p className="text-on-surface-var">Waiting for {wait.model} on {wait.provider}; {wait.holder} is using it. Position {wait.position}{wait.seconds_left !== null ? ` · ${Math.ceil(wait.seconds_left)} seconds left` : ''}.</p></div>
       {wait.next_ref && <Button disabled={!!moving} onClick={() => void moveOn(wait.id)}>Try next model</Button>}
     </div>)}
   </section>

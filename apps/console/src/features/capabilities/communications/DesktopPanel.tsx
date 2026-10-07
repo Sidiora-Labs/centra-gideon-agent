@@ -27,7 +27,7 @@ export function DesktopPanel() {
   return <section aria-label="Desktop message imports" className="space-y-l">
     <h2 data-type="title-m">Desktop message imports</h2>
     <p>Upload a plain SQLite snapshot from iMessage or Signal Desktop. Encrypted Signal databases require a local export or decryption first. Imported snapshots do not prove complete conversation coverage.</p>
-    {error && <p role="alert" className="rounded-lg bg-danger-container p-m text-on-danger-container">{error}</p>}
+    {error && <p role="alert" className="rounded-lg bg-error-container p-m text-on-error-container">{error}</p>}
     {receipt && <p role="status" className="rounded-lg bg-primary-container p-m text-on-primary-container">{receipt}</p>}
     <label className="block">Desktop source<select className={nativeControl} disabled={busy} value={source} onChange={e => { select(e.target.value, account); reset() }}><option value="imessage">iMessage</option><option value="signal">Signal Desktop</option></select></label>
     <label className="block">Desktop source account<input className={nativeControl} disabled={busy} value={account} onChange={e => { select(source, e.target.value); reset() }} /></label>

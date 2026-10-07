@@ -251,7 +251,7 @@ export function WorkflowDefDetail({ name, onBack, onStarted }: {
             {tab === 'steps' && (
               <>
                 {plan && (
-                  <div className="flex flex-col gap-xs rounded-m border border-outline p-m">
+                  <div className="flex flex-col gap-xs rounded-md border border-outline p-m">
                     <span data-type="title-m" className="text-on-surface">Round plan to review</span>
                     <p data-type="caption" className="whitespace-pre-wrap text-on-surface-low">{roundPlanText(plan)}</p>
                   </div>

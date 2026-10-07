@@ -93,7 +93,7 @@ export function ImportStep({ onDone, onSkip }: {
               </motion.div>
 
 
-              {busy && job && <div role="status" className="grid gap-s rounded-lg border border-outline-var p-s">
+              {busy && job && <div role="status" className="grid gap-s rounded-lg border border-outline-variant p-s">
                 <p>{job.phase === 'scanning' ? 'Preparing selected items…' : `Imported ${job.done} of ${job.total}${job.current ? ` · ${job.current}` : ''}`}</p>
                 <Button variant="secondary" size="sm" disabled={job.stopping} loading={job.stopping} loadingLabel="Stopping after this item…" onClick={stop}>
                   Stop after this item
@@ -171,7 +171,7 @@ function ImportGroup({ category, items, picked, onPick }: {
       label={`Bring over ${labelOfCategory(category)} (${items.length})`} />
       <details className="min-w-0 flex-1"><summary>{labelOfCategory(category)} · {items.length} items</summary>
         <div className="grid gap-s py-s">
-          <label>Filter {labelOfCategory(category)}<input type="search" className="w-full rounded-lg border border-outline-var bg-surface p-s"
+          <label>Filter {labelOfCategory(category)}<input type="search" className="w-full rounded-lg border border-outline-variant bg-surface p-s"
             value={filter} onChange={event => { setFilter(event.target.value); setPage(0) }} /></label>
           {matching.slice(shownPage * 40, (shownPage + 1) * 40).map(item => <label key={item.fingerprint} className="flex items-start gap-s text-[0.8125rem]">
             <input type="checkbox" aria-label={item.scan?.verdict === "warning" ? `Accept these warnings and import ${item.title}` : `Import ${item.title}`} checked={!!picked[item.fingerprint] && writableImportItem(item)}
