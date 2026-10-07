@@ -201,8 +201,15 @@ describe('the chip is wired at both surfaces (not an inert helper)', () => {
   const ledger = read('./ContextLedger.tsx')
 
   it('the chat run panel renders the label + the names on hover', () => {
-    expect(chatPage).toContain('title={skillsUsedTitle(skills)}')
-    expect(chatPage).toContain('{skillsUsedLabel(skills)}')
+    const chipStart = chatPage.indexOf('function SkillsUsedChip(')
+    const chipEnd = chatPage.indexOf('\nfunction ', chipStart + 1)
+    expect(chipStart).toBeGreaterThan(-1)
+    expect(chipEnd).toBeGreaterThan(chipStart)
+    const chip = chatPage.slice(chipStart, chipEnd)
+    expect(chip).toContain("const used = skills.filter((s) => s.state === 'admitted' || s.state === 'reduced')")
+    expect(chip).toContain('if (!used.length) return null')
+    expect(chip).toContain('title={skillsUsedTitle(used)}')
+    expect(chip).toContain('{skillsUsedLabel(used)}')
     expect(chatPage).toContain('skillsUsed.length > 0 && <SkillsUsedChip')
   })
 

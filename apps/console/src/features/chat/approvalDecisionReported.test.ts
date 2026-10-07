@@ -57,7 +57,13 @@ describe('a permission decision that fails says so, and moves nothing', () => {
       )
     }
     const card = readFileSync(join(process.cwd(), "src/features/chat/ApprovalCard.tsx"), 'utf8')
-    expect(card, 'the card renders the backend’s outcome').toContain('if (seg.resolved) {')
+    expect(card).toContain('const resolved = seg.resolved ? approvalOutcome(seg.resolved) : null')
+    expect(card).toContain("scope={seg.resolved ?? 'pending'}")
+    expect(card).toContain('resultLabel={resolved?.label}')
+    expect(card).toContain('choices={seg.resolved ? [] : [')
+    const permission = readFileSync(join(process.cwd(), 'src/shared/vendor/assistant-ui/elements/permission-grant.tsx'), 'utf8')
+    expect(permission).toContain('scope === "pending"')
+    expect(permission).toContain('resultLabel ??')
   })
 
   it('no OTHER api.approve call in the file swallows — the ratchet', () => {

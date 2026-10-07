@@ -1,3 +1,4 @@
+import { claimTurnEndAnnouncement, readTurnOutcome } from '../../features/chat/turnOutcome'
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -61,7 +62,7 @@ describe('turn settled → ChatPage', () => {
     expect(code).toMatch(/import \{ playCue \} from '\.\.\/shared\/theme\/soundCues'/)
   })
 
-  it('fires inside markStreaming’s streaming→settled branch, beside the skills epoch', () => {
+  it('fires only for a recorded settled outcome and deduplicates its cue', () => {
     const at = code.indexOf('const markStreaming = ')
     expect(at, 'markStreaming must still exist — the settle point is the whole cue site').toBeGreaterThan(0)
     const body = blockAt(code, at)
@@ -69,9 +70,19 @@ describe('turn settled → ChatPage', () => {
 
     const branch = blockAt(body, body.indexOf('if (streamingRef.current && !v)'))
     expect(branch).toMatch(/setSessionSkillsEpoch/)
-    expect(branch, 'the cue belongs in the settle branch, not on every render').toMatch(
-      /playCue\('turn_complete'\)/,
-    )
+    expect(branch).not.toMatch(/playCue\(/)
+    const announcement = blockAt(code, code.indexOf('const announceTurnEnd = useCallback('))
+    expect(announcement).toContain('claimTurnEndAnnouncement(')
+    expect(announcement).toContain('readTurnOutcome(rawOutcome, superseded)')
+    expect(announcement).toContain('if (!announcement) return')
+    expect(announcement).toContain('playCue(announcement.cue)')
+    expect(code).toContain("announceTurnEnd(sessionRef.current || '', d, d.last_turn_outcome, !!d.superseded)")
+    const announced = new Set<string>()
+    const cursor = { stream_epoch: 'epoch', stream_turn: 1 }
+    expect(claimTurnEndAnnouncement(announced, 'session', cursor, readTurnOutcome(undefined))).toBeNull()
+    expect(claimTurnEndAnnouncement(announced, 'session', cursor, readTurnOutcome('complete'))).toEqual({ sentence: 'Response complete.', cue: 'turn_complete' })
+    expect(claimTurnEndAnnouncement(announced, 'session', cursor, readTurnOutcome('complete'))).toBeNull()
+    expect(claimTurnEndAnnouncement(announced, 'session', { ...cursor, stream_turn: 2 }, readTurnOutcome('error'))).toEqual({ sentence: 'Response ended with an error.', cue: 'error' })
     expect(code.match(/playCue\(/g)?.length).toBe(1)
   })
 })

@@ -14,11 +14,11 @@ describe('session map navigation', () => {
   it('provides short labels and identifies where a match came from', () => {
     expect(turnLabel(turns[0])).toBe('Find the release brief for September')
     expect(sessionMapResults(turns, 'brief')).toEqual([
-      { index: 0, text: 'Find the release brief for September', source: 'Your message' },
-      { index: 1, text: 'I found the brief.', source: 'Agent response' },
+      { index: 0, entryIndex: 0, text: 'Find the release brief for September', source: 'Your message' },
+      { index: 1, entryIndex: 0, text: 'I found the brief.', source: 'Agent response' },
     ])
     expect(sessionMapResults(turns, 'milestones')).toEqual([
-      { index: 1, text: 'read_file · September release milestones', source: 'Tool: read_file' },
+      { index: 1, entryIndex: 0, text: 'read_file · September release milestones', source: 'Tool: read_file' },
     ])
   })
 })

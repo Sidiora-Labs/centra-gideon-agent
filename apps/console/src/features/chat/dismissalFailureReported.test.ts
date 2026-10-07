@@ -71,8 +71,16 @@ describe('a dismissal that fails says so', () => {
     expect(after, 'so no guard may gate the hide').not.toMatch(/\)\)\) return/)
 
     const routing = strip(F('chat/RoutingChip.tsx'))
-    const rAt = routing.indexOf('reportingWrite(')
-    expect(routing.slice(rAt, rAt + 520), 'the routing chip hides too').toContain('onDismiss()')
+    const dismissStart = routing.indexOf('const dismiss = async () => {')
+    const dismissEnd = routing.indexOf('\n  return (', dismissStart)
+    expect(dismissStart).toBeGreaterThan(-1)
+    expect(dismissEnd).toBeGreaterThan(dismissStart)
+    const dismiss = routing.slice(dismissStart, dismissEnd)
+    expect(dismiss, 'the routing chip hides after reporting the result').toContain('onDismiss()')
+    expect(dismiss.indexOf('onDismiss()')).toBeGreaterThan(dismiss.indexOf('await reportingWrite('))
+    expect(dismiss, 'failure cannot return before the local hide').not.toMatch(/\breturn\b/)
+    expect(dismiss).toMatch(/if \(ok && result\?\.muted\) notify/)
+    expect(dismiss).not.toMatch(/if[^\n]*onDismiss/)
   })
 
   it('the accept paths keep their own reporting — this converged onto them', () => {
