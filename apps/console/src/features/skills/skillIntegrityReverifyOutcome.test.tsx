@@ -36,7 +36,8 @@ beforeEach(() => {
 describe('skill integrity re-verification', () => {
   it.each([
     ['intact', 'Integrity verified'],
-    ['tampered', 'Changes found'],
+    ['tampered', 'Record damaged'],
+    ['edited', 'Edits found'],
     ['unverified', 'No integrity baseline'],
   ] as const)('renders the %s outcome beside Re-verify', async (integrity, outcome) => {
     verifySkill.mockResolvedValue(response(integrity))
@@ -49,6 +50,6 @@ describe('skill integrity re-verification', () => {
     const status = await waitFor(() => screen.getByRole('status'))
     expect(status).toHaveTextContent(outcome)
     expect(status.parentElement).toContainElement(button)
-    expect(verifySkill).toHaveBeenCalledWith(skill.name)
+    expect(verifySkill).toHaveBeenCalledWith(skill.name, skill.copy)
   })
 })

@@ -76,9 +76,20 @@ describe('VACUITY: the cascade these dialogs warn about is real', () => {
   it('the delete handler really does delete every task in the project', () => {
     const cascade = retirement().match(/    async def remove_tasks\(self\):[\s\S]*?(?=\n    async def |\n    def |$)/)?.[0] ?? ''
     expect(cascade, 'found the cascade method').not.toBe('')
-    expect(cascade, 'the task scope is the project being deleted').toMatch(/project = _store\(\)\.get_project\(self\.project_id\)/)
-    expect(cascade, 'and the window reached the complete project sweep').toMatch(/list_all_tasks\(project=project\.name, limit=10_000\)/)
-    expect(cascade, 'it deletes each one').toMatch(/for task in tasks:[\s\S]*?await registry\.delete_task\(task\.id\)/)
+    expect(cascade, 'the task scope is the project being deleted').toMatch(/project = self\.store\.get_project\(self\.project_id\)/)
+    expect(cascade).toMatch(/row\.id for row in self\.store\.list_task_lists\(project_id=self\.project_id\)/)
+    expect(cascade).toContain('await _remove_task_list_tasks(')
+    const sweep = py.match(/async def _remove_task_list_tasks\(list_ids\):[\s\S]*?(?=\nclass |\nasync def |$)/)?.[0] ?? ''
+    expect(sweep).toContain('for list_id in dict.fromkeys(list_ids)')
+    expect(sweep).toContain('await registry.delete_tasks(task_list_id=list_id)')
+    const registry = readFileSync(join(REPO, 'runtime/gideon/engine/tasks/registry.py'), 'utf8')
+    const batch = registry.match(/async def delete_tasks\(\*, task_list_id: str\) -> int:[\s\S]*?(?=\nasync def |$)/)?.[0] ?? ''
+    expect(batch).toContain('while True:')
+    expect(batch).toContain('list_all_tasks(task_list_id=task_list_id, limit=500)')
+    expect(batch).toContain('if not tasks:')
+    expect(batch).toContain('return removed')
+    expect(batch).toContain('await delete_task(task.id, provider_name=task.provider or None)')
+    expect(batch).toContain('raise RuntimeError')
   })
 
   it('and the provider really unlinks the file — there is nothing to restore from', () => {
@@ -91,8 +102,11 @@ describe('VACUITY: the cascade these dialogs warn about is real', () => {
     expect(owner, 'found the task mutation owner').not.toBe('')
     const mutation = owner.match(/    def delete\(self, identifier\):[\s\S]*?(?=\n    def |\n@dataclass|$)/)?.[0] ?? ''
     expect(mutation, 'found the actual delete operation').not.toBe('')
-    expect(mutation, 'the unlinked path belongs to the requested task').toMatch(/path = self\.provider\._task_path\(identifier\)/)
-    expect(mutation, 'a hard unlink, not a soft delete').toMatch(/path\.unlink\(\)/)
+    expect(mutation).toContain('with self._mutation_lock():')
+    expect(mutation).toContain('return self._delete_locked(identifier)')
+    const locked = owner.match(/    def _delete_locked\(self, identifier\):[\s\S]*?(?=\n    def |\n@dataclass|$)/)?.[0] ?? ''
+    expect(locked, 'the unlinked path belongs to the requested task').toMatch(/path = self\.provider\._task_path\(identifier\)/)
+    expect(locked, 'a hard unlink, not a soft delete').toMatch(/path\.unlink\(\)/)
   })
 
   it('🔑 the cascade is deliberate, and this change does not touch it', () => {
@@ -101,6 +115,6 @@ describe('VACUITY: the cascade these dialogs warn about is real', () => {
     const response = retirement().match(/    async def respond\(self\):[\s\S]*?(?=\n    async def |\n    def |$)/)?.[0] ?? ''
     expect(response, 'found the lifecycle response').not.toBe('')
     expect(response, 'bound-work admission still precedes the cascade').toMatch(/await self\.detach\(\)/)
-    expect(response, 'the cascade runs before deleting the project').toMatch(/await self\.remove_tasks\(\)[\s\S]*?_store\(\)\.delete_project\(self\.project_id\)/)
+    expect(response, 'the cascade runs before deleting the project').toMatch(/await self\.remove_tasks\(\)[\s\S]*?self\.store\.delete_project\(self\.project_id\)/)
   })
 })

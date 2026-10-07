@@ -41,8 +41,9 @@ function Harness({ initialQuery = {} }: { initialQuery?: Record<string, string> 
 }
 
 function seed(rows: WireTrigger[]) {
-  writeQuery('triggers:schedules', [])
+  writeQuery('triggers:schedules', { jobs: [], unreadable: [] })
   writeQuery('triggers:hooks', [])
+  writeQuery('triggers:review', [])
   writeQuery('triggers:store', rows)
   writeQuery('triggers:action-providers', [])
 }

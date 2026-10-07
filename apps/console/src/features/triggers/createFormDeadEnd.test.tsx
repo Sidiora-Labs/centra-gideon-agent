@@ -1,3 +1,4 @@
+import { namedOwner, queryRegistration } from '../../shared/testing/sourceOwners'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
@@ -11,7 +12,7 @@ function mockApi(over: Record<string, unknown>) {
     actionProviders: () => Promise.resolve([
       { name: 'run_prompt', display_name: 'Run a prompt', supports_blocking: false, settingsSchema: {} },
     ]),
-    triggerVariables: () => Promise.resolve({ lifecycle: [], schedule: [], event: [] }),
+    triggerVariables: () => Promise.resolve({ lifecycle: [], schedule: [], app_sources: [] }),
     appEvents: () => Promise.resolve([]),
     prompts: () => Promise.resolve([]),
     ...over,
@@ -76,23 +77,14 @@ describe('the create paths keep their failures visible', () => {
 
   it('the providers read no longer substitutes an empty list', () => {
     const code = codeOf('features/triggers/TriggerCreatePage.tsx')
-    const at = code.indexOf("useQuery('triggers:action-providers'")
-    expect(at, 'the read must still be here').toBeGreaterThan(-1)
-    let i = code.indexOf('(', at) + 1
-    let depth = 1
-    while (i < code.length && depth > 0) {
-      if (code[i] === '(') depth++
-      else if (code[i] === ')') depth--
-      i++
-    }
-    expect(code.slice(at, i), 'no fallback list').not.toMatch(/\.catch\(/)
+    expect(queryRegistration(code, "'triggers:action-providers'"), 'no fallback list').not.toMatch(/\.catch\(/)
   })
 
   it("the ingest path's title/tags patch reports instead of vanishing", () => {
     const code = codeOf('features/knowledge/KnowledgeCreatePage.tsx')
     const at = code.indexOf('updateKnowledge(res.item_id, custom)')
     expect(at, 'the patch must still be here').toBeGreaterThan(-1)
-    const seg = code.slice(at, at + 320)
+    const seg = namedOwner(code, 'save')
     expect(seg, 'the rejection must not be discarded').not.toMatch(/\.catch\(\(\)\s*=>\s*\{\s*\}\)/)
     expect(seg, 'and must say what was and was not saved').toMatch(/notify\([^)]*Saved the file/)
   })
@@ -100,12 +92,14 @@ describe('the create paths keep their failures visible', () => {
   it('InlineError gained the retry as an OPTIONAL prop — existing callers are untouched', () => {
     const code = codeOf('shared/ui/InlineError.tsx')
     expect(code).toMatch(/onRetry\?:\s*\(\) => void/)
-    expect(code, 'and it renders only when passed').toMatch(/\{onRetry && \(/)
+    expect(namedOwner(code, 'InlineError'), 'and it renders only when passed').toContain("...(onRetry ? [{ name: 'Retry', run: onRetry, content: 'Retry' as ReactNode }] : [])")
+    expect(namedOwner(code, 'InlineError')).toContain('onClick={action.run}')
     expect(code, 'onRetry must not be a required prop').not.toMatch(/onRetry:\s*\(\) => void/)
   })
 
-  it('the tag SUGGESTIONS read keeps its fallback, deliberately', () => {
+  it('the tag suggestions read reports its own failure with retry', () => {
     const code = codeOf('features/knowledge/KnowledgeCreatePage.tsx')
-    expect(code).toMatch(/knowledgeTags\(\)\.catch\(\(\) => \[\]/)
+    expect(queryRegistration(code, "'knowledge:tags'")).not.toMatch(/\.catch\(/)
+    expect(code).toContain('Boolean(tagsErr) && <LoadError what="tag suggestions" error={tagsErr} onRetry={refreshTags}')
   })
 })

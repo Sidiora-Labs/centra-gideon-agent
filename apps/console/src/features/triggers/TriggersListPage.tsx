@@ -1,3 +1,4 @@
+import { InlineError } from '../../shared/ui/InlineError'
 import { TriggerReview } from './TriggerReview'
 import { UnreadableNotice } from './UnreadableNotice'
 import { useEffect, useId, useMemo, useState } from 'react'
@@ -75,17 +76,18 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
   }, [refreshSchedules])
 
   const triggers = useMemo<Trigger[] | null>(() => {
-    if (schedules === undefined || hooks === undefined || stores === undefined) return null
+    if ((schedules === undefined && !schedulesErr) || (hooks === undefined && !hooksErr) || (stores === undefined && !storesErr)) return null
+    if (schedules === undefined && hooks === undefined && stores === undefined) return null
     const all = [
-      ...schedules.map(scheduleToTrigger),
-      ...hooks.map(hookToTrigger),
-      ...stores.map(storeToTrigger),
+      ...(schedules ?? []).map(scheduleToTrigger),
+      ...(hooks ?? []).map(hookToTrigger),
+      ...(stores ?? []).map(storeToTrigger),
     ]
     const n = q.trim().toLowerCase()
     return all
       .filter((t) => filter === 'all' || t.kind === filter)
       .filter((t) => !n || `${t.name} ${t.whenLabel} ${t.actionLabel}`.toLowerCase().includes(n))
-  }, [schedules, hooks, stores, filter, q])
+  }, [schedules, hooks, stores, schedulesErr, hooksErr, storesErr, filter, q])
 
   const open = useMemo(() => resolveOpenTrigger(triggers, openId), [triggers, openId])
 
@@ -102,6 +104,8 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
     return { all: s + h + st, schedule: s, lifecycle: h, store: st - e, event: e }
   }, [schedules, hooks, stores])
 
+  const sourceError = schedulesErr || hooksErr || storesErr
+  const partialFailure = triggers !== null && Boolean(sourceError)
   const loadFailed = triggers === null &&
     !!(schedulesErr || hooksErr || storesErr)
 
@@ -157,11 +161,12 @@ export function TriggersListPage({ onCreate, query, setQuery }: {
       ) : (
       <div className="mx-auto px-l py-l" style={{ maxWidth: 'var(--content-width)' }}>
         <UnreadableNotice sources={unreadable} />
+        {partialFailure && <InlineError icon onRetry={() => { loadSchedules(); refreshHooks(); loadStores(); }}>Couldn’t load every trigger source. Available triggers are shown; this list may be incomplete.</InlineError>}
         {loadFailed ? (
           <LoadError what="triggers" error={schedulesErr || hooksErr || storesErr}
             onRetry={() => { loadSchedules(); refreshHooks(); loadStores(); }} />
         ) : triggers === null ? <ListSkeleton rows={6} what="triggers" /> : triggers.length === 0 ? (
-              unreadable.length > 0 ? null : !q && filter === 'all' ? (
+              unreadable.length > 0 || partialFailure ? null : !q && filter === 'all' ? (
                 <PresetEmptyState
                   title="No triggers"
                   hint="A trigger runs an action when something happens. Each of these opens the create form already filled in, ready for you to review and save."
