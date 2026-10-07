@@ -25,7 +25,7 @@ The existing two-service Compose path remains available from the same checkout:
 
 ```bash
 cp .env.example .env         # fill in provider keys / options (all optional)
-docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build
+docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build gideon-gateway gideon-web
 ```
 
 Two Compose services come up:
@@ -39,7 +39,7 @@ Set `GIDEON_GATEWAY_IMAGE` and `GIDEON_WEB_IMAGE` to complete image references w
 are using published images. Build the local defaults with `compose.build.yaml`:
 
 ```bash
-docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build
+docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build gideon-gateway gideon-web
 ```
 
 ## Ports
@@ -60,8 +60,7 @@ that certificate, mount a real one over `/etc/nginx/certs/gideon.{crt,key}`.
 
 State lives in the named volume `gideon_home`, mounted at `/data` inside the gateway
 container (`GIDEON_HOME=/data`, `GIDEON_WORKSPACE=/data/workspace`). It holds config,
-credentials, memory, knowledge, apps, and the workspace, which is everything that has
-to survive a container recreation. The single-container command uses the same volume.
+credentials, memory, knowledge, apps, and the workspace, including installed app metadata/data and the derived writable `app-python` dependency prefix; configured external paths need separate persistence. The single-container command uses the same volume.
 
 ```bash
 docker exec gideon du -sh /data    # single-container state size
@@ -74,8 +73,8 @@ Compose volume, so take a snapshot before using that option.
 
 ## Environment (`.env`)
 
-The single-container command accepts `--env-file .env` before the image name. Compose
-reads the repo-root `.env` through each service's `env_file`. Copy `.env.example` and
+The single-container command accepts `--env-file .env` before the image name. The Compose gateway
+reads the repo-root `.env` through its `env_file`. Copy `.env.example` and
 set only what you need. The common variables are:
 
 | Variable | Default | Notes |
@@ -84,7 +83,7 @@ set only what you need. The common variables are:
 | `GIDEON_WEB_IMAGE` | `gideon-web:local` | console image reference |
 | `GIDEON_PORT` | `10000` | gateway port inside the container |
 | `GIDEON_BIND_HOST` | `0.0.0.0` (in both images) | so port-forwarding works |
-| `GIDEON_AUTH_MODE` | `local_token` | only `none` is honored as an override, and it forces a loopback bind |
+| `GIDEON_AUTH_MODE` | `local_token` | supported values are `local_token` and `none`; none forces loopback and unsupported values refuse startup |
 | `GIDEON_LOGIN_USER` | (unset) | seeds the owner login once, at first boot |
 | `GIDEON_LOGIN_PASSWORD` | (unset) | the password for that login (≥12 characters) |
 
@@ -94,7 +93,7 @@ in-app update instructions.
 
 ## Getting the dashboard URL
 
-In the default `local_token` auth mode the access URL (with a one-time token) is printed
+In the default `local_token` auth mode the access URL (with a gateway access token) is printed
 to the gateway logs at startup, and it can be regenerated at any time:
 
 ```bash
@@ -138,9 +137,9 @@ Three things worth knowing:
 Prefer a Docker/compose secret, or an `EnvironmentFile` with 0600 permissions, over a
 world-readable `.env`. These two variables are as sensitive as the password itself.
 
-> `GIDEON_AUTH_MODE=api_key` is **not** wired up: `AuthConfig.from_env` honors only
-> `none` (which forces a loopback bind). Use the owner login above for headless access, or
-> mint a long-lived token with `gideon token --ttl`.
+`GIDEON_AUTH_MODE=api_key` and `oauth2` are unsupported and refused during parsing.
+Use the owner login or the actual gateway token path. Token lifetime is bounded by
+the gateway policy; a tokenized URL is a credential, not a public health link.
 
 ## Backups
 
@@ -198,14 +197,13 @@ State in `gideon_home` carries across the recreation. Snapshot before upgrading 
 [Backups](#backups)) and read the [CHANGELOG](../../CHANGELOG.md) for breaking changes.
 Gideon is pre-1.0.
 
-## Slack channel (optional)
+## Channel integrations
 
-The compose file includes an opt-in `gideon-slack` service behind the `with-slack`
-profile. It runs `gideon slack` against the same volume:
-
-```bash
-docker compose -f infrastructure/compose/compose.yaml --profile with-slack up -d
-```
+Configure channel apps through the running gateway's app/provider surfaces. The base
+Compose file defines gateway and web services; it does not define a `with-slack`
+profile or a separate `gideon slack` command. Use explicit service targets in the
+checkout build command above. Channel connections still require their actual app
+configuration and credentials.
 
 ## Troubleshooting
 

@@ -1,264 +1,94 @@
 # Platforms
 
-The runtime includes Linux and macOS service paths, with Linux-container and WSL2
-options for Windows hosts. Use the [checkout setup](../../README.md#run-from-a-checkout)
-or an operator-supplied package or image. No public package index, image registry,
-installer endpoint, or release repository is assumed.
+Gideon includes a Python gateway, a Rust Hypermid daemon, a web console, Electron desktop
+packaging and a Capacitor mobile shell. A source path or build target is not a qualified
+release for every host. Use the actual distribution and configuration for your platform.
 
-## Qualification scope
+| Environment | Implemented path | What to check |
+|---|---|---|
+| Linux | Python gateway, systemd, Linux containers and desktop packaging | Architecture, native dependencies, configured programs and OS wrapping |
+| macOS | Python gateway, launchd and desktop packaging | Architecture, permissions, native dependencies, signing/notarization of supplied distribution |
+| Windows with WSL2 | Linux runtime inside a WSL distribution | Host filesystem, forwarding and service availability |
+| Windows with Docker Desktop | Linux container recipe | Available image architecture, persistent volume, networking and host capabilities |
+| Native Windows | Platform-specific source support exists in parts of the tree | No native desktop packaging/release qualification is established by this guide |
+| iOS/Android | Capacitor shell connected to a gateway | Native permissions, configured gateway access, signing and store distribution |
 
-Platform support must be established for the revision and deployment being used.
-Focused local checks in this rewrite do not certify the full platform matrix.
+## Source requirements and packaging
 
-| Environment | Source path | Qualification boundary |
-| --- | --- | --- |
-| Linux | Python gateway; systemd integration; Linux container images | Verify architecture, dependencies, isolation, and the intended user flows |
-| macOS | Python gateway; launchd integration; desktop packaging target | Verify local behavior and any distribution signing requirements |
-| Windows with WSL2 | Linux runtime inside a WSL2 distribution | Verify filesystem, networking, and service behavior on that host |
-| Windows with Docker Desktop | Linux images using the WSL2 backend | Build locally or select operator-published image references |
-| Native Windows | No desktop packaging command in the current workspace | Not a qualified native release |
+The [checkout recipe](../../README.md#run-from-a-checkout) requires Python 3.12+,
+Node.js 22.12+ and npm for console builds. Runtime wheel builds compile Hypermid with
+Rust/Cargo; the checkout pins Rust 1.91.1. An explicitly supplied compatible daemon can
+be used through `GIDEON_PREBUILT_HYPERMID_DAEMON` during packaging.
 
-The [desktop guide](DESKTOP.md#platforms) distinguishes runtime deployment from native
-application packaging. The guidance below describes environment setup rather than
-recording a completed release validation.
+The console and assistant surface have separate build paths. A complete supplied wheel
+or container can include native binaries and web assets, but the installer name alone
+does not prove that those assets exist. No public package index, image registry or
+release endpoint is required or assumed. See [Getting started](GETTING_STARTED.md) and
+[Containers](CONTAINERS.md).
 
-## The `[models]` extra, per architecture
+## Optional local models
 
-`python -m pip install -e '.[models]'` from the checkout pulls the local-embedding stack. Wheel
-availability, not Gideon, is what varies by arch. Read it from the committed
-`uv.lock`, which is the resolver's own record and so stays honest as versions move:
+`pyproject.toml` declares `embeddings`, `stt`, `tts` and aggregate `models` extras.
+The locked dependency set and the target Python/OS/architecture determine which wheels
+can install. A wheel entry in `uv.lock` is resolver evidence, not proof that every
+extra installs or loads on every architecture. Do not infer native library, GPU or
+Alpine compatibility from one package's wheel availability.
 
-| Package | x86-64 | arm64 (macOS) | arm64 (Linux) | Note |
-|---|---|---|---|---|
-| `faiss-cpu` | wheel | `macosx_14_0_arm64` | `manylinux_2_28_aarch64` + `musllinux_1_2_aarch64` | musllinux wheel means Alpine works too |
-| `torch` | wheel | `macosx_14_0_arm64` | `manylinux_2_28_aarch64` | CPU build; no CUDA on arm |
-| `sentence-transformers` | yes | yes | yes | `py3-none-any`: pure Python, arch-independent |
+Model memory and disk needs depend on the selected runtime and model. A remote binding
+can avoid a local inference stack, but it does not make every optional capability
+available. Diagnose an actual failed load instead of assuming any out-of-memory event
+is caused by one library. `gideon doctor` distinguishes setup evidence from a completed
+inference or transcription.
 
-**So `[models]` installs from wheels on every arch we claim**, with no source build and no
-compiler needed. Verify it yourself without an arm box:
+On macOS, speech and embedding libraries can bring incompatible native/OpenMP runtimes
+into one process. Package discovery without import is not a successful model load.
+Exercise the selected integration on the target host before relying on it.
 
-```bash
-python3 - <<'PY'
-import re
-blk = re.search(r'\[\[package\]\]\nname = "torch"(.*?)(?=\n\[\[package\]\]|\Z)',
-                open("uv.lock").read(), re.S).group(1)
-print([w for w in re.findall(r'([\w.\-]+\.whl)', blk) if "aarch64" in w or "arm64" in w])
-PY
-```
+## Windows through WSL2
 
-### macOS OpenMP (`libomp`) and dependency checks
-
-Local speech and embedding libraries can load different OpenMP runtimes into the
-same process. On macOS, importing `faster_whisper` and its transitive dependencies
-alongside PyTorch can expose a duplicate `libomp` initialization hazard, potentially
-aborting the process before Python can report an exception.
-
-The doctor's `faster_whisper` dependency check uses `importlib.util.find_spec` to
-locate the package without importing it or loading `torch`. Its “installed” result
-confirms package discovery only; it does not certify that transcription, native
-libraries, or model loading work. Exercise the selected speech model separately to
-qualify its runtime on the target host.
-
-### RAM floor on Pi-class boards
-
-The embedding stack, not the gateway, is what strains small boards. The gateway
-itself is light; `torch` plus a loaded embedding model is the heavy part.
-
-- **Under 2 GB RAM**: skip the extra. Install the checkout without the `models` extra and use a remote
-  provider for embeddings. Everything except local embedding works unchanged.
-- **2-4 GB (Pi 4/5 class)**: `[models]` can work, but add swap before first use, because
-  the model load is the spike rather than steady state:
-  ```bash
-  sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
-  sudo mkswap /swapfile && sudo swapon /swapfile
-  # persist: echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-  ```
-  Prefer a small model, and expect the first ingest to be slow.
-- **4 GB and up**: no special handling.
-
-If you hit an OOM kill during ingest rather than at startup, it is the model load, so
-add swap or drop the extra. It is not a database or gateway problem.
-
----
-
-## Windows via WSL2
-
-Windows has no native build. The supported path is **WSL2** (Windows Subsystem
-for Linux, version 2): a real Linux kernel inside Windows where Gideon
-runs as an ordinary Linux install. The Windows-side browser reaches the
-dashboard through WSL2's automatic localhost forwarding.
-
-If you would rather not run a Linux shell at all, use
-[Windows via Docker Desktop](#windows-via-docker-desktop) below. Docker Desktop
-itself uses a WSL2 backend, but you never touch the Linux shell. The rest of
-this section is for running Gideon directly in WSL2.
-
-### 1. Install in WSL2
-
-From a WSL2 shell (Ubuntu or any distro), install exactly as on Linux, with
-`uv`, which brings its own Python 3.12:
+From a Linux shell in WSL, follow the source recipe or install an explicitly supplied
+compatible Linux wheel. For the checkout bootstrap:
 
 ```bash
-uv tool install gideon
-gideon setup      # interactive: workspace directory + timezone
+sh infrastructure/website/install.sh
+gideon setup
 gideon gateway
 ```
 
-`gideon doctor` prints a `platform: WSL detected` line and tells you
-whether the background service will work (see below).
+The bootstrap requires its documented toolchain when building from source. Use the
+access URL the gateway prints; whether Windows can reach it depends on that WSL host's
+localhost forwarding and networking configuration.
 
-### 2. Keep your home on ext4, not on /mnt/c (this matters)
+Keep database/state files on the Linux filesystem when possible. Mounted Windows paths
+have different filesystem and locking behavior; validate them before placing
+`GIDEON_HOME` or active workspaces there. This guide does not supply a measured universal
+performance ratio.
 
-Store `~/.gideon/` on the WSL **ext4** filesystem (that is, under your Linux
-home, `/home/<you>`), and **not** under `/mnt/c`, the mounted Windows drive.
+`gideon service install` uses the Linux systemd path. It requires systemd to be available
+inside the chosen WSL distribution. Without it, run the gateway in a foreground shell
+or configure an appropriate host launcher. Do not assume the VM starts solely because
+a Linux service file was installed.
 
-The `/mnt/c` mount crosses the Windows/Linux filesystem boundary (a 9P network
-protocol), and small random I/O across it is dramatically slower, often
-10-20x. Gideon's SQLite databases and FTS index do exactly that kind of
-I/O, so a home on `/mnt/c` makes chat history, memory, and search crawl.
+## Windows through Docker Desktop
 
-Leave `GIDEON_HOME` unset (it defaults to `~/.gideon`) or point it at
-another ext4 path. Do not set it to a `/mnt/c/...` path.
-
-### 3. Opening the dashboard (localhost forwarding + wslview)
-
-WSL2 automatically forwards `localhost` between Windows and the Linux VM, so the
-dashboard URL the gateway prints (`http://localhost:10000/...`) opens directly
-in a **Windows** browser.
-
-On boot the gateway prints the URL prominently and then tries to open it. Inside
-WSL there is no Linux browser to launch, so Gideon hands the URL to
-[`wslview`](https://github.com/wslutilities/wslu) (from the `wslu` package),
-which opens it in your Windows default browser. Most WSL distros ship `wslu`. If
-`wslview` is missing, install it (`sudo apt install wslu`) or just click the URL
-the gateway printed. Auto-open never blocks startup, so a missing `wslview` is not
-an error.
-
-### 4. Background service needs systemd (opt-in on WSL2)
-
-`gideon service install` registers a systemd unit so the gateway starts on
-boot and restarts on failure. WSL2 runs systemd only when you opt in. Enable it
-once:
-
-1. Create or edit `/etc/wsl.conf` inside your distro:
-
-   ```ini
-   [boot]
-   systemd=true
-   ```
-
-2. From **Windows** (PowerShell or CMD), fully restart the distro so the change
-   takes effect:
-
-   ```powershell
-   wsl --shutdown
-   ```
-
-   Reopen your WSL shell. `gideon doctor` should now report
-   `service: systemd active`.
-
-Without systemd the background service will not persist. In that case, either
-run the gateway in a foreground shell (`gideon gateway`) whenever you need
-it, or start it on Windows login via **Task Scheduler** with a
-`wsl -d <distro> -- gideon gateway` action.
-
----
-
-## Windows via Docker Desktop
-
-Docker Desktop runs the configured Linux images or builds them from this checkout,
-so the Windows host does not need a Python installation. You do need Docker Desktop with
-its **WSL2 backend**, which is the default. The legacy Hyper-V backend is not tested.
-
-### 1. Get the compose file and a `.env`
-
-Obtain the checkout from the operator-configured repository, then run from its root:
+Run the Linux container recipe from the checkout, using a Docker engine able to build
+or run the selected image. The Windows host does not need the runtime's Python installed.
+Use the repo-root `.env` and the persistent named volume as described in
+[Containers](CONTAINERS.md). Paths passed into the runtime are container paths.
 
 ```powershell
 copy .env.example .env
+docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build gideon-gateway gideon-web
 ```
 
-Open `.env` and set at least one provider key. **Paths in `.env` must be
-container paths, not Windows paths**, because the gateway runs inside Linux, where
-`C:\Users\you\...` means nothing. Leave `GIDEON_HOME` alone, since compose
-already sets it to `/data`, backed by a named volume.
+Default published ports bind host loopback. A named volume keeps runtime state inside
+the container engine's managed filesystem. Avoid assuming an arbitrary NTFS bind mount
+has the same locking and permission behavior. `docker compose down` keeps the volume;
+`down -v` deletes it. Take a snapshot before removing state.
 
-> **Why the `.env` must sit at the repo root:** `compose.yaml` declares
-> `env_file: ../../.env`, two levels up from `infrastructure/compose/`. If you copy
-> the compose file somewhere else on its own, that relative path breaks and your
-> keys silently do not load.
+Container restart policy replaces the gateway's system-service installation. It depends
+on the container engine itself running. Host desktop/camera/audio/browser capabilities
+are not automatically available inside a container.
 
-### 2. Start it
-
-```powershell
-docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build
-```
-
-This builds the local gateway and web images. To use published images instead, set
-`GIDEON_GATEWAY_IMAGE` and `GIDEON_WEB_IMAGE` to complete references supplied by the
-operator, then omit the build overlay. No registry is selected by default.
-
-### 3. Open the dashboard
-
-Ports are published on **loopback only** (`127.0.0.1`), which is what you want on
-a laptop:
-
-| URL | What |
-|---|---|
-| `https://localhost:3443` | the dashboard (HTTP/2; SSE + WebSocket streams) |
-| `http://localhost:3000` | 308-redirects to the HTTPS port above |
-| `http://localhost:10000` | the gateway API directly |
-
-The HTTPS certificate is **self-signed** out of the box, so the browser shows a
-warning on first visit. That is expected, so click through. To replace the certificate,
-mount a real one over `/etc/nginx/certs/gideon.{crt,key}`.
-
-Docker Desktop forwards published ports to Windows `localhost` automatically, so
-no port-proxy or firewall rule is needed for loopback access.
-
-### 4. Volume semantics: use the named volume, not a bind mount
-
-State lives in the `gideon_home` **named volume** mounted at `/data`. Keep
-it that way on Windows. A bind mount from an NTFS path (`-v C:\...:/data`) crosses
-the Windows↔Linux filesystem boundary, and Gideon's SQLite databases do
-small random I/O plus file locking across it, which is both much slower and a
-known source of locking oddities. The named volume lives inside the WSL2 VM's
-ext4 disk and behaves like native Linux storage.
-
-Useful volume operations:
-
-```powershell
-docker volume inspect compose_gideon_home     # where it lives
-docker compose -f infrastructure/compose/compose.yaml down  # stop, KEEP the volume
-docker compose -f infrastructure/compose/compose.yaml down -v  # stop and DELETE state
-```
-
-Prefer `gideon snapshot` (run inside the gateway container) over copying
-the volume by hand:
-
-```powershell
-docker compose -f infrastructure/compose/compose.yaml exec gideon-gateway gideon snapshot
-```
-
-### 5. Updating
-
-For a local build, obtain the intended repository revision and rebuild:
-
-```powershell
-docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build
-```
-
-For operator-published images, update the configured image references, then run
-`docker compose -f infrastructure/compose/compose.yaml pull` followed by
-`docker compose -f infrastructure/compose/compose.yaml up -d`.
-
-The named volume survives, so your state carries across the upgrade.
-
-### Known limits on this path
-
-- **No `gideon service install`.** Container restart policy replaces it, because
-  `restart: unless-stopped` already brings the stack back when Docker Desktop
-  starts. Enable *Start Docker Desktop when you log in* for boot behaviour.
-- **The desktop shell does not run on Windows** (it ships for macOS and Linux, so
-  see [the desktop guide](DESKTOP.md#platforms)) and is unrelated to this path.
-- **Docker Desktop's Hyper-V backend is untested.** Use WSL2.
+See [Desktop](DESKTOP.md), [Companion apps](COMPANION_APPS.md) and
+[Security limits](../security/LIMITATIONS.md).
