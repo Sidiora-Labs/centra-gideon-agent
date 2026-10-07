@@ -115,19 +115,19 @@ class ProviderCoverage:
 NOT_GATEABLE: dict[str, ProviderCoverage] = {
     "kiro-cli": ProviderCoverage(
         provider="kiro-cli",
-        measurement="AAP-3 sweep (K13, K15) + AAP-5 live re-drive 2026-08-18: one turn, 6 tool calls, 1 gated, 5 ungated (4x todo_list + 1 file read)",
+        measurement="Recorded kiro-cli coverage includes a 2026-08-18 turn with six tool calls: one permission request and five calls without a permission request (four task-list calls and one file read).",
         entries=(
             NotGateable(
                 tool="todo_list",
-                reason="kiro's native task-list tool emits a tool_call frame and a SEL 'invoked' row but never a session/request_permission, so no host gate — deny-list, task-mode, PreToolUse — can run for it.",
-                observation="G27: seven of thirteen tool calls in one turn ('Creating task list: …', 'Completing #1/#2/#3') executed with no permission request, each labelled risk='destructive' by the host, in the same turns where the read, the write and the rm each raised a card.",
+                reason="The task-list tool emits a tool-call event without a session/request_permission event. Host controls that depend on a permission request cannot gate this operation.",
+                observation="In a recorded thirteen-call turn, seven task-list calls executed without permission requests and were classified as destructive by the host. File-read, file-write and deletion operations in those turns did request permission.",
                 title_patterns=("creating task list", "completing #", "task list"),
                 state=ResidualState.ACCEPTED,
             ),
             NotGateable(
                 tool="fs_read",
-                reason="kiro self-approves its OWN file reads: the read raises no session/request_permission even though the write in the same turn does, so a read of a path the host would have questioned is never offered for a decision.",
-                observation="AAP-5 live re-drive 2026-08-18 against real kiro-cli: in one turn 'Creating todo_probe.txt' raised a card while 'Reading todo_probe.txt:1-10' (kind='read') did not — 6 tool calls, 1 gated, 5 ungated. Effective risk resolves to SAFE, so this residue is labelled, never turn-aborting.",
+                reason="Some file reads execute without a session/request_permission event, even when a file write in the same turn requests permission. The host cannot present a decision for those reads.",
+                observation="A recorded 2026-08-18 turn requested permission for a file write but not for a file read. This accepted read limitation is labelled without aborting the turn.",
                 title_patterns=("reading ",),
                 state=ResidualState.ACCEPTED,
             ),
@@ -135,28 +135,28 @@ NOT_GATEABLE: dict[str, ProviderCoverage] = {
     ),
     "claude-code": ProviderCoverage(
         provider="claude-code",
-        measurement="AAP-5 Phase-1 SEL re-read (O96): 7 persisted rows with outcome='ungated', provider='claude-code', across 4 sessions and 2 tool titles. RETRACTS the earlier AAP-1 zero-residual claim, which runtime disproved: chat_runner records 'ungated_declared' whenever not_gateable_entry() matched, so a plain 'ungated' row is proof the registry held nothing for that title.",
+        measurement="Recorded claude-code coverage contains seven persisted ungated events across four sessions and two tool titles. These events do not support a claim of universal host permission coverage.",
         entries=(
             NotGateable(
                 tool="Terminal",
-                reason="claude-code runs its shell tool without emitting a session/request_permission for it. The host's deny-list, task-mode gate and blocking PreToolUse hooks all hang off that frame, so none of them ran. NOT accepted: a shell command that reaches the OS with no host decision point is not a limitation we are willing to go quiet about.",
-                observation="O97: the execute-kind share of O96's 7 'ungated' rows carries title='Terminal' and reason='no session/request_permission for this tool_call'.",
+                reason="Some shell calls execute without a session/request_permission event. Host deny-list, task-mode and blocking pre-tool controls that depend on that event cannot gate these calls. This remains an unaccepted limitation.",
+                observation="Recorded execute-kind ungated events include the Terminal title and report that no permission request was received for the tool call.",
             ),
             NotGateable(
                 tool="Read File",
-                reason="claude-code self-approves its own file reads — the same missing frame — so a read of a path the host would have questioned is never offered for a decision. NOT accepted: effective risk resolves to SAFE so it never aborts a turn, but nobody ever blessed it, and an unblessed hole stays loud.",
-                observation="O98: 'Read File' is the second of the two titles in O96's 7-row 'ungated' set for provider='claude-code'.",
+                reason="Some file reads execute without a session/request_permission event. The host cannot present a decision for those reads. This remains an unaccepted limitation; effective SAFE risk does not abort the turn.",
+                observation="Read File is one of the two tool titles in the seven recorded ungated claude-code events.",
             ),
         ),
     ),
     "codex": ProviderCoverage(
         provider="codex",
-        measurement="AAP-5 Phase-1 live drive (O99-O102): 4 plain 'ungated' rows on provider='codex' — a read, an in-workspace write, an out-of-workspace write and a network call. RETRACTS the earlier AAP-2 zero-residual claim.",
+        measurement="Recorded codex coverage includes four ungated events: a file read, a workspace write, a write outside the workspace and a network call. These events do not support a claim of universal host permission coverage.",
         entries=(
             NotGateable(
                 tool="codex-native",
-                reason="codex is its own first-line permission authority: under HOST_AUTHORITY_MODE='default' it escalates almost nothing, so its whole native tool surface — reads, writes, shell, network — can execute before the host has a decision point. NOT accepted: an out-of-workspace write that completed with no card is the exact shape §2.2 exists to make loud.",
-                observation="O99-O101: four plain 'ungated' rows in one AAP-5 Phase-1 drive — a read, an in-workspace write, an out-of-workspace write ('printf … > /private/tmp/aap2b-outside-probe.txt', which EXECUTED) and a network call ('curl https://example.com'). Vacuity floor for the same drive (O102): codex DOES escalate on retry, and 'git push' was escalated and correctly deny-listed — so 'escalates almost nothing' measures codex, not a dead harness.",
+                reason="In default permission mode, native file, shell and network operations can execute before the host receives a permission request. A completed write outside the workspace without a host decision remains an unaccepted limitation.",
+                observation="Recorded operations include a read, a workspace write, a completed write outside the workspace and a network call without host permission requests. Other calls in the same recording did request permission, including a push operation that the deny-list refused.",
                 title_patterns=(),
             ),
         ),
