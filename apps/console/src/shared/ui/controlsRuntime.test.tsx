@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { Copy, List, Grid2X2 } from 'lucide-react'
 import { Button } from './Button'
 import { IconButton } from './IconButton'
@@ -47,7 +47,12 @@ describe('shared action availability', () => {
     const button = screen.getByRole('button', { name: 'Sync now' })
     expect(button).toHaveAttribute('aria-busy', 'true')
     expect(button).toBeDisabled()
-    expect(screen.getByText('Synchronizing…').closest('[aria-hidden]')).not.toBeNull()
+    expect(within(button).getByText('Synchronizing…').closest('[aria-hidden]')).not.toBeNull()
+    const descriptionId = button.getAttribute('aria-describedby')!
+    const description = document.getElementById(descriptionId)!
+    expect(description).toHaveClass('sr-only')
+    expect(description).toHaveTextContent('Synchronizing…')
+    expect(button).toHaveAccessibleDescription('Synchronizing…')
     expect(button.classList.contains('disabled:opacity-40')).toBe(false)
     fireEvent.click(button)
     expect(activated).toEqual([])
@@ -55,6 +60,8 @@ describe('shared action availability', () => {
     fireEvent.click(button)
     expect(activated).toEqual(['sync'])
     expect(button).not.toHaveAttribute('aria-busy')
+    expect(button).not.toHaveAttribute('aria-describedby')
+    expect(document.getElementById(descriptionId)).toBeNull()
   })
 
   it('preserves action names and custom tooltips across icon-control states', () => {
