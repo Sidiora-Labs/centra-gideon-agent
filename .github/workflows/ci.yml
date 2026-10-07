@@ -281,6 +281,21 @@ jobs:
       #
 
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Install packaged provider CLI
+        run: |
+          provider_prefix="$RUNNER_TEMP/gideon-provider-cli"
+          npm install --prefix "$provider_prefix" --include=optional --no-save --no-package-lock @openai/codex@0.159.1
+          provider_cli=$(node - "$provider_prefix" <<'NODE'
+          const path = require('node:path');
+          const manifest = require.resolve('@openai/codex-linux-x64/package.json', { paths: [process.argv[2]] });
+          process.stdout.write(path.join(path.dirname(manifest), 'vendor/x86_64-unknown-linux-musl/bin/codex'));
+          NODE
+          )
+          test -x "$provider_cli"
+          echo "GIDEON_TEST_PROVIDER_CLI=$provider_cli" >> "$GITHUB_ENV"
       - name: Install tmux (EI-6 durable sessions — real-daemon test leg)
         run: |
           sudo apt-get update -qq
@@ -346,12 +361,29 @@ jobs:
 
       - name: npm ci (root)
         run: npm ci
+      - name: Install packaged provider CLI
+        run: |
+          provider_prefix="$RUNNER_TEMP/gideon-provider-cli"
+          npm install --prefix "$provider_prefix" --include=optional --no-save --no-package-lock @openai/codex@0.159.1
+          provider_cli=$(node - "$provider_prefix" <<'NODE'
+          const path = require('node:path');
+          const manifest = require.resolve('@openai/codex-linux-x64/package.json', { paths: [process.argv[2]] });
+          process.stdout.write(path.join(path.dirname(manifest), 'vendor/x86_64-unknown-linux-musl/bin/codex'));
+          NODE
+          )
+          test -x "$provider_cli"
+          echo "GIDEON_TEST_PROVIDER_CLI=$provider_cli" >> "$GITHUB_ENV"
       - name: Check shipped asset notices
         run: python tooling/scripts/check_asset_notices.py
       - name: prepare the report directory
         run: mkdir -p reports
       - name: typecheck
         run: npm run typecheck:web
+      - name: Install Chromium for browser tests
+        run: |
+          npx playwright install --with-deps chromium
+          chromium_path=$(node -e "process.stdout.write(require('playwright').chromium.executablePath())")
+          echo "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=$chromium_path" >> "$GITHUB_ENV"
       - name: test (vitest)
         env:
           VITEST_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-web-vitest.junit.xml
@@ -395,8 +427,6 @@ jobs:
 
 
       # caught it. Same script as the local pre-push gate (tooling/scripts/run_prepush.sh).
-      - name: install chromium (render smoke)
-        run: npx playwright install --with-deps chromium
       - name: render smoke (built SPA mounts in a real browser)
         run: npm run smoke:render
       - name: Upload the web test report

@@ -27,10 +27,23 @@ from gideon.workspace.capabilities.workspace.provider_terminal import (
     validate_image,
 )
 
-CODEX = (
-    shutil.which("codex")
-    or "/root/.devin-server/extensions/openai.chatgpt-26.908.40401-linux-x64/bin/linux-x86_64/codex"
-)
+
+def _provider_cli():
+    configured = os.environ.get("GIDEON_TEST_PROVIDER_CLI")
+    if configured is not None:
+        path = Path(configured)
+        if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
+            raise ValueError(
+                "GIDEON_TEST_PROVIDER_CLI must be an absolute executable file"
+            )
+        return str(path.resolve())
+    return (
+        shutil.which("codex")
+        or "/root/.devin-server/extensions/openai.chatgpt-26.908.40401-linux-x64/bin/linux-x86_64/codex"
+    )
+
+
+CODEX = _provider_cli()
 
 
 def png():
