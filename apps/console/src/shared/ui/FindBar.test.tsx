@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { render, waitFor, within, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { FindBar } from './FindBar'
+import ts from 'typescript'
 
 
 interface Win { CSS?: { highlights?: Map<string, unknown> }; Highlight?: new (...r: Range[]) => unknown }
@@ -81,18 +82,26 @@ describe('FindBar painter (#546)', () => {
 describe('FindBar is surface-agnostic', () => {
   const SRC = join(process.cwd(), "src")
   const src = readFileSync(join(SRC, 'shared/ui/FindBar.tsx'), 'utf8')
-  const PAGES_IMPORT = /^\s*import[^\n]*from\s*'[^']*\bpages\//m
+  const imports = (source: string) => ts.createSourceFile('FindBar.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    .statements.filter(ts.isImportDeclaration)
+  const importsCaller = (source: string) => imports(source).some(declaration =>
+    ts.isStringLiteral(declaration.moduleSpecifier) && /(?:^|\/)(?:pages|features)\//.test(declaration.moduleSpecifier.text))
 
   it('imports nothing from pages/ — a shared primitive cannot depend on one caller', () => {
-    expect(PAGES_IMPORT.test(src), 'shared/ui/FindBar.tsx must not import from pages/').toBe(false)
+    expect(importsCaller(src), 'shared/ui/FindBar.tsx must not import from pages/').toBe(false)
   })
 
   it('the import rail is not vacuous — it sees this file\'s real imports, and would flag one', () => {
-    expect(src, 'the file under test must actually have imports').toMatch(
-      /^import \{ findInText, matchingIndices \} from '\.\/findText'$/m)
-    expect(PAGES_IMPORT.test("import { ChatTurn } from '../../features/chat/chatTypes'"), 'positive control')
+    const matchingImport = imports(src).find(declaration => ts.isStringLiteral(declaration.moduleSpecifier) && declaration.moduleSpecifier.text === './findText')
+    expect(matchingImport, 'the rail reads the actual FindBar source').toBeDefined()
+    const bindings = matchingImport?.importClause?.namedBindings
+    expect(bindings && ts.isNamedImports(bindings) ? bindings.elements.map(binding => binding.name.text) : [])
+      .toEqual(['findInText', 'matchingIndices'])
+    expect(importsCaller("import { ChatTurn } from '../../features/chat/chatTypes'"), 'positive control')
       .toBe(true)
-    expect(PAGES_IMPORT.test("import { spring } from '../theme/motion'"), 'negative control').toBe(false)
+    expect(importsCaller("import { spring } from '../theme/motion'"), 'negative control').toBe(false)
+    expect(importsCaller('import {\n ChatTurn\n} from "../../features/chat/chatTypes"'), 'multiline control').toBe(true)
+    expect(importsCaller("import { Page } from '../../pages/Page'"), 'legacy caller path control').toBe(true)
   })
 
   it('counts and cycles ITEMS the host defines, and scrolls the one it is on', async () => {

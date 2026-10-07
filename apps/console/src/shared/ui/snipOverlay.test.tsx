@@ -120,7 +120,8 @@ describe('SnipOverlay — motion + honesty rails', () => {
   const src = readFileSync(join(process.cwd(), "src/shared/ui/SnipOverlay.tsx"), 'utf8')
 
   it('honours reduced motion through the app-wide source of truth', () => {
-    expect(src).toMatch(/useReducedMotion \} from 'framer-motion'/)
+    expect(src).toMatch(/import \{[^}]*\buseReducedMotion\b[^}]*\} from '\.\.\/theme\/motion'/)
+    expect(src).toMatch(/const reduce = useReducedMotion\(\)/)
     expect(src).toMatch(/const enterScale = reduce \? 1 :/)
     expect(src).toMatch(/const enterY = reduce \? 0 :/)
   })

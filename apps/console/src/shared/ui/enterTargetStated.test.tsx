@@ -54,7 +54,9 @@ describe('an Enter shortcut states its target', () => {
   it('a form SUBMIT on Enter is not this defect — the falsified candidate', () => {
     const src = strip(readFileSync(join(SRC, 'features/tasks/TaskForm.tsx'), 'utf8'))
     expect(src, 'it binds Enter').toMatch(/key === 'Enter'/)
-    expect(src, 'but to submit, not to pick out of a list').toMatch(/isProject \? createProject\(\) : createList\(\)/)
+    expect(src, 'Enter calls the native create handler').toMatch(/key === 'Enter'[\s\S]{0,120}create\(\)/)
+    expect(src, 'the handler creates a project').toMatch(/creating === 'project'[\s\S]{0,120}api\.createProject\(/)
+    expect(src, 'the alternative creates a task list').toMatch(/else \{[\s\S]{0,120}api\.createTaskList\(/)
     expect(src, 'so it indexes nothing').not.toMatch(/key === 'Enter'[\s\S]{0,120}\[0\]/)
   })
 })

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { CompanionPage } from './CompanionPage'
+import { navigationItems, ROUTABLE_ROOTS } from '../../app/shell/navigationModel'
 import { invalidateKeys } from '../../shared/data/data'
 import type { PendingApproval } from '../../shared/data/api'
 
@@ -174,11 +175,12 @@ describe('the route is registered under the URL doctrine', () => {
   })
 
   it('stays out of NAV and ROUTABLE — a deep link, not a desktop nav tile', () => {
-    const nav = app.match(/const NAV: NavItem\[\] = \[(.*?)\n\]/s)?.[1] ?? ''
-    expect(nav.length, 'NAV literal must parse or this assertion is vacuous').toBeGreaterThan(100)
-    expect(nav).not.toContain('companion')
-    const routable = app.match(/const ROUTABLE = new Set\(\[(.*?)\]\)/s)?.[1] ?? ''
-    expect(routable.length, 'ROUTABLE literal must parse').toBeGreaterThan(10)
-    expect(routable).not.toContain('companion')
+    for (const hosted of [false, true]) {
+      const nav = navigationItems(hosted)
+      expect(nav.length, 'the actual navigation must be populated').toBeGreaterThan(0)
+      expect(nav.map(item => item.id)).not.toContain('companion')
+    }
+    expect(ROUTABLE_ROOTS.size, 'the actual routable roots must be populated').toBeGreaterThan(0)
+    expect(ROUTABLE_ROOTS.has('companion')).toBe(false)
   })
 })
