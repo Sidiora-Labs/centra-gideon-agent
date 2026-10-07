@@ -11,7 +11,7 @@ const home = mkdtempSync(resolve(tmpdir(), 'capture-console-'))
 let child: ChildProcess
 beforeAll(async () => {
   const root = resolve(process.cwd(), '../..')
-  child = spawn(process.env.GIDEON_TEST_PYTHON || '/tmp/gideon-runtime-venv/bin/python', [resolve(root, 'checks/runtime/capabilities/knowledge/archive_ui_server.py')], {
+  child = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', [resolve(root, 'checks/runtime/capabilities/knowledge/archive_ui_server.py')], {
     cwd: root, env: { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'],
   })
   let errors = ''
@@ -62,7 +62,15 @@ it('previews valid and invalid conversations, imports selected records and prese
   fireEvent.click(screen.getByRole('button', { name: 'Preview archive' }))
   await screen.findByRole('region', { name: 'Conversation selection' })
   expect(screen.getByText('3 conversations found')).toBeInTheDocument()
-  expect(screen.getByRole('checkbox', { name: 'Import Conversation invalid' })).toBeDisabled()
+  const invalid = screen.getByRole('checkbox', { name: 'Import Conversation invalid' })
+  expect(invalid).not.toBeDisabled()
+  expect(invalid).toHaveAttribute('readonly')
+  expect(invalid).toHaveAttribute('aria-readonly', 'true')
+  expect(invalid).toHaveAccessibleDescription(/missing parent/)
+  invalid.focus()
+  expect(invalid).toHaveFocus()
+  fireEvent.click(invalid)
+  expect(invalid).not.toBeChecked()
   expect(screen.getByRole('alert')).toHaveTextContent('missing parent')
   expect(screen.getByRole('button', { name: 'Import selected conversations' })).toBeDisabled()
   fireEvent.click(screen.getByRole('checkbox', { name: 'Import Conversation first' }))
@@ -70,6 +78,7 @@ it('previews valid and invalid conversations, imports selected records and prese
   const target = await screen.findByRole('link', { name: 'Open conversation first' })
   expect(target.getAttribute('href')).toMatch(/^#\/knowledge\/item\//)
   expect(screen.queryByRole('link', { name: 'Open conversation unselected' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Open conversation invalid' })).not.toBeInTheDocument()
   const history = await fetch('/api/capabilities/knowledge/archives').then(r => r.json())
   expect(history.total).toBe(1)
   expect(history.items[0].items).toHaveLength(1)

@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, expect, it } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -17,7 +17,7 @@ beforeAll(async () => {
   writeFileSync(join(vault, 'Other.md'), '# Other\nSecond note')
   writeFileSync(join(home, 'config.json'), JSON.stringify({ knowledge: { external_vault_roots: [allowed] } }))
   const root = resolve(process.cwd(), '../..')
-  child = spawn(process.env.GIDEON_TEST_PYTHON || '/tmp/gideon-runtime-venv/bin/python', [resolve(root, 'checks/runtime/capabilities/knowledge/vaults_ui_server.py')], { cwd: root, env: { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] })
+  child = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', [resolve(root, 'checks/runtime/capabilities/knowledge/vaults_ui_server.py')], { cwd: root, env: { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] })
   let errors = ''
   child.stderr?.on('data', chunk => { errors += String(chunk) })
   let token = ''
@@ -45,9 +45,9 @@ async function registerAndScan() {
   fireEvent.change(screen.getByLabelText('Vault name'), { target: { value: 'Research' } })
   fireEvent.change(screen.getByLabelText('Vault path'), { target: { value: vault } })
   fireEvent.click(screen.getByRole('button', { name: 'Register vault' }))
-  expect(await screen.findByRole('status')).toHaveTextContent('Vault registered')
+  expect(await screen.findByText('Vault registered', { selector: 'p[role="status"]' })).toBeVisible()
   fireEvent.click(screen.getByRole('button', { name: 'Scan vault' }))
-  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('2 notes indexed'))
+  expect(await screen.findByText('2 notes indexed · 0 missing references archived', { selector: 'p[role="status"]' })).toBeVisible()
 }
 
 it('registers an allowed real vault, scans notes and opens canonical references', async () => {
@@ -85,7 +85,7 @@ it('creates a new contained note and returns it through live search', async () =
   fireEvent.change(screen.getByLabelText('Note path'), { target: { value: 'Created.md' } })
   fireEvent.change(screen.getByLabelText('Markdown content'), { target: { value: 'Unique created phrase' } })
   fireEvent.click(screen.getByRole('button', { name: 'Create note' }))
-  expect(await screen.findByRole('status')).toHaveTextContent('saved atomically')
+  expect(await screen.findByText('Created.md saved atomically', { selector: 'p[role="status"]' })).toBeVisible()
   fireEvent.change(screen.getByLabelText('Search notes'), { target: { value: 'unique created' } })
   fireEvent.click(screen.getByRole('button', { name: 'Search' }))
   expect(await screen.findByRole('button', { name: 'Created.md' })).toBeInTheDocument()
