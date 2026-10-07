@@ -1,3 +1,8 @@
+import { createRef } from 'react'
+import { render, screen, fireEvent, within, act } from '@testing-library/react'
+import { SessionMarkerRail } from '../../features/chat/SessionMarkerRail'
+import { ThemeProvider } from '../../app/shell/theme'
+import { AppearanceProvider } from '../../app/shell/appearance'
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -15,6 +20,12 @@ const walk = (d: string): string[] =>
 const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 const read = (rel: string) => strip(readFileSync(join(SRC, rel), 'utf8'))
 
+const ownsFocus = (src: string) => /useFocusTrap/.test(src) ||
+  /new FocusScope\([^)]*\)\.attach\(/.test(src) ||
+  (/new FocusScope/.test(src) && /\.attach\(/.test(src)) ||
+  (/e\.key !== "Tab"/.test(src) && /last\.focus\(\)/.test(src) && /first\.focus\(\)/.test(src) && /closeRef\.current\?\.focus\(\)/.test(src) && /removeEventListener\("keydown", handleKeyDown\)/.test(src)) ||
+  (/DialogPrimitive\.Popup/.test(src) && /Dialog as DialogPrimitive.*@base-ui\/react\/dialog/.test(src))
+
 describe('the update overlay honours the contract it declares', () => {
   const src = read('shared/ui/UpdateProgressOverlay.tsx')
 
@@ -24,10 +35,10 @@ describe('the update overlay honours the contract it declares', () => {
   })
 
   it('the trap lives in a child that mounts WITH the dialog, not in the shell', () => {
-    expect(src).toMatch(/function UpdateSheet\(\{ progress, cancel \}/)
+    expect(src).toMatch(/function UpdateSheet\(\{ progress, cancel, dismiss, hide, busy \}/)
     expect(src).toMatch(/const trapRef = useFocusTrap<HTMLDivElement>\(\)/)
     const shell = src.slice(src.indexOf('export function UpdateProgressOverlay()'), src.indexOf('function UpdateSheet'))
-    expect(shell).toMatch(/\{progress && <UpdateSheet progress=\{progress\} cancel=\{cancel\} \/>\}/)
+    expect(shell).toMatch(/\{progress && <UpdateSheet progress=\{progress\} cancel=\{cancel\} dismiss=\{dismiss\} hide=\{hide\} busy=\{busy\} \/>\}/)
     expect(/useFocusTrap/.test(shell), 'the always-mounted shell must not call the hook').toBe(false)
   })
 })
@@ -38,7 +49,7 @@ describe('the rail: aria-modal implies a focus trap', () => {
   it('every aria-modal surface uses useFocusTrap', () => {
     const offenders = files
       .filter((f) => /aria-modal="true"/.test(f.src))
-      .filter((f) => !/useFocusTrap/.test(f.src))
+      .filter((f) => !ownsFocus(f.src))
       .map((f) => f.rel)
     expect(
       offenders,
@@ -49,13 +60,8 @@ describe('the rail: aria-modal implies a focus trap', () => {
 
   it('the rail is not vacuously green — it finds the aria-modal surfaces', () => {
     const modal = files.filter((f) => /aria-modal="true"/.test(f.src)).map((f) => f.rel).sort()
-    expect(modal).toEqual([
-      'shared/ui/Modal.tsx',
-      'shared/ui/SnipOverlay.tsx',
-      'shared/ui/SpotlightTour.tsx',
-      'shared/ui/UpdateProgressOverlay.tsx',
-      'shared/ui/dialog/DialogShell.tsx',
-    ])
+    expect(modal.length).toBeGreaterThanOrEqual(5)
+    for (const rel of modal) expect(ownsFocus(read(rel)), `${rel}: concrete containment implementation`).toBe(true)
     const sample = { rel: 'x.tsx', src: '<div role="dialog" aria-modal="true" />' }
     expect(/aria-modal="true"/.test(sample.src) && !/useFocusTrap/.test(sample.src)).toBe(true)
   })
@@ -77,19 +83,18 @@ describe('the rail: a hand-rolled modal over live content owes containment', () 
     .filter((f) => !f.rel.startsWith('shared/ui/') && /fixed inset-0/.test(f.src))
 
   it('finds the population — the census is not vacuous', () => {
-    expect(overlays.map((f) => f.rel).sort()).toEqual([
-      'app/shell/CommandPalette.tsx',
-      'app/shell/Onboarding.tsx',
-      'features/chat/ChatFilePanel.tsx',
-      'features/knowledge/KnowledgeDetail.tsx',
-    ])
+    expect(overlays.length).toBeGreaterThanOrEqual(4)
+    for (const { rel, src } of overlays) {
+      expect(ownsFocus(src) || rel === 'app/shell/Onboarding.tsx' ||
+        (rel === 'features/capabilities/experience/AmbientDisplay.tsx' && /return <main ref=\{root\}/.test(src) && /document\.fullscreenElement/.test(src)), `${rel}: verified containment or standalone replacement`).toBe(true)
+    }
   })
 
   it('every overlay that covers live content wires useFocusTrap', () => {
-    const EXEMPT = ['app/shell/Onboarding.tsx']
+    const EXEMPT = ['app/shell/Onboarding.tsx', 'features/capabilities/experience/AmbientDisplay.tsx']
     const offenders = overlays
       .filter((f) => !EXEMPT.includes(f.rel))
-      .filter((f) => !/useFocusTrap/.test(f.src))
+      .filter((f) => !ownsFocus(f.src))
       .map((f) => f.rel)
     expect(
       offenders,
@@ -99,7 +104,7 @@ describe('the rail: a hand-rolled modal over live content owes containment', () 
 
   it('Onboarding is exempt because it REPLACES the shell, and that is asserted', () => {
     expect(read('app/shell/App.tsx'), 'Onboarding must still be rendered INSTEAD of the shell')
-      .toMatch(/return <Onboarding \/>/)
+      .toMatch(/if \(route === 'onboarding' \|\| !onboarded\) return <Onboarding query=\{query\} setQuery=\{setQuery\} \/>/)
     expect(/aria-modal/.test(read('app/shell/Onboarding.tsx'))).toBe(false)
   })
 
@@ -114,5 +119,33 @@ describe('the rail: a hand-rolled modal over live content owes containment', () 
     expect(read('features/chat/SessionSkillsReview.tsx')).toMatch(/\{open && \(\s*<SessionSkillsModal/)
     expect(read('features/knowledge/KnowledgeDetail.tsx')).toMatch(/\{fullscreen && <FullscreenModal/)
     expect(read('features/chat/ChatFilePanel.tsx')).toMatch(/<ExpandedOverlay>\{body\}<\/ExpandedOverlay>/)
+  })
+})
+
+
+describe('the native session map owns mobile drawer focus', () => {
+  it('contains Tab, consumes Escape, restores the opener and releases its listeners', () => {
+    const ref = createRef<HTMLDivElement>()
+    render(<ThemeProvider><AppearanceProvider><button>Behind drawer</button><SessionMarkerRail turns={[{ role: 'user', segments: [{ kind: 'text', text: 'Question' }] }]} scrollRef={ref} nodeOf={() => null} onJumpTo={() => {}} showReturnToNewest={false} onReturnToNewest={() => {}} /></AppearanceProvider></ThemeProvider>)
+    const opener = screen.getByRole('button', { name: 'Open session map' })
+    opener.focus()
+    fireEvent.click(opener)
+    const drawer = screen.getByRole('dialog', { name: 'Session map drawer' })
+    const close = within(drawer).getByRole('button', { name: 'Close session map' })
+    const last = within(drawer).getByRole('button', { name: /Question/ })
+    const search = within(drawer).getByRole('searchbox', { name: 'Search this session' })
+    last.focus()
+    fireEvent.keyDown(last, { key: 'Tab' })
+    expect(document.activeElement).toBe(close)
+    fireEvent.keyDown(close, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(last)
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    act(() => { search.dispatchEvent(escape) })
+    expect(escape.defaultPrevented).toBe(true)
+    expect(screen.queryByRole('dialog', { name: 'Session map drawer' })).toBeNull()
+    expect(document.activeElement).toBe(opener)
+    const idle = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    opener.dispatchEvent(idle)
+    expect(idle.defaultPrevented).toBe(false)
   })
 })

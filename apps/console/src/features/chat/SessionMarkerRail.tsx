@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useMemo, type KeyboardEvent, type RefObject } from 'react'
+import { FocusScope } from '../../shared/ui/focusNavigation'
+import { useDismissKey } from '../../shared/ui/overlayInteraction'
 import { ArrowDown, ListTree, Search, X } from 'lucide-react'
 import { turnText, type ChatTurn } from './chatTypes'
 import { clockTime, fullStamp, isoStamp } from '../../shared/data/epoch'
@@ -42,6 +44,12 @@ export function SessionMarkerRail({
   const [viewport, setViewport] = useState<ViewportPosition>({ top: 0, height: 100 })
   const [current, setCurrent] = useState(0)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const drawerOpener = useRef<HTMLButtonElement>(null)
+  const drawerRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (drawerOpen && drawerRef.current) return new FocusScope(drawerOpener.current).attach(drawerRef.current)
+  }, [drawerOpen])
+  useDismissKey('Escape', () => setDrawerOpen(false), 100, drawerOpen)
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
   const highlightedRoot = useRef<HTMLElement | null>(null)
@@ -167,7 +175,7 @@ export function SessionMarkerRail({
         </div>
       </aside>
       <div className="flex shrink-0 justify-end px-3 py-2 md:hidden" data-slot="session-map-mobile-toolbar">
-        <button type="button" aria-label="Open session map" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}
+        <button ref={drawerOpener} type="button" aria-label="Open session map" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}
           className="relative inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-pill px-3 border border-outline-variant/50 bg-surface/95 text-on-surface-var shadow-md backdrop-blur-md md:hidden">
           <ListTree size={18} aria-hidden="true" />
           <span>Session map</span>
@@ -176,7 +184,7 @@ export function SessionMarkerRail({
       {drawerOpen && (
         <div className="fixed inset-0 z-[var(--z-content)] md:hidden">
           <button type="button" aria-label="Close session map" onClick={() => setDrawerOpen(false)} className="absolute inset-0 bg-scrim/40" />
-          <aside role="dialog" aria-modal="true" aria-label="Session map drawer"
+          <aside ref={drawerRef} role="dialog" aria-modal="true" aria-label="Session map drawer"
             className="absolute inset-y-0 right-0 flex w-72 max-w-[85vw] flex-col border-l border-outline-variant bg-surface p-l shadow-xl">
             <header className="mb-l flex items-center justify-between gap-s">
               <h2 data-type="title-l">Session map</h2>

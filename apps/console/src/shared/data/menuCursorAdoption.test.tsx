@@ -19,12 +19,15 @@ describe('the declaration-implies-implementation census', () => {
   const declaring = new Map<string, string[]>()
   for (const abs of walk(SRC)) {
     const rel = abs.slice(SRC.length + 1)
-    const roles = [...codeOf(rel).matchAll(/role="(menu|listbox)"/g)].map((m) => m[1])
+    const roles = [...codeOf(rel).matchAll(/(?:role="(menu|listbox)"|role: '(menu|listbox)')/g)].map((m) => m[1] ?? m[2])
     if (roles.length) declaring.set(rel, [...new Set(roles)])
   }
   const COMBOBOX = [
     'shared/ui/composer/SlashMenu.tsx', 'shared/ui/composer/MentionMenu.tsx', 'app/shell/CommandPalette.tsx',
     'features/code/CodeCockpitPage.tsx',
+    'features/rooms/RoomsSection.tsx',
+    'shared/vendor/assistant-ui/elements/command-palette.tsx',
+    'shared/vendor/assistant-ui/elements/prompt-library.tsx',
   ]
   const focusMoving = [...declaring.keys()].filter((rel) => !COMBOBOX.includes(rel))
 
@@ -70,10 +73,11 @@ describe('the declaration-implies-implementation census', () => {
       expect(codeOf(rel), `${rel} must not hand-roll ArrowDown`).not.toMatch(/key === 'ArrowDown'/)
     }
     const seg = codeOf('shared/ui/Segmented.tsx')
-    const at = seg.indexOf('function CollapsedOptions')
+    const at = seg.indexOf('function SegmentChoices')
     expect(at, 'the collapsed option list moved — re-anchor this slice').toBeGreaterThan(0)
     expect(seg.slice(at), 'the popup half must use the reducer only').not.toMatch(/key === 'Arrow/)
-    expect(seg.slice(0, at), "the tablist half keeps its own horizontal handler").toMatch(/ArrowRight' \|\| e\.key === 'ArrowDown'/)
+    expect(seg.slice(0, at), "the tablist half delegates its horizontal handler").toMatch(/segmentTarget\(event.key, index, options.length\)/)
+    expect(codeOf('shared/ui/controlState.ts')).toMatch(/ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1/)
   })
 
   it('a listbox carries a name; a menu need not — the role difference axe reported', () => {
@@ -92,13 +96,15 @@ describe('the declaration-implies-implementation census', () => {
 
   it('the typeahead menus keep focus in the composer — a distinction, not a gap', () => {
     for (const rel of COMBOBOX) {
-      expect(codeOf(rel), `${rel} owns its own cursor`).toMatch(/key === 'ArrowDown'/)
+      const cursor = rel.includes('/composer/') ? codeOf('shared/ui/composer/composerTypeahead.tsx') : codeOf(rel)
+      if (rel.includes('/composer/')) expect(codeOf(rel)).toMatch(/useComposerTypeahead/)
+      expect(cursor, `${rel} owns its own cursor`).toMatch(/key === ['"]ArrowDown['"]/)
       expect(codeOf(rel), `${rel} must not move focus onto an option`).not.toMatch(/useMenuCursor/)
     }
   })
 
   it('a header popup portals, or the page body paints over it', () => {
-    expect(codeOf('shared/ui/Segmented.tsx'), 'the collapsed pill must portal its Popover').toMatch(/placement="bottom"[\s\S]{0,80}portal/)
+    expect(codeOf('shared/ui/Segmented.tsx'), 'the collapsed pill must portal its Popover').toMatch(/<Popover portal placement="bottom"/)
     expect(codeOf('shared/ui/HeaderActions.tsx')).toMatch(/createPortal\(/)
   })
 
@@ -265,7 +271,7 @@ describe('the quick-open combobox says what it is doing', () => {
   it('says whether the popover is open — the attribute CommandPalette does not need', () => {
     expect(code).toMatch(/ariaExpanded=\{open && q\.trim\(\)\.length >= 2\}/)
     expect(readFileSync(join(SRC, 'shared/ui/SearchField.tsx'), 'utf8'), 'and the field must pass it through')
-      .toMatch(/'aria-expanded': ariaExpanded/)
+      .toMatch(/aria-expanded=\{props.ariaExpanded\}/)
   })
 
   it('the options are options, and the active one says so', () => {
