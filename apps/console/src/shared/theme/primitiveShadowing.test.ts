@@ -134,17 +134,37 @@ describe('the census is DERIVED, so a ninth shadow cannot arrive unnoticed', () 
   const pageDefs = namesIn(files.filter((f) => !f.includes(`${sep}ui${sep}`)), DEF)
 
   const VERDICTS: Record<string, 'composes' | 'distinct' | 'fixed' | 'owner-taste-call'> = {
-    'Button @ pages/settings/UpdatesPanel.tsx': 'fixed',
-    'FilterMenu @ pages/artifacts/ArtifactsSection.tsx': 'fixed',
-    'Toggle @ pages/tools/ToolsPage.tsx': 'composes',
-    'StatusPill @ pages/settings/bento.tsx': 'composes',
-    'ContextMenu @ pages/files/browse/FileTree.tsx': 'distinct',
-    'Spark @ pages/dashboard/widgets/SystemHealth.tsx': 'distinct',
-    'Field @ pages/settings/settingsUI.tsx': 'distinct',
-    'Field @ pages/projects/ProjectsSection.tsx': 'owner-taste-call',
+    'Button @ shared/vendor/assistant-ui/ui-compat.tsx': 'distinct',
+    'Skeleton @ shared/vendor/assistant-ui/ui-compat.tsx': 'distinct',
+    'Composer @ shared/vendor/assistant-ui/elements/composer.tsx': 'distinct',
+    'Composer @ shared/vendor/assistant-ui/elements/thread-full.aui.tsx': 'distinct',
+    'EmptyState @ shared/vendor/assistant-ui/elements/empty-state.tsx': 'distinct',
+    'SelectionToolbar @ shared/vendor/assistant-ui/elements/quote.aui.tsx': 'distinct',
+    'Button @ features/settings/UpdatesPanel.tsx': 'fixed',
+    'FilterMenu @ features/artifacts/ArtifactsSection.tsx': 'fixed',
+    'Toggle @ features/tools/ToolsPage.tsx': 'composes',
+    'StatusPill @ features/settings/bento.tsx': 'composes',
+    'ContextMenu @ features/files/browse/FileTree.tsx': 'distinct',
+    'Spark @ features/dashboard/widgets/SystemHealth.tsx': 'distinct',
+    'Field @ features/settings/settingsUI.tsx': 'distinct',
+    'Field @ features/projects/ProjectsSection.tsx': 'owner-taste-call',
   }
 
   it('the derived shadow list holds no unjudged name', () => {
+    const compat = read('shared/vendor/assistant-ui/ui-compat.tsx')
+    expect(compat).toMatch(/ButtonProps = ComponentProps<"button">/)
+    expect(compat).toMatch(/forwardRef<HTMLButtonElement, ButtonProps>/)
+    expect(compat).toMatch(/<button ref=\{ref\}[^{]*[\s\S]*?\{\.\.\.props\}/)
+    expect(compat).toMatch(/function Skeleton\(props: ComponentProps<"span">\).*<span aria-hidden \{\.\.\.props\}/)
+    expect(read('shared/vendor/assistant-ui/elements/composer.tsx')).toMatch(/function Composer\(\{ className, \.\.\.props \}: ComponentProps<"div">\)/)
+    expect(read('shared/vendor/assistant-ui/elements/composer.tsx')).toContain('data-slot="composer"')
+    expect(read('shared/vendor/assistant-ui/elements/thread-full.aui.tsx')).toMatch(/import \{[^}]*ComposerPrimitive[^}]*\} from "@assistant-ui\/react"/)
+    expect(read('shared/vendor/assistant-ui/elements/thread-full.aui.tsx')).toContain('<ComposerPrimitive.Root')
+    expect(read('shared/vendor/assistant-ui/elements/empty-state.tsx')).toMatch(/function EmptyState\(\{ className, \.\.\.props \}: ComponentProps<"div">\)/)
+    expect(read('shared/vendor/assistant-ui/elements/empty-state.tsx')).toContain('data-slot="empty-state"')
+    expect(read('shared/vendor/assistant-ui/elements/quote.aui.tsx')).toMatch(/import \{[^}]*SelectionToolbarPrimitive[^}]*\} from "@assistant-ui\/react"/)
+    expect(read('shared/vendor/assistant-ui/elements/quote.aui.tsx')).toContain('<SelectionToolbarPrimitive.Root')
+    expect(read('shared/vendor/assistant-ui/elements/quote.aui.tsx')).toContain('<SelectionToolbarRoot className={className} {...props}>')
     const shadows = [...pageDefs.keys()].filter((n) => uiExports.has(n)).sort()
     expect(uiExports.size, 'the ui/ export scan must resolve').toBeGreaterThan(100)
     expect(shadows.length, 'and some shadows must still be found').toBeGreaterThan(0)

@@ -1,3 +1,4 @@
+import { unavailableWhen } from './unavailable'
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -25,7 +26,7 @@ describe('unavailableWhen — the raw-button carrier', () => {
 
   it('goes natively disabled while busy AND announces it', () => {
     expect(src).toMatch(/if \(opts\?\.busy\) return \{ disabled: true, 'aria-busy': true/)
-    expect(src, 'the file explains why native disabled is kept here').toMatch(/double-fire/)
+    expect(unavailableWhen(true, 'Choose a source', { busy: true })).toEqual({ disabled: true, 'aria-busy': true, title: undefined })
   })
 
   it('returns nothing when nothing is missing', () => {
@@ -33,8 +34,11 @@ describe('unavailableWhen — the raw-button carrier', () => {
   })
 
   it('is actually used, and by raw buttons', () => {
-    const users = walk(SRC).filter((f) => /\bunavailableWhen\(/.test(readFileSync(f, 'utf8')))
+    const users = walk(SRC).filter((f) => /\bunavailableWhen\(|\bdisabledReason=/.test(readFileSync(f, 'utf8')))
     expect(users.length, 'adopting files').toBeGreaterThanOrEqual(10)
+    const button = read('shared/ui/Button.tsx')
+    expect(button).toContain('controlAvailability(disabled, loading, disabledReason)')
+    expect(button).toContain('controlTitle(title, !!state.ariaDisabled, disabledReason)')
     const anyRaw = users.some((f) => /<button[\s\S]{0,400}?unavailableWhen\(/.test(readFileSync(f, 'utf8')))
     expect(anyRaw, 'at least one is the raw-button case it exists for').toBe(true)
   })

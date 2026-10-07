@@ -27,7 +27,7 @@ describe('task 72 silent frontend surfaces', () => {
     const explicit = chat.slice(chat.indexOf('async function optimize()'), chat.indexOf('async function optimizeAndSend'))
     const slash = chat.slice(chat.indexOf('async function optimizeAndSend'), chat.indexOf('function revertOptimize'))
     expect(explicit).toContain("no changes needed.', 'info'")
-    expect(explicit).toContain("before optimizing this prompt.', 'error'")
+    expect(explicit).toMatch(/notify\(isNoModelSetupError\(detail\) \? 'Connect a model before optimizing this prompt\.' : `Couldn't optimize this prompt: \$\{detail\}`, 'error'\)/)
     expect(explicit).toContain("Couldn't optimize this prompt:")
     expect(slash).not.toContain('notify(')
     expect(read('loop/LoopComposer.tsx')).toContain("no changes needed.', 'info'")

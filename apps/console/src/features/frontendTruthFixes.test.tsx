@@ -7,7 +7,11 @@ const read = (path: string) => readFileSync(join(process.cwd(), 'src/features', 
 describe('frontend truth fixes', () => {
   it('scopes streamed text to the open chat and counts only prompt-admitted skills', () => {
     const source = read('ChatPage.tsx')
-    expect(source).toContain("if (d.session !== sessionRef.current) break\n        setStatusText('')")
+    const chunk = source.slice(source.indexOf("case 'chat_chunk':", source.indexOf('const onWs =')), source.indexOf("case 'chat_chunk':", source.indexOf('const onWs =')) + 800)
+    const guard = chunk.indexOf('if (d.session !== sessionRef.current) break')
+    expect(guard).toBeGreaterThan(-1)
+    expect(chunk.indexOf("setStatusText('')")).toBeGreaterThan(guard)
+    expect(chunk.indexOf('coalescer.push(')).toBeGreaterThan(guard)
     expect(source).toContain("skills.filter((s) => s.state === 'admitted' || s.state === 'reduced')")
   })
 

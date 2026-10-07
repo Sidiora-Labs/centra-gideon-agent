@@ -49,6 +49,6 @@ describe('orchestrated surface entrances', () => {
       'shared/theme/motion.ts',
       'features/surfaceEntranceAdoption.test.ts',
       'shared/ui/motion/Entrance.tsx',
-    ])
+    ].sort())
   })
 })

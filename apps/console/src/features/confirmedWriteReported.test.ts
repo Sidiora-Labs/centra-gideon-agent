@@ -76,7 +76,10 @@ function unhandled(): { population: number; findings: Finding[] } {
       seen.add(key)
       population++
       const delegated = new RegExp(`=>\\s*api\\.${m[1]}\\b`).test(body)
-      if (delegated || REPORTS.test(body)) continue
+      const taskErrorFunnel = rel === 'features/tasks/TasksListPage.tsx'
+        && /catch\s*\(error\)\s*\{\s*collection\.showError\(/.test(body)
+        && /error instanceof Error \? error\.message/.test(body)
+      if (delegated || taskErrorFunnel || REPORTS.test(body)) continue
       findings.push({ file: rel, line: s.slice(0, a).split('\n').length, fn, method: m[1] })
     }
   }
@@ -95,6 +98,11 @@ describe('a write the user confirmed reports its failure', () => {
   })
 
   it('every one of them handles the failure', () => {
+    const adapter = readFileSync(join(SRC, 'features/tasks/taskCollectionState.ts'), 'utf8')
+    const page = readFileSync(join(SRC, 'features/tasks/TasksListPage.tsx'), 'utf8')
+    expect(adapter).toMatch(/const showError = \(message: string\) => \{[\s\S]*?setMoveError\(message\)/)
+    expect(adapter).toMatch(/return \{[^;]*moveError, showError/)
+    expect(page).toMatch(/moveError &&[^\n]*<InlineError[^\n]*>\{moveError\}<\/InlineError>/)
     expect(
       findings.map((f) => `${f.file}:${f.line} ${f.fn}() → api.${f.method}`),
       'These functions stop and ASK the user, then drop the failure on the floor — the dialog is ' +
