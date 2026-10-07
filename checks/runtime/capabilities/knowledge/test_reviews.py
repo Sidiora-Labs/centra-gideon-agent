@@ -7,6 +7,7 @@ from threading import Barrier
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.core.config.loader import AppConfig
@@ -269,20 +270,27 @@ def test_scheduled_materialization_previous_local_day_and_replay(reviews):
     assert reviews.list()["total"] == 1
 
 
-def test_actual_tick_dispatch_writes_canonical_note_and_execution_journal(reviews):
+@pytest.mark.asyncio
+async def test_actual_tick_dispatch_writes_canonical_note_and_execution_journal(reviews):
     from gideon.automation.schedule_history import ExecutionJournal
     from gideon.automation.triggers.service import tick
     from gideon.engine.gateway import RuntimeCoordinator
 
+    from gideon.automation.triggers import grants
+    from gideon.security.approval_answer import YOU
+
     schedules = ReviewSchedules(reviews)
     saved = schedule(schedules, timezone="UTC")
     register_action_provider(ReviewActionProvider(schedules))
+    trigger = schedules.triggers.get(saved["trigger_id"]).trigger
+    question = grants.question(trigger)
+    assert question is not None
+    assert grants.grant(trigger, confirmed_revision=question.revision, principal=YOU, shown=question.shown)
+    schedules.triggers.upsert(trigger)
     stamp = datetime.fromisoformat(
         saved["next_fire_at"].replace("Z", "+00:00")
     ).timestamp()
-    result = asyncio.run(
-        tick(schedules.triggers, now=stamp + 1, persist=True, base_dir=reviews.home)
-    )
+    result = await tick(schedules.triggers, now=stamp + 1, persist=True, base_dir=reviews.home)
     assert len(result.fires) == 1
     fire = result.fires[0]
     assert fire.trigger.id == saved["trigger_id"]
@@ -293,11 +301,11 @@ def test_actual_tick_dispatch_writes_canonical_note_and_execution_journal(review
             AppConfig(), no_dashboard=True, no_crons=True, no_open=True
         )
         await runtime._fire_store_trigger(
-            fire.trigger, {"scheduled_for": fire.scheduled_for}
+            fire.trigger, fire.to_dict()
         )
         return await ExecutionJournal(reviews.home).list_for_job(saved["trigger_id"])
 
-    records, total = asyncio.run(dispatch())
+    records, total = await dispatch()
     assert total == 1
     assert records[0]["status"] == "success"
     assert reviews.list()["total"] == 1
@@ -308,9 +316,7 @@ def test_actual_tick_dispatch_writes_canonical_note_and_execution_journal(review
     assert receipt["request_id"].startswith("scheduled-" + saved["id"])
     assert schedules.triggers.get(saved["trigger_id"]).trigger.run_count == 1
     assert (
-        asyncio.run(
-            tick(schedules.triggers, now=stamp + 2, persist=True, base_dir=reviews.home)
-        ).fires
+        (await tick(schedules.triggers, now=stamp + 2, persist=True, base_dir=reviews.home)).fires
         == []
     )
 
@@ -475,11 +481,13 @@ def test_http_preview_save_schedules_and_rejected_scope_selectors(reviews):
     async def journey():
         state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
         state._knowledge_store = reviews.store
-        app = web.Application()
+        app = web.Application(middlewares=[token_auth_middleware()])
         app["state"] = state
         register(app)
         root = "/api/capabilities/knowledge/reviews"
         async with TestClient(TestServer(app)) as client:
+            assert (await client.get(root)).status == 403
+            client.session.headers["Authorization"] = "Bearer " + generate_token("knowledge-owner")
             response = await client.get(
                 root + "/preview?period=weekly&date=2026-09-25&timezone=UTC"
             )

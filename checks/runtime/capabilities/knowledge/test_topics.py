@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.cognition.memory_service import MemoryService
@@ -342,13 +343,13 @@ def test_real_http_topic_refresh_isolation_and_delete(topics, tmp_path):
     async def journey():
         state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
         state._knowledge_store = topics.store
-        app = web.Application()
+        app = web.Application(middlewares=[token_auth_middleware()])
         app["state"] = state
         register(app)
         other_store = KnowledgeStore(str(tmp_path / "other.db"))
         other_state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
         other_state._knowledge_store = other_store
-        other = web.Application()
+        other = web.Application(middlewares=[token_auth_middleware()])
         other["state"] = other_state
         register(other)
         secret = "sk-" + "a" * 48
@@ -362,6 +363,9 @@ def test_real_http_topic_refresh_isolation_and_delete(topics, tmp_path):
             TestClient(TestServer(app)) as client,
             TestClient(TestServer(other)) as isolated,
         ):
+            assert (await client.get(root)).status == 403
+            client.session.headers["Authorization"] = "Bearer " + generate_token("knowledge-owner")
+            isolated.session.headers["Authorization"] = "Bearer " + generate_token("knowledge-owner")
             body = {
                 "request_id": "http-topic-save",
                 "name": "HTTP topic",

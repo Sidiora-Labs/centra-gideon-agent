@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.core.config.loader import AppConfig
@@ -512,11 +513,12 @@ async def test_http_bucket_link_order_delete_and_repository_guards(
     store = KnowledgeStore(str(home / "knowledge.db"))
     state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
     state._knowledge_store = store
-    app = web.Application()
+    app = web.Application(middlewares=[token_auth_middleware()])
     app["state"] = state
     register(app)
     client = TestClient(TestServer(app))
     await client.start_server()
+    client.session.headers["Authorization"] = "Bearer " + generate_token("knowledge-owner")
     headers = {"X-Session-Key": "dashboard:ui"}
     try:
         created = await (
@@ -574,6 +576,7 @@ async def test_http_bucket_link_order_delete_and_repository_guards(
             await client.post(
                 "/api/capabilities/knowledge/links/repositories",
                 json={"request_id": "no-session", "url": "https://github.com/a/b"},
+                headers={"Authorization": ""},
             )
         ).status == 403
         assert (

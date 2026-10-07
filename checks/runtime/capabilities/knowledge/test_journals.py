@@ -6,6 +6,7 @@ from threading import Barrier
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.core.config.loader import AppConfig
@@ -372,11 +373,13 @@ def test_real_http_journal_canonical_read_and_selector_rejection(journals):
     async def journey():
         state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
         state._knowledge_store = journals.store
-        app = web.Application()
+        app = web.Application(middlewares=[token_auth_middleware()])
         app["state"] = state
         register(app)
         root = "/api/capabilities/knowledge/journals"
         async with TestClient(TestServer(app)) as client:
+            assert (await client.get(root)).status == 403
+            client.session.headers["Authorization"] = "Bearer " + generate_token("knowledge-owner")
             assert (
                 await (await client.get(root + "?date=2025-09-25&timezone=UTC")).json()
             )["journal"] is None
