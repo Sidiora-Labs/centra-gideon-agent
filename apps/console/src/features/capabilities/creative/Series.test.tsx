@@ -10,6 +10,7 @@ let server: ChildProcess
 let apiRoot: string
 let home: string
 const repository = resolve(process.cwd(), '../..')
+const nativeFetch = globalThis.fetch
 
 beforeAll(async () => {
   home = mkdtempSync(`${tmpdir()}/gideon-moodboard-ui-`)
@@ -24,13 +25,28 @@ beforeAll(async () => {
     server.once('exit', code => reject(new Error(`Real server exited ${code}: ${errors}`)))
     server.stdout?.on('data', chunk => {
       output += chunk.toString()
-      const port = output.split('\n').find(line => /^\d+$/.test(line.trim()))
-      if (port) done(`http://127.0.0.1:${port.trim()}/api/capabilities/creative/series`)
+      const line = output.split('\n').find(line => line.startsWith('{') && line.endsWith('}'))
+      if (!line) return
+      const ready = JSON.parse(line) as { port: number; token: string }
+      const origin = `http://127.0.0.1:${ready.port}`
+      globalThis.fetch = (input, init) => {
+        const requestUrl = input instanceof Request ? input.url : String(input)
+        const headers = new Headers(input instanceof Request ? input.headers : undefined)
+        new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+        if (new URL(requestUrl, window.location.href).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+        return nativeFetch(input, { ...init, headers })
+      }
+      done(`${origin}/api/capabilities/creative/series`)
     })
   })
+  const refused = await nativeFetch(apiRoot)
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  expect((await fetch(apiRoot)).status).toBe(200)
 })
 afterEach(() => { cleanup(); location.hash = '' })
 afterAll(async () => {
+  globalThis.fetch = nativeFetch
   if (server && server.exitCode === null) {
     const ended = new Promise<void>(done => server.once('exit', () => done()))
     server.kill('SIGTERM'); await ended
