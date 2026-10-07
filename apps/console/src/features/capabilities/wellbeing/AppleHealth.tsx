@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useRef, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -64,7 +65,7 @@ export default function AppleHealth() {
       {file.filename && <p>Selected: {file.filename}</p>}
       <Field label="Export source"><TextInput value={source} onChange={setSource} required /></Field>
       <label className="block">Format<select className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label="Export format" value={format} onChange={e => setFormat(e.target.value)}><option value="xml">Apple XML</option><option value="zip">Apple ZIP</option><option value="json">Health Auto Export JSON</option><option value="fhir">FHIR JSON</option></select></label>
-      <Button disabled={!file.content_base64} loading={busy} onClick={() => run(false)}>Preview export</Button>
+      <Button disabled={!file.content_base64} disabledReason={busy ? BUSY_REASON : !file.content_base64 ? 'Choose an Apple Health export file first' : undefined} loading={busy} onClick={() => run(false)}>Preview export</Button>
       {preview && current && <div className="space-y-m"><p>{preview.result.metric_count} metrics; {preview.result.lab_count} laboratory results.</p>{Object.entries(preview.result.skipped).map(([reason, count]) => <p key={reason}>{reason}: {count} skipped</p>)}<p>Preview shows at most 100 metric rows.</p><ul>{preview.result.metrics.map((row, index) => <li key={index}>{row.metric}: {row.value} {row.unit} · {row.stage ?? row.device_source}</li>)}</ul><Button loading={busy} onClick={() => run(true)}>Commit export import</Button></div>}
       {notice && <p role="status">{notice}</p>}
     </section>

@@ -50,7 +50,7 @@ export default function LifeGoalsPage({ endpoint = '/api/capabilities/identity/g
       </form></section>
       <section className="space-y-m rounded-lg bg-surface-container p-l"><h2 data-type="title-l">Sessions for selected goal</h2>{!goal.id && <p>Save or select a goal to plan a session.</p>}
         {sessions.filter(row => row.goal_id === goal.id).map(row => <button key={row.id} className="block underline" onClick={() => { setSession(row); setSessionRequest(crypto.randomUUID()) }}>{row.title} · {row.status} · {new Date(row.start_at).toLocaleString()}</button>)}
-        <Button variant="secondary" disabled={!goal.id} onClick={freshSession}>New session</Button>
+        <Button variant="secondary" disabled={!goal.id} disabledReason={!goal.id ? 'Save this goal before starting a new session' : undefined} onClick={freshSession}>New session</Button>
         <form className="space-y-m rounded-lg bg-surface-container p-l" onSubmit={e => { e.preventDefault(); void perform(async () => {
           const saved = await call<Session>('/sessions', { goal_id: goal.id, title: session.title, start_at: session.start_at, end_at: session.end_at, notes: session.notes, status: session.status, ...(session.id ? { id: session.id } : {}), expected_revision: session.revision || 0, request_id: sessionRequest })
           setSession(saved); setSessionRequest(crypto.randomUUID()); await load()

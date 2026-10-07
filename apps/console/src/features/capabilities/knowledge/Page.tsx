@@ -55,7 +55,7 @@ export default function Page() {
         <h2 data-type="label-l"><a className="text-primary underline" href={item.source_link}>{item.title || 'Untitled'}</a></h2>
         <time data-type="caption" className="text-on-surface-low">{item.original_at}</time><p className="break-words text-on-surface-var">{item.excerpt}</p>
       </li>)}</ul>
-      <div className="flex gap-m"><Button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 20))}>Previous</Button><Button disabled={data.next_offset === null} onClick={() => setOffset(data.next_offset ?? offset)}>Next</Button></div>
+      <div className="flex gap-m"><Button disabled={offset === 0} disabledReason={offset === 0 ? 'This is the first page' : undefined} onClick={() => setOffset(Math.max(0, offset - 20))}>Previous</Button><Button disabled={data.next_offset === null} disabledReason={data.next_offset === null ? 'There is no next page' : undefined} onClick={() => setOffset(data.next_offset ?? offset)}>Next</Button></div>
     </> : null}
   </div></ListScaffold></main>
 }

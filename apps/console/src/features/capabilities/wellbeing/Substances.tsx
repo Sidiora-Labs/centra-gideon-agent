@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { Table, THead, Th, Td } from '../../../shared/ui/Table'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useHashRoute } from '../../../app/shell/useHashRoute'
@@ -45,9 +46,9 @@ function Editor({ row, presets, presetMode, saved }: { row: Product | Entry | nu
       <Field label="Product name"><TextInput value={name} onChange={setName} required /></Field>
       {kind === 'alcohol' ? <div className="grid gap-m sm:grid-cols-2"><Field label="Volume per serving (mL)"><TextInput value={volume} onChange={setVolume} required /></Field><Field label="ABV (%)"><TextInput value={abv} onChange={setAbv} required /></Field></div> : <Field label="Labeled nicotine per unit (mg)"><TextInput value={mg} onChange={setMg} required /></Field>}
     </>}
-    {!presetMode && <><Field label="Servings or units"><TextInput value={count} onChange={setCount} required /></Field><Field label="Observed at (with offset)"><TextInput value={observed} onChange={setObserved} required /></Field><Field label="Entry source"><TextInput value={source} onChange={setSource} required disabled={!!row} /></Field><Field label="Entry notes"><TextInput value={notes} onChange={setNotes} /></Field></>}
+    {!presetMode && <><Field label="Servings or units"><TextInput value={count} onChange={setCount} required /></Field><Field label="Observed at (with offset)"><TextInput value={observed} onChange={setObserved} required /></Field><Field label="Entry source" hint={!!row ? 'Create a new record to use another source' : undefined}><TextInput value={source} onChange={setSource} required disabled={!!row} disabledReason={!!row ? 'Create a new record to use another source' : undefined} /></Field><Field label="Entry notes"><TextInput value={notes} onChange={setNotes} /></Field></>}
     {error && <p role="alert" className="text-danger">{error}</p>}
-    <Button type="submit" loading={busy} disabled={row?.deleted}>{presetMode ? 'Save product preset' : 'Save consumption entry'}</Button>
+    <Button type="submit" loading={busy} disabled={row?.deleted} disabledReason={busy ? BUSY_REASON : row?.deleted ? 'This entry has been deleted' : undefined}>{presetMode ? 'Save product preset' : 'Save consumption entry'}</Button>
   </form>
 }
 

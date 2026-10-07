@@ -96,7 +96,7 @@ export default function EpigeneticRecords() {
     {editing && <form onSubmit={save} className="grid gap-m rounded-lg border border-outline-variant/20 bg-surface-container p-l sm:grid-cols-2">
       <Field label={w[3]}><TextInput required value={reportId} onChange={setReportId} /></Field>
       <Field label={w[4]}><DateInput value={observed} onChange={setObserved} /></Field>
-      <Field label={w[5]}><TextInput required disabled={selected !== null} value={source} onChange={setSource} /></Field>
+      <Field label={w[5]} hint={selected !== null ? 'Create a new record to use another source' : undefined}><TextInput required disabled={selected !== null} disabledReason={selected !== null ? 'Create a new record to use another source' : undefined} value={source} onChange={setSource} /></Field>
       <fieldset><legend>{w[6]}</legend>
         <Field label={w[7]}><TextInput type="number" value={bio} onChange={setBio} /></Field><Field label={w[8]}><TextInput value={bioUnit} onChange={setBioUnit} /></Field>
         <Field label={w[9]}><TextInput type="number" value={chronological} onChange={setChronological} /></Field><Field label={w[10]}><TextInput value={chronoUnit} onChange={setChronoUnit} /></Field>
