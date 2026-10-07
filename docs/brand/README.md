@@ -9,6 +9,8 @@ The active mark is a geometric G in a blue-to-teal gradient. Its vector source i
 | [gideon-mark-192.png](gideon-mark-192.png) | The same icon at 192 x 192 | Small icon slots that cannot take the 512 pixel file |
 | [avatar.png](avatar.png) | A 512 x 512 copy of the application icon | Avatar slots, such as a profile picture or a bot avatar |
 
-Keep these four filenames. The mobile store-asset build and the repository README link them by name, so a rename breaks a consumer. That build script is `apps/mobile/scripts/generate_store_assets.py`.
+Keep these four filenames. The mobile store-asset build and the repository README link them by name, so a rename breaks a consumer. That build script is `apps/mobile/scripts/generate_store_assets.py`; it uses native
+librsvg/Cairo libraries, so running it requires those actual system dependencies.
+Do not regenerate or replace the supplied artwork merely to refresh documentation.
 
 The navy on these PNGs is `#0f1724`, the same background the mobile launcher icon uses. These are local assets: their presence does not imply publication to an organization profile, a public site, or a release service.

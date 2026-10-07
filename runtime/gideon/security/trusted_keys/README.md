@@ -1,37 +1,31 @@
-# In-tree signing trust store
+# App signing trust store
 
-Every `*.pub` in this directory is a **minisign-format Ed25519 public key** that
-`gideon.security.signing.verify_bundle()` will accept as a bundle signer. It ships inside
-the wheel, so verifying an app bundle needs no network and no key-distribution protocol
-— the keys travel with the code that uses them, at the same trust level as the code.
+The verifier reads recognized minisign-format Ed25519 public keys from `*.pub` files
+in this directory. The filename stem supplies the signer label. A bundle comment or
+registry claim cannot choose that recognized identity.
 
-**The filename stem is the signer identity.** `Gideon.pub` renders as
-`signed by Gideon` on the install-consent surface. The identity deliberately comes
-from the packaged filename and never from a comment inside the key file, so a bundle
-author cannot choose the name their bundle is attributed to.
+The current checkout contains no public keys here. A signature requiring an absent key
+is refused; an unsigned bundle follows its actual source trust and other install gates.
+A recognized signature can raise a community source to official trust, but scanning and
+review remain required. It does not certify safety or grant arbitrary runtime permission.
 
-A key id that appears in a signature but not here is an **unknown key** and the install
-is refused. Adding a key is therefore a deliberate act of trust: a `.pub` landing here
-means "signatures from this key install at official tier".
+## Manage keys deliberately
 
-## No private key material lives in this repository
+Adding a public key changes the packaged trust root. Verify the signer independently
+and review the key before shipping it. Never put private seeds into this directory or
+app bundles. Tests use ephemeral keypairs and isolated stores rather than checked-in
+private signing material.
 
-Not the maintainer key, not a test key, not an example key. Tests generate ephemeral
-keypairs at runtime and monkeypatch `signing.trusted_keys_dir()` at a tmp dir, so the
-whole verification path is exercised without a checked-in secret.
-
-## Adding the maintainer key
-
-See `docs/security/SIGNING.md` for the full workflow. In short:
+From the repository root, the key-generation tool is:
 
 ```sh
-python3 scripts/sign_app.py gen-key --signer Gideon --out-dir ~/keys
-cp ~/keys/Gideon.pub src/gideon/trusted_keys/
-# then store ~/keys/Gideon.seed in the password manager + the CI `release`
-# environment secret, and delete the local copy.
+python3 tooling/scripts/sign_app.py gen-key --signer MySigner --out-dir /secure/key-directory
 ```
 
-Until a real key is added here the trust store is empty, which is the **safe** default:
-no signature verifies (unknown key → refused), and unsigned bundles keep installing at
-community tier exactly as before. Verification is live from the first install — it is the
-signer list that the maintainer populates, not the mechanism.
+It creates public and private material outside the repository and refuses to overwrite
+existing key files. Only the reviewed public half belongs in the packaged trust store.
+Choose appropriate secret custody and filesystem protection for the actual publisher.
+
+See [artifact signing](../../../../docs/security/SIGNING.md) for staged-tree verification,
+signature states, commands, and limits. Store changes are not proof that a release was
+signed or published.
