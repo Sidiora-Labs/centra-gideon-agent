@@ -1,3 +1,4 @@
+import { IconButton } from '../../shared/ui/IconButton'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box, Search, FilePlus2, FolderPlus, RefreshCw, GitBranch, Files as FilesIcon, X, Loader2, CornerDownRight, PanelRight, Upload,
@@ -283,9 +284,9 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
                         <Icon size={14} className="shrink-0 opacity-70" />
                         <span className="max-w-[180px] truncate">{t.name}</span>
                         {fileTabs.dirty[t.path] && <span className="size-1.5 shrink-0 rounded-full" style={{ background: 'var(--color-primary)' }} />}
-                        <button type="button" onClick={(e) => { e.stopPropagation(); void closeTab(t.path) }}
-                          aria-label={`Close ${t.name}`} title="Close file"
-                          className="grid size-6 -mr-0.5 shrink-0 place-items-center rounded opacity-50 hover:bg-surface-high hover:opacity-100"><X size={13} /></button>
+                        <IconButton icon={X} size={24} iconSize={13} onClick={(e) => { e.stopPropagation(); void closeTab(t.path) }}
+                          label={`Close ${t.name}`} title="Close file"
+                          className="!rounded -mr-0.5 opacity-50 hover:bg-surface-high hover:opacity-100" />
                       </div>
                     )
                   })}
@@ -358,11 +359,9 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
                       <span className="max-w-[40%] shrink-0 truncate" title={u.name}>{u.name}</span>
                       <Meter size="thin" className="min-w-0 flex-1" label={`Uploading ${u.name}`} pct={u.pct} />
                       <span className="shrink-0 tabular-nums text-on-surface-low">{u.pct}%</span>
-                      <button type="button" aria-label="Cancel upload"
-                        className="shrink-0 rounded p-0.5 text-on-surface-low hover:text-danger"
-                        onClick={() => uploadAbortRef.current?.abort()}>
-                        <X size={13} />
-                      </button>
+                      <IconButton icon={X} label="Cancel upload" size={17} iconSize={13} tone="danger"
+                        className="!rounded text-on-surface-low hover:text-danger"
+                        onClick={() => uploadAbortRef.current?.abort()} />
                     </div>
                   ))}
                 </div>

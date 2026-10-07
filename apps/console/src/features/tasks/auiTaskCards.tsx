@@ -1,3 +1,4 @@
+import { Button } from '../../shared/ui/Button'
 import { useState } from 'react'
 import { TaskCard, type TaskCardState } from '../../shared/vendor/assistant-ui/elements/task-card'
 import { TodoList, type TodoItem } from '../../shared/vendor/assistant-ui/elements/todo-list'
@@ -41,9 +42,9 @@ export function GideonTaskCard({ task, onSaved, onOpen }: {
     <TaskCard label={task.title} meta={task.id} state={taskCardState(task.status)}
       result={task.description || undefined}
       actions={(onOpen || (task.status !== 'done' && task.status !== 'completed' && task.provider !== 'project')) && <div className="flex gap-2">
-        {onOpen && <button type="button" onClick={() => onOpen(task.id)}>Open task</button>}
+        {onOpen && <Button size="xs" variant="secondary" onClick={() => onOpen(task.id)}>Open task</Button>}
         {task.status !== 'done' && task.status !== 'completed' && task.provider !== 'project' &&
-          <button type="button" disabled={busy} onClick={() => void complete()}>Complete task</button>}
+          <Button size="xs" disabled={busy} onClick={() => void complete()}>Complete task</Button>}
       </div>} />
     {error && <p role="alert">{error}</p>}
   </div>

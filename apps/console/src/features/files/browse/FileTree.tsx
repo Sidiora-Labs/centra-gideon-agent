@@ -1,3 +1,5 @@
+import { IconButton } from '../../../shared/ui/IconButton'
+import { Button } from '../../../shared/ui/Button'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronRight, ChevronDown, Pencil, Trash2, Upload, FilePlus2, FolderPlus, MoreHorizontal } from 'lucide-react'
 import { createPortal } from 'react-dom'
@@ -183,10 +185,8 @@ function TreeNode({ entry, depth, dirs, activePath, gitStatuses, onOpenFile, art
         {
 }
         {!renaming && (
-          <button type="button" onClick={openMenuFromButton} aria-label={`Actions for ${entry.name}`}
-            className="absolute right-0.5 top-1/2 -translate-y-1/2 grid size-6 place-items-center rounded text-on-surface-low opacity-0 transition-opacity hover:bg-surface-highest hover:text-on-surface focus-visible:opacity-100 group-hover/row:opacity-100">
-            <MoreHorizontal size={13} />
-          </button>
+          <IconButton icon={MoreHorizontal} size={24} iconSize={13} onClick={openMenuFromButton} label={`Actions for ${entry.name}`}
+            className="absolute right-0.5 top-1/2 -translate-y-1/2 !rounded text-on-surface-low opacity-0 transition-opacity hover:bg-surface-highest hover:text-on-surface focus-visible:opacity-100 group-hover/row:opacity-100" />
         )}
       </div>
       {entry.is_dir && (
@@ -226,8 +226,8 @@ function TreeNode({ entry, depth, dirs, activePath, gitStatuses, onOpenFile, art
           {kids.length === 0 && !creating
             ? <div className="flex flex-wrap items-center gap-2 py-1 text-on-surface-low text-[0.8125rem]" style={{ paddingLeft: 10 + (depth + 1) * 16 + 15 }}>
                 <span>Empty folder.</span>
-                {onCreate && <button type="button" onClick={() => { void startCreate('file') }} className="rounded px-1.5 py-1 text-primary hover:bg-surface-high">New file</button>}
-                <button type="button" onClick={() => uploadInput.current?.click()} className="rounded px-1.5 py-1 text-primary hover:bg-surface-high">Upload files</button>
+                {onCreate && <Button size="xs" variant="ghost-accent" shape="squircle" onClick={() => { void startCreate('file') }} className="!rounded !px-1.5 text-primary hover:bg-surface-high">New file</Button>}
+                <Button size="xs" variant="ghost-accent" shape="squircle" onClick={() => uploadInput.current?.click()} className="!rounded !px-1.5 text-primary hover:bg-surface-high">Upload files</Button>
               </div>
             : kids.map((c) => (
               <TreeNode key={c.path} entry={c} depth={depth + 1} dirs={dirs} activePath={activePath}

@@ -7,16 +7,16 @@ describe('the file-tree row-action trigger', () => {
   const src = readFileSync(join(process.cwd(), "src/features/files/browse/FileTree.tsx"), 'utf8')
 
   it('clicks 24px', () => {
-    expect(src).toMatch(/grid size-6 place-items-center rounded text-on-surface-low/)
+    expect(src).toMatch(/<IconButton icon=\{MoreHorizontal\} size=\{24\}/)
   })
 
   it('absorbs the extra width in its offset, so the glyph does not move', () => {
-    expect(src).toMatch(/absolute right-0\.5 top-1\/2 -translate-y-1\/2 grid size-6/)
-    expect(src, 'the old offset would move the paint').not.toMatch(/absolute right-1 top-1\/2 -translate-y-1\/2 grid size-6/)
+    expect(src).toMatch(/absolute right-0\.5 top-1\/2 -translate-y-1\/2 !rounded/)
+    expect(src, 'the old offset would move the paint').not.toMatch(/absolute right-1 top-1\/2 -translate-y-1\/2 !rounded/)
   })
 
   it('keeps the 13px glyph — the fix is the hit box, not the design', () => {
-    expect(src).toMatch(/<MoreHorizontal size=\{13\} \/>/)
+    expect(src).toMatch(/icon=\{MoreHorizontal\} size=\{24\} iconSize=\{13\}/)
   })
 
   it('stays hidden until the row is hovered or focused', () => {

@@ -1,3 +1,4 @@
+import { IconButton } from '../../shared/ui/IconButton'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { Plus, List, LayoutGrid, GitFork, Columns3, MessageSquare, FolderKanban, X, RotateCcw, ListChecks, Target, Code2, Check, CheckCircle2, Trash2, Users, UserRound, Search, Filter, Tag, GripVertical } from 'lucide-react'
@@ -151,7 +152,7 @@ export function TasksListPage({ onCreate, view: viewProp, filter, openId, setVie
       <span data-type="label-s" className="font-semibold text-on-surface tabular-nums">{selected.size} selected</span><span className="h-4 w-px bg-outline-variant/50" aria-hidden />
       <Button size="sm" variant="ghost" disabled={bulkBusy} disabledReason={BUSY_REASON} onClick={() => runBulk('update', { status: 'done' })}><CheckCircle2 size={14} /> Complete</Button>
       <Button size="sm" variant="ghost" disabled={bulkBusy} disabledReason={BUSY_REASON} onClick={async () => { if (await confirmDelete('task', `${selected.size} tasks`)) void runBulk('delete') }}><Trash2 size={14} /> Delete</Button>
-      <button type="button" onClick={clearSelection} aria-label="Clear selection" className="grid size-7 place-items-center rounded-md text-on-surface-low hover:bg-surface-container hover:text-on-surface"><X size={15} /></button>
+      <IconButton icon={X} label="Clear selection" size={28} iconSize={15} onClick={clearSelection} className="!rounded-md text-on-surface-low hover:bg-surface-container hover:text-on-surface" />
     </div></div>}
   </WorkbenchLayout>
 }
@@ -161,7 +162,7 @@ function TaskListBar({ lists, tasks, repeatableId, active, onPick, onReset }: { 
     const picked = active === list.id
     return <span key={list.id} data-type="body-s" className={`inline-flex min-h-8 items-center gap-xs rounded-md border px-s ${picked ? 'border-primary bg-primary text-on-primary' : 'border-outline-variant/30 bg-surface-container text-on-surface-var'}`}>
       <button type="button" aria-label={`Task list: ${list.name}`} aria-pressed={picked} onClick={() => onPick(list)} className="inline-flex min-h-6 items-center gap-xs">{list.name}<span data-type="caption">{tasks.filter(task => task.task_list_id === list.id).length}</span></button>
-      {!!repeatableId && list.project_id === repeatableId && <button type="button" aria-label={`Reset list ${list.name}`} title="Reset this repeatable list (all tasks must be done)" onClick={event => { event.stopPropagation(); onReset(list) }} className="grid size-6 place-items-center rounded-md hover:brightness-125"><RotateCcw size={12} /></button>}
+      {!!repeatableId && list.project_id === repeatableId && <IconButton icon={RotateCcw} label={`Reset list ${list.name}`} title="Reset this repeatable list (all tasks must be done)" size={24} iconSize={12} onClick={event => { event.stopPropagation(); onReset(list) }} className="!rounded-md hover:brightness-125" />}
     </span>
   })}</div>
 }
