@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { TriageDigestCard } from './TriageDigestCard'
 import type { TriageDigestView, TriagePending } from '../../shared/data/api'
 
@@ -57,13 +57,12 @@ describe('digest pending-row accessible names', () => {
 
     render(<TriageDigestCard />)
 
-    const firstYes = await screen.findByRole('button', { name: 'Yes: #1 Review request on #412' })
-    expect(firstYes.textContent).toBe('Yes')
-    expect(screen.getByRole('button', { name: 'No: #1 Review request on #412' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Always: #1 Review request on #412' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Never: #1 Review request on #412' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Yes: #2 Review request on #412' })).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Open item: #1 Review request on #412' })).toBeTruthy()
+    const firstRow = await screen.findByRole('listitem', { name: 'Proposal 1: Draft a reply to Review request on #412, inbox' })
+    const secondRow = screen.getByRole('listitem', { name: 'Proposal 2: Draft a reply to Review request on #412, inbox' })
+    expect(within(firstRow).getByRole('button', { name: 'Yes' }).textContent).toBe('Yes')
+    for (const name of ['No', 'Always', 'Never']) expect(within(firstRow).getByRole('button', { name })).toBeTruthy()
+    expect(within(secondRow).getByRole('button', { name: 'Yes' })).toBeTruthy()
+    expect(within(firstRow).getByRole('link', { name: 'the item' }).getAttribute('href')).toBe('#/inbox?open=1')
   })
 
   it('uses the digest ordinal when a proposal has no title', async () => {
@@ -71,7 +70,8 @@ describe('digest pending-row accessible names', () => {
 
     render(<TriageDigestCard />)
 
-    expect(await screen.findByRole('button', { name: 'Yes: item #7' })).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Open item: item #7' })).toBeTruthy()
+    const row = await screen.findByRole('listitem', { name: 'Proposal 7: Draft a reply to item 7, inbox' })
+    expect(within(row).getByRole('button', { name: 'Yes' })).toBeTruthy()
+    expect(within(row).getByRole('link', { name: 'the item' }).getAttribute('href')).toBe('#/inbox?open=7')
   })
 })

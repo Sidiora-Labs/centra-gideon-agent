@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 
 
-const ENVELOPE = { enabled: true, health: {} }
+const ENVELOPE = { enabled: true, native_source_active: true, sources: [], health: {} }
 
 function mockApi(over: Record<string, unknown> = {}) {
   vi.doMock('../../shared/data/api', async (orig) => ({

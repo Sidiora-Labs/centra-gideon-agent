@@ -38,11 +38,11 @@ describe('proposal apply feedback is announced', () => {
     const { container } = render(<ProposalsLens items={[ITEM('a', 'One')]} onChanged={() => {}} />)
     const approve = await waitFor(() => screen.getByRole('button', { name: /^Approve$/ }))
     await act(async () => { approve.click() })
-    await waitFor(() => expect(outcomeNodes(container)[0].textContent).toBe('Applied.'))
+    await waitFor(() => expect(outcomeNodes(container)[0].textContent).toBe('Proposal applied.'))
     const node = outcomeNodes(container)[0]
     expect(node.className, 'it stops being sr-only once filled').not.toContain('sr-only')
     const carriers = [...container.querySelectorAll('*')]
-      .filter((e) => e.textContent === 'Applied.' && e.children.length === 0)
+      .filter((e) => e.textContent === 'Proposal applied.' && e.children.length === 0)
     expect(carriers.length, 'one sentence, one node — nothing read twice').toBe(1)
   })
 
@@ -59,7 +59,7 @@ describe('proposal apply feedback is announced', () => {
     const src = readFileSync(join(process.cwd(), "src/features/inbox/ProposalsLens.tsx"), 'utf8')
     expect(src, 'role + polite live region present').toMatch(/role="status"\s*\n\s*aria-live="polite"/)
     expect(src, 'sr-only only while empty').toMatch(/: 'sr-only'\}/)
-    expect(src, 'text driven by the outcome').toMatch(/\{outcome \? \(outcome\.ok \? 'Applied\.'/)
+    expect(src, 'text driven by the outcome').toMatch(/\{outcome \? \(outcome\.ok \? outcome\.text/)
     expect(/\{outcome && \([\s\S]{0,160}role="status"/.test(src),
       'a conditionally mounted region is born with its content and is not reliably observed').toBe(false)
   })

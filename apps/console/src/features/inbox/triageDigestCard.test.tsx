@@ -36,7 +36,7 @@ function view(over: Partial<TriageDigestView> = {}): TriageDigestView {
     auto_stage_ran: true,
     auto_done: [],
     pending: [],
-    machine_did: [],
+    journal: [],
     ledger_complete: true,
     ledger_rows: 2,
     ...over,
@@ -147,14 +147,14 @@ describe('an unmeasured value is not rendered as a zero', () => {
   })
 
   it('reports an incomplete ledger rather than an empty one', async () => {
-    proactiveDigest.mockResolvedValue(view({ ledger_complete: false, machine_did: [] }))
+    proactiveDigest.mockResolvedValue(view({ ledger_complete: false, journal: [] }))
     render(<TriageDigestCard />)
     await waitFor(() => expect(screen.getByText(/not recorded/)).toBeTruthy())
     expect(screen.queryByText(/wrote no ledger rows/)).toBeNull()
   })
 
   it('reports a genuinely empty ledger as empty — the pair', async () => {
-    proactiveDigest.mockResolvedValue(view({ ledger_complete: true, machine_did: [] }))
+    proactiveDigest.mockResolvedValue(view({ ledger_complete: true, journal: [] }))
     render(<TriageDigestCard />)
     await waitFor(() => expect(screen.getByText(/wrote no ledger rows/)).toBeTruthy())
   })
@@ -270,33 +270,33 @@ describe('an absent notification is explained, never claimed as delivered', () =
   it('names the quiet-hours window that held the digest back', async () => {
     proactiveDigest.mockResolvedValue(view({
       handed_to_notify: true,
-      quiet_hours: { known: true, enabled: true, start: '22:00', end: '08:00', mute_all: false },
+      notice: { known: true, mute_all: false, min_severity: 'info', rule: 'default', quiet_hours: { enabled: true, start: '22:00', end: '08:00' }, inside: 'suppressed', outside: 'immediate' },
     }))
     render(<TriageDigestCard />)
-    await waitFor(() => expect(screen.getByText(/Quiet hours 22:00–08:00/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/Inside quiet hours 22:00–08:00/)).toBeTruthy())
     expect(screen.queryByText(/delivered/i)).toBeNull()
   })
 
-  it('says mute-all when everything is muted, which is a different cause', async () => {
+  it('says the current policy does not announce a digest when mute-all suppresses it', async () => {
     proactiveDigest.mockResolvedValue(view({
-      quiet_hours: { known: true, enabled: false, start: '', end: '', mute_all: true },
+      notice: { known: true, mute_all: true, min_severity: 'info', rule: 'mute_all', quiet_hours: { enabled: false, start: '', end: '' }, inside: 'suppressed', outside: 'suppressed' },
     }))
     render(<TriageDigestCard />)
-    await waitFor(() => expect(screen.getByText(/All notifications are muted/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/Your current notification policy does not announce it/)).toBeTruthy())
     expect(screen.queryByText(/Quiet hours/)).toBeNull()
   })
 
   it('says UNKNOWN when the settings could not be read, not "quiet hours are off"', async () => {
     proactiveDigest.mockResolvedValue(view({
-      quiet_hours: { known: false, enabled: false, start: '', end: '', mute_all: false },
+      notice: { known: false },
     }))
     render(<TriageDigestCard />)
     await waitFor(() => expect(screen.getByText(/is unknown/)).toBeTruthy())
   })
 
-  it('stays silent when quiet hours are genuinely off — the vacuity pair', async () => {
+  it('reports immediate policy without a quiet-hours clause when quiet hours are off', async () => {
     proactiveDigest.mockResolvedValue(view({
-      quiet_hours: { known: true, enabled: false, start: '22:00', end: '08:00', mute_all: false },
+      notice: { known: true, mute_all: false, min_severity: 'info', rule: 'default', quiet_hours: { enabled: false, start: '22:00', end: '08:00' }, inside: 'immediate', outside: 'immediate' },
     }))
     render(<TriageDigestCard />)
     await waitFor(() => expect(screen.getByText(/What your machine did/)).toBeTruthy())
@@ -308,7 +308,7 @@ describe('an absent notification is explained, never claimed as delivered', () =
 describe('the ledger section permalinks into the run journal', () => {
   it('links every row at the run the digest came from', async () => {
     proactiveDigest.mockResolvedValue(view({
-      machine_did: [{
+      journal: [{
         kind: 'skipped_triage', seq: 4, ordinal: '5', action_type: '', rule: 'dependabot',
         outcome: '', reason: 'automated dependency bump', detail: '', verb: '',
         permalink: '#/workflows/runs/run-abc',

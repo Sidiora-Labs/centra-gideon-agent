@@ -4,12 +4,12 @@ import { approvalToastMessage } from './approvalToast'
 
 describe('approvalToastMessage', () => {
   it('names who is asking, the tool, what it can touch, and where to answer', () => {
-    const msg = approvalToastMessage({ who: 'A subagent', tool: 'bash', session: 'main', risk: 'destructive' })
+    const msg = approvalToastMessage({ who: 'A subagent', tool: 'bash', session: 'main', risk: 'destructive', blastRadius: { writes: false, network: false, shell: true, readOnly: false } })
     expect(msg).toBe('A subagent needs approval to run bash (runs a command) — open main to respond.')
   })
 
   it('uses the SAME facet words as the card, so the two cannot drift', () => {
-    expect(approvalToastMessage({ who: 'Another chat session', tool: 'web_fetch', session: 's1', risk: 'caution' }))
+    expect(approvalToastMessage({ who: 'Another chat session', tool: 'web_fetch', session: 's1', risk: 'caution', blastRadius: { writes: false, network: true, shell: false, readOnly: false } }))
       .toContain('(uses the network)')
   })
 
@@ -20,9 +20,11 @@ describe('approvalToastMessage', () => {
   })
 
   it('works without a risk (the field is absent on some paths) and claims nothing extra', () => {
-    const named = approvalToastMessage({ who: 'A subagent', tool: 'read_file', session: 's1' })
+    const named = approvalToastMessage({ who: 'A subagent', tool: 'read_file', session: 's1', blastRadius: { writes: false, network: false, shell: false, readOnly: true } })
     expect(named).toContain('reads only')
     expect(named).not.toContain('writes files')
+    expect(approvalToastMessage({ who: 'A subagent', tool: 'read_file', session: 's1', risk: 'safe' })).not.toMatch(/\(/)
+    expect(approvalToastMessage({ who: 'A subagent', tool: 'bash', session: 's1', risk: 'destructive' })).not.toMatch(/\(/)
     expect(approvalToastMessage({ who: 'A subagent', tool: 'grep', session: 's1' })).not.toMatch(/\(/)
   })
 
