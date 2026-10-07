@@ -10,11 +10,12 @@ let server: ChildProcess
 let endpoint = ''
 let directory = ''
 const root = resolve(process.cwd(), '../..')
+const nativeFetch = globalThis.fetch
 beforeAll(async () => {
   directory = await mkdtemp(resolve(tmpdir(), 'gideon-stories-ui-'))
-  server = spawn('/tmp/gideon-runtime-venv/bin/python', [
+  server = spawn(process.env.GIDEON_TEST_PYTHON || resolve(root, '.venv/bin/python'), [
     resolve(root, 'checks/runtime/capabilities/identity/progress_ui_server.py'), resolve(directory, 'capabilities/identity/progress.sqlite3'),
-  ], { env: { ...process.env, PYTHONPATH: resolve(root, 'runtime') } })
+  ], { env: { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: directory } })
   endpoint = await new Promise<string>((resolveEndpoint, reject) => {
     let output = ''
     let errors = ''
@@ -22,15 +23,31 @@ beforeAll(async () => {
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
-      const line = output.split('\n').find(value => value.startsWith('http://'))
-      if (line) { clearTimeout(timer); resolveEndpoint(line.trim()) }
+      const line = output.split('\n').find(value => value.startsWith('{') && value.endsWith('}'))
+      if (!line) return
+      const ready = JSON.parse(line) as { port: number; token: string }
+      const origin = `http://127.0.0.1:${ready.port}`
+      globalThis.fetch = (input, init) => {
+        const requestUrl = input instanceof Request ? input.url : String(input)
+        const headers = new Headers(input instanceof Request ? input.headers : undefined)
+        new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+        if (new URL(requestUrl, window.location.href).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+        return nativeFetch(input, { ...init, headers })
+      }
+      clearTimeout(timer)
+      resolveEndpoint(`${origin}/api/capabilities/identity/progress`)
     })
     server.once('error', error => { clearTimeout(timer); reject(error) })
     server.once('exit', code => { clearTimeout(timer); reject(new Error('HTTP server exited ' + code + ': ' + errors)) })
   })
+  const refused = await nativeFetch(endpoint)
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  expect((await fetch(endpoint)).status).toBe(200)
 })
 afterEach(() => { cleanup(); window.location.hash = '' })
 afterAll(async () => {
+  globalThis.fetch = nativeFetch
   if (server && server.exitCode === null) {
     await new Promise<void>(resolveExit => { server.once('exit', () => resolveExit()); server.kill('SIGTERM') })
   }
