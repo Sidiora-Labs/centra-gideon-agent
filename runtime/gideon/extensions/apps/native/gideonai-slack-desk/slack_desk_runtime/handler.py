@@ -17,6 +17,8 @@ Both modes are tracked in the core, channel-agnostic
 writes.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -27,12 +29,18 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
+from slack_desk_runtime.blocks import deprecation_warning_block
+from slack_desk_runtime.client import SlackDeskClientOps
+from slack_desk_runtime.format import (
+    split_message,
+    strip_thinking_tags,
+    to_slack_desk_mrkdwn,
+)
 from slack_desk_runtime.settings import ACTIVATION_REVIEW
 
 from gideon.sdk.channel import (
-    EVENT_COMPACTION_STATUS,
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
     EVENT_TEXT_CHUNK,
@@ -49,60 +57,191 @@ from gideon.sdk.channel import (
     AppConfig,
     ChannelMessage,
     ConversationLog,
+)
+from gideon.sdk.channel import DelegationSupervisor as SubagentManager
+from gideon.sdk.channel import (
     HistoryConsolidator,
     LLMEvent,
     ModelProvider,
 )
 from gideon.sdk.channel import PromptAssembler as ContextBuilder
 from gideon.sdk.channel import (
+    Stats,
+    Task,
     TriggerStore,
     TrustVerdict,
     config_dir,
     config_path,
-    delete_all_automations,
-    delete_automation,
-    describe_cadence,
     is_sensitive_path,
     redact_credentials,
     redact_exfiltration_urls,
     save_conversation_turn,
     sel,
     session_restrictions,
-    set_automation_paused,
-    to_schedule_row,
     trust_mode,
     validate_file_path,
 )
-
-if TYPE_CHECKING:
-    from .delivery import SlackDeskDelivery
-
-from slack_desk_runtime.blocks import deprecation_warning_block
-from slack_desk_runtime.client import SlackDeskClientOps
-from slack_desk_runtime.format import (
-    SLACK_MSG_LIMIT,
-    TRUNCATION_NOTICE,
-    split_message,
-    strip_thinking_tags,
-    to_slack_desk_mrkdwn,
-)
-
-from gideon.sdk.channel import ApprovalAnswer
-from gideon.sdk.channel import DelegationSupervisor as SubagentManager
-from gideon.sdk.channel import Principal, Stats, Task
 from gideon.sdk.channel import voice_reply as _voice_reply_fn
 
+from .approvals import _ACTION_APPROVE as _ACTION_APPROVE
+from .approvals import _ACTION_REJECT as _ACTION_REJECT
+from .approvals import _ACTION_TRUST as _ACTION_TRUST
+from .approvals import _APPROVAL_BRIEF_META_KEY as _APPROVAL_BRIEF_META_KEY
+from .approvals import _OUTCOME_APPROVED as _OUTCOME_APPROVED
+from .approvals import (
+    _OUTCOME_REJECTED,
+)
+from .approvals import _READ_CLAIM_FACET as _READ_CLAIM_FACET
+from .approvals import _SLACK_SECTION_TEXT_LIMIT as _SLACK_SECTION_TEXT_LIMIT
+from .approvals import _approval_brief_line as _approval_brief_line
+from .approvals import (
+    _build_approval_blocks,
+)
+from .approvals import _pending_approvals as _pending_approvals
+from .approvals import _PendingApproval as _PendingApproval
+from .approvals import _request_approval as _wait_for_approval
+from .approvals import handle_interaction as handle_interaction
+from .commands import _do_spawn as _do_spawn
+from .commands import _handle_cron_command as _cron_command
+from .commands import (
+    _handle_sessions_command,
+    _handle_spawn_command,
+)
+from .commands import _relative_next_run as _relative_next_run
+from .commands import _remove_all_jobs as _remove_all_jobs
+from .compaction import ContextUsageProvider as ContextUsageProvider
+from .compaction import (
+    _append_footer_actions,
+    _filter_options_brackets,
+)
+from .compaction import _handle_compact_command as _compact_session
+from .compaction import (
+    _safe_final_update,
+    _safe_update,
+    build_timing_footer,
+)
+from .reactions import _DEFAULT_PHASE_EMOJIS as _DEFAULT_PHASE_EMOJIS
+from .reactions import (
+    _PHASE_DEBOUNCE_SECS,
+)
+from .reactions import _STALL_EMOJI_HARD as _STALL_EMOJI_HARD
+from .reactions import _STALL_EMOJI_SOFT as _STALL_EMOJI_SOFT
+from .reactions import (
+    _STALL_HARD_SECS,
+    _STALL_SOFT_SECS,
+    ReactionClient,
+    ReactionSettings,
+)
+from .reactions import StatusReactionController as _ReactionController
+from .reactions import _build_phase_emojis as _build_phase_emojis
+from .reactions import (
+    _tool_to_phase,
+    load_phase_emojis,
+)
 
-class ReactionClient(Protocol):
+# Compatibility exports consumed by native delivery and existing app integrations.
+__all__ = [
+    "_ACTION_APPROVE",
+    "_ACTION_REJECT",
+    "_ACTION_TRUST",
+    "_APPROVAL_BRIEF_META_KEY",
+    "_OUTCOME_APPROVED",
+    "_READ_CLAIM_FACET",
+    "_SLACK_SECTION_TEXT_LIMIT",
+    "_approval_brief_line",
+    "_pending_approvals",
+    "_PendingApproval",
+    "handle_interaction",
+    "_do_spawn",
+    "_relative_next_run",
+    "_remove_all_jobs",
+    "ContextUsageProvider",
+    "_DEFAULT_PHASE_EMOJIS",
+    "_STALL_EMOJI_HARD",
+    "_STALL_EMOJI_SOFT",
+    "_build_phase_emojis",
+]
 
-    async def add_reaction(self, channel: str, ts: str, emoji: str) -> None: ...
-
-    async def remove_reaction(self, channel: str, ts: str, emoji: str) -> None: ...
+_PHASE_EMOJIS = load_phase_emojis()
 
 
-class ContextUsageProvider(Protocol):
+class StatusReactionController(_ReactionController):
+    def __init__(
+        self, slack_desk: ReactionClient, channel: str, ts: str, *, enabled: bool = True
+    ) -> None:
+        super().__init__(
+            slack_desk,
+            channel,
+            ts,
+            enabled=enabled,
+            settings=lambda: ReactionSettings(
+                _PHASE_EMOJIS, _PHASE_DEBOUNCE_SECS, _STALL_SOFT_SECS, _STALL_HARD_SECS
+            ),
+        )
 
-    def context_usage_pct(self) -> float | None: ...
+
+async def _add_phase_reaction(
+    slack_desk: SlackDeskClientOps, channel: str, ts: str, phase: str
+) -> None:
+    emoji = _PHASE_EMOJIS.get(phase)
+    if emoji is not None:
+        await slack_desk.add_reaction(channel, ts, emoji)
+
+
+async def _request_approval(
+    slack_desk: SlackDeskClientOps,
+    provider: ModelProvider,
+    channel: str,
+    thread_ts: str,
+    event: LLMEvent,
+    session_key: str = "",
+    is_dm: bool = True,
+) -> str:
+    return await _wait_for_approval(
+        slack_desk,
+        provider,
+        channel,
+        thread_ts,
+        event,
+        session_key,
+        is_dm,
+        render=_build_approval_blocks,
+        update=_safe_update,
+        timeout=_APPROVAL_TIMEOUT,
+    )
+
+
+def _handle_cron_command(
+    text: str, store: TriggerStore, channel: str, thread_ts: str
+) -> str | None:
+    return _cron_command(
+        text,
+        store,
+        channel,
+        thread_ts,
+        redact_urls=redact_exfiltration_urls,
+        redact_secrets=redact_credentials,
+    )
+
+
+async def _handle_compact_command(
+    slack_desk: SlackDeskClientOps,
+    sessions: SessionManager,
+    channel: str,
+    reply_ts: str,
+    msg_ts: str,
+    session_key: str,
+) -> None:
+    await _compact_session(
+        slack_desk,
+        sessions,
+        channel,
+        reply_ts,
+        msg_ts,
+        session_key,
+        add_phase_reaction=_add_phase_reaction,
+        timing_footer=build_timing_footer,
+    )
 
 
 class SessionManager(Protocol):
@@ -186,7 +325,6 @@ _APPROVAL_TIMEOUT = 120.0
 
 # Slack Block Kit section text limit (3000 chars max); leave room for
 # markdown fences (``` ... ```) that wrap the tool input.
-_SLACK_SECTION_TEXT_LIMIT = 2900
 
 # Truncation marker appended when tool_input exceeds the limit
 _TRUNCATION_MARKER = "\n… [truncated]"
@@ -199,298 +337,6 @@ _STATUS_WORKING = "is working on your request"
 
 # Pending approvals: keyed by f"{channel}:{approval_msg_ts}"
 # Module-level dict — safe because gateway runs in a single asyncio event loop.
-_pending_approvals: "dict[str, _PendingApproval]" = {}
-
-# ── Phase-aware reaction constants ──────────────────────────────────────
-
-_DEFAULT_PHASE_EMOJIS: dict[str, str] = {
-    "queued": "eyes",
-    "thinking": "thinking_face",
-    "coding": "man_technologist",
-    "browsing": "globe_with_meridians",
-    "tool": "wrench",
-    "done": "white_check_mark",
-    "error": "scream",
-}
-
-
-def _build_phase_emojis(
-    overrides: dict[str, str | None] | None = None,
-) -> tuple[dict[str, str | None], list[str]]:
-    """Return ``(phase_emoji_dict, unknown_keys)`` with optional overrides applied.
-
-    A phase value may be ``None`` to suppress that phase entirely (no emoji
-    will be added or swapped in for it).  Stall emojis and transitions from
-    other phases are unaffected.
-
-    Unknown keys are collected and returned so callers can surface them
-    to the user (e.g. startup warning) rather than silently dropping them.
-    """
-    result: dict[str, str | None] = dict(_DEFAULT_PHASE_EMOJIS)
-    unknown: list[str] = []
-    for key, value in (overrides or {}).items():
-        if key in _DEFAULT_PHASE_EMOJIS:
-            result[key] = value
-        else:
-            unknown.append(key)
-    return result, unknown
-
-
-try:
-    from slack_desk_runtime.settings import SlackDeskSettings as _SlackDeskSettings
-
-    _overrides = _SlackDeskSettings.load().reactions
-except Exception:
-    logger.warning(
-        "Failed to load reaction overrides from config; using defaults", exc_info=True
-    )
-    _overrides = {}
-_PHASE_EMOJIS, _unknown_phases = _build_phase_emojis(_overrides)
-del _overrides
-if _unknown_phases:
-    logger.warning(
-        "Ignoring unknown slack.reactions keys: %s (valid: %s)",
-        ", ".join(repr(k) for k in _unknown_phases),
-        ", ".join(sorted(_DEFAULT_PHASE_EMOJIS)),
-    )
-del _unknown_phases
-
-
-async def _add_phase_reaction(
-    slack_desk: SlackDeskClientOps, channel: str, ts: str, phase: str
-) -> None:
-    """Add the reaction for *phase* if the user hasn't suppressed it.
-
-    Used by one-shot emoji-ack sites outside ``StatusReactionController``
-    (e.g. ``!command`` handlers).  Honours ``slack.reactions`` ``null``
-    suppression sentinels.
-    """
-    emoji = _PHASE_EMOJIS.get(phase)
-    if emoji is None:
-        return
-    await slack_desk.add_reaction(channel, ts, emoji)
-
-
-_STALL_EMOJI_SOFT = "yawning_face"
-_STALL_EMOJI_HARD = "fearful"
-
-_STALL_SOFT_SECS = 15.0
-_STALL_HARD_SECS = 45.0
-_PHASE_DEBOUNCE_SECS = 0.7
-
-_TERMINAL_PHASES = frozenset({"done", "error"})
-_IMMEDIATE_PHASES = frozenset({"queued"})
-
-_CODING_TOOLS: frozenset[str] = frozenset(
-    {"Bash", "Write", "Edit", "Read", "Glob", "Grep", "NotebookEdit"}
-)
-_WEB_TOOLS: frozenset[str] = frozenset({"WebFetch", "WebSearch", "Browser"})
-
-_CODING_KINDS: frozenset[str] = frozenset(t.lower() for t in _CODING_TOOLS)
-_WEB_KINDS: frozenset[str] = frozenset(t.lower() for t in _WEB_TOOLS)
-
-
-def _tool_to_phase(tool_name: str, tool_kind: str = "") -> str:
-    """Map a tool name/kind to a reaction phase."""
-    kind_lower = tool_kind.lower()
-    if kind_lower:
-        if kind_lower in _CODING_KINDS:
-            return "coding"
-        if kind_lower in _WEB_KINDS:
-            return "browsing"
-    # Extract base tool name for MCP tools (mcp__my-server__Bash → Bash)
-    base = tool_name.split("__")[-1] if "__" in tool_name else tool_name
-    if base in _CODING_TOOLS:
-        return "coding"
-    if base in _WEB_TOOLS:
-        return "browsing"
-    return "tool"
-
-
-class StatusReactionController:
-    """Phase-aware Slack reaction controller with debounce and stall detection.
-
-    Intermediate phases are debounced so rapid tool transitions don't spam
-    the Slack API.  A stall watchdog adds yawning/fearful reactions when
-    the agent appears stuck.
-    """
-
-    def __init__(
-        self, slack_desk: ReactionClient, channel: str, ts: str, *, enabled: bool = True
-    ) -> None:
-        self._enabled = enabled
-        self._slack_desk = slack_desk
-        self._channel = channel
-        self._ts = ts
-        self._loop = asyncio.get_running_loop()
-
-        self._current_emoji: str | None = None
-        self._pending_phase: str | None = None
-        self._debounce_handle: asyncio.TimerHandle | None = None
-        self._stall_soft_handle: asyncio.TimerHandle | None = None
-        self._stall_hard_handle: asyncio.TimerHandle | None = None
-        self._stall_emoji: str | None = None
-        self._stall_paused = False
-        self._finalized = False
-
-    # ── public API ──────────────────────────────────────────────────
-
-    def set_phase(self, phase: str) -> None:
-        """Request a phase transition (may be debounced)."""
-        if self._finalized or not self._enabled:
-            return
-
-        if phase in _TERMINAL_PHASES:
-            self.finalize(error=(phase == "error"))
-            return
-
-        if phase in _IMMEDIATE_PHASES:
-            self._cancel_debounce()
-            emoji = _PHASE_EMOJIS.get(phase, phase)
-            asyncio.ensure_future(self._swap_emoji(emoji))
-            self._reset_stall_watchdog()
-            return
-
-        # Intermediate phase — debounce
-        self._pending_phase = phase
-        self._cancel_debounce()
-        self._debounce_handle = self._loop.call_later(
-            _PHASE_DEBOUNCE_SECS, self._fire_debounce
-        )
-
-    def on_progress(self) -> None:
-        """Reset stall watchdog — call on any LLM/tool activity."""
-        if not self._finalized and not self._stall_paused and self._enabled:
-            self._reset_stall_watchdog()
-
-    def pause_stall_watchdog(self) -> None:
-        """Pause stall detection (e.g. waiting for user approval)."""
-        self._stall_paused = True
-        self._cancel_stall_timers()
-
-    def resume_stall_watchdog(self) -> None:
-        """Resume stall detection after a pause."""
-        self._stall_paused = False
-        if not self._finalized and self._enabled:
-            self._reset_stall_watchdog()
-
-    def finalize(self, error: bool = False) -> None:
-        """Swap to terminal emoji. Idempotent."""
-        if self._finalized or not self._enabled:
-            return
-        self._finalized = True
-        self._cancel_debounce()
-        self._cancel_stall_timers()
-        # Clean up stall emoji before setting terminal
-        asyncio.ensure_future(self._do_finalize(error))
-
-    # ── internal ────────────────────────────────────────────────────
-
-    async def _do_finalize(self, error: bool) -> None:
-        if self._stall_emoji:
-            try:
-                await self._slack_desk.remove_reaction(
-                    self._channel, self._ts, self._stall_emoji
-                )
-            except Exception:
-                pass
-            self._stall_emoji = None
-        terminal = _PHASE_EMOJIS["error" if error else "done"]
-        await self._swap_emoji(terminal)
-
-    def _fire_debounce(self) -> None:
-        """Timer callback — bridge to async."""
-        asyncio.ensure_future(self._apply_pending())
-
-    async def _apply_pending(self) -> None:
-        if self._finalized or self._pending_phase is None:
-            return
-        emoji = _PHASE_EMOJIS.get(self._pending_phase, self._pending_phase)
-        self._pending_phase = None
-        await self._swap_emoji(emoji)
-        self._reset_stall_watchdog()
-
-    async def _swap_emoji(self, new_emoji: str | None) -> None:
-        """Remove old reaction and add new one (skip if same).
-
-        ``new_emoji=None`` means the phase is suppressed by config: remove
-        any previously-applied reaction but do not add a replacement.
-        """
-        if new_emoji == self._current_emoji:
-            return
-        old = self._current_emoji
-        self._current_emoji = new_emoji
-        if old:
-            try:
-                await self._slack_desk.remove_reaction(self._channel, self._ts, old)
-            except Exception:
-                pass
-        if new_emoji is None:
-            return
-        try:
-            await self._slack_desk.add_reaction(self._channel, self._ts, new_emoji)
-        except Exception:
-            pass
-
-    def _cancel_debounce(self) -> None:
-        if self._debounce_handle is not None:
-            self._debounce_handle.cancel()
-            self._debounce_handle = None
-
-    def _cancel_stall_timers(self) -> None:
-        if self._stall_soft_handle is not None:
-            self._stall_soft_handle.cancel()
-            self._stall_soft_handle = None
-        if self._stall_hard_handle is not None:
-            self._stall_hard_handle.cancel()
-            self._stall_hard_handle = None
-
-    def _reset_stall_watchdog(self) -> None:
-        if not self._enabled:
-            return
-        self._cancel_stall_timers()
-        # Remove existing stall emoji
-        if self._stall_emoji:
-            emoji_to_remove = self._stall_emoji
-            self._stall_emoji = None
-            asyncio.ensure_future(self._remove_stall_emoji(emoji_to_remove))
-        if self._stall_paused or self._finalized:
-            return
-        self._stall_soft_handle = self._loop.call_later(
-            _STALL_SOFT_SECS, self._on_stall_soft
-        )
-        self._stall_hard_handle = self._loop.call_later(
-            _STALL_HARD_SECS, self._on_stall_hard
-        )
-
-    async def _remove_stall_emoji(self, emoji: str) -> None:
-        try:
-            await self._slack_desk.remove_reaction(self._channel, self._ts, emoji)
-        except Exception:
-            pass
-
-    def _on_stall_soft(self) -> None:
-        asyncio.ensure_future(self._add_stall_emoji(_STALL_EMOJI_SOFT))
-
-    def _on_stall_hard(self) -> None:
-        asyncio.ensure_future(self._add_stall_emoji(_STALL_EMOJI_HARD))
-
-    async def _add_stall_emoji(self, emoji: str) -> None:
-        if self._finalized:
-            return
-        # Remove previous stall emoji if upgrading
-        if self._stall_emoji and self._stall_emoji != emoji:
-            try:
-                await self._slack_desk.remove_reaction(
-                    self._channel, self._ts, self._stall_emoji
-                )
-            except Exception:
-                pass
-        self._stall_emoji = emoji
-        try:
-            await self._slack_desk.add_reaction(self._channel, self._ts, emoji)
-        except Exception:
-            pass
 
 
 # Trust state
@@ -827,49 +673,7 @@ def _persist_channel_config(
     ProviderSettings.update("gideonai-slack-desk", {"channels": channels})
 
 
-class _PendingApproval:
-    __slots__ = (
-        "provider",
-        "request_id",
-        "session_key",
-        "future",
-        "answers",
-        "delivery",
-        "tenant",
-        "owner",
-        "channel",
-        "thread",
-        "answerer",
-        "on_answer",
-        "chosen_answer",
-    )
-
-    def __init__(
-        self,
-        provider: ModelProvider | None,
-        request_id: str | int,
-        session_key: str = "",
-    ) -> None:
-        self.provider = provider
-        self.request_id = request_id
-        self.session_key = session_key
-        self.future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-        from gideon.sdk.channel import ONE_CALL_ANSWERS
-
-        self.answers: tuple[ApprovalAnswer, ...] = ONE_CALL_ANSWERS
-        self.delivery: "SlackDeskDelivery | None" = None
-        self.tenant = self.owner = self.channel = self.thread = self.chosen_answer = ""
-        self.answerer: Principal | None = None
-        self.on_answer: Callable[[str, Principal], bool] | None = None
-
-
-_OUTCOME_APPROVED = "approved"
-_OUTCOME_REJECTED = "rejected"
-
 # Block Kit action IDs
-_ACTION_APPROVE = "approve_tool"
-_ACTION_TRUST = "trust_tool"
-_ACTION_REJECT = "reject_tool"
 
 
 def set_allowed_users(user_ids: set[str]) -> None:
@@ -1712,225 +1516,6 @@ async def _handle_slash_command(
         reply_ts,
     )
     return ""
-
-
-def _filter_options_brackets(
-    text: str, bracket_hold: str, stream_buffer: str
-) -> tuple[str, str]:
-    """Filter ``[OPTIONS: ...]`` tags from streaming text character-by-character.
-
-    Returns the updated *(bracket_hold, stream_buffer)* tuple.
-    """
-    for ch in text:
-        if bracket_hold or ch == "[":
-            bracket_hold += ch
-            if ch == "]":
-                if bracket_hold.startswith("[OPTIONS:"):
-                    bracket_hold = ""
-                else:
-                    stream_buffer += bracket_hold
-                    bracket_hold = ""
-        else:
-            stream_buffer += ch
-    return bracket_hold, stream_buffer
-
-
-def build_timing_footer(
-    elapsed: float,
-    client: ContextUsageProvider | None = None,
-) -> tuple[list[dict], str]:
-    """Build the timing/context footer blocks for a Slack response.
-
-    Returns ``(blocks, fallback_text)`` suitable for ``post_blocks``.
-    """
-    if elapsed < 60:
-        duration = f"{int(elapsed)}s"
-    else:
-        mins, secs = divmod(int(elapsed), 60)
-        duration = f"{mins}m {secs}s"
-    footer_text = f"Finished in {duration}"
-    if client is not None:
-        try:
-            context_usage = client.context_usage_pct()
-            if context_usage is not None:
-                ctx_pct = round(context_usage)
-                ctx_icon = (
-                    "🔴"
-                    if ctx_pct >= 70
-                    else "🟠" if ctx_pct >= 50 else "🟡" if ctx_pct >= 30 else "🟢"
-                )
-                footer_text = f"Finished in {duration} · {ctx_icon} ctx {ctx_pct}%"
-        except Exception:
-            logger.debug("Failed to retrieve context usage", exc_info=True)
-    blocks: list[dict] = [
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": footer_text}]}
-    ]
-    return blocks, footer_text
-
-
-def _append_footer_actions(
-    footer_blocks: list[dict],
-    options: list[str] | None,
-    thread_ts: str | None,
-    linked_session_key: str | None,
-    dashboard_state: object | None,
-) -> list[dict]:
-    """Append OPTIONS checkboxes and/or Link to Dashboard button to footer blocks."""
-    if options:
-        from slack_desk_runtime.format import build_options_blocks
-
-        footer_blocks.extend(build_options_blocks(options))
-    if thread_ts and not linked_session_key and dashboard_state:
-        from slack_desk_runtime.format import build_link_dashboard_button
-
-        if footer_blocks and footer_blocks[-1].get("type") == "actions":
-            footer_blocks[-1]["elements"].append(build_link_dashboard_button())
-        else:
-            footer_blocks.append(
-                {"type": "actions", "elements": [build_link_dashboard_button()]}
-            )
-    return footer_blocks
-
-
-async def _handle_compact_command(
-    slack_desk: SlackDeskClientOps,
-    sessions: SessionManager,
-    channel: str,
-    reply_ts: str,
-    msg_ts: str,
-    session_key: str,
-) -> None:
-    """Trigger in-place ACP ``/compact`` on the current thread's session."""
-    provider = sessions.get_provider(session_key)
-    if not provider:
-        await slack_desk.post_message(
-            channel, "No active session to compact.", reply_ts
-        )
-        sel().log_tool_invocation(
-            session_key=session_key,
-            source="slack",
-            tool_name="compact",
-            tool_kind="command",
-            outcome="no_session",
-        )
-        return
-
-    _t0 = time.monotonic()
-
-    # --- Phase 1: Pre-compaction UI (cosmetic — log failures, don't abort) ---
-    try:
-        await slack_desk.add_reaction(channel, msg_ts, "recycle")
-        await slack_desk.post_message(channel, "🔄 Compacting context…", reply_ts)
-    except Exception:
-        logger.debug("Pre-compact UI failed for %s", session_key, exc_info=True)
-
-    # --- Phase 2: Actual compaction (failures warrant error + session teardown) ---
-    result_text: str | None = None
-    outcome = "unknown"
-    try:
-
-        async def _run_compact_stream() -> None:
-            nonlocal result_text, outcome
-            async for event in provider.stream_command("/compact"):
-                if event.kind == EVENT_COMPACTION_STATUS:
-                    if event.text == "completed":
-                        summary = event.title or ""
-                        result_text = (
-                            f"✅ Compacted: {summary}"
-                            if summary
-                            else "✅ Context compacted."
-                        )
-                        outcome = "completed"
-                    elif event.text == "failed":
-                        error = event.title or "unknown error"
-                        result_text = f"❌ Compaction failed: {error}"
-                        outcome = "failed"
-                elif event.kind == EVENT_COMPLETE:
-                    break
-
-        await asyncio.wait_for(_run_compact_stream(), timeout=120)
-
-        # ACP agent fires compaction asynchronously after EVENT_COMPLETE —
-        # wait for the real result, mirroring the dashboard's deferred path.
-        if not result_text:
-            cr = await provider.wait_for_compaction(timeout=120.0)
-            if cr["type"] == "completed":
-                summary = cr.get("summary", "")
-                result_text = (
-                    f"✅ Compacted: {summary}" if summary else "✅ Context compacted."
-                )
-                outcome = "completed"
-            elif cr["type"] == "failed":
-                error = cr.get("summary", "")
-                result_text = (
-                    f"❌ Compaction failed: {error}"
-                    if error
-                    else "❌ Compaction failed."
-                )
-                outcome = "failed"
-            else:
-                result_text = "⚠️ Compaction timed out."
-                outcome = "timeout"
-    except Exception:
-        logger.warning("Compact command failed for %s", session_key, exc_info=True)
-        try:
-            await slack_desk.post_message(
-                channel, "❌ Compaction failed unexpectedly.", reply_ts
-            )
-        except Exception:
-            logger.debug(
-                "Failed to post compact error for %s", session_key, exc_info=True
-            )
-        try:
-            await sessions.destroy(session_key)
-        except Exception:
-            logger.warning(
-                "Failed to destroy session %s after compact failure",
-                session_key,
-                exc_info=True,
-            )
-        sel().log_tool_invocation(
-            session_key=session_key,
-            source="slack",
-            tool_name="compact",
-            tool_kind="command",
-            outcome="failed",
-            error="exception",
-        )
-        try:
-            await slack_desk.remove_reaction(channel, msg_ts, "recycle")
-            await _add_phase_reaction(slack_desk, channel, msg_ts, "done")
-        except Exception:
-            pass
-        return
-
-    # --- Phase 3: Post-compaction reporting (log failures, don't mislead) ---
-    try:
-        result_text, _ = redact_exfiltration_urls(result_text)
-        result_text, _ = redact_credentials(result_text)
-        await slack_desk.post_message(channel, result_text, reply_ts)
-
-        elapsed = time.monotonic() - _t0
-        footer_blocks, footer_text = build_timing_footer(elapsed)
-        await slack_desk.post_blocks(channel, footer_blocks, footer_text, reply_ts)
-    except Exception:
-        logger.debug("Post-compact reporting failed for %s", session_key, exc_info=True)
-
-    try:
-        sel().log_tool_invocation(
-            session_key=session_key,
-            source="slack",
-            tool_name="compact",
-            tool_kind="command",
-            outcome=outcome,
-        )
-    except Exception:
-        logger.debug("Failed to log compact outcome for %s", session_key, exc_info=True)
-    try:
-        await slack_desk.remove_reaction(channel, msg_ts, "recycle")
-        await _add_phase_reaction(slack_desk, channel, msg_ts, "done")
-    except Exception:
-        pass
 
 
 async def handle_message(
@@ -3200,597 +2785,3 @@ async def _maybe_auto_title_slack_desk(
         logger.debug(
             "Slack thread auto-title failed for %s", session_key, exc_info=True
         )
-
-
-async def _request_approval(
-    slack_desk: SlackDeskClientOps,
-    provider: ModelProvider,
-    channel: str,
-    thread_ts: str,
-    event: LLMEvent,
-    session_key: str = "",
-    is_dm: bool = True,
-) -> str:
-    """Post approval buttons, wait for click, return 'approved' or 'rejected'."""
-    blocks = _build_approval_blocks(event, is_dm=is_dm)
-    approval_ts = await slack_desk.post_blocks(
-        channel, blocks, "Manual approval required", thread_ts
-    )
-
-    key = f"{channel}:{approval_ts}"
-    pending = _PendingApproval(provider, event.request_id, session_key)
-    from gideon.sdk.channel import raw_delivery_for
-
-    from .delivery import SlackDeskDelivery
-
-    registered_delivery = raw_delivery_for("slack")
-    pending.delivery = (
-        registered_delivery
-        if isinstance(registered_delivery, SlackDeskDelivery)
-        else None
-    )
-    identity = pending.delivery.approval_identity(channel) if pending.delivery else None
-    if identity is None:
-        await provider.reject_tool(event.request_id)
-        return "rejected"
-    pending.owner, pending.tenant = identity["owner"], identity["tenant"]
-    pending.channel, pending.thread = channel, thread_ts or ""
-    _pending_approvals[key] = pending
-
-    try:
-        outcome = await asyncio.wait_for(pending.future, timeout=_APPROVAL_TIMEOUT)
-    except asyncio.TimeoutError:
-        outcome = _OUTCOME_REJECTED
-        await provider.reject_tool(event.request_id)
-    finally:
-        _pending_approvals.pop(key, None)
-
-    try:
-        await slack_desk.delete_message(channel, approval_ts)
-    except Exception:
-        status = "✅ Approved" if outcome == _OUTCOME_APPROVED else "🚫 Rejected"
-        title_safe, _ = redact_exfiltration_urls(event.title)
-        title_safe, _ = redact_credentials(title_safe)
-        await _safe_update(
-            slack_desk, channel, approval_ts, f"🔐 *{title_safe}* — {status}"
-        )
-
-    return outcome
-
-
-async def handle_interaction(
-    channel: str,
-    msg_ts: str,
-    action_id: str,
-    user_id: str = "",
-    thread_ts: str = "",
-    slack_desk: SlackDeskClientOps | None = None,
-    *,
-    team_id: str = "",
-    answer_value: str = "",
-) -> str | None:
-    """Answer only the live offer in its authenticated workspace and destination."""
-    from slack_desk_runtime.enterprise import check_message_origin
-
-    from gideon.sdk.channel import on_channel, raw_delivery_for
-
-    pending = _pending_approvals.get(f"{channel}:{msg_ts}")
-    if pending is None or pending.future.done() or not check_message_origin(team_id):
-        return None
-    delivery = pending.delivery
-    if delivery is None:
-        return None
-    identity = delivery.approval_identity(channel)
-    registered_matches = bool(raw_delivery_for("slack") is delivery)
-    if (
-        identity is None
-        or not registered_matches
-        or slack_desk is not delivery.client
-        or user_id != identity["owner"]
-        or user_id != pending.owner
-        or identity["tenant"] != pending.tenant
-        or pending.channel != channel
-        or pending.thread != thread_ts
-        or answer_value != str(pending.request_id)
-    ):
-        return None
-    answer = {
-        "approve_tool": "approved",
-        "trust_tool": "trust",
-        "reject_tool": "rejected",
-    }.get(action_id)
-    if answer is None:
-        return None
-    chosen = next((item for item in pending.answers if item.key == answer), None)
-    if chosen is None:
-        return None
-    if answer == "trust" and not await delivery.prepare_approval_channel(channel):
-        return None
-    by = on_channel("slack", user_id, pending.tenant)
-    if callable(pending.on_answer):
-        if not pending.on_answer(answer, by):
-            return None
-    elif answer == "trust":
-        return None
-    elif pending.provider:
-        if chosen.ends == "approved":
-            await pending.provider.approve_tool(pending.request_id)
-        else:
-            await pending.provider.reject_tool(pending.request_id)
-    pending.answerer = by
-    pending.chosen_answer = answer
-    if not pending.future.done():
-        pending.future.set_result(chosen.ends)
-    return action_id
-
-
-#: The key the CORE stamps its approval brief onto ``event.tool_meta`` under — the value
-#: of ``gideon.approval_brief.APPROVAL_BRIEF_META_KEY``. Read as a literal because
-#: the brief is ADDITIVE meta the SDK does not export: a core that composes none simply
-#: leaves the key absent, and this channel then prompts exactly as it did before.
-_APPROVAL_BRIEF_META_KEY = "approval_brief"
-
-#: The one facet that is NOT a consequence: ``readOnly`` claims what a call does not do,
-#: so it must never be framed as something the call "can" do. Named as the EXCEPTION
-#: rather than listing the consequences, so a facet core adds later is framed as a
-#: consequence automatically instead of silently reading as a reassurance.
-_READ_CLAIM_FACET = "readOnly"
-
-
-def _approval_brief_line(event: LLMEvent) -> str:
-    """One line saying what this call can TOUCH, or ``""`` to show no such line.
-
-    Slack is the surface with no room, so the core-composed brief collapses to a single
-    line next to the effective risk; the dashboard stays the rich surface (per-facet
-    cards carrying each facet's ``detail`` sentence). Nothing is re-derived here — every
-    word comes from ``event.tool_meta``, so a hint added to the core gate reaches Slack
-    without a change in this repo, and this renderer cannot drift into a second
-    vocabulary.
-
-    Two rules, both from the ``ChannelDelivery.request_approval`` contract:
-
-    * an ABSENT blast radius renders NO line. "Nothing was established" reads to a
-      person as "nothing happens", which is the opposite of what an unrecognized tool
-      means. Silence is the honest render, and the caller must not fill it.
-    * only ESTABLISHED facets are ever named. ``blastRadiusLine`` already contains
-      exactly the ``True`` ones, so a ``False`` can never be painted as an all-clear
-      ("no network") — absence of evidence never becomes evidence of absence.
-
-    The returned text is plain (no mrkdwn, no emoji) so the approval block and the
-    notification fallback can render the same string without diverging.
-    """
-    meta = getattr(event, "tool_meta", None)
-    if not isinstance(meta, dict):
-        return ""
-    brief = meta.get(_APPROVAL_BRIEF_META_KEY)
-    if not isinstance(brief, dict):
-        return ""
-    facets = str(brief.get("blastRadiusLine") or "")
-    if not facets:
-        return ""
-    radius = brief.get("blastRadius")
-    consequence = isinstance(radius, dict) and any(
-        v for k, v in radius.items() if k != _READ_CLAIM_FACET
-    )
-    line = f"Can: {facets}" if consequence else f"{facets[:1].upper()}{facets[1:]}"
-    risk = str(brief.get("risk") or "")
-    if risk:
-        line += f" · Risk: {risk}"
-    return line
-
-
-def _build_approval_blocks(
-    event: LLMEvent,
-    is_dm: bool = True,
-    source: str = "",
-    *,
-    answers: tuple | None = None,
-) -> list[dict]:
-    """Render the exact offered answers and complete tool input.
-
-    Standing permission appears only when the native approval owner offers it.
-    A private channel alone does not authorize a standing grant.
-    """
-    from gideon.sdk.channel import ONE_CALL_ANSWERS
-
-    answers = answers or ONE_CALL_ANSWERS
-    action_ids = {
-        "approved": _ACTION_APPROVE,
-        "trust": _ACTION_TRUST,
-        "rejected": _ACTION_REJECT,
-    }
-    buttons = [
-        {
-            "type": "button",
-            "text": {"type": "plain_text", "text": answer.label},
-            "action_id": action_ids[answer.key],
-            "value": str(event.request_id),
-        }
-        for answer in answers
-    ]
-
-    blocks: list[dict] = []
-
-    tag = f"[{source}] " if source else ""
-    title_safe, _ = redact_exfiltration_urls(event.title)
-    title_safe, _ = redact_credentials(title_safe)
-    footer = f":lock: {tag}*{title_safe}*"
-    if event.tool_purpose:
-        purpose, _ = redact_exfiltration_urls(event.tool_purpose)
-        purpose, _ = redact_credentials(purpose)
-        footer += f" — {purpose}"
-
-    # When full tool_input is available, show a simple header and the
-    # complete command in a code block below.
-    # When tool_input is missing, fall back to the truncated title.
-    if event.tool_input:
-        blocks.append(
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"🔐 *{tag}Tool approval requested:*",
-                },
-            },
-        )
-        # Security: scan for exfiltration URLs and credentials before posting
-        sanitized, _ = redact_exfiltration_urls(event.tool_input)
-        sanitized, _ = redact_credentials(sanitized)
-        for detail in split_message(sanitized, limit=_SLACK_SECTION_TEXT_LIMIT - 6):
-            blocks.append(
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"```{detail}```"},
-                }
-            )
-
-    # The blast radius goes ABOVE the buttons: it is the reason to press one, so a
-    # reader must meet it before the decision, not after it.
-    brief_line = _approval_brief_line(event)
-    if brief_line:
-        blocks.append(
-            {"type": "context", "elements": [{"type": "mrkdwn", "text": brief_line}]},
-        )
-
-    for answer in answers:
-        if answer.promise:
-            blocks.append(
-                {
-                    "type": "context",
-                    "elements": [{"type": "mrkdwn", "text": answer.promise}],
-                }
-            )
-    blocks.append({"type": "actions", "elements": buttons})
-    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]})
-    return blocks
-
-
-def _remove_all_jobs(store: TriggerStore) -> str:
-    """Remove every automation the ASSISTANT created, and return a summary.
-
-    Scoped to `created_by="agent"` by the SDK helper. The old version removed EVERYTHING the
-    scheduler held, including the automations the user built by hand — `cron remove all` from a chat
-    message could wipe them with no confirmation step. The scoped delete is what the core
-    `automation_delete_all` tool enforces, and this command now inherits it rather than re-deriving a
-    broader blast radius.
-    """
-    rows = [r for r in store.load() if r.trigger.created_by == "agent"]
-    if not rows:
-        return "No agent-created automations to remove."
-    lines = [f"- `{r.trigger.id}` — {r.trigger.name}" for r in rows]
-    result = delete_all_automations(store, created_by="agent", confirm=True)
-    if not result.ok:
-        return f"⚠️ {result.text}"
-    return f"✅ Removed {len(lines)} automation(s):\n" + "\n".join(lines)
-
-
-def _handle_spawn_command(
-    text: str, manager: SubagentManager, session_key: str = ""
-) -> str | None:
-    """Intercept spawn/bg keyword commands. Returns reply or None."""
-    t = text.strip()
-    low = t.lower()
-
-    for prefix in ("spawn ", "bg "):
-        if low.startswith(prefix):
-            return _do_spawn(t[len(prefix) :].strip(), manager, session_key)
-    return None
-
-
-def _do_spawn(task: str, manager: SubagentManager, session_key: str = "") -> str | None:
-    """Execute a spawn command. Returns reply string."""
-    if not task:
-        return None
-
-    # "spawn list" / "spawn status"
-    if task.lower() in ("list", "status"):
-        running = manager.running
-        if not running:
-            return "No subagents running."
-        lines = ["*Running subagents:*"]
-        for a in running:
-            elapsed = int(time.time() - a.started)
-            lines.append(f"🔹 `{a.id}` | {elapsed}s | {a.task[:60]}")
-        return "\n".join(lines)
-
-    info = manager.spawn(task, parent_session_key=session_key)
-    if not info:
-        return (
-            f"⚠️ Subagent capacity reached ({manager.max_concurrent}). Try again later."
-        )
-    return f"🚀 Spawned subagent `{info.id}`\n_{task[:100]}_"
-
-
-def _relative_next_run(nxt: float | None, now: float) -> str:
-    """ "⏭ in 2h 15m" for a next-run timestamp, or "" when there is none."""
-    if nxt is None:
-        return ""
-    delta = nxt - now
-    if delta >= 86400:
-        rel = f"in {int(delta // 86400)}d {int((delta % 86400) // 3600)}h"
-    elif delta >= 3600:
-        rel = f"in {int(delta // 3600)}h {int((delta % 3600) // 60)}m"
-    elif delta > 0:
-        minutes = int(delta // 60)
-        rel = f"in {minutes}m" if minutes >= 1 else "in <1m"
-    else:
-        rel = "now"
-    return f" | ⏭ {rel}"
-
-
-def _handle_cron_command(
-    text: str, store: TriggerStore, channel: str, thread_ts: str
-) -> str | None:
-    """Handle cron keyword commands against the unified trigger store. Returns reply or None.
-
-    🔴 Re-pointed off `ScheduleService`, which core deleted (S112). That service read
-    `crons.json` — a file nothing has written since core's S108 — so **every one of these commands
-    was already broken**: `cron list` showed an empty list to a user with live automations, and
-    remove/pause/resume answered "not found" for every real id. Measured against a store-only home
-    before re-pointing.
-
-    Reads the same store, projection and tool functions the Automations page and the `automation_*`
-    chat tools use, so a `/cron` reply can no longer disagree with the UI.
-
-    The surface is unchanged for the user, with two honest improvements the store makes possible:
-    a BROKEN automation is listed with its parse error rather than silently omitted, and every kind
-    is visible (a file watch or an event trigger used to be invisible here because the legacy
-    scheduler only held clocks).
-    """
-    t = text.strip().lower()
-    parts = t.split()
-
-    if len(parts) < 2 or parts[0] != "cron":
-        return None
-
-    action = parts[1]
-
-    if action == "list":
-        rows = store.load()
-        if not rows:
-            return "No automations scheduled."
-        lines = ["*Your automations:*"]
-        now = time.time()
-        for row in rows:
-            trigger = row.trigger
-            # A row that failed to parse is SHOWN with its reason. The legacy list could not
-            # represent one at all, and silently omitting an automation the user created is how
-            # "where did my automation go" happens.
-            if not row.ok:
-                reason = row.errors[0].message if row.errors else "invalid"
-                lines.append(f"⚠️ `{trigger.id}` | {reason}")
-                continue
-            view = to_schedule_row(trigger)
-            status = "✅" if trigger.enabled else "⏸️"
-            last = ""
-            if view.get("last_status") == "ok":
-                last = " ✓"
-            elif view.get("last_status") in ("error", "failure", "timeout"):
-                last = " ❌"
-            safe_msg, _ = redact_credentials(
-                redact_exfiltration_urls(str(view.get("message") or ""))[0]
-            )
-            next_part = _relative_next_run(view.get("next_run_ts"), now)
-            lines.append(
-                f"{status} `{trigger.id}` | `{describe_cadence(trigger)}` "
-                f"| {safe_msg[:50]}{last}{next_part}"
-            )
-        return "\n".join(lines)
-
-    if len(parts) < 3:
-        return None
-
-    job_id = parts[2]
-
-    if action == "remove":
-        if job_id == "all":
-            return _remove_all_jobs(store)
-        # `confirm=True`: the flag exists so a TOOL CALL cannot delete by accident. A user who typed
-        # `cron remove <id>` has already expressed the intent.
-        if delete_automation(store, trigger_id=job_id, confirm=True).ok:
-            return f"✅ Removed automation `{job_id}`"
-        return f"❌ Automation `{job_id}` not found"
-
-    if action == "pause":
-        if set_automation_paused(store, trigger_id=job_id, paused=True).ok:
-            return f"⏸️ Paused automation `{job_id}`"
-        return f"❌ Automation `{job_id}` not found"
-
-    if action == "resume":
-        result = set_automation_paused(store, trigger_id=job_id, paused=False)
-        if result.ok:
-            return f"▶️ Resumed automation `{job_id}`"
-        # `set_paused` REFUSES to resume a row with a parse error and NAMES it — strictly more useful
-        # than "not found", and the row does exist, so "not found" was wrong as well as unhelpful.
-        return f"❌ {result.text}"
-
-    return None
-
-
-async def _handle_sessions_command(
-    cmd_text: str,
-    slack_desk: SlackDeskClientOps,
-    channel: str,
-    reply_ts: str,
-    msg_ts: str,
-    session_key: str,
-    conversation_log: ConversationLog | None,
-) -> None:
-    """Handle ``!sessions`` — list recent sessions as task_card blocks with resume buttons."""
-    import json as _json
-    from pathlib import Path
-
-    sess_dir = Path.home() / ".gideon" / "sessions"
-    if not sess_dir.exists():
-        await slack_desk.post_message(channel, "_No recent sessions._", reply_ts)
-        return
-
-    max_msg_chars = 4000
-    sessions: list[dict] = []
-    for jsonl in sess_dir.glob("*.jsonl"):
-        if jsonl.is_symlink():
-            continue
-        key = jsonl.stem
-        if key.startswith("dashboard_"):
-            key = "dashboard:" + key[len("dashboard_") :]
-        try:
-            lines = jsonl.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            continue
-        if not lines:
-            continue
-
-        title = key
-        agent = "gideon"
-        msgs: list[tuple[str, str]] = []
-        mtime = jsonl.stat().st_mtime
-
-        for line in lines:
-            try:
-                d = _json.loads(line.strip())
-            except (ValueError, _json.JSONDecodeError):
-                continue
-            if d.get("_type") == "metadata":
-                title = d.get("title") or title
-                agent = d.get("agent") or agent
-                continue
-            role = d.get("role", "")
-            txt = (d.get("content") or "")[:max_msg_chars]
-            if role in ("user", "assistant") and txt:
-                msgs.append((role, txt))
-
-        sessions.append(
-            {
-                "key": key,
-                "title": title[:80],
-                "agent": agent,
-                "mtime": mtime,
-                "msgs": msgs[-5:],
-            }
-        )
-
-    sessions.sort(key=lambda s: s["mtime"], reverse=True)
-    sessions = sessions[:10]
-
-    sel().log_api_access(
-        caller=session_key,
-        operation="slack.sessions_data_access",
-        outcome="allowed",
-        source="slack",
-        resources=f"{len(sessions)} sessions read",
-    )
-
-    if not sessions:
-        await slack_desk.post_message(channel, "_No recent sessions._", reply_ts)
-        return
-
-    blocks: list[dict] = []
-    for i, s in enumerate(sessions):
-        rt_items: list[dict] = []
-        for role, txt in s["msgs"]:
-            txt, _ = redact_exfiltration_urls(txt)
-            txt, _ = redact_credentials(txt)
-            emoji_name = "bust_in_silhouette" if role == "user" else "robot_face"
-            rt_items.append(
-                {
-                    "type": "rich_text_section",
-                    "elements": [
-                        {"type": "emoji", "name": emoji_name},
-                        {"type": "text", "text": f" {txt}"},
-                    ],
-                }
-            )
-
-        _title, _ = redact_exfiltration_urls(s["title"])
-        _title, _ = redact_credentials(_title)
-        task: dict = {
-            "type": "task_card",
-            "task_id": f"session_{i}",
-            "title": f"{_title} — {s['agent']} agent",
-            "status": "complete",
-        }
-        if rt_items:
-            task["details"] = {
-                "type": "rich_text",
-                "elements": [
-                    {"type": "rich_text_list", "style": "bullet", "elements": rt_items}
-                ],
-            }
-        blocks.append(task)
-        blocks.append(
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "\u25b6\ufe0f Resume"},
-                        "action_id": f"pc_session_resume_{s['key']}",
-                        "value": _json.dumps({"key": s["key"], "title": s["title"]}),
-                    }
-                ],
-            }
-        )
-        if i < len(sessions) - 1:
-            blocks.append({"type": "divider"})
-
-    await slack_desk.post_blocks(channel, blocks, "Recent sessions:", reply_ts)
-
-
-async def _safe_update(
-    slack_desk: SlackDeskClientOps, channel: str, ts: str, text: str
-) -> None:
-    """Update a Slack message, truncating if too long.
-
-    Used for progressive streaming edits — truncation is fine here since
-    the final message uses _safe_final_update which splits instead.
-    """
-    text, _ = redact_exfiltration_urls(text)
-    if len(text) > SLACK_MSG_LIMIT:
-        text = text[:SLACK_MSG_LIMIT] + TRUNCATION_NOTICE
-    try:
-        await slack_desk.update_message(channel, ts, text)
-    except Exception:
-        logger.debug("Failed to update message %s", ts, exc_info=True)
-
-
-async def _safe_final_update(
-    slack_desk: SlackDeskClientOps,
-    channel: str,
-    ts: str,
-    text: str,
-    thread_ts: str | None = None,
-) -> None:
-    """Final message update — splits into multiple messages if too long."""
-    text, _ = redact_exfiltration_urls(text)
-    parts = split_message(text)
-    # First part updates the existing streaming message
-    try:
-        await slack_desk.update_message(channel, ts, parts[0])
-    except Exception:
-        logger.debug("Failed to update message %s", ts, exc_info=True)
-    # Overflow parts posted as follow-up messages in the same thread
-    for part in parts[1:]:
-        try:
-            await slack_desk.post_message(channel, part, thread_ts)
-        except Exception:
-            logger.debug("Failed to post continuation message", exc_info=True)

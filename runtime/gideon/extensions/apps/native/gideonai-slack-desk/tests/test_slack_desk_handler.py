@@ -23,9 +23,9 @@ from slack_desk_runtime.handler import (
     set_owner_id,
 )
 
-from gideon.context import ContextBuilder
-from gideon.hooks import AutoReplyHook, HookManager, HooksConfig
-from gideon.llm.base import LLMEvent
+from gideon.engine.hooks import AutoReplyHook, HookManager, HooksConfig
+from gideon.sdk.channel import LLMEvent
+from gideon.sdk.channel import PromptAssembler as ContextBuilder
 
 
 @pytest.fixture(autouse=True)
@@ -324,7 +324,7 @@ class TestHandleMessage:
     @pytest.mark.asyncio
     async def test_trusted_bot_error_suppresses_reply(self):
         """from_trusted_bot=True + ACP error → no error reply posted to Slack."""
-        from gideon.acp.client import AcpError
+        from gideon.sdk.channel import AcpError
 
         class _RaisingProvider(FakeProvider):
             async def stream(self, message, timeout=120.0):
@@ -357,7 +357,7 @@ class TestHandleMessage:
     @pytest.mark.asyncio
     async def test_non_trusted_bot_error_still_posts_reply(self):
         """from_trusted_bot=False + ACP error → error reply still posted (regression guard)."""
-        from gideon.acp.client import AcpError
+        from gideon.sdk.channel import AcpError
 
         class _RaisingProvider(FakeProvider):
             async def stream(self, message, timeout=120.0):
@@ -2645,7 +2645,7 @@ class TestStopReasonCancelled:
     async def test_handler_stop_reason_cancelled_skips_record_success(self):
         """When EVENT_COMPLETE carries stop_reason='cancelled', neither
         record_success nor record_failure should be called."""
-        from gideon.acp.types import STOP_REASON_CANCELLED
+        from gideon.sdk.channel import STOP_REASON_CANCELLED
 
         slack_desk = MockSlackDeskClient()
         provider = FakeProvider(
@@ -2681,7 +2681,7 @@ class TestStopReasonCancelled:
         """When cancelled, maybe_consolidate must not be called."""
         from unittest.mock import MagicMock
 
-        from gideon.acp.types import STOP_REASON_CANCELLED
+        from gideon.sdk.channel import STOP_REASON_CANCELLED
 
         slack_desk = MockSlackDeskClient()
         provider = FakeProvider(
@@ -2712,7 +2712,7 @@ class TestStopReasonCancelled:
         """When stop_reason='end_turn', record_success and maybe_consolidate fire."""
         from unittest.mock import MagicMock
 
-        from gideon.acp.types import STOP_REASON_END_TURN
+        from gideon.sdk.channel import STOP_REASON_END_TURN
 
         slack_desk = MockSlackDeskClient()
         provider = FakeProvider(
@@ -2752,7 +2752,7 @@ class TestStopReasonCancelled:
     @pytest.mark.asyncio
     async def test_handler_stop_reason_cancelled_flushes_partial_text(self):
         """Partial text chunks before cancel must be flushed, not dropped."""
-        from gideon.acp.types import STOP_REASON_CANCELLED
+        from gideon.sdk.channel import STOP_REASON_CANCELLED
 
         slack_desk = MockSlackDeskClient()
         provider = FakeProvider(

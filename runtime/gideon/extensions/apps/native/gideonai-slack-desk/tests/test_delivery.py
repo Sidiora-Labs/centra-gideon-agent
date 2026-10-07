@@ -248,7 +248,7 @@ class TestApprovalBriefOnTheNotification:
 
     @staticmethod
     def _event(brief):
-        from gideon.llm.base import LLMEvent
+        from gideon.sdk.channel import LLMEvent
 
         return LLMEvent(
             kind="permission_request",
