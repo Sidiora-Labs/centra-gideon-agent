@@ -1,3 +1,4 @@
+import { TextInput, Select, TextArea } from '../../../shared/ui/forms'
 import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import Series from './Series'
 import Stories from './Stories'
@@ -113,9 +114,9 @@ function CatalogPage({ apiRoot = base, ingredientId, onSelectIngredient }: { api
     <p data-type="body-m" className="max-w-[48rem] text-on-surface-low">Keep characters, places and ideas with their sources and revision history.</p>
     {error && <div role="alert" className="border-l-2 border-danger/40 pl-s text-danger">{error} <Button onClick={() => { setError(''); setRefresh(n => n + 1) }}>Reload catalog</Button></div>}
     <section aria-label="Catalog filters" className="grid gap-m rounded-lg bg-surface-container p-l sm:grid-cols-3">
-      <label>Search<input className={control} value={q} onChange={e => { setQ(e.target.value); setOffset(0) }} /></label>
-      <label>Filter type<select className={control} value={type} onChange={e => { setType(e.target.value); setOffset(0) }}><option value="">All types</option>{kinds.map(k => <option key={k}>{k}</option>)}</select></label>
-      <label>Filter tag<input className={control} value={tag} onChange={e => { setTag(e.target.value); setOffset(0) }} /></label>
+      <label>Search<TextInput className={control} value={q} onChange={nextValue => { setQ(nextValue); setOffset(0) }} /></label>
+      <label>Filter type<Select className={control} value={type} onChange={nextValue => { setType(nextValue); setOffset(0) }} options={[{value: "", label: "All types"}, ...(kinds.map(k => ({value: k, label: String(k)})) ?? [])]} /></label>
+      <label>Filter tag<TextInput className={control} value={tag} onChange={nextValue => { setTag(nextValue); setOffset(0) }} /></label>
     </section>
     <div className="grid min-w-0 gap-l lg:grid-cols-[minmax(17rem,24rem)_minmax(0,1fr)]">
       <section aria-label="Ingredient list" className="h-fit space-y-m rounded-lg bg-surface-container p-l">
@@ -129,12 +130,12 @@ function CatalogPage({ apiRoot = base, ingredientId, onSelectIngredient }: { api
       <section aria-label="Ingredient editor" className="min-w-0 space-y-m rounded-lg bg-surface-container p-l">
         <div><h2 data-type="title-s">{selected ? `Edit ingredient · revision ${selected.revision}` : 'New ingredient'}</h2><p data-type="body-s" className="text-on-surface-low">Capture the idea, its canonical sources, and its relationships.</p></div>
         <form className="space-y-3" onSubmit={e => { e.preventDefault(); void save() }}>
-          <label className="block">Type<select className={control} value={draft.type} onChange={e => setDraft({ ...draft, type: e.target.value })}>{kinds.map(k => <option key={k}>{k}</option>)}</select></label>
-          <label className="block">Title<input required maxLength={200} className={control} value={draft.title} onChange={e => setDraft({ ...draft, title: e.target.value })} /></label>
-          <label className="block">Body<textarea rows={6} maxLength={100000} className={control} value={draft.body} onChange={e => setDraft({ ...draft, body: e.target.value })} /></label>
-          <label className="block">Tags (comma separated)<input className={control} value={draft.tags} onChange={e => setDraft({ ...draft, tags: e.target.value })} /></label>
-          <label className="block">Source references<textarea className={control} placeholder="artifact:slug or knowledge:id, one per line" value={draft.sources} onChange={e => setDraft({ ...draft, sources: e.target.value })} /></label>
-          <label className="block">Relations<textarea className={control} placeholder="related:ingredient-id or contains:ingredient-id" value={draft.relations} onChange={e => setDraft({ ...draft, relations: e.target.value })} /></label>
+          <label className="block">Type<Select className={control} value={draft.type} onChange={nextValue => setDraft({ ...draft, type: nextValue })} options={[...(kinds.map(k => ({value: k, label: String(k)})) ?? [])]} /></label>
+          <label className="block">Title<TextInput required maxLength={200} className={control} value={draft.title} onChange={nextValue => setDraft({ ...draft, title: nextValue })} /></label>
+          <label className="block">Body<TextArea rows={6} maxLength={100000} className={control} value={draft.body} onChange={nextValue => setDraft({ ...draft, body: nextValue })} /></label>
+          <label className="block">Tags (comma separated)<TextInput className={control} value={draft.tags} onChange={nextValue => setDraft({ ...draft, tags: nextValue })} /></label>
+          <label className="block">Source references<TextArea className={control} placeholder="artifact:slug or knowledge:id, one per line" value={draft.sources} onChange={nextValue => setDraft({ ...draft, sources: nextValue })} /></label>
+          <label className="block">Relations<TextArea className={control} placeholder="related:ingredient-id or contains:ingredient-id" value={draft.relations} onChange={nextValue => setDraft({ ...draft, relations: nextValue })} /></label>
           <Button type="submit" disabled={busy} loading={busy} loadingLabel="Saving…">Save ingredient</Button>
         </form>
         {selected && <p className="break-all text-on-surface-low">ID: {selected.id}</p>}

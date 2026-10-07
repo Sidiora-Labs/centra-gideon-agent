@@ -1,3 +1,4 @@
+import { Select, TextInput, TextArea } from '../../../shared/ui/forms'
 import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
@@ -51,14 +52,14 @@ export default function Continuity({ id, revision, text, apiRoot }: { id: string
     <p className="mt-1 text-sm text-on-surface-var">{t('Review exact evidence from a saved draft before adding it to the ledger. Canon is unchanged. Positions count Unicode characters, including each emoji as one codepoint.')}</p></header>
     {error && <p role="alert">{error}</p>}{!ledger && !error && <p>{t('Loading continuity…')}</p>}
     <div className="grid gap-5 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]"><section aria-label={t('Prepare evidence')} className="space-y-3 rounded-md bg-surface-high p-l"><h3 data-type="label-l" className="text-on-surface">{t('Prepare evidence')}</h3>
-    <label className="block">{t('Extraction source')}<select className={control} value={mode} onChange={e => changed(() => setMode(e.target.value))}><option value="authored">{t('My evidence')}</option><option value="model">{t('Configured model')}</option></select></label>
-    <label className="block">{t('Evidence start')}<input className={control} type="number" min={0} value={start} onChange={e => changed(() => setStart(Number(e.target.value)))} /></label>
-    <label className="block">{t('Evidence end')}<input className={control} type="number" min={1} value={end} onChange={e => changed(() => setEnd(Number(e.target.value)))} /></label>
-    <label className="block">{t('Evidence passage')}<textarea className={control} readOnly value={quote} /></label>
+    <label className="block">{t('Extraction source')}<Select className={control} value={mode} onChange={nextValue => changed(() => setMode(nextValue))} options={[{value: "authored", label: String(t('My evidence'))}, {value: "model", label: String(t('Configured model'))}]} /></label>
+    <label className="block">{t('Evidence start')}<TextInput className={control} type="number" min={0} value={String(start)} onChange={nextValue => changed(() => setStart(Number(nextValue)))} /></label>
+    <label className="block">{t('Evidence end')}<TextInput className={control} type="number" min={1} value={String(end)} onChange={nextValue => changed(() => setEnd(Number(nextValue)))} /></label>
+    <label className="block">{t('Evidence passage')}<TextArea className={control} readOnly value={quote} onChange={() => {}} /></label>
     <p>{t('Coverage')} {start}–{end} {t('of')} {characters.length} {t('characters. Maximum model coverage: 20000; authored quote: 4000.')}</p>
-    {mode === 'authored' ? <><label className="block">{t('Outline summary')}<input className={control} value={summary} onChange={e => changed(() => setSummary(e.target.value))} /></label>
-      <label className="block">{t('Fact subject')}<input className={control} value={subject} onChange={e => changed(() => setSubject(e.target.value))} /></label><label className="block">{t('Fact predicate')}<input className={control} value={predicate} onChange={e => changed(() => setPredicate(e.target.value))} /></label><label className="block">{t('Fact value')}<input className={control} value={value} onChange={e => changed(() => setValue(e.target.value))} /></label></>
-      : <label className="block">{t('Extraction instruction')}<textarea className={control} value={instruction} onChange={e => changed(() => setInstruction(e.target.value))} /></label>}
+    {mode === 'authored' ? <><label className="block">{t('Outline summary')}<TextInput className={control} value={summary} onChange={nextValue => changed(() => setSummary(nextValue))} /></label>
+      <label className="block">{t('Fact subject')}<TextInput className={control} value={subject} onChange={nextValue => changed(() => setSubject(nextValue))} /></label><label className="block">{t('Fact predicate')}<TextInput className={control} value={predicate} onChange={nextValue => changed(() => setPredicate(nextValue))} /></label><label className="block">{t('Fact value')}<TextInput className={control} value={value} onChange={nextValue => changed(() => setValue(nextValue))} /></label></>
+      : <label className="block">{t('Extraction instruction')}<TextArea className={control} value={instruction} onChange={nextValue => changed(() => setInstruction(nextValue))} /></label>}
     <Button disabled={busy || !ledger || start < 0 || end <= start || end > characters.length || end - start > (mode === 'model' ? 20000 : 4000)} onClick={() => void propose()} disabledReason={busy ? BUSY_REASON : undefined}>{t('Prepare evidence for review')}</Button>
     </section><section aria-label={t('Continuity ledger')} className="space-y-3"><h3 data-type="label-l" className="text-on-surface">{t('Continuity ledger')}</h3>{ledger && <><p className="text-sm text-on-surface-var">{t('Ledger revision')} {ledger.revision}</p>{ledger.proposals.length === 0 && <p>{t('No evidence proposals yet.')}</p>}
       {ledger.proposals.map((proposal, index) => <section key={proposal.id} aria-label={`${t('Evidence proposal')} ${index + 1}`} className="rounded border border-outline p-2"><h3>{t('Evidence proposal')} {index + 1}</h3><p>{t('Provenance:')} {t(proposal.mode)}. {t('Coverage')} {proposal.coverage.start}–{proposal.coverage.end} {t('of')} {proposal.coverage.total_characters}.</p>
@@ -67,7 +68,7 @@ export default function Continuity({ id, revision, text, apiRoot }: { id: string
       <section aria-label={t('Accepted reverse outline')}><h3>{t('Accepted reverse outline')}</h3><ol>{ledger.outline.map(evidence)}</ol></section>
       <section aria-label={t('Accepted continuity facts')}><h3>{t('Accepted continuity facts')}</h3><ul>{ledger.facts.map(evidence)}</ul></section>
       <section aria-label={t('Recorded value conflicts')}><h3>{t('Recorded value conflicts')}</h3><p>{t('Exact subject and predicate comparisons; review differing values in their source context.')}</p>{ledger.conflicts.map((conflict, index) => <p key={index}>{conflict.subject} · {conflict.predicate}: {conflict.values.join(' / ')}</p>)}</section>
-      <Button onClick={() => void exportLedger()}>{t('Export continuity ledger')}</Button>{exported && <label className="block">{t('Continuity export')}<textarea className={control} readOnly value={exported} /></label>}
+      <Button onClick={() => void exportLedger()}>{t('Export continuity ledger')}</Button>{exported && <label className="block">{t('Continuity export')}<TextArea className={control} readOnly value={exported} onChange={() => {}} /></label>}
     </>}</section></div>
   </section>
 }

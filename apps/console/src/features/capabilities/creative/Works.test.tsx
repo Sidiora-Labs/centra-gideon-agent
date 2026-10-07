@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -71,48 +71,48 @@ describe('Writing works and canonical manuscript journeys', () => {
   it('pins author and canon, saves actual drafts and restores active manuscript history', async () => {
     render(<Works apiRoot={apiRoot} />)
     await screen.findByText('No writing works found.')
-    change('Work title', 'Station exercise')
-    change('Writing type', 'exercise')
-    change('Writing prompt', 'Describe a train station.')
+    await changeReady('Work title', 'Station exercise')
+    await changeReady('Writing type', 'exercise')
+    await changeReady('Writing prompt', 'Describe a train station.')
     const author = await screen.findByRole('option', { name: 'Pinned writer · revision 1' }) as HTMLOptionElement
     const universe = await screen.findByRole('option', { name: 'Pinned world · revision 1' }) as HTMLOptionElement
-    change('Pin author', author.value)
-    change('Pin universe', universe.value)
-    fireEvent.click(screen.getByRole('button', { name: 'Save work details' }))
+    await changeReady('Pin author', author.value)
+    await changeReady('Pin universe', universe.value)
+    await clickReady('Save work details')
     await screen.findByText('Work revision 1')
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save work details' })).toBeEnabled())
+    await waitFor(() => expectAvailableButton(screen.getByRole('button', { name: 'Save work details' })))
     const first = await current()
     expect(first.kind).toBe('exercise')
     expect(first.author_ref).toEqual({ id: author.value, revision: 1 })
     expect(first.universe_ref).toEqual({ id: universe.value, revision: 1 })
-    fireEvent.click(screen.getByRole('button', { name: 'Read pinned context' }))
+    await clickReady('Read pinned context')
     const context = await screen.findByLabelText('Pinned writing context') as HTMLTextAreaElement
     const parsed = JSON.parse(context.value)
     expect(parsed.author.voice.tone).toBe('Quiet')
     expect(parsed.universe.canon[0].title).toBe('Night')
-    change('Manuscript', '  The last train arrived.\n\n')
-    change('Draft note', 'First attempt')
-    fireEvent.click(screen.getByRole('button', { name: 'Save new draft' }))
+    await changeReady('Manuscript', '  The last train arrived.\n\n')
+    await changeReady('Draft note', 'First attempt')
+    await clickReady('Save new draft')
     await screen.findByText('Work revision 2')
     const second = await current()
     expect(second.text).toBe('  The last train arrived.\n\n')
     expect(second.active_draft.note).toBe('First attempt')
     expect(second.active_draft.artifact_version).toBe(1)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save new draft' })).toBeEnabled())
-    change('Manuscript', 'A second ending.')
-    change('Draft note', 'Second attempt')
-    fireEvent.click(screen.getByRole('button', { name: 'Save new draft' }))
+    await waitFor(() => expectAvailableButton(screen.getByRole('button', { name: 'Save new draft' })))
+    await changeReady('Manuscript', 'A second ending.')
+    await changeReady('Draft note', 'Second attempt')
+    await clickReady('Save new draft')
     await screen.findByText('Work revision 3')
     expect((await current()).text).toBe('A second ending.')
     const drafts = await (await fetch(`${apiRoot}/${first.id}/drafts`)).json()
     expect(drafts.items).toHaveLength(2)
     expect(drafts.items[0].artifact_id).not.toBe(drafts.items[1].artifact_id)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Restore work revision 2' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: 'Restore work revision 2' }))
+    await waitFor(() => expectAvailableButton(screen.getByRole('button', { name: 'Restore work revision 2' })))
+    await clickReady('Restore work revision 2')
     await screen.findByText('Work revision 4')
     expect(screen.getByLabelText('Manuscript')).toHaveValue('  The last train arrived.\n\n')
     expect((await current()).active_draft_id).toBe(second.active_draft_id)
-    fireEvent.click(screen.getByRole('button', { name: 'Read draft 2' }))
+    await clickReady('Read draft 2')
     await waitFor(() => expect(screen.getByLabelText('Manuscript')).toHaveValue('A second ending.'))
     expect((await current()).text).toBe('  The last train arrived.\n\n')
     cleanup()
@@ -128,7 +128,7 @@ describe('Writing works and canonical manuscript journeys', () => {
     change('Work title', 'Continuity work')
     fireEvent.click(screen.getByRole('button', { name: 'Save work details' }))
     await screen.findByText('Work revision 1')
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save work details' })).toBeEnabled())
+    await waitFor(() => expectAvailableButton(screen.getByRole('button', { name: 'Save work details' })))
     change('Manuscript', 'Unsaved prose stays here.')
     change('Draft note', 'Unsaved note')
     change('Writing prompt', 'Updated prompt')
@@ -136,7 +136,7 @@ describe('Writing works and canonical manuscript journeys', () => {
     await screen.findByText('Work revision 2')
     expect(screen.getByLabelText('Manuscript')).toHaveValue('Unsaved prose stays here.')
     expect(screen.getByLabelText('Draft note')).toHaveValue('Unsaved note')
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save new draft' })).toBeEnabled())
+    await waitFor(() => expectAvailableButton(screen.getByRole('button', { name: 'Save new draft' })))
     const work = await current()
     const changed = await fetch(`${apiRoot}/${work.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: 2, title: 'Concurrent metadata' }) })
     expect(changed.status).toBe(200)
@@ -155,26 +155,72 @@ describe('Writing works and canonical manuscript journeys', () => {
     }
     render(<Works apiRoot={apiRoot} />)
     await ready()
-    change('Search writing works', 'Paged work')
+    await changeReady('Search writing works', 'Paged work')
     await screen.findByText('26 writing works')
-    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Previous page' })).toBeEnabled())
+    await clickReady('Next page')
+    await waitFor(() => expectAvailableButton(screen.getByRole('button', { name: 'Previous page' })))
     await ready()
-    expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled()
-    change('Search writing works', 'No such work')
+    expectGuardedButton(screen.getByRole('button', { name: 'Next page' }))
+    await changeReady('Search writing works', 'No such work')
     await screen.findByText('No writing works found.')
     expect(screen.getByText('0 writing works')).toBeInTheDocument()
     location.hash = '#/capabilities/creative?view=works&work=missing'
     fireEvent(window, new HashChangeEvent('hashchange'))
     expect(await screen.findByRole('alert')).toHaveTextContent('Work not found')
-    expect(screen.getByRole('button', { name: 'Save work details' })).toBeDisabled()
+    expectGuardedButton(screen.getByRole('button', { name: 'Save work details' }))
     expect(screen.queryByLabelText('Manuscript')).not.toBeInTheDocument()
     location.hash = '#/capabilities/creative?view=works'
     fireEvent(window, new HashChangeEvent('hashchange'))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save work details' })).toBeEnabled())
-    change('Search writing context', 'Pinned writer')
+    await waitFor(() => expectAvailableButton(screen.getByRole('button', { name: 'Save work details' })))
+    await changeReady('Search writing context', 'Pinned writer')
     await screen.findByRole('option', { name: 'Pinned writer · revision 1' })
-    change('Search writing context', 'No such context')
+    await changeReady('Search writing context', 'No such context')
     await waitFor(() => expect(screen.queryByRole('option', { name: 'Pinned writer · revision 1' })).not.toBeInTheDocument())
   })
 })
+
+function expectAvailableButton(button: HTMLElement) {
+  expect(button).not.toBeDisabled()
+  expect(button).not.toHaveAttribute('aria-disabled', 'true')
+}
+function expectGuardedButton(button: HTMLElement) {
+  if (button.hasAttribute('disabled')) {
+    expect(button).toBeDisabled()
+    expect(button).not.toHaveAttribute('aria-disabled', 'true')
+  } else {
+    expect(button).toHaveAttribute('aria-disabled', 'true')
+    const ids = button.getAttribute('aria-describedby')?.split(' ') ?? []
+    expect(ids.length).toBeGreaterThan(0)
+    for (const id of ids) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+    button.focus()
+    expect(document.activeElement).toBe(button)
+  }
+  const requests = vi.spyOn(globalThis, 'fetch')
+  try {
+    fireEvent.click(button)
+    expect(requests).not.toHaveBeenCalled()
+  } finally { requests.mockRestore() }
+}
+
+async function changeReady(label: string, value: string) {
+  await waitFor(() => {
+    const field = screen.getByLabelText(label)
+    expect(field).not.toBeDisabled()
+    expect(field).not.toHaveAttribute('readonly')
+    expect(field).not.toHaveAttribute('aria-readonly', 'true')
+  })
+  change(label, value)
+  const field = screen.getByLabelText(label)
+  expect(field).toHaveValue(field.getAttribute('type') === 'number' ? Number(value) : value)
+}
+async function clickReady(name: string) {
+  let button: HTMLElement | undefined
+  await waitFor(() => {
+    button = screen.getByRole('button', { name })
+    expect(button).toBeVisible()
+    expect(button).toHaveAccessibleName(name)
+    expectAvailableButton(button)
+  })
+  if (!button) throw new Error(`Button did not become available: ${name}`)
+  fireEvent.click(button)
+}

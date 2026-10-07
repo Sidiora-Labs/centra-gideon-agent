@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -143,28 +143,28 @@ describe('Editorial checks and explicit canonical repair review', () => {
     location.hash = `#/capabilities/creative?view=works&work=${work.id}`
     render(<Works apiRoot={apiRoot} />)
     const runButton = await screen.findByRole('button', { name: 'Run selected editorial checks' })
-    await waitFor(() => expect(runButton).toBeEnabled())
-    fireEvent.click(runButton)
-    fireEvent.click(await screen.findByRole('button', { name: 'Review phrase: time stood still' }))
+    await waitFor(() => expectAvailableButton(runButton))
+    await clickReady('Run selected editorial checks')
+    await clickReady('Review phrase: time stood still')
     expect(screen.getByLabelText('Finding quotation')).toHaveValue('Time stood still')
     expect(screen.getByText('Exact source span 2–18')).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Editorial run 1' })).toHaveTextContent('prose.cliches: completed')
-    expect(screen.getByRole('button', { name: 'Prepare reviewed repair' })).toBeDisabled()
-    change('My editorial replacement', 'The clock stopped')
-    fireEvent.click(screen.getByRole('button', { name: 'Prepare reviewed repair' }))
+    expectGuardedButton(screen.getByRole('button', { name: 'Prepare reviewed repair' }))
+    await changeReady('My editorial replacement', 'The clock stopped')
+    await clickReady('Prepare reviewed repair')
     await screen.findByText('Repair candidate prepared. Review and promote it in manuscript polishing.')
     expect(screen.getByLabelText('Manuscript')).toHaveValue(original)
-    fireEvent.click(await screen.findByRole('button', { name: 'Review candidate 1' }))
+    await clickReady('Review candidate 1')
     await screen.findByLabelText('Candidate passage')
     expect(screen.getByLabelText('Original passage')).toHaveValue('Time stood still')
     expect(screen.getByLabelText('Candidate passage')).toHaveValue('The clock stopped')
-    fireEvent.click(screen.getByRole('button', { name: 'Promote reviewed candidate' }))
+    await clickReady('Promote reviewed candidate')
     await waitFor(() => expect(screen.getByLabelText('Manuscript')).toHaveValue(original.replace('Time stood still', 'The clock stopped')))
     await screen.findByText('Run source changed')
     const promoted = await (await fetch(`${apiRoot}/${work.id}`)).json()
     expect(promoted.revision).toBe(3)
     expect(promoted.text.endsWith('The last line stays intact.')).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: 'Restore work revision 2' }))
+    await clickReady('Restore work revision 2')
     await waitFor(() => expect(screen.getByLabelText('Manuscript')).toHaveValue(original))
     const restored = await (await fetch(`${apiRoot}/${work.id}`)).json()
     expect(restored.revision).toBe(4)
@@ -179,46 +179,92 @@ describe('Editorial checks and explicit canonical repair review', () => {
     const work = await seed()
     const view = render(<Editorial id={work.id} revision={2} text={original} apiRoot={apiRoot} onPrepared={() => { location.hash = '#prepared' }} />)
     const runButton = await screen.findByRole('button', { name: 'Run selected editorial checks' })
-    await waitFor(() => expect(runButton).toBeEnabled())
+    await waitFor(() => expectAvailableButton(runButton))
     const catalog = screen.getByText('Editorial check catalog').parentElement!
     const all = catalog.querySelectorAll('input[type="checkbox"]')
     expect(all).toHaveLength(80)
     const disabled = Array.from(all).filter(input => (input as HTMLInputElement).disabled)
     expect(disabled.length).toBeGreaterThan(0)
     expect(Array.from(all).filter(input => (input as HTMLInputElement).checked).length).toBeGreaterThan(10)
-    fireEvent.click(runButton)
+    await clickReady('Run selected editorial checks')
     await screen.findByRole('button', { name: 'Review phrase: time stood still' })
     const newer = (await post(`${apiRoot}/${work.id}/drafts`, { request_id: crypto.randomUUID(), revision: 2, text: 'A different saved draft.' })).work
     view.rerender(<Editorial id={work.id} revision={newer.revision} text="A different saved draft." apiRoot={apiRoot} onPrepared={() => { location.hash = '#prepared' }} />)
     await screen.findByText('Run source changed')
-    fireEvent.click(screen.getByRole('button', { name: 'Review phrase: time stood still' }))
-    change('My editorial replacement', 'New phrase')
-    expect(screen.getByRole('button', { name: 'Prepare reviewed repair' })).toBeDisabled()
+    await clickReady('Review phrase: time stood still')
+    await changeReady('My editorial replacement', 'New phrase')
+    expectGuardedButton(screen.getByRole('button', { name: 'Prepare reviewed repair' }))
     expect(screen.getByLabelText('Finding quotation')).toHaveValue('Time stood still')
     expect(screen.getByLabelText('Editorial coverage end')).toHaveValue(24)
     view.rerender(<Editorial id="missing" revision={1} text="" apiRoot={apiRoot} onPrepared={() => { location.hash = '#prepared' }} />)
     await screen.findByRole('alert')
     expect(screen.queryByLabelText('Finding quotation')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Run selected editorial checks' })).toBeDisabled()
+    expectGuardedButton(screen.getByRole('button', { name: 'Run selected editorial checks' }))
   })
 
   it('preserves bounded partial coverage and does not label it a clean manuscript', async () => {
     const work = await seed()
     render(<Editorial id={work.id} revision={2} text={original} apiRoot={apiRoot} onPrepared={() => { location.hash = '#prepared' }} />)
     const runButton = await screen.findByRole('button', { name: 'Run selected editorial checks' })
-    await waitFor(() => expect(runButton).toBeEnabled())
-    change('Editorial coverage start', '40')
-    change('Editorial coverage end', '62')
-    fireEvent.click(runButton)
+    await waitFor(() => expectAvailableButton(runButton))
+    await changeReady('Editorial coverage start', '40')
+    await changeReady('Editorial coverage end', '62')
+    await clickReady('Run selected editorial checks')
     const region = await screen.findByRole('region', { name: 'Editorial run 1' })
     expect(region).toHaveTextContent('coverage 40–62')
     const state = await (await fetch(`${apiRoot}/${work.id}/editorial`)).json()
     expect(state.runs[0].coverage).toEqual({ start: 40, end: 62, total_characters: Array.from(original).length })
     expect(state.runs[0].readiness).not.toBe('selected_checks_clear')
-    change('Editorial coverage end', '30000')
-    expect(runButton).toBeDisabled()
+    await changeReady('Editorial coverage end', '30000')
+    expectGuardedButton(runButton)
     const current = await (await fetch(`${apiRoot}/${work.id}`)).json()
     expect(current.revision).toBe(2)
     expect(current.text).toBe(original)
   })
 })
+
+function expectAvailableButton(button: HTMLElement) {
+  expect(button).not.toBeDisabled()
+  expect(button).not.toHaveAttribute('aria-disabled', 'true')
+}
+function expectGuardedButton(button: HTMLElement) {
+  if (button.hasAttribute('disabled')) {
+    expect(button).toBeDisabled()
+    expect(button).not.toHaveAttribute('aria-disabled', 'true')
+  } else {
+    expect(button).toHaveAttribute('aria-disabled', 'true')
+    const ids = button.getAttribute('aria-describedby')?.split(' ') ?? []
+    expect(ids.length).toBeGreaterThan(0)
+    for (const id of ids) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+    button.focus()
+    expect(document.activeElement).toBe(button)
+  }
+  const requests = vi.spyOn(globalThis, 'fetch')
+  try {
+    fireEvent.click(button)
+    expect(requests).not.toHaveBeenCalled()
+  } finally { requests.mockRestore() }
+}
+
+async function changeReady(label: string, value: string) {
+  await waitFor(() => {
+    const field = screen.getByLabelText(label)
+    expect(field).not.toBeDisabled()
+    expect(field).not.toHaveAttribute('readonly')
+    expect(field).not.toHaveAttribute('aria-readonly', 'true')
+  })
+  change(label, value)
+  const field = screen.getByLabelText(label)
+  expect(field).toHaveValue(field.getAttribute('type') === 'number' ? Number(value) : value)
+}
+async function clickReady(name: string) {
+  let button: HTMLElement | undefined
+  await waitFor(() => {
+    button = screen.getByRole('button', { name })
+    expect(button).toBeVisible()
+    expect(button).toHaveAccessibleName(name)
+    expectAvailableButton(button)
+  })
+  if (!button) throw new Error(`Button did not become available: ${name}`)
+  fireEvent.click(button)
+}

@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -121,17 +121,17 @@ describe('Artifact-backed moodboard journeys', () => {
     const first = await current()
     expect(first.groups[0].title).toBe('Foreground')
     expect(first.groups[1].cards.map((c: { artifact_id: string }) => c.artifact_id)).toEqual(['red-reference', 'blue-reference'])
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save moodboard' })).not.toBeDisabled())
+    await waitFor(() => expectAvailableButton(screen.getByRole('button', { name: 'Save moodboard' })))
     change('Board title', 'Ordering changed')
     change('Colors 2.1', '#123456')
     fireEvent.click(screen.getByRole('button', { name: 'Save moodboard' }))
     await screen.findByText('Moodboard revision 2')
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Restore board revision 1' })).not.toBeDisabled())
+    await waitFor(() => expectAvailableButton(screen.getByRole('button', { name: 'Restore board revision 1' })))
     fireEvent.click(screen.getByRole('button', { name: 'Restore board revision 1' }))
     await screen.findByText('Moodboard revision 3')
     expect(screen.getByLabelText('Colors 2.1')).toHaveValue('')
     expect((await current()).groups).toEqual(first.groups)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Export moodboard' })).not.toBeDisabled())
+    await waitFor(() => expectAvailableButton(screen.getByRole('button', { name: 'Export moodboard' })))
     fireEvent.click(screen.getByRole('button', { name: 'Export moodboard' }))
     const exported = await screen.findByLabelText('Exported moodboard') as HTMLTextAreaElement
     const json = JSON.parse(exported.value)
@@ -155,7 +155,7 @@ describe('Artifact-backed moodboard journeys', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save moodboard' }))
     await screen.findByText('Moodboard revision 1')
     const first = await current()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save moodboard' })).not.toBeDisabled())
+    await waitFor(() => expectAvailableButton(screen.getByRole('button', { name: 'Save moodboard' })))
     const response = await fetch(`${apiRoot}/${first.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: 1, title: 'Remote title' }) })
     expect(response.status).toBe(200)
     change('Board title', 'Unsaved title')
@@ -168,16 +168,16 @@ describe('Artifact-backed moodboard journeys', () => {
   it('supports board pagination and narrows canonical source choices', async () => {
     await Promise.all(Array.from({ length: 26 }, (_, n) => fetch(apiRoot, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: crypto.randomUUID(), title: `Page board ${n}`, groups: [] }) })))
     render(<Moodboards apiRoot={apiRoot} />)
-    change('Search boards', 'Page board')
+    await changeReady('Search boards', 'Page board')
     await screen.findByText('26 moodboards')
-    fireEvent.click(screen.getByRole('button', { name: 'Next boards' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Previous boards' })).not.toBeDisabled())
-    expect(screen.getByRole('button', { name: 'Next boards' })).toBeDisabled()
-    change('Search boards', 'nothing matches')
+    await clickReady('Next boards')
+    await waitFor(() => expectAvailableButton(screen.getByRole('button', { name: 'Previous boards' })))
+    expectGuardedButton(screen.getByRole('button', { name: 'Next boards' }))
+    await changeReady('Search boards', 'nothing matches')
     await screen.findByText('No moodboards yet.')
     expect(screen.getByText('0 moodboards')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Add group' }))
-    change('Find source artifacts', 'Red')
+    await clickReady('Add group')
+    await changeReady('Find source artifacts', 'Red')
     await waitFor(() => expect(screen.queryByRole('option', { name: 'Blue reference · version 1' })).not.toBeInTheDocument())
     expect(screen.getByRole('option', { name: 'Red reference · version 1' })).toBeInTheDocument()
   })
@@ -195,3 +195,42 @@ describe('Artifact-backed moodboard journeys', () => {
     expect(location.hash).toBe('#/capabilities/creative?view=boards')
   })
 })
+
+function expectAvailableButton(button: HTMLElement) {
+  expect(button).not.toBeDisabled()
+  expect(button).not.toHaveAttribute('aria-disabled', 'true')
+}
+function expectGuardedButton(button: HTMLElement) {
+  if (button.hasAttribute('disabled')) {
+    expect(button).toBeDisabled()
+    expect(button).not.toHaveAttribute('aria-disabled', 'true')
+  } else {
+    expect(button).toHaveAttribute('aria-disabled', 'true')
+    const ids = button.getAttribute('aria-describedby')?.split(' ') ?? []
+    expect(ids.length).toBeGreaterThan(0)
+    for (const id of ids) expect(document.getElementById(id)?.textContent?.trim()).toBeTruthy()
+    button.focus()
+    expect(document.activeElement).toBe(button)
+  }
+  const requests = vi.spyOn(globalThis, 'fetch')
+  try {
+    fireEvent.click(button)
+    expect(requests).not.toHaveBeenCalled()
+  } finally { requests.mockRestore() }
+}
+
+async function changeReady(label: string, value: string) {
+  await waitFor(() => {
+    const field = screen.getByLabelText(label)
+    expect(field).not.toBeDisabled()
+    expect(field).not.toHaveAttribute('readonly')
+    expect(field).not.toHaveAttribute('aria-readonly', 'true')
+  })
+  change(label, value)
+  const field = screen.getByLabelText(label)
+  expect(field).toHaveValue(field.getAttribute('type') === 'number' ? Number(value) : value)
+}
+async function clickReady(name: string) {
+  await waitFor(() => expectAvailableButton(screen.getByRole('button', { name })))
+  fireEvent.click(screen.getByRole('button', { name }))
+}
