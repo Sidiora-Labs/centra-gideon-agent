@@ -46,7 +46,7 @@ export const IframeHtmlPreview = memo(function IframeHtmlPreview({ content, mode
     {editable && (open ? <ArtifactIterationRail it={iteration} onClose={() => setOpen(false)} /> : <div className="shrink-0 border-l border-outline-variant/30 p-2">
       <SquareIconButton icon={Sliders} label="Iterate on this artifact — tweak parameters or mark elements" onClick={() => setOpen(true)} iconSize={13} />
     </div>)}
-    {error && <div role="alert" className="border-t border-outline-variant bg-surface-high px-m py-s text-sm text-danger">Preview could not be rendered: {error}</div>}
+    {error && <div role="alert" data-type="body-s" className="border-t border-outline-variant bg-surface-high px-m py-s text-danger">Preview could not be rendered: {error}</div>}
   </div>
 })
 
@@ -61,8 +61,8 @@ export const ReactPreview = memo(function ReactPreview({ content, title }: Previ
 
 function SanitizedEmpty({ what }: { what: string }) {
   return <div className="grid h-full place-items-center p-l"><div className="flex max-w-sm flex-col items-center gap-2 text-center text-on-surface-low">
-    <ShieldAlert size={22} className="opacity-40" /><p className="text-sm">Nothing to display.</p>
-    <p className="text-xs leading-relaxed">The {what} had no renderable content after sanitizing — script, handlers, and unsafe markup are removed. Switch to Edit to see the raw source.</p>
+    <ShieldAlert size={22} className="opacity-40" /><p data-type="body-s" className="">Nothing to display.</p>
+    <p data-type="body-s" className="leading-relaxed">The {what} had no renderable content after sanitizing — script, handlers, and unsafe markup are removed. Switch to Edit to see the raw source.</p>
   </div></div>
 }
 
@@ -104,8 +104,8 @@ export const VideoFilePreview = memo(function VideoFilePreview({ path, content }
 export const OfficeDocPreview = memo(function OfficeDocPreview({ path, content }: PreviewProps) {
   const raw = binaryReference(content) || path
   return <div className="flex h-full flex-col gap-3 overflow-auto p-m">
-    <p className="text-xs leading-relaxed text-on-surface-low">Text preview — download for full formatting. The editable source is whatever this document was generated from.</p>
-    {raw ? <a href={raw} download className="inline-flex h-8 w-fit items-center gap-2 rounded-md border border-outline-variant bg-surface-high px-3 text-sm text-on-surface hover:bg-surface-container"><Download size={13} /> Download</a> : <PreviewUnavailable label="document" />}
+    <p data-type="body-s" className="leading-relaxed text-on-surface-low">Text preview — download for full formatting. The editable source is whatever this document was generated from.</p>
+    {raw ? <a href={raw} download data-type="label-s" className="inline-flex h-8 w-fit items-center gap-2 rounded-md border border-outline-variant bg-surface-high px-3 text-on-surface hover:bg-surface-container"><Download size={13} /> Download</a> : <PreviewUnavailable label="document" />}
     <OfficeExtractedText url={raw} />
   </div>
 })

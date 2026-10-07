@@ -70,7 +70,7 @@ export function MessageAssistant({ children, actions, timestamp, feedback, model
           totalDeletions={changedFiles.every(item => item.diff) ? changedFiles.reduce((sum, item) => sum + item.diff!.deletions, 0) : undefined}
           onFileClick={onOpenFile} className="max-w-none" />
         {changedFiles.map(({ change, diff }) => diff && (diff.additions || diff.deletions) && <details key={change.path} className="min-w-0">
-          <summary className="cursor-pointer text-sm text-on-surface-var">File changes · {change.path}</summary>
+          <summary data-type="label-s" className="cursor-pointer text-on-surface-var">File changes · {change.path}</summary>
           <ReviewableDiff filename={change.path} mode="applied" hunks={[{ id: change.path, range: diff.range, lines: diff.lines }]} className="mt-1 max-w-none" />
         </details>)}
       </div>}

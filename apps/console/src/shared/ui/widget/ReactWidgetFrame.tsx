@@ -35,8 +35,8 @@ export function ReactWidgetFrame({ jsx, title = 'React widget', onReady, onError
   return <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
     className={expansion.expanded ? 'fixed inset-4 z-[var(--z-content)] flex flex-col rounded-2xl border border-outline-variant bg-surface shadow-2xl' : 'relative my-3 overflow-hidden rounded-xl border border-outline-variant bg-surface'}>
     <div className="flex min-h-11 items-center justify-between gap-3 border-b border-outline-variant bg-surface-high/40 px-3 py-1.5">
-      <div className="flex min-w-0 items-center gap-2"><span className="truncate text-xs font-medium text-on-surface">{title}</span>
-        {error && <span className="inline-flex items-center gap-1 text-xs text-danger" title={error}><AlertTriangle size={12} />error</span>}
+      <div className="flex min-w-0 items-center gap-2"><span data-type="label-s" className="truncate font-medium text-on-surface">{title}</span>
+        {error && <span data-type="caption" className="inline-flex items-center gap-1 text-danger" title={error}><AlertTriangle size={12} />error</span>}
       </div>
       <div className="flex gap-1" role="group" aria-label={`${title} actions`}>
         <SquareIconButton label="Open in new tab" icon={ExternalLink} disabled={!source} disabledReason={error ? "Fix the widget source error before opening it in a new tab." : "The widget source is not ready to open in a new tab."} onClick={() => source && exportWidget(source, title, 'tab')} />
@@ -44,7 +44,7 @@ export function ReactWidgetFrame({ jsx, title = 'React widget', onReady, onError
       </div>
     </div>
     {url && source && <iframe ref={frame} src={url} sandbox="allow-scripts" title={title} className="w-full border-none bg-surface" style={{ height: expansion.expanded ? 'calc(100% - 44px)' : height }} />}
-    {error && <div role="alert" className="border-t border-outline-variant bg-surface-high px-m py-s text-sm text-danger">React artifact could not be rendered: {error}</div>}
+    {error && <div role="alert" data-type="body-s" className="border-t border-outline-variant bg-surface-high px-m py-s text-danger">React artifact could not be rendered: {error}</div>}
     {expansion.expanded && <div className="fixed inset-0 -z-10 bg-black/55 backdrop-blur-sm" onClick={expansion.close} />}
   </motion.div>
 }

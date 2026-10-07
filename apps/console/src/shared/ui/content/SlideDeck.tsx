@@ -31,16 +31,16 @@ export function SlideOutline({ slide, index, editable, reason, onEdit, preview }
       <div className="relative aspect-video min-h-0 overflow-hidden rounded-xl border border-outline/40 bg-surface-container p-[6%] shadow-sm">
         {preview && <img src={preview.raw_url} alt={`Chromium raster preview of slide ${number}`} className="absolute inset-0 z-10 h-full w-full bg-white object-contain" />}
         <p data-type="caption" className="mb-3 uppercase tracking-wide text-primary">Slide {number} · outline preview</p>
-        <h3 className="line-clamp-2 text-xl font-semibold leading-tight text-on-surface">{slide.title || 'Untitled slide'}</h3>
-        <ul className="mt-4 grid gap-1.5 text-sm text-on-surface-var">{slide.bullets.slice(0, 7).map((bullet, i) =>
+        <h3 data-type="title-l" className="line-clamp-2 font-semibold leading-tight text-on-surface">{slide.title || 'Untitled slide'}</h3>
+        <ul data-type="body-m" className="mt-4 grid gap-1.5 text-on-surface-var">{slide.bullets.slice(0, 7).map((bullet, i) =>
           <li key={i} className="truncate" style={{ paddingLeft: `${Math.min(3, bullet.level) * .75}rem` }}>• {bullet.text || 'Empty bullet'}</li>)}</ul>
         {slide.artifact_slug && <img src={`/api/artifacts/${encodeURIComponent(slide.artifact_slug)}/raw`} alt={`Visual asset for slide ${number}`}
           className="absolute bottom-[8%] right-[6%] h-[56%] w-[40%] rounded-md object-contain" />}
       </div>
       <div className="rounded-xl border border-outline/30 bg-surface-container/20 p-3">
         <p data-type="label-s" className="text-on-surface">Review this slide</p>
-        {critique.length ? <ul className="mt-2 grid gap-2 text-xs text-on-surface-low">{critique.map(item => <li key={item}>• {item}</li>)}</ul>
-          : <p className="mt-2 text-xs text-on-surface-low">The outline has a title, readable bullet count, and notes. Open the saved PPTX to inspect exact layout and visual assets.</p>}
+        {critique.length ? <ul data-type="body-s" className="mt-2 grid gap-2 text-on-surface-low">{critique.map(item => <li key={item}>• {item}</li>)}</ul>
+          : <p data-type="body-s" className="mt-2 text-on-surface-low">The outline has a title, readable bullet count, and notes. Open the saved PPTX to inspect exact layout and visual assets.</p>}
       </div>
     </section>
     <section className="grid gap-3 rounded-xl border border-outline/30 p-3 sm:grid-cols-[1fr_15rem]">

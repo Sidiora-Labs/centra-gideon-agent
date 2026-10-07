@@ -179,7 +179,7 @@ function ModelControl({ data, agent, value, openSignal, onSelect, aui }: {
         {menu.options.map(option => <AssistantComposerModelItem key={option.value}
           entry={{ name: option.label, meta: option.hint ?? '' }} selected={(value || 'Auto') === option.value}
           onClick={() => { onSelect(option.value); close() }} />)}
-        {menu.runtimeDefault && <p className="px-3 py-2 text-sm text-on-surface-low">This runtime uses its own default model.</p>}
+        {menu.runtimeDefault && <p data-type="body-s" className="px-3 py-2 text-on-surface-low">This runtime uses its own default model.</p>}
       </div>}
     </Popover>}
   </div>

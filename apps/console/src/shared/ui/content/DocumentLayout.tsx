@@ -40,7 +40,7 @@ export function PageSetupControls({ page, readOnly, disabledReason, onChange }: 
     <Field label="Margins (cm)" hint="0 keeps the template's own margin for that edge.">
       <div className="flex flex-wrap gap-3">{marginEdges.map(edge => {
         const key = `margin_${edge}_pt` as const
-        return <label key={edge} className="grid gap-1 text-xs text-on-surface-var"><span className="capitalize">{edge}</span>
+        return <label key={edge} data-type="label-s" className="grid gap-1 text-on-surface-var"><span className="capitalize">{edge}</span>
           <NumberField value={ptToCm(page[key])} onChange={value => onChange({ [key]: cmToPt(value) })} min={0} step={.1} width="w-20" ariaLabel={`${edge} margin in centimetres`} />
         </label>
       })}</div>
@@ -52,7 +52,7 @@ export function PageSetupControls({ page, readOnly, disabledReason, onChange }: 
     })}</div>
     <div className="flex items-center gap-2 rounded-md border border-outline-variant/40 p-2">
       <Toggle on={page.page_numbers} onChange={page_numbers => onChange({ page_numbers })} size="sm" label="Number the pages" />
-      <span className="text-xs text-on-surface-var">Number the pages <span className="text-on-surface-low">— a field in the footer, so it counts per page.</span></span>
+      <span data-type="body-s" className="text-on-surface-var">Number the pages <span className="text-on-surface-low">— a field in the footer, so it counts per page.</span></span>
     </div>
     <PageGeometryPreview page={page} />
   </div>

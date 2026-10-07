@@ -52,7 +52,7 @@ export function MentionMenu({ query, anchorRef, open, project, leading, onSelect
       const selected = index === menu.cursor
       const subtitle = row.kind === 'file' ? row.sub : `${row.kind} · ${row.sub}`
       return <ComposerPersonItem key={`${row.kind}:${row.id}`} person={{ name: row.name, role: row.kind }} active={selected}
-        meta={<span className="flex min-w-0 items-center gap-2 text-xs text-on-surface-low"><span className="truncate">{subtitle}</span>
+        meta={<span data-type="caption" className="flex min-w-0 items-center gap-2 text-on-surface-low"><span className="truncate">{subtitle}</span>
           {row.size !== undefined && <span className="shrink-0 tabular-nums">{formatMentionSize(row.size)}</span>}</span>}
         id={`${idPrefix}-opt-${index}`} role="option"
         aria-selected={selected} title={row.sub} onMouseEnter={() => menu.selectCursor(index)}

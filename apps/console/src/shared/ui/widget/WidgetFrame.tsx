@@ -56,7 +56,7 @@ export function WidgetFrame({ html, title = 'Widget', slug, messageTs, widgetInd
     className={expansion.expanded ? 'fixed inset-4 z-[var(--z-content)] flex flex-col rounded-2xl border border-outline-variant bg-surface shadow-2xl' : 'group/widget relative my-3'}
     style={expansion.expanded ? undefined : measure.layout}>
     {expansion.expanded && <div className="flex min-h-11 items-center justify-between gap-3 border-b border-outline-variant px-3 py-1.5">
-      <span className="truncate text-xs font-medium text-on-surface">{title}</span>{!streaming && actions}
+      <span data-type="label-s" className="truncate font-medium text-on-surface">{title}</span>{!streaming && actions}
     </div>}
     <AnimatePresence mode="wait">
       {streaming ? <BlueprintSkeleton key="blueprint" height={240} /> : url && source && <motion.iframe key="document" ref={frame} src={url} sandbox="allow-scripts" title={title}

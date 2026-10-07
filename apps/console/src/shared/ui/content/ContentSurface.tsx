@@ -81,7 +81,7 @@ export const ContentSurface = forwardRef<ContentSurfaceHandle, ContentSurfacePro
   return <div className="flex h-full flex-col">
     {showToolbar && <div className="flex flex-wrap items-center gap-s border-b border-outline/40 px-m py-1.5">
       {headerLeft}
-      {truncated && <span className="rounded-md bg-surface-high px-2 py-1 text-xs text-on-surface-low" title="Only the first part of this large file was loaded — read-only so a save can't truncate the rest.">truncated · read-only</span>}
+      {truncated && <span data-type="caption" className="rounded-md bg-surface-high px-2 py-1 text-on-surface-low" title="Only the first part of this large file was loaded — read-only so a save can't truncate the rest.">truncated · read-only</span>}
       {state.anyDirty && <span className="size-1.5 shrink-0 rounded-full bg-primary" title="Unsaved changes" />}
       <div className="ml-auto flex flex-wrap items-center justify-end gap-1">
         {capability.editable && capability.previewable && <div className="mr-1 inline-flex rounded-lg border border-outline-variant/40 bg-surface-container p-0.5" role="group" aria-label="Document view">
@@ -97,27 +97,27 @@ export const ContentSurface = forwardRef<ContentSurfaceHandle, ContentSurfacePro
           {tools.exportOpen && <>
             <div className="fixed inset-0 z-40" onClick={() => tools.setExportOpen(false)} />
             <div className="absolute right-0 z-50 mt-1 min-w-40 overflow-hidden rounded-lg border border-outline-variant/50 bg-surface p-1 shadow-lg">
-              {exports.map(target => <button key={target.id} type="button" onClick={() => { tools.setExportOpen(false); void target.run(draft, title) }} className="block w-full rounded px-3 py-2 text-left text-xs text-on-surface hover:bg-surface-high">{target.label}</button>)}
+              {exports.map(target => <button key={target.id} type="button" onClick={() => { tools.setExportOpen(false); void target.run(draft, title) }} data-type="label-s" className="block w-full rounded px-3 py-2 text-left text-on-surface hover:bg-surface-high">{target.label}</button>)}
             </div>
           </>}
         </div>}
         {capability.draftEditable && <>
           <SquareIconButton icon={RotateCcw} label="Revert unsaved changes" disabled={!dirty} disabledReason="There are no unsaved changes to revert." iconSize={13} onClick={() => state.setDraft(state.base)} />
           <button type="button" onClick={dirty && !state.baseMissing ? state.save : undefined} disabled={saving} aria-busy={saving || undefined} aria-disabled={(!dirty && !saving) || state.baseMissing || undefined}
-            className="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-xs disabled:opacity-40 aria-disabled:opacity-40"
+            data-type="label-s" className="inline-flex h-7 items-center gap-1 rounded-md px-2.5 disabled:opacity-40 aria-disabled:opacity-40"
             style={{ background: dirty ? 'var(--color-primary)' : 'var(--color-surface-high)', color: dirty ? 'var(--color-on-primary)' : 'var(--color-on-surface-low)' }} title={saving ? 'Saving changes…' : state.baseMissing ? 'Refresh and rebase the draft before saving; the current source is unavailable' : dirty ? 'Save (⌘S)' : 'Save (⌘S) — no changes to save'}>
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}{!compact && 'Save'}
           </button>
           {actions?.map(action => <button key={action.label} type="button" onClick={() => state.action(action.run)} disabled={saving} aria-busy={saving || undefined}
-            className="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-xs disabled:opacity-40"
+            data-type="label-s" className="inline-flex h-7 items-center gap-1 rounded-md px-2.5 disabled:opacity-40"
             style={action.primary ? { background: 'var(--color-primary)', color: 'var(--color-on-primary)' } : { color: 'var(--color-on-surface-low)' }} title={action.title || action.label}>
             {saving ? <Loader2 size={13} className="animate-spin" /> : <action.icon size={13} />}{!compact && action.label}
           </button>)}
         </>}
       </div>
     </div>}
-    {state.baseError && <div role="alert" className="border-b border-error/30 bg-error/10 px-m py-2 text-xs text-error">{state.baseError}</div>}
-    {state.baseMissing && <div role="alert" className="flex items-center justify-between gap-2 border-b border-warning/30 bg-warning/10 px-m py-2 text-xs text-on-surface">
+    {state.baseError && <div role="alert" data-type="body-s" className="border-b border-error/30 bg-error/10 px-m py-2 text-error">{state.baseError}</div>}
+    {state.baseMissing && <div role="alert" data-type="body-s" className="flex items-center justify-between gap-2 border-b border-warning/30 bg-warning/10 px-m py-2 text-on-surface">
       <span>This saved draft has no matching version. Refresh and rebase it before saving.</span>
       {readCurrent && <button type="button" onClick={() => void state.rebaseMissing()} disabled={saving} className="rounded-md border border-outline/50 px-2 py-1 font-medium hover:bg-surface-high">Refresh and rebase draft</button>}
     </div>}
@@ -138,7 +138,7 @@ function ToggleBtn({ icon: Icon, label, on, onClick, compact, indicatorId }: { i
   return <button type="button" aria-label={label} aria-pressed={on} title={compact ? label : undefined} onClick={onClick}
     className={`relative inline-flex h-6 items-center gap-1 rounded-md ${compact ? 'px-2' : 'px-2.5'} ${on ? 'text-on-surface' : 'text-on-surface-low'}`}>
     {on && <motion.span layoutId={indicatorId} transition={spring.spatialFast} className="absolute inset-0 rounded-md bg-surface-highest" />}
-    <Icon size={12} className="relative" />{!compact && <span className="relative text-xs">{label}</span>}
+    <Icon size={12} className="relative" />{!compact && <span data-type="label-s" className="relative">{label}</span>}
   </button>
 }
 export { FileWarning }
