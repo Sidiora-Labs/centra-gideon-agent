@@ -1,3 +1,4 @@
+import { notify } from '../../../app/shell/appSdk'
 import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useRef, useState } from 'react'
 import { reportSpeechPlayback } from './speechPlayback'
@@ -22,7 +23,7 @@ export default function OwnedAudio({ src, baseUrl, label = 'Scene narration audi
     const lease = held.current
     held.current = null
     if (lease) onStopped?.()
-    if (lease && !supplied) void releaseAudible(baseUrl, lease).catch(() => {})
+    if (lease && !supplied) void releaseAudible(baseUrl, lease).catch(cause => notify(`Speech stopped locally, but audible ownership could not be released: ${String(cause)}`, 'error'))
   }
   const arm = (lease: AudibleLease) => { clearTimeout(deadline.current); deadline.current = setTimeout(() => { stop(); setError('Audible ownership expired.') }, Math.max(0, lease.expires_at * 1000 - Date.now())) }
   useEffect(() => {

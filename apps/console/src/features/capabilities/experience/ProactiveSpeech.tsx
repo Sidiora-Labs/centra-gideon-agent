@@ -1,3 +1,4 @@
+import { notify } from '../../../app/shell/appSdk'
 import { useEffect, useRef, useState } from 'react'
 import { gatewayRequest, requestJson, responseError } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -14,7 +15,7 @@ export default function ProactiveSpeech({ baseUrl = '/api/capabilities/experienc
   const retry = useRef(false)
   const lastAudio = useRef('')
   const playingJob = useRef('')
-  const release = () => { const held = lease.current; lease.current = null; if (held) void releaseAudible(baseUrl, held).catch(() => {}) }
+  const release = () => { const held = lease.current; lease.current = null; if (held) void releaseAudible(baseUrl, held).catch(cause => notify(`Speech stopped locally, but audible ownership could not be released: ${String(cause)}`, 'error')) }
   useEffect(() => {
     if (!active) return
     let alive = true, timer: ReturnType<typeof setTimeout>, url = ''
@@ -45,7 +46,7 @@ export default function ProactiveSpeech({ baseUrl = '/api/capabilities/experienc
       alive = false; clearTimeout(timer); generation.current++; setAudio('')
       if (url) URL.revokeObjectURL(url)
       const held = lease.current; lease.current = null
-      if (held) void releaseAudible(baseUrl, held).catch(() => {})
+      if (held) void releaseAudible(baseUrl, held).catch(cause => notify(`Speech stopped locally, but audible ownership could not be released: ${String(cause)}`, 'error'))
     }
   }, [active, baseUrl])
   const enable = async () => {
