@@ -375,6 +375,11 @@ describe("ImageZoom modal behavior", () => {
     const { trigger, dialog, closeButton } = await openZoom();
 
     expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.querySelector('h2')?.className).toBe('sr-only');
+    expect(dialog.querySelector('header')).toBeNull();
+    expect(dialog.parentElement!.firstElementChild).toHaveClass('bg-black/80');
+    expect(dialog.querySelector('[data-slot="image-zoom-overlay"]')?.parentElement).toHaveClass('overflow-hidden');
+    expect(document.body.style.overflow).toBe('hidden');
     expect(document.activeElement).toBe(closeButton);
 
     fireEvent.click(closeButton);
@@ -418,7 +423,7 @@ describe("ImageZoom modal behavior", () => {
       cancelable: true,
       key: "Tab",
     });
-    document.dispatchEvent(tabEvent);
+    closeButton.dispatchEvent(tabEvent);
 
     expect(tabEvent.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(closeButton);
@@ -429,7 +434,7 @@ describe("ImageZoom modal behavior", () => {
       key: "Tab",
       shiftKey: true,
     });
-    document.dispatchEvent(reverseTabEvent);
+    closeButton.dispatchEvent(reverseTabEvent);
 
     expect(reverseTabEvent.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(closeButton);
@@ -443,7 +448,7 @@ describe("ImageZoom modal behavior", () => {
   it("restores focus after backdrop and image dismissal", async () => {
     const { trigger, dialog } = await openZoom();
 
-    fireEvent.click(dialog);
+    fireEvent.click(dialog.parentElement!.firstElementChild!);
 
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(trigger);

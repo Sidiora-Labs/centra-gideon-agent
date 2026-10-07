@@ -1,18 +1,18 @@
 "use client";
 
 import { renderMermaidSVG } from "beautiful-mermaid";
-import { Maximize2, Minus, Plus, RotateCcw, X } from "lucide-react";
+import { Maximize2, Minus, Plus, RotateCcw } from "lucide-react";
 import {
   type FC,
   type ReactNode,
   memo,
   useCallback,
-  useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
+import { Modal } from "../../../ui/Modal";
+import { IconButton } from "../../../ui/IconButton";
 import { cn } from "../lib/utils";
 
 export type MermaidDiagramProps = {
@@ -34,8 +34,6 @@ function MermaidZoom({ svg, children }: MermaidZoomProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const closeRef = useRef<HTMLButtonElement>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{
     startX: number;
@@ -58,47 +56,7 @@ function MermaidZoom({ svg, children }: MermaidZoomProps) {
   const handleClose = useCallback(() => {
     setIsOpen(false);
     setTransform({ x: 0, y: 0, scale: 1 });
-    triggerRef.current?.focus();
   }, []);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        handleClose();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const focusables = overlayRef.current?.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      );
-      const first = focusables?.[0];
-      const last = focusables?.[focusables.length - 1];
-      if (!first || !last) return;
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, handleClose]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = originalOverflow;
-    };
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (isOpen) closeRef.current?.focus();
-  }, [isOpen]);
 
   const zoomBy = useCallback((factor: number, cx?: number, cy?: number) => {
     setTransform((t) => {
@@ -170,19 +128,15 @@ function MermaidZoom({ svg, children }: MermaidZoomProps) {
       >
         <Maximize2 className="size-3.5" />
       </button>
-      {isOpen &&
-        createPortal(
-          <div
-            ref={overlayRef}
-            data-slot="mermaid-zoom-overlay"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Diagram"
-            className="aui-mermaid-zoom-overlay fade-in animate-in bg-background fixed inset-0 z-[var(--z-modal)] duration-200"
-          >
+      {isOpen && <Modal title="Diagram" presentation="fullscreen" chrome="media" restoreFocus={triggerRef}
+        dismissOnBackdrop={false} lockBodyScroll onClose={handleClose} mediaControls={<>
+          <IconButton icon={Plus} label="Zoom in" size={28} iconSize={16} onClick={() => zoomBy(1.25)} />
+          <IconButton icon={Minus} label="Zoom out" size={28} iconSize={16} onClick={() => zoomBy(0.8)} />
+          <IconButton icon={RotateCcw} label="Reset zoom" size={28} iconSize={16} onClick={() => setTransform({ x: 0, y: 0, scale: 1 })} />
+        </>}>
             <div
               ref={viewportRef}
-              className="aui-mermaid-zoom-viewport h-full w-full cursor-grab touch-none overflow-hidden active:cursor-grabbing"
+              className="aui-mermaid-zoom-viewport bg-background h-full w-full cursor-grab touch-none overflow-hidden active:cursor-grabbing"
               onWheel={onWheel}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
@@ -199,47 +153,7 @@ function MermaidZoom({ svg, children }: MermaidZoomProps) {
                 dangerouslySetInnerHTML={{ __html: zoomSvg }}
               />
             </div>
-            <div
-              data-slot="mermaid-zoom-toolbar"
-              className="aui-mermaid-zoom-toolbar border-border bg-background absolute top-4 right-4 flex items-center gap-1 rounded-lg border p-1"
-            >
-              <button
-                type="button"
-                aria-label="Zoom in"
-                onClick={() => zoomBy(1.25)}
-                className="text-muted-foreground hover:text-foreground cursor-pointer rounded-sm p-1.5"
-              >
-                <Plus className="size-4" />
-              </button>
-              <button
-                type="button"
-                aria-label="Zoom out"
-                onClick={() => zoomBy(0.8)}
-                className="text-muted-foreground hover:text-foreground cursor-pointer rounded-sm p-1.5"
-              >
-                <Minus className="size-4" />
-              </button>
-              <button
-                type="button"
-                aria-label="Reset zoom"
-                onClick={() => setTransform({ x: 0, y: 0, scale: 1 })}
-                className="text-muted-foreground hover:text-foreground cursor-pointer rounded-sm p-1.5"
-              >
-                <RotateCcw className="size-4" />
-              </button>
-              <button
-                ref={closeRef}
-                type="button"
-                aria-label="Close"
-                onClick={handleClose}
-                className="text-muted-foreground hover:text-foreground cursor-pointer rounded-sm p-1.5"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-          </div>,
-          document.body,
-        )}
+      </Modal>}
     </div>
   );
 }

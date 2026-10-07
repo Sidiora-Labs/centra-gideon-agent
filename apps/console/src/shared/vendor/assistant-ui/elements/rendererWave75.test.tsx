@@ -409,7 +409,7 @@ describe('MermaidZoom direct interaction contract', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Expand diagram' }))
     const dialog = screen.getByRole('dialog', { name: 'Diagram' })
     expect(dialog.getAttribute('aria-modal')).toBe('true')
-    expect(dialog.parentElement).toBe(document.body)
+    expect(dialog.parentElement?.parentElement).toBe(document.body)
     expect(container.querySelector('[data-slot="mermaid-zoom-overlay"]')).toBeNull()
   })
   it('rewrites SVG definition IDs and URL references in the zoom copy', () => {
@@ -478,7 +478,7 @@ describe('MermaidZoom direct interaction contract', () => {
     const close = screen.getByRole('button', { name: 'Close' })
     close.focus()
     const event = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
-    document.dispatchEvent(event)
+    ;(document.activeElement as HTMLElement).dispatchEvent(event)
     expect(event.defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Zoom in' }))
   })
@@ -488,7 +488,7 @@ describe('MermaidZoom direct interaction contract', () => {
     const first = screen.getByRole('button', { name: 'Zoom in' })
     first.focus()
     const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true })
-    document.dispatchEvent(event)
+    ;(document.activeElement as HTMLElement).dispatchEvent(event)
     expect(event.defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close' }))
   })
@@ -897,12 +897,36 @@ describe('Mermaid zoom pointer and keyboard edge behavior', () => {
   it('does not trap Tab when the zoom toolbar has no focusable control', () => {
     render(<MermaidZoom svg={svg}>{preview}</MermaidZoom>)
     fireEvent.click(screen.getByRole('button', { name: 'Expand diagram' }))
-    const toolbar = document.querySelector('[data-slot="mermaid-zoom-toolbar"]') as HTMLElement
+    const toolbar = document.querySelector('[data-slot="modal-media-toolbar"]') as HTMLElement
     const controls = Array.from(toolbar.childNodes)
     toolbar.replaceChildren()
     const event = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
     document.dispatchEvent(event)
     expect(event.defaultPrevented).toBe(false)
     toolbar.replaceChildren(...controls)
+  })
+})
+
+
+describe('Mermaid fullscreen native media chrome', () => {
+  it('keeps the entire canvas interactive without introducing backdrop dismissal', () => {
+    render(<MermaidZoom svg="<svg></svg>"><span>Preview</span></MermaidZoom>)
+    const trigger = screen.getByRole('button', { name: 'Expand diagram' })
+    trigger.focus()
+    fireEvent.click(trigger)
+    const dialog = screen.getByRole('dialog', { name: 'Diagram' })
+    expect(dialog.querySelector('h2')).toHaveClass('sr-only')
+    expect(dialog.querySelector('header')).toBeNull()
+    const viewport = dialog.querySelector('.aui-mermaid-zoom-viewport') as HTMLElement
+    expect(viewport).toHaveClass('h-full', 'w-full')
+    expect(viewport.parentElement).toHaveClass('overflow-hidden')
+    expect(viewport.parentElement?.className).not.toMatch(/px-|py-/)
+    fireEvent.click(dialog.parentElement!.firstElementChild!)
+    fireEvent.click(viewport)
+    expect(screen.getByRole('dialog', { name: 'Diagram' })).toBe(dialog)
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
   })
 })
