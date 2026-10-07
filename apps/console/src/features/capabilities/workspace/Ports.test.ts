@@ -18,15 +18,17 @@ const root = resolve(process.cwd(), '../..')
 const cache = mkdtempSync(resolve(tmpdir(), 'workspace-ports-vite-'))
 
 beforeAll(async () => {
-  backend = spawn('/tmp/gideon-runtime-venv/bin/python', [resolve(root, 'checks/runtime/capabilities/workspace/ui_server.py')], { env: { ...process.env, PYTHONPATH: resolve(root, 'runtime') }, stdio: ['ignore', 'pipe', 'pipe'] })
+  backend = spawn(process.env.GIDEON_TEST_PYTHON || resolve(root, '.venv/bin/python'), [resolve(root, 'checks/runtime/capabilities/workspace/ui_server.py')], { cwd: root, env: { ...process.env, PYTHONPATH: resolve(root, 'runtime') }, stdio: ['ignore', 'pipe', 'pipe'] })
   const ready = await new Promise<{ url: string; repo: string; token: string }>((accept, reject) => {
     let output = '', errors = ''
+    const timeout = setTimeout(() => reject(new Error(`Workspace backend readiness timed out: ${errors}`)), 20000)
+    backend.once('error', error => { clearTimeout(timeout); reject(error) })
     backend.stderr!.on('data', chunk => { errors += chunk })
-    backend.on('exit', code => reject(new Error(`Backend exited ${code}: ${errors}`)))
+    backend.on('exit', code => { clearTimeout(timeout); reject(new Error(`Backend exited ${code}: ${errors}`)) })
     backend.stdout!.on('data', chunk => {
       output += chunk
       const line = output.split('\n').find(text => text.startsWith('{"url"'))
-      if (line) accept(JSON.parse(line))
+      if (line) { clearTimeout(timeout); accept(JSON.parse(line)) }
     })
   })
   token = ready.token
@@ -46,7 +48,7 @@ beforeAll(async () => {
   const address = server.httpServer!.address()
   if (!address || typeof address === 'string') throw new Error('Missing server address')
   origin = `http://127.0.0.1:${address.port}`
-  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || '/opt/chromium/chrome-linux64/chrome', headless: true, args: ['--no-sandbox'] })
+  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH, headless: true, args: ['--no-sandbox'] })
   page = await browser.newPage()
   page.on('pageerror', error => console.error(error.message))
   await page.goto(`${origin}/api/capabilities/workspace?token=${token}`)

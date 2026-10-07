@@ -13,14 +13,17 @@ from types import SimpleNamespace
 
 from aiohttp import web
 
-from checks.runtime.capabilities.workspace.test_workspace import repository
-
 
 async def main():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         os.environ["GIDEON_HOME"] = directory
-        repo = repository(root / "repo")
+        os.environ["GIDEON_WORKSPACE"] = str(root / "workspace")
+        from gideon.core.config.loader import workspace_root
+
+        from checks.runtime.capabilities.workspace.test_workspace import repository
+
+        repo = repository(workspace_root() / "repo")
         (root / "config.json").write_text(
             json.dumps({"dashboard": {"terminal": {"enabled": True}}})
         )
