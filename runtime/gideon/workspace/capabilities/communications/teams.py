@@ -7,6 +7,7 @@ import threading
 from contextlib import closing
 from datetime import datetime, timezone
 from html.parser import HTMLParser
+from typing import Any
 from urllib.parse import quote, urljoin, urlsplit
 from uuid import uuid4
 
@@ -211,7 +212,7 @@ class GraphClient:
 
 
 async def _collect_pages(client, path, limit=MAX_MESSAGES):
-    rows = []
+    rows: list[dict[str, Any]] = []
     async for page in client.pages(path):
         if len(rows) + len(page) > limit:
             return rows + page[: max(0, limit - len(rows))], False
@@ -314,7 +315,7 @@ async def _history(client, owner, people):
             continue
         team_id = text(team.get("id"), "team id", 500, True)
         channels, complete = await _collect_pages(
-            client, f'teams/{quote(team_id, safe="")}/channels?$top=50'
+            client, f'teams/{quote(team_id or "", safe="")}/channels?$top=50'
         )
         discovered_complete &= complete
         conversations.extend(
@@ -327,15 +328,15 @@ async def _history(client, owner, people):
             for row in channels
             if isinstance(row, dict)
         )
-    normalized = {}
+    normalized: dict[str, dict[str, Any]] = {}
     for kind, conversation_id, team_id, channel_id in conversations:
         if len(normalized) >= MAX_MESSAGES:
             discovered_complete = False
             break
         if kind == "chat":
-            path = f'chats/{quote(conversation_id, safe="")}/messages?$top=50'
+            path = f'chats/{quote(conversation_id or "", safe="")}/messages?$top=50'
         else:
-            path = f'teams/{quote(team_id, safe="")}/channels/{quote(channel_id, safe="")}/messages?$top=50&$expand=replies'
+            path = f'teams/{quote(team_id or "", safe="")}/channels/{quote(channel_id or "", safe="")}/messages?$top=50&$expand=replies'
         rows, complete = await _collect_pages(
             client, path, MAX_MESSAGES - len(normalized)
         )

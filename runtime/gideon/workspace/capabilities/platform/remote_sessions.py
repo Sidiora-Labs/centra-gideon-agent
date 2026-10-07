@@ -7,6 +7,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 import aiohttp
@@ -291,7 +292,7 @@ class RemoteSessionBridge:
             raise ValueError("message or attachment required")
         if not isinstance(attachments, list) or len(attachments) > 8:
             raise ValueError("attachments must contain at most 8 items")
-        input_rows = (
+        input_rows: list[dict[str, Any]] = (
             [
                 {
                     "type": "message",

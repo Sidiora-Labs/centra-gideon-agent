@@ -1,6 +1,7 @@
 """Native tool consumer of the authored story and narration services."""
 
 import json
+from typing import Any
 
 from gideon.sdk.tool import RiskLevel, ToolDefinition, ToolProvider, ToolResult
 
@@ -21,7 +22,7 @@ STORY = {
     "description": "title, start_node, nodes [{id,text,kind:scene|ending,choices:[{id,label,target}]}]; revision required on edit",
     "required": ["title", "start_node", "nodes"],
 }
-OPERATIONS = {
+OPERATIONS: dict[str, tuple[dict[str, Any], bool, str]] = {
     "world_get": (
         {"world": STRING},
         False,

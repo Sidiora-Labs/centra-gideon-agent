@@ -218,7 +218,7 @@ class ManuscriptExports:
             raise ExportError(
                 "Pinned manuscript artifact is missing", 404, "source_missing"
             )
-        data = artifact.content.encode()
+        data = (artifact.content or "").encode()
         return {
             "title": title or work["title"],
             "text": artifact.content,

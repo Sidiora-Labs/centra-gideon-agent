@@ -7,8 +7,6 @@ import json
 import os
 import re
 import shutil
-
-from gideon.operations.durability import sqlite_files
 import socket
 import tarfile
 import tempfile
@@ -17,6 +15,7 @@ from pathlib import Path, PurePosixPath
 
 from gideon.core.atomic_write import atomic_write
 from gideon.core.sqlite_compat import connect, sqlite3
+from gideon.operations.durability import sqlite_files
 
 VALID_COMPONENTS = (
     "memory",
@@ -124,9 +123,7 @@ def _declared_db_paths() -> tuple[str, ...]:
     try:
         from gideon.operations.durability import inventory as inv
 
-        return tuple(
-            e.path for e in inv.backup_entries() if e.kind == inv.KIND_SQLITE
-        )
+        return tuple(e.path for e in inv.backup_entries() if e.kind == inv.KIND_SQLITE)
     except Exception:  # noqa: BLE001 — snapshot must work even if this import breaks
         return ("memory.db", "memory_index.db")
 
@@ -151,13 +148,18 @@ def _safe_copy_db(src: Path, dst: Path) -> bool:
 
 def _tree_ignore_dbs(db_names: set[str], *, home: Path | None = None):
     """Skip only the declared copies already staged through SQLite backup."""
+
     def _ignore(directory: str, contents: list[str]) -> set[str]:
         if home is None:
             captured = {name for name in contents if name in db_names}
         else:
-            captured = {name for name in contents if
-                        (Path(directory) / name).relative_to(home).as_posix() in db_names}
+            captured = {
+                name
+                for name in contents
+                if (Path(directory) / name).relative_to(home).as_posix() in db_names
+            }
         return captured | sqlite_files.sidecars_in(directory, contents)
+
     return _ignore
 
 
@@ -262,7 +264,9 @@ def _restore_ignore(entry_path: str, root: Path):
     return _ignore
 
 
-def _apps_missing_engines(snap: Path, components: list[str] | None) -> list[tuple[str, str]]:
+def _apps_missing_engines(
+    snap: Path, components: list[str] | None
+) -> list[tuple[str, str]]:
     """Return restored sidecar apps that need their machine engine installed again."""
     if not _store_selected(components, "apps") or not (snap / "apps").is_dir():
         return []
@@ -274,7 +278,10 @@ def _apps_missing_engines(snap: Path, components: list[str] | None) -> list[tupl
 
         missing: list[tuple[str, str]] = []
         for archived in sorted((snap / "apps").iterdir()):
-            if archived.name.startswith(".") or not (archived / APP_MANIFEST_FILENAME).is_file():
+            if (
+                archived.name.startswith(".")
+                or not (archived / APP_MANIFEST_FILENAME).is_file()
+            ):
                 continue
             install = SidecarInstall.for_app(archived.name)
             if install is None or install.installed:
@@ -439,7 +446,6 @@ def _list_components() -> None:
     print("\nCombine with commas: --components memory,crons,skills")
 
 
-
 def _copytree_safe(src: Path, dst: Path, **kwargs) -> None:
     """copytree that skips symlinks to prevent sensitive file leakage."""
     from gideon.operations.durability.home_paths import guard_path
@@ -464,9 +470,11 @@ def _copytree_safe(src: Path, dst: Path, **kwargs) -> None:
     shutil.copytree(str(src), str(dst), ignore=_ignore_symlinks, **kwargs)
 
 
-def _copy_tree_no_overwrite(src: Path, dst: Path, *, entry_path: str = "", left: list[str] | None = None) -> None:
-    from gideon.operations.durability.restore_items import copy_tree_no_overwrite
+def _copy_tree_no_overwrite(
+    src: Path, dst: Path, *, entry_path: str = "", left: list[str] | None = None
+) -> None:
     from gideon.operations.durability.home_paths import guard_path
+    from gideon.operations.durability.restore_items import copy_tree_no_overwrite
 
     dst = guard_path(dst)
     if left is None:
@@ -498,6 +506,7 @@ def _copy_json_with_arrival_policy(
     src: Path, dst: Path, entry_path: str, *, local_path: Path | None = None
 ) -> None:
     from gideon.operations.durability.home_paths import guard_path
+
     src, dst = guard_path(src, read=True), guard_path(dst)
     incoming = _read_optional_json(src)
     local = _read_optional_json(local_path) if local_path is not None else None
@@ -508,7 +517,9 @@ def _copy_json_with_arrival_policy(
     atomic_write(dst, json.dumps(restored, indent=2))
 
 
-def _apply_arrival_policy_to_tree(root: Path, entry_path: str, local_root: Path) -> None:
+def _apply_arrival_policy_to_tree(
+    root: Path, entry_path: str, local_root: Path
+) -> None:
     """Reconcile machine-local fields after a replace has retained its recovery tree."""
     for path in root.rglob("*.json"):
         if path.is_symlink() or not path.is_file():
@@ -524,8 +535,9 @@ def _apply_arrival_policy_to_tree(root: Path, entry_path: str, local_root: Path)
 
 def _write_archive(stage: Path, outfile: Path) -> Path:
     """Publish a whole snapshot with private permissions from its first byte."""
-    from gideon.operations.durability.home_paths import guard_path, private_file
     from gideon.operations.durability.archive import sidecar_path
+    from gideon.operations.durability.home_paths import guard_path, private_file
+
     guard_path(outfile)
     guard_path(sidecar_path(outfile))
     missing = []
@@ -670,9 +682,9 @@ def snapshot_main(
                 def _ignore(
                     directory: str, contents: list[str], _d=_derived
                 ) -> set[str]:
-                    return set(_tree_ignore_dbs(_db_names, home=pc)(directory, contents)) | _d(
-                        directory, contents
-                    )
+                    return set(
+                        _tree_ignore_dbs(_db_names, home=pc)(directory, contents)
+                    ) | _d(directory, contents)
 
                 _copytree_safe(src, stage / rel, dirs_exist_ok=True, ignore=_ignore)
                 staged_extra.append(rel)
@@ -729,8 +741,11 @@ def snapshot_main(
     from gideon.operations.durability import retention
     from gideon.operations.durability.service import last_verified
 
-    plan = retention.plan_newest(retention.list_snapshots(out), keep=args.keep,
-                                 verified=last_verified()["archive"])
+    plan = retention.plan_newest(
+        retention.list_snapshots(out),
+        keep=args.keep,
+        verified=last_verified()["archive"],
+    )
     for name in retention.remove(plan.prune)[0]:
         print(f"🗑  Pruned: {name} ({plan.reasons[name]})")
     if plan.held is not None:
@@ -781,7 +796,9 @@ def _domain_counts(stage: Path) -> dict[str, dict[str, int]]:
             if entry.kind == inv.KIND_SQLITE and staged.is_file():
                 bucket["rows"] += _sqlite_row_total(staged)
             elif entry.kind == inv.KIND_JSONL_APPEND:
-                files = [staged] if staged.is_file() else sorted(staged.rglob("*.jsonl"))
+                files = (
+                    [staged] if staged.is_file() else sorted(staged.rglob("*.jsonl"))
+                )
                 for fpath in files:
                     try:
                         bucket["rows"] += sum(
@@ -811,11 +828,12 @@ def _sqlite_row_total(db: Path) -> int:
     correct here (and only here): the staged file came through the backup API, so it is
     fully checkpointed and has no WAL to miss.
     """
-    from gideon.core.sqlite_compat import connect, sqlite3 as _sqlite3
+    from gideon.core.sqlite_compat import connect
+    from gideon.core.sqlite_compat import sqlite3 as _sqlite3
 
     total = 0
     try:
-        conn = _connect(f"file:{db}?mode=ro&immutable=1", uri=True)
+        conn = connect(f"file:{db}?mode=ro&immutable=1", uri=True)
     except Exception:  # noqa: BLE001
         return 0
     try:
@@ -903,6 +921,7 @@ def _validate_identifier(name: str) -> str:
 
 def _merge_memory(src_db: Path, dst_db: Path) -> None:
     from gideon.operations.durability.home_paths import guard_path
+
     src_db, dst_db = guard_path(src_db, read=True), guard_path(dst_db)
     try:
         from contextlib import closing
@@ -991,6 +1010,7 @@ def _merge_memory(src_db: Path, dst_db: Path) -> None:
 
 def _merge_crons(src_path: Path, dst_path: Path) -> None:
     from gideon.operations.durability.home_paths import guard_path
+
     src_path, dst_path = guard_path(src_path, read=True), guard_path(dst_path)
     src = json.loads(src_path.read_text())
     dst = json.loads(dst_path.read_text())
@@ -1031,6 +1051,7 @@ def _merge_triggers(src_path: Path, dst_path: Path) -> None:
     also why importing cannot resurrect a fire that should have happened during the move.
     """
     from gideon.operations.durability.home_paths import guard_path
+
     src_path, dst_path = guard_path(src_path, read=True), guard_path(dst_path)
     src = json.loads(src_path.read_text())
     dst = json.loads(dst_path.read_text())
@@ -1070,6 +1091,7 @@ def _merge_event_triggers(src_path: Path, dst_path: Path) -> None:
     has no name field, so the pattern is its identity.
     """
     from gideon.operations.durability.home_paths import guard_path
+
     src_path, dst_path = guard_path(src_path, read=True), guard_path(dst_path)
     src = json.loads(src_path.read_text())
     dst = json.loads(dst_path.read_text())
@@ -1096,6 +1118,7 @@ def _merge_event_triggers(src_path: Path, dst_path: Path) -> None:
 
 def _merge_notifications(src_path: Path, dst_path: Path) -> None:
     from gideon.operations.durability.home_paths import guard_path
+
     src_path, dst_path = guard_path(src_path, read=True), guard_path(dst_path)
     existing: set[str] = set()
     with open(dst_path) as f:
@@ -1133,6 +1156,7 @@ def _merge_json_collection(
     merge mode's contract is that local state wins — the snapshot only fills gaps.
     """
     from gideon.operations.durability.home_paths import guard_path
+
     src, dst = guard_path(src, read=True), guard_path(dst)
     if not src.is_file() or not dst.is_file():
         return 0
@@ -1185,6 +1209,7 @@ def _merge_json_map(src: Path, dst: Path, *, wrapper: str | None = None) -> int:
     key the live home does not have is pure recovery; a key it has is authoritative.
     """
     from gideon.operations.durability.home_paths import guard_path
+
     src, dst = guard_path(src, read=True), guard_path(dst)
     if not src.is_file() or not dst.is_file():
         return 0
@@ -1249,6 +1274,7 @@ def _merge_sqlite_attach(src_db: Path, dst_db: Path, label: str) -> int:
     allowlist exists, not an accident of it.
     """
     from gideon.operations.durability.home_paths import guard_path
+
     src_db, dst_db = guard_path(src_db, read=True), guard_path(dst_db)
     try:
         check = connect(f"file:{src_db}?mode=ro", uri=True)
@@ -1341,6 +1367,7 @@ def _merge_keyed_jsonl(src: Path, dst: Path, key_field: str, label: str) -> int:
     who only wanted the dedup.
     """
     from gideon.operations.durability.home_paths import guard_path
+
     src, dst = guard_path(src, read=True), guard_path(dst)
     if not src.is_file() or (dst.exists() and not dst.is_file()):
         return 0
@@ -1382,6 +1409,7 @@ def _merge_feedback(src: Path, dst: Path) -> None:
     store after finding one copy had silently reverted the other.
     """
     from gideon.operations.durability.home_paths import guard_path
+
     src, dst = guard_path(src, read=True), guard_path(dst)
     _merge_keyed_jsonl(src, dst, "id", "Feedback")
 
@@ -1474,7 +1502,8 @@ def _merge_run_history(src_dir: Path, dst_dir: Path) -> list[str]:
     (S175) and owns that policy; trimming here would apply retention twice with a second copy of the
     rule — the duplication S175 just removed.
     """
-    from gideon.operations.durability.home_paths import guard_path, LinkInTheWay
+    from gideon.operations.durability.home_paths import LinkInTheWay, guard_path
+
     src_dir, dst_dir = guard_path(src_dir, read=True), guard_path(dst_dir)
     left: list[str] = []
     if not src_dir.is_dir():
@@ -1493,7 +1522,9 @@ def _merge_run_history(src_dir: Path, dst_dir: Path) -> list[str]:
             with open(dst) as f:
                 for line in f:
                     try:
-                        existing.add(str(json.loads(line).get("run_id") or line.strip()))
+                        existing.add(
+                            str(json.loads(line).get("run_id") or line.strip())
+                        )
                     except (ValueError, TypeError):
                         pass
             with open(dst, "a") as out, open(src) as f:
@@ -1526,6 +1557,7 @@ def _snapshot_config_document(path: Path) -> dict:
 
 def _replace_config_from_snapshot(src: Path, live: Path, backup: Path) -> None:
     from gideon.operations.durability.home_paths import guard_path
+
     src, live = guard_path(src, read=True), guard_path(live)
     incoming = _snapshot_config_document(src)
 
@@ -1544,6 +1576,7 @@ def _replace_config_from_snapshot(src: Path, live: Path, backup: Path) -> None:
 
 def _copy_config_if_missing(src: Path, live: Path) -> bool:
     from gideon.operations.durability.home_paths import guard_path
+
     src, live = guard_path(src, read=True), guard_path(live)
     incoming = _snapshot_config_document(src)
 
@@ -1570,6 +1603,7 @@ def _backup_and_copy(pc: Path, backup: Path, snap: Path, component: str) -> None
                 _replace_config_from_snapshot(src, pc / f, backup / f)
             continue
         from gideon.operations.durability.home_paths import home_path
+
         local_path = home_path(pc, f)
         local = _read_optional_json(local_path) if f.endswith(".json") else None
         if local_path.is_file():
@@ -1596,10 +1630,12 @@ def _backup_and_copy(pc: Path, backup: Path, snap: Path, component: str) -> None
 def _do_replace(snap: Path, pc: Path, components: list[str] | None) -> list[str]:
     from gideon.operations.durability.home_paths import LinkInTheWay
     from gideon.operations.durability.restore_items import left_unchanged_line
+
     left: list[str] = []
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup = pc / f"pre-restore-{ts}"
     from gideon.operations.durability.home_paths import guard_path
+
     backup = guard_path(backup)
     backup.mkdir(exist_ok=True)
     print("🔄 Replace mode — backing up current state...")
@@ -1658,8 +1694,13 @@ def _do_replace(snap: Path, pc: Path, components: list[str] | None) -> list[str]
                     if not _store_selected(components, rel):
                         continue
                     from gideon.operations.durability.home_paths import home_path
+
                     src, live = snap / rel, home_path(pc, rel)
-                    local = _read_optional_json(live) if src.is_file() and rel.endswith(".json") else None
+                    local = (
+                        _read_optional_json(live)
+                        if src.is_file() and rel.endswith(".json")
+                        else None
+                    )
                     if live.exists() and not live.is_symlink():
                         (backup / rel).parent.mkdir(parents=True, exist_ok=True)
                         shutil.move(str(live), str(backup / rel))
@@ -1689,7 +1730,9 @@ def _do_replace(snap: Path, pc: Path, components: list[str] | None) -> list[str]
         backup.rmdir()
     except OSError:
         print(f"  Previous state saved to: {backup}/")
-    print("✅ Replace complete." if not left else "Replace finished with unchanged parts.")
+    print(
+        "✅ Replace complete." if not left else "Replace finished with unchanged parts."
+    )
     if left:
         print(left_unchanged_line(left, "Replace"))
     return left
@@ -1858,6 +1901,7 @@ def print_merge_plan(rows: list[dict]) -> None:
 def _do_merge(snap: Path, pc: Path, components: list[str] | None) -> list[str]:
     from gideon.operations.durability.home_paths import LinkInTheWay
     from gideon.operations.durability.restore_items import left_unchanged_line
+
     left: list[str] = []
     print("🔀 Merge mode — importing...")
 
@@ -1866,7 +1910,9 @@ def _do_merge(snap: Path, pc: Path, components: list[str] | None) -> list[str]:
             if not (pc / "memory.db").is_file():
                 sqlite_files.copy_file(str(snap / "memory.db"), str(pc / "memory.db"))
                 if (snap / "memory_index.db").is_file():
-                    sqlite_files.copy_file(str(snap / "memory_index.db"), str(pc / "memory_index.db"))
+                    sqlite_files.copy_file(
+                        str(snap / "memory_index.db"), str(pc / "memory_index.db")
+                    )
                 print("  Memory: copied (no existing memory.db)")
             else:
                 _merge_memory(snap / "memory.db", pc / "memory.db")
@@ -1942,7 +1988,10 @@ def _do_merge(snap: Path, pc: Path, components: list[str] | None) -> list[str]:
                     sqlite_files.copy_file(str(sn), str(dn))
                     print("  Notifications: copied")
             _merge_keyed_jsonl(
-                snap / "digest_queue.jsonl", pc / "digest_queue.jsonl", "ts", "Digest queue"
+                snap / "digest_queue.jsonl",
+                pc / "digest_queue.jsonl",
+                "ts",
+                "Digest queue",
             )
             _merge_feedback(snap / "feedback.jsonl", pc / "feedback.jsonl")
             _merge_keyed_jsonl(
@@ -1979,6 +2028,7 @@ def _do_merge(snap: Path, pc: Path, components: list[str] | None) -> list[str]:
             sd = snap / "workspace"
             if sd.is_dir():
                 from gideon.operations.durability.home_paths import home_path
+
                 dd = home_path(pc, "workspace")
                 dd.mkdir(parents=True, exist_ok=True)
                 _copy_tree_no_overwrite(sd, dd, left=left)
@@ -1991,6 +2041,7 @@ def _do_merge(snap: Path, pc: Path, components: list[str] | None) -> list[str]:
         if _want(components, "skills"):
             if (snap / "skills").is_dir():
                 from gideon.operations.durability.home_paths import home_path
+
                 home_path(pc, "skills").mkdir(parents=True, exist_ok=True)
                 _copy_tree_no_overwrite(snap / "skills", pc / "skills", left=left)
             print("  Processed skills")
@@ -2057,11 +2108,13 @@ def _do_merge(snap: Path, pc: Path, components: list[str] | None) -> list[str]:
                     if not _store_selected(components, rel):
                         continue
                     from gideon.operations.durability import inventory as inv
+
                     entry = inv.claim_for(rel)
                     if entry is not None and not entry.merged_in:
                         continue
                     src = snap / rel
                     from gideon.operations.durability.home_paths import home_path
+
                     dst = home_path(pc, rel)
                     if src.is_dir():
                         dst.mkdir(parents=True, exist_ok=True)
@@ -2167,8 +2220,16 @@ def restore_apply(archive: Path, mode: str, components: list[str] | None) -> dic
             left = _do_replace(roots[0], pc, components)
         else:
             left = _do_merge(roots[0], pc, components)
-    _audit("state_restored", f"mode={mode} partial={bool(left)} snapshot={archive.name}")
-    return {"ok": True, "partial": bool(left), "left_unchanged": left, "mode": mode, "snapshot": archive.name}
+    _audit(
+        "state_restored", f"mode={mode} partial={bool(left)} snapshot={archive.name}"
+    )
+    return {
+        "ok": True,
+        "partial": bool(left),
+        "left_unchanged": left,
+        "mode": mode,
+        "snapshot": archive.name,
+    }
 
 
 def restore_main(

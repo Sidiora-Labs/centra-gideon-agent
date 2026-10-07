@@ -28,6 +28,8 @@ def avatar_info(data):
         if kind == 0x4E4F534A:
             document = json.loads(data[offset : offset + length])
         offset += length
+    if not isinstance(document, dict):
+        raise ValueError("Avatar model has no JSON document")
     nodes = document.get("nodes", [])
     accessors = document.get("accessors", [])
     animations = document.get("animations", [])

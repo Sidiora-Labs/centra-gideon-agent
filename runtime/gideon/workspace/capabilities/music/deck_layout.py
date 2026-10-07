@@ -29,14 +29,14 @@ MAJORS = (
 
 
 def roster(kind):
-    cards = []
+    cards: list[dict[str, str]] = []
     if kind == "tarot":
         cards.extend(
             {"key": f"major-{i}", "name": name, "group": "major", "rank": str(i)}
             for i, name in enumerate(MAJORS)
         )
         suits = ("wands", "cups", "swords", "pentacles")
-        ranks = (
+        ranks: tuple[str, ...] = (
             "ace",
             "2",
             "3",

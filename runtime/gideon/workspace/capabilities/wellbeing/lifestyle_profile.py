@@ -8,7 +8,7 @@ import math
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from .store import MeasurementError, MeasurementStore, instant, text
+from .store import MeasurementDatabase, MeasurementError, instant, text
 
 SCHEMA = "gideon.wellbeing.lifestyle-profile"
 SMOKING = {"never", "former", "current", "unknown"}
@@ -126,7 +126,7 @@ def _fingerprint(value):
     ).hexdigest()
 
 
-class LifestyleProfileStore(MeasurementStore):
+class LifestyleProfileStore(MeasurementDatabase):
     def __init__(self, home):
         super().__init__(home)
         with self.connection() as db:

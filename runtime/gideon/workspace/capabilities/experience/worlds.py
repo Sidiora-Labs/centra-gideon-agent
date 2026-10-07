@@ -4,6 +4,7 @@ import json
 import math
 import re
 import weakref
+from pathlib import Path
 
 import aiohttp
 
@@ -325,7 +326,7 @@ class Worlds:
         )
 
 
-_instances = weakref.WeakValueDictionary()
+_instances: "weakref.WeakValueDictionary[str, Worlds]" = weakref.WeakValueDictionary()
 
 
 def get_worlds(store):

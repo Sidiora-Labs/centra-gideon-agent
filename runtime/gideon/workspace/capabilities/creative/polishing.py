@@ -51,7 +51,7 @@ class PolishingStore:
             ).fetchone()
         base = self.works.read_draft(id, proposal["base_draft_id"])
         artifact = self.works.artifacts.get(proposal["artifact_id"], version=1)
-        candidate = artifact.content if artifact else ""
+        candidate = (artifact.content or "") if artifact else ""
         original = base["text"]
         diff = (
             "".join(
@@ -252,7 +252,7 @@ class PolishingStore:
                 "artifact_id": artifact.slug,
                 "artifact_version": 1,
                 "note": proposal["summary"],
-                "characters": len(artifact.content),
+                "characters": len(artifact.content or ""),
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
             db.execute(

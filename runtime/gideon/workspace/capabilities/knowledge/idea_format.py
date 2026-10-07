@@ -49,8 +49,8 @@ def parse(content):
         identity = str(UUID(metadata.get("id", metadata.get("uuid", ""))))
         created = metadata.get("created", metadata.get("createdAt", ""))
         modified = metadata.get("modified", metadata.get("updatedAt", ""))
-        datetime.fromisoformat(created.replace("Z", "+00:00"))
-        datetime.fromisoformat(modified.replace("Z", "+00:00"))
+        datetime.fromisoformat((created or "").replace("Z", "+00:00"))
+        datetime.fromisoformat((modified or "").replace("Z", "+00:00"))
     except (
         ValueError,
         TypeError,
@@ -78,7 +78,9 @@ def parse(content):
         if lines and not re.match(r"^(#|\d+\.)", lines[0].strip()):
             prompt = lines.pop(0).strip()
     text_field(prompt, "prompt", 1000)
-    help_lines, ideas, section = [], [], "legacy"
+    help_lines = []
+    ideas: list[str] = []
+    section = "legacy"
     for line in lines:
         if re.fullmatch(r"#{1,6}\s+Help\s*:?", line.strip(), re.IGNORECASE):
             section = "help"

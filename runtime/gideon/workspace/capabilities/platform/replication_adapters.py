@@ -261,7 +261,7 @@ def validate_entries(scope: str, entries: list[dict]) -> None:
     people = entries[0]["rows"]
     touchpoints = entries[1]["rows"]
     ids = {row.get("id") for row in people}
-    identities: list[dict] = []
+    contact_identities: list[dict] = []
     for row in people:
         data = row.get("data")
         values = data.get("identities") if isinstance(data, dict) else None
@@ -271,7 +271,7 @@ def validate_entries(scope: str, entries: list[dict]) -> None:
             or any(value in identities for value in values)
         ):
             raise ValueError("Invalid or ambiguous canonical contact identities")
-        identities.extend(values)
+        contact_identities.extend(values)
     if any(
         not isinstance(row.get("data"), dict) or row["data"].get("person_id") not in ids
         for row in touchpoints
@@ -503,14 +503,14 @@ def read_rows(home: Path, entry_id: str) -> list[dict]:
                 rows.append({"id": artifact.slug, "data": data})
         return sorted(rows, key=lambda row: row["id"])
     if entry_id == "knowledge.items":
-        store = _knowledge(home)
+        store_506 = _knowledge(home)
         try:
-            rows = store.db.execute("SELECT id FROM items ORDER BY id").fetchall()
+            rows = store_506.db.execute("SELECT id FROM items ORDER BY id").fetchall()
             return [
-                {"id": row["id"], "data": store.get_item(row["id"])} for row in rows
+                {"id": row["id"], "data": store_506.get_item(row["id"])} for row in rows
             ]
         finally:
-            store.db.close()
+            store_506.db.close()
     if entry_id in MUSIC_ENTRIES:
         catalog, songs, playlists, decks = _music_paths(home)
         if entry_id in {"music.artists", "music.tracks", "music.albums"}:
@@ -547,12 +547,12 @@ def read_rows(home: Path, entry_id: str) -> list[dict]:
     if entry_id in WELLBEING_ENTRIES:
         if entry_id == "wellbeing.cognitive_sessions":
             with sqlite3.connect(_wellbeing_path(home)) as db:
-                rows = db.execute(
+                cursor_rows = db.execute(
                     "SELECT r.id,r.data FROM cognitive_sessions r WHERE revision=(SELECT max(s.revision) FROM cognitive_sessions s WHERE s.id=r.id) AND json_extract(r.data,'$.status')!='active' ORDER BY r.id"
                 )
                 return [
                     {"id": row[0], "data": _without_key(json.loads(row[1]), "expected")}
-                    for row in rows
+                    for row in cursor_rows
                 ]
         if entry_id in WELLBEING_CALENDAR_ENTRIES:
             entity = "config" if entry_id == "wellbeing.life_config" else "event"
@@ -562,11 +562,13 @@ def read_rows(home: Path, entry_id: str) -> list[dict]:
                     if entity == "event"
                     else ""
                 )
-                rows = db.execute(
+                cursor_rows = db.execute(
                     f"SELECT r.id,r.data FROM life_calendar_revisions r WHERE r.entity=? AND revision=(SELECT max(s.revision) FROM life_calendar_revisions s WHERE s.entity=r.entity AND s.id=r.id){suffix} ORDER BY r.id",
                     (entity,),
                 )
-                result = [{"id": row[0], "data": json.loads(row[1])} for row in rows]
+                result = [
+                    {"id": row[0], "data": json.loads(row[1])} for row in cursor_rows
+                ]
                 if entity == "config":
                     for row in result:
                         row["data"].pop("trigger_id", None)
@@ -1165,7 +1167,7 @@ def apply_rows(
     local_rows = read_rows(home, entry_id)
     local = {row["id"]: row for row in local_rows}
     remote = {
-        row.get("id"): row
+        str(row["id"]): row
         for row in remote_rows
         if isinstance(row.get("id"), str) and isinstance(row.get("data"), dict)
     }

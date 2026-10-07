@@ -7,6 +7,7 @@ import re
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from io import StringIO
+from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -154,11 +155,15 @@ def _duration(value, all_day=False):
 
 
 def _local_event_times(raw, default_zone, custom_zones=None):
-    start, all_day = _local_time(*raw["DTSTART"], default_zone, custom_zones)
+    start, all_day = _local_time(
+        raw["DTSTART"][0], raw["DTSTART"][1], default_zone, custom_zones
+    )
     if "DTEND" in raw and "DURATION" in raw:
         raise PeopleError("Event cannot contain both DTEND and DURATION")
     if "DTEND" in raw:
-        end, end_all_day = _local_time(*raw["DTEND"], default_zone, custom_zones)
+        end, end_all_day = _local_time(
+            raw["DTEND"][0], raw["DTEND"][1], default_zone, custom_zones
+        )
         if end_all_day != all_day:
             raise PeopleError("Event start and end value types differ")
     elif "DURATION" in raw:
@@ -355,7 +360,9 @@ def parse_ics(content, default_zone, window_start=None, window_end=None):
         }
     except (TypeError, ValueError, OverflowError):
         raise PeopleError("Invalid embedded VTIMEZONE definition") from None
-    rows, current, nested = [], None, 0
+    rows = []
+    current: dict[str, Any] | None = None
+    nested = 0
     for line in lines[1:-1]:
         if line == "BEGIN:VEVENT":
             if current is not None:
@@ -399,7 +406,7 @@ def parse_ics(content, default_zone, window_start=None, window_end=None):
         raise PeopleError("Incomplete calendar event or more than 1000 events")
     events, seen, warnings = [], set(), []
     try:
-        grouped = {}
+        grouped: dict[str, list[dict[str, Any]]] = {}
         for raw in rows:
             uid = text(raw.get("UID", ("", {}))[0], "UID", 500, True)
             grouped.setdefault(uid, []).append(raw)
@@ -418,7 +425,7 @@ def parse_ics(content, default_zone, window_start=None, window_end=None):
                 events.append(master)
                 continue
             base_local, all_day = _local_time(
-                *raw["DTSTART"], default_zone, custom_zones
+                raw["DTSTART"][0], raw["DTSTART"][1], default_zone, custom_zones
             )
             anchor = (
                 datetime.combine(base_local, datetime.min.time(), timezone.utc)
@@ -428,8 +435,8 @@ def parse_ics(content, default_zone, window_start=None, window_end=None):
             lower, upper = _window(
                 window_start, window_end, anchor.astimezone(timezone.utc)
             )
-            exclusions = set()
-            additions = []
+            exclusions: set[str] = set()
+            additions: list[datetime] = []
             period_ends = {}
             for name, target in (("EXDATE", exclusions), ("RDATE", additions)):
                 for value, params in raw.get(name, []):
@@ -472,14 +479,17 @@ def parse_ics(content, default_zone, window_start=None, window_end=None):
                         if value_all_day != all_day:
                             raise PeopleError(name + " value type differs from DTSTART")
                         (
-                            target.add(local_value.isoformat())
+                            exclusions.add(local_value.isoformat())
                             if name == "EXDATE"
-                            else target.append(local_value)
+                            else additions.append(local_value)
                         )
             overrides, ranges, override_keys = {}, [], set()
             for override in (item for item in group if "RECURRENCE-ID" in item):
                 recurrence_value, recurrence_all_day = _local_time(
-                    *override["RECURRENCE-ID"], default_zone, custom_zones
+                    override["RECURRENCE-ID"][0],
+                    override["RECURRENCE-ID"][1],
+                    default_zone,
+                    custom_zones,
                 )
                 if recurrence_all_day != all_day:
                     raise PeopleError("RECURRENCE-ID value type differs from DTSTART")
@@ -541,12 +551,20 @@ def parse_ics(content, default_zone, window_start=None, window_end=None):
             for original_key, occurrence in sorted(unique.items()):
                 if original_key in exclusions:
                     continue
-                override = overrides.pop(original_key, None)
-                if override:
-                    if override.get("STATUS", ("", {}))[0].upper() == "CANCELLED":
+                selected_override = (
+                    overrides.pop(original_key) if original_key in overrides else None
+                )
+                if selected_override:
+                    if (
+                        selected_override.get("STATUS", ("", {}))[0].upper()
+                        == "CANCELLED"
+                    ):
                         continue
                     item = _event(
-                        override, default_zone, uid + "#" + original_key, custom_zones
+                        selected_override,
+                        default_zone,
+                        uid + "#" + original_key,
+                        custom_zones,
                     )
                     item.update(
                         recurring=True, recurrence_id=original_key, overridden=True
@@ -791,8 +809,9 @@ async def _sync_remote(store, source_id, data):
         if google
         else {"startDateTime": beginning, "endDateTime": ending, "$top": "500"}
     )
-    url = base + "?" + urlencode(params)
-    events, visited = [], set()
+    url: str | None = base + "?" + urlencode(params)
+    events: list[dict[str, Any]] = []
+    visited: set[str] = set()
     try:
         async with ClientSession(
             timeout=ClientTimeout(total=20),

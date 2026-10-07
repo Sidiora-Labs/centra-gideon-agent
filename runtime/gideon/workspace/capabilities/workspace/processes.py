@@ -335,7 +335,7 @@ class ProcessRegistry:
             self.lock_file.close()
 
 
-_registries = {}
+_registries: dict[str, ProcessRegistry] = {}
 
 
 def get_registry(root, *, allowed_roots):

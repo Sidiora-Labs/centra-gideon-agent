@@ -133,7 +133,8 @@ class SketchStore:
         if len(raw) > 20 * 1024 * 1024:
             raise SketchError("Source image is too large")
         try:
-            with Image.open(io.BytesIO(raw)) as image:
+            with Image.open(io.BytesIO(raw)) as opened:
+                image: Image.Image = opened
                 if image.width * image.height > 4096 * 4096:
                     raise SketchError("Source image is too large")
                 image = ImageOps.exif_transpose(image).convert("RGBA")

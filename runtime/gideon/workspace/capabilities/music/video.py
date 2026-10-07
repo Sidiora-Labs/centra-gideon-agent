@@ -414,7 +414,7 @@ class VideoStore:
                     )
 
 
-_SERVICES = {}
+_SERVICES: dict[Path, VideoStore] = {}
 
 
 def default_store():

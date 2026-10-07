@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 from datetime import datetime, timezone
+from typing import Any
 
 from .store import CatalogError, identifier, integer, keys, text
 from .works import WorkStore
@@ -40,7 +41,8 @@ class ContinuityStore:
                     (id,),
                 ).fetchall()
             )
-        outline, facts = [], []
+        outline: list[dict[str, Any]] = []
+        facts: list[dict[str, Any]] = []
         for record in records:
             base = self.works.read_draft(id, record["base_draft_id"])
             record.update(
@@ -69,7 +71,7 @@ class ContinuityStore:
                 item["accepted_revision"],
             )
         )
-        groups = {}
+        groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for fact in facts:
             groups.setdefault((fact["subject"], fact["predicate"]), []).append(fact)
         conflicts = [
@@ -288,7 +290,7 @@ class ContinuityStore:
             artifact = self.works.artifacts.get(
                 record["artifact_id"], version=record["artifact_version"]
             )
-            if artifact is None:
+            if artifact is None or artifact.content is None:
                 raise CatalogError("Evidence artifact missing", 404)
             for item in record["outline"] + record["facts"]:
                 if artifact.content[item["start"] : item["end"]] != item["quote"]:

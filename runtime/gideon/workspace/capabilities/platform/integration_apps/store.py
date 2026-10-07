@@ -7,6 +7,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from gideon.sdk.credentials import CredentialStore
@@ -25,8 +26,8 @@ def now():
 def jira_report(body):
     if not isinstance(body, dict) or not isinstance(body.get("issues"), list):
         raise DomainError("Issue search response required")
-    statuses = {}
-    assignees = {}
+    statuses: dict[str, int] = {}
+    assignees: dict[str, int] = {}
     total = 0
     for issue in body["issues"]:
         if not isinstance(issue, dict) or not isinstance(issue.get("fields"), dict):
@@ -80,6 +81,8 @@ class IntegrationApps:
             db.close()
 
     def _resolve(self, name):
+        if self.credentials is None:
+            raise ValueError("Credential storage is unavailable")
         self.credentials.reload()
         try:
             return self.credentials.resolve(name).secret

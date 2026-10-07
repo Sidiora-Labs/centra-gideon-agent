@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import io
+from typing import Any
 
 from gideon.sdk.credentials import CredentialStore
 from gideon.sdk.model import Capability, ModelProvider, get_default_registry
@@ -39,7 +40,7 @@ class DeckModel:
     def messages(self, prompt, image_ref=None):
         if not isinstance(prompt, str) or not prompt or len(prompt) > 60000:
             raise DomainError("Model prompt exceeds supported bound")
-        content = [{"type": "text", "text": prompt}]
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         if image_ref is not None:
             image = self.decks.image(image_ref)
             image.thumbnail((1536, 1536))

@@ -6,13 +6,13 @@ from uuid import uuid4
 
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 
-from .store import CatalogError, IngredientStore, identifier, integer, keys, text
+from .store import CatalogError, CreativeDatabase, identifier, integer, keys, text
 
 FIELDS = {"title", "biography", "voice", "sample_refs"}
 VOICE_FIELDS = {"perspective", "tense", "tone", "diction", "rhythm", "avoid"}
 
 
-class AuthorStore(IngredientStore):
+class AuthorStore(CreativeDatabase):
     def __init__(self, home=None):
         super().__init__(home)
         self.artifacts = NativeArtifactProvider(self.home / "artifacts")
@@ -211,7 +211,7 @@ class AuthorStore(IngredientStore):
             artifact = self.artifacts.get(
                 ref["artifact_id"], version=ref["artifact_version"]
             )
-            content = artifact.content if artifact else ""
+            content = (artifact.content or "") if artifact else ""
             samples.append(
                 {
                     **ref,

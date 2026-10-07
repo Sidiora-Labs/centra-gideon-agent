@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from collections.abc import Callable
 
 from .store import MeasurementError
 from .substances import ConsumptionStore
@@ -11,7 +12,7 @@ async def invoke_substances(home, arguments):
     store = ConsumptionStore(home)
     name, payload = arguments.get("operation", ""), arguments.get("payload", {})
     operation = name.removeprefix("substances_")
-    methods = {
+    methods: dict[str, Callable[..., object]] = {
         "entry_create": store.create_entry,
         "entry_correct": store.correct_entry,
         "entry_delete": store.delete_entry,

@@ -3,6 +3,7 @@
 import copy
 import json
 import time
+from typing import Any
 from urllib.parse import quote
 
 from gideon.automation.triggers import arm, claims, firepath, service
@@ -23,7 +24,8 @@ async def view(*, horizon=3600, now=None):
     service._unpark_ready(store, triggers, now=now, persist=False)
     slots = claims.slot_holders(store, now=now, base_dir=config_dir())
     planner = service.TickPass(store, now, False, False, config_dir())
-    events, exclusions = [], [
+    events: list[dict[str, Any]] = []
+    exclusions = [
         {"trigger_id": row.trigger.id, "reason": "invalid_trigger"}
         for row in records
         if not row.ok

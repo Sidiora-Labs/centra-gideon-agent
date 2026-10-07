@@ -478,7 +478,7 @@ class ExternalVaults:
 
     def graph(self, identity):
         notes = self.notes(identity)
-        names = {}
+        names: dict[str, str] = {}
         for note in notes:
             names.setdefault(Path(note["path"]).stem.casefold(), note["path"])
         edges = []

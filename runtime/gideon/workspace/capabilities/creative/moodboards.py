@@ -7,12 +7,12 @@ from uuid import uuid4
 
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 
-from .store import CatalogError, IngredientStore, identifier, integer, keys, text
+from .store import CatalogError, CreativeDatabase, identifier, integer, keys, text
 
 FIELDS = {"title", "groups", "ingredient_ids"}
 
 
-class BoardStore(IngredientStore):
+class BoardStore(CreativeDatabase):
     def __init__(self, home=None):
         super().__init__(home)
         self.artifacts = NativeArtifactProvider(self.home / "artifacts")

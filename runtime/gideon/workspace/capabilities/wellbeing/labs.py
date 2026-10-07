@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 
-from .store import MeasurementError, MeasurementStore, instant, text
+from .store import MeasurementDatabase, MeasurementError, instant, text
 
 
 def digest(value):
@@ -125,7 +125,7 @@ def parse(payload):
     return import_id, valid
 
 
-class LabStore(MeasurementStore):
+class LabStore(MeasurementDatabase):
     def __init__(self, home):
         super().__init__(home)
         self.artifacts = NativeArtifactProvider(
@@ -151,7 +151,8 @@ class LabStore(MeasurementStore):
 
     def preview(self, payload):
         identity, rows = parse(payload)
-        duplicates, seen = 0, {}
+        duplicates = 0
+        seen: dict[str, str] = {}
         with self.connection() as db:
             for row in rows:
                 key, fingerprint = self._identity(payload["source"], row)
@@ -207,9 +208,9 @@ class LabStore(MeasurementStore):
                     slug=slug,
                     readonly=True,
                 )
-            if artifact.content.replace("\r\n", "\n").replace("\r", "\n") != payload[
-                "content"
-            ].replace("\r\n", "\n").replace("\r", "\n"):
+            if (artifact.content or "").replace("\r\n", "\n").replace(
+                "\r", "\n"
+            ) != payload["content"].replace("\r\n", "\n").replace("\r", "\n"):
                 raise MeasurementError(
                     "Original artifact content differs", 409, "conflict"
                 )
@@ -222,7 +223,7 @@ class LabStore(MeasurementStore):
                 f"original@{reference['sha256']}.{payload['format']}"
             )
             if not self.artifacts.store_version_file(
-                artifact.slug, reference["filename"], payload["content"].encode()
+                artifact.slug, str(reference["filename"]), payload["content"].encode()
             ):
                 raise MeasurementError("Original attachment could not be stored")
             self._original(reference)
@@ -287,6 +288,10 @@ class LabStore(MeasurementStore):
         if hashlib.sha256(data).hexdigest() != reference["sha256"]:
             raise MeasurementError("Original attachment hash mismatch", 409, "conflict")
         return data
+
+    def get(self, identity):
+        with self.connection() as db:
+            return self._get(db, identity)
 
     def original(self, identity):
         return self._original(self.get(identity)["artifact"])

@@ -16,10 +16,10 @@ from gideon.automation.triggers.store import TriggerStore
 from gideon.integrations.inbox import InboxStore, emit_attention_item
 
 from .intervention import calendar_date
-from .store import MeasurementError, MeasurementStore, instant, text
+from .store import MeasurementDatabase, MeasurementError, instant, text
 
 
-class LifeCalendarStore(MeasurementStore):
+class LifeCalendarStore(MeasurementDatabase):
     def __init__(self, home):
         super().__init__(home)
         self.home = self.path.parent.parent
@@ -29,7 +29,7 @@ class LifeCalendarStore(MeasurementStore):
                 CREATE TABLE IF NOT EXISTS life_reminder_claims(day TEXT NOT NULL,timezone TEXT NOT NULL,item_id TEXT NOT NULL,PRIMARY KEY(day,timezone));"""
             )
 
-    def _get(self, db, entity, identity):
+    def _get_record(self, db, entity, identity):
         row = db.execute(
             "SELECT data FROM life_calendar_revisions WHERE entity=? AND id=? ORDER BY revision DESC LIMIT 1",
             (entity, identity),
@@ -137,7 +137,7 @@ class LifeCalendarStore(MeasurementStore):
                 "Reminder requires enabled boolean and HH:MM local time"
             )
 
-    def _write(self, entity, payload, identity=None):
+    def _write_record(self, entity, payload, identity=None):
         config_fields = {
             "birth_date",
             "horizon_years",
@@ -178,7 +178,7 @@ class LifeCalendarStore(MeasurementStore):
                     raise MeasurementError("Request ID already used", 409, "conflict")
                 return json.loads(prior[1])
             if entity == "config":
-                current = self._get(db, "config", "config")
+                current = self._get_record(db, "config", "config")
                 expected = current["revision"] if current else 0
                 if (
                     type(payload.get("revision")) is not int
@@ -202,7 +202,7 @@ class LifeCalendarStore(MeasurementStore):
                 row["trigger_id"] = self._sync_trigger(row)
             else:
                 if identity:
-                    row = self._get(db, entity, identity)
+                    row = self._get_record(db, entity, identity)
                     if (
                         type(payload.get("revision")) is not int
                         or payload["revision"] != row["revision"]
@@ -250,17 +250,17 @@ class LifeCalendarStore(MeasurementStore):
             return row
 
     def configure(self, payload):
-        return self._write("config", payload)
+        return self._write_record("config", payload)
 
     def get_config(self):
         with self.connection() as db:
-            return self._get(db, "config", "config")
+            return self._get_record(db, "config", "config")
 
     def create_event(self, payload):
-        return self._write("event", payload)
+        return self._write_record("event", payload)
 
     def update_event(self, identity, payload):
-        return self._write("event", payload, identity)
+        return self._write_record("event", payload, identity)
 
     def list_events(self):
         with self.connection() as db:
@@ -271,7 +271,7 @@ class LifeCalendarStore(MeasurementStore):
 
     def _history(self, entity, identity):
         with self.connection() as db:
-            self._get(db, entity, identity)
+            self._get_record(db, entity, identity)
             return [
                 json.loads(row[0])
                 for row in db.execute(
@@ -335,7 +335,7 @@ class LifeCalendarStore(MeasurementStore):
         )
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
-            config = self._get(db, "config", "config")
+            config = self._get_record(db, "config", "config")
             if not config or not config["reminder"]["enabled"]:
                 return {"status": "disabled"}
             local = at.astimezone(ZoneInfo(config["timezone"]))

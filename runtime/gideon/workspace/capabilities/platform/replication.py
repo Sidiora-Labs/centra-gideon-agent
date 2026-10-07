@@ -8,6 +8,7 @@ import sqlite3
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from gideon.core.config.loader import config_dir
 from gideon.operations.durability import conflicts, inventory, reconcile, tombstones
@@ -331,7 +332,8 @@ class ReplicationService:
                     f"Replication cursor expects sequence {expected}", 409
                 )
             queue = conflicts.ConflictQueue(self.home)
-            results, ancestor_updates = [], []
+            results = []
+            ancestor_updates: list[tuple[str, str, str]] = []
             if scope == replication_knowledge_collections.SCOPE:
                 try:
                     applied = replication_knowledge_collections.apply_entries(

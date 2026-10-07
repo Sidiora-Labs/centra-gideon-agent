@@ -93,7 +93,7 @@ async def response_json(response):
     return json.loads(b"".join(chunks))
 
 
-_REFRESH_LOCKS = {}
+_REFRESH_LOCKS: dict[tuple[str, str], asyncio.Lock] = {}
 
 
 def asset_url(value):
@@ -130,6 +130,8 @@ class Image3DStore:
             )
 
     def _credential(self, name):
+        if self.credentials is None:
+            raise ValueError("Credential storage is unavailable")
         self.credentials.reload()
         try:
             result = self.credentials.resolve(name)

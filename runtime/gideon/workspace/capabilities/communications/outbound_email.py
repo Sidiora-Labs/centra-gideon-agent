@@ -176,7 +176,11 @@ class SMTPTransport:
                     token = (
                         f'user={account["username"]}\x01auth=Bearer {secret}\x01\x01'
                     )
-                    client.auth("XOAUTH2", lambda _: token)
+
+                    def auth_response(challenge: bytes | None = None) -> str:
+                        return token
+
+                    client.auth("XOAUTH2", auth_response)
                 else:
                     client.login(account["username"], secret)
             refused = client.sendmail(account["owner_email"], envelope, raw)
@@ -358,7 +362,9 @@ class OutboundEmail:
 
         def change(row):
             if row["account_id"] != account["id"]:
-                raise PeopleError("Outbound email draft belongs to another account", 409)
+                raise PeopleError(
+                    "Outbound email draft belongs to another account", 409
+                )
             if row["state"] not in ("draft", "approved"):
                 raise PeopleError("Only an unsent draft can be edited", 409)
             row.setdefault("request_fingerprint", row["fingerprint"])

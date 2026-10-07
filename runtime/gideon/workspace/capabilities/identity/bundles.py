@@ -5,6 +5,7 @@ import hashlib
 import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from gideon.automation.workflows.project_archive import (
     ArchiveRefused,
@@ -191,7 +192,12 @@ class BundleService:
                 raise ConflictError("Destination continuity changed; preview again")
             if not preview["can_apply"]:
                 raise ValueError("Selected groups exceed destination slot capacity")
-            receipt = {"status": "applying", "applied": [], "skipped": [], "errors": []}
+            receipt: dict[str, Any] = {
+                "status": "applying",
+                "applied": [],
+                "skipped": [],
+                "errors": [],
+            }
             db.execute(
                 "INSERT INTO receipts VALUES(?,?,?)",
                 (request_id, fingerprint, json.dumps(receipt)),

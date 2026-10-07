@@ -2,6 +2,7 @@ import asyncio
 import os
 import shutil
 from pathlib import Path
+from typing import Any
 
 import aiohttp
 
@@ -44,7 +45,7 @@ class WorldEngine:
 
     async def status(self):
         self.guard()
-        result = {
+        result: dict[str, Any] = {
             "state": "unavailable",
             "reason": "",
             "app_id": APP_ID,

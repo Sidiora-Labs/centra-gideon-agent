@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime, timezone
+from typing import Any
 
 from gideon.core.config.loader import config_dir
 
@@ -86,7 +87,7 @@ class AmbientDisplay:
         )
         from gideon.interfaces.dashboard.views_store import list_views
 
-        cards = {}
+        cards: dict[str, Any] = {}
         try:
             rows = TriggerStore(home).load()
             broken = [row for row in rows if not row.ok]

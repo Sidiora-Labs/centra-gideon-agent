@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from collections.abc import Callable
 
 from .privacy import PrivacyStore
 from .store import MeasurementError
@@ -11,7 +12,7 @@ async def invoke_privacy(home, arguments):
     store = PrivacyStore(home)
     operation = arguments.get("operation", "").removeprefix("privacy_")
     payload, identity = arguments.get("payload", {}), arguments.get("id")
-    methods = {
+    methods: dict[str, Callable[..., object]] = {
         "subject_create": store.create_subject,
         "subjects": store.list_subjects,
         "subject": store.get_subject,

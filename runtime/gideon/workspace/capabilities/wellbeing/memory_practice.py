@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 
-from .store import MeasurementError, MeasurementStore, instant, text
+from .store import MeasurementDatabase, MeasurementError, instant, text
 
 
 def content_fields(front, back, tags):
@@ -56,7 +56,7 @@ def next_schedule(previous, grade, at):
     )
 
 
-class MemoryPracticeStore(MeasurementStore):
+class MemoryPracticeStore(MeasurementDatabase):
     def __init__(self, home):
         super().__init__(home)
         self.artifacts = NativeArtifactProvider(
@@ -79,7 +79,7 @@ class MemoryPracticeStore(MeasurementStore):
     def _public(self, row):
         reference = row["artifact"]
         artifact = self.artifacts.get(reference["slug"], version=reference["version"])
-        if artifact is None:
+        if artifact is None or artifact.content is None:
             raise MeasurementError("Memory card artifact unavailable", 404, "not_found")
         if hashlib.sha256(artifact.content.encode()).hexdigest() != reference["sha256"]:
             raise MeasurementError(
@@ -92,7 +92,7 @@ class MemoryPracticeStore(MeasurementStore):
         sha = hashlib.sha256(content.encode()).hexdigest()
         slug = "memory-card-" + sha
         artifact = self.artifacts.get(slug, version=1)
-        if artifact is None:
+        if artifact is None or artifact.content is None:
             artifact = self.artifacts.create(
                 name=fields["front"][:100],
                 content=content,
@@ -105,7 +105,7 @@ class MemoryPracticeStore(MeasurementStore):
             raise MeasurementError("Memory card artifact differs", 409, "conflict")
         return dict(slug=slug, version=1, sha256=sha)
 
-    def _write(self, operation, payload, identity=None):
+    def _write_record(self, operation, payload, identity=None):
         if not isinstance(payload, dict):
             raise MeasurementError("Card operation must be an object")
         fields = (
@@ -215,13 +215,13 @@ class MemoryPracticeStore(MeasurementStore):
             return result
 
     def create(self, payload):
-        return self._write("create", payload)
+        return self._write_record("create", payload)
 
     def update(self, identity, payload):
-        return self._write("update", payload, identity)
+        return self._write_record("update", payload, identity)
 
     def practice(self, identity, payload):
-        return self._write("practice", payload, identity)
+        return self._write_record("practice", payload, identity)
 
     def get(self, identity):
         with self.connection() as db:

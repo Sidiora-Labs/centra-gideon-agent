@@ -60,7 +60,10 @@ def validate_image(data):
 
 def upload(data, actor):
     mime = validate_image(data)
-    artifact = get_provider().create_binary(
+    provider = get_provider()
+    if provider is None:
+        raise ValueError("Artifact storage is unavailable")
+    artifact = provider.create_binary(
         name="Provider terminal image",
         data=data,
         mime=mime,
@@ -82,7 +85,10 @@ def prepare(session_id, provider_id, image=None):
     if not profile or not profile["available"]:
         raise ValueError("Configured provider terminal unavailable")
     entry = get_default_registry().get_entry(provider_id)
-    argv = [str(Path(entry.options["requires_executable"]["path"]).resolve())]
+    required = entry.options.get("requires_executable")
+    if not isinstance(required, dict) or not isinstance(required.get("path"), str):
+        raise ValueError("Configured executable path is unavailable")
+    argv = [str(Path(required["path"]).resolve())]
     if image is not None:
         if (
             not isinstance(image, dict)
@@ -93,6 +99,8 @@ def prepare(session_id, provider_id, image=None):
         ):
             raise ValueError("Image requires artifact identity and version")
         provider = get_provider()
+        if provider is None:
+            raise ValueError("Artifact storage is unavailable")
         artifact = provider.get(image["artifact_id"], version=image["version"])
         if artifact is None or artifact.kind != "image":
             raise FileNotFoundError("Image artifact not found")

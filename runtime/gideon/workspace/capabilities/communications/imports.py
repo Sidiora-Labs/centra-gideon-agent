@@ -7,6 +7,7 @@ import json
 import re
 from contextlib import closing
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 from .store import PeopleError, fields, person_values, text
@@ -62,7 +63,8 @@ def unescape(value):
 
 def vcard_rows(content):
     lines = re.sub(r"\r?\n[ \t]", "", content).splitlines()
-    rows, card = [], None
+    rows = []
+    card: dict[str, Any] | None = None
     for line in lines:
         if not line.strip():
             continue

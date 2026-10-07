@@ -131,7 +131,7 @@ class PeerStore:
             raise PeerError("Peer identity key permissions must be 0600", 503)
         document = json.loads(self.key_path.read_text())
         private = Ed25519PrivateKey.from_private_bytes(_unb64(document["private_key"]))
-        public = _b64(
+        public_text = _b64(
             private.public_key().public_bytes(
                 serialization.Encoding.Raw, serialization.PublicFormat.Raw
             )
@@ -139,12 +139,12 @@ class PeerStore:
         if document != {
             "version": 1,
             "private_key": document["private_key"],
-            "public_key": public,
+            "public_key": public_text,
         }:
             raise PeerError("Peer identity key is invalid", 503)
         return private, {
-            "peer_id": "peer-" + hashlib.sha256(_unb64(public)).hexdigest()[:32],
-            "public_key": public,
+            "peer_id": "peer-" + hashlib.sha256(_unb64(public_text)).hexdigest()[:32],
+            "public_key": public_text,
         }
 
     def _connect(self) -> sqlite3.Connection:

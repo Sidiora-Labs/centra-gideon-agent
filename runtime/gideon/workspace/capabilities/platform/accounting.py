@@ -2,6 +2,7 @@
 
 import math
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from gideon.operations import usage_ledger
 
@@ -11,7 +12,7 @@ def view(*, days=30, now=None):
         raise ValueError("Usage window must be 1..365 days")
     now = now or datetime.now(timezone.utc)
     start = now - timedelta(days=days)
-    groups = {}
+    groups: dict[tuple[object, ...], dict[str, Any]] = {}
     invalid = 0
     for row in usage_ledger._iter_rows():
         try:

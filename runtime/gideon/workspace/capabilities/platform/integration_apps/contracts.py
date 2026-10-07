@@ -2,6 +2,7 @@
 
 import re
 from datetime import datetime
+from typing import Any
 from urllib.parse import quote, urlsplit
 
 from gideon.workspace.capabilities.music.store import DomainError, integer, text
@@ -143,7 +144,7 @@ def plan(kind, operation, data):
     if OPERATIONS.get(operation) != kind:
         raise DomainError("Operation does not belong to connection")
     method = "GET"
-    body = None
+    body: dict[str, Any] | None = None
     params = {}
     path = ""
     if operation in ("jira_auth", "datadog_auth", "github_auth"):

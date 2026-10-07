@@ -222,7 +222,7 @@ class PortRegistry:
             self.lock_file.close()
 
 
-_registries = {}
+_registries: dict[str, PortRegistry] = {}
 
 
 def get_port_registry(root, *, allowed_ports=range(6000, 6100)):

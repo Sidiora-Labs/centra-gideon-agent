@@ -710,7 +710,7 @@ class CommissionStore:
                 return run
             attempts = run["attempts"] if run else []
             if len(attempts) >= commission["max_attempts"]:
-                return {**run, "status": "exhausted"}
+                return {**(run or {}), "status": "exhausted"}
             feedback = self._feedback_context(db, commission_id)
             run_id = run["id"] if run else digest(commission_id + ":" + occurrence)
             if run is None:

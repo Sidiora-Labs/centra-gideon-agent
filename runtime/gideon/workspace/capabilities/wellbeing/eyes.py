@@ -9,7 +9,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from .store import MeasurementError, MeasurementStore, text
+from .store import MeasurementDatabase, MeasurementError, text
 
 SCHEMA = "gideon.eye-prescriptions"
 EYE_FIELDS = {"sphere", "sphere_unit", "cylinder", "cylinder_unit", "axis", "axis_unit"}
@@ -96,7 +96,7 @@ def _validated(payload, correction=False):
     return result
 
 
-class EyePrescriptionStore(MeasurementStore):
+class EyePrescriptionStore(MeasurementDatabase):
     def __init__(self, home: Path):
         super().__init__(home)
         with self.connection() as db:

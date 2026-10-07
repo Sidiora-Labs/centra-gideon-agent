@@ -145,6 +145,8 @@ class Client:
             raise PeopleError("Beeper connection credential is unavailable", 503)
 
     async def request(self, method, path, data=None, binary=False):
+        if self.token is None:
+            raise PeopleError("Beeper connection credential is unavailable", 503)
         try:
             async with ClientSession(
                 timeout=ClientTimeout(total=20),
@@ -456,7 +458,7 @@ async def reconcile(store, outbox_id, revision):
         "PENDING": "pending",
         "FAIL_RETRIABLE": "failed",
         "FAIL_PERMANENT": "failed",
-    }.get(status, "unknown")
+    }.get(status or "", "unknown")
     return transition(
         store,
         outbox_id,

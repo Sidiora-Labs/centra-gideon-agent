@@ -19,7 +19,7 @@ from gideon.integrations.llm.openai import OpenAIProvider
 from gideon.integrations.llm.registry import get_default_registry
 from gideon.operations.usage_ledger import record_from_event
 
-_hosts = {}
+_hosts: dict[str, "InferenceHost"] = {}
 RUNTIME_RECIPE = "openai-compatible-v1"
 
 

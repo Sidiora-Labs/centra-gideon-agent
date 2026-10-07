@@ -5,6 +5,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from gideon.cognition import memory_slots
 from gideon.cognition.vector_memory import SemanticArchive
@@ -120,7 +121,8 @@ class ContinuityStore:
                     "SELECT sequence,body FROM journal ORDER BY sequence"
                 )
             ]
-        slots, context, events = {name: [] for name in SLOTS}, "", []
+        slots: dict[str, list[dict[str, Any]]] = {name: [] for name in SLOTS}
+        context, events = "", []
         if (self.home / "memory.db").exists():
             with self._memory() as memory:
                 slots = {

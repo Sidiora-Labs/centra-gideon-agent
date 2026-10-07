@@ -12,6 +12,7 @@ import tempfile
 import wave
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from .store import DomainError, integer, text
@@ -112,7 +113,7 @@ class MusicCatalog:
             label = "name" if kind == "artists" else "title"
             if label not in fields or "revision" in data:
                 raise DomainError("A label is required; revision is server managed")
-            defaults = {
+            defaults: dict[str, dict[str, Any]] = {
                 "artists": {"bio": ""},
                 "albums": {"artist_id": "", "track_ids": []},
                 "tracks": {

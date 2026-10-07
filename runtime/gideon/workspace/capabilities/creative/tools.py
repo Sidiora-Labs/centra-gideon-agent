@@ -751,7 +751,16 @@ class CreativeToolProvider(ToolProvider):
             if tool_name in PRODUCTION_SCHEMAS:
                 return await self.production.invoke(tool_name, arguments)
             _, entity, action = tool_name.split("_", 2)
-            store = {
+            stores: dict[
+                str,
+                IngredientStore
+                | BoardStore
+                | UniverseStore
+                | AuthorStore
+                | WorkStore
+                | StoryStore
+                | SeriesStore,
+            ] = {
                 "ingredient": self.ingredients,
                 "board": self.boards,
                 "universe": self.universes,
@@ -759,13 +768,14 @@ class CreativeToolProvider(ToolProvider):
                 "work": self.works,
                 "story": self.stories,
                 "series": self.series,
-            }[entity]
+            }
+            store = stores[entity]
             args = dict(arguments)
             if entity == "series" and action in ("prepare", "draft", "review"):
                 method = getattr(store, action)
                 result = await method(**args) if action == "draft" else method(**args)
             elif entity == "story" and action == "suggest":
-                result = await store.suggest(**args)
+                result = await self.stories.suggest(**args)
             elif action.startswith("editorial_"):
                 if action == "editorial_context_bind":
                     result = self.editorial.context.bind(args["id"], args["payload"])
@@ -849,7 +859,10 @@ class CreativeToolProvider(ToolProvider):
             else:
                 result = getattr(store, action)(**args)
                 if entity == "ingredient" and action == "get":
-                    result = {**result, "source_status": store.source_status(result)}
+                    result = {
+                        **result,
+                        "source_status": self.ingredients.source_status(result),
+                    }
             return ToolResult(
                 success=True,
                 output=json.dumps(result, ensure_ascii=False),

@@ -196,7 +196,9 @@ class MoltbookAdapter:
                             else None
                         )
                         retry = response.headers.get("Retry-After")
-                        retry = int(retry) if retry and retry.isdigit() else None
+                        retry_seconds = (
+                            int(retry) if retry and retry.isdigit() else None
+                        )
                         raise MoltbookError(
                             clean(str(message or f"HTTP {response.status}"), 500),
                             response.status if response.status < 500 else 503,
@@ -317,9 +319,9 @@ class MoltbookAdapter:
             )
             raise
         count = (
-            len(data.get("posts", data.get("comments", [])))
+            len(data.get("posts", data.get("comments", [])) or [])
             if isinstance(data, dict)
-            else len(data)
+            else len(data) if data is not None else 0
         )
         self._record(action, "GET", endpoint, "succeeded", {"items": count})
         return data

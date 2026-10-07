@@ -4,6 +4,7 @@ import itertools
 import json
 import math
 import struct
+from typing import Any
 
 
 def quaternion(euler):
@@ -45,16 +46,16 @@ def mesh(part):
             (0, 2, 6, 4),
             (1, 5, 7, 3),
         )
-        for a, b, c, d in faces:
+        for ia, ib, ic, id_ in faces:
             triangles.extend(
                 [
-                    [vertices[a], vertices[b], vertices[c]],
-                    [vertices[a], vertices[c], vertices[d]],
+                    [vertices[ia], vertices[ib], vertices[ic]],
+                    [vertices[ia], vertices[ic], vertices[id_]],
                 ]
             )
     elif part["shape"] == "sphere":
 
-        def point(ring, segment):
+        def sphere_point(ring, segment):
             latitude = math.pi * ring / 8
             longitude = 2 * math.pi * segment / 12
             return (
@@ -66,10 +67,10 @@ def mesh(part):
         for ring in range(8):
             for segment in range(12):
                 a, b, c, d = (
-                    point(ring, segment),
-                    point(ring + 1, segment),
-                    point(ring + 1, segment + 1),
-                    point(ring, segment + 1),
+                    sphere_point(ring, segment),
+                    sphere_point(ring + 1, segment),
+                    sphere_point(ring + 1, segment + 1),
+                    sphere_point(ring, segment + 1),
                 )
                 if ring != 0:
                     triangles.append([a, b, d])
@@ -77,9 +78,12 @@ def mesh(part):
                     triangles.append([b, c, d])
     else:
         for segment in range(12):
-            a, b = 2 * math.pi * segment / 12, 2 * math.pi * (segment + 1) / 12
-            bottom = (sx * math.cos(a), -sy, sz * math.sin(a))
-            next_bottom = (sx * math.cos(b), -sy, sz * math.sin(b))
+            angle_a, angle_b = (
+                2 * math.pi * segment / 12,
+                2 * math.pi * (segment + 1) / 12,
+            )
+            bottom = (sx * math.cos(angle_a), -sy, sz * math.sin(angle_a))
+            next_bottom = (sx * math.cos(angle_b), -sy, sz * math.sin(angle_b))
             top = (bottom[0], sy, bottom[2])
             next_top = (next_bottom[0], sy, next_bottom[2])
             triangles.extend(
@@ -90,7 +94,8 @@ def mesh(part):
                     [(0, sy, 0), next_top, top],
                 ]
             )
-    positions, normals = [], []
+    positions: list[float] = []
+    normals: list[float] = []
     for a, b, c in triangles:
         u = [b[i] - a[i] for i in range(3)]
         v = [c[i] - a[i] for i in range(3)]
@@ -101,14 +106,14 @@ def mesh(part):
         ]
         length = math.sqrt(sum(value * value for value in normal)) or 1
         normal = [value / length for value in normal]
-        for point in (a, b, c):
-            positions.extend(point)
+        for vertex in (a, b, c):
+            positions.extend(vertex)
             normals.extend(normal)
     return positions, normals
 
 
 def compile_model(spec):
-    document = {
+    document: dict[str, Any] = {
         "asset": {"version": "2.0", "generator": "Gideon procedural assemblies"},
         "scene": 0,
         "scenes": [{"nodes": []}],
@@ -133,7 +138,7 @@ def compile_model(spec):
             {"buffer": 0, "byteOffset": len(binary), "byteLength": len(raw)}
         )
         binary.extend(raw)
-        item = {
+        item: dict[str, Any] = {
             "bufferView": view,
             "componentType": 5126,
             "count": len(values) // width,
@@ -212,7 +217,7 @@ def compile_model(spec):
                 clip["from_degrees"]
                 + (clip["to_degrees"] - clip["from_degrees"]) * i / steps
             )
-            axis = [0, 0, 0]
+            axis = [0.0, 0.0, 0.0]
             axis["xyz".index(clip["axis"])] = math.radians(angle)
             quaternions.extend(multiply(quaternion(part["rotation"]), quaternion(axis)))
         times = accessor(times, 1)

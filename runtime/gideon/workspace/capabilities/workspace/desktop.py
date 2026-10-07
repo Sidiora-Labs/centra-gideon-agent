@@ -519,7 +519,7 @@ class DesktopRegistry:
         self.lock.close()
 
 
-_registries = {}
+_registries: dict[str, DesktopRegistry] = {}
 
 
 def get_desktop_registry(root, *, allowed_roots):

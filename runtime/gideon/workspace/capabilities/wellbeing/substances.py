@@ -4,10 +4,11 @@ import json
 import math
 from datetime import datetime, timedelta
 from datetime import timezone as utc
+from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .store import MeasurementError, MeasurementStore, instant, text
+from .store import MeasurementDatabase, MeasurementError, instant, text
 
 
 def amount(value, label, low=0, high=10000, positive=False):
@@ -41,7 +42,7 @@ def quantities(kind, details, count=1):
     return {"mg_per_unit": mg}, None, mg * count
 
 
-class ConsumptionStore(MeasurementStore):
+class ConsumptionStore(MeasurementDatabase):
     def __init__(self, home):
         super().__init__(home)
         with self.connection() as db:
@@ -59,7 +60,7 @@ class ConsumptionStore(MeasurementStore):
             raise MeasurementError("Substance record not found", 404, "not_found")
         return json.loads(row[0])
 
-    def _write(self, entity, payload, identity=None, delete=False):
+    def _write_record(self, entity, payload, identity=None, delete=False):
         if not isinstance(payload, dict):
             raise MeasurementError("Record must be an object")
         mutable = {"name", "details"} | (
@@ -162,22 +163,22 @@ class ConsumptionStore(MeasurementStore):
             return record
 
     def create_entry(self, payload):
-        return self._write("entries", payload)
+        return self._write_record("entries", payload)
 
     def correct_entry(self, identity, payload):
-        return self._write("entries", payload, identity)
+        return self._write_record("entries", payload, identity)
 
     def delete_entry(self, identity, payload):
-        return self._write("entries", payload, identity, True)
+        return self._write_record("entries", payload, identity, True)
 
     def create_preset(self, payload):
-        return self._write("presets", payload)
+        return self._write_record("presets", payload)
 
     def update_preset(self, identity, payload):
-        return self._write("presets", payload, identity)
+        return self._write_record("presets", payload, identity)
 
     def delete_preset(self, identity, payload):
-        return self._write("presets", payload, identity, True)
+        return self._write_record("presets", payload, identity, True)
 
     def get_entry(self, identity):
         with self.connection() as db:
@@ -246,7 +247,7 @@ class ConsumptionStore(MeasurementStore):
         rows = self._list(
             "entries", start=start, end=now.isoformat(timespec="microseconds"), limit=-1
         )
-        buckets = {
+        buckets: dict[str, dict[str, Any]] = {
             str(first + timedelta(days=index)): {
                 "date": str(first + timedelta(days=index)),
                 "entry_count": 0,

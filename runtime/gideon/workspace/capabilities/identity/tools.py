@@ -104,27 +104,29 @@ class IdentityToolProvider(ToolProvider):
                     LifecycleStore,
                 )
 
-                store = LifecycleStore(self.home)
+                store_107 = LifecycleStore(self.home)
                 operation = tool_name.removeprefix("identity_lifecycle_")
                 result = (
-                    await store.dispatch(
+                    await store_107.dispatch(
                         **arguments, state=get_dashboard_state(), service=get_instance()
                     )
                     if operation == "dispatch"
-                    else getattr(store, operation)(**arguments)
+                    else getattr(store_107, operation)(**arguments)
                 )
             elif tool_name == "identity_recipe_advance":
-                store = RecipeStore(self.home / "capabilities/identity/recipes.sqlite3")
-                result = await store.advance(**arguments, provider=self)
+                store_117 = RecipeStore(
+                    self.home / "capabilities/identity/recipes.sqlite3"
+                )
+                result = await store_117.advance(**arguments, provider=self)
             elif tool_name == "identity_fidelity_run":
-                store = FidelityStore(
+                store_120 = FidelityStore(
                     self.home / "capabilities/identity/fidelity.sqlite3"
                 )
-                result = await run_evaluation(store, **arguments)
-                store._sources(result["case_snapshot"]["source_ids"])
+                result = await run_evaluation(store_120, **arguments)
+                store_120._sources(result["case_snapshot"]["source_ids"])
             elif tool_name == "identity_twin_enrich":
-                store = TwinStore(self.home / "capabilities/identity/twin.sqlite3")
-                doc = self._public_document(store, arguments["document_id"])
+                store_126 = TwinStore(self.home / "capabilities/identity/twin.sqlite3")
+                doc = self._public_document(store_126, arguments["document_id"])
                 if not doc["enabled"]:
                     raise ValueError("Enable the source before proposing questions")
                 result = {
@@ -190,23 +192,25 @@ class IdentityToolProvider(ToolProvider):
                 ContinuityStore(self.home), name.removeprefix("identity_continuity_")
             )(**arguments)
         if name.startswith("identity_progress_"):
-            store = ProgressStore(directory / "progress.sqlite3")
-            return getattr(store, name.removeprefix("identity_progress_"))(**arguments)
+            store_193 = ProgressStore(directory / "progress.sqlite3")
+            return getattr(store_193, name.removeprefix("identity_progress_"))(
+                **arguments
+            )
         if name.startswith("identity_goals_"):
-            store = GoalStore(directory / "goals.sqlite3")
+            store_196 = GoalStore(directory / "goals.sqlite3")
             operation = name.removeprefix("identity_goals_")
-            result = getattr(store, operation)(**arguments)
+            result = getattr(store_196, operation)(**arguments)
             return {"calendar": result} if operation == "calendar" else result
         if name.startswith("identity_fidelity_"):
-            store = FidelityStore(directory / "fidelity.sqlite3")
+            store_201 = FidelityStore(directory / "fidelity.sqlite3")
             operation = name.removeprefix("identity_fidelity_")
             result = getattr(
-                store, "record_observation" if operation == "observe" else operation
+                store_201, "record_observation" if operation == "observe" else operation
             )(**arguments)
 
             def visible(row):
                 try:
-                    store._sources(row.get("case_snapshot", row)["source_ids"])
+                    store_201._sources(row.get("case_snapshot", row)["source_ids"])
                     return True
                 except ValueError:
                     return False
@@ -217,13 +221,13 @@ class IdentityToolProvider(ToolProvider):
                 raise KeyError("Accessible fidelity record not found")
             return result
         if name.startswith("identity_story_"):
-            store = StoryStore(directory / "stories.sqlite3")
+            store_220 = StoryStore(directory / "stories.sqlite3")
             operation = name.removeprefix("identity_story_")
             if "story_id" in arguments:
                 identifier = arguments.pop("story_id")
-                result = getattr(store, operation)(identifier, **arguments)
+                result = getattr(store_220, operation)(identifier, **arguments)
             else:
-                result = getattr(store, operation)(**arguments)
+                result = getattr(store_220, operation)(**arguments)
             return {"deleted": identifier} if operation == "delete" else result
         store = TwinStore(directory / "twin.sqlite3")
         operation = name.removeprefix("identity_twin_")

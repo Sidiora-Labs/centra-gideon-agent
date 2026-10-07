@@ -235,7 +235,11 @@ class VoiceStore:
                             "title": artifact.name if artifact else ref["artifact_id"],
                         }
                     )
-                    if not missing:
+                    if (
+                        not missing
+                        and artifact is not None
+                        and artifact.content is not None
+                    ):
                         passages.append(artifact.content)
         exemplar = (
             fingerprint("\n\n".join(passages), config["wells"]) if passages else None

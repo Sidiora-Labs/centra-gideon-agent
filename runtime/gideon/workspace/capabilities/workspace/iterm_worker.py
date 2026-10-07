@@ -15,7 +15,7 @@ async def observe(connection, identity):
     import iterm2
 
     app = await iterm2.async_get_app(connection)
-    panes = []
+    panes: list[dict[str, object]] = []
     visited = 0
     for window in app.windows:
         for tab in window.tabs:

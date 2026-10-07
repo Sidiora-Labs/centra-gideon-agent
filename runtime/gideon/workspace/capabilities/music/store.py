@@ -8,6 +8,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -221,7 +222,7 @@ class RepertoireStore:
             refs = data["attachment_refs"]
             if not isinstance(refs, list) or len(refs) > 30:
                 raise DomainError("Invalid attachment references")
-            clean = []
+            attachment_records = []
             for ref in refs:
                 if not isinstance(ref, dict) or set(ref) != {"slug", "version"}:
                     raise DomainError("An attachment requires slug and version")
@@ -231,9 +232,9 @@ class RepertoireStore:
                     raise DomainError(
                         "Attachment version not found", 404, "attachment_not_found"
                     )
-                if {"slug": slug, "version": version} not in clean:
-                    clean.append({"slug": slug, "version": version})
-            out["attachment_refs"] = clean
+                if {"slug": slug, "version": version} not in attachment_records:
+                    attachment_records.append({"slug": slug, "version": version})
+            out["attachment_refs"] = attachment_records
         return out
 
     def _schedule(self, data):
@@ -297,7 +298,7 @@ class RepertoireStore:
         fields = self._fields(data)
         if "title" not in fields or "revision" in data:
             raise DomainError("A title is required; revision is server managed")
-        item = dict(
+        item: dict[str, Any] = dict(
             id=str(uuid4()),
             artist="",
             instrument="guitar",
@@ -383,7 +384,7 @@ class RepertoireStore:
                 raise DomainError(
                     "Repertoire item ID already exists", 409, "item_conflict"
                 )
-            item = dict(
+            item: dict[str, Any] = dict(
                 id=item_id,
                 artist="",
                 instrument="guitar",

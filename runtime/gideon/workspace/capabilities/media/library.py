@@ -155,7 +155,7 @@ class MediaLibrary:
                     "PNG": "image/png",
                     "JPEG": "image/jpeg",
                     "WEBP": "image/webp",
-                }.get(image.format)
+                }.get(image.format or "")
                 if (
                     not detected
                     or image.width * image.height > 4096 * 4096

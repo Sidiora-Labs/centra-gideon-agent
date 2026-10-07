@@ -3,6 +3,7 @@
 import base64
 import json
 import sqlite3
+from typing import Any
 
 from gideon.automation.workflows.project_archive import (
     ArchiveRefused,
@@ -212,7 +213,7 @@ class ExtendedBundleService(BundleService):
                 for group in groups
                 if group not in SLOTS
             }
-            receipt = {
+            receipt: dict[str, Any] = {
                 "status": "applying",
                 "applied": [],
                 "skipped": [],

@@ -6,12 +6,12 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from .moodboards import BoardStore
-from .store import CatalogError, IngredientStore, identifier, integer, keys, text
+from .store import CatalogError, CreativeDatabase, identifier, integer, keys, text
 
 FIELDS = {"title", "canon", "visual_identity", "ingredient_ids", "board_refs"}
 
 
-class UniverseStore(IngredientStore):
+class UniverseStore(CreativeDatabase):
     def __init__(self, home=None):
         super().__init__(home)
         self.boards = BoardStore(self.home)

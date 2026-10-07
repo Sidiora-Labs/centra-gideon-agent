@@ -4,15 +4,16 @@ import asyncio
 import hashlib
 import json
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
-from .store import CatalogError, IngredientStore, identifier, integer, keys, text
+from .store import CatalogError, CreativeDatabase, identifier, integer, keys, text
 from .works import WorkStore
 
 FIELDS = {"title", "synopsis", "volumes", "arcs", "author_ref", "universe_ref"}
 
 
-class SeriesStore(IngredientStore):
+class SeriesStore(CreativeDatabase):
     def __init__(self, home=None):
         super().__init__(home)
         self.works = WorkStore(self.home)
@@ -43,7 +44,8 @@ class SeriesStore(IngredientStore):
             or len(arcs) > 100
         ):
             raise CatalogError("Invalid series collection size")
-        output, ids, chapters = [], set(), set()
+        output, ids = [], set()
+        chapters: set[str] = set()
         latest = max(history, key=lambda row: row["revision"]) if history else None
         for volume in volumes:
             keys(volume, {"id", "title", "chapters"})
@@ -215,7 +217,9 @@ class SeriesStore(IngredientStore):
             return json.loads(row[0])
 
     def _state(self, db, series):
-        statuses, prior, prior_reviewed = [], {}, True
+        statuses = []
+        prior: dict[str, str | None] = {}
+        prior_reviewed = True
         for volume in series["volumes"]:
             for chapter in volume["chapters"]:
                 row = db.execute(
@@ -237,7 +241,7 @@ class SeriesStore(IngredientStore):
                         "SELECT record FROM work_drafts WHERE id=? AND work_id=?",
                         (active, work["id"]),
                     ).fetchone()
-                    if active
+                    if active and work is not None
                     else None
                 )
                 draft_ref = json.loads(draft_row[0]) if draft_row else None
@@ -250,6 +254,7 @@ class SeriesStore(IngredientStore):
                 reviewed = bool(
                     active
                     and artifact_exists
+                    and link is not None
                     and link["reviewed_draft_id"] == active
                     and link["reviewed_dependencies"] == prior
                     and prior_reviewed
@@ -383,7 +388,7 @@ class SeriesStore(IngredientStore):
             artifact = self.works.artifacts.get(
                 ref["artifact_id"], version=ref["artifact_version"]
             )
-            content = artifact.content if artifact else ""
+            content = (artifact.content or "") if artifact else ""
             excerpts.append(
                 {
                     "chapter_id": status["chapter_id"],

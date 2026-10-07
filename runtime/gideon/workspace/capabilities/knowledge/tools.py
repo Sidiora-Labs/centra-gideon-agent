@@ -2,8 +2,6 @@
 
 import json
 
-from gideon.workspace.uploads.content_intake import IntakeRefused
-
 from jsonschema import ValidationError, validate
 
 from gideon.cognition.memory_service import MemoryService
@@ -45,6 +43,7 @@ from gideon.workspace.capabilities.knowledge.transcript_format import (
 )
 from gideon.workspace.capabilities.knowledge.typed import TypedCapture
 from gideon.workspace.capabilities.knowledge.videos import VideoIngests
+from gideon.workspace.uploads.content_intake import IntakeRefused
 
 _ID = {"type": "string", "minLength": 1, "maxLength": 128}
 _REQUEST = {"type": "string", "pattern": "^[A-Za-z0-9_-]{8,128}$"}
@@ -688,11 +687,15 @@ class KnowledgeCapabilityTools(ToolProvider):
                     result = self._ideas.export(arguments["id"])
                 elif tool_name == "knowledge_idea_sync":
                     from gideon.cognition.knowledge.file_items import _owned_io
-                    result = await _owned_io(self._ideas.sync,
+
+                    result = await _owned_io(
+                        self._ideas.sync,
                         arguments["id"],
                         {key: value for key, value in arguments.items() if key != "id"},
                     )
                 else:
+                    if self._idea_schedules is None:
+                        raise ValueError("Idea scheduling is unavailable")
                     result = self._idea_schedules.save(
                         arguments["id"],
                         {key: value for key, value in arguments.items() if key != "id"},
@@ -720,8 +723,12 @@ class KnowledgeCapabilityTools(ToolProvider):
                 elif tool_name == "knowledge_review_list":
                     result = self._reviews.list(**arguments)
                 elif tool_name == "knowledge_review_schedules":
+                    if self._review_schedules is None:
+                        raise ValueError("Review scheduling is unavailable")
                     result = self._review_schedules.list()
                 else:
+                    if self._review_schedules is None:
+                        raise ValueError("Review scheduling is unavailable")
                     result = self._review_schedules.save(arguments)
             elif tool_name.startswith("knowledge_topic_"):
                 if self._topics is None:

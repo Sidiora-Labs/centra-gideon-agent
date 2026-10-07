@@ -5,6 +5,7 @@ import json
 from datetime import date as calendar_date
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from gideon.workspace.capabilities.communications.store import PeopleStore, care
@@ -94,7 +95,8 @@ class ReviewService:
 
     def preview(self, period, date, timezone="UTC"):
         day, zone, start, end = window(period, date, timezone)
-        sections, scanned, truncated = {key: [] for key in SECTIONS}, {}, []
+        sections: dict[str, list[dict[str, Any]]] = {key: [] for key in SECTIONS}
+        scanned, truncated = {}, []
         sources = {
             key: "available" for key in ("tasks", "contacts", "notes", "captures")
         }
@@ -177,7 +179,7 @@ class ReviewService:
         for person in rows("contacts", people.people() if people else []):
             state = care(
                 person,
-                people.touchpoints(person["id"]),
+                people.touchpoints(person["id"]) if people is not None else [],
                 zone.key,
                 now=end - timedelta(microseconds=1),
             )

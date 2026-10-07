@@ -56,20 +56,29 @@ def _presentation_for(model: DeckModel):
 
     prov = artifact_registry.get_provider()
     art = prov.get(model.template_slug) if prov is not None else None
-    if art is None or art.kind != "pptx":
-        raise ValueError(f"PPTX template artifact {model.template_slug!r} is unavailable")
+    if prov is None or art is None or art.kind != "pptx":
+        raise ValueError(
+            f"PPTX template artifact {model.template_slug!r} is unavailable"
+        )
     version = model.template_version or art.version
     result = prov.raw_bytes(art.slug, version=version)
     if result is None:
-        raise ValueError(f"PPTX template artifact {art.slug!r} version {version} is unavailable")
+        raise ValueError(
+            f"PPTX template artifact {art.slug!r} version {version} is unavailable"
+        )
     prs = Presentation(io.BytesIO(result[0]))
     for slide_id in list(prs.slides._sldIdLst):
         prs.part.drop_rel(slide_id.rId)
         prs.slides._sldIdLst.remove(slide_id)
     model.template_version = version
-    keywords = [part.strip() for part in (prs.core_properties.keywords or "").split(";")
-                if part.strip() and not part.strip().startswith(_TEMPLATE_KEY)]
-    prs.core_properties.keywords = "; ".join([*keywords, f"{_TEMPLATE_KEY}{art.slug}@{version}"])
+    keywords = [
+        part.strip()
+        for part in (prs.core_properties.keywords or "").split(";")
+        if part.strip() and not part.strip().startswith(_TEMPLATE_KEY)
+    ]
+    prs.core_properties.keywords = "; ".join(
+        [*keywords, f"{_TEMPLATE_KEY}{art.slug}@{version}"]
+    )
     return prs
 
 
@@ -124,7 +133,7 @@ def _add_artifact_picture(prs, slide, entry: Slide) -> None:
 
     prov = artifact_registry.get_provider()
     art = prov.get(entry.artifact_slug) if prov is not None else None
-    if art is None or art.kind != "image":
+    if prov is None or art is None or art.kind != "image":
         raise ValueError(f"image artifact {entry.artifact_slug!r} is unavailable")
     result = prov.raw_bytes(art.slug)
     if result is None:
@@ -141,9 +150,14 @@ def _add_artifact_picture(prs, slide, entry: Slide) -> None:
     box_height = int(slide_height * 0.62)
     scale = min(box_width / width, box_height / height)
     picture_width, picture_height = int(width * scale), int(height * scale)
-    left = int(slide_width * (0.54 if entry.bullets else 0.12)) + (box_width - picture_width) // 2
+    left = (
+        int(slide_width * (0.54 if entry.bullets else 0.12))
+        + (box_width - picture_width) // 2
+    )
     top = int(slide_height * 0.27) + (box_height - picture_height) // 2
-    picture = slide.shapes.add_picture(picture_bytes, left, top, width=picture_width, height=picture_height)
+    picture = slide.shapes.add_picture(
+        picture_bytes, left, top, width=picture_width, height=picture_height
+    )
     picture.name = f"Gideon image artifact {art.slug}"
     if entry.bullets and not entry.body_box.placed:
         body = body_placeholder(slide)

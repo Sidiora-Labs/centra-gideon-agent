@@ -1,6 +1,7 @@
 """Native agent access to the same repertoire and catalog stores as the console."""
 
 import json
+from typing import Any
 
 from gideon.core.config.loader import config_dir
 from gideon.sdk.tool import RiskLevel, ToolDefinition, ToolProvider, ToolResult
@@ -36,7 +37,8 @@ class MusicToolProvider(ToolProvider):
             ("catalog", ("list", "get", "create", "update", "attach", "select")),
         ):
             for action in actions:
-                properties, required = {}, []
+                properties: dict[str, dict[str, Any]] = {}
+                required = []
                 if domain == "catalog" and action not in ("attach", "select"):
                     properties["kind"] = {
                         "type": "string",

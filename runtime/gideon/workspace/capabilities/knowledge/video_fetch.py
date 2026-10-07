@@ -72,6 +72,8 @@ class VideoReader:
         self, url, *, method="GET", headers=None, data=None, max_bytes=8388608
     ):
         self.validate(url)
+        if self.policy is None:
+            raise CaptureError("Session egress policy disables video acquisition", 403)
         policy = replace(
             self.policy,
             allow_private=False,

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from gideon.core.config.loader import config_dir
@@ -57,7 +58,7 @@ async def invoke_life(home, arguments):
     store = LifeCalendarStore(home)
     operation = arguments.get("operation", "").removeprefix("life_")
     payload, identity = arguments.get("payload", {}), arguments.get("id")
-    methods = {
+    methods: dict[str, Callable[..., object]] = {
         "configure": store.configure,
         "config": store.get_config,
         "config_history": store.config_history,

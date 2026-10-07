@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from .store import CatalogError, IngredientStore, identifier, integer, keys, text
+from .store import CatalogError, CreativeDatabase, identifier, integer, keys, text
 from .works import WorkStore
 
 STAGES = ("premise", "development", "outline", "ready")
@@ -19,7 +19,7 @@ STAGE_FIELDS = {
 }
 
 
-class StoryStore(IngredientStore):
+class StoryStore(CreativeDatabase):
     def __init__(self, home=None):
         super().__init__(home)
         self.works = WorkStore(self.home)

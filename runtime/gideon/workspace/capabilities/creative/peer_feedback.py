@@ -366,7 +366,10 @@ class PeerFeedbackStore:
             peer = self.peers.verify_proof(proof)
         except ValueError as exc:
             raise CatalogError(str(exc), getattr(exc, "status", 401)) from exc
-        return self.receive(peer["id"], envelope.get("payload"))
+        payload = envelope.get("payload")
+        if not isinstance(payload, dict):
+            raise CatalogError("Peer feedback payload must be an object")
+        return self.receive(peer["id"], payload)
 
     def receive(self, sender: str, payload: dict) -> dict:
         sender = identifier(sender)
@@ -509,7 +512,10 @@ class PeerFeedbackStore:
         keys(lineage, {"commission_id", "run_id", "project", "sources", "output"})
         identifier(lineage.get("commission_id"))
         identifier(lineage.get("run_id"))
-        cls._output(lineage.get("output"))
+        output = lineage.get("output")
+        if not isinstance(output, dict):
+            raise CatalogError("Peer feedback output must be an object")
+        cls._output(output)
         project, sources = lineage.get("project"), lineage.get("sources")
         if (
             not isinstance(project, dict)

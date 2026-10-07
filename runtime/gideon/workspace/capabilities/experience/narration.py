@@ -14,7 +14,7 @@ from gideon.workspace.artifacts.native import NativeArtifactProvider
 from .graph import identifier, revision
 from .store import Conflict, NotFound
 
-_services = WeakValueDictionary()
+_services: "WeakValueDictionary[str, NarrationJobs]" = WeakValueDictionary()
 
 
 def get_narration_jobs(store):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -210,7 +211,7 @@ def report(store, zone="UTC", now=None):
             if "relationship_coverage" in tables
             else {}
         )
-    groups = {}
+    groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
     for source, account, body in messages:
         row = json.loads(body)
         groups.setdefault(

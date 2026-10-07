@@ -76,7 +76,7 @@ def scan(check_id, source):
         if WORD.search(m[0])
     ]
     if check_id in PHRASES:
-        occupied = []
+        occupied: list[tuple[int, int]] = []
         for phrase in sorted(LEX[PHRASES[check_id]], key=len, reverse=True):
             pattern = (
                 r"(?<!\w)"
@@ -109,19 +109,19 @@ def scan(check_id, source):
                     tag_kind=kind,
                 )
     elif check_id == "prose.modifier-stacking":
-        run = []
-        for token in tokens + [None]:
-            adjective = token is not None and (
-                token[0].casefold() in LEX["COMMON_ADJECTIVES"]
+        run: list[re.Match[str]] = []
+        for possible_token in tokens + [None]:
+            adjective = possible_token is not None and (
+                possible_token[0].casefold() in LEX["COMMON_ADJECTIVES"]
                 or re.search(
                     r"(ous|ful|ive|ent|ant|ical|ic|less|able|ible|ish|ese|like|some|ward|most|ed|ing|ly)$",
-                    token[0],
+                    possible_token[0],
                     re.I,
                 )
             )
             if run and (
-                not adjective or source[run[-1].end() : token.start()].strip()
-                if token is not None
+                not adjective or source[run[-1].end() : possible_token.start()].strip()
+                if possible_token is not None
                 else True
             ):
                 if len(run) >= 3:
@@ -132,8 +132,8 @@ def scan(check_id, source):
                         modifier_count=len(run),
                     )
                 run = []
-            if adjective:
-                run.append(token)
+            if adjective and possible_token is not None:
+                run.append(possible_token)
     elif check_id == "prose.passive-voice":
         for i, token in enumerate(tokens[:-1]):
             if token[0].casefold() not in (
@@ -174,7 +174,8 @@ def scan(check_id, source):
                         )
                 break
     elif check_id == "prose.word-echoes":
-        previous, emitted = {}, set()
+        previous: dict[str, int] = {}
+        emitted = set()
         for i, token in enumerate(tokens):
             word = token[0].casefold()
             if len(word) >= 4 and word not in LEX["STOPWORDS"]:
@@ -262,10 +263,10 @@ def scan(check_id, source):
             ]
         )
         for pattern in patterns:
-            match = re.search(pattern, source, re.I)
-            if match:
+            pattern_match = re.search(pattern, source, re.I)
+            if pattern_match:
                 add(
-                    *match.span(),
+                    *pattern_match.span(),
                     "Stock prose pattern; this is not evidence of AI authorship",
                 )
         if check_id == "prose.structural-tics":

@@ -82,11 +82,14 @@ def repository_url(value):
 
 class RepositoryReader:
     def __init__(self, session_key):
-        self.policy = egress_policy_for_profile(
+        policy = egress_policy_for_profile(
             egress_policy_for(CONNECTOR), profile_for_session(session_key).egress_tier
         )
-        if self.policy is None:
+        if policy is None:
             raise CaptureError("Session egress policy disables repository intake", 403)
+        self.policy = policy
+        self.policy = policy
+        self.policy = policy
         self.bytes = 0
 
     def validate(self, url):
@@ -229,7 +232,9 @@ def study(path, revision, url):
     root = Path(path).resolve()
     if not root.is_dir():
         raise CaptureError("Repository checkout is unavailable", 404)
-    files, total, languages, top = [], 0, Counter(), Counter()
+    files, total = [], 0
+    languages: Counter[str] = Counter()
+    top: Counter[str] = Counter()
     readme = ""
     risks = []
     for candidate in sorted(root.rglob("*")):

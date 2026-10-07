@@ -12,6 +12,7 @@ import tarfile
 import tempfile
 from contextlib import closing
 from datetime import datetime, timezone
+from typing import Any
 from urllib.parse import urlsplit
 
 from gideon.cognition.knowledge.store import KnowledgeStore, _fts_tags, normalize_url
@@ -2311,7 +2312,8 @@ def _ordered_canonical_records(records):
         raise MigrationError(
             "This canonical coordinator does not support one or more archive families"
         )
-    ordered, published = [*people, *projects, *collections, *knowledge], set()
+    ordered = [*people, *projects, *collections, *knowledge]
+    published: set[str] = set()
     while pending:
         ready = []
         for identity, row in pending.items():
@@ -3349,7 +3351,8 @@ def _read_grouped_journal(path):
 
 def _grouped_receipt(journal):
     completed = [group for group in journal["groups"] if group["state"] == "complete"]
-    domains, records = {}, []
+    domains: dict[str, int] = {}
+    records = []
     for group in completed:
         receipt = group["receipt"]
         for domain, count in receipt["domains"].items():
@@ -3715,7 +3718,7 @@ def receipts(
             if journal["receipt"] is not None:
                 result.append(journal["receipt"])
     ordered = sorted(result, key=lambda row: row["committed_at"], reverse=True)
-    unique = {}
+    unique: dict[str, dict[str, Any]] = {}
     for row in ordered:
         unique.setdefault(row["archive_digest"], row)
     return list(unique.values())[:20]

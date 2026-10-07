@@ -42,7 +42,8 @@ def quantity(value):
 
 class ExportParser:
     def __init__(self):
-        self.metrics, self.labs, self.skipped = [], [], Counter()
+        self.metrics, self.labs = [], []
+        self.skipped: Counter[str] = Counter()
 
     def metric(self, name, observed, unit, value, device="", end=None, stage=None):
         row = dict(
@@ -399,7 +400,7 @@ class AppleHealthStore(LabStore):
                 "filename": f"original@{sha}.{payload['format']}",
             }
             if not self.artifacts.store_version_file(
-                artifact.slug, reference["filename"], raw
+                artifact.slug, str(reference["filename"]), raw
             ):
                 raise MeasurementError("Original export could not be stored")
             self._original(reference)

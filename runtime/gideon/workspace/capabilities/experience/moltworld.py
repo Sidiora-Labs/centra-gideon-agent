@@ -124,7 +124,11 @@ class Moltworld:
             secret = (
                 self.credential_resolver(config["credential_name"])
                 if self.credential_resolver
-                else self.credentials.resolve(config["credential_name"]).secret
+                else (
+                    self.credentials.resolve(config["credential_name"]).secret
+                    if self.credentials is not None
+                    else None
+                )
             )
         except (KeyError, ValueError):
             secret = None
@@ -140,7 +144,11 @@ class Moltworld:
                 available = bool(
                     self.credential_resolver(config["credential_name"])
                     if self.credential_resolver
-                    else self.credentials.resolve(config["credential_name"]).secret
+                    else (
+                        self.credentials.resolve(config["credential_name"]).secret
+                        if self.credentials is not None
+                        else None
+                    )
                 )
             except (KeyError, ValueError):
                 pass

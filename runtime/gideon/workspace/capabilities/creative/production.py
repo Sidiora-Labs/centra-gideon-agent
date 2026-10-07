@@ -47,7 +47,7 @@ class SeriesProductionStore:
 
     def _read(self, db, run_id, series_id=None):
         query = "SELECT record FROM creative_production_runs WHERE id=?"
-        args = (identifier(run_id),)
+        args: tuple[str, ...] = (identifier(run_id),)
         if series_id is not None:
             query += " AND series_id=?"
             args += (identifier(series_id),)
@@ -505,7 +505,7 @@ class SeriesProductionStore:
                 )
                 if (
                     artifact is None
-                    or hashlib.sha256(artifact.content.encode()).hexdigest()
+                    or hashlib.sha256((artifact.content or "").encode()).hexdigest()
                     != candidate["content_hash"]
                 ):
                     raise CatalogError(
@@ -530,7 +530,7 @@ class SeriesProductionStore:
                 )
                 digest = (
                     hashlib.sha256(source.content.encode()).hexdigest()
-                    if source
+                    if source is not None and source.content is not None
                     else None
                 )
                 if source is None or digest != candidate["content_hash"]:

@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import json
+from collections.abc import Callable
 
 from .genome import GenomeStore
 from .store import MeasurementError
@@ -12,7 +13,7 @@ async def invoke_genome(home, arguments):
     store = GenomeStore(home)
     operation = arguments.get("operation", "").removeprefix("genome_")
     payload, identity = arguments.get("payload", {}), arguments.get("id")
-    methods = {
+    methods: dict[str, Callable[..., object]] = {
         "preview": store.preview,
         "commit": store.commit,
         "sources": store.list_sources,
@@ -37,5 +38,7 @@ async def invoke_genome(home, arguments):
     else:
         result = await asyncio.to_thread(method, identity)
     if operation == "original":
+        if not isinstance(result, bytes):
+            raise MeasurementError("Original genome bytes are unavailable")
         result = {"content_base64": base64.b64encode(result).decode()}
     return json.dumps(result, allow_nan=False)

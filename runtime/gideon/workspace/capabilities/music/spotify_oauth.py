@@ -15,7 +15,7 @@ from .store import DomainError, text
 
 SCOPES = "user-read-recently-played playlist-read-private playlist-read-collaborative"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
-_LOCKS = {}
+_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 class SpotifyOAuth:

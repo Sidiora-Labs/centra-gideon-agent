@@ -276,6 +276,10 @@ class EpisodeStore(TimelineStore):
                             aspect_ratio=document["aspect_ratio"],
                         )
                         if scene["mode"] == "continue":
+                            if predecessor is None:
+                                raise SketchError(
+                                    "Episode continuation has no preceding scene", 409
+                                )
                             body.update(
                                 continuation_artifact_id=predecessor["artifact_id"],
                                 continuation_version=predecessor["version"],

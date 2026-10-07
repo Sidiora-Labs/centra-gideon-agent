@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from gideon.core.config.loader import config_dir
 from gideon.workspace.artifacts.native import NativeArtifactProvider
@@ -54,7 +55,7 @@ def snapshot(home=None):
         ("measurement", measures, "#/capabilities/wellbeing"),
         ("laboratory", labs, "#/capabilities/wellbeing/labs"),
     ]:
-        groups = {}
+        groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for record in records:
             label = record.get("analyte", record["kind"])
             groups.setdefault((label, record["unit"]), []).append(record)

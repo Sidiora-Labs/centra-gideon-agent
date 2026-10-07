@@ -49,13 +49,17 @@ def prompt_usage(provider: str, name: str) -> dict:
                         "label": use_case_label(entry.use_case),
                     }
                 )
-    for use_case, entry in sorted(apps.items()):
-        if entry and entry.provider == provider and entry.prompt_name == name:
+    for use_case, app_entry in sorted(apps.items()):
+        if (
+            app_entry
+            and app_entry.provider == provider
+            and app_entry.prompt_name == name
+        ):
             consumers.append(
                 {
                     "kind": "app",
                     "id": use_case,
-                    "label": f"{entry.app}: {use_case_label(use_case)}",
+                    "label": f"{app_entry.app}: {use_case_label(use_case)}",
                 }
             )
     return {

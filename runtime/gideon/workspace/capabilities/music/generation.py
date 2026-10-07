@@ -235,7 +235,7 @@ class MusicGeneration:
                     ENDPOINT,
                     params={"output_format": "mp3_44100_128"},
                     json=payload,
-                    headers={"xi-api-key": key},
+                    headers={"xi-api-key": key or ""},
                     allow_redirects=False,
                 ) as response:
                     if response.status != 200:

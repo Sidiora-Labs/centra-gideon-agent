@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .store import MeasurementError, MeasurementStore, instant, text
+from .store import MeasurementDatabase, MeasurementError, instant, text
 
 
 def calendar_date(value):
@@ -28,7 +28,7 @@ def scheduled(plan, day):
     )
 
 
-class InterventionStore(MeasurementStore):
+class InterventionStore(MeasurementDatabase):
     def __init__(self, home):
         super().__init__(home)
         with self.connection() as db:
@@ -40,7 +40,7 @@ class InterventionStore(MeasurementStore):
                 "CREATE TABLE IF NOT EXISTS intervention_dates(plan_id TEXT NOT NULL,day TEXT NOT NULL,record_id TEXT NOT NULL,PRIMARY KEY(plan_id,day))"
             )
 
-    def _get(self, db, entity, identity):
+    def _get_record(self, db, entity, identity):
         row = db.execute(
             f"SELECT data FROM intervention_{entity} WHERE id=? ORDER BY revision DESC LIMIT 1",
             (identity,),
@@ -49,7 +49,7 @@ class InterventionStore(MeasurementStore):
             raise MeasurementError("Intervention record not found", 404, "not_found")
         return json.loads(row[0])
 
-    def _write(self, entity, payload, identity=None, parent=None):
+    def _write_record(self, entity, payload, identity=None, parent=None):
         if not isinstance(payload, dict):
             raise MeasurementError("Intervention payload must be an object")
         fields = (
@@ -96,7 +96,7 @@ class InterventionStore(MeasurementStore):
                     raise MeasurementError("Request ID already used", 409, "conflict")
                 return json.loads(prior[1])
             if identity:
-                row = self._get(db, entity, identity)
+                row = self._get_record(db, entity, identity)
                 if (
                     type(payload.get("revision")) is not int
                     or payload["revision"] != row["revision"]
@@ -116,7 +116,7 @@ class InterventionStore(MeasurementStore):
                 if entity == "plans":
                     row["archived"] = False
                 else:
-                    plan = self._get(db, "plans", parent)
+                    plan = self._get_record(db, "plans", parent)
                     if plan["archived"]:
                         raise MeasurementError(
                             "Intervention is archived", 409, "conflict"
@@ -171,7 +171,7 @@ class InterventionStore(MeasurementStore):
                     )
                 parent_id, day = "", ""
             else:
-                plan = self._get(db, "plans", row["plan_id"])
+                plan = self._get_record(db, "plans", row["plan_id"])
                 day = calendar_date(row["date"])
                 if not scheduled(plan, day):
                     raise MeasurementError(
@@ -202,24 +202,24 @@ class InterventionStore(MeasurementStore):
             return row
 
     def create_plan(self, payload):
-        return self._write("plans", payload)
+        return self._write_record("plans", payload)
 
     def update_plan(self, identity, payload):
-        return self._write("plans", payload, identity)
+        return self._write_record("plans", payload, identity)
 
     def record(self, plan_id, payload):
-        return self._write("records", payload, parent=plan_id)
+        return self._write_record("records", payload, parent=plan_id)
 
     def correct_record(self, identity, payload):
-        return self._write("records", payload, identity)
+        return self._write_record("records", payload, identity)
 
     def get_plan(self, identity):
         with self.connection() as db:
-            return self._get(db, "plans", identity)
+            return self._get_record(db, "plans", identity)
 
     def get_record(self, identity):
         with self.connection() as db:
-            return self._get(db, "records", identity)
+            return self._get_record(db, "records", identity)
 
     def list_plans(self, include_archived=False):
         if type(include_archived) is not bool:
@@ -242,7 +242,7 @@ class InterventionStore(MeasurementStore):
 
     def _history(self, entity, identity):
         with self.connection() as db:
-            self._get(db, entity, identity)
+            self._get_record(db, entity, identity)
             return [
                 json.loads(row[0])
                 for row in db.execute(

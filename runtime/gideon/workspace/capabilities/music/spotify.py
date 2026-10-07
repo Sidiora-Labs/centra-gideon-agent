@@ -18,7 +18,7 @@ from .listening import digest
 from .store import DomainError, integer, text
 
 BASE = "https://api.spotify.com/v1"
-_LOCKS = {}
+_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 class SpotifyBridge:
@@ -55,6 +55,8 @@ class SpotifyBridge:
             db.close()
 
     def _credential(self, name):
+        if self.credentials is None:
+            raise ValueError("Credential storage is unavailable")
         self.credentials.reload()
         try:
             secret = self.credentials.resolve(name).secret

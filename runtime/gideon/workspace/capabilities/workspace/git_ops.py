@@ -8,15 +8,16 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from gideon.core.cancellation import terminate_and_reap
+from gideon.security.net.git import git_argv, git_child_env
 from gideon.security.sandbox import (
     PROFILE_TOOL,
     create_subprocess_limited,
     wrap_argv,
 )
-from gideon.security.net.git import git_argv, git_child_env
 
 from .projects import ProjectService
 from .store import ConflictError
@@ -36,9 +37,7 @@ class GitService:
         os.chmod(self.db_path, 0o600)
 
     async def _git(self, path, *args):
-        argv, disposable = wrap_argv(
-            git_argv(["-c", "submodule.recurse=false", *args])
-        )
+        argv, disposable = wrap_argv(git_argv(["-c", "submodule.recurse=false", *args]))
         proc = None
         try:
             proc = await create_subprocess_limited(
@@ -115,7 +114,7 @@ class GitService:
             "--untracked-files=normal",
             "--ignore-submodules=all",
         )
-        submodules = []
+        submodules: list[dict[str, Any]] = []
         for item in (await self._git(path, "ls-files", "--stage", "-z")).split("\0"):
             if not item.startswith("160000 "):
                 continue
@@ -224,7 +223,7 @@ class GitService:
                 )
                 if child is None or not child["initialized"]:
                     raise ValueError("Select an initialized submodule")
-                args = (
+                args: tuple[str, ...] = (
                     "-C",
                     str(path / target),
                     "checkout",

@@ -136,7 +136,7 @@ class RecipeStore:
             raise ValueError("Recipes require one to five read steps")
         if len(json.dumps(steps, allow_nan=False)) > 16000:
             raise ValueError("Recipe arguments exceed their size limit")
-        previous = set()
+        previous: set[str] = set()
         for step in steps:
             if (
                 not isinstance(step, dict)

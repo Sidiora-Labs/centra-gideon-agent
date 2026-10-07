@@ -5,7 +5,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from .store import MeasurementError, MeasurementStore, text
+from .store import MeasurementDatabase, MeasurementError, text
 
 
 def now():
@@ -21,7 +21,7 @@ def challenge(kind, index, issued):
     else:
         colors = ("red", "blue", "green", "yellow")
         stimulus = dict(word=secrets.choice(colors), color=secrets.choice(colors))
-        expected = stimulus["color"]
+        expected = str(stimulus["color"])
     return dict(
         index=index,
         stimulus=stimulus,
@@ -56,7 +56,7 @@ def public(row, at=None):
     return result
 
 
-class CognitiveStore(MeasurementStore):
+class CognitiveStore(MeasurementDatabase):
     def __init__(self, home):
         super().__init__(home)
         with self.connection() as db:
@@ -73,7 +73,7 @@ class CognitiveStore(MeasurementStore):
             raise MeasurementError("Exercise session not found", 404, "not_found")
         return json.loads(row[0])
 
-    def _write(self, operation, payload, identity=None):
+    def _write_record(self, operation, payload, identity=None):
         fields = (
             {"request_id", "kind", "planned_trials", "time_limit_seconds"}
             if operation == "start"
@@ -186,13 +186,13 @@ class CognitiveStore(MeasurementStore):
             return result
 
     def start(self, payload):
-        return self._write("start", payload)
+        return self._write_record("start", payload)
 
     def answer(self, identity, payload):
-        return self._write("answer", payload, identity)
+        return self._write_record("answer", payload, identity)
 
     def cancel(self, identity, payload):
-        return self._write("cancel", payload, identity)
+        return self._write_record("cancel", payload, identity)
 
     def get(self, identity):
         with self.connection() as db:

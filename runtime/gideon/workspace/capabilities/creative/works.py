@@ -8,13 +8,13 @@ from uuid import uuid4
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 
 from .authors import AuthorStore
-from .store import CatalogError, IngredientStore, identifier, integer, keys, text
+from .store import CatalogError, CreativeDatabase, identifier, integer, keys, text
 from .universes import UniverseStore
 
 FIELDS = {"title", "kind", "prompt", "author_ref", "universe_ref", "active_draft_id"}
 
 
-class WorkStore(IngredientStore):
+class WorkStore(CreativeDatabase):
     def __init__(self, home=None):
         super().__init__(home)
         self.authors = AuthorStore(self.home)
@@ -469,9 +469,9 @@ class WorkStore(IngredientStore):
             if ref:
                 try:
                     result[key] = (
-                        store.brief(ref["id"], ref["revision"])
+                        self.authors.brief(ref["id"], ref["revision"])
                         if key == "author"
-                        else store.export(ref["id"], ref["revision"])
+                        else self.universes.export(ref["id"], ref["revision"])
                     )
                 except CatalogError as exc:
                     if exc.status != 404:

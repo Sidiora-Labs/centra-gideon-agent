@@ -5,7 +5,7 @@ import math
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from .store import MeasurementError, MeasurementStore, instant, text
+from .store import MeasurementDatabase, MeasurementError, instant, text
 
 MASS_FACTORS = {"kg": 1.0, "g": 0.001, "lb": 0.45359237}
 TEMPERATURE_UNITS = {"C", "F", "K"}
@@ -82,7 +82,7 @@ def normalize(payload):
     return original, normalized
 
 
-class BodyCompositionStore(MeasurementStore):
+class BodyCompositionStore(MeasurementDatabase):
     def __init__(self, home):
         super().__init__(home)
         with self.connection() as database:

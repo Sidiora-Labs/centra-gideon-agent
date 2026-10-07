@@ -4,6 +4,7 @@ import json
 import math
 import re
 from datetime import date
+from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -86,7 +87,7 @@ def add(body):
         raise ComparisonError(
             "Model, corpus, metric, score, source, observed date and methodology are required"
         )
-    result = {}
+    result: dict[str, Any] = {}
     for key in keys:
         value = body[key]
         if (

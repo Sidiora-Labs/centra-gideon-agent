@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -126,7 +127,7 @@ class StoryStore:
         with self._db() as db:
             return self._get(db, story_id)
 
-    def list(self) -> list[dict]:
+    def list(self) -> builtins.list[dict]:
         with self._db() as db:
             return self._list(db)
 
@@ -173,7 +174,7 @@ class StoryStore:
                 raise ConflictError("Delete or reparent follow-ups before this story")
             db.execute("DELETE FROM stories WHERE id=?", (story_id,))
 
-    def chain(self, story_id: str) -> list[dict]:
+    def chain(self, story_id: str) -> builtins.list[dict]:
         with self._db() as db:
             current = self._get(db, story_id)
             while current["parent_id"]:
@@ -188,7 +189,7 @@ class StoryStore:
                     return [s for s in stories if s["id"] in included]
                 included = expanded
 
-    def history(self, story_id: str) -> list[dict]:
+    def history(self, story_id: str) -> builtins.list[dict]:
         with self._db() as db:
             return self._history(db, story_id)
 

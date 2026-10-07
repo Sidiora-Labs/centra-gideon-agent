@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 from datetime import datetime, timezone
+from typing import Any
 
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 
@@ -13,7 +14,7 @@ from .store import MeasurementError, MeasurementStore, text
 SCHEMA = "gideon.wellbeing-export"
 VERSION = 1
 MAX_BYTES = 64 * 1024 * 1024
-TABLES = {
+TABLES: dict[str, list[tuple[str, str, str | None]]] = {
     "measurements": [
         ("history", "revisions", "data"),
         ("shared_sources", "shared_health_imports", "data"),
@@ -81,7 +82,8 @@ class ExportStore(MeasurementStore):
             row[0]
             for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
-        sections, counts = {}, {}
+        sections: dict[str, dict[str, Any]] = {}
+        counts: dict[str, int] = {}
         section_bytes = 0
         for domain, tables in TABLES.items():
             sections[domain] = {}
@@ -137,7 +139,7 @@ class ExportStore(MeasurementStore):
                 continue
             seen.add(identity)
             artifact = self.artifacts.get(slug, version=version)
-            if artifact is None:
+            if artifact is None or artifact.content is None:
                 raise MeasurementError(
                     "Referenced source artifact is unavailable", 404, "not_found"
                 )
@@ -258,7 +260,7 @@ class ExportStore(MeasurementStore):
             )
             descriptor = json.dumps(metadata, sort_keys=True)
             artifact = self.artifacts.get(slug, version=1)
-            if artifact is None:
+            if artifact is None or artifact.content is None:
                 artifact = self.artifacts.create(
                     name="Wellbeing export " + snapshot["generated_at"],
                     content=descriptor,

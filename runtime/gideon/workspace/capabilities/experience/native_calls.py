@@ -10,7 +10,7 @@ from weakref import WeakValueDictionary
 
 from .store import Conflict, NotFound
 
-_SERVICES = WeakValueDictionary()
+_SERVICES: "WeakValueDictionary[str, NativeCalls]" = WeakValueDictionary()
 
 
 def get_native_calls(store):

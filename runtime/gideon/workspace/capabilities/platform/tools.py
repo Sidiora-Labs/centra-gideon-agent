@@ -268,13 +268,17 @@ class PlatformTools(ToolProvider):
 
                 result = current().view()
             elif tool_name == "platform_personal_scorecard":
-                from gideon.workspace.capabilities.platform.insights import view
+                from gideon.workspace.capabilities.platform.insights import (
+                    view as view_271,
+                )
 
-                result = view()
+                result = view_271()
             elif tool_name == "platform_usage_accounting":
-                from gideon.workspace.capabilities.platform.accounting import view
+                from gideon.workspace.capabilities.platform.accounting import (
+                    view as view_275,
+                )
 
-                result = view(**arguments)
+                result = view_275(**arguments)
             elif tool_name == "platform_dashboard_compositions":
                 from gideon.interfaces.dashboard.views_store import composition_state
 
@@ -289,13 +293,17 @@ class PlatformTools(ToolProvider):
                     {"revision": arguments["revision"], "select": True},
                 )
             elif tool_name == "platform_schedule_forecast":
-                from gideon.workspace.capabilities.platform.forecast import view
+                from gideon.workspace.capabilities.platform.forecast import (
+                    view as view_292,
+                )
 
-                result = await view(**arguments)
+                result = await view_292(**arguments)
             elif tool_name == "platform_task_cadence":
-                from gideon.workspace.capabilities.platform.cadence import view
+                from gideon.workspace.capabilities.platform.cadence import (
+                    view as view_296,
+                )
 
-                result = view()
+                result = view_296()
             elif tool_name == "platform_task_cadence_set":
                 if not get_current_session_key():
                     raise ValueError("Authenticated cadence editor required")
@@ -309,9 +317,11 @@ class PlatformTools(ToolProvider):
                     },
                 )
             elif tool_name == "platform_pr_screening":
-                from gideon.workspace.capabilities.platform.pr_screening import view
+                from gideon.workspace.capabilities.platform.pr_screening import (
+                    view as view_312,
+                )
 
-                result = view()
+                result = view_312()
             elif tool_name == "platform_pr_capture":
                 from gideon.workspace.capabilities.platform.pr_screening import capture
 
@@ -320,9 +330,11 @@ class PlatformTools(ToolProvider):
                     raise ValueError("Authenticated PR requester required")
                 result = await capture(arguments, "session:" + session)
             elif tool_name == "platform_maintenance":
-                from gideon.workspace.capabilities.platform.maintenance import view
+                from gideon.workspace.capabilities.platform.maintenance import (
+                    view as view_323,
+                )
 
-                result = view()
+                result = view_323()
             elif tool_name == "platform_maintenance_control":
                 if not get_current_session_key():
                     raise ValueError("Authenticated maintenance controller required")

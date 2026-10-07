@@ -3,6 +3,7 @@
 import hashlib
 import json
 from datetime import datetime, timezone
+from typing import Any
 
 from .store import CatalogError, identifier, integer, keys, text
 
@@ -239,7 +240,7 @@ class EditorialContextStore:
                     (work_id,),
                 )
             ]
-        latest = {}
+        latest: dict[str, dict[str, Any]] = {}
         for row in rows:
             latest.setdefault(row["family"], row)
         return {

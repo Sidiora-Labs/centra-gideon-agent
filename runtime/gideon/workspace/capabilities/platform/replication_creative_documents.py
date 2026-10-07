@@ -7,6 +7,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from gideon.operations.durability import conflicts, inventory
 from gideon.workspace.capabilities.creative.store import CatalogError, identifier
@@ -196,7 +197,7 @@ def validate_entries(entries):
         )
     versions = _validate_rows(VERSIONS_ENTRY, entries[0]["rows"])
     drafts = _validate_rows(DRAFTS_ENTRY, entries[1]["rows"])
-    by_work = {}
+    by_work: dict[str, list[dict[str, Any]]] = {}
     for data in versions.values():
         by_work.setdefault(data["work_id"], []).append(data)
         active = data["record"]["active_draft_id"]

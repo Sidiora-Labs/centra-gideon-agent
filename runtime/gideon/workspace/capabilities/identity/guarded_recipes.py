@@ -25,7 +25,7 @@ from gideon.workspace.capabilities.identity.recipe_runtime_platform import (
 from gideon.workspace.capabilities.identity.recipes import RecipeStore
 from gideon.workspace.capabilities.identity.store import ConflictError
 
-_ACTIVE = {}
+_ACTIVE: dict[tuple[Path, str], tuple[asyncio.Task, "_RuntimeStep"]] = {}
 
 
 def fingerprint(definition):

@@ -1,5 +1,6 @@
 import asyncio
 import json
+from typing import Any
 
 from jsonschema import Draft202012Validator, ValidationError
 
@@ -299,7 +300,7 @@ CATALOG["media_video_submit"] = (
     True,
 )
 
-SPRITE_GENERATE = {
+SPRITE_GENERATE: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "required": ["title", "frames"],

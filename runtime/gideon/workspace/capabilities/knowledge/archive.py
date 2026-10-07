@@ -6,6 +6,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from gideon.core.atomic_write import atomic_write_bytes
 from gideon.core.config.loader import CONFIG_DIR_NAME
@@ -49,7 +50,7 @@ def conversation(record):
     identity = record.get("id") or record.get("conversation_id")
     if not isinstance(identity, str) or not 1 <= len(identity) <= 200:
         raise CaptureError("Each conversation requires a stable id")
-    result = {
+    result: dict[str, Any] = {
         "id": identity,
         "title": record.get("title") or "Untitled conversation",
         "created_at": None,
@@ -69,7 +70,8 @@ def conversation(record):
         mapping = record.get("mapping")
         if not isinstance(mapping, dict) or not 1 <= len(mapping) <= 5000:
             raise CaptureError("Conversation mapping requires 1..5000 nodes")
-        sections, child_counts = [], {}
+        sections = []
+        child_counts: dict[str | None, int] = {}
         for identity, node in mapping.items():
             if not isinstance(identity, str) or not isinstance(node, dict):
                 raise CaptureError("Invalid conversation node")

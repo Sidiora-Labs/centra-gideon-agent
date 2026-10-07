@@ -9,6 +9,7 @@ import struct
 import wave
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import numpy as np
@@ -37,7 +38,8 @@ def transcribe_pcm(raw):
     samples = np.frombuffer(body, dtype="<i2").astype(float) / 32768
     window, hop = int(rate * 0.08), int(rate * 0.01)
     size = 1 << (2 * window - 1).bit_length()
-    notes, active = [], None
+    notes: list[dict[str, Any]] = []
+    active: dict[str, Any] | None = None
     for center in range(0, frames, hop):
         frame = samples[
             max(0, center - window // 2) : min(frames, center + window // 2)

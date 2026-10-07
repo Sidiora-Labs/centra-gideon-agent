@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from email import policy
 from email.parser import BytesParser
 from email.utils import getaddresses, parsedate_to_datetime
+from typing import Any
 from uuid import uuid4
 
 from gideon.core.atomic_write import atomic_write
@@ -395,7 +396,8 @@ def normalize_message(raw, owner, fallback, attachment_policy=STRICT):
             occurred_at = observed.astimezone(timezone.utc).isoformat()
     except (ValueError, TypeError, OverflowError):
         pass
-    bodies, attachments = [], []
+    bodies = []
+    attachments: list[dict[str, Any]] = []
     for part_index, part in enumerate(message.walk()):
         if part.is_multipart():
             continue
@@ -433,11 +435,10 @@ def normalize_message(raw, owner, fallback, attachment_policy=STRICT):
             try:
                 bodies.append(part.get_content())
             except (LookupError, UnicodeError):
-                bodies.append(
-                    (part.get_payload(decode=True) or b"").decode(
-                        "utf-8", errors="replace"
-                    )
-                )
+                decoded_payload = part.get_payload(decode=True)
+                if not isinstance(decoded_payload, bytes):
+                    raise PeopleError("Message text payload is unavailable")
+                bodies.append(decoded_payload.decode("utf-8", errors="replace"))
     return {
         "external_id": external_id[:500],
         "thread_id": (references[0] if references else external_id)[:100],
@@ -454,7 +455,8 @@ def normalize_message(raw, owner, fallback, attachment_policy=STRICT):
 
 def local_messages(store, account):
     root = source_root(store, account)
-    payloads, complete = [], True
+    payloads: list[bytes] = []
+    complete = True
     if account["kind"] == "mbox":
         path = root / "archive.mbox"
         if not path.exists() or path.is_symlink():
@@ -477,9 +479,9 @@ def local_messages(store, account):
             path = root / folder
             if path.is_symlink():
                 raise PeopleError("Mailbox folder cannot be a symlink")
-            box = mailbox.Maildir(path, create=True)
+            maildir = mailbox.Maildir(path, create=True)
             try:
-                for key in box.iterkeys():
+                for key in maildir.iterkeys():
                     if len(payloads) >= MAX_MESSAGES:
                         complete = False
                         break
@@ -488,13 +490,13 @@ def local_messages(store, account):
                             p.is_symlink() for p in (path / sub).iterdir()
                         ):
                             raise PeopleError("Mailbox files must remain account-owned")
-                    raw = box.get_bytes(key)
+                    raw = maildir.get_bytes(key)
                     if sum(map(len, payloads)) + len(raw) > MAX_SCAN_BYTES:
                         complete = False
                         break
                     payloads.append(raw)
             finally:
-                box.close()
+                maildir.close()
     if any(len(raw) > MAX_SOURCE_BYTES for raw in payloads):
         raise PeopleError("Source message exceeds 2 MiB")
     return payloads, complete
@@ -518,14 +520,15 @@ def imap_messages(account):
             )
         else:
             client.login(account["username"], secret)
-        payloads, complete = [], True
+        payloads: list[bytes] = []
+        complete = True
         for folder in dict.fromkeys((account["inbox_folder"], account["sent_folder"])):
             if client.select(folder, readonly=True)[0] != "OK":
                 raise PeopleError("IMAP folder is unavailable", 503)
             validity = client.response("UIDVALIDITY")[1]
             if not validity or not validity[0] or validity[0] == b"0":
                 complete = False
-            status, data = client.uid("search", None, "ALL")
+            status, data = client.uid("search", "", "ALL")
             if status != "OK":
                 raise PeopleError("IMAP search failed", 503)
             uids = data[0].split() if data and data[0] else []
@@ -586,10 +589,13 @@ def set_message_read_state(store, account_id, external_id, data):
     with closing(store.connect()) as db, db:
         db.execute("BEGIN IMMEDIATE")
         schema(db)
-        if db.execute(
-            "SELECT 1 FROM mirror_messages WHERE account_id=? AND external_id=?",
-            (account_id, external_id),
-        ).fetchone() is None:
+        if (
+            db.execute(
+                "SELECT 1 FROM mirror_messages WHERE account_id=? AND external_id=?",
+                (account_id, external_id),
+            ).fetchone()
+            is None
+        ):
             raise PeopleError("Mirror message not found for this account", 404)
         db.execute(
             "INSERT INTO mirror_message_read_state(account_id,external_id,is_read,updated_at) VALUES (?,?,?,?) ON CONFLICT(account_id,external_id) DO UPDATE SET is_read=excluded.is_read,updated_at=excluded.updated_at",
@@ -624,7 +630,7 @@ def _sync(store, account_id, *, attachment_policy=STRICT):
             if account["kind"] == "imap"
             else local_messages(store, account)
         )
-        normalized = {}
+        normalized: dict[str, dict[str, Any]] = {}
         for raw in payloads:
             row = normalize_message(
                 raw,

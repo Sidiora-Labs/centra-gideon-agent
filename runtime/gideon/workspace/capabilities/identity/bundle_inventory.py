@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from gideon.core.config.loader import AgentProfile
 from gideon.workspace.capabilities.experience.avatar import (
@@ -92,7 +93,7 @@ class BundleInventory:
             if digest(current) != expected:
                 raise ValueError("Destination group changed or became unavailable")
 
-            result = {
+            result: dict[str, Any] = {
                 "new": [],
                 "duplicates": [],
                 "conflicts": [],
@@ -115,9 +116,7 @@ class BundleInventory:
                         name + ": destination agent already exists"
                     )
                 elif group == "model_policy" and name not in agents:
-                    result["conflicts"].append(
-                        name + ": import agent definition first"
-                    )
+                    result["conflicts"].append(name + ": import agent definition first")
                 else:
                     result["new"].append(name)
             if group == "model_policy":
@@ -411,7 +410,7 @@ class BundleInventory:
 
     def plan(self, group, data):
         self.validate(group, data)
-        result = {
+        result: dict[str, Any] = {
             "id": group,
             "new": [],
             "duplicates": [],
@@ -515,15 +514,15 @@ class BundleInventory:
         if not plan["new"]:
             return 0
         if group == "human_twin":
-            store = TwinStore(self.directory / "twin.sqlite3")
-            store._change(
+            store_519 = TwinStore(self.directory / "twin.sqlite3")
+            store_519._change(
                 current["revision"],
                 lambda state: state.update({**data, "enabled": False, "revision": 0}),
             )
         elif group == "autobiography":
-            store = StoryStore(self.directory / "stories.sqlite3")
-            with store._db() as db:
-                if store._history(db) or store._list(db):
+            store_525 = StoryStore(self.directory / "stories.sqlite3")
+            with store_525._db() as db:
+                if store_525._history(db) or store_525._list(db):
                     raise ValueError("Autobiography destination changed")
                 for row in data["history"]:
                     db.execute(
