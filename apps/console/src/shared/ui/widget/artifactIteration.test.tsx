@@ -31,10 +31,21 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
+async function renderedFrame(container: HTMLElement) {
+  // The self-contained document compiles its bundled styles before mounting.
+  await waitFor(() => {
+    const iframe = container.querySelector('iframe')
+    if (!iframe) throw new Error('the host rendered no iframe — the fixture never reached the wire')
+    return iframe
+  })
+  // Flush the Blob URL effect before capturing the frame's browsing context.
+  await act(async () => {})
+  return container.querySelector('iframe')!
+}
+
 async function mount(target: Parameters<typeof IframeHtmlPreview>[0]['iterate']) {
   const view = render(<IframeHtmlPreview content={SOURCE} mode="dark" title="Card" iterate={target} />)
-  const iframe = view.container.querySelector('iframe')
-  if (!iframe) throw new Error('the host rendered no iframe — the fixture never reached the wire')
+  const iframe = await renderedFrame(view.container)
   const child = iframe.contentWindow
   if (!child) throw new Error('the iframe has no contentWindow — nothing to talk to')
   const posted = vi.spyOn(child, 'postMessage').mockImplementation(() => {})
@@ -134,7 +145,7 @@ describe('EDITMODE — a drag restyles live, with zero network requests', () => 
     const view = render(
       <IframeHtmlPreview content={SOURCE.replace('#3b82f6', 'oklch(0.7 0.1 250)')} mode="dark" title="Card" iterate={{ slug: 'card' }} />,
     )
-    const child = view.container.querySelector('iframe')!.contentWindow!
+    const child = (await renderedFrame(view.container)).contentWindow!
     const posted = vi.spyOn(child, 'postMessage').mockImplementation(() => {})
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Iterate on this artifact/i })) })
     await act(async () => {
@@ -182,11 +193,11 @@ describe('EDITMODE Save — the LIVE values, not the ones the rail thinks it sen
   })
 
   it('REFUSES to save when the frame never answers — it does not write a guess', async () => {
-    vi.useFakeTimers()
     try {
       const persistVersion = vi.fn(async (_next: string): Promise<void> => {})
       const view = render(<IframeHtmlPreview content={SOURCE} mode="dark" title="Card" iterate={{ slug: 'card', persistVersion }} />)
-      const child = view.container.querySelector('iframe')!.contentWindow!
+      const child = (await renderedFrame(view.container)).contentWindow!
+      vi.useFakeTimers()
       vi.spyOn(child, 'postMessage').mockImplementation(() => {})
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Iterate on this artifact/i })) })
       await act(async () => { fireEvent.change(screen.getByRole('slider', { name: 'Corners' }), { target: { value: '18' } }) })
@@ -273,7 +284,7 @@ describe('a host that offers no iteration is unchanged', () => {
   it('renders no rail affordance and ships no iteration script', async () => {
     const view = render(<IframeHtmlPreview content={SOURCE} mode="dark" title="Card" />)
     expect(screen.queryByRole('button', { name: /Iterate on this artifact/i })).toBeNull()
-    expect(view.container.querySelector('iframe')).toBeTruthy()
+    expect(await renderedFrame(view.container)).toBeTruthy()
   })
 
   it('the child document differs by EXACTLY the inserted script — nothing else moved', () => {
