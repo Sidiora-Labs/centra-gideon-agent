@@ -4,7 +4,9 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { Button } from './Button'
 import { controlAvailability } from './controlState'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import ts from 'typescript'
+import { BUSY_REASON } from './unavailable'
 
 
 const SRC = join(process.cwd(), "src")
@@ -49,8 +51,8 @@ function elements(src: string): Array<{ tag: string; body: string; line: number 
   return out
 }
 
-function gateOf(tag: string): string | null {
-  const i = tag.search(/(?<!aria-)\bdisabled=\{/)
+function expressionProp(tag: string, name: string): string | null {
+  const i = tag.search(new RegExp(`(?<![\\w-])${name}=\\{`))
   if (i < 0) return null
   const start = tag.indexOf('{', i)
   let d = 0
@@ -59,6 +61,36 @@ function gateOf(tag: string): string | null {
     else if (tag[j] === '}') { d--; if (d === 0) return tag.slice(start + 1, j) }
   }
   return null
+}
+
+const gateOf = (tag: string) => expressionProp(tag, 'disabled')
+
+// A reason must be present on every branch. Merely having the prop is insufficient.
+function provenDescription(tag: string, src: string, abs: string): boolean {
+  const reason = expressionProp(tag, 'disabledReason')
+  if (!reason) return false
+  const file = ts.createSourceFile(abs, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const canonical = file.statements.some((node) => {
+    if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier)) return false
+    const bindings = node.importClause?.namedBindings
+    return resolve(dirname(abs), node.moduleSpecifier.text) === join(SRC, 'shared/ui/unavailable') &&
+      !!bindings && ts.isNamedImports(bindings) && bindings.elements.some((e) =>
+        e.name.text === 'BUSY_REASON' && (!e.propertyName || e.propertyName.text === 'BUSY_REASON'))
+  })
+  const parsed = ts.createSourceFile('reason.ts', `const reason = (${reason})`, ts.ScriptTarget.Latest, true)
+  const statement = parsed.statements[0]
+  if (!statement || !ts.isVariableStatement(statement)) return false
+  const expression = statement.declarationList.declarations[0]?.initializer
+  const nonempty = (node: ts.Expression): boolean => {
+    if (ts.isParenthesizedExpression(node)) return nonempty(node.expression)
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text.trim().length > 0
+    if (ts.isIdentifier(node)) return canonical && node.text === 'BUSY_REASON'
+    if (ts.isConditionalExpression(node)) return nonempty(node.whenTrue) && nonempty(node.whenFalse)
+    // Button's typed string input: a truthy left string or the proven nonempty fallback.
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.BarBarToken) return nonempty(node.right)
+    return false
+  }
+  return !!expression && canonical && /\bBUSY_REASON\b/.test(reason) && nonempty(expression)
 }
 
 function disjuncts(g: string): string[] {
@@ -119,6 +151,7 @@ const census = () => {
   const B: Site[] = []
   const C: Site[] = []
   const D: Site[] = []
+  const classified = { A: [] as Site[], B: [] as Site[], C: [] as Site[], D: [] as Site[] }
   let population = 0
   for (const abs of walk(SRC)) {
     const rel = abs.slice(SRC.length + 1)
@@ -128,21 +161,28 @@ const census = () => {
       const gate = gateOf(tag)
       if (gate === null) continue
       population++
+      // ReadingView.pending is the selected text to review, not an in-flight action.
+      if (rel === 'features/knowledge/ReadingView.tsx' && norm(gate) === '!pending' &&
+          /const \[pending, setPending\] = useState<\{ quote: string; occurrence: number; x: number; y: number \} \| null>\(null\)/.test(src) && /const selection = article.ownerDocument.getSelection\(\)/.test(src) && /setPending\(\{\s*\.\.\.anchor,/.test(src)) continue
       if (!BUSY.test(gate)) continue
       const site: Site = { at: `${rel}:${line}`, gate: norm(gate), spinner: spinnerCond(body) }
-      if (/aria-busy|\bloading=/.test(tag)) { announced.push(site); continue }
+      // Native Button only derives aria-busy from its loading prop; an arbitrary
+      // aria-busy attribute (especially false) is not forwarded by this component.
+      const loading = expressionProp(tag, 'loading')
+      if (loading !== null && !/^(false|null|undefined|0)$/.test(norm(loading))) { announced.push(site); continue }
       const ds = disjuncts(gate)
       const busyDs = ds.filter((d) => BUSY.test(d))
       const ownFlag = gate.match(/[A-Za-z_$][\w$]*/)?.[0]
       const bystander = !site.spinner && !!ownFlag && published.has(ownFlag)
-      if (ds.length === 1 && site.spinner && norm(site.spinner) === norm(gate)) A.push(site)
-      else if (ds.length > 1 && busyDs.length === 1 && BARE.test(busyDs[0])) D.push(site)
-      else if (ds.length > 1) C.push(site)
-      else if (BARE.test(gate) || bystander) D.push(site)
-      else B.push(site)
+      const category = ds.length === 1 && site.spinner && norm(site.spinner) === norm(gate) ? 'A'
+        : ds.length > 1 && busyDs.length === 1 && BARE.test(busyDs[0]) ? 'D'
+          : ds.length > 1 ? 'C' : BARE.test(gate) || bystander ? 'D' : 'B'
+      classified[category].push(site)
+      if (provenDescription(tag, src, abs)) announced.push(site)
+      else ({ A, B, C, D })[category].push(site)
     }
   }
-  return { population, announced, A, B, C, D }
+  return { population, announced, A, B, C, D, classified }
 }
 
 describe('the `aria-busy` exemption is measured, not asserted by comment', () => {
@@ -187,7 +227,7 @@ describe('the `aria-busy` exemption is measured, not asserted by comment', () =>
   })
 
   it('records the classes, because they want OPPOSITE fixes', () => {
-    const { A, B, C, D } = census()
+    const { A, B, C, D } = census().classified
     expect(A, 'a hand-rolled spinner whose condition IS the disabled gate — use `loading=` instead')
       .toEqual([])
     expect(C.length, 'Class C — mixed gate; `loading` takes the busy disjunct, `disabled` keeps the gate')
@@ -214,6 +254,23 @@ describe('the `aria-busy` exemption is measured, not asserted by comment', () =>
 })
 
 describe('a slow action can name what it is doing AND announce it', () => {
+  it('describes a blocked bystander without claiming it owns busy work', () => {
+    const action = vi.fn()
+    const view = render(createElement(Button, { children: 'Cancel', disabled: true, disabledReason: BUSY_REASON, onClick: action }))
+    const button = screen.getByRole('button', { name: 'Cancel' })
+    expect(button).toHaveAccessibleDescription(BUSY_REASON)
+    const reason = document.getElementById(button.getAttribute('aria-describedby')!)
+    expect(reason).toHaveClass('sr-only')
+    expect(reason).toHaveTextContent(BUSY_REASON)
+    expect(button).toHaveAttribute('aria-disabled', 'true')
+    expect(button).not.toHaveAttribute('aria-busy')
+    fireEvent.click(button)
+    expect(action).not.toHaveBeenCalled()
+    view.rerender(createElement(Button, { children: 'Cancel', onClick: action }))
+    fireEvent.click(button)
+    expect(action).toHaveBeenCalledOnce()
+  })
+
   it('renders busy state with an unchanged action name, a readable progress label and blocked repeat activation', () => {
     const action = vi.fn()
     const view = render(createElement(Button, { children: 'Save item', loading: true, loadingLabel: 'Saving…', onClick: action }, 'Save item'))
