@@ -6,7 +6,7 @@ from aiohttp import web
 from yarl import URL
 
 from gideon.core.http_request import read_json_body
-from gideon.sdk.security import PROXY_SIGNATURE_HEADER, sign_proxy_request
+from gideon.security.app_proxy_signatures import PROXY_SIGNATURE_HEADER, sign_proxy_request
 
 from .store import Conflict
 from .world_engine import PREFIX, WorldEngine

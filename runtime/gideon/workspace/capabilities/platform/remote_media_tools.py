@@ -2,7 +2,7 @@ import json
 
 from jsonschema import ValidationError, validate
 
-from gideon.sdk.tool import RiskLevel, ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
 from gideon.workspace.capabilities.platform.peers import PeerError
 from gideon.workspace.capabilities.platform.remote_media import (
     RemoteMediaError,

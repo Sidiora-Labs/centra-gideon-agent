@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from gideon.sdk.credentials import CredentialStore
+from gideon.integrations.llm.credentials import CredentialStore
 from gideon.workspace.capabilities.media.jobs import identity
 from gideon.workspace.capabilities.music.listening import digest
 from gideon.workspace.capabilities.music.store import DomainError, integer

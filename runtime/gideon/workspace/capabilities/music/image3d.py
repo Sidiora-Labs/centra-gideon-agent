@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 import aiohttp
 from PIL import Image
 
-from gideon.sdk.credentials import CredentialStore
+from gideon.integrations.llm.credentials import CredentialStore
 
 from .store import DomainError, integer, text
 

@@ -5,8 +5,10 @@ import base64
 import io
 from typing import Any
 
-from gideon.sdk.credentials import CredentialStore
-from gideon.sdk.model import Capability, ModelProvider, get_default_registry
+from gideon.integrations.llm.credentials import CredentialStore
+from gideon.integrations.llm.capabilities import Capability
+from gideon.integrations.llm.base import ModelProvider
+from gideon.integrations.llm.registry import get_default_registry
 
 from .store import DomainError
 

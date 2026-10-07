@@ -9,7 +9,7 @@ from pathlib import Path
 
 import aiohttp
 
-from gideon.sdk.credentials import CredentialStore
+from gideon.integrations.llm.credentials import CredentialStore
 
 from .store import DomainError, integer, text
 

@@ -447,14 +447,16 @@ def scan_upward_edges() -> Scan:
     per_file: dict[str, dict[str, Any]] = {}
     inspected: set[str] = set()
     for path in _src_py_files():
-        if path.is_relative_to(
-            _REPO_ROOT / "runtime" / "gideon" / "extensions" / "apps" / "native"
-        ):
-            continue
         tree = _parse(path)
         if tree is None:
             continue
         inspected.add(_rel(path))
+        # Native extension bundles consume the public SDK rather than forming a core layer.
+        # Their syntax and census coverage are still inspected before applying core rules.
+        if path.is_relative_to(
+            _REPO_ROOT / "runtime" / "gideon" / "extensions" / "apps" / "native"
+        ):
+            continue
         in_src = _in_src(path)
         found: list[str] = []
         modules = _imported_gideon_modules(path, tree)

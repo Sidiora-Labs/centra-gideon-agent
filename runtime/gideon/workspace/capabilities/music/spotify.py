@@ -11,7 +11,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 import aiohttp
 
-from gideon.sdk.credentials import CredentialStore
+from gideon.integrations.llm.credentials import CredentialStore
 
 from .image3d import response_json
 from .listening import digest

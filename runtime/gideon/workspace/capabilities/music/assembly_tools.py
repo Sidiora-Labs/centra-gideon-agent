@@ -3,7 +3,7 @@
 import json
 
 from gideon.core.config.loader import config_dir
-from gideon.sdk.tool import RiskLevel, ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 
 from .assembly import AssemblyStore

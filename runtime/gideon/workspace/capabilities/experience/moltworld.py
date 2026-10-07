@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import aiohttp
 
-from gideon.sdk.credentials import CredentialStore
+from gideon.integrations.llm.credentials import CredentialStore
 
 from .store import Conflict
 

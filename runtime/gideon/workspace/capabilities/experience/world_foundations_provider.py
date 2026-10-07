@@ -1,6 +1,6 @@
 import json
 
-from gideon.sdk.tool import RiskLevel, ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
 
 from .store import Conflict, ExperienceStore, NotFound
 from .world_foundations import WorldFoundations

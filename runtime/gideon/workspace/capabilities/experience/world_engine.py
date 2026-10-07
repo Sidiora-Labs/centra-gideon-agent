@@ -12,7 +12,7 @@ from gideon.extensions.apps import app_manager
 from gideon.extensions.apps.app_secret import read_app_secret
 from gideon.extensions.apps.backend_runtime import get_backend_supervisor
 from gideon.extensions.apps.manager import _read_installed, app_dir
-from gideon.sdk.security import PROXY_SIGNATURE_HEADER, sign_proxy_request
+from gideon.security.app_proxy_signatures import PROXY_SIGNATURE_HEADER, sign_proxy_request
 
 from .store import Conflict
 

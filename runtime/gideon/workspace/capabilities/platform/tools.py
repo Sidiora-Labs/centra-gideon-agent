@@ -7,7 +7,7 @@ from jsonschema import ValidationError, validate
 
 from gideon.integrations.mcp_core import get_current_session_key
 from gideon.interfaces.dashboard.views_store import PresetLockedError, ViewNotFoundError
-from gideon.sdk.tool import RiskLevel, ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
 from gideon.workspace.capabilities.platform.catalog import current_catalog
 from gideon.workspace.capabilities.platform.comparisons import view as comparison_view
 from gideon.workspace.capabilities.platform.connections import projection

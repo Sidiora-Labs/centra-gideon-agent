@@ -7,7 +7,7 @@ import weakref
 
 import aiohttp
 
-from gideon.sdk.security import PROXY_SIGNATURE_HEADER, sign_proxy_request
+from gideon.security.app_proxy_signatures import PROXY_SIGNATURE_HEADER, sign_proxy_request
 
 from .ambient import AmbientDisplay
 from .store import Conflict, NotFound

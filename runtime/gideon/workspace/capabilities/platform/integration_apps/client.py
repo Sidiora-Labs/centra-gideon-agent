@@ -6,7 +6,7 @@ import ctypes.util
 import json
 from urllib.parse import urlencode
 
-from gideon.sdk.net import CONNECTOR, fetch
+from gideon.security.net import CONNECTOR, fetch
 from gideon.workspace.capabilities.music.store import DomainError
 
 
