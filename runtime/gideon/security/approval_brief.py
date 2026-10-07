@@ -62,9 +62,13 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from gideon.engine.task_modes import (
+    read_call,
+    resolve_effective_risk,
+    tool_input_to_str,
+)
 from gideon.security.command_effects import CommandEffects
 from gideon.security.security import redact_field, redact_values_for_display
-from gideon.engine.task_modes import read_call, resolve_effective_risk, tool_input_to_str
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +123,14 @@ NETWORK_HINTS: tuple[str, ...] = (
 )
 
 #: Removes something. A delete is a write to the world, so these describe ``writes`` too.
-DESTRUCTIVE_HINTS: tuple[str, ...] = ("delete", "remove", "destroy", "drop", "purge", "forget")
+DESTRUCTIVE_HINTS: tuple[str, ...] = (
+    "delete",
+    "remove",
+    "destroy",
+    "drop",
+    "purge",
+    "forget",
+)
 
 #: Creates or changes something.
 WRITE_HINTS: tuple[str, ...] = (
@@ -354,7 +365,9 @@ def summary_line(radius: dict[str, bool] | None, risk: str) -> str:
     """
     parts: list[str] = []
     facets = established_facets(radius)
-    consequences = [f["label"].lower() for f in facets if f["key"] not in _READ_CLAIM_FACETS]
+    consequences = [
+        f["label"].lower() for f in facets if f["key"] not in _READ_CLAIM_FACETS
+    ]
     if consequences:
         parts.append(f"Can: {', '.join(consequences)}")
     parts.extend(f["label"] for f in facets if f["key"] in _READ_CLAIM_FACETS)
@@ -376,6 +389,7 @@ def _brief(
     """The brief's one shape. ``radius`` is what the call can touch; the ``shown_*`` strings are
     what a channel prints, already masked by the caller."""
     from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
+
     answers = ONE_CALL_ANSWERS if answers is None else answers
     brief: dict[str, Any] = {
         "tool": shown_tool,
@@ -425,7 +439,9 @@ def compose_approval_brief(event: Any) -> dict[str, Any] | None:
             annotations=getattr(event, "tool_annotations", None),
         ),
         shown_tool=redact_field(tool),
-        shown_input=redact_field(tool_input_to_str(redact_values_for_display(tool_input))),
+        shown_input=redact_field(
+            tool_input_to_str(redact_values_for_display(tool_input))
+        ),
         shown_purpose=redact_field(str(getattr(event, "tool_purpose", "") or "")),
         risk=reading.risk,
     )
@@ -436,8 +452,9 @@ def compose_approval_brief(event: Any) -> dict[str, Any] | None:
     return brief
 
 
-
-def entry_approval_brief(entry: Mapping[str, Any], *, answers: tuple | None = None) -> dict[str, Any] | None:
+def entry_approval_brief(
+    entry: Mapping[str, Any], *, answers: tuple | None = None
+) -> dict[str, Any] | None:
     """The brief for a pending approval the dashboard registered (its ``_approval_entry``).
 
     The entry's strings are the ones the dashboard's card shows, already masked, so they are
@@ -449,7 +466,9 @@ def entry_approval_brief(entry: Mapping[str, Any], *, answers: tuple | None = No
     if not tool:
         return None
     shown_input = str(entry.get("tool_input") or "")
-    risk = str(entry.get("risk") or "") or str(resolve_effective_risk("", tool, "", shown_input))
+    risk = str(entry.get("risk") or "") or str(
+        resolve_effective_risk("", tool, "", shown_input)
+    )
     radius = entry.get("blast_radius")
     brief = _brief(
         radius=radius if isinstance(radius, dict) else None,
@@ -482,7 +501,12 @@ def approval_brief_for(event: Any) -> dict[str, Any] | None:
     meta = getattr(event, "tool_meta", None)
     brief = meta.get(APPROVAL_BRIEF_META_KEY) if isinstance(meta, dict) else None
     from gideon.integrations.channel_delivery import offered_answers
-    if isinstance(brief, dict) and all(isinstance(brief.get(k), str) for k in _SHOWN) and offered_answers(brief.get("answers")) is not None:
+
+    if (
+        isinstance(brief, dict)
+        and all(isinstance(brief.get(k), str) for k in _SHOWN)
+        and offered_answers(brief.get("answers")) is not None
+    ):
         return brief
     return compose_approval_brief(event)
 
@@ -509,7 +533,10 @@ def attach_approval_brief(event: Any) -> dict[str, Any] | None:
         return None
     meta = getattr(event, "tool_meta", None)
     if not isinstance(meta, dict):
-        logger.debug("approval brief not attached: %s has no dict tool_meta", type(event).__name__)
+        logger.debug(
+            "approval brief not attached: %s has no dict tool_meta",
+            type(event).__name__,
+        )
         return None
     meta[APPROVAL_BRIEF_META_KEY] = brief
     return brief
@@ -525,7 +552,7 @@ def channel_approval_brief(event: Any) -> str:
     if brief.get("purpose"):
         lines.append(f"Purpose: {brief['purpose']}")
     if brief.get("summary"):
-        lines.append(brief['summary'])
+        lines.append(brief["summary"])
     return "\n".join(lines)
 
 

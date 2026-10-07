@@ -41,7 +41,12 @@ from datetime import datetime
 from typing import Any
 
 from gideon.cognition.proactive.autoexec import not_done_note, stopped_note
-from gideon.cognition.proactive.carry import CARRY_RULE, DROPPED_EXPIRED, carried_note, dropped_note
+from gideon.cognition.proactive.carry import (
+    CARRY_RULE,
+    DROPPED_EXPIRED,
+    carried_note,
+    dropped_note,
+)
 from gideon.cognition.proactive.proposals import bind_arguments
 
 #: The bundled WorkflowDef the pack card installs. One name, shared with the provider.
@@ -113,7 +118,9 @@ def _rows(value: Any) -> list[dict[str, Any]]:
     return [dict(row) for row in value if isinstance(row, Mapping)]
 
 
-def _by_ordinal(rows: Sequence[Mapping[str, Any]], key: str = "item_id") -> dict[str, dict]:
+def _by_ordinal(
+    rows: Sequence[Mapping[str, Any]], key: str = "item_id"
+) -> dict[str, dict]:
     return {str(row.get(key, "") or ""): dict(row) for row in rows if row.get(key)}
 
 
@@ -182,7 +189,12 @@ def build_digest_view(
     digest ran, which is when its own proposals were made.
     """
     if error:
-        return {"state": STATE_ERROR, "error": error, "enabled": enabled, "installed": installed}
+        return {
+            "state": STATE_ERROR,
+            "error": error,
+            "enabled": enabled,
+            "installed": installed,
+        }
     base: dict[str, Any] = {
         "enabled": enabled,
         "installed": installed,
@@ -208,7 +220,9 @@ def build_digest_view(
 
     run_id = str(run.get("run_id", "") or run.get("id", "") or "")
     permalink = run_permalink(run_id)
-    proposed_at = str(as_utc(str(run.get("started_at") or run.get("created_at") or "")) or "")
+    proposed_at = str(
+        as_utc(str(run.get("started_at") or run.get("created_at") or "")) or ""
+    )
     items = _item_index(output)
     proposals = _by_ordinal(_rows(output.get("proposals")))
     answered = answered_ordinals(events)
@@ -264,14 +278,18 @@ def build_digest_view(
                 # carries out, and what the card shows before she answers. Re-bound here, so a
                 # record from an older process or edited on disk shows and runs no more than the
                 # kind declares.
-                "action_config": bind_arguments(action_type, joined.get("action_config"))[0],
+                "action_config": bind_arguments(
+                    action_type, joined.get("action_config")
+                )[0],
                 "reason": reason,
                 "rule": str(row.get("rule", "") or ""),
                 # The digest's own text says the same sentence (`rank.render_digest`): an action it
                 # tried and could not do, or one a guard held, is said as not done, never as done
                 # and never as a proposal nobody tried.
                 "not_done": (
-                    not_done_note(reason, str(row.get("detail", "") or ""), on_card=True)
+                    not_done_note(
+                        reason, str(row.get("detail", "") or ""), on_card=True
+                    )
                     if auto_stage_ran
                     else ""
                 ),
@@ -298,7 +316,9 @@ def build_digest_view(
                 "tier": str(row.get("tier", "") or ""),
                 "pattern_key": str(row.get("pattern_key", "") or ""),
                 "clamped": bool(row.get("clamped")),
-                "action_config": bind_arguments(action_type, row.get("action_config"))[0],
+                "action_config": bind_arguments(action_type, row.get("action_config"))[
+                    0
+                ],
                 "reason": "",
                 "rule": "",
                 "not_done": "",
@@ -334,18 +354,24 @@ def build_digest_view(
         else ""
     )
 
-    ran, waiting = _the_rest(output, items, placed={row["ordinal"] for row in auto_done + pending})
+    ran, waiting = _the_rest(
+        output, items, placed={row["ordinal"] for row in auto_done + pending}
+    )
 
     dropped = _int(output.get("dropped"))
     refused = len(_rows(output.get("refused")))
-    carried_rows = len(_rows(output.get("carried"))) + len(_rows(output.get("carry_dropped")))
+    carried_rows = len(_rows(output.get("carried"))) + len(
+        _rows(output.get("carry_dropped"))
+    )
     recorded = _int(output.get("ledger_rows"))
     return {
         **base,
         "state": STATE_READY,
         "run_id": run_id,
         "status": str(run.get("status", "") or ""),
-        "finished_at": str(run.get("finished_at", "") or run.get("started_at", "") or ""),
+        "finished_at": str(
+            run.get("finished_at", "") or run.get("started_at", "") or ""
+        ),
         "permalink": permalink,
         "proposed_at": proposed_at,
         "window_start": str(output.get("window_start", "") or ""),
@@ -360,7 +386,9 @@ def build_digest_view(
         "handed_to_notify": bool(output.get("delivered")),
         "collected": _int(output.get("collected")),
         "lanes": (
-            dict(output.get("lanes") or {}) if isinstance(output.get("lanes"), Mapping) else {}
+            dict(output.get("lanes") or {})
+            if isinstance(output.get("lanes"), Mapping)
+            else {}
         ),
         "dropped": dropped,
         "auto_stage_ran": auto_stage_ran,
@@ -381,13 +409,17 @@ def build_digest_view(
         "degraded": bool(output.get("degraded")),
         "journal": journal_rows(events, permalink=permalink),
         # False means "rows that should exist were not written", never "there were none".
-        "ledger_complete": recorded > 0 or (dropped == 0 and refused == 0 and carried_rows == 0),
+        "ledger_complete": recorded > 0
+        or (dropped == 0 and refused == 0 and carried_rows == 0),
         "ledger_rows": recorded,
     }
 
 
 def _the_rest(
-    output: Mapping[str, Any], items: Mapping[str, Mapping[str, Any]], *, placed: set[str]
+    output: Mapping[str, Any],
+    items: Mapping[str, Mapping[str, Any]],
+    *,
+    placed: set[str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """The kept items no other section holds: the runs that ended, and what else is waiting.
 
@@ -397,7 +429,11 @@ def _the_rest(
     in ``dropped`` and never shown; an item already ``placed`` as a proposal or an action taken is
     not shown twice. In the manifest's ordinal order.
     """
-    kept = [str(o) for o in output.get("kept") or [] if str(o) in items and str(o) not in placed]
+    kept = [
+        str(o)
+        for o in output.get("kept") or []
+        if str(o) in items and str(o) not in placed
+    ]
     ran: list[dict[str, Any]] = []
     waiting: list[dict[str, Any]] = []
     for ordinal in kept:
@@ -455,7 +491,9 @@ def journal_rows(
         for event in events
         if str(event.get("kind", "") or "") in order
     ]
-    rows.sort(key=lambda row: (order.get(str(row["kind"]), len(order)), _int(row["seq"])))
+    rows.sort(
+        key=lambda row: (order.get(str(row["kind"]), len(order)), _int(row["seq"]))
+    )
     return rows
 
 
@@ -464,35 +502,3 @@ def _int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
-
-
-def machine_did(
-    events: Sequence[Mapping[str, Any]], *, permalink: str = ""
-) -> list[dict[str, Any]]:
-    """§5.1's "what your machine did" section: the run's own ledger rows, with permalinks.
-
-    Filtered to :data:`MACHINE_DID_KINDS` and sorted by that tuple's order then by sequence, so
-    the section groups by what happened rather than by write order — the ledger interleaves an
-    execution and the filter decision that let it through, and a reader wants them apart.
-    """
-    order = {kind: i for i, kind in enumerate(MACHINE_DID_KINDS)}
-    rows = [
-        {
-            "kind": str(event.get("kind", "") or ""),
-            "seq": _int(event.get("seq")),
-            "ordinal": str(event.get("item_ordinal", "") or ""),
-            "action_type": str(event.get("action_type", "") or ""),
-            "rule": str(event.get("rule", "") or ""),
-            "outcome": str(event.get("outcome", "") or ""),
-            "reason": str(event.get("reason", "") or event.get("rationale", "") or ""),
-            "detail": str(event.get("detail", "") or ""),
-            "verb": str(event.get("verb", "") or ""),
-            "permalink": permalink,
-        }
-        for event in events
-        if str(event.get("kind", "") or "") in order
-    ]
-    rows.sort(
-        key=lambda row: (order.get(str(row["kind"]), len(order)), _int(row["seq"]))
-    )
-    return rows
