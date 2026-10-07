@@ -9,6 +9,7 @@ from aiohttp import web
 from gideon.extensions.apps import app_manager
 from gideon.extensions.apps.backend_runtime import get_backend_supervisor
 from gideon.extensions.apps.manager import app_data_dir
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.experience import ExperienceStore
 from gideon.workspace.capabilities.experience.world_engine import APP_ID, WorldEngine
 from gideon.workspace.capabilities.experience.world_travel import SCOPE
@@ -59,10 +60,10 @@ async def main():
     worlds = get_worlds(store)
     await worlds.open("ui_lounge", {})
     origin, destination = PeerStore(home / "origin"), PeerStore(home / "destination")
-    destination_app = web.Application()
+    destination_app = web.Application(middlewares=[token_auth_middleware()])
     register_world_travel(destination_app, store, destination)
     destination_runner, destination_url = await serve(destination_app)
-    origin_app = web.Application()
+    origin_app = web.Application(middlewares=[token_auth_middleware()])
     register_world_travel(origin_app, store, origin)
     origin_runner, origin_url = await serve(origin_app)
     origin_identity, destination_identity = (
@@ -76,7 +77,16 @@ async def main():
     destination.put(
         origin_identity["peer_id"], record(origin_identity, origin_url, "Actual origin")
     )
-    print(f"ORIGIN_URL={origin_url} DEST_URL={destination_url}", flush=True)
+    print(
+        json.dumps(
+            {
+                "origin": origin_url,
+                "destination": destination_url,
+                "token": generate_token("world-ui-owner"),
+            }
+        ),
+        flush=True,
+    )
     stop = asyncio.Event()
     for name in (signal.SIGTERM, signal.SIGINT):
         asyncio.get_running_loop().add_signal_handler(name, stop.set)

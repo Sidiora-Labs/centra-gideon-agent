@@ -2,28 +2,44 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, expect, it } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterAll, afterEach, beforeAll, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import WorldTravel from './WorldTravel'
 
 let child: ChildProcess, home: string, origin: string, destination: string
 const root = resolve(process.cwd(), '../..')
+const nativeFetch = globalThis.fetch
+let ownerToken = ''
+let ownerOrigin = ''
+function ownerFetch(input: RequestInfo | URL, init?: RequestInit) {
+  const target = input instanceof Request ? input : new URL(String(input), ownerOrigin)
+  const url = target instanceof Request ? target.url : String(target)
+  const headers = new Headers(target instanceof Request ? target.headers : undefined)
+  new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+  if (new URL(url).origin === ownerOrigin) headers.set('Authorization', `Bearer ${ownerToken}`)
+  return nativeFetch(target, { ...init, headers })
+}
+afterEach(cleanup)
 beforeAll(async () => {
   home = await mkdtemp(resolve(tmpdir(), 'gideon-world-travel-ui-'))
-  child = spawn('/tmp/gideon-runtime-venv/bin/python', ['checks/runtime/capabilities/experience/serve_world_travel_ui.py', home], {
+  child = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/experience/serve_world_travel_ui.py', home], {
     cwd: root, env: { ...process.env, GIDEON_HOME: resolve(home, 'runtime'), PYTHONPATH: resolve(root, 'runtime'), PATH: '/tmp/gideon-world-engine-deps/bun-linux-x64:' + process.env.PATH }, stdio: ['ignore', 'pipe', 'pipe'],
   })
   await new Promise<void>((accept, reject) => {
     let output = '', errors = ''
-    child.stdout!.on('data', data => { output += String(data); const match = output.match(/ORIGIN_URL=(http:\/\/[^\s]+) DEST_URL=(http:\/\/[^\s]+)/); if (match) { origin = match[1] + '/api/capabilities/experience'; destination = match[2] + '/api/capabilities/experience'; accept() } })
+    child.stdout!.on('data', data => { output += String(data); const line = output.split('\n').find(value => value.startsWith('{"origin":')); if (line) { const ready = JSON.parse(line); ownerToken = ready.token; ownerOrigin = ready.origin; origin = ready.origin + '/api/capabilities/experience'; destination = ready.destination + '/api/capabilities/experience'; accept() } })
     child.stderr!.on('data', data => { errors += String(data) })
     child.on('exit', code => reject(new Error(`HTTP process exited ${code}: ${errors}`)))
     child.on('error', reject)
   })
+  expect((await nativeFetch(origin + '/world-travel/destinations')).status).toBe(403)
+  expect(ownerToken).toBeTruthy()
+  globalThis.fetch = ownerFetch
 }, 30000)
 afterAll(async () => {
-  const stopped = new Promise<void>(resolve => child?.once('exit', () => resolve()))
-  child?.kill(); await stopped; await rm(home, { recursive: true, force: true })
+  globalThis.fetch = nativeFetch
+  if (child?.exitCode === null && child.signalCode === null) { const stopped = new Promise<void>(done => child.once('exit', () => done())); child.kill(); await stopped }
+  if (home) await rm(home, { recursive: true, force: true })
 })
 
 it('discovers a policy-allowed canonical peer and creates a real signed admission', async () => {

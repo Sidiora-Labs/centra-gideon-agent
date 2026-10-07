@@ -10,6 +10,7 @@ from gideon.extensions.apps import app_manager
 from gideon.extensions.apps.backend_runtime import get_backend_supervisor
 from gideon.extensions.apps.manager import app_data_dir
 from gideon.interfaces.dashboard.handlers.capabilities_experience import STORE, register
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.experience import ExperienceStore
 from gideon.workspace.capabilities.experience.world_engine import APP_ID, WorldEngine
 from gideon.workspace.capabilities.identity.goals import GoalStore
@@ -34,7 +35,7 @@ async def main():
     GoalStore(home / "capabilities/identity/goals.sqlite3").save_goal(
         title="Actual authored goal", request_id="ui_goal"
     )
-    app = web.Application()
+    app = web.Application(middlewares=[token_auth_middleware()])
     app[STORE] = store
     register(app)
     runner = web.AppRunner(app)
@@ -42,7 +43,13 @@ async def main():
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
     print(
-        "UI_URL=http://127.0.0.1:" + str(site._server.sockets[0].getsockname()[1]),
+        json.dumps(
+            {
+                "url": "http://127.0.0.1:"
+                + str(site._server.sockets[0].getsockname()[1]),
+                "token": generate_token("world-ui-owner"),
+            }
+        ),
         flush=True,
     )
     stop = asyncio.Event()

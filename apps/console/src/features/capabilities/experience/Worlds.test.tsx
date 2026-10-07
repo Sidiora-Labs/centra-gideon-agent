@@ -2,23 +2,43 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, expect, it } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterAll, afterEach, beforeAll, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import Worlds from './Worlds'
 let child: ChildProcess, home: string, base: string
 const root = resolve(process.cwd(), '../..')
+const nativeFetch = globalThis.fetch
+let ownerToken = ''
+let ownerOrigin = ''
+function ownerFetch(input: RequestInfo | URL, init?: RequestInit) {
+  const target = input instanceof Request ? input : new URL(String(input), ownerOrigin)
+  const url = target instanceof Request ? target.url : String(target)
+  const headers = new Headers(target instanceof Request ? target.headers : undefined)
+  new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+  if (new URL(url).origin === ownerOrigin) headers.set('Authorization', `Bearer ${ownerToken}`)
+  return nativeFetch(target, { ...init, headers })
+}
+afterEach(cleanup)
 beforeAll(async () => {
   home = await mkdtemp(resolve(tmpdir(), 'gideon-worlds-ui-'))
-  child = spawn('/tmp/gideon-runtime-venv/bin/python', ['checks/runtime/capabilities/experience/serve_worlds_ui.py', home], { cwd: root, env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime'), PATH: '/tmp/gideon-world-engine-deps/bun-linux-x64:' + process.env.PATH }, stdio: ['ignore', 'pipe', 'pipe'] })
+  child = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/experience/serve_worlds_ui.py', home], { cwd: root, env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime'), PATH: '/tmp/gideon-world-engine-deps/bun-linux-x64:' + process.env.PATH }, stdio: ['ignore', 'pipe', 'pipe'] })
   base = await new Promise<string>((accept, reject) => {
     let output = '', errors = ''
-    child.stdout!.on('data', data => { output += String(data); const match = output.match(/UI_URL=(http:\/\/[^\s]+)/); if (match) accept(match[1] + '/api/capabilities/experience') })
+    child.stdout!.on('data', data => { output += String(data); const line = output.split('\n').find(value => value.startsWith('{"url":')); if (line) { const ready = JSON.parse(line); ownerToken = ready.token; ownerOrigin = ready.url; accept(ownerOrigin + '/api/capabilities/experience') } })
     child.stderr!.on('data', data => { errors += String(data) })
     child.on('exit', code => reject(new Error(`HTTP process exited ${code}: ${errors}`)))
     child.on('error', reject)
   })
+  expect((await nativeFetch(base + '/worlds/ui_garden')).status).toBe(403)
+  expect(ownerToken).toBeTruthy()
+  globalThis.fetch = ownerFetch
 }, 30000)
-afterAll(async () => { const stopped = new Promise<void>(resolve => child?.once('exit', () => resolve())); child?.kill(); await stopped; await rm(home, { recursive: true, force: true }) })
+afterAll(async () => {
+  globalThis.fetch = nativeFetch
+  if (child?.exitCode === null && child.signalCode === null) { const stopped = new Promise<void>(done => child.once('exit', () => done())); child.kill(); await stopped }
+  if (home) await rm(home, { recursive: true, force: true })
+})
+
 it('joins actual world and projects a chosen canonical source, preserving route selection', async () => {
   location.hash = '/capabilities/experience?story=authored&session=saved&world=ui_garden'
   render(<Worlds baseUrl={base} />)
@@ -31,9 +51,14 @@ it('joins actual world and projects a chosen canonical source, preserving route 
   expect(location.hash).toContain('world=ui_garden')
   expect(screen.getByLabelText('health')).not.toBeChecked()
   expect(await screen.findByText('Unavailable sources: memory, operations, peers')).toBeVisible()
-  expect(screen.getByLabelText('memory')).toBeDisabled()
-  expect(screen.getByLabelText('operations')).toBeDisabled()
-  expect(screen.getByLabelText('peers')).toBeDisabled()
+  for (const kind of ['memory', 'operations', 'peers']) {
+    const control = screen.getByRole('checkbox', { name: kind })
+    expect(control).toHaveAttribute('aria-disabled', 'true')
+    expect(control).toHaveAccessibleDescription(`This world’s ${kind} source is unavailable`)
+    expect(control).not.toBeDisabled()
+    fireEvent.click(control)
+    expect(control).not.toBeChecked()
+  }
   expect(screen.getByRole('button', { name: 'Project selected sources' })).toBeDisabled()
   fireEvent.click(screen.getByLabelText('goals'))
   await screen.findByRole('link', { name: 'Actual authored goal' })
