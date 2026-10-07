@@ -82,7 +82,7 @@ function Receipt({ receipt, busy, onStatus, onRecover }: {
   onStatus: () => void
   onRecover: () => void
 }) {
-  return <Surface tone="container" radius="lg" className="mt-m p-l" aria-live="polite">
+  return <div aria-live="polite"><Surface tone="container" radius="lg" className="mt-m p-l">
     <div className="flex flex-wrap items-start justify-between gap-m"><div><div className="flex flex-wrap items-center gap-s"><FileCheck2 size={16} className="text-primary" />
       <h3 data-type="title-m" className="text-on-surface">Security operation receipt</h3><StatusPill label={receipt.state.replaceAll('_', ' ')} tone={tone(receipt.state)} />
       <StatusPill label={`effect ${receipt.effect_state.replaceAll('_', ' ')}`} tone={tone(receipt.effect_state)} /></div>
@@ -99,7 +99,7 @@ function Receipt({ receipt, busy, onStatus, onRecover }: {
       {receipt.record_count != null && <div><dt className="text-on-surface-low">Records</dt><dd className="text-on-surface">{receipt.record_count.toLocaleString()}</dd></div>}
       {receipt.batch_state && <div><dt className="text-on-surface-low">Restore batch</dt><dd className="text-on-surface">{receipt.batch_state.replaceAll('_', ' ')}</dd></div>}
     </dl>
-  </Surface>
+  </Surface></div>
 }
 
 export function SecurityRecovery() {

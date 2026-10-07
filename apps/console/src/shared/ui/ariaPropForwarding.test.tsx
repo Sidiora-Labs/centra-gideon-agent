@@ -47,7 +47,7 @@ function hyphenatedAriaOnAppComponents() {
       const arias = [...ownAttrs(src, m.index! + m[0].length).matchAll(/\s(aria-[a-z]+)=/g)].map((x) => x[1])
       if (!arias.length) continue
       const target = readFileSync(join(SRC, def), 'utf8')
-      if (/\.\.\.(rest|props)\b/.test(target)) continue
+      if (/\.\.\.(rest|props|attributes)\b/.test(target)) continue
       if (arias.some((a) => new RegExp(`['"\`]${a}['"\`]\\s*[:?]|\\[['"]${a}['"]\\]`).test(target))) continue
       out.push({ file: f.slice(SRC.length + 1), comp: m[1], arias, def })
     }
@@ -81,7 +81,7 @@ describe('a hyphenated aria prop on one of our components is dropped, so nobody 
     const src = readFileSync(join(SRC, 'shared/ui/Button.tsx'), 'utf8')
     for (const prop of ['ariaLabel', 'ariaExpanded', 'ariaPressed']) expect(src).toContain(prop)
     expect(src, 'and it renders them onto the button').toMatch(/aria-label=\{ariaLabel\}/)
-    expect(src, 'no rest spread — the reason a hyphenated prop vanishes').not.toMatch(/\.\.\.(rest|props)\b/)
+    expect(src, 'no rest spread — the reason a hyphenated prop vanishes').not.toMatch(/\.\.\.(rest|props|attributes)\b/)
   })
 
   it('the two fixed call sites use the camelCase props', () => {
