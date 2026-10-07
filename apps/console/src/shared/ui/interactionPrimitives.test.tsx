@@ -109,24 +109,35 @@ describe('overlay interaction ownership', () => {
 
 describe('panel modes and keyboard resize', () => {
   it('resizes with the splitter, preserves the exact storage key and clears URL state on close', () => {
-    const key = 'interaction-panel-width'
-    localStorage.setItem(key, '500')
-    const events: unknown[] = []
-    const { unmount } = render(<SidePanel title="Inspector" storeKey={key} onClose={() => events.push('closed')}
-      urlKey={{ key: 'inspect', setQuery: (patch) => events.push(patch) }}>Content</SidePanel>)
-    const separator = screen.getByRole('separator')
-    expect(separator).toHaveAttribute('aria-valuenow', '500')
-    fireEvent.keyDown(separator, { key: 'ArrowLeft' })
-    expect(separator).toHaveAttribute('aria-valuenow', '516')
-    fireEvent.keyDown(separator, { key: 'End' })
-    expect(separator).toHaveAttribute('aria-valuenow', '720')
-    fireEvent.keyDown(separator, { key: 'Home' })
-    expect(separator).toHaveAttribute('aria-valuenow', '320')
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
-    expect(events).toEqual([{ inspect: null }, 'closed'])
-    unmount()
-    expect(localStorage.getItem(key)).toBe('320')
-    localStorage.removeItem(key)
+    const originalWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1600 })
+    try {
+      const key = 'interaction-panel-width'
+      localStorage.setItem(key, '500')
+      const events: unknown[] = []
+      const { unmount } = render(<SidePanel title="Inspector" storeKey={key} onClose={() => events.push('closed')}
+        urlKey={{ key: 'inspect', setQuery: (patch) => events.push(patch) }}>Content</SidePanel>)
+      const separator = screen.getByRole('separator')
+      expect(separator).toHaveAttribute('aria-valuenow', '500')
+      fireEvent.keyDown(separator, { key: 'ArrowLeft' })
+      expect(separator).toHaveAttribute('aria-valuenow', '516')
+      fireEvent.keyDown(separator, { key: 'End' })
+      expect(separator).toHaveAttribute('aria-valuenow', '720')
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 })
+      fireEvent(window, new Event('resize'))
+      expect(separator).toHaveAttribute('aria-valuemax', '512')
+      expect(separator).toHaveAttribute('aria-valuenow', '512')
+      fireEvent.keyDown(separator, { key: 'Home' })
+      expect(separator).toHaveAttribute('aria-valuenow', '320')
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+      expect(events).toEqual([{ inspect: null }, 'closed'])
+      unmount()
+      expect(localStorage.getItem(key)).toBe('320')
+      localStorage.removeItem(key)
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
+      fireEvent(window, new Event('resize'))
+    }
   })
 
   it('collapses expansion before closing and balances dock reservations', () => {

@@ -1,3 +1,8 @@
+import { createElement } from 'react'
+import { render, screen, fireEvent } from '@testing-library/react'
+import { Popover } from './Popover'
+import { jsxTags } from '../testing/jsxContracts'
+import { namedOwner } from '../testing/sourceOwners'
 import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -66,7 +71,19 @@ describe('a Popover inside a clipping container must portal', () => {
   })
 
   it("the two fixed call sites retain their clipping safeguards", () => {
-    expect(read('features/apps/AppsSection.tsx')).toMatch(/56px/)
-    expect(read('shared/ui/FilterMenu.tsx')).toMatch(/<Popover\s+portal\b/)
+    for (const [file, owner] of [['features/apps/AppsSection.tsx', 'AppActionMenu'], ['shared/ui/FilterMenu.tsx', 'FilterMenu']]) {
+      const menus = jsxTags(namedOwner(read(file), owner), ['Popover'])
+      expect(menus.length, `${file}: real owner has exactly one popup`).toBe(1)
+      expect(menus[0].attributes.has('portal'), `${file}: actual popup opts into portal`).toBe(true)
+    }
+    const { container } = render(createElement('div', { style: { overflow: 'hidden' } }, createElement(Popover, {
+      portal: true,
+      trigger: (_open: boolean, toggle: () => void) => createElement('button', { onClick: toggle }, 'Open actions'),
+      children: () => createElement('button', null, 'Popup action'),
+    })))
+    fireEvent.click(screen.getByRole('button', { name: 'Open actions' }))
+    const action = screen.getByRole('button', { name: 'Popup action' })
+    expect(document.body).toContainElement(action)
+    expect(container).not.toContainElement(action)
   })
 })

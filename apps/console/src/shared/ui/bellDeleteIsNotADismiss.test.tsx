@@ -1,3 +1,5 @@
+import { namedOwner } from '../testing/sourceOwners'
+import { jsxTags } from '../testing/jsxContracts'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, waitFor, fireEvent, within } from '@testing-library/react'
 
@@ -126,7 +128,19 @@ describe('structurally: the bell now matches the sibling #628 fixed', () => {
     for (const rel of ['src/shared/ui/NotificationBell.tsx', 'src/features/notifications/NotificationsPage.tsx']) {
       const code = readFileSync(join(process.cwd(), rel), 'utf8')
         .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/^\s*\/\/.*$/gm, '')
-      expect(code, `${rel} deletes notifications`).toMatch(/deleteNotification/)
+      if (rel.endsWith('NotificationsPage.tsx')) {
+        expect(code).toMatch(/import \{ useNotificationFeed \} from '.\/notificationFeedState'/)
+        expect(code).toContain('useNotificationFeed(filter, openTs, setOpenTs)')
+        const feed = readFileSync(join(process.cwd(), 'src/features/notifications/notificationFeedState.ts'), 'utf8')
+        const remove = namedOwner(feed, 'remove')
+        expect(remove).toContain("confirmDelete('notification'")
+        expect(remove).toContain('api.deleteNotification(item.ts)')
+        expect(remove.indexOf('confirmDelete')).toBeLessThan(remove.indexOf('api.deleteNotification'))
+        expect(remove).toContain('if (!deleted) return')
+        expect(remove.indexOf('if (!deleted) return')).toBeLessThan(remove.indexOf('load()'))
+        const action = jsxTags(code, ['Button']).find((tag) => tag.attributes.get('onClick') === '{() => remove(open)}')
+        expect(action?.element).toContain('Delete</Button>')
+      } else expect(code, `${rel} deletes notifications`).toMatch(/deleteNotification/)
       expect(code, `${rel} must not name a delete "dismiss"`).not.toMatch(/(aria-label|title)=\{?["'`]?[^"'`}]*[Dd]ismiss/)
     }
   })

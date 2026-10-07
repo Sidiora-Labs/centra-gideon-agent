@@ -1,3 +1,5 @@
+import ts from 'typescript'
+import { namedOwner, nodes } from '../../shared/testing/sourceOwners'
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -132,8 +134,17 @@ describe('a confirmed delete reports its failure', () => {
     expect(src, 'the rotation must still be confirmed first').toMatch(/await confirm\(\{/)
     expect(src, 'and the rejection captured, not discarded').toMatch(/try \{\s+const res = await api\.selRotate\(\)/)
     expect(src, 'reported with the server’s own message').toMatch(/notify\(`Couldn't archive the audit log: \$\{msg\}`, 'error'\)/)
-    const at = src.indexOf('api.selRotate(')
-    expect(src.slice(at, at + 640), 'a failed rotation must not invalidate or reload').toMatch(/return {3}\/\/ nothing archived/)
+    const rotate = namedOwner(src, 'rotate')
+    const attempts = nodes(rotate, (node) => ts.isTryStatement(node) && node.tryBlock.getText().includes('api.selRotate('))
+    expect(attempts.length).toBe(1)
+    const attempt = attempts[0]
+    if (!ts.isTryStatement(attempt) || !attempt.catchClause) throw new Error('Rotation must catch a rejected request')
+    const statements = attempt.catchClause.block.statements
+    const last = statements[statements.length - 1]
+    expect(ts.isReturnStatement(last), 'failure branch must exit before success invalidation/reload').toBe(true)
+    expect(attempt.catchClause.block.getText()).not.toMatch(/invalidateKeys\(|reload\(/)
+    expect(rotate.indexOf('invalidateKeys(')).toBeGreaterThan(rotate.indexOf(attempt.getText()) + attempt.getText().length - 1)
+    expect(rotate.indexOf('reload()')).toBeGreaterThan(rotate.indexOf('invalidateKeys('))
     expect(confirmGatedCalls().some((g) => g.rel === join('settings', 'AuditPanel.tsx') && g.call === 'selRotate'))
       .toBe(true)
   })

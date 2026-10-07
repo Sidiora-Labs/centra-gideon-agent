@@ -1,3 +1,6 @@
+import ts from 'typescript'
+import { nodes } from '../../shared/testing/sourceOwners'
+import { jsxTags } from '../../shared/testing/jsxContracts'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from '@testing-library/react'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
@@ -69,7 +72,22 @@ describe('ToolsPage uses the shared Field', () => {
   })
 
   it('still wraps its inputs in Field, so the labels are published', () => {
-    expect((src.match(/<Field label=/g) ?? []).length).toBe(8)
+    expect(src).toMatch(/import \{[^}]*\bField\b[^}]*\} from '\.\.\/\.\.\/shared\/ui\/forms'/)
+    const fields = jsxTags(src, ['Field'])
+    expect(fields.length).toBeGreaterThanOrEqual(8)
+    expect(fields.length).toBe(19)
+    const controls = nodes(src, (node) => (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && ['TextInput', 'TextArea', 'Select'].includes(node.tagName.getText()))
+    expect(controls.length).toBeGreaterThanOrEqual(8)
+    for (const control of controls) {
+      let parent = control.parent
+      while (parent && !(ts.isJsxElement(parent) && parent.openingElement.tagName.getText() === 'Field')) parent = parent.parent
+      expect(parent, `actual ${control.getText()} has a Field ancestor`).toBeTruthy()
+      if (!parent || !ts.isJsxElement(parent)) throw new Error('Missing actual Field ancestor')
+      const label = parent.openingElement.attributes.properties.find((attr) => ts.isJsxAttribute(attr) && attr.name.getText() === 'label')
+      expect(label).toBeTruthy()
+    }
+    const { container } = render(<Field label="Command"><TextInput value="npx" onChange={() => {}} /></Field>)
+    expect(container.querySelector('input')).toHaveAccessibleName('Command')
   })
 })
 
