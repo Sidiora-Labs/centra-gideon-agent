@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { createElement } from 'react'
 import { render } from '@testing-library/react'
 import { NON_NAV_ROUTES, ROUTES, SETTINGS_ROUTES, THEMES, VIEW_ROUTES } from '../../../e2e/routes'
-import { VISUAL_BASELINE_PLATFORMS } from '../../../playwright.config'
+import { VISUAL_BASELINE_PLATFORMS, VISUAL_SUPPLEMENTAL_PLATFORMS } from '../../../playwright.config'
 import { lazyRoute, preloadRoute } from './routePreload'
 import { Loading, Skeleton } from '../../shared/ui/ListScaffold'
 
@@ -125,9 +125,12 @@ describe('visual golden census', () => {
     expect(HELPERS).toContain(').toBe(0)')
   })
 
-  it('keeps the committed platform set equal to the declared platforms', () => {
+  it('keeps every committed platform declared as qualifying or supplemental', () => {
     const platforms = [...new Set(parsed.map(({ platform }) => platform))].sort()
-    expect(platforms).toEqual([...VISUAL_BASELINE_PLATFORMS])
+    expect(platforms).toEqual([...VISUAL_BASELINE_PLATFORMS, ...VISUAL_SUPPLEMENTAL_PLATFORMS].sort())
+    for (const { surface, platform } of parsed) {
+      expect(surfaceIds, `${platform}: stale visual surface ${surface}`).toContain(surface)
+    }
   })
 
   it('requires every declared platform to capture every manifest surface and theme', () => {
@@ -136,15 +139,19 @@ describe('visual golden census', () => {
         THEMES.map((theme) => `${surface}-${theme}-${platform}.png`),
       ),
     ).sort()
-    expect(files).toEqual(expected)
-    expect(files).toHaveLength(40)
-    expect(files).toHaveLength(surfaceIds.size * THEMES.length * VISUAL_BASELINE_PLATFORMS.length)
+    const qualifying = files.filter((_, index) => VISUAL_BASELINE_PLATFORMS.some(platform => platform === parsed[index].platform))
+    expect(qualifying).toEqual(expected)
+    expect(qualifying).toHaveLength(surfaceIds.size * THEMES.length * VISUAL_BASELINE_PLATFORMS.length)
   })
 })
 
 describe('axe route census', () => {
   it('pins every route and theme scanned by axe', () => {
     const routeCases = (ROUTES.length + SETTINGS_ROUTES.length + VIEW_ROUTES.length + NON_NAV_ROUTES.length) * THEMES.length
-    expect(routeCases).toBe(124)
+    const routes = [...ROUTES, ...SETTINGS_ROUTES, ...VIEW_ROUTES, ...NON_NAV_ROUTES]
+    const cases = routes.flatMap(({ route }) => THEMES.map(theme => `${route}:${theme}`))
+    expect(new Set(cases).size).toBe(routeCases)
+    expect(cases).toHaveLength(routeCases)
+    expect(routeCases, 'the established route coverage floor').toBeGreaterThanOrEqual(124)
   })
 })

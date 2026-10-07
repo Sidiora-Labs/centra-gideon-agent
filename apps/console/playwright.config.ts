@@ -10,7 +10,9 @@ const STORAGE_STATE = process.env.STORAGE_STATE || 'e2e/.auth/state.json'
 const MODEL_DOWNLOAD_LIVE_REQUESTED = !!process.env.GIDEON_E2E_MODEL_ACTION
   || process.argv.some((argument) => argument.includes('modelDownloadSafety.live'))
 
-export const VISUAL_BASELINE_PLATFORMS = ['darwin'] as const
+// Ubuntu CI qualifies Linux captures; existing macOS images remain supplemental.
+export const VISUAL_BASELINE_PLATFORMS = ['linux'] as const
+export const VISUAL_SUPPLEMENTAL_PLATFORMS = ['darwin'] as const
 
 export const SCRIPTED = {
   type: 'scripted',
