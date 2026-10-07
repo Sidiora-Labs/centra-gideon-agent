@@ -210,7 +210,7 @@ const MermaidDiagramImpl: FC<MermaidDiagramProps> = ({
           className,
         )}
       >
-        <pre className="overflow-x-auto p-4 text-sm">{code.trim()}</pre>
+        <pre tabIndex={0} aria-label="Diagram source" className="overflow-x-auto p-4 text-sm">{code.trim()}</pre>
         <p className="text-muted-foreground border-border border-t px-4 py-1.5 text-xs">
           diagram could not be rendered
         </p>

@@ -134,7 +134,7 @@ function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: str
       </form></Surface>
       {item && <article aria-label="Practice reader" className="flex flex-col gap-3">
         <h2 data-type="title-m">{item.title}</h2><p data-type="body-s" className="text-on-surface-low">{item.artist || 'Unknown artist'} · {item.instrument}{item.key ? ` · ${item.key}` : ''}{item.capo ? ` · capo ${item.capo}` : ''}{item.tuning ? ` · ${item.tuning}` : ''}</p>
-        {item.notation.text && <pre aria-label="Song notation" className="overflow-x-auto whitespace-pre font-mono">{item.notation.text}</pre>}
+        {item.notation.text && <pre tabIndex={0} aria-label="Song notation" className="overflow-x-auto whitespace-pre font-mono">{item.notation.text}</pre>}
         {item.body && <p className="whitespace-pre-wrap break-words">{item.body}</p>}
         {item.source_url && <a className="text-primary" href={item.source_url} target="_blank" rel="noreferrer">Original source</a>}
         {item.links.length > 0 && <ul aria-label="Related music records">{item.links.map(link => <li key={`${link.type}:${link.id}`}>{link.label || link.id} · {link.type}</li>)}</ul>}

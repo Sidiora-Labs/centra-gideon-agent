@@ -52,7 +52,7 @@ export function ToolTimeline({
       onOpenChange={onOpenChange}
       className={cn("w-full max-w-sm", className)}
     >
-      <CollapsibleTrigger className="group/trigger text-foreground/55 hover:text-foreground/90 flex items-center gap-1.5 rounded-md py-1 text-[13.5px] transition-colors outline-none">
+      <CollapsibleTrigger className="group/trigger text-foreground/55 hover:text-foreground/90 flex items-center gap-1.5 rounded-md py-1 text-[13.5px] transition-colors">
         <ChevronRightIcon className="size-3.5 shrink-0 opacity-60 transition-transform duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-open/trigger:rotate-90 group-data-panel-open/trigger:rotate-90 motion-reduce:transition-none" />
         <SwapLabel
           active={streaming ? 0 : 1}
@@ -67,7 +67,7 @@ export function ToolTimeline({
           <>{restingLabel}</>
         </SwapLabel>
       </CollapsibleTrigger>
-      <CollapsibleContent className={cn(collapsePanel, "outline-none")}>
+      <CollapsibleContent className={cn(collapsePanel)}>
         <div className="flex flex-col gap-2.5 ps-4 pt-2.5">
           {take(steps, visibleSteps).map((step, index, shown) => {
             const Icon = step.icon;

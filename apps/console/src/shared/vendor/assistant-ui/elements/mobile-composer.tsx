@@ -131,7 +131,7 @@ export function MobileComposer({
             }}
             placeholder="Message"
             aria-label="Message"
-            className="text-foreground/85 placeholder:text-foreground/30 min-w-0 flex-1 bg-transparent text-[16px] outline-none"
+            className="text-foreground/85 placeholder:text-foreground/30 min-w-0 flex-1 bg-transparent text-[16px]"
           /> : editor}
           {value === "" && (
             <MicIcon className="text-foreground/35 size-4 shrink-0" />

@@ -270,5 +270,5 @@ export function ArtifactMarkdownText({ artifact }: { artifact: Artifact }) {
 
 export function ArtifactCodeText({ artifact }: { artifact: Artifact }) {
   if (artifact.kind !== 'text' || artifact.content == null) return null
-  return <pre data-slot="code-text" className={`${paper} overflow-x-auto rounded-xl p-3`}><code>{artifact.content}</code></pre>
+  return <pre tabIndex={0} aria-label="Artifact code" data-slot="code-text" className={`${paper} overflow-x-auto rounded-xl p-3`}><code>{artifact.content}</code></pre>
 }

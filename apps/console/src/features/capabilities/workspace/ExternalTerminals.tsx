@@ -47,6 +47,6 @@ export default function ExternalTerminals() {
     <Surface className="space-y-m p-l"><div className="flex flex-wrap gap-s"><Button disabled={busy} loading={busy} loadingLabel="Discovering…" onClick={() => void discover()}>Discover native panes</Button><Button variant="secondary" disabled={!selected} disabledReason={!selected ? 'Select a terminal pane before observing it.' : undefined} onClick={() => setObserving(value => !value)}>{observing ? 'Disconnect mirror' : 'Observe pane'}</Button></div>
     <Field label="Native pane"><Select ariaLabel="Native pane" value={selected} onChange={select} options={[{ value: '', label: 'Choose a pane' }, ...panes.map(p => ({ value: p.id, label: `${p.title} · ${p.columns}×${p.rows} · ${p.window_id}/${p.tab_id}` }))]}/></Field></Surface>
     {error && <p role="alert">{error}</p>}
-    {screen && <Surface className="space-y-m p-l"><p data-type="body-s" className="text-on-surface-low">{screen.columns}×{screen.rows}{screen.truncated ? ' · Display excerpt truncated' : ''}</p><pre aria-label="Native pane output" className="max-h-96 overflow-auto whitespace-pre rounded-lg bg-surface p-m">{screen.lines.join('\n')}</pre></Surface>}
+    {screen && <Surface className="space-y-m p-l"><p data-type="body-s" className="text-on-surface-low">{screen.columns}×{screen.rows}{screen.truncated ? ' · Display excerpt truncated' : ''}</p><pre tabIndex={0} aria-label="Native pane output" className="max-h-96 overflow-auto whitespace-pre rounded-lg bg-surface p-m">{screen.lines.join('\n')}</pre></Surface>}
   </section>
 }

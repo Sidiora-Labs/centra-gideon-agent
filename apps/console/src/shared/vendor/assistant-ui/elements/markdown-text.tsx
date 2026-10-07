@@ -249,6 +249,8 @@ const defaultComponents = memoizeMarkdownComponents({
         className,
       )}
       {...props}
+      tabIndex={0}
+      aria-label={props['aria-label'] ?? 'Code block'}
     />
   ),
   code: function Code({ className, ...props }) {

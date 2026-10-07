@@ -78,6 +78,6 @@ export const liveMarkdownTheme = EditorView.theme({
   '.cm-gideon-emphasis': { fontStyle: 'italic' },
   '.cm-gideon-strike': { textDecoration: 'line-through', opacity: '0.7' },
   '.cm-gideon-code': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.9em', color: 'var(--color-primary-emphasis, var(--color-primary))', background: 'var(--color-surface-high)', borderRadius: '5px', padding: '0.05em 0.3em' },
-  '.cm-gideon-quote': { color: 'var(--color-on-surface-var)', fontStyle: 'italic', borderLeft: '2px solid var(--color-outline-variant)', paddingLeft: '0.6em' },
+  '.cm-gideon-quote': { color: 'var(--color-on-surface-var)', fontStyle: 'italic', borderLeft: '1px solid var(--color-outline-variant)', paddingLeft: '0.6em' },
   '.cm-gideon-bullet': { color: 'var(--color-primary)' },
 })

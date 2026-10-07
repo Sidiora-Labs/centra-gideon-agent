@@ -64,7 +64,7 @@ export function CodeRunner({
         </Button>
       </div>
 
-      <pre className="border-foreground/[0.07] overflow-x-auto border-t px-3.5 py-2.5 font-mono text-xs leading-relaxed">
+      <pre tabIndex={0} aria-label="Runnable code" className="border-foreground/[0.07] overflow-x-auto border-t px-3.5 py-2.5 font-mono text-xs leading-relaxed">
         <code className="text-foreground/75">{code}</code>
       </pre>
 

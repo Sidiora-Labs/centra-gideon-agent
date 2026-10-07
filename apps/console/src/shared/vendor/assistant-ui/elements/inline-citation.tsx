@@ -40,7 +40,7 @@ function Citation({ index, source, open, onOpenChange, onSourceOpen }: CitationP
           <PreviewCard.Popup
             className={cn(
               floating,
-              "z-50 w-64 origin-(--transform-origin) rounded-2xl p-3.5 outline-none",
+              "z-50 w-64 origin-(--transform-origin) rounded-2xl p-3.5",
               "transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
               "data-[starting-style]:scale-[0.97] data-[starting-style]:opacity-0",
               "data-[ending-style]:scale-[0.97] data-[ending-style]:opacity-0",

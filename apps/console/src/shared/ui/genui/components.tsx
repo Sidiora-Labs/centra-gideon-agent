@@ -129,7 +129,7 @@ function ActionForm({ args }: GenUiRenderProps) {
       <span data-type="caption" className="text-on-surface-low">{fieldTitle(field)}</span>
       <input type="text" name={field} value={values[field] ?? ''} data-type="body-s"
         onChange={event => { const value = event.currentTarget.value; setState(previous => ({ ...previous, fields: { ...previous.fields, [field]: value } })) }}
-        className="w-full rounded-lg border border-outline-variant/50 bg-surface px-3 py-2 text-on-surface outline-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/25" />
+        className="w-full rounded-lg border border-outline-variant/50 bg-surface px-3 py-2 text-on-surface outline-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary" />
     </label>)}</div>
     <Button type="submit" variant="primary" size="sm" className="w-fit" loading={command.busy}>{label}</Button>
     <ActionFailure message={command.error} />

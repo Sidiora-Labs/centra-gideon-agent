@@ -109,7 +109,7 @@ export function CommandPalette({
               ? optionId(activeId)
               : undefined
           }
-          className="text-foreground/85 placeholder:text-foreground/30 min-w-0 flex-1 bg-transparent text-[13.5px] outline-none"
+          className="text-foreground/85 placeholder:text-foreground/30 min-w-0 flex-1 bg-transparent text-[13.5px]"
         />
         <span
           className={cn(

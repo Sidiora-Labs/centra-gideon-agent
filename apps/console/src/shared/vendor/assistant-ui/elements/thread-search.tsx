@@ -133,7 +133,7 @@ export function ThreadSearch({
           onKeyDown={onKeyDown}
           placeholder="Search threads"
           aria-label="Search threads"
-          className="text-foreground/85 placeholder:text-foreground/30 min-w-0 flex-1 bg-transparent text-[13px] outline-none"
+          className="text-foreground/85 placeholder:text-foreground/30 min-w-0 flex-1 bg-transparent text-[13px]"
         />
       </div>
 

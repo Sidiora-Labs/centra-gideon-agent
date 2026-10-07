@@ -1261,7 +1261,7 @@ export function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSu
                 ) : !engineStatus?.installed && <Button className="mt-2" variant="primary" size="sm" disabled={engineBusy} onClick={() => void installEngine()} disabledReason={engineBusy ? 'Wait for the current engine operation to finish' : undefined}>
                   {engineBusy ? 'Starting…' : 'Install engine'}
                 </Button>}
-                {!!engineStatus?.job.log_tail?.length && <pre className="mt-2 max-h-28 overflow-auto rounded bg-surface px-2 py-1 text-[0.6875rem] text-on-surface-low">{engineStatus.job.log_tail.join('\n')}</pre>}
+                {!!engineStatus?.job.log_tail?.length && <pre tabIndex={0} aria-label="Engine installation log" className="mt-2 max-h-28 overflow-auto rounded bg-surface px-2 py-1 text-[0.6875rem] text-on-surface-low">{engineStatus.job.log_tail.join('\n')}</pre>}
                 {(engineError || engineStatus?.job.error) && <p role="status" data-type="label-s" className="mt-2 text-danger">{engineError || engineStatus?.job.error}</p>}
               </div>
             )}
