@@ -213,7 +213,7 @@ class LifecycleStore:
             try:
                 loop = self._loop()
                 if action == "cancel_turn":
-                    from gideon.interfaces.dashboard.chat_utils import _history_key_for
+                    from gideon.engine.history_keys import _history_key_for
 
                     outcome = await state.sessions.stop_turn(
                         _history_key_for(manager.session_key(loop.id)),

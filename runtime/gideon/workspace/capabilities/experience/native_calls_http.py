@@ -49,8 +49,8 @@ def handoff(request, record, body):
         raise Conflict("Handoff requires an idle persistent conversation")
     if getattr(session, "_app", "") != request.get("app", ""):
         raise NotFound("Conversation belongs to another application")
+    from gideon.engine.history_keys import persisted_history_key
     from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
-    from gideon.interfaces.dashboard.chat_utils import persisted_history_key
 
     digest = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
     marker = {

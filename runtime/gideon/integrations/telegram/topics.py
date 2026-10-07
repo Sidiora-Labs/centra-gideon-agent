@@ -141,7 +141,7 @@ class TopicStore:
                 return (
                     "Stop running responses in your topics before disabling topic mode."
                 )
-            from gideon.interfaces.dashboard.chat_utils import _history_key_for
+            from gideon.engine.history_keys import _history_key_for
 
             for session in owned:
                 if not session or not session._channel_thread_ts.startswith(

@@ -1020,7 +1020,7 @@ class LoopWatchdog:
                 and loop.started_at
                 and time.time() - loop.started_at > cfg.trust_ttl_secs
             ):
-                from gideon.interfaces.dashboard.chat_utils import _history_key_for
+                from gideon.engine.history_keys import _history_key_for
 
                 for key, worker in self._state._sessions.items():
                     if (

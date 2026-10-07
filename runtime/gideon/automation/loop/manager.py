@@ -204,7 +204,7 @@ def _arm_worker_approval_posture(state, session, loop: Loop) -> None:
     session._unattended = posture.unattended
     session.acp_mode = posture.acp_mode
     try:
-        from gideon.interfaces.dashboard.chat_utils import _history_key_for
+        from gideon.engine.history_keys import _history_key_for
 
         state.sessions.set_approval_policy(
             _history_key_for(session.key), posture.approval_policy

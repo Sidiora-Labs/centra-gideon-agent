@@ -72,7 +72,7 @@ class TelegramTools(ToolProvider):
             return ToolResult(success=False, error="Unknown Telegram tool")
         key = get_current_session_key()
         state = self.transport.services.dashboard_state
-        from gideon.interfaces.dashboard.chat_utils import _history_key_for
+        from gideon.engine.history_keys import _history_key_for
 
         session = state.get_session(key) or next(
             (s for s in state._sessions.values() if _history_key_for(s.key) == key),

@@ -59,7 +59,7 @@ class DeliveryRouter:
 
     async def request_approval(self, event, *, parent_session_key="", **kwargs):
         state = self.transport.services.dashboard_state
-        from gideon.interfaces.dashboard.chat_utils import _history_key_for
+        from gideon.engine.history_keys import _history_key_for
 
         session = state.get_session(parent_session_key) or next(
             (

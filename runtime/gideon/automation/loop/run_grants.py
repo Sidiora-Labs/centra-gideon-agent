@@ -71,7 +71,7 @@ def revoke(state, loop_id):
         return
     if grant.timer is not None:
         grant.timer.cancel()
-    from gideon.interfaces.dashboard.chat_utils import _history_key_for
+    from gideon.engine.history_keys import _history_key_for
 
     for key, (session, floor_trust, floor_seeded) in grant.workers.items():
         session._trust = floor_trust
@@ -135,7 +135,7 @@ def issue(state, session, receipt, offered):
     grant.timer = asyncio.get_running_loop().call_later(
         current["duration_seconds"], revoke, state, loop.id
     )
-    from gideon.interfaces.dashboard.chat_utils import _history_key_for
+    from gideon.engine.history_keys import _history_key_for
 
     for worker in state._sessions.values():
         if refresh(state, worker):

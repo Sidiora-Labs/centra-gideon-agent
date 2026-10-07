@@ -140,7 +140,7 @@ async def extra_command(transport, cm, command, argument):
             session._trust_reads = mode == "trust_reads"
         else:
             return "Start a conversation first."
-        from gideon.interfaces.dashboard.chat_utils import _history_key_for
+        from gideon.engine.history_keys import _history_key_for
 
         if state.sessions:
             targets = (
@@ -248,7 +248,7 @@ async def extra_command(transport, cm, command, argument):
         if session.running:
             return "Stop the current response before changing reasoning effort."
         session.reasoning_effort = effort
-        from gideon.interfaces.dashboard.chat_utils import _history_key_for
+        from gideon.engine.history_keys import _history_key_for
 
         if state.sessions:
             await state.sessions.reset(_history_key_for(session.key))
@@ -257,7 +257,7 @@ async def extra_command(transport, cm, command, argument):
     if command == "context":
         return f"Conversation: {session.key}\nMessages: {session.total_messages}\nAgent: {session.agent or 'Gideon'}\nRunning: {session.running}"
     if command == "usage":
-        from gideon.interfaces.dashboard.chat_utils import _history_key_for
+        from gideon.engine.history_keys import _history_key_for
         from gideon.operations import usage_ledger
 
         totals = await asyncio.to_thread(
@@ -284,7 +284,7 @@ async def extra_command(transport, cm, command, argument):
             return "/background <task>"
         if state.subagents is None:
             return "Background tasks are unavailable in this runtime."
-        from gideon.interfaces.dashboard.chat_utils import _history_key_for
+        from gideon.engine.history_keys import _history_key_for
 
         info = state.subagents.spawn(
             argument,

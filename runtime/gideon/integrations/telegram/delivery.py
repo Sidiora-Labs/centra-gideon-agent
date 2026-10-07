@@ -571,11 +571,11 @@ class TelegramDelivery:
         if not owner or not is_allowed_sender("telegram", owner):
             return None
         key = secrets.token_hex(12)
+        from gideon.engine.history_keys import _history_key_for
         from gideon.integrations.channel_delivery import (
             ONE_CALL_ANSWERS,
             offered_answers,
         )
-        from gideon.interfaces.dashboard.chat_utils import _history_key_for
         from gideon.security.approval_brief import approval_brief_for
 
         brief = approval_brief_for(event) or {}
