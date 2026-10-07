@@ -204,7 +204,7 @@ describe('the ablation report is CONSUMED, not merely served', () => {
 
   it('the api client targets GET /api/evals/ablation', () => {
     const src = readFileSync(join(process.cwd(), "src/shared/data/api.ts"), 'utf8')
-    expect(src).toContain("ablation: () => get<AblationView>('/api/evals/ablation')")
+    expect(src).toMatch(/ablation:\s*\(\)\s*=>\s*get<[^>]+>\('\/api\/evals\/ablation'\)/)
     expect(src).not.toContain("'/api/evals/ablations'")
   })
 })

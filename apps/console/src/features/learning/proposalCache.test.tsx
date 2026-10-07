@@ -55,6 +55,7 @@ vi.mock('../../shared/data/api', async (importOriginal) => {
     api: {
       workflowAttention: () => Promise.resolve({ scopes: [] }),
       evalFieldMetrics: () => Promise.resolve({ subjects: [] }),
+      pendingSkillProposalCount: () => Promise.resolve(0),
       learningProposals: () => learningProposals(),
       learningStagingWeek: () => learningStagingWeek(),
       learningHealth: () => learningHealth(),

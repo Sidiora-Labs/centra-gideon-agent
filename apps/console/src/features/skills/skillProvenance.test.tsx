@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
@@ -31,7 +32,18 @@ vi.mock('../../shared/data/api', async (importActual) => {
 describe('skill provenance', () => {
   it('shows the creation origin on the row and explains it in the inspector', async () => {
     const { SkillsPage } = await import('./SkillsPage')
-    render(<SkillsPage query={{}} setQuery={() => {}} />)
+    function Route() {
+      const [query, setQuery] = useState<Record<string, string>>({})
+      return <SkillsPage query={query} setQuery={patch => setQuery(current => {
+        const next = { ...current }
+        for (const [key, value] of Object.entries(patch)) {
+          if (value == null) delete next[key]
+          else next[key] = value
+        }
+        return next
+      })} />
+    }
+    render(<Route />)
 
     await waitFor(() => expect(screen.getByText('auto')).toBeInTheDocument())
     expect(screen.getByText('taught')).toBeInTheDocument()

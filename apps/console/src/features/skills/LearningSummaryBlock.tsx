@@ -2,7 +2,7 @@ import { LoadError } from '../../shared/ui/ListScaffold'
 import { Sparkles, RefreshCw, Lightbulb, Brain } from 'lucide-react'
 import { Surface } from '../../shared/ui/Surface'
 import { useQuery } from '../../shared/data/data'
-import { api, type LearningSummary, type LearningSummaryGroup } from '../../shared/data/api'
+import { api, ApiError, type FeatureOffEnvelope, type LearningSummary, type LearningSummaryGroup } from '../../shared/data/api'
 import { fvs } from '../../shared/theme/fontWeight'
 
 const sections = [
@@ -20,9 +20,11 @@ function SummaryRow({ icon, label, group }: { icon: React.ReactNode; label: stri
   </div>
 }
 export function LearningSummaryBlock() {
-  const { data, error: loadErr, refresh } = useQuery<LearningSummary | null>('learning:summary', () => api.learningSummary())
+  const { data, error: loadErr, refresh } = useQuery<LearningSummary | FeatureOffEnvelope | null>('learning:summary', () => api.learningSummary())
+  if (loadErr instanceof ApiError && loadErr.status === 404 && loadErr.code === 'learning_disabled') return null
   if (loadErr) return <LoadError what="learning summary" error={loadErr} onRetry={refresh} />
-  if (!data || data.total <= 0) return null
+  if (!data || 'enabled' in data) return null
+  if (data.total <= 0) return null
   const visible = sections.filter(section => data[section.key].count > 0)
   return <Surface tone="low" radius="lg" className="mb-l border border-outline-variant/25 px-m py-m">
     <section role="region" aria-label={`Learned in the last ${data.window_days} days`} className="grid gap-s">

@@ -94,13 +94,20 @@ describe('#/skills renders the learning summary block with real counts and names
     expect(screen.getByText('cut a release'), 'the page itself is unaffected').toBeInTheDocument()
   })
 
-  it('is ABSENT when the route 404s (learning disabled), and the list still renders', async () => {
-    mockApi({ learningSummary: () => Promise.reject(new Error('404 learning is disabled')) })
+  it.each(['current', 'legacy', 'genuine error'] as const)('disabled learning response %s preserves the skill list and truthful errors', async kind => {
+    mockApi({ learningSummary: async () => {
+      const { ApiError } = await import('../../shared/data/api')
+      return kind === 'current'
+      ? Promise.resolve({ enabled: false })
+      : Promise.reject(kind === 'legacy'
+        ? new ApiError('Learning is disabled', 404, 'learning_disabled')
+        : new Error('404 learning is disabled')) } })
     await mountSkillsPage()
 
     expect(region()).toBeNull()
     expect(screen.getByText('cut a release')).toBeInTheDocument()
-    expect(screen.queryByRole('alert'), 'and not an error banner over a supplementary block').toBeNull()
+    if (kind === 'genuine error') expect(await screen.findByRole('alert')).toHaveTextContent('404 learning is disabled')
+    else expect(screen.queryByRole('alert'), 'disabled supplementary block is absent').toBeNull()
   })
 })
 

@@ -5696,7 +5696,7 @@ export const api = {
   acceptSkillProposal: (id: string, edits?: { description?: string; procedure_md?: string }) =>
     post<{ ok: boolean; name: string; version: number }>(`/api/skills/proposals/${encodeURIComponent(id)}/accept`, edits ?? {}),
   rejectSkillProposal: (id: string) => del(`/api/skills/proposals/${encodeURIComponent(id)}`),
-  learningSummary: (days?: number) => get<LearningSummary>(`/api/learning/summary${days ? `?days=${days}` : ''}`),
+  learningSummary: (days?: number) => get<LearningSummary | FeatureOffEnvelope>(`/api/learning/summary${days ? `?days=${days}` : ''}`),
   ephemeralSkills: (session: string) =>
     get<{ drafts: EphemeralDraft[] }>(`/api/skills/ephemeral/${encodeURIComponent(session)}`).then((d) => d.drafts),
   promoteEphemeralSkill: (session: string, payload: { slug: string; scope: 'agent' | 'global'; agent?: string; title?: string; body?: string }) =>
