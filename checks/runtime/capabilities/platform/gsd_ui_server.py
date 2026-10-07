@@ -1,11 +1,12 @@
 import asyncio
+import json
 
 from aiohttp import web
 
 from gideon.core.config.loader import config_dir
 from gideon.engine.tasks.hierarchy import HierarchyStore
 from gideon.interfaces.dashboard.handlers.capabilities_gsd import register
-from gideon.interfaces.dashboard.token_auth import token_auth_middleware
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 
 async def main():
@@ -20,7 +21,7 @@ async def main():
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", 0).start()
-    print(runner.addresses[0][1], flush=True)
+    print(json.dumps({"port": runner.addresses[0][1], "token": generate_token("platform-owner")}), flush=True)
     try:
         await asyncio.Event().wait()
     finally:
