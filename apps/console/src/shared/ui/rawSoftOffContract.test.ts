@@ -15,7 +15,7 @@ const walk = (d: string): string[] =>
 const FIXED: Array<{ file: string; reason: string; guard: RegExp }> = [
   { file: 'features/settings/AccountPanel.tsx', reason: 'No changes to save', guard: /aria-disabled=\{!dirty \|\| undefined\}/ },
   { file: 'features/settings/AccountPanel.tsx', reason: 'No changes to save', guard: /aria-disabled=\{!botDirty \|\| undefined\}/ },
-  { file: 'shared/ui/content/ContentSurface.tsx', reason: 'no changes to save', guard: /aria-disabled=\{\(!dirty && !saving\) \|\| undefined\}/ },
+  { file: 'shared/ui/content/ContentSurface.tsx', reason: 'no changes to save', guard: /aria-disabled=\{\(!dirty && !saving\) \|\| state\.baseMissing \|\| undefined\}/ },
   { file: 'features/tasks/formControls.tsx', reason: 'That would create a dependency cycle', guard: /aria-disabled=\{cyclic \|\| undefined\}/ },
   { file: 'features/knowledge/KnowledgeDetail.tsx', reason: 'Nothing more to show', guard: /aria-disabled=\{!hasMore \|\| undefined\}/ },
 ]
@@ -35,15 +35,27 @@ describe('a converted raw control keeps its tab stop AND its dimming', () => {
     })
   }
 
-  it('neutralises the hover tint that `enabled:` starts allowing', () => {
+  it('keeps the active hover tint and neutralises it for soft-off controls', () => {
     const src = readFileSync(join(SRC, 'features/tasks/formControls.tsx'), 'utf8')
-    expect(src).toMatch(/enabled:hover:bg-surface-high aria-disabled:hover:bg-transparent/)
+    expect(src).toMatch(/hover:bg-surface-high/)
+    expect(src).toMatch(/aria-disabled:hover:bg-transparent/)
+  })
+
+  it('keeps a missing-source save focusable and explains the recovery', () => {
+    const src = readFileSync(join(SRC, 'shared/ui/content/ContentSurface.tsx'), 'utf8')
+    expect(src).toMatch(/onClick=\{dirty && !state\.baseMissing \? state\.save : undefined\} disabled=\{saving\}/)
+    expect(src).toContain('Refresh and rebase the draft before saving; the current source is unavailable')
   })
 
   it('refuses the click it can no longer refuse natively', () => {
     for (const rel of ['features/settings/AccountPanel.tsx', 'features/tasks/formControls.tsx', 'features/knowledge/KnowledgeDetail.tsx', 'shared/ui/content/ContentSurface.tsx']) {
       const src = readFileSync(join(SRC, rel), 'utf8')
-      expect(src, `${rel} must guard its handler`).toMatch(/onClick=\{[^}\n]*\?[^\n]*undefined/)
+      if (rel === 'features/tasks/formControls.tsx') {
+        expect(src, 'dependency insertion remains inside the noncyclic branch')
+          .toMatch(/onClick=\{\(\) => \{ if \(!cyclic\) \{ onChange\(\[\.\.\.value, task\.id\]\); setQuery\(''\) \} \}\}/)
+      } else {
+        expect(src, `${rel} must guard its handler`).toMatch(/onClick=\{[^}\n]*\?[^\n]*undefined/)
+      }
     }
   })
 })

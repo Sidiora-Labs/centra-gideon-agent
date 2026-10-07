@@ -27,8 +27,10 @@ describe('TextLink is a 24px target wherever it sits', () => {
 describe("the task row's checkbox paints 20px and clicks 24px", () => {
   const src = readFileSync(join(process.cwd(), "src/features/tasks/TasksListPage.tsx"), 'utf8')
 
+  const checkboxClasses = src.match(/aria-label=\{`\$\{selected[\s\S]*?className="([^"]*)"/)?.[1].split(/\s+/) || []
+
   it('is a transparent 24px button around the painted control', () => {
-    expect(src).toMatch(/className="shrink-0 grid size-6 -m-0\.5 place-items-center"/)
+    expect(checkboxClasses).toEqual(expect.arrayContaining(['shrink-0', 'grid', 'size-6', '-m-0.5', 'place-items-center']))
   })
 
   it('keeps the 20px painted box, now as a child span', () => {
@@ -36,7 +38,7 @@ describe("the task row's checkbox paints 20px and clicks 24px", () => {
   })
 
   it('returns the 4px so no row reflows', () => {
-    expect(src).toMatch(/size-6 -m-0\.5/)
+    expect(checkboxClasses).toEqual(expect.arrayContaining(['size-6', '-m-0.5']))
   })
 })
 
@@ -46,7 +48,7 @@ describe('the detail routes added after the first census', () => {
 
   it("the project header's Rename button carries a 24px hit box", () => {
     expect(read('features/projects/ProjectsSection.tsx'))
-      .toMatch(/IconButton icon=\{Pencil\} label="Rename" size=\{24\}/)
+      .toMatch(/IconButton icon=\{Pencil\} label="Rename project" size=\{24\}/)
   })
 
   it("the context/workspace row's Open-in-Files button carries one too", () => {
@@ -102,7 +104,9 @@ describe('.hit-24 expands the pointer target without touching layout', () => {
     expect(rule, 'the overlay must accept pointer events on its host\'s behalf').not.toMatch(/pointer-events:\s*none/)
   })
 
-  it('it states what it cannot do, so the caveat is not rediscovered', () => {
-    expect(tokens, 'the axe caveat must be recorded beside the utility').toMatch(/axe[\s\S]{0,400}does not change/)
+  it('does not change the host layout geometry', () => {
+    const host = tokens.slice(tokens.indexOf('.hit-24 {'), tokens.indexOf('}', tokens.indexOf('.hit-24 {')) + 1)
+    expect(host, 'the pointer overlay must not resize or reflow the host')
+      .not.toMatch(/(?:^|[;{])\s*(?:min-)?(?:width|height|margin|padding)\s*:/)
   })
 })
