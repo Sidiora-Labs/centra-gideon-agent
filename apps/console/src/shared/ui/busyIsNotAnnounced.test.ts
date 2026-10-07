@@ -65,7 +65,8 @@ function expressionProp(tag: string, name: string): string | null {
 
 const gateOf = (tag: string) => expressionProp(tag, 'disabled')
 
-// A reason must be present on every branch. Merely having the prop is insufficient.
+// A reason must be nonempty whenever the disabled busy atom holds.
+// Merely having the prop, or describing an unrelated prerequisite, is insufficient.
 function provenDescription(tag: string, src: string, abs: string): boolean {
   const reason = expressionProp(tag, 'disabledReason')
   if (!reason) return false
@@ -90,7 +91,19 @@ function provenDescription(tag: string, src: string, abs: string): boolean {
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.BarBarToken) return nonempty(node.right)
     return false
   }
-  return !!expression && canonical && /\bBUSY_REASON\b/.test(reason) && nonempty(expression)
+  if (!expression || !canonical || !/\bBUSY_REASON\b/.test(reason)) return false
+  if (nonempty(expression)) return true
+  const unwrap = (node: ts.Expression): ts.Expression => ts.isParenthesizedExpression(node) ? unwrap(node.expression) : node
+  const conditional = unwrap(expression)
+  if (!ts.isConditionalExpression(conditional)) return false
+  const busyAtoms = disjuncts(gateOf(tag) ?? '').filter((atom) => BUSY.test(atom))
+  if (busyAtoms.length !== 1) return false
+  const condition = unwrap(conditional.condition)
+  const atom = norm(busyAtoms[0])
+  if (norm(condition.getText(parsed)) === atom) return nonempty(conditional.whenTrue)
+  if (ts.isPrefixUnaryExpression(condition) && condition.operator === ts.SyntaxKind.ExclamationToken &&
+      norm(unwrap(condition.operand).getText(parsed)) === atom) return nonempty(conditional.whenFalse)
+  return false
 }
 
 function disjuncts(g: string): string[] {
@@ -254,6 +267,44 @@ describe('the `aria-busy` exemption is measured, not asserted by comment', () =>
 })
 
 describe('a slow action can name what it is doing AND announce it', () => {
+  it('only exempts a conditional reason when the busy disabled atom implies a nonempty description', () => {
+    const abs = join(SRC, 'shared/ui/conditionalProof.tsx')
+    const source = "import { BUSY_REASON } from './unavailable'"
+    const proof = (gate: string, reason: string) => provenDescription(`<Button disabled={${gate}} disabledReason={${reason}}>`, source, abs)
+    expect(proof('busy || !profile', 'busy ? BUSY_REASON : undefined')).toBe(true)
+    expect(proof('busy || !profile', '!busy ? undefined : BUSY_REASON')).toBe(true)
+    expect(proof('busy || !profile', 'saving ? BUSY_REASON : undefined')).toBe(false)
+    expect(proof('busy || saving', 'busy ? BUSY_REASON : undefined')).toBe(false)
+    expect(proof('busy || !profile', 'busy ? undefined : BUSY_REASON')).toBe(false)
+    expect(proof('busy || !profile', 'busy ? "" : BUSY_REASON')).toBe(false)
+    expect(provenDescription('<Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>',
+      "import { BUSY_REASON } from './unrelated'", abs)).toBe(false)
+  })
+
+  it('describes only the busy branch while guarding prerequisite-only blocking independently', () => {
+    const action = vi.fn()
+    const control = (busy: boolean, missingProfile: boolean) => createElement(Button, {
+      children: 'Launch', disabled: busy || missingProfile,
+      disabledReason: busy ? BUSY_REASON : undefined, onClick: action,
+    })
+    const view = render(control(true, false))
+    const button = screen.getByRole('button', { name: 'Launch' })
+    expect(button).toHaveAccessibleDescription(BUSY_REASON)
+    expect(document.getElementById(button.getAttribute('aria-describedby')!)).toHaveClass('sr-only')
+    expect(button).not.toHaveAttribute('aria-busy')
+    fireEvent.click(button)
+    expect(action).not.toHaveBeenCalled()
+    view.rerender(control(false, true))
+    expect(button).not.toHaveAttribute('aria-describedby')
+    expect(button).not.toHaveAttribute('aria-busy')
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    expect(action).not.toHaveBeenCalled()
+    view.rerender(control(false, false))
+    fireEvent.click(button)
+    expect(action).toHaveBeenCalledOnce()
+  })
+
   it('describes a blocked bystander without claiming it owns busy work', () => {
     const action = vi.fn()
     const view = render(createElement(Button, { children: 'Cancel', disabled: true, disabledReason: BUSY_REASON, onClick: action }))
