@@ -10,27 +10,42 @@ let server: ChildProcess
 let endpoint = ''
 let directory = ''
 const root = resolve(process.cwd(), '../..')
+const python = process.env.GIDEON_TEST_PYTHON || resolve(root, '.venv/bin/python')
+const originalFetch = globalThis.fetch
 beforeAll(async () => {
   directory = await mkdtemp(resolve(tmpdir(), 'gideon-stories-ui-'))
-  server = spawn('/tmp/gideon-runtime-venv/bin/python', [
+  const runtimeEnv: NodeJS.ProcessEnv = { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: directory }
+  delete runtimeEnv.GIDEON_DEV_NO_AUTH
+  server = spawn(python, [
     resolve(root, 'checks/runtime/capabilities/identity/bundle_extended_ui_server.py'), directory,
-  ], { env: { ...process.env, PYTHONPATH: resolve(root, 'runtime') } })
-  endpoint = await new Promise<string>((resolveEndpoint, reject) => {
+  ], { env: runtimeEnv })
+  const ready = await new Promise<{ endpoint: string; token: string }>((resolveEndpoint, reject) => {
     let output = ''
     let errors = ''
     const timer = setTimeout(() => reject(new Error('HTTP server startup timed out: ' + errors)), 10000)
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
-      const line = output.split('\n').find(value => value.startsWith('http://'))
-      if (line) { clearTimeout(timer); resolveEndpoint(line.trim()) }
+      const line = output.split('\n').find(value => value.startsWith('{'))
+      if (line) { clearTimeout(timer); resolveEndpoint(JSON.parse(line)) }
     })
     server.once('error', error => { clearTimeout(timer); reject(error) })
     server.once('exit', code => { clearTimeout(timer); reject(new Error('HTTP server exited ' + code + ': ' + errors)) })
   })
+  endpoint = ready.endpoint
+  const origins = new Set(endpoint.split('|').map(value => new URL(value).origin))
+  for (const address of endpoint.split('|')) expect((await originalFetch(address)).status).toBe(403)
+  globalThis.fetch = (input, init) => {
+    const url = input instanceof Request ? input.url : String(input)
+    const headers = new Headers(input instanceof Request ? input.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (origins.has(new URL(url).origin)) headers.set('Authorization', `Bearer ${ready.token}`)
+    return originalFetch(input, { ...init, headers })
+  }
 })
 afterEach(() => { cleanup(); window.location.hash = '' })
 afterAll(async () => {
+  globalThis.fetch = originalFetch
   if (server && server.exitCode === null) {
     await new Promise<void>(resolveExit => { server.once('exit', () => resolveExit()); server.kill('SIGTERM') })
   }

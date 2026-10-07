@@ -1,10 +1,12 @@
 """Two real isolated canonical stores for encrypted identity console transfers."""
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
 from aiohttp import web
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.interfaces.dashboard.handlers.capabilities_identity_bundles import register
 from gideon.workspace.capabilities.identity.store import StoryStore
@@ -33,7 +35,7 @@ async def main():
     )
     runners, endpoints = [], []
     for name in ("source", "destination"):
-        app = web.Application()
+        app = web.Application(middlewares=[token_auth_middleware()])
         register(app, home=home / name)
         runner = web.AppRunner(app)
         await runner.setup()
@@ -43,7 +45,7 @@ async def main():
         endpoints.append(
             f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}/api/capabilities/identity/bundles"
         )
-    print("|".join(endpoints), flush=True)
+    print(json.dumps({"endpoint": "|".join(endpoints), "token": generate_token("identity-owner")}), flush=True)
     try:
         await asyncio.Event().wait()
     finally:

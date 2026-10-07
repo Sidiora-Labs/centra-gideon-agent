@@ -10,27 +10,42 @@ let server: ChildProcess
 let endpoint = ''
 let directory = ''
 const root = resolve(process.cwd(), '../..')
+const python = process.env.GIDEON_TEST_PYTHON || resolve(root, '.venv/bin/python')
+const originalFetch = globalThis.fetch
 beforeAll(async () => {
   directory = await mkdtemp(resolve(tmpdir(), 'gideon-stories-ui-'))
-  server = spawn('/tmp/gideon-runtime-venv/bin/python', [
+  const runtimeEnv: NodeJS.ProcessEnv = { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: directory }
+  delete runtimeEnv.GIDEON_DEV_NO_AUTH
+  server = spawn(python, [
     resolve(root, 'checks/runtime/capabilities/identity/continuity_ui_server.py'), directory,
-  ], { env: { ...process.env, PYTHONPATH: resolve(root, 'runtime') } })
-  endpoint = await new Promise<string>((resolveEndpoint, reject) => {
+  ], { env: runtimeEnv })
+  const ready = await new Promise<{ endpoint: string; token: string }>((resolveEndpoint, reject) => {
     let output = ''
     let errors = ''
     const timer = setTimeout(() => reject(new Error('HTTP server startup timed out: ' + errors)), 10000)
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
-      const line = output.split('\n').find(value => value.startsWith('http://'))
-      if (line) { clearTimeout(timer); resolveEndpoint(line.trim()) }
+      const line = output.split('\n').find(value => value.startsWith('{'))
+      if (line) { clearTimeout(timer); resolveEndpoint(JSON.parse(line)) }
     })
     server.once('error', error => { clearTimeout(timer); reject(error) })
     server.once('exit', code => { clearTimeout(timer); reject(new Error('HTTP server exited ' + code + ': ' + errors)) })
   })
+  endpoint = ready.endpoint
+  const origins = new Set(endpoint.split('|').map(value => new URL(value).origin))
+  for (const address of endpoint.split('|')) expect((await originalFetch(address)).status).toBe(403)
+  globalThis.fetch = (input, init) => {
+    const url = input instanceof Request ? input.url : String(input)
+    const headers = new Headers(input instanceof Request ? input.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (origins.has(new URL(url).origin)) headers.set('Authorization', `Bearer ${ready.token}`)
+    return originalFetch(input, { ...init, headers })
+  }
 })
 afterEach(() => { cleanup(); window.location.hash = '' })
 afterAll(async () => {
+  globalThis.fetch = originalFetch
   if (server && server.exitCode === null) {
     await new Promise<void>(resolveExit => { server.once('exit', () => resolveExit()); server.kill('SIGTERM') })
   }
@@ -59,13 +74,13 @@ test('actual heartbeat policy and canonical continuity notes survive reload and 
   render(<ContinuityPage endpoint={endpoint} />)
   await screen.findByText('Paused')
   expect(screen.getByRole('region', { name: 'Continuity context' })).toHaveTextContent('Keep careful evidence.')
-  fireEvent.click(screen.getByRole('button', { name: 'Remove note' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Remove note: Keep careful evidence.' }))
   await screen.findByText('Keep careful evidence. · Removed by human')
   expect(screen.getByRole('region', { name: 'Continuity context' })).not.toHaveTextContent('Keep careful evidence.')
   fireEvent.change(screen.getByLabelText('Continuity note'), { target: { value: 'Keep careful evidence.' } })
   fireEvent.click(screen.getByRole('button', { name: 'Add continuity note' }))
   await waitFor(() => expect(screen.getByLabelText('Continuity note')).toHaveValue(''))
-  expect(screen.queryByRole('button', { name: 'Remove note' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Remove note: Keep careful evidence.' })).not.toBeInTheDocument()
   expect(screen.getByRole('region', { name: 'Continuity context' })).not.toHaveTextContent('Keep careful evidence.')
   await waitFor(() => expect(screen.getByRole('button', { name: 'Add continuity note' })).toBeEnabled())
   fireEvent.change(screen.getByLabelText('Memory slot'), { target: { value: 'self_notes' } })
