@@ -42,8 +42,9 @@ export function Security() {
   if (!query.data && query.error) return <LoadError what="Hypermid network security" error={query.error} onRetry={query.refresh} />
   if (!query.data) return <FormSkeleton sections={1} rows={3} what="Hypermid network security" />
 
+  const status = query.data
   const revoke = async (grantId: string) => {
-    const grant = query.data.grants.find(candidate => candidate.grantId === grantId)
+    const grant = status.grants.find(candidate => candidate.grantId === grantId)
     if (!grant) { setError('This network grant is no longer available. Refresh and try again.'); return }
     if (!(await confirmDestructive(
       `Revoke network access to ${grant.scheme}://${grant.hostname}?`,
