@@ -1,3 +1,4 @@
+import { namedOwner } from '../shared/testing/sourceOwners'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -8,7 +9,7 @@ const read = (rel: string) => readFileSync(join(SRC, rel), 'utf8')
 const code = (rel: string) => read(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 
 const OUTSIDE_THE_SETTINGS_SWEEP = [
-  { file: 'features/agents/AgentDetail.tsx', write: 'saveAgentMetadata', form: 'inline' as const },
+  { file: 'features/agents/agentEditorState.ts', write: 'saveAgentMetadata', form: 'inline' as const },
   { file: 'features/dashboard/widgets/TasksWidget.tsx', write: 'updateTask', form: 'toast' as const },
 ]
 
@@ -29,12 +30,7 @@ describe('a refused write is visible, not merely non-confirmed', () => {
   })
 
   const componentBody = (rel: string, name: string) => {
-    const src = code(rel)
-    const at = src.indexOf(`function ${name}(`)
-    expect(at, `${rel} no longer defines ${name}`).toBeGreaterThan(-1)
-    const end = src.indexOf('\n}', at)
-    expect(end, `${name}'s body did not terminate`).toBeGreaterThan(at)
-    return src.slice(at, end)
+    return namedOwner(code(rel), name)
   }
 
   const INLINE_REPORTERS: [string, string][] = [
@@ -45,16 +41,21 @@ describe('a refused write is visible, not merely non-confirmed', () => {
 
   it.each(INLINE_REPORTERS)('%s › %s reports its refused write inline', (rel, name) => {
     const body = componentBody(rel, name)
-    expect(
-      [...body.matchAll(/\{err && <span role="alert"[^>]*>\{err\}<\/span>\}/g)].length,
-      `${name} must report beside the control that was pressed — a toast would put the answer ` +
-        'somewhere other than where the user is looking',
-    ).toBe(1)
-    expect(
-      [...body.matchAll(/catch \(e\) \{ setErr\(e instanceof Error \? e\.message : '/g)].length,
-      `${name}: the slot needs a handler filling it from the server's own sentence`,
-    ).toBe(1)
-    expect(body, `${name} must not swallow it instead`).not.toMatch(/catch\s*\{\s*\}/)
+    const slot = name === 'RoutingNotesEditor' ? 'notes.error' : name === 'RoutingStatusView' ? 'operation.error' : 'err'
+    expect(body).toContain(`${slot} && <span role="alert"`)
+    expect(body).toContain(`{${slot}}</span>`)
+    const handler = name === 'StudioDocEditor' ? body : namedOwner(code('features/agents/agentEditorState.ts'), 'useAgentWrite')
+    expect(handler).toMatch(/catch \((?:e|failure)\)/)
+    expect(handler).toMatch(/(?:setErr|setError)\(/)
+    expect(handler).toMatch(/instanceof Error \? (?:e|failure)\.message/)
+    if (name === 'RoutingNotesEditor') {
+      expect(body).toContain('useAgentRoutingNotes(agentName)')
+      const notes = namedOwner(code('features/agents/agentEditorState.ts'), 'useAgentRoutingNotes')
+      expect(notes).toContain('useAgentWrite(agentName)')
+      expect(notes).toContain('operation.write(() => api.saveAgentMetadata')
+    }
+    if (name === 'RoutingStatusView') expect(body).toContain('operation.write(() => unmuteAgent')
+    expect(body).not.toMatch(/catch\s*\{\s*\}/)
   })
 
   it('the two save editors still flash their success confirmation', () => {

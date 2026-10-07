@@ -3606,7 +3606,10 @@ function ChatHistoryPage({ navigate, query, setQuery }: { navigate: (p: string) 
   }
   async function setNeverArchive(key: string, value: boolean) {
     setSessions((prev) => prev && prev.map((x) => (x.key === key ? { ...x, never_archive: value } : x)))
-    await api.setSessionLifecycle(key, { never_archive: value }).catch(() => load())
+    await api.setSessionLifecycle(key, { never_archive: value }).catch((error) => {
+      reportActionFailure('change this chat’s archive protection')(error)
+      load()
+    })
   }
   async function createFolder() {
     const name = await promptInput({ title: 'New folder', label: 'Folder name', placeholder: 'e.g. Research', confirmLabel: 'Create' })

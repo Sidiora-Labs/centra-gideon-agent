@@ -1,3 +1,4 @@
+import { namedOwner } from '../shared/testing/sourceOwners'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -25,8 +26,8 @@ describe('frontend save and refusal truth', () => {
   })
 
   it('renders a retryable dashboard error instead of an empty recent-chat result', () => {
-    const dashboard = source('features/dashboard/DashboardPage.tsx')
-    expect(dashboard).toMatch(/sessionsError && \(/)
+    const dashboard = namedOwner(source('features/dashboard/DashboardPage.tsx'), 'Launcher')
+    expect(dashboard).toMatch(/Boolean\(sessionsError\) && \(/)
     expect(dashboard).toMatch(/InlineError icon onRetry=\{refreshSessions\}/)
   })
 
@@ -38,9 +39,9 @@ describe('frontend save and refusal truth', () => {
   })
 
   it('reconciles settings after success or refusal without swallowing the outcome', () => {
-    const settings = source('features/settings/settingsWidgets.tsx')
+    const settings = namedOwner(source('features/settings/settingsWidgets.tsx'), 'mutate')
     expect(settings).toMatch(/requireWriteAccepted\(await fn\(\)\)/)
     expect(settings).toMatch(/finally \{\s*invalidateSpecs\(affects\)/)
-    expect(settings).toMatch(/catch \(e\)[\s\S]{0,200}?return false/)
+    expect(settings).toMatch(/catch \(e\) \{\s*notify\([\s\S]*?, 'error'\)\s*return/)
   })
 })
