@@ -6,15 +6,16 @@ import hashlib
 import json
 import logging
 import secrets
-from gideon.core.sqlite_compat import connect, sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from sqlite3 import Connection, Row
 from typing import Any
 
 from gideon.automation.workflows.models import NodeInstance, RunStatus, WorkflowRun
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
+from gideon.core.sqlite_compat import connect, sqlite3
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ _JSON_COLUMNS = frozenset(
 _RUN_SCHEMA = "CREATE TABLE IF NOT EXISTS runs (\n            id TEXT PRIMARY KEY,\n            workflow_name TEXT NOT NULL,\n            status TEXT NOT NULL DEFAULT 'draft',\n            spec_version INTEGER NOT NULL DEFAULT 1,\n            inputs TEXT NOT NULL DEFAULT '{}',\n            intent TEXT NOT NULL DEFAULT '',\n            origin TEXT NOT NULL DEFAULT '{}',\n            parent_run_id TEXT,\n            root_run_id TEXT NOT NULL DEFAULT '',\n            spawned_by_node_id TEXT,\n            branch_key TEXT,\n            forked_from TEXT,\n            project_id TEXT NOT NULL DEFAULT '',\n            mode TEXT NOT NULL DEFAULT 'background',\n            budget TEXT NOT NULL DEFAULT '{}',\n            pinned INTEGER NOT NULL DEFAULT 0,\n            created_at TEXT NOT NULL DEFAULT '',\n            started_at TEXT,\n            completed_at TEXT,\n            elapsed_seconds REAL NOT NULL DEFAULT 0,\n            total_tokens INTEGER NOT NULL DEFAULT 0,\n            agent_count INTEGER NOT NULL DEFAULT 0,\n            error_message TEXT NOT NULL DEFAULT '',\n            attention TEXT,\n            policy_overrides TEXT NOT NULL DEFAULT '{}',\n            owner_username TEXT NOT NULL DEFAULT '',\n            origin_harness TEXT NOT NULL DEFAULT '',\n            extra TEXT NOT NULL DEFAULT '{}'\n        )"
 
 
-def _ensure_columns(conn: sqlite3.Connection, cols: dict[str, str]) -> None:
+def _ensure_columns(conn: Connection, cols: dict[str, str]) -> None:
     try:
         found = {row["name"] for row in conn.execute("PRAGMA table_info(runs)")}
     except sqlite3.DatabaseError:
@@ -108,7 +109,7 @@ def _ensure_columns(conn: sqlite3.Connection, cols: dict[str, str]) -> None:
             logger.debug("could not add column %s", name, exc_info=True)
 
 
-def _connect() -> sqlite3.Connection:
+def _connect() -> Connection:
     _db_path().parent.mkdir(parents=True, exist_ok=True)
     database = connect(str(_db_path()), timeout=5.0)
     database.row_factory = sqlite3.Row
@@ -149,7 +150,7 @@ def _connection(*, write: bool = False):
 
 class RunRowCodec:
     @staticmethod
-    def decode_cell(row: sqlite3.Row, name: str) -> Any:
+    def decode_cell(row: Row, name: str) -> Any:
         value = row[name]
         if name not in _JSON_COLUMNS:
             return bool(value) if name == "pinned" else value
@@ -165,7 +166,7 @@ class RunRowCodec:
             return fallback
 
     @classmethod
-    def decode(cls, row: sqlite3.Row) -> WorkflowRun:
+    def decode(cls, row: Row) -> WorkflowRun:
         document = {name: cls.decode_cell(row, name) for name in _COLUMNS}
         extension = document.pop("extra") or {}
         result = WorkflowRun.from_dict(document)
@@ -189,7 +190,7 @@ class RunRowCodec:
         return {name: cell(name) for name in _COLUMNS}
 
 
-def _row_to_run(row: sqlite3.Row) -> WorkflowRun:
+def _row_to_run(row: Row) -> WorkflowRun:
     return RunRowCodec.decode(row)
 
 
@@ -199,7 +200,7 @@ def _run_to_params(run: WorkflowRun) -> dict[str, Any]:
 
 class RunTable:
     @staticmethod
-    def insert(database: sqlite3.Connection, run: WorkflowRun) -> None:
+    def insert(database: Connection, run: WorkflowRun) -> None:
         fields = ", ".join(_COLUMNS)
         values = ", ".join(":" + name for name in _COLUMNS)
         database.execute(
@@ -301,9 +302,8 @@ def list_runs(
     )
     if owner_username.strip():
         clause += (
-            (" AND " if clause else " WHERE ")
-            + "(TRIM(owner_username) = '' OR LOWER(TRIM(owner_username)) = ?)"
-        )
+            " AND " if clause else " WHERE "
+        ) + "(TRIM(owner_username) = '' OR LOWER(TRIM(owner_username)) = ?)"
         bindings.append(owner_username.strip().lower())
     with _connection() as database:
         count = database.execute(
@@ -320,7 +320,10 @@ def list_runs(
 
 def list_loop_runs(*, project_id: str = "", kind: str = "") -> list[WorkflowRun]:
     """List runs explicitly created through the loop launch seam."""
-    clauses = ["json_valid(extra)", "COALESCE(json_extract(extra, '$.loop_kind'), '') <> ''"]
+    clauses = [
+        "json_valid(extra)",
+        "COALESCE(json_extract(extra, '$.loop_kind'), '') <> ''",
+    ]
     values: list[str] = []
     if project_id:
         clauses.append("project_id = ?")
@@ -330,7 +333,8 @@ def list_loop_runs(*, project_id: str = "", kind: str = "") -> list[WorkflowRun]
         values.append(kind)
     with _connection() as database:
         rows = database.execute(
-            "SELECT * FROM runs WHERE " + " AND ".join(clauses)
+            "SELECT * FROM runs WHERE "
+            + " AND ".join(clauses)
             + " ORDER BY created_at DESC, id DESC",
             values,
         ).fetchall()

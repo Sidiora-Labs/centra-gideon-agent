@@ -26,6 +26,7 @@ import re
 import time
 import weakref
 from pathlib import Path
+from sqlite3 import Connection, Row
 from typing import Any, Callable
 
 from gideon.automation.loop import files
@@ -52,6 +53,7 @@ def register_status_observer(
     if not getattr(observer, "__self__", None):
         raise TypeError("loop status observers must be bound methods")
     _STATUS_OBSERVERS.append(weakref.WeakMethod(observer))
+
 
 _LOOP_ID_RE = re.compile(r"^[a-f0-9]{8}$")
 
@@ -92,7 +94,7 @@ def _db_path() -> Path:
     return files._loops_root() / "loops.db"
 
 
-def _connect() -> sqlite3.Connection:
+def _connect() -> Connection:
     _db_path().parent.mkdir(parents=True, exist_ok=True)
     conn = connect(str(_db_path()), timeout=5.0)
     conn.row_factory = sqlite3.Row
@@ -157,7 +159,7 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
-def _ensure_columns(conn: sqlite3.Connection, cols: dict[str, str]) -> None:
+def _ensure_columns(conn: Connection, cols: dict[str, str]) -> None:
     """ALTER TABLE ADD COLUMN for any missing column (SQLite has no ADD-IF-NOT-EXISTS)."""
     try:
         existing = {
@@ -210,7 +212,7 @@ _SCALAR_COLS = (
 _JSON_COLS = _LIST_COLS + _DICT_COLS
 
 
-def _row_to_loop(row: sqlite3.Row) -> Loop:
+def _row_to_loop(row: Row) -> Loop:
     d: dict[str, Any] = dict(row)
     for col in _JSON_COLS:
         raw = d.get(col)
@@ -381,7 +383,9 @@ def update_status(loop_id: str, new_status: LoopStatus, **fields: Any) -> Loop:
             try:
                 callback(loop_id, current, new_status)
             except Exception:
-                logger.warning("loop status observer failed for %s", loop_id, exc_info=True)
+                logger.warning(
+                    "loop status observer failed for %s", loop_id, exc_info=True
+                )
         _STATUS_OBSERVERS[:] = alive
     if current in ATTENTION_STATUSES and new_status not in ATTENTION_STATUSES:
         _resolve_attention_rows(loop_id)

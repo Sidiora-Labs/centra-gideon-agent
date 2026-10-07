@@ -352,6 +352,7 @@ def read_archive_plan(
 
 def projects_folder(home: Path) -> Path:
     from gideon.operations.durability.home_paths import home_path
+
     return home_path(home, "projects")
 
 
@@ -363,11 +364,13 @@ class ImportDestination:
         if not safe_member(relative)[0]:
             return None
         from gideon.operations.durability.home_paths import guard_path
+
         return guard_path(self.directory / relative)
 
     def commit(self, accepted, contents, *, left=None):
         from gideon.core.atomic_write import atomic_write_bytes
         from gideon.operations.durability.home_paths import LinkInTheWay
+
         written = []
         for relative in accepted:
             if relative == "project.json" or not safe_member(relative)[0]:
@@ -390,7 +393,9 @@ class ImportDestination:
 def commit_import(
     plan: ImportPlan, archive: ExtractedArchive, *, project_root: Path, left=None
 ) -> list[str]:
-    return ImportDestination(project_root).commit(plan.accepted, archive.contents, left=left)
+    return ImportDestination(project_root).commit(
+        plan.accepted, archive.contents, left=left
+    )
 
 
 def import_project(plan: ImportPlan, archive: ExtractedArchive, *, store, home: Path):
@@ -399,15 +404,22 @@ def import_project(plan: ImportPlan, archive: ExtractedArchive, *, store, home: 
     portable = {}
     if "project.json" in plan.accepted:
         try:
-            record = json.loads(archive.contents.get("project.json", b"").decode("utf-8"))
+            record = json.loads(
+                archive.contents.get("project.json", b"").decode("utf-8")
+            )
         except (UnicodeDecodeError, ValueError):
             record = {}
         if isinstance(record, dict):
-            portable = {name: record[name] for name in ("brief", "agent_instructions_template")
-                        if isinstance(record.get(name), str)}
+            portable = {
+                name: record[name]
+                for name in ("brief", "agent_instructions_template")
+                if isinstance(record.get(name), str)
+            }
     project = store.create_project(plan.project_name, **portable)
-    left = []
-    written = commit_import(plan, archive, project_root=home / "projects" / project.id, left=left)
+    left: list[str] = []
+    written = commit_import(
+        plan, archive, project_root=home / "projects" / project.id, left=left
+    )
     if "project.json" in plan.accepted:
         written.insert(0, "project.json")
     return project, written, left

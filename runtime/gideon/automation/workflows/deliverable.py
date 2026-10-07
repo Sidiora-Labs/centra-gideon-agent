@@ -390,7 +390,7 @@ def retain_step_documents(
                 or not stat.S_ISREG(info.st_mode)
                 or info.st_size > MAX_STEP_MANIFEST_BYTES
             ):
-                rows = []
+                rows: object = []
             else:
                 current = json.loads(manifest_path.read_text(encoding="utf-8"))
                 rows = current.get("documents", []) if isinstance(current, dict) else []

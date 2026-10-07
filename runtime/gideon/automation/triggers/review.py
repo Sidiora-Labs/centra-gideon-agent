@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import fcntl
 import json
 import logging
@@ -46,20 +47,30 @@ class TriggerReviewStore:
         except (OSError, json.JSONDecodeError):
             logger.warning("trigger review store is unreadable: %s", self.path)
             return {"version": _SCHEMA_VERSION, "cards": {}}
-        if not isinstance(document, dict) or not isinstance(document.get("cards"), dict):
+        if not isinstance(document, dict) or not isinstance(
+            document.get("cards"), dict
+        ):
             logger.warning("trigger review store has an invalid shape: %s", self.path)
             return {"version": _SCHEMA_VERSION, "cards": {}}
         return {"version": _SCHEMA_VERSION, "cards": document["cards"]}
 
     def _write(self, document: dict[str, Any]) -> None:
-        atomic_write(self.path, json.dumps(document, indent=2, ensure_ascii=False) + "\n")
+        atomic_write(
+            self.path, json.dumps(document, indent=2, ensure_ascii=False) + "\n"
+        )
 
-    def list(self, *, pending_only: bool = True) -> list[dict[str, Any]]:
+    def list(self, *, pending_only: bool = True) -> builtins.list[dict[str, Any]]:
         with self._locked():
             rows = list(self._read()["cards"].values())
         if pending_only:
             rows = [row for row in rows if row.get("status") == "pending"]
-        return sorted(rows, key=lambda row: (float(row.get("created_at") or 0), str(row.get("id") or "")))
+        return sorted(
+            rows,
+            key=lambda row: (
+                float(row.get("created_at") or 0),
+                str(row.get("id") or ""),
+            ),
+        )
 
     def get(self, review_id: str) -> dict[str, Any] | None:
         with self._locked():
@@ -70,10 +81,10 @@ class TriggerReviewStore:
         self,
         trigger_store: Any,
         report: dict[str, Any],
-        interrupted: list[str],
+        interrupted: builtins.list[str],
         *,
         now: float | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> builtins.list[dict[str, Any]]:
         from gideon.automation.triggers.grants import action_revision
         from gideon.security.security import redact_values_for_display
 
@@ -84,9 +95,7 @@ class TriggerReviewStore:
             identity = str(entry.get("trigger_id") or "")
             if not identity:
                 continue
-            aggregate = missed.setdefault(
-                identity, {"count": 0, "latest": 0.0}
-            )
+            aggregate = missed.setdefault(identity, {"count": 0, "latest": 0.0})
             aggregate["count"] += 1
             aggregate["latest"] = max(
                 aggregate["latest"], float(entry.get("scheduled_for") or 0)
@@ -95,22 +104,21 @@ class TriggerReviewStore:
             identity = str(entry.get("trigger_id") or "")
             if not identity:
                 continue
-            aggregate = missed.setdefault(
-                identity, {"count": 0, "latest": 0.0}
-            )
+            aggregate = missed.setdefault(identity, {"count": 0, "latest": 0.0})
             aggregate["count"] += int(entry.get("count") or 0)
             aggregate["latest"] = max(
                 aggregate["latest"], float(entry.get("newest") or 0)
             )
 
-        candidates: list[dict[str, Any]] = []
+        candidates: builtins.list[dict[str, Any]] = []
         for identity, aggregate in missed.items():
             row = trigger_store.get(identity)
             if row is None:
                 continue
             trigger = row.trigger
             action = trigger.workflow if isinstance(trigger.workflow, dict) else {}
-            action = action.get("inline") if isinstance(action.get("inline"), dict) else action
+            inline = action.get("inline")
+            action = inline if isinstance(inline, dict) else action
             revision = action_revision(trigger)
             candidates.append(
                 {
@@ -135,7 +143,8 @@ class TriggerReviewStore:
                 continue
             trigger = row.trigger
             action = trigger.workflow if isinstance(trigger.workflow, dict) else {}
-            action = action.get("inline") if isinstance(action.get("inline"), dict) else action
+            inline = action.get("inline")
+            action = inline if isinstance(inline, dict) else action
             revision = action_revision(trigger)
             run_id = str(trigger.last_run_id or "")
             candidates.append(
@@ -165,18 +174,27 @@ class TriggerReviewStore:
 
                     pid = int(row.get("owner_pid") or 0)
                     identity = str(row.get("owner_identity") or "")
-                    dead = claims.owner_state(pid, identity) is False if identity else _owner_provably_dead(pid)
+                    dead = (
+                        claims.owner_state(pid, identity) is False
+                        if identity
+                        else _owner_provably_dead(pid)
+                    )
                     if not dead:
                         continue
                     row["status"] = "pending"
-                    row["last_error"] = "review decision was interrupted before completion"
+                    row["last_error"] = (
+                        "review decision was interrupted before completion"
+                    )
             for candidate in candidates:
                 previous = cards.get(candidate["id"])
                 if isinstance(previous, dict):
                     if previous.get("status") == "running":
                         continue
                     if previous.get("status") == "pending":
-                        if previous.get("action_revision") == candidate["action_revision"]:
+                        if (
+                            previous.get("action_revision")
+                            == candidate["action_revision"]
+                        ):
                             previous["missed_count"] = max(
                                 int(previous.get("missed_count") or 0),
                                 int(candidate.get("missed_count") or 0),
@@ -186,15 +204,15 @@ class TriggerReviewStore:
                                 float(candidate.get("latest_missed_at") or 0),
                             )
                         continue
-                    if (
-                        candidate["reason"] == "missed"
-                        and float(candidate["latest_missed_at"] or 0)
-                        <= float(previous.get("latest_missed_at") or 0)
-                    ):
+                    if candidate["reason"] == "missed" and float(
+                        candidate["latest_missed_at"] or 0
+                    ) <= float(previous.get("latest_missed_at") or 0):
                         continue
                 cards[candidate["id"]] = candidate
             self._write(document)
-            return [dict(row) for row in cards.values() if row.get("status") == "pending"]
+            return [
+                dict(row) for row in cards.values() if row.get("status") == "pending"
+            ]
 
     def resolve(
         self,
@@ -220,7 +238,9 @@ class TriggerReviewStore:
         from gideon.integrations.inbox import resolve_attention_items
 
         services = get_action_services()
-        resolve_attention_items(services.state if services else None, {"trigger_review": review_id})
+        resolve_attention_items(
+            services.state if services else None, {"trigger_review": review_id}
+        )
         return True
 
     def begin_run(self, review_id: str) -> dict[str, Any] | None:
@@ -232,7 +252,8 @@ class TriggerReviewStore:
             if any(
                 other.get("status") == "running"
                 and other.get("trigger_id") == row.get("trigger_id")
-                for other in document["cards"].values() if isinstance(other, dict)
+                for other in document["cards"].values()
+                if isinstance(other, dict)
             ):
                 return None
             row["status"] = "running"
@@ -276,13 +297,25 @@ async def record_review_outcome(
         return None
     status = outcome
     if status == "dismissed":
-        status = "interrupted_dismissed" if card.get("reason") == "interrupted" else "skipped_missed"
+        status = (
+            "interrupted_dismissed"
+            if card.get("reason") == "interrupted"
+            else "skipped_missed"
+        )
     record = ExecutionRecord(
         run_id=f"review-{int(finished * 1000)}",
         job_id=identity,
         trigger="review",
-        started_at=float(action_record.get("started_at") or finished) if action_record else finished,
-        finished_at=float(action_record.get("finished_at") or finished) if action_record else finished,
+        started_at=(
+            float(action_record.get("started_at") or finished)
+            if action_record
+            else finished
+        ),
+        finished_at=(
+            float(action_record.get("finished_at") or finished)
+            if action_record
+            else finished
+        ),
         duration_ms=int(action_record.get("duration_ms") or 0) if action_record else 0,
         status=str(action_record.get("status") or status) if action_record else status,
         summary=(
@@ -293,5 +326,7 @@ async def record_review_outcome(
         trace=str(action_record.get("trace") or "") if action_record else "",
         error=str(action_record.get("error") or error) if action_record else error,
     )
-    await ExecutionJournal(config_dir() if base_dir is None else Path(base_dir)).append(record)
+    await ExecutionJournal(config_dir() if base_dir is None else Path(base_dir)).append(
+        record
+    )
     return record.run_id

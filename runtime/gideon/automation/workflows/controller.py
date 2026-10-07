@@ -93,26 +93,16 @@ from gideon.automation.workflows.engine import (
     dispatcher_commits_effects,
     parse_declared_output,
 )
-from gideon.automation.workflows.failure_taxonomy import (
-    classify_exception,
-    with_breaker_window,
-)
-from gideon.automation.workflows.liveness import last_heard
-from gideon.automation.workflows.step_usage import (
-    NOT_RECORDED,
-    NOTHING_SENT,
-    CallLog,
-    StepUsage,
-    bind_calls,
-    measured,
-    subagent_usage,
-)
 from gideon.automation.workflows.engine_support import (
     DEFAULT_MODEL_TIERS,
     NodeResult,
     _release_claim,
     claim_key,
     resolve_axis_model,
+)
+from gideon.automation.workflows.failure_taxonomy import (
+    classify_exception,
+    with_breaker_window,
 )
 from gideon.automation.workflows.human_input import drop_continuations
 from gideon.automation.workflows.journal import (
@@ -124,6 +114,7 @@ from gideon.automation.workflows.journal import (
 from gideon.automation.workflows.judge_contract import (
     hints_from_dict as judge_hints_from_dict,
 )
+from gideon.automation.workflows.liveness import last_heard
 from gideon.automation.workflows.loop_middleware import (
     InterruptQueue,
     call_fingerprint,
@@ -161,6 +152,15 @@ from gideon.automation.workflows.scope import diff as scope_diff
 from gideon.automation.workflows.scope import enforces_scope, scope_mode
 from gideon.automation.workflows.scope import snapshot as scope_snapshot
 from gideon.automation.workflows.scope import watch_roots as scope_watch_roots
+from gideon.automation.workflows.step_usage import (
+    NOT_RECORDED,
+    NOTHING_SENT,
+    CallLog,
+    StepUsage,
+    bind_calls,
+    measured,
+    subagent_usage,
+)
 from gideon.automation.workflows.supervisor_policy import (
     tick_config as convergence_config,
 )
@@ -318,7 +318,9 @@ class RunController:
         self._budget_warned = False
         self._effects: dict[str, list[EffectRecord]] = effect_history(run.id)
         queued = self.run.extra.get("workflow_queued_mutations", [])
-        self._pending_mutations: list[tuple[list[dict[str, Any]], str, dict[str, Any] | None]] = [
+        self._pending_mutations: list[
+            tuple[list[dict[str, Any]], str, dict[str, Any] | None]
+        ] = [
             (list(item.get("ops") or []), str(item.get("actor") or "user"), None)
             for item in queued
             if isinstance(item, dict) and isinstance(item.get("ops"), list)
@@ -357,7 +359,7 @@ class RunController:
                 self._publish_nullable_failure_output(node, inst.state)
 
     def _publish_nullable_failure_output(
-        self, node: Node, state: InstanceState
+        self, node: Node | None, state: InstanceState
     ) -> None:
         """Expose only explicit `allow_failure` failures as a present null binding.
 
@@ -365,7 +367,8 @@ class RunController:
         stored for diagnostics. Null is the binding value, never a success-shaped result.
         """
         if (
-            state == InstanceState.FAILED
+            node is not None
+            and state == InstanceState.FAILED
             and (node.config or {}).get("allow_failure") is True
             and node.id
         ):
@@ -491,13 +494,17 @@ class RunController:
         if self._task is not None:
             home = self._task.get_loop()
             if home.is_running() and home is not asyncio.get_running_loop():
-                await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self.stop(), home))
+                await asyncio.wrap_future(
+                    asyncio.run_coroutine_threadsafe(self.stop(), home)
+                )
                 return
         entries = list(self._inflight.values())
         for entry in entries:
             entry.task.cancel()
         if entries:
-            await asyncio.gather(*(entry.task for entry in entries), return_exceptions=True)
+            await asyncio.gather(
+                *(entry.task for entry in entries), return_exceptions=True
+            )
         self._inflight.clear()
         if self._task and not self._task.done():
             self._task.cancel()
@@ -510,7 +517,9 @@ class RunController:
         task = self._task
         if task is None:
             return False
-        return task.get_loop().is_closed() or (task.cancelled() and self.run.status == RunStatus.RUNNING)
+        return task.get_loop().is_closed() or (
+            task.cancelled() and self.run.status == RunStatus.RUNNING
+        )
 
     def let_go(self) -> None:
         """Withdraw task ownership before another controller adopts the durable run."""
@@ -581,8 +590,11 @@ class RunController:
         not be honored.
         """
         from gideon.automation.workflows import private_work
+
         try:
-            await private_work.validate_run(getattr(self.services, "supervisor", None), self.run)
+            await private_work.validate_run(
+                getattr(self.services, "supervisor", None), self.run
+            )
         except Exception as error:
             await self._finish(RunStatus.CANCELLED, error=str(error)[:500])
             return False
@@ -593,7 +605,11 @@ class RunController:
         if resumed:
             lost = []
             for path, inst in self.instances.items():
-                if inst.state == InstanceState.RUNNING and not inst.subagent_id and path not in self._inflight:
+                if (
+                    inst.state == InstanceState.RUNNING
+                    and not inst.subagent_id
+                    and path not in self._inflight
+                ):
                     inst.state = InstanceState.PENDING
                     inst.started_at = None
                     inst.attempt = max(0, inst.attempt - 1)
@@ -605,7 +621,11 @@ class RunController:
 
             for path, _config in self._round_configs():
                 self._iterations[path] = completed_iterations(self.run.id, path)
-            interrupted = [inst for inst in self.instances.values() if inst.state == InstanceState.RUNNING]
+            interrupted = [
+                inst
+                for inst in self.instances.values()
+                if inst.state == InstanceState.RUNNING
+            ]
             for inst in interrupted:
                 inst.state = InstanceState.PENDING
                 inst.started_at = None
@@ -638,11 +658,16 @@ class RunController:
                     return False
                 worktree = str(decision.handoff["worktree"])
                 if round_workspace and worktree != round_workspace:
-                    await self._finish(RunStatus.ESCALATED, error="round loops require one reviewed worktree")
+                    await self._finish(
+                        RunStatus.ESCALATED,
+                        error="round loops require one reviewed worktree",
+                    )
                     return False
                 round_workspace = worktree
                 saved = (self.run.extra.get("round_handoff") or {}).get(path)
-                self._steering_inject[path] = json.dumps(saved if isinstance(saved, dict) else decision.handoff, default=str)
+                self._steering_inject[path] = json.dumps(
+                    saved if isinstance(saved, dict) else decision.handoff, default=str
+                )
             if round_workspace:
                 self.services.cwd = round_workspace
         self._bind_project_memory_cwd()
@@ -891,7 +916,11 @@ class RunController:
                     info = get(inst.subagent_id) if callable(get) else None
                 except Exception:
                     info = None
-                usage = subagent_usage(info) if info is not None and getattr(info, "done", False) else NOT_RECORDED
+                usage = (
+                    subagent_usage(info)
+                    if info is not None and getattr(info, "done", False)
+                    else NOT_RECORDED
+                )
                 node = by_path.get(spec_path(path))
                 self._cancel_usage_snapshot.append(
                     _CancelledAttemptSnapshot(
@@ -983,12 +1012,15 @@ class RunController:
                 continue
             config = node.config or {}
             if inst.state == InstanceState.DECLINED:
-                reason = inst.failure.cause_plain if inst.failure else "gate was declined"
+                reason = (
+                    inst.failure.cause_plain if inst.failure else "gate was declined"
+                )
                 return RunStatus.DECLINED, f"{node.id or path}: {reason}"
             if inst.state != InstanceState.FAILED:
                 continue
             tolerated = bool(config.get("allow_failure")) or (
-                "on_error" in config and str(config.get("on_error") or "") == "null_continue"
+                "on_error" in config
+                and str(config.get("on_error") or "") == "null_continue"
             )
             if not tolerated:
                 reason = inst.failure.cause_plain if inst.failure else "gate failed"
@@ -1119,7 +1151,11 @@ class RunController:
             from gideon.automation.triggers import grants
             from gideon.automation.triggers.store import TriggerStore
             from gideon.automation.triggers.wakeup import resume_target_of
-            from gideon.automation.workflows.human_input import Ask, AskKind, list_continuations
+            from gideon.automation.workflows.human_input import (
+                Ask,
+                AskKind,
+                list_continuations,
+            )
             from gideon.automation.workflows.service import (
                 ScheduledEventWake,
                 json_values_equal,
@@ -1143,10 +1179,9 @@ class RunController:
             if row is None or not row.ok or not row.trigger.enabled:
                 return False
             trigger = row.trigger
-            if (
-                grants.action_revision(trigger) != context.action_revision
-                or not grants.is_granted(trigger)
-            ):
+            if grants.action_revision(
+                trigger
+            ) != context.action_revision or not grants.is_granted(trigger):
                 return False
             target = resume_target_of(trigger)
             if (
@@ -1287,7 +1322,8 @@ class RunController:
         self.publish_confirmation_resolved(
             cont.instance_path,
             cont.node_id,
-            confirmation_id=cont.confirmation_id or _confirmation_id(
+            confirmation_id=cont.confirmation_id
+            or _confirmation_id(
                 self.run.id, cont.node_id or cont.instance_path, cont.epoch
             ),
             verb=("wake" if is_event else "approve") if approved else "reject",
@@ -1521,7 +1557,9 @@ class RunController:
             decided_by="nobody" if outcome in ("withdrawn", "declined") else "you",
         )
 
-    def _close_waits(self, *, outcome: str, reason: str, instance_path: str = "") -> None:
+    def _close_waits(
+        self, *, outcome: str, reason: str, instance_path: str = ""
+    ) -> None:
         from gideon.automation.workflows.human_input import (
             drop_continuations,
             list_continuations,
@@ -1559,11 +1597,13 @@ class RunController:
             return {
                 "ok": False,
                 "code": "WF_MUT_RUN_TERMINAL",
-                "issues": [{
-                    "code": "WF_MUT_RUN_TERMINAL",
-                    "message": f"run is already {self.run.status.value}",
-                    "node_id": "",
-                }],
+                "issues": [
+                    {
+                        "code": "WF_MUT_RUN_TERMINAL",
+                        "message": f"run is already {self.run.status.value}",
+                        "node_id": "",
+                    }
+                ],
                 "preview": mutations.CascadePreview().to_dict(),
             }
         if expect_version is not None and int(expect_version) != int(
@@ -1632,7 +1672,9 @@ class RunController:
                     **owner_reentry,
                     "mutation_id": uuid.uuid4().hex,
                 }
-        self._pending_mutations.append(([op.to_dict() for op in result.ops], actor, reentry))
+        self._pending_mutations.append(
+            ([op.to_dict() for op in result.ops], actor, reentry)
+        )
         self._persist_pending_mutations()
         body["queued"] = True
         if self.run.status in (RunStatus.NEEDS_INPUT, RunStatus.PAUSED):
@@ -1641,7 +1683,8 @@ class RunController:
 
     def _persist_pending_mutations(self) -> None:
         self.run.extra["workflow_queued_mutations"] = [
-            {"ops": ops, "actor": actor} for ops, actor, _reentry in self._pending_mutations
+            {"ops": ops, "actor": actor}
+            for ops, actor, _reentry in self._pending_mutations
         ]
         self._save_run()
 
@@ -1785,7 +1828,9 @@ class RunController:
                 self._outputs.pop(node.id, None)
             self.journal.invalidate_prefix(path)
             self._close_waits(
-                outcome="revised", reason="the gate was invalidated by a rewind", instance_path=path
+                outcome="revised",
+                reason="the gate was invalidated by a rewind",
+                instance_path=path,
             )
             drop_continuations(self.run.id, instance_prefix=path)
 
@@ -1930,7 +1975,8 @@ class RunController:
             node_id = node.id if node else ""
             inst.served_model_ref = str(getattr(info, "served_model_ref", "") or "")
             inst.model_substitutions = [
-                dict(record) for record in (getattr(info, "model_substitutions", None) or [])
+                dict(record)
+                for record in (getattr(info, "model_substitutions", None) or [])
                 if isinstance(record, dict)
             ]
             if inst.model_substitutions:
@@ -1944,7 +1990,9 @@ class RunController:
                 self.journal.write("model_substitution", **metadata)
                 self._publish("workflow_model_substitution", metadata)
             if inst.subagent_claim_holder:
-                _release_claim(claim_key(self.run.id, node_id), inst.subagent_claim_holder)
+                _release_claim(
+                    claim_key(self.run.id, node_id), inst.subagent_claim_holder
+                )
                 inst.subagent_claim_holder = ""
             error = str(getattr(info, "error", "") or "")
             reaped = bool(getattr(info, "reaped", False))
@@ -1955,9 +2003,7 @@ class RunController:
                 classified = classify_exception(RuntimeError(error))
                 failure = Failure(
                     failure_class=(
-                        FailureClass.TIMEOUT
-                        if reaped
-                        else classified.failure_class
+                        FailureClass.TIMEOUT if reaped else classified.failure_class
                     ),
                     cause_plain=error,
                     remediation=(
@@ -1968,7 +2014,9 @@ class RunController:
                     ),
                     recoverable=True,
                 )
-                if node is not None and self._retry_allowed(node, inst.attempt, failure):
+                if node is not None and self._retry_allowed(
+                    node, inst.attempt, failure
+                ):
                     record = attempt_from_failure(inst.attempt, failure)
                     self._attempts.setdefault(path, []).append(record)
                     self.journal.write(
@@ -2067,7 +2115,6 @@ class RunController:
                             tokens=inst.tokens,
                             model=usage.model,
                             provider=usage.provider,
-                            cost_usd=usage.cost_usd,
                             usage=usage,
                             degraded_reason="",
                             output_ref=ref,
@@ -2092,7 +2139,6 @@ class RunController:
                         tokens=inst.tokens,
                         model=usage.model,
                         provider=usage.provider,
-                        cost_usd=usage.cost_usd,
                         usage=usage,
                         degraded_reason="",
                         output_ref=ref,
@@ -2756,15 +2802,15 @@ class RunController:
             and reentry.get("attempt") == inst.attempt
             and reentry.get("node_id") == item.node.id
         )
-        if reentry_matches:
+        if reentry is not None and reentry_matches:
             from gideon.interfaces.dashboard.auto_denials import owner_reentry_attempt
 
-            state = getattr(self.services, "attention_state", None)
+            attention_state = getattr(self.services, "attention_state", None)
             execution_attempt = (
                 f"{reentry['mutation_id']}:{item.path}:{inst.epoch}:{inst.attempt}"
             )
             with owner_reentry_attempt(
-                state,
+                attention_state,
                 str(reentry["note_id"]),
                 reentry["principal"],
                 origin_kind=str(reentry["origin_kind"]),
@@ -2782,7 +2828,11 @@ class RunController:
 
             document_snapshot = deliverable.step_document_snapshot(self.services.cwd)
         self._inflight[item.path] = _InFlight(
-            task=task, ready=item, started=now, last_progress=now, cache_key=key,
+            task=task,
+            ready=item,
+            started=now,
+            last_progress=now,
+            cache_key=key,
             calls=calls,
             document_root=self.services.cwd,
             document_snapshot=document_snapshot,
@@ -2842,7 +2892,9 @@ class RunController:
         if not dispatcher_commits_effects(item.node):
             return True
         history = self._effects.get(item.path, [])
-        latest = next((record for record in reversed(history) if record.epoch == inst.epoch), None)
+        latest = next(
+            (record for record in reversed(history) if record.epoch == inst.epoch), None
+        )
         if latest is not None and latest.effect_status in (
             EffectStatus.ATTEMPTED,
             EffectStatus.COMMITTED,
@@ -3018,8 +3070,10 @@ class RunController:
         """
         if self._worker_model_cache is None:
             from gideon.security.execution_lineage import run_model
+
             original_model = run_model(self.run)
             from gideon.automation.workflows import ownership
+
             if ownership.run_mode(self.run) is not ownership.MemoryMode.NORMAL:
                 self._worker_model_cache = original_model
                 return original_model
@@ -3075,7 +3129,11 @@ class RunController:
             project_id=self.run.project_id,
             instance_path=item.path,
             cwd=self.services.cwd,
-            action_cwd=self.services.cwd if self._round_configs() and node.kind == NodeKind.ACTION else "",
+            action_cwd=(
+                self.services.cwd
+                if self._round_configs() and node.kind == NodeKind.ACTION
+                else ""
+            ),
             tiers=self.services.model_tiers,
             completion=self.services.completion,
             get_provider=self.services.get_provider,
@@ -3405,7 +3463,9 @@ class RunController:
             self._store_prompt(item.path, result.resolved_prompt)
             if isinstance(result.output, dict):
                 inst.subagent_id = str(result.output.get("subagent_id", "") or "")
-                inst.subagent_claim_holder = str(result.output.get("claim_holder", "") or "")
+                inst.subagent_claim_holder = str(
+                    result.output.get("claim_holder", "") or ""
+                )
             return
 
         if result.state == InstanceState.WAITING:
@@ -3477,7 +3537,10 @@ class RunController:
                 provider=result.provider,
             )
             record = attempt_from_failure(
-                inst.attempt, failure, tokens=usage.billable(result.tokens), duration_secs=duration
+                inst.attempt,
+                failure,
+                tokens=usage.billable(result.tokens),
+                duration_secs=duration,
             )
             inst.tokens = usage.billable(result.tokens)
             self.run.total_tokens += inst.tokens
@@ -3608,7 +3671,6 @@ class RunController:
                 retries=max(0, inst.attempt - 1),
                 model=usage.model,
                 provider=usage.provider,
-                cost_usd=usage.cost_usd,
                 usage=usage,
                 degraded_reason=result.degraded_reason,
                 resolved_prompt_ref=self._store_prompt(
@@ -4061,19 +4123,39 @@ class RunController:
                 loop_path=parent_path,
             )
             if not decision.allow_next:
-                self._surface_loop(parent_path, node, reason="round_verification", detail=decision.reason)
+                self._surface_loop(
+                    parent_path,
+                    node,
+                    reason="round_verification",
+                    detail=decision.reason,
+                )
                 return
             handoffs = dict(self.run.extra.get("round_handoff") or {})
             handoffs[parent_path] = decision.handoff
             self.run.extra["round_handoff"] = handoffs
             self._save_run()
-            self.journal.handoff(parent_path, node.id, epoch=self._instance(item.path).epoch, iteration=iteration, handoff=decision.handoff)
-            self._steering_inject[parent_path] = json.dumps(decision.handoff, default=str)
+            self.journal.handoff(
+                parent_path,
+                node.id,
+                epoch=self._instance(item.path).epoch,
+                iteration=iteration,
+                handoff=decision.handoff,
+            )
+            self._steering_inject[parent_path] = json.dumps(
+                decision.handoff, default=str
+            )
             if decision.handoff.get("stop"):
                 loop_inst = self._instance(parent_path)
                 loop_inst.state = InstanceState.DONE
                 loop_inst.completed_at = _now()
-                self.journal.iteration(parent_path, node.id, iteration=iteration, outcome=decision.reason, error_signature="", tokens=0)
+                self.journal.iteration(
+                    parent_path,
+                    node.id,
+                    iteration=iteration,
+                    outcome=decision.reason,
+                    error_signature="",
+                    tokens=0,
+                )
                 return
         if self._iteration_is_dry(node, parent_path, iteration, output):
             self._dry_streaks[parent_path] = self._dry_streaks.get(parent_path, 0) + 1
@@ -4130,8 +4212,10 @@ class RunController:
             dry_streak=self._dry_streaks.get(parent_path, 0),
             ctx=ctx,
         )
-        if verdict.tripped and verdict.reason == "max_iterations" and (
-            keep_going or reason == "max_iterations"
+        if (
+            verdict.tripped
+            and verdict.reason == "max_iterations"
+            and (keep_going or reason == "max_iterations")
         ):
             self._surface_loop(
                 parent_path, node, reason=verdict.reason, detail=verdict.detail
@@ -4724,7 +4808,9 @@ class RunController:
                 terminal_reason="timed_out_unattended",
             )
             self._close_waits(
-                outcome="declined", reason="gate timed out with no answer", instance_path=path
+                outcome="declined",
+                reason="gate timed out with no answer",
+                instance_path=path,
             )
             inst.state = InstanceState.FAILED
             inst.failure = failure
@@ -4792,11 +4878,14 @@ class RunController:
         cancel = getattr(manager, "cancel", None)
         if not callable(cancel):
             if any(inst.subagent_id for inst in self.instances.values()):
-                raise RuntimeError("workflow worker manager cannot cancel active workers")
+                raise RuntimeError(
+                    "workflow worker manager cannot cancel active workers"
+                )
             return
         prefix = f"workflow:{self.run.id}:"
         workers = [
-            info for info in getattr(manager, "running", [])
+            info
+            for info in getattr(manager, "running", [])
             if str(getattr(info, "parent_session_key", "")).startswith(prefix)
         ]
         results = await asyncio.gather(
@@ -4814,27 +4903,44 @@ class RunController:
                 try:
                     self._apply(entry, entry.task.result())
                 except Exception:
-                    logger.debug("completed node could not settle before cancellation", exc_info=True)
+                    logger.debug(
+                        "completed node could not settle before cancellation",
+                        exc_info=True,
+                    )
         self._reconcile_dispatched_stages()
         await self._stop_run_workers("workflow workers could not be stopped")
         captured = {snapshot.path for snapshot in self._cancel_usage_snapshot}
         nodes = dict(_walk(self.root))
         manager_get = getattr(self.services.subagents, "get", None)
         for path, inst in self.instances.items():
-            if path in captured or inst.state != InstanceState.RUNNING or not inst.subagent_id:
+            if (
+                path in captured
+                or inst.state != InstanceState.RUNNING
+                or not inst.subagent_id
+            ):
                 continue
             try:
                 info = manager_get(inst.subagent_id) if callable(manager_get) else None
             except Exception:
                 info = None
-            usage = subagent_usage(info) if info is not None and getattr(info, "done", False) else NOT_RECORDED
+            usage = (
+                subagent_usage(info)
+                if info is not None and getattr(info, "done", False)
+                else NOT_RECORDED
+            )
             node = nodes.get(spec_path(path))
-            self._cancel_usage_snapshot.append(_CancelledAttemptSnapshot(path, node.id if node else "", inst.epoch, inst.attempt, usage))
+            self._cancel_usage_snapshot.append(
+                _CancelledAttemptSnapshot(
+                    path, node.id if node else "", inst.epoch, inst.attempt, usage
+                )
+            )
         entries = list(self._inflight.values())
         for entry in entries:
             entry.task.cancel()
         if entries:
-            await asyncio.gather(*(entry.task for entry in entries), return_exceptions=True)
+            await asyncio.gather(
+                *(entry.task for entry in entries), return_exceptions=True
+            )
         for entry in entries:
             inst = self._instance(entry.ready.path)
             if inst.state == InstanceState.RUNNING:
@@ -4846,7 +4952,9 @@ class RunController:
                 inst.completed_at = _now()
                 inst.subagent_id = ""
         self._inflight.clear()
-        snapshots = {snapshot.path: snapshot for snapshot in self._cancel_usage_snapshot}
+        snapshots = {
+            snapshot.path: snapshot for snapshot in self._cancel_usage_snapshot
+        }
         for entry in entries:
             path = entry.ready.path
             inst = self._instance(path)
@@ -4854,13 +4962,28 @@ class RunController:
                 continue
             snapshot = snapshots.pop(path, None)
             usage = snapshot.usage if snapshot is not None else measured(entry.calls)
-            self.journal.step_cancelled(path, entry.ready.node.id, epoch=inst.epoch, attempt=inst.attempt, usage=usage)
+            self.journal.step_cancelled(
+                path,
+                entry.ready.node.id,
+                epoch=inst.epoch,
+                attempt=inst.attempt,
+                usage=usage,
+            )
             inst.tokens = usage.billable()
         for snapshot in snapshots.values():
-            inst = self.instances.get(snapshot.path)
-            if inst is not None and inst.state == InstanceState.CANCELLED:
-                self.journal.step_cancelled(snapshot.path, snapshot.node_id, epoch=snapshot.epoch, attempt=snapshot.attempt, usage=snapshot.usage)
-                inst.tokens = snapshot.usage.billable()
+            cancelled_inst = self.instances.get(snapshot.path)
+            if (
+                cancelled_inst is not None
+                and cancelled_inst.state == InstanceState.CANCELLED
+            ):
+                self.journal.step_cancelled(
+                    snapshot.path,
+                    snapshot.node_id,
+                    epoch=snapshot.epoch,
+                    attempt=snapshot.attempt,
+                    usage=snapshot.usage,
+                )
+                cancelled_inst.tokens = snapshot.usage.billable()
         self._cancel_usage_snapshot.clear()
         self._persist_state()
 
@@ -4874,14 +4997,19 @@ class RunController:
                 try:
                     self._apply(entry, entry.task.result())
                 except Exception:
-                    logger.debug("completed workflow node could not settle before pause", exc_info=True)
+                    logger.debug(
+                        "completed workflow node could not settle before pause",
+                        exc_info=True,
+                    )
         self._reconcile_dispatched_stages()
         await self._stop_run_workers("workflow workers could not be paused")
         entries = list(self._inflight.values())
         for entry in entries:
             entry.task.cancel()
         if entries:
-            await asyncio.gather(*(entry.task for entry in entries), return_exceptions=True)
+            await asyncio.gather(
+                *(entry.task for entry in entries), return_exceptions=True
+            )
         self._inflight.clear()
         for inst in self.instances.values():
             if inst.state != InstanceState.RUNNING:
@@ -4915,14 +5043,20 @@ class RunController:
 
             error = for_failures(self)
             failed = [
-                (path, inst) for path, inst in self.instances.items()
+                (path, inst)
+                for path, inst in self.instances.items()
                 if inst.failure and inst.failure.cause_plain
             ]
             if not error and failed:
-                path, inst = max(failed, key=lambda row: (row[0].count("."), row[1].completed_at or ""))
+                path, inst = max(
+                    failed,
+                    key=lambda row: (row[0].count("."), row[1].completed_at or ""),
+                )
                 node = dict(_walk(self.root)).get(spec_path(path))
                 label = node.id if node and node.id else path
-                error = f"{label}: {inst.failure.cause_plain}"[:500]
+                failure = inst.failure
+                if failure is not None:
+                    error = f"{label}: {failure.cause_plain}"[:500]
         if status in TERMINAL_RUN_STATUSES:
             self._close_waits(outcome="withdrawn", reason=f"run ended {status.value}")
         self.run.status = status

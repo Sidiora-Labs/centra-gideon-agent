@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import fcntl
 import json
 import logging
-import fcntl
-import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -90,8 +90,11 @@ class DefinitionDraft:
                 prior = _read(self.name)
                 current_revision = prior.version if prior is not None else None
                 if create_only and prior is not None:
-                    raise DefinitionNameConflict(current_revision)
-                if expected_revision is not None and current_revision != expected_revision:
+                    raise DefinitionNameConflict(prior.version)
+                if (
+                    expected_revision is not None
+                    and current_revision != expected_revision
+                ):
                     raise DefinitionRevisionConflict(current_revision)
                 document = self.document(prior)
                 target = _def_path(self.name)
@@ -113,8 +116,13 @@ class DefinitionDraft:
             ]
             owner_calls = None
             source = str(self.fields.get("_version_source") or versions.SOURCE_USER)
-            if self.fields.get("_owner_saved") is True and source == versions.SOURCE_USER and document.get("provenance") == "user":
+            if (
+                self.fields.get("_owner_saved") is True
+                and source == versions.SOURCE_USER
+                and document.get("provenance") == "user"
+            ):
                 from gideon.automation.workflows.automation_versions import snapshot
+
                 try:
                     owner_calls = snapshot(self.name, root_spec=document, keeping=True)
                 except ValueError:
@@ -127,7 +135,10 @@ class DefinitionDraft:
                 ops=operations,
             )
             if owner_calls is not None:
-                from gideon.automation.workflows.automation_versions import record_owner_save
+                from gideon.automation.workflows.automation_versions import (
+                    record_owner_save,
+                )
+
                 record_owner_save(self.name, document, owner_calls)
         except Exception:
             logger.debug(
@@ -155,7 +166,10 @@ class NativeWorkflowDefProvider(WorkflowDefProvider):
         return _read(name) if valid_name(name) else None
 
     async def save_def(
-        self, *, expected_revision: int | None = None, create_only: bool = False,
+        self,
+        *,
+        expected_revision: int | None = None,
+        create_only: bool = False,
         **fields: Any,
     ) -> Any:
         return await asyncio.to_thread(
@@ -183,7 +197,10 @@ class NativeWorkflowDefProvider(WorkflowDefProvider):
                 current = _read(name)
                 if current is None:
                     return None
-                if expected_revision is not None and current.version != expected_revision:
+                if (
+                    expected_revision is not None
+                    and current.version != expected_revision
+                ):
                     raise DefinitionRevisionConflict(current.version)
                 path = _def_path(name)
                 document = read_definition(path, name, logger)
@@ -247,7 +264,9 @@ class DefinitionRevisionConflict(Exception):
 class DefinitionNameConflict(Exception):
     def __init__(self, current_revision: int):
         self.current_revision = current_revision
-        super().__init__("a workflow with that name already exists; choose another name")
+        super().__init__(
+            "a workflow with that name already exists; choose another name"
+        )
 
 
 def _now() -> str:
