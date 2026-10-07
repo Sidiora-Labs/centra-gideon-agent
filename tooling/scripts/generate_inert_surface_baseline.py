@@ -481,7 +481,9 @@ def _iterated_enum_classes(
 
 
 def _inert_enum_members(
-    files: list[Path], attr_names: set[str], native_files: list[Path] | None = None,
+    files: list[Path],
+    attr_names: set[str],
+    native_files: list[Path] | None = None,
     native_aliases: dict[tuple[Path, str], tuple[Path, str]] | None = None,
 ) -> list[tuple[Path, str]]:
     """``(file, "Class.MEMBER")`` for every enum member with neither a reader nor an iterator.
@@ -598,7 +600,9 @@ def _inert_enum_surfaces(
     return [
         (_rel(path), f"{KIND_ENUM}:{surface}")
         for path, surface in _inert_enum_members(
-            files, attr_names, sorted((_repo_root() / "crates").glob("*/src/**/*.rs")),
+            files,
+            attr_names,
+            sorted((_repo_root() / "crates").glob("*/src/**/*.rs")),
             native_wire_aliases(_repo_root()),
         )
     ]

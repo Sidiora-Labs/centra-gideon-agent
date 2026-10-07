@@ -638,9 +638,13 @@ def test_separate_config_wire_decoders_require_actual_load_calls():
 
 def _wire_enum_fixture(tmp_path, python_name="WireKind", rust_name="WireKind"):
     python = tmp_path / "mirror.py"
-    python.write_text(f"from enum import Enum\nclass {python_name}(str, Enum):\n    FIRST = 'first'\n    SECOND_KIND = 'second_kind'\n")
+    python.write_text(
+        f"from enum import Enum\nclass {python_name}(str, Enum):\n    FIRST = 'first'\n    SECOND_KIND = 'second_kind'\n"
+    )
     native = tmp_path / "wire.rs"
-    native.write_text(f'#[derive(Clone, Deserialize, Serialize)]\n#[serde(rename_all = "snake_case")]\npub enum {rust_name} {{ First, SecondKind, }}\n')
+    native.write_text(
+        f'#[derive(Clone, Deserialize, Serialize)]\n#[serde(rename_all = "snake_case")]\npub enum {rust_name} {{ First, SecondKind, }}\n'
+    )
     return python, native
 
 
@@ -651,12 +655,26 @@ def test_exact_native_serde_wire_parity_clears_mirror_members(tmp_path):
     assert len(_inert_enum_members([python], set())) == 2
 
 
-@pytest.mark.parametrize("mutation", [
-    "missing-deserialize", "missing-serialize", "wrong-values", "extra-native-variant",
-    "extra-python-variant", "custom-rename", "tagged", "conditional", "wrong-name",
-    "private-native", "comment-only", "string-only",
-])
-def test_incomplete_native_wire_evidence_does_not_clear_private_surface(tmp_path, mutation):
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing-deserialize",
+        "missing-serialize",
+        "wrong-values",
+        "extra-native-variant",
+        "extra-python-variant",
+        "custom-rename",
+        "tagged",
+        "conditional",
+        "wrong-name",
+        "private-native",
+        "comment-only",
+        "string-only",
+    ],
+)
+def test_incomplete_native_wire_evidence_does_not_clear_private_surface(
+    tmp_path, mutation
+):
     python, native = _wire_enum_fixture(tmp_path)
     source = native.read_text()
     if mutation == "missing-deserialize":
@@ -672,7 +690,9 @@ def test_incomplete_native_wire_evidence_does_not_clear_private_surface(tmp_path
     elif mutation == "custom-rename":
         source = source.replace('"snake_case"', '"camelCase"')
     elif mutation == "tagged":
-        source = source.replace('rename_all = "snake_case"', 'rename_all = "snake_case", tag = "kind"')
+        source = source.replace(
+            'rename_all = "snake_case"', 'rename_all = "snake_case", tag = "kind"'
+        )
     elif mutation == "conditional":
         source = '#[cfg(feature = "optional")]\n' + source
     elif mutation == "wrong-name":
@@ -703,37 +723,51 @@ def test_actual_native_protocol_wire_values_have_complete_parity():
     assert matches[(python.resolve(), "RenderMode")] == (native.resolve(),)
 
 
-def test_native_kebab_case_and_literal_variant_renames_require_complete_parity(tmp_path):
+def test_native_kebab_case_and_literal_variant_renames_require_complete_parity(
+    tmp_path,
+):
     python, native = _wire_enum_fixture(tmp_path)
     python.write_text(python.read_text().replace("second_kind", "second-kind"))
     native.write_text(native.read_text().replace("snake_case", "kebab-case"))
     assert _inert_enum_members([python], set(), [native]) == []
-    python.write_text(python.read_text().replace("second-kind", "event.label").replace("'first'", "'event.kind'"))
-    native.write_text('''#[derive(Deserialize, Serialize)]
+    python.write_text(
+        python.read_text()
+        .replace("second-kind", "event.label")
+        .replace("'first'", "'event.kind'")
+    )
+    native.write_text("""#[derive(Deserialize, Serialize)]
         pub enum WireKind {
             #[serde(rename = "event.kind")] First,
             #[serde(rename = "event.label")] SecondKind,
         }
-    ''')
+    """)
     assert _inert_enum_members([python], set(), [native]) == []
     native.write_text(native.read_text().replace("event.label", "event.other"))
     assert len(_inert_enum_members([python], set(), [native])) == 2
 
 
-@pytest.mark.parametrize("variant", [
-    'First', '#[serde(alias = "event.kind")] First',
-    '#[serde(rename = "event.kind", alias = "first")] First',
-    '#[serde(rename = "event.kind")] First(String)',
-])
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "First",
+        '#[serde(alias = "event.kind")] First',
+        '#[serde(rename = "event.kind", alias = "first")] First',
+        '#[serde(rename = "event.kind")] First(String)',
+    ],
+)
 def test_incomplete_or_custom_native_variant_map_remains_flagged(tmp_path, variant):
     python, native = _wire_enum_fixture(tmp_path)
-    python.write_text(python.read_text().replace("'first'", "'event.kind'").replace("'second_kind'", "'event.label'"))
-    native.write_text(f'''#[derive(Deserialize, Serialize)]
+    python.write_text(
+        python.read_text()
+        .replace("'first'", "'event.kind'")
+        .replace("'second_kind'", "'event.label'")
+    )
+    native.write_text(f"""#[derive(Deserialize, Serialize)]
         pub enum WireKind {{
             {variant},
             #[serde(rename = "event.label")] SecondKind,
         }}
-    ''')
+    """)
     assert len(_inert_enum_members([python], set(), [native])) == 2
 
 
@@ -750,7 +784,10 @@ def test_source_bound_native_alias_never_waives_name_path_or_value_proof(tmp_pat
 
 
 def test_actual_custom_native_aliases_and_predicate_fields_have_exact_wire_parity():
-    from tooling.scripts.native_wire_enums import native_wire_aliases, native_wire_enum_evidence
+    from tooling.scripts.native_wire_enums import (
+        native_wire_aliases,
+        native_wire_enum_evidence,
+    )
 
     root = Path(__file__).resolve().parents[2]
     aliases = native_wire_aliases(root)
@@ -766,7 +803,7 @@ def test_actual_custom_native_aliases_and_predicate_fields_have_exact_wire_parit
 
 def _member_name_wire_fixture(tmp_path):
     python = tmp_path / "transport.py"
-    python.write_text('''from enum import Enum
+    python.write_text("""from enum import Enum
 class WireOperation(str, Enum):
     FIRST = "memory.first"
     SECOND = "memory.second"
@@ -779,9 +816,9 @@ class WireRequest:
     def from_wire(cls, value):
         raw = _mapping(value, "request")
         return cls(operation=WireOperation[raw["operation"].upper()])
-''')
+""")
     native = tmp_path / "transport.rs"
-    native.write_text('''#[derive(Deserialize, Serialize)]
+    native.write_text("""#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WireOperation { First, Second, }
 impl WireOperation {
@@ -795,7 +832,7 @@ impl WireOperation {
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WireRequest { pub operation: WireOperation, }
-''')
+""")
     return python, native
 
 
@@ -805,62 +842,112 @@ def test_complete_member_name_transport_wire_proof_clears_both_maps(tmp_path):
     assert len(_inert_enum_members([python], set())) == 2
 
 
-@pytest.mark.parametrize("mutation", [
-    "wrong-native-map", "missing-native-arm", "extra-native-arm", "wildcard-arm",
-    "wrong-serde-pair", "wrong-struct-type", "no-struct-deserialize",
-    "struct-field-rename", "wrong-encoder", "wrong-decoder", "wrong-input",
-    "overridden-wire-field", "dict-update", "overridden-input", "encoder-not-returned",
-    "nested-input-reassignment", "input-update", "escaped-wire-dict",
-])
-def test_partial_or_mismatched_member_transport_contract_stays_flagged(tmp_path, mutation):
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "wrong-native-map",
+        "missing-native-arm",
+        "extra-native-arm",
+        "wildcard-arm",
+        "wrong-serde-pair",
+        "wrong-struct-type",
+        "no-struct-deserialize",
+        "struct-field-rename",
+        "wrong-encoder",
+        "wrong-decoder",
+        "wrong-input",
+        "overridden-wire-field",
+        "dict-update",
+        "overridden-input",
+        "encoder-not-returned",
+        "nested-input-reassignment",
+        "input-update",
+        "escaped-wire-dict",
+    ],
+)
+def test_partial_or_mismatched_member_transport_contract_stays_flagged(
+    tmp_path, mutation
+):
     python, native = _member_name_wire_fixture(tmp_path)
     py = python.read_text()
     rs = native.read_text()
     if mutation == "wrong-native-map":
-        rs = rs.replace('Self::Second => "memory.second"', 'Self::Second => "memory.other"')
+        rs = rs.replace(
+            'Self::Second => "memory.second"', 'Self::Second => "memory.other"'
+        )
     elif mutation == "missing-native-arm":
-        rs = rs.replace('Self::Second => "memory.second",', '')
+        rs = rs.replace('Self::Second => "memory.second",', "")
     elif mutation == "extra-native-arm":
-        rs = rs.replace('Self::Second => "memory.second",', 'Self::Second => "memory.second", Self::Third => "memory.third",')
+        rs = rs.replace(
+            'Self::Second => "memory.second",',
+            'Self::Second => "memory.second", Self::Third => "memory.third",',
+        )
     elif mutation == "wildcard-arm":
         rs = rs.replace('Self::Second => "memory.second",', '_ => "memory.second",')
     elif mutation == "wrong-serde-pair":
-        rs = rs.replace('First, Second,', '#[serde(rename = "second")] First, #[serde(rename = "first")] Second,')
+        rs = rs.replace(
+            "First, Second,",
+            '#[serde(rename = "second")] First, #[serde(rename = "first")] Second,',
+        )
     elif mutation == "wrong-struct-type":
-        rs = rs.replace('pub operation: WireOperation', 'pub operation: OtherOperation')
+        rs = rs.replace("pub operation: WireOperation", "pub operation: OtherOperation")
     elif mutation == "no-struct-deserialize":
-        rs = rs.replace('#[derive(Deserialize, Serialize)]\n#[serde(deny_unknown_fields)]', '#[derive(Serialize)]\n#[serde(deny_unknown_fields)]')
+        rs = rs.replace(
+            "#[derive(Deserialize, Serialize)]\n#[serde(deny_unknown_fields)]",
+            "#[derive(Serialize)]\n#[serde(deny_unknown_fields)]",
+        )
     elif mutation == "struct-field-rename":
-        rs = rs.replace('pub operation: WireOperation', '#[serde(rename = "other")] pub operation: WireOperation')
+        rs = rs.replace(
+            "pub operation: WireOperation",
+            '#[serde(rename = "other")] pub operation: WireOperation',
+        )
     elif mutation == "wrong-encoder":
-        py = py.replace('self.operation.name.lower()', 'self.operation.value')
+        py = py.replace("self.operation.name.lower()", "self.operation.value")
     elif mutation == "wrong-decoder":
         py = py.replace('raw["operation"].upper()', 'raw["other"].upper()')
     elif mutation == "wrong-input":
         py = py.replace('_mapping(value, "request")', '_mapping({}, "request")')
     elif mutation == "overridden-wire-field":
-        py = py.replace('        return result', '        result["operation"] = "first"\n        return result')
+        py = py.replace(
+            "        return result",
+            '        result["operation"] = "first"\n        return result',
+        )
     elif mutation == "dict-update":
-        py = py.replace('        return result', '        result.update(operation="first")\n        return result')
+        py = py.replace(
+            "        return result",
+            '        result.update(operation="first")\n        return result',
+        )
     elif mutation == "overridden-input":
-        py = py.replace('        return cls(', '        raw["operation"] = "first"\n        return cls(')
+        py = py.replace(
+            "        return cls(",
+            '        raw["operation"] = "first"\n        return cls(',
+        )
     elif mutation == "nested-input-reassignment":
-        py = py.replace('        return cls(operation=WireOperation[raw["operation"].upper()])', '        try:\n            raw = {"operation": "first"}\n            return cls(operation=WireOperation[raw["operation"].upper()])\n        except Exception:\n            raise')
+        py = py.replace(
+            '        return cls(operation=WireOperation[raw["operation"].upper()])',
+            '        try:\n            raw = {"operation": "first"}\n            return cls(operation=WireOperation[raw["operation"].upper()])\n        except Exception:\n            raise',
+        )
     elif mutation == "input-update":
-        py = py.replace('        return cls(', '        raw.update(operation="first")\n        return cls(')
+        py = py.replace(
+            "        return cls(",
+            '        raw.update(operation="first")\n        return cls(',
+        )
     elif mutation == "escaped-wire-dict":
-        py = py.replace('        return result', '        mutate(document=result)\n        return result')
+        py = py.replace(
+            "        return result",
+            "        mutate(document=result)\n        return result",
+        )
     elif mutation == "encoder-not-returned":
-        py = py.replace('return result', 'return {}')
+        py = py.replace("return result", "return {}")
     python.write_text(py)
     native.write_text(rs)
     assert len(_inert_enum_members([python], set(), [native])) == 2
 
 
 def test_actual_memory_transport_member_and_envelope_wire_maps_round_trip():
-    from tooling.scripts.native_wire_enums import native_wire_enum_evidence
     from gideon.hypermid.foundation import Cursor, Id, Scope, Trace
     from gideon.hypermid.transport import MemoryOperation, MemoryRequest
+    from tooling.scripts.native_wire_enums import native_wire_enum_evidence
 
     root = Path(__file__).resolve().parents[2]
     python = root / "runtime/gideon/hypermid/transport.py"
@@ -870,11 +957,170 @@ def test_actual_memory_transport_member_and_envelope_wire_maps_round_trip():
     scope = Scope("owner-1", "project-1")
     for operation in MemoryOperation:
         request = MemoryRequest(
-            operation, scope, scope, Id("resource-1"), Id("capability-1"),
-            Trace("trace-1", "request-1"), expected_cursor=Cursor(1, 0),
+            operation,
+            scope,
+            scope,
+            Id("resource-1"),
+            Id("capability-1"),
+            Trace("trace-1", "request-1"),
+            expected_cursor=Cursor(1, 0),
             idempotency_key=Id("request-1"),
         )
         wire = request.to_wire()
         assert wire["operation"] == operation.name.lower()
         assert request.envelope().operation == operation.value
         assert MemoryRequest.from_wire(wire).operation is operation
+
+
+def _authored_log_fixture(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    relative = (
+        "runtime/gideon/hypermid/observability.py",
+        "runtime/gideon/hypermid/foundation_service.py",
+        "crates/hypermid-log/src/filter.rs",
+        "crates/hypermid-log/src/format.rs",
+    )
+    copied = []
+    for name in relative:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text((root / name).read_text())
+        copied.append(path)
+    return copied
+
+
+def test_actual_authored_log_wire_contract_requires_operational_writer(tmp_path):
+    from tooling.scripts.native_wire_enums import native_wire_enum_evidence
+
+    observed, writer, native_filter, native_format = _authored_log_fixture(tmp_path)
+    matches = native_wire_enum_evidence(
+        [observed, writer], [native_filter, native_format]
+    )
+    assert matches[(observed.resolve(), "LogLevel")] == (
+        native_filter.resolve(),
+        native_format.resolve(),
+    )
+    # The parser alone is not a public wire/operational consumer proof.
+    assert native_wire_enum_evidence([observed], [native_filter, native_format]) == {}
+    assert _inert_enum_members([observed], set(), [native_filter, native_format])
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "extra-python-member",
+        "wrong-member-order",
+        "wrong-native-member",
+        "missing-native-deserialize",
+        "wrong-native-case",
+        "wrong-native-alias",
+        "wrong-native-record-level",
+        "missing-record-serialize",
+        "wrong-input-parser",
+        "wrong-formatter",
+        "wrong-json-reader",
+        "wrong-json-input",
+        "wrong-python-record",
+        "wrong-redacted-level",
+        "missing-writer",
+        "wrong-emitter-level",
+        "wrong-writer-format",
+        "base-member-alias",
+        "lowercase-alias-test",
+        "decoded-json-update",
+        "record-rebound-before-writer",
+    ],
+)
+def test_partial_dynamic_log_contract_never_clears_an_inert_level(tmp_path, mutation):
+    from tooling.scripts.native_wire_enums import native_wire_enum_evidence
+
+    observed, writer, native_filter, native_format = _authored_log_fixture(tmp_path)
+    py = observed.read_text()
+    service = writer.read_text()
+    rs = native_filter.read_text()
+    record = native_format.read_text()
+    if mutation == "extra-python-member":
+        py = py.replace("    OFF = 5", "    OFF = 5\n    EXTRA = 6")
+    elif mutation == "wrong-member-order":
+        py = py.replace("    DEBUG = 1", "    DEBUG = 0")
+    elif mutation == "wrong-native-member":
+        rs = rs.replace("    Trace,", "    Detailed,")
+    elif mutation == "missing-native-deserialize":
+        rs = rs.replace("Deserialize, ", "")
+    elif mutation == "wrong-native-case":
+        rs = rs.replace('rename_all = "lowercase"', 'rename_all = "snake_case"')
+    elif mutation == "wrong-native-alias":
+        rs = rs.replace(
+            '"warn" | "warning" => Ok(Self::Warn)',
+            '"warn" | "warning" => Ok(Self::Error)',
+        )
+    elif mutation == "wrong-native-record-level":
+        record = record.replace("pub level: Level", "pub level: String")
+    elif mutation == "missing-record-serialize":
+        record = record.replace(", Serialize", "")
+    elif mutation == "wrong-input-parser":
+        py = py.replace("normalized = value.strip().upper()", 'normalized = "INFO"')
+    elif mutation == "wrong-formatter":
+        py = py.replace("record.level.name.lower()", "record.level.value")
+    elif mutation == "wrong-json-reader":
+        py = py.replace(
+            'level=LogLevel.parse(str(value["level"]))', 'level=LogLevel.parse("info")'
+        )
+    elif mutation == "wrong-json-input":
+        py = py.replace("value = json.loads(line)", 'value = json.loads(b"{}")')
+    elif mutation == "wrong-python-record":
+        py = py.replace("    level: LogLevel\n", "    level: int\n")
+    elif mutation == "wrong-redacted-level":
+        py = py.replace("level=record.level,", 'level=LogLevel.parse("info"),')
+    elif mutation == "missing-writer":
+        service = service.replace(
+            "self._log_writer.append(", "self._log_writer.buffer("
+        )
+    elif mutation == "wrong-emitter-level":
+        service = service.replace(
+            "                level=level,",
+            '                level=LogLevel.parse("info"),',
+        )
+    elif mutation == "wrong-writer-format":
+        service = service.replace("format_line(record)", 'b"fixed line"')
+    elif mutation == "base-member-alias":
+        py = py.replace('normalized == "WARNING"', 'normalized == "INFO"')
+    elif mutation == "decoded-json-update":
+        py = py.replace(
+            "    try:\n        bound = tuple(",
+            '    value.update(level="info")\n    try:\n        bound = tuple(',
+        )
+    elif mutation == "record-rebound-before-writer":
+        service = service.replace(
+            "        try:\n            self._log_writer.append(",
+            "        record = None\n        try:\n            self._log_writer.append(",
+        )
+    elif mutation == "lowercase-alias-test":
+        py = py.replace('normalized == "WARNING"', 'normalized == "warning"')
+    observed.write_text(py)
+    writer.write_text(service)
+    native_filter.write_text(rs)
+    native_format.write_text(record)
+    assert (
+        native_wire_enum_evidence([observed, writer], [native_filter, native_format])
+        == {}
+    )
+    assert _inert_enum_members([observed], set(), [native_filter, native_format])
+
+
+def test_authored_log_wire_names_round_trip_without_numeric_wire_values():
+    from gideon.hypermid.observability import (
+        LogLevel,
+        LogRecord,
+        format_line,
+        parse_line,
+    )
+
+    for name in LogLevel.__members__:
+        level = LogLevel.parse(name.lower())
+        record = LogRecord("2026-10-07T00:00:00.000Z", level, "hypermid.test", "record")
+        line = format_line(record)
+        assert json.loads(line)["level"] == name.lower()
+        assert parse_line(line).level is level
+    with pytest.raises(ValueError):
+        LogLevel.parse("unknown-authored-level")
