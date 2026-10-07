@@ -634,3 +634,70 @@ def test_separate_config_wire_decoders_require_actual_load_calls():
     names = _load_body_kwarg_names(tree)
     assert "nudges" not in names
     assert "overrides" not in names
+
+
+def _wire_enum_fixture(tmp_path, python_name="WireKind", rust_name="WireKind"):
+    python = tmp_path / "mirror.py"
+    python.write_text(f"from enum import Enum\nclass {python_name}(str, Enum):\n    FIRST = 'first'\n    SECOND_KIND = 'second_kind'\n")
+    native = tmp_path / "wire.rs"
+    native.write_text(f'#[derive(Clone, Deserialize, Serialize)]\n#[serde(rename_all = "snake_case")]\npub enum {rust_name} {{ First, SecondKind, }}\n')
+    return python, native
+
+
+def test_exact_native_serde_wire_parity_clears_mirror_members(tmp_path):
+    python, native = _wire_enum_fixture(tmp_path)
+    assert _inert_enum_members([python], set(), [native]) == []
+    # Without a proven native boundary the ordinary Python census still reports both.
+    assert len(_inert_enum_members([python], set())) == 2
+
+
+@pytest.mark.parametrize("mutation", [
+    "missing-deserialize", "missing-serialize", "wrong-values", "extra-native-variant",
+    "extra-python-variant", "custom-rename", "tagged", "conditional", "wrong-name",
+    "private-native", "comment-only", "string-only",
+])
+def test_incomplete_native_wire_evidence_does_not_clear_private_surface(tmp_path, mutation):
+    python, native = _wire_enum_fixture(tmp_path)
+    source = native.read_text()
+    if mutation == "missing-deserialize":
+        source = source.replace("Deserialize, ", "")
+    elif mutation == "missing-serialize":
+        source = source.replace(", Serialize", "")
+    elif mutation == "wrong-values":
+        source = source.replace("SecondKind", "OtherKind")
+    elif mutation == "extra-native-variant":
+        source = source.replace("SecondKind,", "SecondKind, Third,")
+    elif mutation == "extra-python-variant":
+        python.write_text(python.read_text() + "    THIRD = 'third'\n")
+    elif mutation == "custom-rename":
+        source = source.replace('"snake_case"', '"kebab-case"')
+    elif mutation == "tagged":
+        source = source.replace('rename_all = "snake_case"', 'rename_all = "snake_case", tag = "kind"')
+    elif mutation == "conditional":
+        source = '#[cfg(feature = "optional")]\n' + source
+    elif mutation == "wrong-name":
+        source = source.replace("WireKind", "OtherKind")
+    elif mutation == "private-native":
+        source = source.replace("pub enum", "enum")
+    elif mutation == "comment-only":
+        source = "/*" + source + "*/"
+    elif mutation == "string-only":
+        source = 'const FIXTURE: &str = r#"' + source + '"#;'
+    native.write_text(source)
+    assert len(_inert_enum_members([python], set(), [native])) >= 2
+
+
+def test_private_python_enum_is_not_public_native_wire_contract(tmp_path):
+    python, native = _wire_enum_fixture(tmp_path, "_WireKind", "_WireKind")
+    assert len(_inert_enum_members([python], set(), [native])) == 2
+
+
+def test_actual_native_protocol_wire_values_have_complete_parity():
+    from tooling.scripts.native_wire_enums import native_wire_enum_evidence
+
+    root = Path(__file__).resolve().parents[2]
+    python = root / "runtime/gideon/hypermid/protocol.py"
+    native = root / "crates/hypermid-core/src/protocol.rs"
+    matches = native_wire_enum_evidence([python], [native])
+    assert matches[(python.resolve(), "Operation")] == (native.resolve(),)
+    assert matches[(python.resolve(), "RenderMode")] == (native.resolve(),)

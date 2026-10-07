@@ -481,17 +481,21 @@ def _iterated_enum_classes(
 
 
 def _inert_enum_members(
-    files: list[Path], attr_names: set[str]
+    files: list[Path], attr_names: set[str], native_files: list[Path] | None = None
 ) -> list[tuple[Path, str]]:
     """``(file, "Class.MEMBER")`` for every enum member with neither a reader nor an iterator.
 
-    THE RULE (two independent clears, either one is enough):
+    THE RULE (direct Python readers, iteration, or exact native wire parity):
 
     1. the member's name is accessed as an attribute somewhere in production ``src/``
        (``E.MEMBER``) — a direct reader; or
     2. the member's ENUM CLASS is iterated as a whole anywhere in production ``src/`` —
        whole-enum iteration reaches every member by construction, so ONE iteration site
-       clears ALL of that class's members.
+       clears ALL of that class's members; or
+    3. a public native Rust unit enum derives both serde serialization traits and
+       snake_case conversion, with the same class name and complete variant values.
+       The production census supplies native source files explicitly; fixture trees
+       and ordinary value constructors do not gain this clearance.
 
     DETECTED ITERATION SHAPES: ``for m in E`` (and ``async for``); all four comprehension
     forms over ``E`` (``{e.value for e in E}``, ``[e.value for e in E]``, dict and generator);
@@ -566,10 +570,13 @@ def _inert_enum_members(
         path: {cls for cls, _ in members} for path, members in declared.items()
     }
     iterated = _iterated_enum_classes(files, enum_names)
+    from tooling.scripts.native_wire_enums import native_wire_enum_evidence
+
+    native_wire = native_wire_enum_evidence(files, native_files or [])
     out: list[tuple[Path, str]] = []
     for path, members in declared.items():
         for class_name, member in members:
-            if (path, class_name) in iterated:
+            if (path, class_name) in iterated or (path, class_name) in native_wire:
                 continue
             if member not in attr_names:
                 out.append((path, f"{class_name}.{member}"))
@@ -584,7 +591,9 @@ def _inert_enum_surfaces(
     ``_iterated_enum_classes`` for the two halves."""
     return [
         (_rel(path), f"{KIND_ENUM}:{surface}")
-        for path, surface in _inert_enum_members(files, attr_names)
+        for path, surface in _inert_enum_members(
+            files, attr_names, sorted((_repo_root() / "crates").glob("*/src/**/*.rs"))
+        )
     ]
 
 
