@@ -382,3 +382,62 @@ describe('the hand-laid bars reach the same idiom', () => {
     expect(walk(SRC).length).toBeGreaterThan(200)
   })
 })
+
+
+// Each native search inventory has its own count and a successful-current-request gate.
+const nativeSearchRegions: readonly (readonly [string, readonly string[]])[] = [
+  ["features/capabilities/creative/Authors.tsx", ["<ResultAnnouncement count={items.length} noun=\"authors\" singular=\"author\" active={resultsReady && !!query.trim()} />", "<ResultAnnouncement count={samples.length} noun=\"writing samples\" active={resultsReady && !!sampleQuery.trim()} />"]],
+  ["features/capabilities/creative/Series.tsx", ["<ResultAnnouncement count={items.length} noun=\"series\" singular=\"series\" active={resultsReady && !!query.trim()} />", "<ResultAnnouncement count={authors.length} noun=\"authors\" active={resultsReady && !!references.trim()} />", "<ResultAnnouncement count={universes.length} noun=\"universes\" active={resultsReady && !!references.trim()} />"]],
+  ["features/capabilities/creative/Stories.tsx", ["<ResultAnnouncement count={items.length} noun=\"stories\" singular=\"story\" active={resultsReady && !!query.trim()} />", "<ResultAnnouncement count={authors.length} noun=\"authors\" active={resultsReady && !!references.trim()} />", "<ResultAnnouncement count={universes.length} noun=\"universes\" active={resultsReady && !!references.trim()} />"]],
+  ["features/capabilities/creative/UniverseGraph.tsx", ["<ResultAnnouncement count={sources.length} noun=\"merge sources\" active={sourceRequest === sourceKey && !error && !!query.trim()} />"]],
+  ["features/capabilities/creative/Universes.tsx", ["<ResultAnnouncement count={items.length} noun=\"universes\" singular=\"universe\" active={resultsReady && !!query.trim()} />", "<ResultAnnouncement count={ingredients.length} noun=\"ingredients\" active={resultsReady && !!references.trim()} />", "<ResultAnnouncement count={boards.length} noun=\"moodboards\" active={resultsReady && !!references.trim()} />"]],
+  ["features/capabilities/creative/Works.tsx", ["<ResultAnnouncement count={items.length} noun=\"writing works\" singular=\"writing work\" active={resultsReady && !!query.trim()} />", "<ResultAnnouncement count={authors.length} noun=\"authors\" active={resultsReady && !!referenceQuery.trim()} />", "<ResultAnnouncement count={universes.length} noun=\"universes\" active={resultsReady && !!referenceQuery.trim()} />"]],
+  ["features/capabilities/knowledge/VaultsPage.tsx", ["<ResultAnnouncement count={notes.length} noun=\"notes\" active={notesRequest === notesKey && !busy && !error && !!query.trim()} />"]],
+  ["features/capabilities/workspace/ProcessLogs.tsx", ["<ResultAnnouncement count={visibleLines.length} noun=\"log lines\" active={readFor === id && !error && !!query.trim()} />"]],
+  ["features/hypermid/MemoryInspector.tsx", ["<ResultAnnouncement count={memory.data?.items.length ?? 0} noun=\"memories\" singular=\"memory\" active={!!(query.trim() || kind) && !memory.revalidating && !memory.error && !!memory.data && memory.data.state !== 'unavailable' && memory.data.state !== 'unreadable'} />"]],
+  ["features/hypermid/SessionInspector.tsx", ["<ResultAnnouncement count={sessions.data?.items.length ?? 0} noun=\"sessions\" active={!!(text.trim() || state) && !sessions.revalidating && !sessions.error && !!sessions.data && sessions.data.state !== 'unavailable' && sessions.data.state !== 'unreadable'} />"]],
+]
+
+describe('native search announcement ownership', () => {
+  it('covers all nineteen actual rendered regions across ten search surfaces', () => {
+    expect(nativeSearchRegions).toHaveLength(10)
+    expect(nativeSearchRegions.reduce((total, [, tags]) => total + tags.length, 0)).toBe(19)
+  })
+
+  for (const [rel, expected] of nativeSearchRegions) {
+    it(`${rel} counts its displayed inventory only when its current result is readable`, () => {
+      const source = readFileSync(join(SRC, rel), 'utf8')
+      const actual = jsxTags(source, ['ResultAnnouncement'])
+      const wanted = expected.flatMap(tag => jsxTags(tag, ['ResultAnnouncement']))
+      const contract = (site: ReturnType<typeof jsxTags>[number]) => Object.fromEntries(['count', 'noun', 'singular', 'active'].map(name => [name, site.attributes.get(name)]))
+      expect(actual.map(contract)).toEqual(wanted.map(contract))
+      for (const site of actual) {
+        const count = site.attributes.get('count')!
+        const collection = count.slice(1, -1).replace(/\?\./g, '.').replace(/\.length(?: \?\? 0)?$/, '')
+        if (collection !== 'visibleLines') expect(source, 'count follows the collection rendered into rows or options').toContain(`${collection}.map(`)
+        else {
+          expect(source).toContain("const visible = visibleLines.join('\\n')")
+          expect(source).toContain('{visible ||')
+        }
+      }
+      if (source.includes('const resultsReady =')) {
+        expect(source).toContain('const resultsReady = resultRequest === resultKey && !loading && !error')
+        expect(source).toMatch(/const resultKey = JSON\.stringify\(\[apiRoot, query, (?:sampleQuery|references|referenceQuery), offset, refresh\]\)/)
+        expect(source).toMatch(/\.then\([\s\S]*?if \(alive\) \{ setResultRequest\(resultKey\)/)
+      } else if (rel.endsWith('UniverseGraph.tsx')) {
+        expect(source).toContain('const sourceKey = JSON.stringify([apiRoot, id, query, refresh])')
+        expect(source).toContain('setSources(value.items.filter(item => item.id !== id)); setSourceRequest(sourceKey)')
+      } else if (rel.endsWith('VaultsPage.tsx')) {
+        expect(source).toContain('const notesKey = JSON.stringify([selected?.id, query])')
+        expect(source).toContain('setNotes(result.results); setNotesRequest(notesKey)')
+      } else if (rel.endsWith('ProcessLogs.tsx')) {
+        expect(source).toContain('setReadFor(id)')
+        expect(source).toMatch(/const visibleLines = text \? text\.split\('\\n'\)\.filter/)
+      } else {
+        const name = rel.endsWith('MemoryInspector.tsx') ? 'memory' : 'sessions'
+        expect(source).toContain(`!${name}.revalidating && !${name}.error`)
+        expect(source).toContain(`${name}.data.state !== 'unavailable' && ${name}.data.state !== 'unreadable'`)
+      }
+    })
+  }
+})
