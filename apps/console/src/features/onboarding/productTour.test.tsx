@@ -113,7 +113,7 @@ async function atStop(id: string) {
   await waitFor(() => expect(tour()).toHaveAttribute('data-tour-step', id), {
     timeout: STOP_BUDGET_MS,
   })
-  await waitFor(() => expect(tour()).toHaveAttribute('data-tour-anchored', 'true'), { timeout: STOP_BUDGET_MS })
+  await waitFor(() => expect(tour(), `Tour stop ${id} at ${location.hash}; available anchors: ${[...document.querySelectorAll('[data-tour]')].map(node => node.getAttribute('data-tour')).join(', ')}`).toHaveAttribute('data-tour-anchored', 'true'), { timeout: STOP_BUDGET_MS })
   return screen.getByRole('dialog')
 }
 

@@ -56,15 +56,31 @@ export function SpotlightTour({ steps, index, label, onIndex, onExit }: {
     let alive = true
     let tries = 0
     let timer = 0
-    const find = () => {
-      if (!alive) return
+    let found = false
+    let observer: MutationObserver | null = null
+    const discover = () => {
+      if (!alive || found) return found
       const el = document.querySelector<HTMLElement>(`[data-tour="${step.anchor}"]`)
-      if (el) { setAnchorEl(el); return }
+      if (!el) return false
+      found = true
+      window.clearTimeout(timer)
+      observer?.disconnect()
+      setAnchorEl(el)
+      return true
+    }
+    // Lazy routes may mount after the polling fallback has finished.
+    // Observe only anchor-bearing DOM changes for this pending stop.
+    if (typeof MutationObserver === 'function') {
+      observer = new MutationObserver(discover)
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-tour'] })
+    }
+    const find = () => {
+      if (!alive || discover()) return
       if (++tries > POLL_TRIES) return
       timer = window.setTimeout(find, POLL_MS)
     }
     find()
-    return () => { alive = false; window.clearTimeout(timer) }
+    return () => { alive = false; window.clearTimeout(timer); observer?.disconnect() }
   }, [step.anchor])
 
   useEffect(() => {
