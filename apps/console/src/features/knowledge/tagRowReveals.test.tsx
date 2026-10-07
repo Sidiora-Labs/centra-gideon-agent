@@ -31,7 +31,9 @@ describe('the hint names both routes to the menu', () => {
   it('the keyboard route it now promises is really wired', () => {
     const primitive = readFileSync(join(process.cwd(), "src/shared/ui/motion/ContextMenu.tsx"), 'utf8')
     expect(primitive, 'Shift+F10 and the ContextMenu key open it')
-      .toMatch(/e\.key === 'ContextMenu' \|\| \(e\.key === 'F10' && e\.shiftKey\)/)
+      .toMatch(/event\.key !== 'ContextMenu' && !\(event\.key === 'F10' && event\.shiftKey\)/)
+    expect(primitive).toMatch(/onKeyDown=\{keyboardOpen\}/)
+    expect(primitive).toMatch(/event\.preventDefault\(\)[\s\S]*?open\(\{ x:/)
     expect(CODE, 'the row is wrapped in the primitive').toMatch(/<ContextMenu key=\{tag\.id\} items=\{menu\}>/)
   })
 

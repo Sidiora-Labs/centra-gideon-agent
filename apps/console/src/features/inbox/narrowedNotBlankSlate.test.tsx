@@ -25,7 +25,7 @@ describe('the inbox distinguishes "nothing matches" from "you have nothing"', ()
   it('keeps the blank-slate copy for the state it was written for', () => {
     const tag = inbox.match(/<EmptyState icon=\{InboxIcon\}[\s\S]{0,900}?\/>/)?.[0] ?? ''
     expect(tag).toMatch(/Enable a source to begin\./)
-    expect(tag, 'and the caught-up line for a genuinely empty, enabled inbox').toMatch(/all caught up/)
+    expect(tag, 'and the caught-up line for a genuinely empty, enabled inbox').toMatch(/The native inbox is active\. Your agents can post here now; no items need attention\./)
   })
 
   it('keeps the kind-specific narrowed line, and makes it say why', () => {

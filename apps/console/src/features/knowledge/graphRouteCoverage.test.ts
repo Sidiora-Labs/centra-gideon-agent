@@ -1,3 +1,4 @@
+import { parseRouteHash } from '../../app/shell/useHashRoute'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -68,12 +69,13 @@ describe('the knowledge graph is reachable as a harness route', () => {
 
     expect(navRoutes(), `${path} must be a nav route`).toContain(path)
 
-    const hash = read('src/app/shell/useHashRoute.ts')
-    expect(hash, 'the hash router must parse a query string').toMatch(/new URLSearchParams\(qs\)/)
-    expect(hash, 'and must resolve the route from the path only').toMatch(/segs\[0\] \|\| fallback/)
+    expect(parseRouteHash(`#/${GRAPH_ROUTE}`, 'chat')).toEqual({ route: path, sub: '', query: { [param]: value }, navEpoch: 0 })
 
     const app = read('src/app/shell/App.tsx')
-    expect(app).toMatch(new RegExp(`case '${path}': return <KnowledgeSection \\{\\.\\.\\.r\\} />`))
+    expect(app).toMatch(/knowledge: KnowledgeSection,/ )
+    expect(app).toMatch(/const KnowledgeSection = lazyRoute\('knowledge', \(\) => import\('\.\.\/\.\.\/features\/knowledge\/KnowledgeSection'\)/)
+    expect(app).toContain('const Page = pageComponents[route]')
+    expect(app).toContain('Page ? <Page {...props} />')
 
     expect(read('src/features/knowledge/KnowledgeSection.tsx'))
       .toMatch(/<KnowledgeListPage[\s\S]*?query=\{query\} setQuery=\{setQuery\}/)

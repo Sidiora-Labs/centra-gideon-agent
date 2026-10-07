@@ -212,6 +212,15 @@ describe('every file that renders graph marks is under the contrast rail', () =>
     for (const f of census) {
       expect(strokeTokens(f).length, `${f} paints a mark boundary with at least one token`).toBeGreaterThan(0)
     }
+    const universe = readFileSync(join(process.cwd(), 'src/features/capabilities/creative/UniverseGraph.tsx'), 'utf8')
+    expect(universe).toMatch(/<rect[^>]*stroke="var\(--color-on-surface-low\)"/)
+    const edge = /<line[^>]*stroke="var\(--color-on-surface-low\)" opacity="([0-9.]+)"/.exec(universe)
+    expect(edge, 'the universe relation opacity is measured from its actual mark').toBeTruthy()
+    for (const mode of ['dark', 'light'] as const) {
+      const background = token('--color-canvas', mode)
+      expect(ratio(token('--color-on-surface-low', mode), background), `universe node in ${mode}`).toBeGreaterThanOrEqual(MIN)
+      expect(ratio(over(token('--color-on-surface-low', mode), Number(edge![1]), background), background), `universe edge in ${mode}`).toBeGreaterThanOrEqual(MIN)
+    }
   })
 
   it('every boundary token is declared in tokens.css, so a typo cannot pass unmeasured', () => {
