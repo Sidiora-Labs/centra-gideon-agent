@@ -18,7 +18,7 @@ export default function References({ baseUrl = '' }: { baseUrl?: string }) {
   return <section aria-label="Reference repositories" className="grid gap-l">
     <h2 data-type="title-m">Reference repositories</h2><p>Check fetches the tracked origin branch. Only Mark reviewed advances your cursor. Failed checks retain the last successful snapshot.</p>
     {error && <p role="alert">{error}</p>}
-    <div className="grid gap-m sm:grid-cols-3">{(['name', 'path', 'branch'] as const).map(field => <label className="grid gap-xs text-sm" key={field}>{field}<TextInput ariaLabel={`Reference ${field}`} className="min-h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" value={draft[field]} onChange={value => setDraft({ ...draft, [field]: value })} /></label>)}</div>
+    <div className="grid gap-m sm:grid-cols-3">{(['name', 'path', 'branch'] as const).map(field => <label data-type="label-s" className="grid gap-xs" key={field}>{field}<TextInput ariaLabel={`Reference ${field}`} className="min-h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" value={draft[field]} onChange={value => setDraft({ ...draft, [field]: value })} /></label>)}</div>
     <Button disabled={busy || !draft.name || !draft.path || !draft.branch} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void write()}>Track reference</Button>
     <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void load()}>Refresh references</Button>
     {data && !data.references.length && <p>No reference repositories.</p>}

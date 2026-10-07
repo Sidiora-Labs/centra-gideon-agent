@@ -21,7 +21,7 @@ export default function Harnesses({ baseUrl = '' }: { baseUrl?: string }) {
   }
   return <section aria-label="CLI harnesses" className="grid gap-l">
     <div className="flex flex-wrap items-start justify-between gap-m"><div><h2 data-type="title-m">CLI harnesses</h2><p data-type="body-s" className="mt-1 max-w-[48rem] text-on-surface-low">Install exact adapter versions on this machine. Disable dependent runtimes before replacing or removing an adapter.</p></div><Button variant="secondary" onClick={() => void refresh()} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>Refresh</Button></div>
-    {error && <p role="alert" className="rounded-lg bg-danger/10 px-m py-s text-sm text-danger">{error}</p>}
+    {error && <p role="alert" data-type="body-s" className="rounded-lg bg-danger/10 px-m py-s text-danger">{error}</p>}
     {!data ? <ListSkeleton rows={2} what="CLI harnesses" /> : data.harnesses.length === 0 ? <EmptyState icon={Blocks} title="No harnesses available" hint="Installed harness packages appear here." /> : <div className="grid gap-s lg:grid-cols-2">{data.harnesses.map(row => <article key={row.id} aria-label={row.name}><Surface className="grid h-full gap-m p-l">
       <div><h3 data-type="headline-s">{row.name}</h3><p data-type="caption" className="mt-1 text-on-surface-low">{row.installed ? `Installed ${row.installed.version}` : 'No managed adapter installed'}</p></div>
       {!!row.dependents.length && <p data-type="body-s">Dependencies: {row.dependents.join(', ')}</p>}

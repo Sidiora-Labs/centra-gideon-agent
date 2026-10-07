@@ -39,7 +39,7 @@ export function ProviderConnections({ selected, onSelect, baseUrl = '' }: { sele
   const key = encodeURIComponent(draft.id)
   return <section aria-label="Provider connections" className="grid min-w-0 gap-l text-on-surface">
     <div className="flex flex-wrap items-start justify-between gap-m"><div><h2 data-type="title-m">Provider connections</h2><p data-type="body-s" className="mt-1 max-w-[48rem] text-on-surface-low">Connect provider endpoints, named credentials, and model access rules for this machine.</p></div><div className="flex flex-wrap gap-s"><Button onClick={() => { onSelect(''); setDraft(empty()) }}>New connection</Button><Button variant="secondary" onClick={() => setReload(value => value + 1)}>Refresh</Button></div></div>
-    {error && <p role="alert" className="rounded-lg bg-danger/10 px-m py-s text-sm text-danger">{error}</p>}
+    {error && <p role="alert" data-type="body-s" className="rounded-lg bg-danger/10 px-m py-s text-danger">{error}</p>}
     {!inventory && !error && <ListSkeleton rows={2} what="provider connections" />}
     {inventory && <>
       {!inventory.connections.length ? <EmptyState icon={Cable} title="No shared connections configured." hint="Create a connection to bind an installed provider to an endpoint and credential." /> : <div className="flex flex-wrap gap-s" aria-label="Configured provider connections">{inventory.connections.map(row => <Button key={row.id} variant={selected === row.id ? 'tonal' : 'secondary'} onClick={() => onSelect(row.id)}>{row.label}</Button>)}</div>}
