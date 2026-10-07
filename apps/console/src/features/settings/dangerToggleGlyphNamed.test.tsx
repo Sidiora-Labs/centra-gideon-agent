@@ -1,3 +1,6 @@
+import ts from 'typescript'
+import { jsxTags } from '../../shared/testing/jsxContracts'
+import { sourceFile } from '../../shared/testing/sourceOwners'
 import { describe, it, expect, vi } from 'vitest'
 import { render } from '@testing-library/react'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -45,7 +48,6 @@ describe('the danger glyph says what it means', () => {
 
 describe('every consumer that relaxes a safety default marks itself', () => {
   const PANELS = join(import.meta.dirname)
-  const strip = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
   const walk = (d: string): string[] =>
     readdirSync(d).flatMap((n) => {
       const p = join(d, n)
@@ -56,10 +58,19 @@ describe('every consumer that relaxes a safety default marks itself', () => {
   it('the danger consumers are a real, findable population (vacuity floor)', () => {
     let consumers = 0
     for (const abs of walk(PANELS)) {
-      for (const m of strip(readFileSync(abs, 'utf8')).matchAll(/<ToggleRow\b[\s\S]{0,400}?\/>/g)) {
-        if (/\bdanger\b/.test(m[0])) consumers++
+      const src = readFileSync(abs, 'utf8')
+      for (const tag of jsxTags(src, nativeBindings(src, 'ToggleRow'))) {
+        if (tag.attributes.has('danger') && tag.attributes.get('danger') !== '{false}') consumers++
       }
     }
     expect(consumers, 'no ToggleRow passes `danger` — the glyph is unreachable').toBeGreaterThanOrEqual(2)
   })
 })
+
+function nativeBindings(src: string, symbol: string, module = './settingsUI'): string[] {
+  return sourceFile(src).statements.flatMap(statement => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || statement.moduleSpecifier.text !== module) return []
+    const bindings = statement.importClause?.namedBindings
+    return bindings && ts.isNamedImports(bindings) ? bindings.elements.filter(binding => (binding.propertyName ?? binding.name).text === symbol).map(binding => binding.name.text) : []
+  })
+}

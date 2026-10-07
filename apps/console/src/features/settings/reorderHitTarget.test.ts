@@ -1,3 +1,6 @@
+import ts from 'typescript'
+import { jsxTags } from '../../shared/testing/jsxContracts'
+import { sourceFile } from '../../shared/testing/sourceOwners'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -7,11 +10,9 @@ const SRC = join(process.cwd(), "src")
 const routing = () => readFileSync(join(SRC, 'features/settings/RoutingPanel.tsx'), 'utf8')
 
 function moveButtons(src: string): string[] {
-  return src
-    .split('<button type="button"')
-    .slice(1)
-    .map((chunk) => chunk.slice(0, chunk.indexOf('</button>')))
-    .filter((el) => /aria-label=\{`Move /.test(el))
+  return jsxTags(src, nativeBindings(src, 'Button', '../../shared/ui/Button'))
+    .filter(tag => tag.attributes.get('ariaLabel')?.startsWith('{`Move '))
+    .map(tag => tag.element)
 }
 
 describe('reorder buttons carry a 24px+ target', () => {
@@ -28,20 +29,34 @@ describe('reorder buttons carry a 24px+ target', () => {
 
   it('the size matches the icon-button primitive it borrows from', () => {
     const sib = readFileSync(join(SRC, 'shared/ui/SquareIconButton.tsx'), 'utf8')
-    expect(sib).toMatch(/grid size-7 place-items-center rounded-md/)
+    const primitive = jsxTags(sib, ['motion.button'])
+    expect(primitive).toHaveLength(1)
+    const classes = primitive[0].attributes.get('className')!
+    for (const token of ['grid', 'size-7', 'place-items-center', 'rounded-md']) expect(classes).toMatch(new RegExp(`\\b${token}\\b`))
   })
 
-  it('the busy semantics are preserved — still unavailableWhen, not the primitive', () => {
+  it('the busy semantics are preserved by the native control-state contract', () => {
     const src = routing()
-    expect(src).toMatch(/unavailableWhen\(i === 0, 'Already tried first', \{ busy \}\)/)
-    expect(src).toMatch(/unavailableWhen\(i === shown\.length - 1, 'Already tried last', \{ busy \}\)/)
-    const helper = readFileSync(join(SRC, 'shared/ui/unavailable.ts'), 'utf8')
-    expect(helper, 'busy must still mean NATIVE disabled').toMatch(/if \(opts\?\.busy\) return \{ disabled: true/)
+    const buttons = moveButtons(src)
+    expect(buttons[0]).toMatch(/disabled=\{\(i === 0\) \|\| \(busy\)\}/)
+    expect(buttons[1]).toMatch(/disabled=\{\(i === shown\.length - 1\) \|\| \(busy\)\}/)
+    for (const button of buttons) expect(button).toMatch(/disabledReason=\{\(busy\) \? '[^']+' : 'Already tried (first|last)'\}/)
+    const primitive = readFileSync(join(SRC, 'shared/ui/Button.tsx'), 'utf8')
+    expect(primitive).toMatch(/disabled=\{state\.nativeDisabled\}/)
+    expect(primitive).toMatch(/activateControl\(event, state\.blocked, onClick\)/)
   })
 
   it('each button still names itself and hides its icon', () => {
-    for (const tag of moveButtons(routing())) expect(tag).toMatch(/aria-label=\{`Move \$\{ref\} (earlier|later)`\}/)
+    for (const tag of moveButtons(routing())) expect(tag).toMatch(/ariaLabel=\{`Move \$\{ref\} (earlier|later)`\}/)
     expect(routing()).toMatch(/<ArrowUp size=\{13\} aria-hidden \/>/)
     expect(routing()).toMatch(/<ArrowDown size=\{13\} aria-hidden \/>/)
   })
 })
+
+function nativeBindings(src: string, symbol: string, module = './settingsUI'): string[] {
+  return sourceFile(src).statements.flatMap(statement => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || statement.moduleSpecifier.text !== module) return []
+    const bindings = statement.importClause?.namedBindings
+    return bindings && ts.isNamedImports(bindings) ? bindings.elements.filter(binding => (binding.propertyName ?? binding.name).text === symbol).map(binding => binding.name.text) : []
+  })
+}

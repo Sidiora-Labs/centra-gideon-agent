@@ -1,3 +1,6 @@
+import ts from 'typescript'
+import { jsxTags } from '../../shared/testing/jsxContracts'
+import { sourceFile } from '../../shared/testing/sourceOwners'
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -140,7 +143,7 @@ describe('the panels this rail cannot speak for', () => {
       .filter((n) => /\.tsx$/.test(n) && !/\.(test|doc)\.tsx$/.test(n) && n !== 'settingsUI.tsx')
       .filter((n) => {
         const src = readFileSync(join(DIR, n), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-        return src.includes("from './settingsUI'") && !src.includes('<Section')
+        return jsxTags(src, nativeBindings(src, 'Section')).length === 0 && jsxTags(src, nativeBindings(src, '*')).length > 0
       })
     expect(found.length, 'vacuity floor — the scan must resolve files').toBeGreaterThan(0)
     expect(found.sort(), 'add it to NO_SECTIONS with a reason, or give it sections')
@@ -201,3 +204,11 @@ describe('a section glyph is muted unless it marks something live', () => {
       .toMatch(/iconTone === 'muted' \? 'text-on-surface-low' : 'text-primary'/)
   })
 })
+
+function nativeBindings(src: string, symbol: string, module = './settingsUI'): string[] {
+  return sourceFile(src).statements.flatMap(statement => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || statement.moduleSpecifier.text !== module) return []
+    const bindings = statement.importClause?.namedBindings
+    return bindings && ts.isNamedImports(bindings) ? bindings.elements.filter(binding => symbol === '*' ? (binding.propertyName ?? binding.name).text !== 'SettingsNavigation' : (binding.propertyName ?? binding.name).text === symbol).map(binding => binding.name.text) : []
+  })
+}

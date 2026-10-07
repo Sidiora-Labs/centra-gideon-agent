@@ -1,3 +1,6 @@
+import ts from 'typescript'
+import { jsxTags } from '../../shared/testing/jsxContracts'
+import { sourceFile } from '../../shared/testing/sourceOwners'
 import { describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -26,7 +29,22 @@ describe('PanelHeader is the page heading of a settings sub-route', () => {
   it('EVERY settings panel uses it — the count floor was too loose', () => {
     const files = readdirSync(SETTINGS).filter((f) => /Panel\.tsx$/.test(f))
     expect(files.length, 'the settings panels must be discoverable').toBeGreaterThan(20)
-    const missing = files.filter((f) => !/<PanelHeader\b/.test(readFileSync(join(SETTINGS, f), 'utf8')))
+    const missing = files.filter((f) => {
+      const src = readFileSync(join(SETTINGS, f), 'utf8')
+      if (jsxTags(src, nativeBindings(src, 'PanelHeader')).length > 0) return false
+      if (f !== 'HypermidPanel.tsx') return true
+      const branches = ['HypermidOverview', 'RemoteAccess', 'Connections', 'Security', 'Operations', 'Lifecycle']
+      for (const branch of branches) {
+        expect(nativeBindings(src, branch, `../hypermid/${branch}`)).toEqual([branch])
+        expect(jsxTags(src, [branch])).toHaveLength(1)
+        const child = readFileSync(join(SETTINGS, '../hypermid', `${branch}.tsx`), 'utf8')
+        const headers = jsxTags(child, nativeBindings(child, 'PanelHeader', '../settings/settingsUI'))
+        const headings = jsxTags(child, ['h1']).filter(tag => tag.attributes.get('data-type') === '"title-l"')
+        expect(headers.length + headings.length, `${branch} owns its page heading`).toBe(1)
+      }
+      expect(jsxTags(src, ['h1']).map(tag => tag.attributes.get('data-type'))).toEqual(['"title-l"', '"title-l"'])
+      return false
+    })
     expect(missing, 'a settings sub-route is a page; its panel title is its h1').toEqual([])
   })
 
@@ -36,3 +54,11 @@ describe('PanelHeader is the page heading of a settings sub-route', () => {
     expect(/<PanelHeader\b/.test(drawer), 'the embedded copy must not emit a page-level heading').toBe(false)
   })
 })
+
+function nativeBindings(src: string, symbol: string, module = './settingsUI'): string[] {
+  return sourceFile(src).statements.flatMap(statement => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || statement.moduleSpecifier.text !== module) return []
+    const bindings = statement.importClause?.namedBindings
+    return bindings && ts.isNamedImports(bindings) ? bindings.elements.filter(binding => (binding.propertyName ?? binding.name).text === symbol).map(binding => binding.name.text) : []
+  })
+}
