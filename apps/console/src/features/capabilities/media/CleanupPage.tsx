@@ -1,3 +1,4 @@
+import { unavailableWhen } from '../../../shared/ui/unavailable'
 import NativeMediaPage from './NativeMediaPage'
 import { useEffect, useState } from 'react'
 type SourceImage = { id: string; name: string; version: number }
@@ -6,7 +7,7 @@ export const defaultTransform = (op: string): Transform => op === 'crop' ? { op,
 export function TransformList({ operations, change }: { operations: Transform[]; change: (operations: Transform[]) => void }) {
   return <ol>{operations.map((operation, index) => <li className="rounded-lg bg-surface-container p-m" key={index}><h2>{index+1}. {operation.op}</h2>
     {Object.entries(operation).filter(([key]) => key !== 'op').map(([key, value]) => <label key={key}>{key}<input type={typeof value === 'number' ? 'number' : key === 'color' ? 'color' : 'text'} step="any" value={value} onChange={event => change(operations.map((item, at) => at === index ? { ...item, [key]: typeof value === 'number' ? Number(event.target.value) : event.target.value } : item))} /></label>)}
-    <button disabled={index === 0} onClick={() => { const reordered = [...operations]; [reordered[index-1], reordered[index]] = [reordered[index], reordered[index-1]]; change(reordered) }}>Move up</button><button onClick={() => change(operations.filter((_, at) => at !== index))}>Remove transform</button>
+    <button {...unavailableWhen(index === 0, 'This transform is already first')} onClick={() => { if (index === 0) return; const reordered = [...operations]; [reordered[index-1], reordered[index]] = [reordered[index], reordered[index-1]]; change(reordered) }}>Move up</button><button onClick={() => change(operations.filter((_, at) => at !== index))}>Remove transform</button>
   </li>)}</ol>
 }
 export default function CleanupPage({ onJob }: { onJob?: (id: string) => void } = {}) {
@@ -25,7 +26,7 @@ export default function CleanupPage({ onJob }: { onJob?: (id: string) => void } 
     }, query ? 200 : 0)
     return () => { clearTimeout(timer); controller.abort() }
   }, [query, refresh])
-  const submit = async () => { if (!source) return; setBusy(true); setError(''); try { const response = await fetch('/api/capabilities/media/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'image_cleanup', request_id: crypto.randomUUID(), input: { source_artifact_id: source.id, source_version: source.version, operations } }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Cleanup request failed'); if (onJob) onJob(result.id); else location.hash = '#/capabilities/media?view=jobs' } catch (reason) { setError(String(reason)) } finally { setBusy(false) } }
+  const submit = async () => { if (busy || !source || operations.length === 0) return; setBusy(true); setError(''); try { const response = await fetch('/api/capabilities/media/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'image_cleanup', request_id: crypto.randomUUID(), input: { source_artifact_id: source.id, source_version: source.version, operations } }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Cleanup request failed'); if (onJob) onJob(result.id); else location.hash = '#/capabilities/media?view=jobs' } catch (reason) { setError(String(reason)) } finally { setBusy(false) } }
   return <NativeMediaPage title="Image cleanup" actions={<><a href="#/capabilities/media?view=library">Library</a><a href="#/capabilities/media?view=jobs">Jobs</a></>}>
     <p>Transforms run in the listed order on an EXIF-oriented copy. The pinned original stays unchanged. Resize uses Lanczos interpolation; it does not invent detail. Solid background cleanup removes only matching color connected to image edges, preserving enclosed regions; it is not semantic segmentation.</p>
     {error && <p role="alert">{error}</p>}
@@ -36,8 +37,8 @@ export default function CleanupPage({ onJob }: { onJob?: (id: string) => void } 
     </select></label>
     {loading ? <p role="status">Loading images…</p> : <p role="status">{total} matching images{total > images.length ? ' · Search to find more' : ''}</p>}
     {source && <p>Pinned source: {source.name} · version {source.version}</p>}
-    <label>Transform<select value={kind} onChange={event => setKind(event.target.value)}>{['crop', 'resize', 'rotate', 'flip', 'brightness', 'contrast', 'sharpen', 'solid_background'].map(name => <option key={name}>{name}</option>)}</select></label><button disabled={busy || operations.length >= 10} onClick={() => setOperations(old => [...old, defaultTransform(kind)])}>Add transform</button>
+    <label>Transform<select value={kind} onChange={event => setKind(event.target.value)}>{['crop', 'resize', 'rotate', 'flip', 'brightness', 'contrast', 'sharpen', 'solid_background'].map(name => <option key={name}>{name}</option>)}</select></label><button {...unavailableWhen(operations.length >= 10, 'A cleanup can contain at most 10 transforms', { busy })} onClick={() => { if (busy || operations.length >= 10) return; setOperations(old => [...old, defaultTransform(kind)]) }}>Add transform</button>
     <p>Up to 10 transforms. Dimensions stay within 4096 × 4096; solid background cleanup is limited to 4 megapixels. Rotations are counterclockwise right angles.</p>
-    <TransformList operations={operations} change={setOperations} /><button disabled={busy || !source || operations.length === 0} onClick={() => void submit()}>{busy ? 'Queuing…' : 'Queue cleanup'}</button>
+    <TransformList operations={operations} change={setOperations} /><button {...unavailableWhen(!source || operations.length === 0, !source ? 'Choose a source image first' : 'Add a transform before queuing cleanup', { busy })} onClick={() => void submit()}>{busy ? 'Queuing…' : 'Queue cleanup'}</button>
   </NativeMediaPage>
 }
