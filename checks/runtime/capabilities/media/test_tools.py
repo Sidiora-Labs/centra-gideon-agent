@@ -42,8 +42,58 @@ async def test_manifest_and_discovery_are_executable(provider):
     )
     assert manifest["native"] is True
     tools = await provider.list_tools()
-    assert len(tools) == 46
-    assert len({tool.name for tool in tools}) == 46
+    expected_names = {
+        "media_annotations_get",
+        "media_annotations_history",
+        "media_annotations_save",
+        "media_cleanup_submit",
+        "media_code_animation_submit",
+        "media_datasets_get",
+        "media_datasets_list",
+        "media_datasets_save",
+        "media_episode_render",
+        "media_episode_scenes",
+        "media_episodes_get",
+        "media_episodes_history",
+        "media_episodes_list",
+        "media_episodes_save",
+        "media_image_capabilities",
+        "media_image_submit",
+        "media_jobs_cancel",
+        "media_jobs_get",
+        "media_jobs_list",
+        "media_jobs_retry",
+        "media_jobs_submit",
+        "media_library_get",
+        "media_library_list",
+        "media_library_update",
+        "media_loras_get",
+        "media_loras_list",
+        "media_readiness_get",
+        "media_readiness_refresh",
+        "media_sketch_create",
+        "media_sketch_export",
+        "media_sketch_get",
+        "media_sketch_list",
+        "media_sketch_update",
+        "media_source_download_submit",
+        "media_sprite_compile",
+        "media_sprite_frames",
+        "media_sprite_generate",
+        "media_sprite_inspect",
+        "media_timeline_render",
+        "media_timelines_get",
+        "media_timelines_history",
+        "media_timelines_list",
+        "media_timelines_save",
+        "media_training_checkpoints",
+        "media_training_readiness",
+        "media_training_submit",
+        "media_video_capabilities",
+        "media_video_submit",
+    }
+    assert {tool.name for tool in tools} == expected_names
+    assert len(tools) == len(expected_names)
     assert provider.display_name == "Gideon Media"
     for tool in tools:
         Draft202012Validator.check_schema(tool.parameters)
