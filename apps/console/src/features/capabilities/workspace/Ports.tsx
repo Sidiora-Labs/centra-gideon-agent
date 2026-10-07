@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { Field, TextInput } from '../../../shared/ui/forms'
 import { Surface } from '../../../shared/ui/Surface'
 
@@ -55,7 +56,7 @@ export default function Ports() {
     {loaded && rows.length === 0 && <p>No port reservations.</p>}
     <Button loading={busy} variant="secondary" onClick={() => void act(async () => setInventory(await requestJson<Inventory>(`${base}/inventory`)))}>Inspect port availability</Button>
     {inventory && <Surface className="max-h-64 overflow-auto p-l"><p data-type="label-m">{inventory.host} · {inventory.transport}</p><ul className="mt-m divide-y divide-outline-variant/20">{inventory.ports.map(item => <li key={item.port} className="flex justify-between gap-m py-s"><span className="font-mono">{item.port}</span><span className="text-on-surface-low">{item.reservation_id ? 'Reserved here' : item.available ? 'Available' : 'Unavailable'}</span></li>)}</ul></Surface>}
-    <ul className="space-y-s">{rows.map(item => <li key={item.id}><Button className="w-full justify-start" variant={selected === item.id ? 'tonal' : 'secondary'} disabled={busy} onClick={() => choose(item.id)}>{item.project_id} · {item.port} · {item.status}</Button></li>)}</ul>
+    <ul className="space-y-s">{rows.map(item => <li key={item.id}><Button className="w-full justify-start" variant={selected === item.id ? 'tonal' : 'secondary'} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => choose(item.id)}>{item.project_id} · {item.port} · {item.status}</Button></li>)}</ul>
     {selected && !row && loaded && <p>Reservation not found in this page.</p>}
     {row && <Surface className="space-y-m p-l"><h3 data-type="title-m">{row.project_id}</h3><p aria-live="polite">Port {row.port} · {row.status}</p><p data-type="body-s" className="text-on-surface-low">{row.created_at}</p>
       <Button variant="danger" loading={busy} disabled={row.status !== 'held'} onClick={() => void act(async () => { const released = await requestJson<Reservation>(`${base}/${row.id}/release`, 'POST', { revision: row.revision }); setRows(old => old.map(item => item.id === row.id ? released : item)); setInventory(null) })}>Release port</Button>

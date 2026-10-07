@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 
 type Thread = { source: string; source_account_id: string; person_id: string; thread_id: string; state: string; reason: string; as_of: string | null; latest: { summary: string }; message_count: number }
 type Report = { people: { person: { id: string; name: string }; care: { state: string } }[]; threads: Thread[]; timezone: string }
@@ -21,7 +22,7 @@ export function ThreadsPanel() {
   }, [version])
   return <section aria-label="Thread care evidence" className="space-y-l">
     <h2 data-type="title-m">Thread care evidence</h2><p data-type="body-s" className="text-on-surface-low">These results describe imported observations, not live account status. Incomplete or stale coverage stays unknown.</p>
-    <Button onClick={() => setVersion(v => v + 1)} disabled={loading}>Refresh thread evidence</Button>
+    <Button onClick={() => setVersion(v => v + 1)} disabled={loading} disabledReason={loading ? BUSY_REASON : undefined}>Refresh thread evidence</Button>
     {error && <p role="alert" className="text-danger">{error}</p>}
     {loading ? <p role="status" className="rounded-lg bg-primary-container p-m text-on-primary-container">Loading thread evidence…</p> : report && <>
       <p>Timezone: {report.timezone}</p>

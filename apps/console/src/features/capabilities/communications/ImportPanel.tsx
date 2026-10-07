@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 const nativeControl = 'block h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 
 type Match = { id: string; name: string; revision: number }
@@ -43,7 +44,7 @@ export function ImportPanel({ onImported }: { onImported: () => void }) {
     <p>Preview CSV or UTF-8 vCard 3/4. CSV columns: name, email, phone, handle, notes. Separate multiple identities with |. Nothing is saved until you commit.</p>
     <label className="block">Contact format<select className={nativeControl} value={format} disabled={busy} onChange={e => { setFormat(e.target.value); invalidate() }}><option value="csv">CSV</option><option value="vcard">vCard</option></select></label>
     <label className="block">Contact data<textarea className="block min-h-28 w-full resize-y rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" value={content} maxLength={262144} disabled={busy} onChange={e => { setContent(e.target.value); invalidate() }} /></label>
-    <Button onClick={inspect} disabled={busy || !content.trim()}>Preview contacts</Button>
+    <Button onClick={inspect} disabled={busy || !content.trim()} disabledReason={busy ? BUSY_REASON : undefined}>Preview contacts</Button>
     {error && <p role="alert" className="text-danger">{error}</p>}
     {preview && <><p>Choose what to import. Updating a match adds identities and preserves existing name, notes, ring and cadence. Conflicts never merge people automatically.</p>
       <ul>{preview.rows.map(row => <li key={row.row_id} className="my-3 border-b border-outline pb-3">
@@ -55,7 +56,7 @@ export function ImportPanel({ onImported }: { onImported: () => void }) {
           <option value="skip">Skip</option>{!row.error && !row.matches.length && <option value="create">Create person</option>}
           {!row.error && row.matches.length === 1 && row.matches.map(match => <option key={match.id} value={match.id}>Add identities to {match.name}</option>)}
         </select></label>
-      </li>)}</ul><Button onClick={apply} disabled={busy || !!receipt || Object.values(choices).every(c => c === 'skip')}>Commit selected contacts</Button>
+      </li>)}</ul><Button onClick={apply} disabled={busy || !!receipt || Object.values(choices).every(c => c === 'skip')} disabledReason={busy ? BUSY_REASON : undefined}>Commit selected contacts</Button>
     </>}
     {receipt && <div role="status"><p>Import saved at {receipt.committed_at}.</p><ul>{receipt.rows.map(row => <li key={row.row_id}>{row.action === 'skip' ? 'Skipped' : <a className="text-primary underline" href={`#/capabilities/communications?person=${row.person_id}`}>Open imported person</a>}</li>)}</ul></div>}
   </section>

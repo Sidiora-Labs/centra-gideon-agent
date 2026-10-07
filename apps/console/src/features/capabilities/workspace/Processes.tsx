@@ -2,6 +2,7 @@ import ProcessLogs from './ProcessLogs'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { Field, TextInput } from '../../../shared/ui/forms'
 import { Surface } from '../../../shared/ui/Surface'
 
@@ -56,7 +57,7 @@ export default function Processes() {
     {!loaded && !error && <p role="status">Loading processes…</p>}
     {loaded && rows.length === 0 && <p>No managed processes.</p>}
     <Button variant="secondary" loading={busy} onClick={() => void act(async () => { setRows(await requestJson<Process[]>(base)); setLoaded(true) })}>Refresh processes</Button>
-    <ul className="space-y-s">{rows.map(item => <li key={item.id}><Button className="w-full justify-start" variant={selected === item.id ? 'tonal' : 'secondary'} disabled={busy} onClick={() => choose(item.id)}>{item.project_id} · {item.status}</Button></li>)}</ul>
+    <ul className="space-y-s">{rows.map(item => <li key={item.id}><Button className="w-full justify-start" variant={selected === item.id ? 'tonal' : 'secondary'} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => choose(item.id)}>{item.project_id} · {item.status}</Button></li>)}</ul>
     {selected && !row && loaded && <p>Process not found in this page.</p>}
     {row && <Surface className="space-y-m break-words p-l"><h3 data-type="title-m">{row.project_id}</h3><p className="text-on-surface-low">{row.workspace}</p><code className="block rounded-md bg-surface p-m">{row.command}</code><p aria-live="polite">Status: {row.status} · Exit: {row.exit_code ?? 'Not exited'}</p>
       <div className="flex flex-wrap gap-2"><Button loading={busy} onClick={() => void act(async () => { setText((await requestJson<{ text: string }>(`${base}/${row.id}/logs`)).text); update(await requestJson<Process>(`${base}/${row.id}`)) })}>Read process logs</Button>

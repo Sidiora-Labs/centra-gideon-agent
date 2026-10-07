@@ -16,6 +16,7 @@ import { OutboundEmailPanel } from './OutboundEmailPanel'
 import { ThreadsPanel } from './ThreadsPanel'
 import { ImportPanel } from './ImportPanel'
 import { Button } from '../../../shared/ui/Button'
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { PageTitle } from '../../../shared/ui/PageTitle'
 import { TopBar } from '../../../shared/ui/TopBar'
 import { WorkbenchLayout } from '../../../shared/ui/WorkbenchLayout'
@@ -86,7 +87,7 @@ export default function Page() {
   const chooseView = (next: string) => { const params = new URLSearchParams(location.hash.split('?')[1] || ''); if (next === 'people') params.delete('view'); else params.set('view', next); location.hash = `#/capabilities/communications${params.size ? `?${params}` : ''}`; setView(next) }
   const panels: Record<string, ReactNode> = { inbox: <MirrorPanel />, calendar: <CalendarPanel />, beeper: <BeeperPanel />, outbound: <OutboundEmailPanel />, desktop: <DesktopPanel />, imports: <ImportPanel onImported={() => setVersion(v => v + 1)} />, threads: <ThreadsPanel />, teams: <TeamsPanel />, telegram: <TelegramPanel />, social: <SocialPanel />, x: <XPanel />, stacker: <StackerPanel />, signal: <SignalArchivePanel />, lifecycle: <LifecyclePanel />, timeline: <TimelinePanel /> }
   const peopleView = <div className="space-y-l">
-    <div className="flex flex-wrap items-center justify-between gap-s"><div><h2 data-type="title-m">People and relationships</h2><p data-type="body-s" className="text-on-surface-low">Review contact cadence and record durable relationship history.</p></div><div className="flex gap-s"><Button onClick={() => open('')}>New person</Button><Button variant="secondary" onClick={() => setVersion(v => v + 1)} disabled={busy}>Reload</Button></div></div>
+    <div className="flex flex-wrap items-center justify-between gap-s"><div><h2 data-type="title-m">People and relationships</h2><p data-type="body-s" className="text-on-surface-low">Review contact cadence and record durable relationship history.</p></div><div className="flex gap-s"><Button onClick={() => open('')}>New person</Button><Button variant="secondary" onClick={() => setVersion(v => v + 1)} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>Reload</Button></div></div>
     {error && <p role="alert" className="rounded-lg bg-danger-container p-m text-on-danger-container">{error}</p>}
     {loading ? <p role="status" className="text-on-surface-low">Loading people…</p> : <div className="grid min-w-0 gap-l lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)]">
       <section aria-label="Care list" className="min-w-0 rounded-lg bg-surface-container px-l py-l"><h2 data-type="title-s">Care list</h2>{people.length === 0 && <p className="py-xl text-on-surface-low">No people yet. Add someone to begin tracking contact.</p>}
@@ -99,12 +100,12 @@ export default function Page() {
         <label className="block" data-type="label-s">Cadence in days<input type="number" min={1} max={3650} className={inputStyle} value={form.cadence_days} onChange={event => setForm({ ...form, cadence_days: Number(event.target.value) })} /></label>
         <Field label="Identities (one email:, phone:, or handle: per line)"><TextArea value={identities} onChange={setIdentities} rows={4} /></Field>
         <Field label="Notes"><TextArea value={form.notes} onChange={notes => setForm({ ...form, notes: notes.slice(0, 10000) })} rows={5} /></Field>
-        <Button onClick={save} disabled={busy || !form.name.trim() || (!!id && !detail)}>Save person</Button>
+        <Button onClick={save} disabled={busy || !form.name.trim() || (!!id && !detail)} disabledReason={busy ? BUSY_REASON : undefined}>Save person</Button>
         {detail && <section className="space-y-m border-t border-outline-variant/20 pt-l"><div><h3 data-type="title-s">Contact history</h3><p data-type="body-s" className="text-on-surface-low">{detail.timezone}</p><p>Care: {detail.care.state}</p></div>
           <Field label="Occurred at (ISO with timezone)"><TextInput value={occurredAt} onChange={setOccurredAt} /></Field>
           <Field label="Direction"><Select value={direction} onChange={setDirection} options={['mutual', 'inbound', 'outbound'].map(value => ({ value, label: value }))} /></Field>
           <Field label="Contact summary"><TextArea value={summary} onChange={value => setSummary(value.slice(0, 2000))} rows={4} /></Field>
-          <Button onClick={record} disabled={busy}>Record contact</Button>
+          <Button onClick={record} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>Record contact</Button>
           <ul className="space-y-s">{detail.touchpoints.map(point => <li key={point.id} className="rounded-lg border border-outline-variant/20 bg-surface px-l py-m"><time data-type="body-s" className="text-on-surface-low">{point.occurred_at}</time><span data-type="body-s" className="text-on-surface-low"> · {point.direction} · {point.source}</span><p>{point.summary}</p></li>)}</ul>{!detail.touchpoints.length && <p className="text-on-surface-low">No contact recorded.</p>}
         </section>}
       </section>

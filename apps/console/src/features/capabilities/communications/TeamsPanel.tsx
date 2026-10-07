@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 
 type Sync = { state: string; coverage: string; error?: string; messages_seen?: number; conversations_seen?: number }
 type Source = { id: string; name: string; owner_email: string; credential_ref: string; revision: number; sync: Sync }
@@ -60,8 +61,8 @@ export function TeamsPanel() {
     <label className="block">Teams source name<input className={style} value={form.name} maxLength={200} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
     <label className="block">Verified Microsoft owner email<input className={style} type="email" value={form.owner_email} onChange={event => setForm({ ...form, owner_email: event.target.value })} /></label>
     <label className="block">Graph credential reference<input className={style} value={form.credential_ref} maxLength={120} onChange={event => setForm({ ...form, credential_ref: event.target.value })} /></label>
-    <Button disabled={busy || !form.name || !form.owner_email || !form.credential_ref} onClick={save}>{id ? 'Save Teams source' : 'Create Teams source'}</Button>
-    {current && <div className="space-y-2"><p>Sync: {current.sync.state} · coverage: {current.sync.coverage}</p>{current.sync.error && <p>{current.sync.error}</p>}<Button disabled={busy} onClick={sync}>Sync Teams history</Button>
+    <Button disabled={busy || !form.name || !form.owner_email || !form.credential_ref} disabledReason={busy ? BUSY_REASON : undefined} onClick={save}>{id ? 'Save Teams source' : 'Create Teams source'}</Button>
+    {current && <div className="space-y-2"><p>Sync: {current.sync.state} · coverage: {current.sync.coverage}</p>{current.sync.error && <p>{current.sync.error}</p>}<Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={sync}>Sync Teams history</Button>
       {messages.length === 0 ? <p>No Teams messages have been acquired.</p> : <ul>{messages.map(message => <li key={message.provenance_key} className="my-2"><time>{message.created_at}</time> · {message.source_kind} · {message.direction}{message.person_id ? ' · linked person' : ' · unlinked sender'}<p>{message.deleted_at ? '[Deleted]' : message.body}</p>{message.attachments.length > 0 && <p>{message.attachments.length} attachment reference(s)</p>}</li>)}</ul>}
     </div>}
   </section>

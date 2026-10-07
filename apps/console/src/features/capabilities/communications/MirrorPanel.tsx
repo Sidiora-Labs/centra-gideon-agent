@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 const nativeControl = 'block h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 
 type Account = { id: string; name: string; kind: string; owner_email: string; revision: number; sync: { state: string; coverage: string; evidence_status?: string; error?: string } }
@@ -38,15 +39,15 @@ export function MirrorPanel() {
         {(['host', 'username', 'credential_ref', 'inbox_folder', 'sent_folder'] as const).map(key => <label className="block" key={key}>{key}<input className={nativeControl} required value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })} /></label>)}
         <label className="block">Authentication<select className={nativeControl} value={form.auth_mode} onChange={e => setForm({ ...form, auth_mode: e.target.value })}><option value="password">Password reference</option><option value="xoauth2">OAuth token reference</option></select></label>
       </fieldset>}
-      <Button disabled={busy} type="submit">Create mail account</Button>
+      <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} type="submit">Create mail account</Button>
     </form>
     <label className="block">Mail account<select className={nativeControl} disabled={busy} value={selected} onChange={e => { const id = e.target.value; selectAccount(id); setMessages([]); if (id) void run(() => readMessages(id)) }}><option value="">Select account</option>{accounts.map(row => <option value={row.id} key={row.id}>{row.name}</option>)}</select></label>
     {account && <div className="space-y-2">
       <p>Sync: {account.sync.state}; coverage: {account.sync.coverage}; evidence: {account.sync.evidence_status || 'none'}</p>
       {account.sync.error && <p>{account.sync.error}</p>}
-      {account.kind !== 'imap' && <div><label className="block">Mail source content<textarea className="block min-h-28 w-full resize-y rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" value={content} onChange={e => setContent(e.target.value)} /></label><label className="block">Message folder<select className={nativeControl} value={folder} onChange={e => setFolder(e.target.value)}><option>INBOX</option><option>Sent</option></select></label><Button disabled={busy || !content} onClick={() => void run(async () => { await requestJson(`${base}/accounts/${selected}/upload`, 'POST', { content, folder }); setContent('') })}>Upload mail source</Button></div>}
-      <Button disabled={busy} onClick={() => void run(async () => { try { await requestJson(`${base}/accounts/${selected}/sync`, 'POST', {}) } finally { await reload(); await readMessages(selected) } })}>Sync mail account</Button>
-      <Button disabled={busy} onClick={() => void run(() => readMessages(selected))}>Read mirrored messages</Button>
+      {account.kind !== 'imap' && <div><label className="block">Mail source content<textarea className="block min-h-28 w-full resize-y rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" value={content} onChange={e => setContent(e.target.value)} /></label><label className="block">Message folder<select className={nativeControl} value={folder} onChange={e => setFolder(e.target.value)}><option>INBOX</option><option>Sent</option></select></label><Button disabled={busy || !content} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void run(async () => { await requestJson(`${base}/accounts/${selected}/upload`, 'POST', { content, folder }); setContent('') })}>Upload mail source</Button></div>}
+      <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void run(async () => { try { await requestJson(`${base}/accounts/${selected}/sync`, 'POST', {}) } finally { await reload(); await readMessages(selected) } })}>Sync mail account</Button>
+      <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void run(() => readMessages(selected))}>Read mirrored messages</Button>
       {messages.map(message => <article className="rounded-lg border border-outline-variant/20 bg-surface px-l py-m" key={message.external_id}><h3 data-type="title-s">{message.subject || '(No subject)'}</h3><p>{message.direction}</p><pre className="whitespace-pre-wrap">{message.body}</pre>{message.attachments.map((file, index) => <p key={index}>Attachment: {file.filename} ({file.size} bytes)</p>)}</article>)}
     </div>}
   </section>

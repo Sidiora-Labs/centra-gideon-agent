@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { Field, Select, TextInput } from '../../../shared/ui/forms'
 import { Surface } from '../../../shared/ui/Surface'
 type Desktop = { id: string; project_id: string; width: number; height: number; status: string; revision: number }
@@ -51,15 +52,15 @@ export default function Desktops() {
     {error && <p role="alert" className="text-danger">{error}</p>}
     {available === null ? <p role="status">Checking desktop availability…</p> : !available && <p>Isolated desktop dependencies unavailable.</p>}
     <Surface className="flex flex-wrap items-end gap-m p-l"><div className="min-w-64 flex-1"><Field label="Desktop project"><Select id="desktop-project" value={project} onChange={setProject} options={[{ value: '', label: 'Select a project' }, ...projects.map(p => ({ value: p.project.id, label: p.project.name }))]}/></Field></div>
-    <Button disabled={busy || !available || !project} onClick={() => void act(async () => { if (retry.current?.project !== project) retry.current = { project, id: crypto.randomUUID() }; const created = await requestJson<Desktop>(base, 'POST', { project_id: project, request_id: retry.current.id, width: 800, height: 600 }); setRows(old => [created, ...old.filter(x => x.id !== created.id)]); retry.current = null; choose(created.id) })}>Start isolated desktop</Button></Surface>
+    <Button disabled={busy || !available || !project} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void act(async () => { if (retry.current?.project !== project) retry.current = { project, id: crypto.randomUUID() }; const created = await requestJson<Desktop>(base, 'POST', { project_id: project, request_id: retry.current.id, width: 800, height: 600 }); setRows(old => [created, ...old.filter(x => x.id !== created.id)]); retry.current = null; choose(created.id) })}>Start isolated desktop</Button></Surface>
     {available && rows.length === 0 && <p>No desktop sessions.</p>}
     <ul className="space-y-s">{rows.map(item => <li key={item.id}><Button className="w-full justify-start" variant={selected === item.id ? 'tonal' : 'secondary'} onClick={() => choose(item.id)}>{item.project_id} · {item.status}</Button></li>)}</ul>
     {row && <Surface className="space-y-m p-l"><p data-type="label-m">Desktop status: {row.status}</p>
-      {row.status === 'running' && <><Button disabled={busy} onClick={() => void act(async () => { const stopped = await requestJson<Desktop>(`${base}/${row.id}/stop`, 'POST', { revision: row.revision }); setRows(old => old.map(x => x.id === row.id ? stopped : x)) })}>Stop isolated desktop</Button>
+      {row.status === 'running' && <><Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void act(async () => { const stopped = await requestJson<Desktop>(`${base}/${row.id}/stop`, 'POST', { revision: row.revision }); setRows(old => old.map(x => x.id === row.id ? stopped : x)) })}>Stop isolated desktop</Button>
         {frame ? <img src={frame} alt="Isolated desktop frame" className="max-w-full rounded-lg border border-outline-variant/20" onClick={e => { const bounds = e.currentTarget.getBoundingClientRect(); const x = Math.min(row.width - 1, Math.floor((e.clientX - bounds.left) * row.width / bounds.width)), y = Math.min(row.height - 1, Math.floor((e.clientY - bounds.top) * row.height / bounds.height)); void act(() => input({ kind: 'click', x, y })) }} /> : <p role="status">Waiting for desktop frame…</p>}
         <Field label="Desktop text"><TextInput id="desktop-text" maxLength={2048} value={text} onChange={setText}/></Field>
-        <Button disabled={busy || !text} onClick={() => void act(async () => { await input({ kind: 'text', text }); setText('') })}>Send text to desktop</Button>
-        <div className="flex flex-wrap gap-2">{['Return', 'Tab', 'Escape', 'BackSpace', 'Left', 'Right', 'Up', 'Down'].map(key => <Button key={key} disabled={busy} onClick={() => void act(() => input({ kind: 'key', key }))}>{key}</Button>)}</div>
+        <Button disabled={busy || !text} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void act(async () => { await input({ kind: 'text', text }); setText('') })}>Send text to desktop</Button>
+        <div className="flex flex-wrap gap-2">{['Return', 'Tab', 'Escape', 'BackSpace', 'Left', 'Right', 'Up', 'Down'].map(key => <Button key={key} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void act(() => input({ kind: 'key', key }))}>{key}</Button>)}</div>
       </>}
     </Surface>}
   </section>

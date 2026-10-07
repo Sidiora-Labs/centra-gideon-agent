@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { Field, Select, TextInput } from '../../../shared/ui/forms'
 import { Surface } from '../../../shared/ui/Surface'
 type State = { project_id: string; head: string; branch: string; dirty: boolean; status: string; submodules: { path: string; expected_head: string; head: string | null; initialized: boolean; dirty: boolean }[] }
@@ -41,11 +42,11 @@ export default function Git() {
     <p data-type="body-s" className="mt-1 text-on-surface-low">Local clean-tree branch operations and initialized submodules only. Submodule updates use cached pinned revisions. No fetch, clone, push or commit is performed.</p></header>
     {error && <p role="alert" className="text-danger">{error}</p>}
     <Surface className="flex flex-wrap items-end gap-m p-l"><div className="min-w-64 flex-1"><Field label="Git project"><Select ariaLabel="Git project" id="git-project" disabled={busy} value={project} onChange={choose} options={[{ value: '', label: 'Select a registered project' }, ...projects.map(p => ({ value: p.project.id, label: p.project.name }))]}/></Field></div>
-    <Button disabled={busy || !project} onClick={() => void act(() => refresh(project))}>Inspect Git project</Button></Surface>
+    <Button disabled={busy || !project} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void act(() => refresh(project))}>Inspect Git project</Button></Surface>
     {state && <Surface className="space-y-m p-l"><p data-type="title-m">Current branch: {state.branch || 'Detached HEAD'} · {state.dirty ? 'Dirty' : 'Clean'}</p><p className="break-all text-on-surface-low">Revision: {state.head}</p><pre className="overflow-auto whitespace-pre-wrap rounded-lg bg-surface p-m">{state.status}</pre>
       <Field label="Local branch name"><TextInput id="git-branch" value={branch} onChange={setBranch}/></Field>
-      <div className="flex flex-wrap gap-2"><Button disabled={busy || state.dirty || !branch} onClick={() => void act(() => mutate('create_branch', branch))}>Create and switch branch</Button><Button disabled={busy || state.dirty || !branch} onClick={() => void act(() => mutate('switch_branch', branch))}>Switch existing branch</Button></div>
-      <ul className="divide-y divide-outline-variant/20">{state.submodules.map(sub => <li key={sub.path} className="space-y-s py-m"><p>{sub.path} · {sub.initialized ? sub.dirty ? 'Dirty' : 'Initialized' : 'Uninitialized'}</p><p className="break-all text-on-surface-low">Pinned: {sub.expected_head}</p><Button disabled={busy || state.dirty || !sub.initialized || sub.dirty} onClick={() => void act(() => mutate('submodule_update', sub.path))}>Update {sub.path} to pinned revision</Button></li>)}</ul>
+      <div className="flex flex-wrap gap-2"><Button disabled={busy || state.dirty || !branch} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void act(() => mutate('create_branch', branch))}>Create and switch branch</Button><Button disabled={busy || state.dirty || !branch} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void act(() => mutate('switch_branch', branch))}>Switch existing branch</Button></div>
+      <ul className="divide-y divide-outline-variant/20">{state.submodules.map(sub => <li key={sub.path} className="space-y-s py-m"><p>{sub.path} · {sub.initialized ? sub.dirty ? 'Dirty' : 'Initialized' : 'Uninitialized'}</p><p className="break-all text-on-surface-low">Pinned: {sub.expected_head}</p><Button disabled={busy || state.dirty || !sub.initialized || sub.dirty} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void act(() => mutate('submodule_update', sub.path))}>Update {sub.path} to pinned revision</Button></li>)}</ul>
       {state.submodules.length === 0 && <p>No registered submodules.</p>}
       <ul aria-label="Git operation history">{history.map(row => <li key={row.id}>{row.operation}: {row.target} · {row.status}</li>)}</ul>
     </Surface>}
