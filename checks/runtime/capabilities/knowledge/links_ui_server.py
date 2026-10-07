@@ -12,6 +12,7 @@ from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge_links import register
 from gideon.interfaces.dashboard.state import ConsoleState
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 
 async def main():
@@ -20,7 +21,7 @@ async def main():
     store = KnowledgeStore(str(home / "knowledge.db"))
     state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
     state._knowledge_store = store
-    app = web.Application()
+    app = web.Application(middlewares=[token_auth_middleware()])
     app["state"] = state
     register(app)
     runner = web.AppRunner(app)
@@ -28,7 +29,7 @@ async def main():
     listener = web.TCPSite(runner, "127.0.0.1", 0)
     await listener.start()
     print(
-        json.dumps({"port": listener._server.sockets[0].getsockname()[1]}), flush=True
+        json.dumps({"port": listener._server.sockets[0].getsockname()[1], "token": generate_token("links-test-owner")}), flush=True
     )
     try:
         await asyncio.Event().wait()

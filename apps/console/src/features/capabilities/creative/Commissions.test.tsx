@@ -42,7 +42,9 @@ afterAll(async () => {
 
 function fillSource() {
   fireEvent.change(screen.getByLabelText('Source work ID'), { target: { value: fixture.work_id } })
-  fireEvent.change(screen.getByLabelText('Source revision'), { target: { value: String(fixture.work_revision) } })
+  const revision = screen.getByLabelText('Source revision')
+  fireEvent.change(revision, { target: { value: String(fixture.work_revision) } })
+  fireEvent.blur(revision)
 }
 
 describe('recurring creative commissions', () => {
@@ -64,7 +66,7 @@ describe('recurring creative commissions', () => {
     expect(screen.getByLabelText('License statement')).toBeVisible()
     fireEvent.change(screen.getByLabelText('Target ability'), { target: { value: 'music-video' } })
     expect(screen.getByLabelText('Music video project ID')).toBeVisible()
-    expect(screen.getByLabelText('Project revision')).toBeVisible()
+    expect(screen.getByRole('spinbutton', { name: 'Music video project revision' })).toBeVisible()
   })
 
   it('creates a scheduled brief, runs a real direction project, and records linked feedback', async () => {
