@@ -247,6 +247,21 @@ function ContextDisplayContent({
           </span>
         </div>
         <Meter label="Model context usage" pct={percent} tone={getBarTone(percent)} size="thin" className="mt-2.5" />
+        {segments.length > 0 && (
+          <div className="mt-3 grid gap-1.5">
+            {segments.map((segment) => (
+              <div
+                key={segment.label}
+                className="flex items-baseline justify-between gap-6"
+              >
+                <span className="text-muted-foreground">{segment.label}</span>
+                <span className="font-mono tabular-nums">
+                  {formatTokenCount(segment.tokens)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </TooltipContent>
   );
