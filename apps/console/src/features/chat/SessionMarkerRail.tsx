@@ -1,10 +1,9 @@
+import { Modal } from "../../shared/ui/Modal"
 import { Button } from "../../shared/ui/Button"
 import { SquareIconButton } from "../../shared/ui/SquareIconButton"
 import { IconButton } from "../../shared/ui/IconButton"
 import { useCallback, useEffect, useRef, useState, useMemo, type KeyboardEvent, type RefObject } from 'react'
 import { prefersReducedMotion } from '../../shared/theme/motion'
-import { FocusScope } from '../../shared/ui/focusNavigation'
-import { useDismissKey } from '../../shared/ui/overlayInteraction'
 import { ArrowDown, ListTree, Search, X } from 'lucide-react'
 import { turnText, type ChatTurn } from './chatTypes'
 import { clockTime, fullStamp, isoStamp } from '../../shared/data/epoch'
@@ -49,11 +48,6 @@ export function SessionMarkerRail({
   const [current, setCurrent] = useState(0)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const drawerOpener = useRef<HTMLButtonElement>(null)
-  const drawerRef = useRef<HTMLElement>(null)
-  useEffect(() => {
-    if (drawerOpen && drawerRef.current) return new FocusScope(drawerOpener.current).attach(drawerRef.current)
-  }, [drawerOpen])
-  useDismissKey('Escape', () => setDrawerOpen(false), 100, drawerOpen)
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
   const highlightedRoot = useRef<HTMLElement | null>(null)
@@ -186,15 +180,9 @@ export function SessionMarkerRail({
         </Button>
       </div>
       {drawerOpen && (
-        <div className="fixed inset-0 z-[var(--z-content)] md:hidden">
-          <button type="button" aria-label="Close session map" onClick={() => setDrawerOpen(false)} className="absolute inset-0 bg-black/40" />
-          <aside ref={drawerRef} role="dialog" aria-modal="true" aria-label="Session map drawer"
-            className="absolute inset-y-0 right-0 flex w-72 max-w-[85vw] flex-col border-l border-outline-variant bg-surface p-l shadow-xl">
-            <header className="mb-l flex items-center justify-between gap-s">
-              <h2 data-type="title-l">Session map</h2>
-              <IconButton label="Close session map" onClick={() => setDrawerOpen(false)}
-                className="inline-flex size-11 items-center justify-center rounded-pill text-on-surface-var hover:bg-surface-high" icon={X} size={44} iconSize={18} />
-            </header>
+        <Modal title="Session map" presentation="drawer" closeLabel="Close session map"
+          onClose={() => setDrawerOpen(false)} restoreFocus={drawerOpener}>
+          <div className="flex h-full min-h-0 flex-col">
             <div className="mb-l min-w-0 shrink-0 [&_[role=search]]:static [&_[role=search]]:w-full"><SearchControl open query={query} source={searchSource} results={results}
               onToggle={() => { setQuery(''); clearHighlight() }}
               onQuery={(value) => { setQuery(value); clearHighlight() }} onSelect={selectResult} /></div>
@@ -202,8 +190,8 @@ export function SessionMarkerRail({
               <MapMarks id="mobile" entries={entries} viewport={viewport} current={current} compact={compact} jumpTo={jumpTo} moveWithKeyboard={moveWithKeyboard} />
             </div>
             {showReturnToNewest && <div className="mt-l flex justify-center"><ReturnToNewest onClick={() => { onReturnToNewest(); setDrawerOpen(false) }} /></div>}
-          </aside>
-        </div>
+          </div>
+        </Modal>
       )}
     </>
   )

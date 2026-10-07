@@ -1,5 +1,5 @@
 import { createRef } from 'react'
-import { fireEvent, render, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionMarkerRail } from './SessionMarkerRail'
 import { ChatActivityPanel } from './ChatActivityPanel'
@@ -47,7 +47,7 @@ function setup(showReturnToNewest = true) {
 }
 
 describe('SessionMarkerRail', () => {
-  afterEach(() => { document.body.innerHTML = '' })
+  afterEach(() => { cleanup(); document.body.innerHTML = '' })
 
   it('exposes a named Session map region and visualizes the viewport', () => {
     const { container } = setup()
@@ -132,10 +132,23 @@ describe('SessionMarkerRail', () => {
   it('opens the mobile drawer and closes it after a mark scrolls to its turn', () => {
     const { container, nodes } = setup(false)
     fireEvent.click(within(container).getByRole('button', { name: 'Open session map' }))
-    const drawer = within(container).getByRole('dialog', { name: 'Session map drawer' })
+    const drawer = screen.getByRole('dialog', { name: 'Session map' })
     fireEvent.click(within(drawer).getByRole('button', { name: 'Jump to message 3, You: Question three' }))
     expect(nodes[5].scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
-    expect(within(container).queryByRole('dialog', { name: 'Session map drawer' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Session map' })).toBeNull()
+  })
+
+  it('closes the native drawer with Escape and restores its actual opener', () => {
+    const { container } = setup(false)
+    const opener = within(container).getByRole('button', { name: 'Open session map' })
+    opener.focus()
+    fireEvent.click(opener)
+    const dialog = screen.getByRole('dialog', { name: 'Session map' })
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    expect(within(dialog).getByRole('searchbox', { name: 'Search this session' })).toHaveFocus()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'Session map' })).toBeNull()
+    expect(opener).toHaveFocus()
   })
 
   it.each(['rail', 'drawer', 'transcript'] as const)('scrolls a %s result to its turn, highlights its match, and names its source', (source) => {

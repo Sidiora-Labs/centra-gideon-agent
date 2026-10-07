@@ -8,9 +8,9 @@ describe("AssistantModal constrained content", () => {
       thread={<p>Current conversation</p>}
       history={<div><p>Saved session</p><button type="button">Quick reply</button></div>} />);
 
-    const dialog = screen.getByRole("dialog", { name: "Assistant" });
+    const dialog = screen.getByRole("dialog", { name: "Conversation" });
     expect(dialog).toHaveClass("flex", "flex-col", "overflow-hidden");
-    const header = dialog.querySelector('[data-slot="aui_assistant-modal-header"]');
+    const header = dialog.querySelector('header');
     const body = dialog.querySelector('[data-slot="aui_assistant-modal-body"]');
     expect(header).toHaveClass("shrink-0");
     expect(body).toHaveClass("min-h-0", "flex-1", "overflow-auto");

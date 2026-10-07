@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { Modal } from "../../../ui/Modal";
+import { Button } from "../../../ui/Button";
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { ThreadTranscript } from "./thread.aui";
 import { ThreadList } from "./thread-list.aui";
@@ -38,11 +39,17 @@ export function AssistantModal({ thread, history, open, onOpenChange, trigger }:
 
   if (trigger === null) {
     if (!currentOpen || typeof document === "undefined") return null;
-    return createPortal(
-      <div role="dialog" aria-label="Assistant" data-slot="aui_assistant-modal"
-        className="bg-background border-border fixed inset-x-3 bottom-3 z-[var(--z-modal)] flex h-[min(80vh,40rem)] flex-col overflow-hidden rounded-xl border shadow-xl">
-        {content}
-      </div>, document.body,
+    return (
+      <Modal title="Conversation" presentation="bottom-sheet" closeLabel="Close assistant"
+        onClose={() => changeOpen(false)} headerActions={<>
+          <Button variant="ghost" size="xs" onClick={() => setView("thread")} ariaPressed={view === "thread"}>Conversation</Button>
+          <Button variant="ghost" size="xs" onClick={() => setView("list")} ariaPressed={view === "list"}>History</Button>
+        </>}>
+        <div data-slot="aui_assistant-modal-body" className="min-h-0 flex-1 overflow-auto">
+          {view === "thread" ? (thread === undefined ? <ThreadTranscript /> : thread)
+            : (history === undefined ? <ThreadList /> : history)}
+        </div>
+      </Modal>
     );
   }
 
