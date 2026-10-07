@@ -32,9 +32,10 @@ R / B / S (see ../CONTRIBUTING.md#breaking-changes):
 - S (schema): changes a stored schema or another stable contract.
 
 Aim for class R. If your change is B or S, describe the break here and add a
-CHANGELOG entry. Do not build compatibility shims or migration helpers: there is
-no migration machinery yet, and that is deliberate. The maintainer decides
-whether to take the break, reshape it, or schedule it.
+CHANGELOG entry. Describe persisted-state and API compatibility implications. Evaluate existing
+migration paths for the affected store; do not assume every store has an
+automatic migration. The maintainer decides whether to take the break, reshape
+it, or schedule it.
 -->
 
 Class: <!-- R | B | S -->

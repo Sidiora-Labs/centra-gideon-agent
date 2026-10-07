@@ -1,25 +1,12 @@
-# Slice 3 — Side effects, scope, termination, secrets
+# Slice 3: Secrets and redaction
 
-**What the slice added.** The effect ledger (idempotency keys, teardown), write-scope
-enforcement, termination (sticky cancel, protocol-violation), the v2 `run-workflow` action
-provider, and secret handling (`{{secret:KEY}}` resolution, `_has*` stripping, the
-RedactingSink on the journal and event stream). This exemplar isolates the secret half —
-the piece whose failure mode is the sharpest: a leaked credential in the journal, which the
-flywheel reads, bug reports ship, and the UI renders.
+This historical regression example exercises the following mechanism: An injected secret resolver, missing-secret refusal and redaction of a synthetic token from persisted output.
 
-**What this exemplar proves.** Two mechanisms:
+Read [exemplar.py](exemplar.py) for the exact assertions and injected dependencies.
+The implementation belongs to `gideon.automation.workflows`, including
+`bindings.py` and `journal.py`. Run it with isolated state; consult the
+[parent guide](../README.md) for invocation.
 
-- **`{{secret:KEY}}` goes only through the injected resolver.** Bindings never read the
-  credential store directly, so an exemplar (or unit test) supplies its own resolver; a
-  reference to an unset key raises a typed `BindingError` rather than resolving to an empty
-  string. Both directions are asserted.
-- **The RedactingSink scrubs the write path.** A real run whose (fake) model echoes a
-  secret-shaped token into its OUTPUT is driven to completion, then the entire run directory
-  is read back and grepped: the token appears nowhere on disk. The journal — the thing read
-  by three downstream consumers — scrubbed it on the way out.
-
-The token used is synthetic (an `sk-`-prefixed filler string), never a real credential; the
-whole point is that this synthetic value must not survive to disk.
-
-**Mechanism under test:** `gideon.workflows.bindings` secret resolution +
-`gideon.workflows.journal` RedactingSink (WF2-R14).
+An injected model or worker response is component-test evidence, not a real
+provider result. The presence of this example and its rationale does not claim
+a fresh passing run, complete workflow coverage or production qualification.

@@ -1,25 +1,12 @@
-# Slice 1 — Pure frontier core, engine, journal
+# Slice 1: Controller and journal
 
-**What the slice added.** The executable heart: the pure `frontier()` scheduler (which
-nodes are ready, respecting data dependencies and lane caps), the node dispatchers
-(transform / infer / branch / stage / wait / gate), the `RunController` lifecycle with
-terminal-status ownership, and the journal (epoch + inputs-hash keyed resume cache; Run
-Ledger emission). Slice 1's own acceptance criterion was "a simple sequence of 2 stages →
-completion"; this exemplar runs a 3-node sequence with a binding leg between each.
+This historical regression example exercises the following mechanism: A dependency-ordered sequence with an injected model response, terminal state and journal events.
 
-**What this exemplar proves.** One `seed → think → final` sequence driven end to end against
-a temp home with only the model call faked:
+Read [exemplar.py](exemplar.py) for the exact assertions and injected dependencies.
+The implementation belongs to `gideon.automation.workflows`, including
+`controller.py` and `journal.py`. Run it with isolated state; consult the
+[parent guide](../README.md) for invocation.
 
-- the frontier scheduled the nodes in dependency order (a single `infer` call, `"double 7"`,
-  proves `think` ran after `seed` and saw its bound value — not the raw `{{...}}` template);
-- bindings threaded node to node (`final` consumed `think`'s output);
-- every node reached `DONE` and the run reached `COMPLETE`;
-- the run row carries terminal metadata (started/completed timestamps);
-- the journal recorded one `STEP_COMPLETED` per node — the Run Ledger the flywheel and the
-  UI read.
-
-**Mechanism under test:** `gideon.workflows.controller.RunController` +
-`engine` dispatchers + `journal` ledger emission.
-
-**Recorded-trace reuse:** this clean 3-node run is the natural source for a
-`workflow-journal-projection`-style replay scenario (a happy-path event fold).
+An injected model or worker response is component-test evidence, not a real
+provider result. The presence of this example and its rationale does not claim
+a fresh passing run, complete workflow coverage or production qualification.
