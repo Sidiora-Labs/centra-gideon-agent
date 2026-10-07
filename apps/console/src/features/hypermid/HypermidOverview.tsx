@@ -2,7 +2,7 @@ import { Activity, Database, RefreshCw, Server, Waypoints } from 'lucide-react'
 import { api } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
 import { Button } from '../../shared/ui/Button'
-import { LoadError, FormSkeleton } from '../../shared/ui/ListScaffold'
+import { EmptyState, LoadError, FormSkeleton } from '../../shared/ui/ListScaffold'
 import { Surface } from '../../shared/ui/Surface'
 import { StatusPill } from '../settings/bento'
 import { PanelHeader, Section } from '../settings/settingsUI'
@@ -29,12 +29,16 @@ function StatusCard({ icon: Icon, label, value, detail }: {
   </Surface>
 }
 
-export function HypermidOverview() {
+export function HypermidOverview({ onConfigure }: { onConfigure?: () => void }) {
   const overview = useQuery('hypermid:overview', () => api.hypermidOverview(), { staleAfterMs: 5_000 })
   if (!overview.data && overview.error) return <LoadError what="Hypermid status" error={overview.error} onRetry={overview.refresh} />
   if (!overview.data) return <FormSkeleton sections={3} rows={2} what="Hypermid status" />
   const data = overview.data
   const scope = data.scope.workspace_id ? 'This workspace' : 'This project'
+  const knownOff = !overview.error && data.mode === 'off' && data.availability === 'unavailable'
+    && (data.daemon.state === 'stopped' || data.daemon.state === 'absent')
+    && data.adapter.availability === 'unavailable' && !data.adapter.full_host_integration
+    && (data.failure_code == null || data.failure_code === 'NOT_CONFIGURED')
   return <div>
     <PanelHeader title="Hypermid" hint="Inspect the context, memory, and cache state Gideon is using for this project." />
     <Section title="Current state" right={<Button size="sm" variant="secondary" onClick={overview.refresh}><RefreshCw size={14} /> Refresh</Button>}>
@@ -54,8 +58,9 @@ export function HypermidOverview() {
         Maintenance is running{data.maintenance.label ? `: ${data.maintenance.label}` : ''}.
       </p>}
     </Section>
-    <SessionInspector />
-    <MemoryInspector />
-    <CacheInspector />
+    {knownOff ? <EmptyState icon={Database} title="Hypermid is off"
+      hint="Session, memory, and cache inspection requires a connected Hypermid runtime with an authenticated project scope. Configure Hypermid before inspecting its state."
+      action={onConfigure ? { label: 'Configure Hypermid', onClick: onConfigure } : undefined} />
+      : <><SessionInspector /><MemoryInspector /><CacheInspector /></>}
   </div>
 }

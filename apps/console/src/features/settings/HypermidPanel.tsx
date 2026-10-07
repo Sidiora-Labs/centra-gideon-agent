@@ -26,7 +26,7 @@ export function HypermidPanel() {
         {label}
       </Button>)}
     </div>
-    {view === 'inspect' ? <HypermidOverview /> : view === 'remote' ? <RemoteAccess /> : view === 'connections' ? <Connections /> : view === 'security' ? <Security /> : view === 'operations' ? <Operations /> : view === 'lifecycle' ? <Lifecycle /> : view === 'diagnostics' ? <div>
+    {view === 'inspect' ? <HypermidOverview onConfigure={() => setView('configure')} /> : view === 'remote' ? <RemoteAccess /> : view === 'connections' ? <Connections /> : view === 'security' ? <Security /> : view === 'operations' ? <Operations /> : view === 'lifecycle' ? <Lifecycle /> : view === 'diagnostics' ? <div>
       <div className="mb-l"><h1 data-type="title-l" className="text-on-surface">Hypermid health</h1>
         <p data-type="body-s" className="mt-xs text-on-surface-low">Review observed checks and bounded redacted daemon logs for this scope.</p></div>
       <Diagnostics />
