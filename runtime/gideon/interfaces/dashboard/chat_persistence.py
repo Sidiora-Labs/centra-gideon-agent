@@ -2,7 +2,6 @@
 
 import json
 import logging
-import re
 import shutil
 import time
 import uuid

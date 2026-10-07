@@ -12,6 +12,7 @@ from gideon.core.http_request import (
     read_json_body,
 )
 from gideon.http_errors import json_error
+from gideon.integrations import inbox_projection
 from gideon.integrations.inbox import (
     NON_CHANNEL_KINDS,
     InboxFieldTypeError,
@@ -36,18 +37,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-from gideon.integrations import inbox_projection
 
 _owner_item = inbox_projection.owner_item
 _mask_inbox_projection = inbox_projection.mask_inbox_projection
 
 _UPDATABLE_FIELDS = {"status", "draft", "classification", "confidence", "favorited"}
-
-
-
-
-
-
 
 
 def _get_inbox(state: "ConsoleState") -> tuple[InboxState, InboxStore]:
