@@ -1,3 +1,5 @@
+import ts from 'typescript'
+import { apiCalls, nodes, callStatement, namedOwner } from '../../shared/testing/sourceOwners'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -29,13 +31,31 @@ describe('a selection that fails to persist tells the user', () => {
     expect(offenders, 'a swallowed selection write leaves the composer lying').toEqual([])
   })
 
-  it('every selection write goes through the one reporter', () => {
+  it('every selection write goes through an actual failure reporter', () => {
+    const calls = SELECTION_WRITES.flatMap(method => apiCalls(CODE, method))
+    expect(calls, 'all selection writes remain discoverable, including consent escalation').toHaveLength(14)
     let routed = 0
-    for (const m of CODE.matchAll(/persistSelection\('([^']+)', api\.(\w+)\(/g)) {
-      expect(SELECTION_WRITES, `unexpected call routed: ${m[2]}`).toContain(m[2])
-      routed++
+    for (const call of calls) {
+      if (ts.isCallExpression(call.parent) && call.parent.expression.getText() === 'persistSelection') {
+        expect(call.parent.arguments[0]?.getText()).toMatch(/^'this /)
+        routed++
+        continue
+      }
+      const chain = callStatement(call)
+      if (call.expression.getText() === 'api.setApprovalMode') {
+        expect(chain).toContain(".catch(reportActionFailure('apply this approval mode'))")
+        expect(chain).toContain('approval: result.mode')
+        routed++
+      } else {
+        const escalation = namedOwner(CODE, 'switchToAgentAndRun')
+        expect(escalation).toContain(chain)
+        expect(escalation).toMatch(/catch \(e\) \{[\s\S]*notify\([\s\S]*'error'\)[\s\S]*return/)
+      }
     }
-    expect(routed, 'selection writes routed through persistSelection').toBe(13)
+    expect(routed, '13 ordinary selection writes reach a failure reporter').toBe(13)
+    const reporter = readFileSync(join(process.cwd(), 'src/app/shell/reportingWrite.ts'), 'utf8')
+    expect(namedOwner(reporter, 'reportActionFailure')).toContain("notify(failureSentence(what, error), 'error')")
+    expect(nodes(CODE, node => ts.isCallExpression(node) && node.expression.getText() === 'persistSelection')).toHaveLength(12)
   })
 
   it('each report names WHICH pick failed', () => {

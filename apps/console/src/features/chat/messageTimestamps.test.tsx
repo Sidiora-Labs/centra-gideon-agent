@@ -1,3 +1,4 @@
+import { jsxTags } from '../../shared/testing/jsxContracts'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
@@ -102,7 +103,17 @@ describe('the preference actually reaches the transcript', () => {
     expect(code).toMatch(/useQuery\(\s*'chat:show-timestamps'/)
     expect(code).toMatch(/\.show_timestamps\b/)
     expect(code).toMatch(/showTimestamps \? turn\.ts : undefined/)
-    expect(code.match(/ts=\{stampOf\(turn\)\}/g) ?? [], 'both action rows pass the stamp').toHaveLength(2)
+    const rows = jsxTags(code, ['MessageUser', 'MessageAssistant'])
+    expect(rows, 'both transcript owners receive the preference-gated stamp').toHaveLength(2)
+    for (const row of rows) {
+      expect(row.attributes.get('timestamp')).toBe('{stampOf(turn)}')
+      const owner = codeOf('shared', 'ui', 'chat', `${row.name}.tsx`)
+      const times = jsxTags(owner, ['time'])
+      expect(times).toHaveLength(1)
+      expect(times[0].attributes.get('dateTime')).toBe('{isoStamp(timestamp)}')
+      expect(owner).toMatch(/const time = clockTime\(timestamp\)/)
+      expect(owner).toMatch(/\{time && <time/)
+    }
   })
 
   it('both writers bust the reader key, so the toggle changes the transcript at once', () => {

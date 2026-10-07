@@ -1,3 +1,5 @@
+import ts from 'typescript'
+import { nodes } from '../../shared/testing/sourceOwners'
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -12,19 +14,21 @@ describe('workflow failure toasts carry the error level', () => {
     for (const name of readdirSync(DIR)) {
       if (!/\.tsx?$/.test(name) || /\.test\./.test(name)) continue
       const src = readFileSync(join(DIR, name), 'utf8')
-      for (const m of src.matchAll(/notify\(/g)) {
-        let i = m.index! + m[0].length
-        let depth = 1
-        while (i < src.length && depth > 0) {
-          if (src[i] === '(') depth++
-          else if (src[i] === ')') depth--
-          i++
+      const calls = nodes(src, node => ts.isCallExpression(node) && node.expression.getText() === 'notify') as ts.CallExpression[]
+      for (const call of calls) {
+        let parent: ts.Node | undefined = call.parent
+        let rejection = false
+        while (parent) {
+          if (ts.isCatchClause(parent) || ts.isJsxAttribute(parent) && parent.name.getText() === 'onError') rejection = true
+          parent = parent.parent
         }
-        const args = src.slice(m.index! + m[0].length, i - 1)
-        if (!FAILURE_WORDS.test(args)) continue
+        if (!rejection && !FAILURE_WORDS.test(call.arguments[0]?.getText() ?? '')) continue
         failureCalls++
-        const line = src.slice(0, m.index).split('\n').length
-        if (!/'error'/.test(args)) offenders.push(`${name}:${line} — notify(${args.slice(0, 60)}…)`)
+        const level = call.arguments[1]
+        if (!level || !ts.isStringLiteral(level) || level.text !== 'error') {
+          const line = call.getSourceFile().getLineAndCharacterOfPosition(call.getStart()).line + 1
+          offenders.push(`${name}:${line} — ${call.getText()}`)
+        }
       }
     }
     expect(offenders, `a failure that looks like an info toast gets missed:\n${offenders.join('\n')}`).toEqual([])

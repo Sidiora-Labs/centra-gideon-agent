@@ -1,5 +1,7 @@
+import { jsxTags } from '../../shared/testing/jsxContracts'
+import { namedOwner } from '../../shared/testing/sourceOwners'
 import { describe, expect, it } from 'vitest'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 
@@ -27,28 +29,15 @@ describe("Discover's area headings sit one rung under the page title", () => {
     expect(PAGE).toMatch(/data-type="label-l"/)
   })
 
-  it('the h3s that remain in the tree are all panel-level or markdown — the scope claim', () => {
-    const walk = (dir: string, out: string[] = []): string[] => {
-      for (const name of readdirSync(dir)) {
-        const abs = join(dir, name)
-        if (statSync(abs).isDirectory()) walk(abs, out)
-        else if (/\.tsx$/.test(name) && !name.includes('.test.')) out.push(abs)
-      }
-      return out
-    }
-    const withH3 = walk(SRC)
-      .filter((abs) => /<h3[\s>]/.test(strip(readFileSync(abs, 'utf8'))))
-      .map((abs) => abs.replace(SRC + '/', ''))
-    expect(withH3.sort(), 'files still using h3').toEqual([
-      'features/code/CodeCockpitPage.tsx',
-      'features/settings/VoicePanel.tsx',
-      'features/settings/VoiceProfilesSection.tsx',
-      'features/workflows/IntrospectPanel.tsx',
-      'features/workflows/LedgerRailsPanel.tsx',
-      'features/workflows/NodeInspectorDrawer.tsx',
-      'features/workflows/OutboxPanel.tsx',
-      'features/workflows/WorkspacePanel.tsx',
-      'shared/ui/Markdown.tsx',
-    ])
+  it('the native Discover owner keeps its page-to-area outline', () => {
+    const owner = namedOwner(PAGE, 'DiscoverPage')
+    expect(jsxTags(owner, ['PageTitle'])).toHaveLength(1)
+    expect(jsxTags(owner, ['h1', 'h3'])).toHaveLength(0)
+    const areas = jsxTags(owner, ['h2']).filter(tag => tag.element.includes('{group.area}'))
+    expect(areas).toHaveLength(1)
+    expect(areas[0].attributes.get('data-type')).toBe('"label-l"')
+    expect(PAGE).toContain("import { PageTitle } from '../../shared/ui/PageTitle'")
+    const nativeTitle = namedOwner(read('shared/ui/PageTitle.tsx'), 'PageTitle')
+    expect(jsxTags(nativeTitle, ['h1'])).toHaveLength(1)
   })
 })

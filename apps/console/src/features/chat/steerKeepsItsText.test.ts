@@ -1,3 +1,5 @@
+import ts from 'typescript'
+import { nodes } from '../../shared/testing/sourceOwners'
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -53,11 +55,21 @@ describe('a failed mid-stream steer keeps the text the user typed', () => {
   })
 })
 
-describe("the file no longer claims a safety it does not have", () => {
-  it('the "nothing is dropped" sentence is scoped to the two success outcomes', () => {
-    expect(CHAT, 'the unqualified claim must not return')
-      .not.toMatch(/Either way nothing is dropped/)
-    expect(CHAT, 'and the rejection outcome must be named where the claim used to sit')
-      .toMatch(/THIRD OUTCOME/)
+describe('the steer rejection has its own failure outcome', () => {
+  it('retains the draft on rejection and reports the failure at error severity', () => {
+    const branches = nodes(CHAT, node => ts.isIfStatement(node) && node.expression.getText() === 'isStreaming') as ts.IfStatement[]
+    expect(branches).toHaveLength(1)
+    const body = branches[0].thenStatement.getText()
+    const clear = nodes(body, node => ts.isCallExpression(node) && node.expression.getText() === 'setInput') as ts.CallExpression[]
+    expect(clear).toHaveLength(1)
+    let callback: ts.Node = clear[0]
+    while (callback.parent && !ts.isArrowFunction(callback)) callback = callback.parent
+    expect(ts.isArrowFunction(callback)).toBe(true)
+    expect(callback.parent.getText()).toMatch(/\.then\(\(r\) =>/)
+    expect(clear[0].arguments[0].getText()).toBe("(cur) => (cur === t ? '' : cur)")
+    expect(body).toContain(".catch(reportActionFailure('steer this turn'))")
+    const reporter = readFileSync(join(process.cwd(), 'src/app/shell/reportingWrite.ts'), 'utf8')
+    expect(reporter).toContain("notify(failureSentence(what, error), 'error')")
+    expect(reporter).not.toContain('setInput(')
   })
 })

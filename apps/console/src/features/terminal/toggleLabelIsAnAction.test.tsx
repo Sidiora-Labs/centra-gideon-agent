@@ -1,3 +1,6 @@
+import { jsxTags } from '../../shared/testing/jsxContracts'
+import { namedOwner } from '../../shared/testing/sourceOwners'
+import { persistClaim } from '../../lib/persistClaim'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -24,7 +27,14 @@ describe('the terminal persistence toggle is labelled as an action', () => {
   })
 
   it('state is still conveyed — via active, not via the words', () => {
-    expect(src).toMatch(/active=\{persist\}/)
+    const toggles = jsxTags(src, ['HeaderControl']).filter(tag => tag.attributes.get('label')?.includes('Disable persistent sessions'))
+    expect(toggles).toHaveLength(1)
+    expect(toggles[0].attributes.get('active')).toBe('{persistenceConfirmed}')
+    expect(namedOwner(src, 'persistenceConfirmed')).toContain('persistClaim(persist, persistAvailable)')
+    expect(src).toContain("import { persistClaim } from '../../lib/persistClaim'")
+    for (const requested of [false, true, null, undefined]) {
+      for (const available of [false, true, undefined]) expect(persistClaim(requested, available)).toBe(requested === true && available === true)
+    }
   })
 
   it('matches the shape the Files header already uses', () => {
