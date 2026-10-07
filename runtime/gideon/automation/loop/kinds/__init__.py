@@ -81,7 +81,9 @@ class LoopKindStrategy(Protocol):
     testable in isolation and the engine never branches on ``loop.kind``.
     """
 
-    def turn_capabilities(self, loop: Loop) -> tuple[list[str], list[str]]: ...
+    def turn_capabilities(self, loop: Loop) -> tuple[list[str], list[str]]:
+        """Kinds without phase-specific selection force no additional capabilities."""
+        return [], []
 
     kind: str
 
