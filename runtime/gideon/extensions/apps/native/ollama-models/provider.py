@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-from gideon.core.turn_streams import closing_stream
-
 import asyncio
 import json
 import logging
 import math
 import sys
-from types import ModuleType
 from collections.abc import AsyncIterator
+from types import ModuleType
 from typing import Any
 
 import httpx
 
+from gideon.core.turn_streams import closing_stream
 from gideon.integrations.llm.events import ContextUsage
-
 from gideon.sdk.embedding import EmbeddingProvider
 from gideon.sdk.local_model import LocalModel, LocalModelProvider
 from gideon.sdk.model import (
@@ -43,7 +41,6 @@ from gideon.sdk.model import (
     until_terminal,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +60,7 @@ _DEFAULT_ENDPOINT = "http://localhost:11434"
 _CLOUD_TAG = "cloud"
 _ANSWERED_FROM: dict[str, dict[str, str]] = {}
 
+
 def _said() -> dict[str, dict[str, str]]:
     """The record of what the servers said, as the copy of this module the process holds now
     keeps it.
@@ -70,14 +68,16 @@ def _said() -> dict[str, dict[str, str]]:
     A process can run this file more than once: loaded again from its files, it is a second copy,
     while core keeps the provider type, and so the pass-on probe, of the copy that registered it
     first, and a catalog of the second may be the one that lists next. Every copy keeps its record
-    in the copy ``sys.modules`` holds, so the probe core asks reads what any of them heard."""
-    current = sys.modules.setdefault("gideon_ollama_host_records", ModuleType("gideon_ollama_host_records"))
+    in the copy ``sys.modules`` holds, so the probe core asks reads what any of them heard.
+    """
+    current = sys.modules.setdefault(
+        "gideon_ollama_host_records", ModuleType("gideon_ollama_host_records")
+    )
     record = getattr(current, "_ANSWERED_FROM", None)
     if not isinstance(record, dict):
         record = {}
-        current._ANSWERED_FROM = record
+        setattr(current, "_ANSWERED_FROM", record)
     return record
-
 
 
 def _server_key(endpoint: object) -> str:
@@ -126,8 +126,16 @@ def passes_on(entry: ProviderEntry, model: str) -> bool:
     makes it no model of this machine for core (``ProviderRegistry.passes_on``): the server named
     a host for it the last time it listed, described or answered it, or the model carries the tag
     Ollama gives its cloud models, which says so before the server has been asked. Either says it;
-    a model with no such tag that the server named no host for runs where the server is."""
-    if _said().get(_server_key(entry.options.get("endpoint") or entry.options.get("base_url")), {}).get(_model_key(model)):
+    a model with no such tag that the server named no host for runs where the server is.
+    """
+    if (
+        _said()
+        .get(
+            _server_key(entry.options.get("endpoint") or entry.options.get("base_url")),
+            {},
+        )
+        .get(_model_key(model))
+    ):
         return True
     return _cloud_tagged(model)
 
@@ -193,7 +201,9 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
     async def start(self) -> None:
         if self._client is None:
             self._client = httpx.AsyncClient(
-                base_url=self.endpoint, timeout=httpx.Timeout(self.timeout_secs, connect=10.0), trust_env=False
+                base_url=self.endpoint,
+                timeout=httpx.Timeout(self.timeout_secs, connect=10.0),
+                trust_env=False,
             )
 
     @property
@@ -236,7 +246,9 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         async with httpx.AsyncClient(
-            base_url=self.endpoint, timeout=httpx.Timeout(self.timeout_secs, connect=10.0), trust_env=False
+            base_url=self.endpoint,
+            timeout=httpx.Timeout(self.timeout_secs, connect=10.0),
+            trust_env=False,
         ) as client:
             response = await client.request(method, path, **kwargs)
             response.raise_for_status()
@@ -257,9 +269,14 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
     async def list_models(self) -> list[LocalModel]:
         result = await self._request("GET", "/api/tags")
         rows = result.get("models", [])
-        self._listed_modified_at = {str(row.get("name") or row.get("model") or ""): row.get("modified_at", "") for row in rows if isinstance(row, dict)}
+        self._listed_modified_at = {
+            str(row.get("name") or row.get("model") or ""): row.get("modified_at", "")
+            for row in rows
+            if isinstance(row, dict)
+        }
         _heard_list(self.endpoint, rows)
         semaphore = asyncio.Semaphore(4)
+
         async def describe(row):
             name = str(row.get("name") or "")
             if not name:
@@ -269,17 +286,41 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
             if not isinstance(served, list):
                 try:
                     async with semaphore:
-                        record = await self._request("POST", "/api/show", json={"model": name}, timeout=httpx.Timeout(10.0))
+                        record = await self._request(
+                            "POST",
+                            "/api/show",
+                            json={"model": name},
+                            timeout=httpx.Timeout(10.0),
+                        )
                     _heard_one(self.endpoint, name, record)
                     served = record.get("capabilities")
                 except (httpx.HTTPError, ValueError, RuntimeError):
                     served = None
-            entry = ProviderEntry(name=self.name, type="ollama", model=name, options={"endpoint":self.endpoint})
+            entry = ProviderEntry(
+                name=self.name,
+                type="ollama",
+                model=name,
+                options={"endpoint": self.endpoint},
+            )
             from gideon.integrations.llm.registry import served_on_this_machine
-            return LocalModel(name=name, size_mb=float(row.get("size",0))/1_000_000,
-                downloaded=True, capabilities=_with_served(inferred, served), source=self.endpoint,
-                runtime="ollama", runs_here=served_on_this_machine(entry,name))
-        return [row for row in await asyncio.gather(*(describe(row) for row in rows if isinstance(row,dict))) if row is not None]
+
+            return LocalModel(
+                name=name,
+                size_mb=float(row.get("size", 0)) / 1_000_000,
+                downloaded=True,
+                capabilities=_with_served(inferred, served),
+                source=self.endpoint,
+                runtime="ollama",
+                runs_here=served_on_this_machine(entry, name),
+            )
+
+        return [
+            row
+            for row in await asyncio.gather(
+                *(describe(row) for row in rows if isinstance(row, dict))
+            )
+            if row is not None
+        ]
 
     async def download_model(self, model_name: str) -> bool:
         async with httpx.AsyncClient(
@@ -315,7 +356,9 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
         rows = await self.embed_batch([text], model)
         return rows[0] if rows else None
 
-    async def embed_batch(self, texts: list[str], model: str = "") -> list[list[float]]:
+    async def embed_batch(
+        self, texts: list[str], model: str = ""
+    ) -> list[list[float] | None]:
         if not texts:
             return []
         selected = model or self.embedding_model
@@ -332,7 +375,9 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
         return [[float(value) for value in row] for row in rows]
 
     async def stream(self, message: str) -> AsyncIterator[LLMEvent]:
-        async with closing_stream(self.complete([{"role": "user", "content": message}])) as _owned_events:
+        async with closing_stream(
+            self.complete([{"role": "user", "content": message}])
+        ) as _owned_events:
             async for event in _owned_events:
                 yield event
 
@@ -368,17 +413,23 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
         answering = False
         try:
             async with asyncio.timeout(self.timeout_secs) as startup_deadline:
-                async with self._client.stream("POST", "/api/chat", json=payload) as response:
+                async with self._client.stream(
+                    "POST", "/api/chat", json=payload
+                ) as response:
                     response.raise_for_status()
                     calls: dict[str, dict[str, Any]] = {}
                     async for row in until_terminal(
-                        _chat_rows(response), ends=lambda row: row.get("done") is True,
-                        adapter="Ollama", missing="the done line", model=selected,
+                        _chat_rows(response),
+                        ends=lambda row: row.get("done") is True,
+                        adapter="Ollama",
+                        missing="the done line",
+                        model=selected,
                     ):
                         _heard_one(self.endpoint, selected, row)
                         message = row.get("message") or {}
                         if row.get("done") or any(
-                            message.get(field) for field in ("content", "thinking", "tool_calls")
+                            message.get(field)
+                            for field in ("content", "thinking", "tool_calls")
                         ):
                             answering = True
                             startup_deadline.reschedule(None)
@@ -390,8 +441,13 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
                                 yield LLMEvent(kind=kind, text=message[field])
                         for index, call in enumerate(message.get("tool_calls") or []):
                             function = call["function"]
-                            identifier = str(call.get("id") or f"ollama-{function.get('index', index)}")
-                            pending = calls.setdefault(identifier, {"name": "", "arguments": ""})
+                            identifier = str(
+                                call.get("id")
+                                or f"ollama-{function.get('index', index)}"
+                            )
+                            pending = calls.setdefault(
+                                identifier, {"name": "", "arguments": ""}
+                            )
                             if function.get("name"):
                                 pending["name"] = function["name"]
                             arguments = function.get("arguments", {})
@@ -408,14 +464,22 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
                                 except json.JSONDecodeError:
                                     parsed = None
                                 yield LLMEvent(
-                                    kind=EVENT_TOOL_CALL, tool_call_id=identifier,
-                                    title=pending["name"], tool_input=arguments,
-                                    tool_input_obj=parsed if isinstance(parsed, dict) else None,
+                                    kind=EVENT_TOOL_CALL,
+                                    tool_call_id=identifier,
+                                    title=pending["name"],
+                                    tool_input=arguments,
+                                    tool_input_obj=(
+                                        parsed if isinstance(parsed, dict) else None
+                                    ),
                                     stop_reason=reason,
                                 )
-                            reported_window = await self._served_context_window(selected)
+                            reported_window = await self._served_context_window(
+                                selected
+                            )
                             self._reported_context_window = reported_window
-                            self.context_window = reported_window or LOCAL_SERVED_CONTEXT_WINDOW
+                            self.context_window = (
+                                reported_window or LOCAL_SERVED_CONTEXT_WINDOW
+                            )
                             prompt_tokens = int(row.get("prompt_eval_count", 0))
                             self._last_context_pct = (
                                 100.0
@@ -456,7 +520,9 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
             if answering:
                 raise
             error = FirstTokenTimeout(
-                model=selected, provider=self.display_name, waited_secs=self.timeout_secs
+                model=selected,
+                provider=self.display_name,
+                waited_secs=self.timeout_secs,
             )
             logger.warning("%s", error)
             raise error from None
@@ -485,7 +551,12 @@ class OllamaCatalog(ModelCatalog):
                 capabilities=row.capabilities,
                 size=int(row.size_mb * 1_000_000),
                 downloaded=True,
-                extra={"runs_here": row.runs_here, "modified_at": getattr(self.provider, "_listed_modified_at", {}).get(row.name, "")},
+                extra={
+                    "runs_here": row.runs_here,
+                    "modified_at": getattr(
+                        self.provider, "_listed_modified_at", {}
+                    ).get(row.name, ""),
+                },
             )
             for row in await self.provider.list_models()
         ]
@@ -509,7 +580,10 @@ def _factory(*, entry: ProviderEntry, **kwargs: Any) -> ModelProvider:
         cap = int(kwargs["max_tokens"])
         if cap <= 0:
             raise ValueError("max_tokens must be positive")
-        options = dict(config.get("options") or {})
+        configured_options = config.get("options")
+        if configured_options is not None and not isinstance(configured_options, dict):
+            raise ValueError("Ollama generation options must be an object")
+        options = dict(configured_options or {})
         previous = options.get("num_predict")
         if previous is not None and int(previous) > 0:
             cap = min(cap, int(previous))
