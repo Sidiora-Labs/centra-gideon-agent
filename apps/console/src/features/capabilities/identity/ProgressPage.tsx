@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { Button } from '../../../shared/ui/Button'
 import { PageTitle } from '../../../shared/ui/PageTitle'
@@ -23,7 +24,7 @@ export default function ProgressPage({ endpoint = '/api/capabilities/identity/pr
     <p>Source-backed progress. Planned session time is not measured effort. Health and skill level are unknown.</p>
     {error && <p role="alert" className="text-danger">{error}</p>}{!sheet && <p role="status">Loading progress…</p>}
     <label htmlFor="progress-asof">As of local date</label><input id="progress-asof" type="date" value={asOf} className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" onChange={e => setAsOf(e.target.value)} />
-    <Button disabled={busy} onClick={() => { window.location.hash = '#/capabilities/identity/progress' + (asOf ? '?as_of=' + asOf : ''); void perform(load) }}>Reload progress</Button>
+    <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => { window.location.hash = '#/capabilities/identity/progress' + (asOf ? '?as_of=' + asOf : ''); void perform(load) }}>Reload progress</Button>
     <form className="space-y-m rounded-lg bg-surface-container p-l" onSubmit={e => { e.preventDefault(); void perform(async () => {
       await readJson<Profile>(await fetch(endpoint, { method: 'PUT', headers: { ...gatewayHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ birth_date: profile.birth_date, timezone: profile.timezone, tracked_task_ids: taskIds.split('\n').map(x => x.trim()).filter(Boolean), expected_revision: profile.revision, request_id: request }) }))
       setRequest(crypto.randomUUID()); await load()
@@ -31,7 +32,7 @@ export default function ProgressPage({ endpoint = '/api/capabilities/identity/pr
       <label className="block" htmlFor="progress-birth">Birth date (optional)</label><input id="progress-birth" type="date" value={profile.birth_date || ''} className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" onChange={e => setProfile({ ...profile, birth_date: e.target.value || null })} />
       <label className="block" htmlFor="progress-zone">Timezone</label><input className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" id="progress-zone" value={profile.timezone} onChange={e => setProfile({ ...profile, timezone: e.target.value })} required />
       <label className="block" htmlFor="progress-tasks">Tracked native task IDs (one per line)</label><textarea className="w-full min-w-0 resize-y rounded-md border border-outline-variant/30 bg-surface-container p-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" id="progress-tasks" value={taskIds} onChange={e => setTaskIds(e.target.value)} />
-      <Button type="submit" disabled={busy || !sheet}>Save progress settings</Button>
+      <Button type="submit" disabled={busy || !sheet} disabledReason={busy ? BUSY_REASON : undefined}>Save progress settings</Button>
     </form>
     {sheet && <><section aria-label="Progress summary"><h2 data-type="title-l">Current source summary</h2><p>Age: {sheet.age === null ? 'Unknown' : sheet.age}</p><p>Completed goals: {sheet.goals.completed} · Active goals: {sheet.goals.active}</p><p>Completed sessions: {sheet.sessions_completed.length}</p><p>Planned minutes in completed sessions: {sheet.planned_completed_minutes}</p><p>Authored stories: {sheet.authored_story_count}</p><p>Tracked tasks currently done: {sheet.tasks_done}</p><p>{sheet.source_policy}</p></section>
       <section><h2 data-type="title-l">Completed sessions</h2>{!sheet.sessions_completed.length && <p>No completed sessions recorded.</p>}{sheet.sessions_completed.map(row => <p key={row.id}><a className="underline" href={'#/capabilities/identity/goals?goal=' + row.goal_id}>{row.title}</a> · {row.local_date} · {row.planned_minutes} planned minutes</p>)}</section>

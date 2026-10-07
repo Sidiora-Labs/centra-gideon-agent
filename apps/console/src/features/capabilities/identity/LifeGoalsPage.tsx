@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { Button } from '../../../shared/ui/Button'
 import { PageTitle } from '../../../shared/ui/PageTitle'
@@ -33,7 +34,7 @@ export default function LifeGoalsPage({ endpoint = '/api/capabilities/identity/g
   return <WorkbenchLayout topBar={<TopBar keepCornerPadding left={<PageTitle>Life goals and planned sessions</PageTitle>} />}>
   <section className="mx-auto flex w-full max-w-[72rem] flex-col gap-l px-l py-2xl text-on-surface"><p>Plan human activities. Calendar export contains recorded plans; it does not send invitations or synchronize an external calendar.</p>
     {error && <p role="alert" className="text-danger">{error}</p>}{!loaded && <p role="status">Loading plans…</p>}
-    <Button disabled={busy} onClick={() => void perform(load)}>Reload plans</Button>
+    <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void perform(load)}>Reload plans</Button>
     <div className="grid md:grid-cols-2 gap-4"><section className="space-y-m rounded-lg bg-surface-container p-l"><h2 data-type="title-l">Goals</h2>
       {loaded && !goals.length && <p>No life goals yet.</p>}{goals.map(row => <button key={row.id} className="block underline" onClick={() => { choose(row); freshSession() }}>{row.title} · {row.status}</button>)}
       <Button variant="secondary" onClick={() => { setGoal({ title: '', description: '', status: 'active', target_date: null }); setRequest(crypto.randomUUID()); freshSession(); window.location.hash = '#/capabilities/identity/goals' }}>New goal</Button>
@@ -45,7 +46,7 @@ export default function LifeGoalsPage({ endpoint = '/api/capabilities/identity/g
         <label className="block" htmlFor="goal-description">Why this matters</label><textarea className="w-full min-w-0 resize-y rounded-md border border-outline-variant/30 bg-surface-container p-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" id="goal-description" value={goal.description} onChange={e => setGoal({ ...goal, description: e.target.value })} />
         <label className="block" htmlFor="goal-date">Target date</label><input id="goal-date" type="date" value={goal.target_date || ''} className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" onChange={e => setGoal({ ...goal, target_date: e.target.value || null })} />
         <label className="block" htmlFor="goal-status">Goal status</label><select id="goal-status" value={goal.status} className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary appearance-none" onChange={e => setGoal({ ...goal, status: e.target.value })}>{['active', 'completed', 'archived'].map(value => <option key={value}>{value}</option>)}</select>
-        <Button type="submit" disabled={busy}>Save goal</Button>
+        <Button type="submit" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>Save goal</Button>
       </form></section>
       <section className="space-y-m rounded-lg bg-surface-container p-l"><h2 data-type="title-l">Sessions for selected goal</h2>{!goal.id && <p>Save or select a goal to plan a session.</p>}
         {sessions.filter(row => row.goal_id === goal.id).map(row => <button key={row.id} className="block underline" onClick={() => { setSession(row); setSessionRequest(crypto.randomUUID()) }}>{row.title} · {row.status} · {new Date(row.start_at).toLocaleString()}</button>)}
@@ -60,9 +61,9 @@ export default function LifeGoalsPage({ endpoint = '/api/capabilities/identity/g
           <label className="block" htmlFor="plan-end">End with timezone</label><input className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" id="plan-end" required value={session.end_at} onChange={e => setSession({ ...session, end_at: e.target.value })} />
           <label className="block" htmlFor="plan-notes">Session notes</label><textarea className="w-full min-w-0 resize-y rounded-md border border-outline-variant/30 bg-surface-container p-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" id="plan-notes" value={session.notes} onChange={e => setSession({ ...session, notes: e.target.value })} />
           <label className="block" htmlFor="plan-status">Session status</label><select id="plan-status" value={session.status} className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary appearance-none" onChange={e => setSession({ ...session, status: e.target.value })}>{['scheduled', 'completed', 'cancelled'].map(value => <option key={value}>{value}</option>)}</select>
-          <Button type="submit" disabled={busy || !goal.id}>Save session</Button>
+          <Button type="submit" disabled={busy || !goal.id} disabledReason={busy ? BUSY_REASON : undefined}>Save session</Button>
         </form></section></div>
-    <Button disabled={busy} onClick={() => void perform(async () => { const response = await fetch(endpoint + '/calendar', { headers: gatewayHeaders }); if (!response.ok) throw new Error('Calendar export unavailable'); setCalendar(await response.text()) })}>Export calendar</Button>
+    <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void perform(async () => { const response = await fetch(endpoint + '/calendar', { headers: gatewayHeaders }); if (!response.ok) throw new Error('Calendar export unavailable'); setCalendar(await response.text()) })}>Export calendar</Button>
     {calendar && <section aria-label="Calendar export"><a download="human-plans.ics" href={'data:text/calendar;charset=utf-8,' + encodeURIComponent(calendar)}>Download calendar file</a><pre className="overflow-auto whitespace-pre-wrap">{calendar}</pre></section>}
   </section></WorkbenchLayout>
 }

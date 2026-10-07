@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { Button } from '../../../shared/ui/Button'
 import { PageTitle } from '../../../shared/ui/PageTitle'
@@ -35,7 +36,7 @@ export default function TwinPage({ endpoint = '/api/capabilities/identity/twin' 
   return <WorkbenchLayout topBar={<TopBar keepCornerPadding left={<PageTitle>Your identity context</PageTitle>} />}>
   <section className="mx-auto flex w-full max-w-[72rem] flex-col gap-l px-l py-2xl text-on-surface"><p>Describe yourself in your own words. Private sources stay out of automatic model context.</p>
     {error && <p role="alert" className="text-danger">{error}</p>}{!state && <p role="status">Loading identity…</p>}
-    <Button onClick={() => void load()} disabled={busy}>Reload identity</Button>
+    <Button onClick={() => void load()} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>Reload identity</Button>
     <div className="grid md:grid-cols-2 gap-4">
       <section className="space-y-3 min-w-0"><h2 className="text-xl">Source documents</h2>
         {state?.documents.length === 0 && <p>No sources yet.</p>}
@@ -48,9 +49,9 @@ export default function TwinPage({ endpoint = '/api/capabilities/identity/twin' 
           <label className="block"><input type="checkbox" checked={draft.private} className="size-4 shrink-0 accent-primary" onChange={e => setDraft({ ...draft, private: e.target.checked })} /> Private source</label>
           <label htmlFor="twin-weight">Weight</label><input id="twin-weight" type="number" min={1} max={10} value={draft.weight} className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" onChange={e => setDraft({ ...draft, weight: Number(e.target.value) })} />
           <label htmlFor="twin-priority">Priority</label><input id="twin-priority" type="number" min={0} max={1000} value={draft.priority} className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" onChange={e => setDraft({ ...draft, priority: Number(e.target.value) })} />
-          <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy || !state}>Save source</Button>
-            {draft.id && <><Button variant="danger" disabled={busy} onClick={() => void perform(async () => { adopt(await call<Snapshot>('/documents/' + draft.id + '?expected_revision=' + state!.revision, 'DELETE')); setDraft(blank); window.location.hash = '#/capabilities/identity/twin' })}>Delete source</Button>
-              <Button variant="secondary" disabled={busy || draft.private || !draft.enabled} onClick={() => void perform(async () => { const result = await call<{ text: string }>('/enrich', 'POST', { document_id: draft.id }); setPreview(result.text) })}>Suggest questions</Button></>}</div>
+          <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy || !state} disabledReason={busy ? BUSY_REASON : undefined}>Save source</Button>
+            {draft.id && <><Button variant="danger" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void perform(async () => { adopt(await call<Snapshot>('/documents/' + draft.id + '?expected_revision=' + state!.revision, 'DELETE')); setDraft(blank); window.location.hash = '#/capabilities/identity/twin' })}>Delete source</Button>
+              <Button variant="secondary" disabled={busy || draft.private || !draft.enabled} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void perform(async () => { const result = await call<{ text: string }>('/enrich', 'POST', { document_id: draft.id }); setPreview(result.text) })}>Suggest questions</Button></>}</div>
         </form>
       </section>
       <section className="space-y-3 min-w-0"><h2 className="text-xl">Traits and persona overlays</h2>
@@ -59,9 +60,9 @@ export default function TwinPage({ endpoint = '/api/capabilities/identity/twin' 
         <label className="block" htmlFor="twin-personas">Persona overlays (JSON list)</label><textarea className="w-full min-w-0 resize-y rounded-md border border-outline-variant/30 bg-surface-container p-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" id="twin-personas" rows={5} value={personas} onChange={e => setPersonas(e.target.value)} />
         <p>Each overlay has id, name, instructions and trait_adjustments. These describe your communication preferences.</p>
         <label className="block" htmlFor="twin-active">Active overlay ID</label><input className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" id="twin-active" value={active} onChange={e => setActive(e.target.value)} />
-        <Button disabled={busy || !state} onClick={() => void perform(async () => { adopt(await call<Snapshot>('', 'PUT', { expected_revision: state!.revision, enabled, traits: JSON.parse(traits), personas: JSON.parse(personas), active_persona_id: active || null })) })}>Save identity settings</Button>
+        <Button disabled={busy || !state} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void perform(async () => { adopt(await call<Snapshot>('', 'PUT', { expected_revision: state!.revision, enabled, traits: JSON.parse(traits), personas: JSON.parse(personas), active_persona_id: active || null })) })}>Save identity settings</Button>
         <label className="block" htmlFor="twin-budget">Context token budget (conservative)</label><input id="twin-budget" type="number" min={1} max={10000} value={budget} className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" onChange={e => setBudget(Number(e.target.value))} />
-        <Button variant="secondary" disabled={busy} onClick={() => void perform(async () => { const result = await call<{ text: string; omitted_ids: string[] }>('/context?budget=' + budget); setPreview(result.text + (result.omitted_ids.length ? '\nSources omitted for budget: ' + result.omitted_ids.join(', ') : '')) })}>Preview shared context</Button>
+        <Button variant="secondary" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void perform(async () => { const result = await call<{ text: string; omitted_ids: string[] }>('/context?budget=' + budget); setPreview(result.text + (result.omitted_ids.length ? '\nSources omitted for budget: ' + result.omitted_ids.join(', ') : '')) })}>Preview shared context</Button>
       </section>
     </div>
     {preview && <section aria-label="Identity preview"><h2 data-type="title-l">Preview</h2><pre className="whitespace-pre-wrap break-words">{preview}</pre></section>}

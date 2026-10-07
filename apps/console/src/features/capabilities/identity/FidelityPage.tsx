@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import { Button } from '../../../shared/ui/Button'
 import { PageTitle } from '../../../shared/ui/PageTitle'
@@ -33,7 +34,7 @@ export default function FidelityPage({ endpoint = '/api/capabilities/identity/fi
   <section className="mx-auto flex w-full max-w-[72rem] flex-col gap-l px-l py-2xl text-on-surface">
     <p>Check explicit words against human identity sources. Literal checks do not measure semantic fidelity. Supplied observations are not verified provider outputs.</p>
     {error && <p role="alert" className="text-danger">{error}</p>}{!loaded && <p role="status">Loading checks…</p>}
-    <Button onClick={() => void perform(load)} disabled={busy}>Reload checks</Button>
+    <Button onClick={() => void perform(load)} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>Reload checks</Button>
     <div className="grid md:grid-cols-2 gap-4">
       <section className="space-y-m rounded-lg bg-surface-container p-l"><h2 data-type="title-l">Cases</h2>{loaded && cases.length === 0 && <p>No fidelity cases yet.</p>}
         {cases.map(item => <button className="block underline" key={item.id} onClick={() => choose(item)}>{item.prompt}</button>)}
@@ -48,12 +49,12 @@ export default function FidelityPage({ endpoint = '/api/capabilities/identity/fi
           <label className="block" htmlFor="fidelity-sources">Identity sources</label><select multiple className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" id="fidelity-sources" required value={sources.split(',').map(x => x.trim())} onChange={e => setSources(Array.from(e.target.selectedOptions, option => option.value).join(','))}>{documents.map(doc => <option key={doc.id} value={doc.id} disabled={doc.private || !doc.enabled}>{doc.title}{doc.private ? ' (private)' : !doc.enabled ? ' (disabled)' : ''}</option>)}</select>
           <label className="block" htmlFor="fidelity-rule">Expectation</label><select id="fidelity-rule" value={rule} className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary appearance-none" onChange={e => setRule(e.target.value)}><option value="contains">Contains</option><option value="not_contains">Does not contain</option><option value="equals">Equals</option></select>
           <label className="block" htmlFor="fidelity-value">Expected text</label><input className="h-10 w-full min-w-0 rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" id="fidelity-value" required value={value} onChange={e => setValue(e.target.value)} />
-          <Button type="submit" disabled={busy}>Save case</Button>
+          <Button type="submit" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>Save case</Button>
         </form>
       </section>
       <section className="space-y-m rounded-lg bg-surface-container p-l"><h2 data-type="title-l">Observed answer</h2><label className="block" htmlFor="fidelity-answer">Supplied answer</label><textarea className="w-full min-w-0 resize-y rounded-md border border-outline-variant/30 bg-surface-container p-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" id="fidelity-answer" rows={6} value={answer} onChange={e => setAnswer(e.target.value)} />
-        <Button disabled={busy || !selected || !answer.trim()} onClick={() => void perform(async () => { await call('/observations', { case_id: selected, answer, request_id: requestId }); setRequestId(crypto.randomUUID()); await load() })}>Check supplied observation</Button>
-        <Button variant="secondary" disabled={busy || !selected} onClick={() => void perform(async () => { await call('/run', { case_id: selected, request_id: requestId }); setRequestId(crypto.randomUUID()); await load() })}>Run configured model</Button>
+        <Button disabled={busy || !selected || !answer.trim()} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void perform(async () => { await call('/observations', { case_id: selected, answer, request_id: requestId }); setRequestId(crypto.randomUUID()); await load() })}>Check supplied observation</Button>
+        <Button variant="secondary" disabled={busy || !selected} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void perform(async () => { await call('/run', { case_id: selected, request_id: requestId }); setRequestId(crypto.randomUUID()); await load() })}>Run configured model</Button>
       </section>
     </div>
     <section aria-label="Evaluation history"><h2 data-type="title-l">Evaluation history</h2>{loaded && runs.length === 0 && <p>No evaluations recorded.</p>}
