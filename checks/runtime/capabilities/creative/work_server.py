@@ -48,8 +48,15 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
-    print(json.dumps({"port": site._server.sockets[0].getsockname()[1],
-                      "token": generate_token("creative-test-owner")}), flush=True)
+    print(
+        json.dumps(
+            {
+                "port": site._server.sockets[0].getsockname()[1],
+                "token": generate_token("creative-test-owner"),
+            }
+        ),
+        flush=True,
+    )
     try:
         await asyncio.Event().wait()
     finally:
