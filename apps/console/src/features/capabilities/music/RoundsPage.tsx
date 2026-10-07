@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import {ListScaffold} from '../../../shared/ui/ListScaffold'
 import {Checkbox} from '../../../shared/ui/forms'
@@ -44,13 +45,13 @@ export default function RoundsPage({apiBase='/api/capabilities/music/rounds',cat
           <Button variant="secondary" disabled={draft.parts.length<=1} onClick={()=>edit({parts:draft.parts.filter((_,i)=>i!==index)})}>Remove part {index+1}</Button>
         </fieldset>)}
         <Button variant="secondary" disabled={draft.parts.length>=16} onClick={()=>edit({parts:[...draft.parts,blankPart()]})}>Add voice part</Button>
-        <Button type="submit" disabled={busy||!draft.title.trim()}>{item?'Save arrangement':'Create canon'}</Button>
+        <Button type="submit" disabled={busy||!draft.title.trim()} disabledReason={busy ? BUSY_REASON : undefined}>{item?'Save arrangement':'Create canon'}</Button>
       </form>}
       {item&&<article aria-label="Part practice" className="flex flex-col gap-3"><h2>{item.title}</h2><p>Practice uses saved arrangement revision {item.revision}.</p>
         {item.parts.map(part=>{const track=tracks.find(row=>row.id===part.catalog_ref?.track_id);const ref=track?.renders.find(row=>row.id===part.catalog_ref?.render_id)?.artifact_ref;return <div key={part.id}><label className="flex items-center gap-s"><Checkbox ariaLabel={part.name} checked={chosen.includes(part.id)} onChange={checked=>setChosen(values=>checked?[...values,part.id]:values.filter(value=>value!==part.id))}/>{part.name}</label><pre className="whitespace-pre-wrap font-sans">{part.notation}</pre>{ref?<audio aria-label={`Play ${part.name}`} controls src={`/api/artifacts/${ref.slug}/raw?version=${ref.version}`}/>:<p>{part.catalog_ref?'Recording unavailable.':'No recording attached.'}</p>}</div>})}
         <label>Practice grade<select className={cls} value={grade} onChange={event=>setGrade(Number(event.target.value))}>{[0,1,2,3,4,5].map(value=><option key={value}>{value}</option>)}</select></label>
         <label>Practice notes<textarea className={`${cls} h-auto min-h-24 py-2`} value={practiceNotes} onChange={event=>setPracticeNotes(event.target.value)}/></label>
-        <Button disabled={busy||dirty||chosen.length===0} onClick={()=>void practice()}>Log part practice</Button>{dirty&&<p>Save arrangement changes before practicing.</p>}
+        <Button disabled={busy||dirty||chosen.length===0} disabledReason={busy ? BUSY_REASON : undefined} onClick={()=>void practice()}>Log part practice</Button>{dirty&&<p>Save arrangement changes before practicing.</p>}
         <ol aria-label="Part practice history">{history.map(row=><li key={row.id}>Grade {row.grade} · {row.part_ids.length} parts · revision {row.round_revision} · {row.notes}</li>)}</ol>
       </article>}
     </>}

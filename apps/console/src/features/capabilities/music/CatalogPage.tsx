@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useState } from 'react'
 import {ListScaffold} from '../../../shared/ui/ListScaffold'
 import {Checkbox} from '../../../shared/ui/forms'
@@ -68,20 +69,20 @@ export default function CatalogPage({ apiBase = '/api/capabilities/music/catalog
         <label>{kind === 'artists' ? 'Artist name' : 'Title'}<input className={inputClass} value={label} maxLength={200} required onChange={event => setLabel(event.target.value)} /></label>
         {kind !== 'artists' && <label>Artist ID (optional)<input className={inputClass} value={artist} onChange={event => setArtist(event.target.value)} /></label>}
         {kind === 'albums' ? <label>Ordered track IDs (one per line)<textarea className={`${inputClass} h-auto min-h-24 py-2`} value={tracks} onChange={event => setTracks(event.target.value)} /></label> : <label>{kind === 'artists' ? 'Biography' : 'Notes'}<textarea className={`${inputClass} h-auto min-h-24 py-2`} value={details} onChange={event => setDetails(event.target.value)} /></label>}
-        <Button type="submit" disabled={busy || !label.trim()}>{item ? 'Save metadata' : 'Create record'}</Button>
+        <Button type="submit" disabled={busy || !label.trim()} disabledReason={busy ? BUSY_REASON : undefined}>{item ? 'Save metadata' : 'Create record'}</Button>
       </form>}
-      {item && <><p>Record ID: {item.id}</p><Button variant="secondary" disabled={busy} onClick={() => void mutate(`/${kind}/${id}`, 'PATCH', { revision: item.revision, archived: !item.archived })}>{item.archived ? 'Restore record' : 'Archive record'}</Button></>}
+      {item && <><p>Record ID: {item.id}</p><Button variant="secondary" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void mutate(`/${kind}/${id}`, 'PATCH', { revision: item.revision, archived: !item.archived })}>{item.archived ? 'Restore record' : 'Archive record'}</Button></>}
       {item && kind === 'tracks' && <article aria-label="Audio renders" className="flex flex-col gap-3">
         <h2>Audio renders</h2><p>Attach existing PCM WAV artifacts. Generation provenance is unavailable until a verified generation job adapter is connected.</p>
         <label>Audio artifact slug<input className={inputClass} value={slug} onChange={event => setSlug(event.target.value)} /></label>
         <label>Artifact version<input className={inputClass} type="number" min={1} value={version} onChange={event => setVersion(Number(event.target.value))} /></label>
         <label>Source attribution<input className={inputClass} value={source} onChange={event => setSource(event.target.value)} /></label>
         <label>License or rights statement<input className={inputClass} value={license} onChange={event => setLicense(event.target.value)} /></label>
-        <Button disabled={busy || !slug || !source || !license} onClick={() => void mutate(`/tracks/${id}/renders`, 'POST', { revision: item.revision, artifact_ref: { slug, version }, source: { kind: 'imported', label: source, license } })}>Attach recording</Button>
+        <Button disabled={busy || !slug || !source || !license} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void mutate(`/tracks/${id}/renders`, 'POST', { revision: item.revision, artifact_ref: { slug, version }, source: { kind: 'imported', label: source, license } })}>Attach recording</Button>
         {(item.renders || []).map(render => <div key={render.id} className="rounded-lg border border-outline p-3">
           <p>{render.artifact_ref.slug} · {render.duration_seconds.toFixed(3)} seconds · {render.source.kind}</p><p>{render.source.label} · {render.source.license} (user supplied)</p>
           <audio aria-label={`Play ${render.artifact_ref.slug}`} controls src={`/api/artifacts/${encodeURIComponent(render.artifact_ref.slug)}/raw?version=${render.artifact_ref.version}`} />
-          <Button disabled={busy || item.selected_render_id === render.id} onClick={() => void mutate(`/tracks/${id}/select`, 'POST', { revision: item.revision, render_id: render.id })}>{item.selected_render_id === render.id ? 'Selected render' : 'Select render'}</Button>
+          <Button disabled={busy || item.selected_render_id === render.id} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void mutate(`/tracks/${id}/select`, 'POST', { revision: item.revision, render_id: render.id })}>{item.selected_render_id === render.id ? 'Selected render' : 'Select render'}</Button>
         </div>)}
       </article>}
     </>}

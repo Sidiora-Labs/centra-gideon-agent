@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { requestJson } from '../../../shared/data/gatewayRequest';
 import { Button } from '../../../shared/ui/Button';
@@ -103,7 +104,7 @@ export default function EpigeneticRecords() {
       <fieldset className="grid gap-m sm:grid-cols-2"><legend data-type="label-l" className="mb-s">{w[11]}</legend><Field label={w[12]}><TextInput type="number" value={pace} onChange={setPace} /></Field><Field label={w[13]}><TextInput value={paceScale} onChange={setPaceScale} /></Field></fieldset>
       <Field label={w[14]} hint={w[15]}><TextArea rows={5} value={scores} onChange={setScores} mono /></Field>
       <Field label={w[16]}><TextArea value={notes} onChange={setNotes} /></Field>
-      <Button type="submit" disabled={busy}>{selected ? w[17] : w[18]}</Button>
+      <Button type="submit" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>{selected ? w[17] : w[18]}</Button>
     </form>}
     {selected && <section><h2>{w[20]}</h2><p>{w[21]}</p><ol>{history.map(row => <li key={row.revision}>v{row.revision}: biological {shown(row.biological_age)}; chronological {shown(row.chronological_age)}; pace {shown(row.pace_of_aging)}</li>)}</ol></section>}
   </main>;

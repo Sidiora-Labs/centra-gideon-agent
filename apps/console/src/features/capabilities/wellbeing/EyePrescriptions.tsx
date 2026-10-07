@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { requestJson } from '../../../shared/data/gatewayRequest';
 import { Button } from '../../../shared/ui/Button';
@@ -94,7 +95,7 @@ export default function EyePrescriptions() {
     });
   }
   const create = () => { generation.current += 1; setBusy(false); setSelected(null); setEditing(true); setHistory([]); setDraft(blank()); window.history.replaceState(null, '', '#/capabilities/wellbeing?view=eyes'); };
-  return <main dir={language === 'ar' ? 'rtl' : 'auto'} style={{ maxWidth: 'var(--content-width)' }} className="mx-auto w-full space-y-2xl px-l py-2xl text-on-surface"><div className="flex flex-wrap items-start justify-between gap-l"><div className="min-w-0"><h2 data-type="title-m" className="text-on-surface">{w[0]}</h2><p data-type="body-m" className="mt-xs text-on-surface-var">{w[1]}</p></div><div className="flex w-full flex-wrap gap-s sm:w-auto"><Button disabled={busy} onClick={create}><Plus size={17} />{w[3]}</Button><Button variant="secondary" disabled={busy} onClick={() => void run(async token => { const value = await requestJson(base + '/export'); if (current(token)) setExported(JSON.stringify(value, null, 2)); })}><Download size={17} />{w[17]}</Button></div></div>
+  return <main dir={language === 'ar' ? 'rtl' : 'auto'} style={{ maxWidth: 'var(--content-width)' }} className="mx-auto w-full space-y-2xl px-l py-2xl text-on-surface"><div className="flex flex-wrap items-start justify-between gap-l"><div className="min-w-0"><h2 data-type="title-m" className="text-on-surface">{w[0]}</h2><p data-type="body-m" className="mt-xs text-on-surface-var">{w[1]}</p></div><div className="flex w-full flex-wrap gap-s sm:w-auto"><Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={create}><Plus size={17} />{w[3]}</Button><Button variant="secondary" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void run(async token => { const value = await requestJson(base + '/export'); if (current(token)) setExported(JSON.stringify(value, null, 2)); })}><Download size={17} />{w[17]}</Button></div></div>
     {error && <p role="alert">{error}</p>}{busy && <p role="status">{w[2]}</p>}
     <section className="rounded-lg border border-outline-variant/20 bg-surface-container p-l"><h2 data-type="title-m" className="text-on-surface">{w[14]}</h2>{!busy && records.length === 0 ? <div className="py-8 text-center"><Eye className="mx-auto mb-3 text-on-surface-low" /><p>{w[15]}</p><Button className="mt-4" onClick={create}>{w[3]}</Button></div> : <ul className="mt-3 divide-y divide-outline-variant/30">{records.map(row => <li key={row.id}><button className="flex w-full items-center justify-between py-3 text-left" onClick={() => void run(token => select(row.id, token))}><span>{row.observed_date} · {row.source}</span><strong>{row.left.sphere} / {row.right.sphere} D</strong></button></li>)}</ul>}</section>
     {editing && <form onSubmit={save} className="grid gap-m rounded-lg border border-outline-variant/20 bg-surface-container p-l sm:grid-cols-2">
@@ -102,7 +103,7 @@ export default function EyePrescriptions() {
       <Field label={w[5]}><TextInput required disabled={!!selected} value={draft.source} onChange={value => setDraft({ ...draft, source: value })} /></Field>
       <EyeFields side="left" labels={w} draft={draft} setDraft={setDraft} disabled={busy} /><EyeFields side="right" labels={w} draft={draft} setDraft={setDraft} disabled={busy} />
       <Field label={w[11]}><TextArea value={draft.notes} onChange={value => setDraft({ ...draft, notes: value })} /></Field>
-      <Button type="submit" disabled={busy}>{selected ? w[12] : w[13]}</Button>
+      <Button type="submit" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>{selected ? w[12] : w[13]}</Button>
     </form>}
     {selected && <section><h2>{w[16]}</h2><ol>{history.map(row => <li key={row.revision}>v{row.revision}: {w[6]} {row.left.sphere} D / {row.left.cylinder} D × {row.left.axis} {w[19]}; {w[7]} {row.right.sphere} D / {row.right.cylinder} D × {row.right.axis} {w[19]} · {row.notes}</li>)}</ol></section>}
     {exported && <pre aria-label={w[18]}>{exported}</pre>}

@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -97,7 +98,7 @@ export default function BodyComposition({ baseUrl = '' }: { baseUrl?: string }) 
       <Field label={w[12]}><DecimalInput value={temperature} onChange={setTemperature} /></Field>
       <Field label={w[13]}><Select ariaLabel={w[13]} value={temperatureUnit} onChange={setTemperatureUnit} options={['C', 'F', 'K'].map(value => ({ value, label: value }))} /></Field>
       <Field label={w[14]}><TextArea value={notes} onChange={setNotes} /></Field>
-      <Button type="submit" disabled={busy}>{selected ? w[15] : w[16]}</Button>
+      <Button type="submit" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>{selected ? w[15] : w[16]}</Button>
     </form>}
     {selected && <section><h2>{w[17]}</h2><p>{selected.original_values.muscle_percent}% {w[20]} · {selected.original_values.fat_percent}% {w[21]} · {selected.original_values.bone_mass.value} {selected.original_values.bone_mass.unit} {w[22]} · {selected.original_values.temperature.value} °{selected.original_values.temperature.unit}</p><p>{selected.normalized_values.bone_mass_kg} kg {w[22]} · {selected.normalized_values.temperature_c} °C · {selected.source}</p><h3>{w[18]}</h3><ol>{history.map(row => <li key={row.revision}>v{row.revision}: {row.original_values.temperature.value} °{row.original_values.temperature.unit} · {row.notes}</li>)}</ol></section>}
     {exported && <section><h2>{w[19]}</h2><pre>{exported}</pre></section>}

@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import DeckPage from './DeckPage'
 import ListeningPage from './ListeningPage'
 import AssemblyPage from './AssemblyPage'
@@ -130,7 +131,7 @@ function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: str
         <Field label="Scroll duration seconds"><TextInput type="number" min={15} max={3600} value={scrollDuration} onChange={setScrollDuration}/></Field>
         <div className="sm:col-span-2"><Field label="Related records JSON"><TextArea mono rows={4} value={links} onChange={setLinks}/></Field></div>
         <div className="sm:col-span-2"><Field label="Artifact attachments (slug@version)"><TextArea mono value={refs} onChange={setRefs}/></Field></div>
-        <Button type="submit" disabled={busy||!title.trim()}>{item?'Save changes':'Add piece'}</Button>
+        <Button type="submit" disabled={busy||!title.trim()} disabledReason={busy ? BUSY_REASON : undefined}>{item?'Save changes':'Add piece'}</Button>
       </form></Surface>
       {item && <article aria-label="Practice reader" className="flex flex-col gap-3">
         <h2 data-type="title-m">{item.title}</h2><p data-type="body-s" className="text-on-surface-low">{item.artist || 'Unknown artist'} · {item.instrument}{item.key ? ` · ${item.key}` : ''}{item.capo ? ` · capo ${item.capo}` : ''}{item.tuning ? ` · ${item.tuning}` : ''}</p>
@@ -145,7 +146,7 @@ function RepertoirePage({ apiBase = '/api/capabilities/music' }: { apiBase?: str
         <p>Stage: {item.stage}. Next practice: {item.due_at ? new Date(item.due_at).toLocaleString() : 'Not scheduled'}</p>
         <Field label="Practice grade"><Select value={String(grade)} onChange={value=>setGrade(Number(value))} options={['0 — No recall','1 — Incorrect','2 — Difficult recall','3 — Correct with effort','4 — Correct','5 — Easy'].map((label,index)=>({value:String(index),label}))}/></Field>
         <Field label="Practice timezone"><TextInput value={zone} onChange={setZone}/></Field>
-        <Button disabled={busy} onClick={() => void practice()}>{pending.current ? 'Retry practice submission' : 'Log practice'}</Button>
+        <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void practice()}>{pending.current ? 'Retry practice submission' : 'Log practice'}</Button>
         <ol aria-label="Practice history">{item.practice_history.map(attempt => <li key={attempt.attempt_id}>Grade {attempt.grade} · {attempt.occurred_at} · {attempt.timezone}</li>)}</ol>
       </article>}
     </>}

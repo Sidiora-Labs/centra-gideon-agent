@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import PrivacyPage from './Privacy';
 import SharedPage from './SharedHealth';
 import ExportsPage from './Exports';
@@ -78,9 +79,9 @@ function MeasurementsPage() {
       {kind === 'blood_pressure' && <Field label={w[18]}><input className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" required type="number" step="any" min="0.001" value={second} onChange={e => setSecond(e.target.value)} /></Field>}
       <Field label={w[16]}><Select value={unit} onChange={setUnit} options={(kind === 'body_weight' ? ['kg', 'lb'] : ['mmHg']).map(value => ({ value, label: value }))} /></Field>
       <Field label={w[4]}><TextInput required disabled={!!selected} value={source} onChange={setSource} /></Field>
-      <Field label={w[5]}><TextArea value={notes} onChange={setNotes} /></Field><Button type="submit" disabled={busy}>{w[6]}</Button>
+      <Field label={w[5]}><TextArea value={notes} onChange={setNotes} /></Field><Button type="submit" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>{w[6]}</Button>
     </form>
-    <form onSubmit={e => { e.preventDefault(); void load(); }} className="flex flex-wrap items-end gap-m"><Field label={w[12]}><TextInput value={from} onChange={setFrom} /></Field><Field label={w[13]}><TextInput value={until} onChange={setUntil} /></Field><Button type="submit" variant="secondary" disabled={busy}>{w[14]}</Button></form>
+    <form onSubmit={e => { e.preventDefault(); void load(); }} className="flex flex-wrap items-end gap-m"><Field label={w[12]}><TextInput value={from} onChange={setFrom} /></Field><Field label={w[13]}><TextInput value={until} onChange={setUntil} /></Field><Button type="submit" variant="secondary" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>{w[14]}</Button></form>
     {!busy && !rows.length && <p>{w[11]}</p>}
     <ul className="divide-y divide-outline-variant/20 rounded-lg bg-surface-container px-l">{rows.map(row => <li key={row.id}><button className="w-full py-m text-left" onClick={() => void select(row.id)}>{row.observed_at} · {row.kind === 'body_weight' ? w[1] : w[2]} · {Object.values(row.values).join('/')} {row.unit}</button></li>)}</ul>
     {!!history.length && <section><h2>{w[8]}</h2><ol>{history.map(row => <li key={row.revision}>{w[15]} {row.revision} · {row.observed_at} · {Object.values(row.values).join('/')} {row.unit} · {row.notes}</li>)}</ol></section>}
