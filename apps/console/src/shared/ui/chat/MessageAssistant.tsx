@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ThumbsDown, ThumbsUp } from 'lucide-react'
+import { IconButton } from '../IconButton'
 import { fvs } from '../../theme/fontWeight'
 import { messageEnter } from '../../theme/motion'
 import { clockTime, fullStamp, isoStamp } from '../../data/epoch'
@@ -38,6 +39,7 @@ export function MessageAssistant({ children, actions, timestamp, feedback, model
   stopOutcome?: StopOutcome
 }) {
   const time = clockTime(timestamp)
+  const savingFeedback = Boolean(feedbackBusy || feedback?.busy)
   const modelLogo = model ? logoForModel(model) : null
   const [note, setNote] = useState('')
   const changedFiles = useMemo(() => (fileChanges ?? []).filter(change => change.path).map(change => ({
@@ -74,14 +76,12 @@ export function MessageAssistant({ children, actions, timestamp, feedback, model
       </div>}
       {actions}
       {(onFeedbackUp || onFeedbackDown) && <div className="mt-1 flex items-center gap-1.5">
-        {onFeedbackUp && <button type="button" aria-label="Mark response helpful" aria-pressed={feedbackVerdict === 'up'}
-          disabled={feedbackBusy || feedback?.busy} onClick={onFeedbackUp} className="rounded-md p-2 text-on-surface-low hover:bg-surface-high hover:text-on-surface disabled:opacity-40">
-          <ThumbsUp size={14} />
-        </button>}
-        {onFeedbackDown && <button type="button" aria-label="Mark response unhelpful" aria-pressed={feedbackVerdict === 'down'}
-          disabled={feedbackBusy || feedback?.busy} onClick={onFeedbackDown} className="rounded-md p-2 text-on-surface-low hover:bg-surface-high hover:text-on-surface disabled:opacity-40">
-          <ThumbsDown size={14} />
-        </button>}
+        {onFeedbackUp && <IconButton icon={ThumbsUp} size={30} iconSize={14} label="Mark response helpful" active={feedbackVerdict === 'up'}
+          title={savingFeedback ? 'Saving feedback. Please wait.' : 'Mark response helpful'} loading={savingFeedback}
+          onClick={() => { if (!savingFeedback) onFeedbackUp() }} />}
+        {onFeedbackDown && <IconButton icon={ThumbsDown} size={30} iconSize={14} label="Mark response unhelpful" active={feedbackVerdict === 'down'}
+          title={savingFeedback ? 'Saving feedback. Please wait.' : 'Mark response unhelpful'} loading={savingFeedback}
+          onClick={() => { if (!savingFeedback) onFeedbackDown() }} />}
       </div>}
       {time && <time dateTime={isoStamp(timestamp)} title={fullStamp(timestamp)} data-type="caption" className="mt-1 block text-on-surface-low">{time}</time>}
       {feedback && (

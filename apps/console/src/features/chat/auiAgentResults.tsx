@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '../../shared/ui/Button'
 import { AgentPlan } from '../../shared/vendor/assistant-ui/elements/agent-plan'
 import { SubagentList } from '../../shared/vendor/assistant-ui/elements/subagent-list'
 import { AgentStatus } from '../../shared/vendor/assistant-ui/elements/agent-status'
@@ -71,13 +72,14 @@ export function PendingApprovalResult({ approval, onResolved }: { approval: Pend
 }
 
 export interface AgentOption { id: string; label: string; description?: string }
-export function AgentOptionList({ title, options, onSelect }: {
-  title: string; options: AgentOption[]; onSelect: (id: string) => Promise<{ ok: boolean }>
+export function AgentOptionList({ title, options, onSelect, disabledReason }: {
+  title: string; options: AgentOption[]; onSelect: (id: string) => Promise<{ ok: boolean }>; disabledReason?: string
 }) {
   const [busy, setBusy] = useState('')
   const [selected, setSelected] = useState('')
   const [error, setError] = useState('')
   async function choose(id: string) {
+    if (busy || selected || disabledReason || !options.some(option => option.id === id)) return { ok: false }
     setBusy(id)
     setError('')
     try {
@@ -92,10 +94,11 @@ export function AgentOptionList({ title, options, onSelect }: {
   }
   return <div aria-label={title}>
     <TaskCard label={title} state={selected ? 'done' : 'waiting'}
-      actions={options.length ? <div role="group" aria-label={title}>{options.map(option => <button key={option.id} type="button"
-        disabled={!!busy || !!selected} onClick={() => void choose(option.id)} title={option.description}>
+      actions={options.length ? <div role="group" aria-label={title}>{options.map(option => <Button key={option.id} size="sm" variant="secondary"
+        loading={!!busy} loadingLabel="Saving selection…" disabled={!!selected || !!disabledReason} disabledReason={selected ? 'A selection has already been confirmed.' : disabledReason}
+        onClick={() => void choose(option.id)} title={option.description}>
         {option.label}{selected === option.id ? ' — selected' : ''}
-      </button>)}</div> : <span>No options available</span>} />
+      </Button>)}</div> : <span>No options available</span>} />
     {error && <p role="alert">{error}</p>}
   </div>
 }
@@ -109,6 +112,8 @@ export function WorkflowQuestionFlow({ runId, continuation, onResolved }: {
   const prompt = continuation.ask.prompt
   const choices = continuation.ask.choices
   async function submit(value: string) {
+    if (busy || !value.trim() || continuation.expired || !continuation.resume_token ||
+      (continuation.ask.kind === 'choice' && !choices?.includes(value))) return { ok: false }
     setBusy(true)
     setError('')
     try {
@@ -130,11 +135,12 @@ export function WorkflowQuestionFlow({ runId, continuation, onResolved }: {
   if (continuation.ask.kind === 'choice' && !choices?.length)
     return <p role="status">No choices were supplied for run {runId}.</p>
   return <div aria-label={`Question for run ${runId}`}>
-    {continuation.ask.kind === 'choice' ? <AgentOptionList title={prompt} options={choices!.map(value => ({ id: value, label: value }))} onSelect={submit} />
+    {continuation.ask.kind === 'choice' ? <AgentOptionList title={prompt} options={choices!.map(value => ({ id: value, label: value }))} onSelect={submit} disabledReason={!continuation.resume_token ? 'Reopen the workflow to obtain a current answer request.' : undefined} />
       : <TaskCard label={prompt} meta={continuation.node_id} state="waiting"
         actions={<form onSubmit={event => { event.preventDefault(); void submit(answer.trim()) }}>
           <label>Answer <textarea value={answer} onChange={event => setAnswer(event.target.value)} required /></label>
-          <button type="submit" disabled={busy || !answer.trim()}>Send answer</button>
+          <Button type="submit" size="sm" loading={busy} loadingLabel="Sending answer…" disabled={!answer.trim() || !continuation.resume_token}
+            disabledReason={!continuation.resume_token ? 'Reopen the workflow to obtain a current answer request.' : 'Enter an answer before sending.'}>Send answer</Button>
         </form>} />}
     {error && <p role="alert">{error}</p>}
   </div>

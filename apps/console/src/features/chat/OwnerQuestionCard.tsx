@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type OwnerQuestionAnswer } from '../../shared/data/api'
 import type { QuestionSegment } from './chatTypes'
+import { Button } from '../../shared/ui/Button'
 
 const LABELS = { answered: 'Answered', skipped: 'Skipped', expired: 'Answer window expired', cancelled: 'Question cancelled', unanswerable: 'Answer channel unavailable', pending: 'Your answer is needed' }
 
@@ -26,11 +27,16 @@ export function OwnerQuestionCard({ seg, session }: { seg: QuestionSegment; sess
     const timer = window.setTimeout(() => { if (live) { setOutcome('expired'); setVerified(false) } }, Math.max(0, seg.deadline! * 1000 - Date.now()))
     return () => { live = false; window.clearTimeout(timer) }
   }, [seg.id, seg.outcome, seg.answerable, seg.deadline, session, seg.session])
-  const active = outcome === 'pending' && seg.answerable && verified && !busy && session === seg.session
+  const active = outcome === 'pending' && seg.answerable && verified && !busy && session === seg.session && !expired()
+  const unavailableReason = outcome !== 'pending' ? LABELS[outcome]
+    : !seg.answerable ? seg.reason || 'This question cannot be answered here.'
+    : !session || session !== seg.session ? 'Open the original chat to answer this question.'
+    : expired() ? LABELS.expired
+    : !verified ? error || 'Verifying the answer channel. Please wait.' : undefined
   const complete = answers.every((answer) => answer.selected.length > 0 || answer.other.trim().length > 0)
   const change = (index: number, patch: Partial<OwnerQuestionAnswer>) => setAnswers((old) => old.map((answer, i) => i === index ? { ...answer, ...patch } : answer))
   const submit = async (skip: boolean) => {
-    if (!active || expired() || !session) { if (expired()) setOutcome('expired'); return }
+    if (!active || (!skip && !complete) || expired() || !session) { if (expired()) setOutcome('expired'); return }
     setBusy(true); setError('')
     try {
       const { questions } = await api.ownerQuestions(session)
@@ -58,8 +64,10 @@ export function OwnerQuestionCard({ seg, session }: { seg: QuestionSegment; sess
       </label>}
     </fieldset>)}
     {outcome === 'pending' && seg.answerable && <div className="flex gap-2">
-      <button type="button" disabled={!active || !complete} onClick={() => void submit(false)} className="rounded-md bg-primary px-3 py-2 text-sm text-on-primary disabled:opacity-50">Send answer</button>
-      <button type="button" disabled={!active} onClick={() => void submit(true)} className="rounded-md border border-outline-variant px-3 py-2 text-sm disabled:opacity-50">Skip</button>
+      <Button size="sm" loading={busy} loadingLabel="Sending answer…" disabled={!active || !complete}
+        disabledReason={unavailableReason || (!complete ? 'Answer every question before sending.' : undefined)} onClick={() => void submit(false)}>Send answer</Button>
+      <Button size="sm" variant="secondary" loading={busy} loadingLabel="Sending answer…" disabled={!active}
+        disabledReason={unavailableReason} onClick={() => void submit(true)}>Skip</Button>
     </div>}
     {seg.reason && <p className="text-xs text-on-surface-low">{seg.reason}</p>}
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ComponentProps, type ReactNode, type Ref } from 'react'
+import { Button } from '../../shared/ui/Button'
 import { X } from 'lucide-react'
 import { ConversationSearch, type SearchHit } from '../../shared/vendor/assistant-ui/elements/conversation-search'
 import { ThreadSearch } from '../../shared/vendor/assistant-ui/elements/thread-search'
@@ -103,8 +104,10 @@ export function ThreadPeekViews({ turns, streamingText, busy = false, renderAssi
     {turns.length > 0 && <div role="group" aria-label={labels?.group ?? 'Conversation view'} className="flex gap-1 px-1 pb-2">
       <button type="button" aria-pressed={!timeline} onClick={() => setView('preview')}
         className="min-h-9 rounded-pill px-3 text-xs text-on-surface-var aria-pressed:bg-surface-high aria-pressed:text-on-surface">{labels?.preview ?? 'Preview'}</button>
-      <button type="button" aria-pressed={timeline} disabled={live} onClick={() => setView('timeline')}
-        className="min-h-9 rounded-pill px-3 text-xs text-on-surface-var aria-pressed:bg-surface-high aria-pressed:text-on-surface disabled:opacity-50">{labels?.timeline ?? 'Timeline'}</button>
+      <Button size="sm" variant="ghost" ariaPressed={timeline} disabled={live}
+        disabledReason="Wait for the current response to finish before opening the timeline."
+        onClick={() => { if (!live && turns.length > 0) setView('timeline') }}
+        className="min-h-9 text-xs text-on-surface-var aria-pressed:bg-surface-high aria-pressed:text-on-surface">{labels?.timeline ?? 'Timeline'}</Button>
     </div>}
     {timeline ? <ConversationHistoryView turns={turns} labels={labels?.conversation}/>
       : <ThreadChatPreview turns={turns} streamingText={streamingText} busy={busy} renderAssistant={renderAssistant} endRef={endRef}/>}
