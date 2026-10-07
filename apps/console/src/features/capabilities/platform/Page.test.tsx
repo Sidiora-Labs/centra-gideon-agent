@@ -11,28 +11,48 @@ import Page from './Page'
 let server: ChildProcess
 let baseUrl: string
 let home: string
+const nativeFetch = globalThis.fetch
 beforeAll(async () => {
   home = await mkdtemp(`${tmpdir()}/gideon-api-explorer-`)
   const root = resolve(process.cwd(), '../..')
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home }
+  delete childEnv.GIDEON_DEV_NO_AUTH
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/platform/ui_server.py'], {
     cwd: root,
-    env: { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home, GIDEON_DEV_NO_AUTH: '1' },
+    env: childEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let diagnostics = ''
   server.stderr!.on('data', chunk => { diagnostics += chunk.toString() })
-  baseUrl = await new Promise<string>((accept, reject) => {
+  const ready = await new Promise<{ url: string; token: string }>((accept, reject) => {
+    const timer = setTimeout(() => reject(new Error(`HTTP startup timeout: ${diagnostics}`)), 15000)
     const lines = createInterface({ input: server.stdout! })
-    lines.on('line', line => { if (/^\d+$/.test(line)) { accept(`http://127.0.0.1:${line}`); lines.close() } })
-    server.once('error', reject)
-    server.once('exit', code => reject(new Error(`HTTP process exited ${code}: ${diagnostics}`)))
+    lines.on('line', line => {
+      try {
+        const value = JSON.parse(line) as { url: string; token: string }
+        if (typeof value.url !== 'string' || typeof value.token !== 'string') return
+        clearTimeout(timer); lines.close(); accept(value)
+      } catch { /* Readiness is the only JSON line emitted by the child. */ }
+    })
+    server.once('error', error => { clearTimeout(timer); reject(error) })
+    server.once('exit', code => { clearTimeout(timer); reject(new Error(`HTTP process exited ${code}: ${diagnostics}`)) })
   })
+  baseUrl = ready.url
+  expect((await nativeFetch(baseUrl + '/api/capabilities/platform/catalog')).status).toBe(403)
+  globalThis.fetch = (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), baseUrl)
+    if (url.origin !== baseUrl) return nativeFetch(input, init)
+    const headers = new Headers(init?.headers)
+    headers.set('Authorization', `Bearer ${ready.token}`)
+    return nativeFetch(url, { ...init, headers })
+  }
 })
 afterAll(async () => {
+  globalThis.fetch = nativeFetch
   if (server && server.exitCode === null) {
     await new Promise<void>(done => { server.once('exit', () => done()); server.kill('SIGTERM') })
   }
-  await rm(home, { recursive: true, force: true })
+  if (home) await rm(home, { recursive: true, force: true })
 })
 
 function Location() { return <output aria-label="Location">{JSON.stringify(useHashRoute('capabilities').query)}</output> }
@@ -112,12 +132,13 @@ describe('API explorer over real dashboard HTTP', () => {
     expect(execute).toHaveAttribute('aria-disabled', 'true')
     fireEvent.click(execute)
     expect(screen.queryByLabelText('HTTP response')).toBeNull()
+    const detail = screen.getByRole('region', { name: 'Route detail' })
+    expect(within(detail).getByRole('heading')).toHaveTextContent('HEAD /api/prompts/syntax')
     fireEvent.change(screen.getByLabelText('Method'), { target: { value: 'PATCH' } })
     expect(await screen.findByText('No matching routes')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Previous' })).toHaveAttribute('aria-disabled', 'true')
     expect(screen.getByRole('button', { name: 'Next' })).toHaveAttribute('aria-disabled', 'true')
-    const detail = screen.getByRole('region', { name: 'Route detail' })
-    expect(within(detail).getByRole('heading')).toHaveTextContent('HEAD /api/prompts/syntax')
+
   })
 
   it('shows real HTTP catalog errors and offers retry', async () => {
@@ -133,7 +154,7 @@ describe('API explorer over real dashboard HTTP', () => {
 
 
 it('preserves real hash route selection across remount and external hash navigation', async () => {
-  const view = show('/capabilities/platform?keep=1')
+  const view = show('/capabilities/platform?view=api&keep=1')
   fireEvent.click(await screen.findByRole('button', { name: 'GET /api/prompts/syntax' }))
   await screen.findByRole('region', { name: 'Route detail' })
   expect(location.hash).toContain('/capabilities/platform?')
