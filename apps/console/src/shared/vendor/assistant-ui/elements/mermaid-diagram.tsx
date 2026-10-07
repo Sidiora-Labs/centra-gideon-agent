@@ -12,6 +12,7 @@ import {
   useState,
 } from "react";
 import { Modal } from "../../../ui/Modal";
+import { LoadingStatus } from "../../../ui/ListScaffold";
 import { IconButton } from "../../../ui/IconButton";
 import { cn } from "../lib/utils";
 
@@ -192,7 +193,7 @@ const MermaidDiagramImpl: FC<MermaidDiagramProps> = ({
           className,
         )}
       >
-        <span className="sr-only">Rendering diagram</span>
+        <LoadingStatus what="diagram" />
         <div className="bg-muted-foreground/20 h-8 w-20 rounded-md" />
         <div className="bg-muted-foreground/20 h-px w-10" />
         <div className="bg-muted-foreground/20 h-8 w-20 rounded-md" />

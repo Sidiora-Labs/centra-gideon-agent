@@ -74,7 +74,9 @@ function authoredTokenSource(source: string): string {
     const element = style.parent.parent
     const index = access.argumentExpression.getText().replace(/!$/, '')
     return opening(element) && expression(attribute(element, 'data-color'))?.getText() === index
-      && /\.stimulus\.color$/.test(index) && !!attribute(element, 'aria-label')
+      && /\.stimulus\.color$/.test(index) && ts.isJsxElement(element.parent)
+      && element.parent.children.some(child => ts.isJsxExpression(child)
+        && child.expression?.getText() === index.replace(/\.color$/, '.word'))
   }
   const chromeReference = (ref: ts.Node) => !!ancestor(ref, n => ts.isJsxAttribute(n) && n.name.getText() === 'style') && !clinical(ref)
   function isDataLiteral(node: ts.StringLiteral | ts.NoSubstitutionTemplateLiteral): boolean {
@@ -152,7 +154,7 @@ describe('token-lint: design-system adherence', () => {
       '<svg viewBox="0 0 24 24"><path d="M0 0L24 24" fill="#D97757" /></svg>',
       '<svg viewBox="0 0 24 24"><defs><linearGradient id="mark"><stop stopColor="#4285F4" /></linearGradient></defs><path d="M0 0L24 24" /></svg>',
       'const scale = ["#ebedf0", "#2563eb"]; const view = <Graph data={observations} colorScale={scale} />',
-      'const colors = {red: "#dc2626"}; const view = <p aria-label="Color word stimulus" data-color={trial.stimulus.color} style={{color: colors[trial.stimulus.color]}}>{trial.stimulus.word}</p>',
+      'const colors = {red: "#dc2626"}; const view = <p data-color={trial.stimulus.color} style={{color: colors[trial.stimulus.color]}}>{trial.stimulus.word}</p>',
       'const model = {parts:[{shape:"box",size:[1,1,1],position:[0,0,0],rotation:[0,0,0],color:"#5599cc"}]}; const json = JSON.stringify(model)',
       'const transform = op === "solid_background" ? {op, color:"#ffffff", tolerance:10} : {op}',
       'const [ink, setInk] = useState("#ff0000"); const view = <input type="color" value={ink} onChange={event => setInk(event.target.value)} />',
@@ -168,7 +170,7 @@ describe('token-lint: design-system adherence', () => {
       'const [ink, setInk] = useState("#ff0000"); const view = <div style={{color:ink}} />',
       'const fallback = "#ffffff"',
       'const scale = ["#2563eb"]; const chart = <Graph data={observations} colorScale={scale} />; const chrome = <div style={{color:scale[0]}} />',
-      'const colors = {red:"#dc2626"}; const trialView = <p aria-label="Stimulus" data-color={trial.stimulus.color} style={{color:colors[trial.stimulus.color]}} />; const chrome = <div style={{color:colors.red}} />',
+      'const colors = {red:"#dc2626"}; const trialView = <p data-color={trial.stimulus.color} style={{color:colors[trial.stimulus.color]}}>{trial.stimulus.word}</p>; const chrome = <div style={{color:colors.red}} />',
       'const [ink, setInk] = useState("#ff0000"); const picker = <input type="color" value={ink} />; const chrome = <div style={{color:ink}} />',
 
     ]
@@ -183,6 +185,11 @@ describe('token-lint: design-system adherence', () => {
   })
 
   it('no raw hex/px outside design/ (except the shrinking allowlist)', () => {
+    const stimulus = 'const ink = {red:"#dc2626"}; const trialView = <p data-color={trial.stimulus.color} style={{color:ink[trial.stimulus.color]}}>{trial.stimulus.word}</p>'
+    expect(violationsOf(stimulus)).toEqual([])
+    expect(violationsOf(stimulus.replace('{trial.stimulus.word}</p>', '{other.stimulus.word}</p>'))).not.toEqual([])
+    expect(violationsOf(stimulus.replace('{trial.stimulus.word}</p>', '</p>'))).not.toEqual([])
+    expect(violationsOf(stimulus + '; const chrome = <div style={{color:ink.red}} />')).not.toEqual([])
     const offenders: Record<string, string[]> = {}
     for (const f of files) {
       const rel = relative(SRC, f).replace(/\\/g, '/')
