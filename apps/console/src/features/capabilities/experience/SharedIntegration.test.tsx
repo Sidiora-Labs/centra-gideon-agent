@@ -6,13 +6,28 @@ import { afterAll, beforeAll, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import Page from './Page'
 
+const networkFetch = globalThis.fetch
+function acceptNativeReadiness(output: string) {
+  const line = output.split('\n').find(value => value.startsWith('{'))
+  if (!line) return undefined
+  const ready: { port: number; token: string } = JSON.parse(line)
+  if (!Number.isInteger(ready.port) || !ready.token) throw new Error('Invalid native readiness')
+  const origin = `http://127.0.0.1:${ready.port}`
+  globalThis.fetch = (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), origin)
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+    if (url.origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+    return networkFetch(url, { ...init, headers })
+  }
+  return origin + '/api/capabilities/experience'
+}
 let server: ChildProcess
 let baseUrl: string
 const home = mkdtempSync(resolve(tmpdir(), 'gideon-shared-experience-'))
 
 beforeAll(async () => {
   const root = resolve(process.cwd(), '../..')
-  server = spawn(process.env.GIDEON_TEST_PYTHON || '/tmp/gideon-runtime-venv/bin/python', ['checks/runtime/capabilities/experience/serve_ui.py', home], {
+  server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/experience/serve_ui.py', home], {
     cwd: root,
     env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime') },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -25,13 +40,15 @@ beforeAll(async () => {
     server.once('exit', code => reject(new Error(`experience HTTP exited ${code}: ${errors}`)))
     server.stdout?.on('data', value => {
       output += String(value)
-      const origin = output.match(/^http:\/\/127\.0\.0\.1:\d+$/m)?.[0]
-      if (origin) { clearTimeout(timer); accept(origin + '/api/capabilities/experience') }
+      try {
+        const ready = acceptNativeReadiness(output)
+        if (ready) { clearTimeout(timer); accept(ready) }
+      } catch (error) { clearTimeout(timer); reject(error) }
     })
   })
 })
 
-afterAll(async () => {
+afterAll(async () => { globalThis.fetch = networkFetch;
   cleanup()
   if (server?.exitCode === null) await new Promise<void>(done => { server.once('exit', () => done()); server.kill('SIGTERM') })
   rmSync(home, { recursive: true, force: true })
@@ -47,9 +64,9 @@ it('renders real experience components over the shared registered HTTP applicati
   fireEvent.click(screen.getByRole('button', { name: 'Native calls' }))
   expect(await screen.findByText('Native duplex audio unavailable')).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: 'Moltworld' }))
-  expect(await screen.findByRole('heading', { name: 'Moltworld' })).toBeTruthy()
+  expect(await screen.findByRole('heading', { name: 'Moltworld', level: 2 })).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: 'Moltbook' }))
-  expect(await screen.findByRole('heading', { name: 'Moltbook' })).toBeTruthy()
+  expect(await screen.findByRole('heading', { name: 'Moltbook', level: 2 })).toBeTruthy()
   expect(await screen.findByText('No Moltbook account configured')).toBeTruthy()
   const foundations = await fetch(baseUrl + '/world-foundations')
   expect(foundations.status).toBe(200)

@@ -5,22 +5,37 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import NativeCalls from './NativeCalls'
+const networkFetch = globalThis.fetch
+function acceptNativeReadiness(output: string) {
+  const line = output.split('\n').find(value => value.startsWith('{'))
+  if (!line) return undefined
+  const ready: { port: number; token: string } = JSON.parse(line)
+  if (!Number.isInteger(ready.port) || !ready.token) throw new Error('Invalid native readiness')
+  const origin = `http://127.0.0.1:${ready.port}`
+  globalThis.fetch = (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), origin)
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+    if (url.origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+    return networkFetch(url, { ...init, headers })
+  }
+  return origin + '/api/capabilities/experience'
+}
 let child: ChildProcess
 let home: string
 let base: string
 const root = resolve(process.cwd(), '../..')
 beforeAll(async () => {
   home = await mkdtemp(resolve(tmpdir(), 'gideon-navigation-ui-'))
-  child = spawn('/tmp/gideon-runtime-venv/bin/python', ['checks/runtime/capabilities/experience/serve_ui.py', home], { cwd: root, env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime') }, stdio: ['ignore', 'pipe', 'pipe'] })
+  child = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/experience/serve_ui.py', home], { cwd: root, env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(root, 'runtime') }, stdio: ['ignore', 'pipe', 'pipe'] })
   base = await new Promise<string>((accept, reject) => {
     let output = '', errors = ''
-    child.stdout!.on('data', data => { output += String(data); if (output.includes('\n')) accept(output.trim() + '/api/capabilities/experience') })
+    child.stdout!.on('data', data => { output += String(data); if (output.includes('\n')) { try { const ready = acceptNativeReadiness(output); if (ready) accept(ready) } catch (error) { reject(error) } } })
     child.stderr!.on('data', data => { errors += String(data) })
     child.on('exit', code => reject(new Error(`HTTP process exited ${code}: ${errors}`)))
     child.on('error', reject)
   })
 })
-afterAll(async () => { child?.kill(); await rm(home, { recursive: true, force: true }) })
+afterAll(async () => { globalThis.fetch = networkFetch; child?.kill(); await rm(home, { recursive: true, force: true }) })
 it('shows actual Linux unavailability and prevents invoking unavailable native controls', async () => {
   render(<NativeCalls baseUrl={base} />)
   await screen.findByText('Native control unavailable')
