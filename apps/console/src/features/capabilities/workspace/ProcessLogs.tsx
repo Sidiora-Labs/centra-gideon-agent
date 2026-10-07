@@ -43,7 +43,7 @@ export default function ProcessLogs({ id }: { id: string }) {
   const visibleLines = text ? text.split('\n').filter(line => !query || line.toLowerCase().includes(query.toLowerCase())) : []
   const visible = visibleLines.join('\n')
   return <Surface className="p-l"><section aria-label="Live process log" className="space-y-m">
-    <div className="flex flex-wrap items-center justify-between gap-m"><h3 data-type="title-m">Live process log</h3><div className="flex flex-wrap gap-s"><Button size="sm" onClick={() => setFollowing(value => !value)}>{following ? 'Pause live log' : 'Follow process log'}</Button><Button size="sm" variant="secondary" disabled={!text} onClick={download}>Download retained log</Button></div></div>
+    <div className="flex flex-wrap items-center justify-between gap-m"><h3 data-type="title-m">Live process log</h3><div className="flex flex-wrap gap-s"><Button size="sm" onClick={() => setFollowing(value => !value)}>{following ? 'Pause live log' : 'Follow process log'}</Button><Button size="sm" variant="secondary" disabled={!text} disabledReason={!text ? 'There is no retained log text to download.' : undefined} onClick={download}>Download retained log</Button></div></div>
     <Field label="Filter retained lines"><TextInput ariaLabel="Filter retained log lines" maxLength={256} value={query} onChange={setQuery}/></Field>
     <ResultAnnouncement count={visibleLines.length} noun="log lines" active={readFor === id && !error && !!query.trim()} />
     <p data-type="body-s" className="text-on-surface-low">Status: {status} · Cursor: {cursor.current} · {dropped} characters missed before retained window. Displays the latest 65,536 characters.</p>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 import { BUSY_REASON } from '../../../shared/ui/unavailable'
@@ -9,6 +9,8 @@ type Review = { timezone: string; coverage: string; events: { id: string; source
 const base = '/api/capabilities/communications/calendar'
 const empty = { name: '', kind: 'ics', calendar_id: 'primary', credential_ref: '', timezone: 'UTC' }
 export function CalendarPanel() {
+  const calendarKindReasonId = useId()
+  const calendarKindReason = 'Calendar kind cannot change while editing an existing source.'
   const [sources, setSources] = useState<Source[]>([])
   const [form, setForm] = useState(empty)
   const [editing, setEditing] = useState<{ id: string; revision: number } | null>(null)
@@ -29,7 +31,7 @@ export function CalendarPanel() {
   useEffect(() => { let active = true; requestJson<{ sources: Source[] }>(base + '/sources').then(data => { if (active) setSources(data.sources) }).catch(e => { if (active) setError(String(e)) }); return () => { active = false } }, [])
   return <section aria-label="Calendar daily review" className="space-y-l"><h2 data-type="title-m">Calendar daily review</h2><p data-type="body-s" className="text-on-surface-low">Review mirrored events by local day. Snapshot coverage is separate from live calendar access. ICS recurrence, exclusions, additions, overrides and cancellations are expanded within the selected bounded window.</p>{error && <p role="alert" className="rounded-lg bg-error-container p-m text-on-error-container">{error}</p>}
     <form className="space-y-m rounded-lg bg-surface-container px-l py-l" onSubmit={e => { e.preventDefault(); void run(async () => { const data = await requestJson<{ source: Source }>(base + '/sources' + (editing ? '/' + editing.id : ''), editing ? 'PUT' : 'POST', editing ? { ...form, revision: editing.revision } : form); await reload(); select(data.source.id); setForm(empty); setEditing(null) }) }}>
-      <label className="block">Calendar name<input className={nativeControl} required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label><label className="block">Calendar kind<select className={nativeControl} disabled={Boolean(editing)} value={form.kind} onChange={e => setForm({ ...form, kind: e.target.value })}><option value="ics">ICS export</option><option value="google">Google Calendar</option><option value="outlook">Outlook</option></select></label>
+      <label className="block">Calendar name<input className={nativeControl} required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label><label className="block">Calendar kind<span className="block" role="group" aria-label="Calendar kind" tabIndex={editing ? 0 : undefined} aria-describedby={editing ? calendarKindReasonId : undefined} title={editing ? calendarKindReason : undefined}><select className={nativeControl} disabled={Boolean(editing)} aria-describedby={editing ? calendarKindReasonId : undefined} value={form.kind} onChange={e => setForm({ ...form, kind: e.target.value })}><option value="ics">ICS export</option><option value="google">Google Calendar</option><option value="outlook">Outlook</option></select>{editing && <span id={calendarKindReasonId} className="sr-only">{calendarKindReason}</span>}</span></label>
       <label className="block">Calendar source timezone<input className={nativeControl} required value={form.timezone} onChange={e => setForm({ ...form, timezone: e.target.value })} /></label>{form.kind !== 'ics' && <><label className="block">Remote calendar ID<input className={nativeControl} required value={form.calendar_id} onChange={e => setForm({ ...form, calendar_id: e.target.value })} /></label><label className="block">Calendar credential reference<input className={nativeControl} required value={form.credential_ref} onChange={e => setForm({ ...form, credential_ref: e.target.value })} /></label></>}<Button type="submit" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>{editing ? 'Save calendar changes' : 'Create calendar source'}</Button>{editing && <Button type="button" onClick={() => { setEditing(null); setForm(empty) }}>Cancel calendar edit</Button>}
     </form>
     <label className="block">Calendar source<select className={nativeControl} value={sourceId} onChange={e => select(e.target.value)}><option value="">Select calendar</option>{sources.map(row => <option value={row.id} key={row.id}>{row.name}</option>)}</select></label>

@@ -1,3 +1,4 @@
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import { useEffect, useRef, useState } from 'react'
 import { requestJson, gatewayHeaders } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -44,7 +45,7 @@ export default function ProviderTerminals() {
     {!profiles.length && <p>No configured interactive provider engines.</p>}
     <Field label="Working directory"><TextInput ariaLabel="Provider working directory" value={cwd} onChange={setCwd}/></Field>
     <Field label="Startup image"><input aria-label="Provider startup image" type="file" accept="image/png,image/jpeg,image/webp" onChange={e => setFile(e.target.files?.[0] || null)} className="block w-full rounded-md border border-outline-variant/30 bg-surface px-m py-s text-sm text-on-surface file:me-m file:rounded-md file:border-0 file:bg-surface-high file:px-m file:py-s" /></Field>
-    <Button disabled={!profile || busy || Boolean(tab)} loading={busy} loadingLabel="Launching…" onClick={() => void launch()}>Launch provider terminal</Button>
+    <Button disabled={!profile || busy || Boolean(tab)} disabledReason={busy ? BUSY_REASON : !profile ? 'Choose a provider profile before launching a terminal.' : tab ? 'Close the existing provider terminal before launching another.' : undefined} loading={busy} loadingLabel="Launching…" onClick={() => void launch()}>Launch provider terminal</Button>
     </Surface>
     {error && <p role="alert">{error}</p>}
     {tab && <Surface className="space-y-m p-l"><Button variant="secondary" onClick={() => void close()}>Close provider terminal</Button><div ref={terminalHost} className="min-h-0 overflow-hidden rounded-lg" style={{ height: 400 }}><TerminalView tab={tab} onExited={() => setError('Provider process exited')} onClose={() => void close()} /></div></Surface>}

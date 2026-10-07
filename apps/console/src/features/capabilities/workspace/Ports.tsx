@@ -59,7 +59,7 @@ export default function Ports() {
     <ul className="space-y-s">{rows.map(item => <li key={item.id}><Button className="w-full justify-start" variant={selected === item.id ? 'tonal' : 'secondary'} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => choose(item.id)}>{item.project_id} · {item.port} · {item.status}</Button></li>)}</ul>
     {selected && !row && loaded && <p>Reservation not found in this page.</p>}
     {row && <Surface className="space-y-m p-l"><h3 data-type="title-m">{row.project_id}</h3><p aria-live="polite">Port {row.port} · {row.status}</p><p data-type="body-s" className="text-on-surface-low">{row.created_at}</p>
-      <Button variant="danger" loading={busy} disabled={row.status !== 'held'} onClick={() => void act(async () => { const released = await requestJson<Reservation>(`${base}/${row.id}/release`, 'POST', { revision: row.revision }); setRows(old => old.map(item => item.id === row.id ? released : item)); setInventory(null) })}>Release port</Button>
+      <Button variant="danger" loading={busy} disabled={row.status !== 'held'} disabledReason={busy ? BUSY_REASON : row.status !== 'held' ? 'Only a currently held port reservation can be released.' : undefined} onClick={() => void act(async () => { const released = await requestJson<Reservation>(`${base}/${row.id}/release`, 'POST', { revision: row.revision }); setRows(old => old.map(item => item.id === row.id ? released : item)); setInventory(null) })}>Release port</Button>
     </Surface>}
   </section>
 }
