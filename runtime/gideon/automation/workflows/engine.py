@@ -32,45 +32,9 @@ import json
 import logging
 import os
 import time
+from enum import Enum
 from functools import wraps
 from typing import Any, Awaitable, Callable, Concatenate, ParamSpec
-
-from gideon.security.safety_flags import yes_or_no
-
-_DispatchArgs = ParamSpec("_DispatchArgs")
-
-
-def _with_workflow_identity(
-    function: Callable[
-        Concatenate[Node, BindingContext, _DispatchArgs], Awaitable[NodeResult]
-    ],
-) -> Callable[Concatenate[Node, BindingContext, _DispatchArgs], Awaitable[NodeResult]]:
-    @wraps(function)
-    async def invoke(
-        node: Node,
-        ctx: BindingContext,
-        *args: _DispatchArgs.args,
-        **kwargs: _DispatchArgs.kwargs,
-    ) -> NodeResult:
-        run_id = str(kwargs.get("run_id") or "")
-        if not run_id:
-            return await function(node, ctx, *args, **kwargs)
-        from gideon.security.durable_work import workflow_work
-
-        try:
-            with workflow_work(run_id, node.id or "node"):
-                return await function(node, ctx, *args, **kwargs)
-        except PermissionError as error:
-            return _fail(
-                FailureClass.PERMISSION,
-                str(error),
-                "review and resume the run from an authenticated owner session",
-            )
-
-    return invoke
-
-
-from enum import Enum
 
 from gideon.automation.workflows import leases, longrun, ownership
 from gideon.automation.workflows.bindings import (
@@ -123,7 +87,40 @@ from gideon.automation.workflows.verify import (
     run_ladder,
 )
 from gideon.core.token_estimate import NOMINAL_CHARS_PER_TOKEN
-from gideon.security.safety_flags import strict_bool
+from gideon.security.safety_flags import strict_bool, yes_or_no
+
+_DispatchArgs = ParamSpec("_DispatchArgs")
+
+
+def _with_workflow_identity(
+    function: Callable[
+        Concatenate[Node, BindingContext, _DispatchArgs], Awaitable[NodeResult]
+    ],
+) -> Callable[Concatenate[Node, BindingContext, _DispatchArgs], Awaitable[NodeResult]]:
+    @wraps(function)
+    async def invoke(
+        node: Node,
+        ctx: BindingContext,
+        *args: _DispatchArgs.args,
+        **kwargs: _DispatchArgs.kwargs,
+    ) -> NodeResult:
+        run_id = str(kwargs.get("run_id") or "")
+        if not run_id:
+            return await function(node, ctx, *args, **kwargs)
+        from gideon.security.durable_work import workflow_work
+
+        try:
+            with workflow_work(run_id, node.id or "node"):
+                return await function(node, ctx, *args, **kwargs)
+        except PermissionError as error:
+            return _fail(
+                FailureClass.PERMISSION,
+                str(error),
+                "review and resume the run from an authenticated owner session",
+            )
+
+    return invoke
+
 
 logger = logging.getLogger(__name__)
 
@@ -2222,7 +2219,7 @@ def selected_dispatcher(node: Node) -> Callable[..., Awaitable[NodeResult]] | No
     classification next to this selection means a new effectful dispatcher cannot be
     mistaken for a pure node merely because it has a new ``NodeKind``.
     """
-    return {
+    dispatchers: dict[NodeKind, Callable[..., Awaitable[NodeResult]]] = {
         NodeKind.TRANSFORM: dispatch_transform,
         NodeKind.INFER: dispatch_infer,
         NodeKind.VISUALIZE: dispatch_visualize,
@@ -2232,7 +2229,8 @@ def selected_dispatcher(node: Node) -> Callable[..., Awaitable[NodeResult]] | No
         NodeKind.WAIT: dispatch_wait,
         NodeKind.GATE: dispatch_gate,
         NodeKind.SUBWORKFLOW: dispatch_subworkflow,
-    }.get(node.kind)
+    }
+    return dispatchers.get(node.kind)
 
 
 def dispatcher_commits_effects(node: Node) -> bool:
