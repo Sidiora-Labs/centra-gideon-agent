@@ -9,22 +9,41 @@ import Accounting from './Accounting'
 let server: ChildProcess
 let baseUrl: string
 let home: string
+const nativeFetch = globalThis.fetch
 beforeAll(async () => {
   home = await mkdtemp(`${tmpdir()}/gideon-accounting-`)
   const root = resolve(process.cwd(), '../..')
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home }
+  delete childEnv.GIDEON_DEV_NO_AUTH
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/platform/accounting_ui_server.py'], {
-    cwd: root, env: { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home, GIDEON_DEV_NO_AUTH: '1' }, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: root, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'],
   })
   let diagnostics = ''
   server.stderr!.on('data', chunk => { diagnostics += chunk.toString() })
-  baseUrl = await new Promise<string>((accept, reject) => {
+  const ready = await new Promise<{ url: string; token: string }>((accept, reject) => {
     const lines = createInterface({ input: server.stdout! })
-    lines.on('line', line => { if (/^\d+$/.test(line)) { accept(`http://127.0.0.1:${line}`); lines.close() } })
+    lines.on('line', line => {
+      try {
+        const value = JSON.parse(line) as { url: string; token: string }
+        if (typeof value.url !== 'string' || typeof value.token !== 'string') return
+        accept(value); lines.close()
+      } catch { /* Native readiness is the JSON line from this child. */ }
+    })
     server.once('error', reject)
     server.once('exit', code => reject(new Error(`HTTP process exited ${code}: ${diagnostics}`)))
   })
+  baseUrl = ready.url
+  expect((await nativeFetch(`${baseUrl}/api/capabilities/platform/accounting`)).status).toBe(403)
+  globalThis.fetch = (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), baseUrl)
+    if (url.origin !== baseUrl) return nativeFetch(input, init)
+    const headers = new Headers(init?.headers)
+    headers.set('Authorization', `Bearer ${ready.token}`)
+    return nativeFetch(url, { ...init, headers })
+  }
 })
 afterAll(async () => {
+  globalThis.fetch = nativeFetch
   if (server && server.exitCode === null) await new Promise<void>(done => { server.once('exit', () => done()); server.kill('SIGTERM') })
   await rm(home, { recursive: true, force: true })
 })
@@ -34,7 +53,7 @@ it('shows historical recorded credential binding usage and unknown live billing'
   expect(screen.getByText('work-account')).toBeVisible()
   expect(screen.getByText('150 / 30')).toBeVisible()
   expect(screen.getByText('$0.250000')).toBeVisible()
-  expect(screen.getByText(/2 recorded turns/)).toBeVisible()
+  expect(screen.getByText(/2 turns/)).toBeVisible()
   expect(screen.getByText(/vendor plan, billing and live quotas are unavailable/)).toBeVisible()
   const value = await (await fetch(`${baseUrl}/api/capabilities/platform/accounting`)).json()
   expect(value.rows[0].instance_id).toBe((await readFile(`${home}/machine_id`, 'utf8')).trim())
@@ -48,7 +67,7 @@ it('filters actual retained source window and refreshes without rewriting ledger
   const before = await readFile(`${home}/usage/turns.jsonl`, 'utf8')
   fireEvent.change(screen.getByLabelText('Accounting window'), { target: { value: '1' } })
   expect(await screen.findByText('100 / 20')).toBeVisible()
-  expect(screen.getByText(/1 recorded turns/)).toBeVisible()
+  expect(screen.getByText(/1 turns/)).toBeVisible()
   fireEvent.click(screen.getByRole('button', { name: 'Refresh accounting' }))
   await waitFor(() => expect(screen.getByText('100 / 20')).toBeVisible())
   expect(await readFile(`${home}/usage/turns.jsonl`, 'utf8')).toBe(before)
@@ -65,7 +84,7 @@ it('imports an actual Claude Code JSONL file and reports unknown pricing without
   fireEvent.change(screen.getByLabelText('CLI usage history file'), { target: { files: [file] } })
   fireEvent.click(screen.getByRole('button', { name: 'Import usage history' }))
   expect(await screen.findByRole('status')).toHaveTextContent('Imported 1 records · 0 duplicates · 0 invalid lines · pricing unknown')
-  expect(await screen.findByText(/3 recorded turns · 1 imported/)).toBeVisible()
+  expect(await screen.findByText(/3 turns · 1 imported/)).toBeVisible()
   expect(screen.getByText('70 / 12')).toBeVisible()
   expect(screen.getByText('1 (claude_code_jsonl)')).toBeVisible()
   fireEvent.click(screen.getByRole('button', { name: 'Import usage history' }))

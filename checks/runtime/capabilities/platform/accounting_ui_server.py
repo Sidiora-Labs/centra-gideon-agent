@@ -1,11 +1,12 @@
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 
 from aiohttp import web
 
 from gideon.integrations.llm.registry import ProviderEntry, get_default_registry
 from gideon.interfaces.dashboard.handlers.capabilities_accounting import register
-from gideon.interfaces.dashboard.token_auth import token_auth_middleware
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.operations import usage_ledger as ledger
 
 
@@ -47,7 +48,7 @@ async def main():
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", 0).start()
-    print(runner.addresses[0][1], flush=True)
+    print(json.dumps({"url": f"http://127.0.0.1:{runner.addresses[0][1]}", "token": generate_token("accounting-owner")}), flush=True)
     try:
         await asyncio.Event().wait()
     finally:

@@ -9,22 +9,41 @@ import InferenceHost from './InferenceHost'
 let server: ChildProcess
 let baseUrl: string
 let home: string
+const nativeFetch = globalThis.fetch
 beforeAll(async () => {
   home = await mkdtemp(`${tmpdir()}/gideon-inference-host-`)
   const root = resolve(process.cwd(), '../..')
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home }
+  delete childEnv.GIDEON_DEV_NO_AUTH
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/platform/inference_host_ui_server.py'], {
-    cwd: root, env: { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home, GIDEON_DEV_NO_AUTH: '1' }, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: root, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'],
   })
   let diagnostics = ''
   server.stderr!.on('data', chunk => { diagnostics += chunk.toString() })
-  baseUrl = await new Promise<string>((accept, reject) => {
+  const ready = await new Promise<{ url: string; token: string }>((accept, reject) => {
     const lines = createInterface({ input: server.stdout! })
-    lines.on('line', line => { if (/^\d+$/.test(line)) { accept(`http://127.0.0.1:${line}`); lines.close() } })
+    lines.on('line', line => {
+      try {
+        const value = JSON.parse(line) as { url: string; token: string }
+        if (typeof value.url !== 'string' || typeof value.token !== 'string') return
+        accept(value); lines.close()
+      } catch { /* Native readiness is the JSON line from this child. */ }
+    })
     server.once('error', reject)
     server.once('exit', code => reject(new Error(`HTTP process exited ${code}: ${diagnostics}`)))
   })
+  baseUrl = ready.url
+  expect((await nativeFetch(`${baseUrl}/api/capabilities/platform/inference-host`)).status).toBe(403)
+  globalThis.fetch = (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), baseUrl)
+    if (url.origin !== baseUrl) return nativeFetch(input, init)
+    const headers = new Headers(init?.headers)
+    headers.set('Authorization', `Bearer ${ready.token}`)
+    return nativeFetch(url, { ...init, headers })
+  }
 })
 afterAll(async () => {
+  globalThis.fetch = nativeFetch
   if (server && server.exitCode === null) await new Promise<void>(done => { server.once('exit', () => done()); server.kill('SIGTERM') })
   await rm(home, { recursive: true, force: true })
 })
@@ -33,7 +52,10 @@ it('configures starts and disarms an actual independently authenticated listener
   await screen.findByRole('option', { name: 'Unavailable inference' })
   expect(screen.getByText(/Listener stopped/)).toBeVisible()
   fireEvent.click(screen.getByRole('button', { name: 'Configure loopback listener' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Start inference listener' })).toBeEnabled())
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: 'Start inference listener' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Start inference listener' })).not.toHaveAttribute('aria-disabled', 'true')
+  })
   fireEvent.click(screen.getByRole('button', { name: 'Start inference listener' }))
   await screen.findByText(/Listening on 127.0.0.1/)
   const state = await (await fetch(`${baseUrl}/api/capabilities/platform/inference-host`)).json()
@@ -72,7 +94,10 @@ it('configures an explicit supervised runtime and reports missing runtime files 
   await screen.findByRole('option', { name: 'Unavailable GPU runtime' })
   fireEvent.change(screen.getByRole('combobox', { name: 'Supervised runtime' }), { target: { value: 'Unavailable GPU runtime' } })
   fireEvent.click(screen.getByRole('button', { name: 'Configure loopback listener' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Provision runtime' })).toBeEnabled())
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: 'Provision runtime' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Provision runtime' })).not.toHaveAttribute('aria-disabled', 'true')
+  })
   fireEvent.click(screen.getByRole('button', { name: 'Provision runtime' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('Configured inference runtime files are unavailable')
   fireEvent.click(screen.getByRole('button', { name: 'Check runtime readiness' }))

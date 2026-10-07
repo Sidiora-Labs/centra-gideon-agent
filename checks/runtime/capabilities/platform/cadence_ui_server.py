@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 
 from aiohttp import web
@@ -9,7 +10,7 @@ from gideon.automation.triggers.store import TriggerStore
 from gideon.core.config.loader import config_dir
 from gideon.engine.trigger_outcomes import FireResult
 from gideon.interfaces.dashboard.handlers.capabilities_cadence import register
-from gideon.interfaces.dashboard.token_auth import token_auth_middleware
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.sdk.tool import ToolResult
 
 
@@ -42,7 +43,7 @@ async def main():
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", 0).start()
-    print(runner.addresses[0][1], flush=True)
+    print(json.dumps({"url": f"http://127.0.0.1:{runner.addresses[0][1]}", "token": generate_token("cadence-owner")}), flush=True)
     try:
         await asyncio.Event().wait()
     finally:
