@@ -686,7 +686,7 @@ function CanvasComponent({ a, loopId, draggable, onDragStart, onDragEnd }: {
     void api.reviewULoopDesignPreview(loopId, a.slug, a.version, false).catch(() => setActionError('Could not save the failed preview review.'))
   }
   const approve = async () => {
-    if (!rendered || renderError || reviewBusy) return
+    if (!rendered || renderError || reviewed || reviewBusy) return
     setReviewBusy(true); setActionError(null)
     try {
       await api.reviewULoopDesignPreview(loopId, a.slug, a.version, true)
@@ -703,6 +703,9 @@ function CanvasComponent({ a, loopId, draggable, onDragStart, onDragEnd }: {
     } catch (cause) { setActionError((cause as Error).message || 'Could not request refinement.') }
     finally { setFeedbackBusy(false) }
   }
+  const approvalReason = renderError ? 'Fix the preview render error before approving.'
+    : !rendered ? 'Wait for the preview to render before approving.'
+      : reviewed ? 'This preview version has already been reviewed.' : undefined
   return <div className="flex flex-col gap-s">
     <div className="flex items-center gap-s">
       {draggable && <span draggable role="button" aria-label="Drag to reorder"
@@ -719,16 +722,21 @@ function CanvasComponent({ a, loopId, draggable, onDragStart, onDragEnd }: {
       <span role="status" data-type="caption" className={renderError ? 'text-danger' : 'text-on-surface-low'}>
         {renderError ? `Render error: ${renderError}` : rendered ? reviewed ? 'Current version reviewed' : 'Rendered in browser — inspect before approving' : 'Waiting for browser render'}
       </span>
-      <button type="button" disabled={!rendered || !!renderError || reviewed || reviewBusy}
-        onClick={() => { void approve() }} className="rounded-md bg-primary px-m py-xs text-on-primary disabled:opacity-40">
+      <button type="button" disabled={reviewBusy} aria-disabled={!!approvalReason || undefined}
+        aria-description={approvalReason} title={approvalReason}
+        onClick={approvalReason ? undefined : () => { void approve() }}
+        className="rounded-md bg-primary px-m py-xs text-on-primary disabled:opacity-40 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">
         {reviewBusy ? 'Saving…' : reviewed ? 'Reviewed' : 'Approve preview'}
       </button>
     </div>
     <div className="flex flex-wrap items-center gap-s">
       <input aria-label={`Refinement for ${a.name}`} value={feedback} onChange={event => setFeedback(event.target.value)}
         placeholder="Describe what to change after previewing…" className="min-w-0 flex-1 rounded-md border border-outline/40 bg-surface px-s py-xs text-on-surface" />
-      <button type="button" disabled={!feedback.trim() || feedbackBusy} onClick={() => { void requestRefinement() }}
-        className="rounded-md border border-outline/40 px-m py-xs text-on-surface disabled:opacity-40">{feedbackBusy ? 'Sending…' : 'Request refinement'}</button>
+      <button type="button" disabled={feedbackBusy} aria-disabled={!feedback.trim() || undefined}
+        aria-description={!feedback.trim() ? 'Describe the refinement before requesting it.' : undefined}
+        title={!feedback.trim() ? 'Describe the refinement before requesting it.' : undefined}
+        onClick={!feedback.trim() ? undefined : () => { void requestRefinement() }}
+        className="rounded-md border border-outline/40 px-m py-xs text-on-surface disabled:opacity-40 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">{feedbackBusy ? 'Sending…' : 'Request refinement'}</button>
     </div>
     {actionError && <p role="alert" data-type="caption" className="text-danger">{actionError}</p>}
   </div>

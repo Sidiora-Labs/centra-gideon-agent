@@ -156,6 +156,11 @@ describe('real composer surface', () => {
     const host = mount({ value: 'abc', minChars: 5 })
     const send = screen.getByRole('button', { name: 'Send message' })
     expect(send).toHaveAttribute('aria-disabled', 'true')
+    expect(send).not.toBeDisabled()
+    expect(send).toHaveAttribute('title', 'Enter at least 5 characters before sending.')
+    expect(send).toHaveAccessibleDescription('Enter at least 5 characters before sending.')
+    send.focus()
+    expect(send).toHaveFocus()
     fireEvent.click(send)
     expect(host.sent).toEqual([])
     const editor = screen.getByRole('textbox', { name: 'Message input' })
@@ -165,10 +170,24 @@ describe('real composer surface', () => {
     host.unmount()
   })
 
+  it('keeps an empty attached draft focusable without changing its send admission', () => {
+    const host = mount({ value: '   ', attachments: [{ id: 'one', name: 'one.txt', state: 'done' }] })
+    const send = screen.getByRole('button', { name: 'Send message' })
+    expect(send).not.toBeDisabled()
+    expect(send).toHaveAttribute('aria-disabled', 'true')
+    expect(send).toHaveAccessibleDescription('Type a message before sending.')
+    send.focus()
+    expect(send).toHaveFocus()
+    fireEvent.click(send)
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message input' }), { key: 'Enter' })
+    expect(host.sent).toEqual([])
+    host.unmount()
+  })
+
   it('restores and persists resize changes through the accessible handle', () => {
     localStorage.setItem(COMPOSER_HEIGHT.key, '160')
     const host = mount()
-    const resize = screen.getByRole('separator', { name: 'Resize message input' })
+    const resize = screen.getByRole('separator', { name: 'Resize message input — arrow keys to resize' })
     expect(resize).toHaveAttribute('aria-valuenow', '160')
     fireEvent.keyDown(resize, { key: 'ArrowUp' })
     expect(resize).toHaveAttribute('aria-valuenow', '176')
@@ -180,7 +199,7 @@ describe('real composer surface', () => {
 
   it('ends pointer resize ownership on cancellation and unmount', () => {
     const host = mount()
-    const resize = screen.getByRole('separator', { name: 'Resize message input' })
+    const resize = screen.getByRole('separator', { name: 'Resize message input — arrow keys to resize' })
     fireEvent(resize, new MouseEvent('pointerdown', { bubbles: true, clientY: 200, button: 0 }))
     fireEvent(window, new MouseEvent('pointermove', { clientY: 160 }))
     expect(resize).toHaveAttribute('aria-valuenow', '132')

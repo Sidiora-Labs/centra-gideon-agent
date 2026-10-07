@@ -272,6 +272,9 @@ export function Composer(props: ComposerProps) {
   const action = surface.action.kind
   const primary = primaryActions[action]
   const primaryClick = action === 'stop' ? onStop : surface.action.canSubmit ? surface.submit : undefined
+  const sendReason = action === 'send-disabled'
+    ? (props.minChars ?? 1) > 1 ? `Enter at least ${props.minChars} characters before sending.` : 'Type a message before sending.'
+    : undefined
   const active = surface.focused || surface.dropping
 
   const useDictation = async () => {
@@ -332,7 +335,9 @@ export function Composer(props: ComposerProps) {
         <div className="mt-2 flex flex-wrap gap-2">
           <input aria-label="Misheard word" placeholder="Gideon heard…" value={heardTerm} onChange={event => setHeardTerm(event.target.value)} className="min-w-0 flex-1 rounded-md border border-outline-variant/50 bg-surface-container px-2 py-1 text-on-surface" />
           <input aria-label="Correct spelling" placeholder="You meant…" value={meantTerm} onChange={event => setMeantTerm(event.target.value)} className="min-w-0 flex-1 rounded-md border border-outline-variant/50 bg-surface-container px-2 py-1 text-on-surface" />
-          <button type="button" onClick={() => { void useDictation() }} disabled={!dictation.edited.trim() || savingCorrection} className="rounded-md bg-primary px-3 py-1 text-on-primary disabled:opacity-40">{savingCorrection ? 'Saving…' : 'Use text'}</button>
+          <button type="button" onClick={() => { void useDictation() }} disabled={savingCorrection} aria-disabled={!dictation.edited.trim() || undefined}
+            aria-description={!dictation.edited.trim() ? "Enter dictation text before using it." : undefined}
+            title={!dictation.edited.trim() ? "Enter dictation text before using it." : undefined} className="rounded-md bg-primary px-3 py-1 text-on-primary disabled:opacity-40 aria-disabled:opacity-40">{savingCorrection ? 'Saving…' : 'Use text'}</button>
         </div>
       </div>}
       <AssistantComposerToolbar className="gideon-composer-toolbar flex flex-wrap items-end justify-between gap-x-3 gap-y-2 border-t pt-2">
@@ -365,9 +370,10 @@ export function Composer(props: ComposerProps) {
             disabled={!listening && recorder.state !== 'idle'} disabledReason="Finish the current recording first"
             onClick={() => setListening(previous => !previous)} />}
           {!mobile && <AssistantComposerSend streaming={action === 'stop'} idle={action === 'send-disabled'}
-            aria-label={primary.label} aria-disabled={action === 'send-disabled'} aria-busy={action === 'processing'}
-            disabled={action === 'send-disabled' || action === 'processing' || action === 'sent'}
-            onClick={primaryClick} className="gideon-composer-primary size-10" />}
+            aria-label={primary.label} aria-disabled={action === 'send-disabled' || undefined} aria-busy={action === 'processing'}
+            aria-description={sendReason} title={sendReason}
+            disabled={action === 'processing' || action === 'sent'}
+            onClick={primaryClick} className="gideon-composer-primary size-10 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed" />}
         </AssistantComposerActions>
       </AssistantComposerToolbar>
       <input ref={files} type="file" multiple hidden aria-label="Attach message files" onChange={event => {
