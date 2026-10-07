@@ -1,3 +1,6 @@
+import ts from 'typescript'
+import { nodes } from '../../shared/testing/sourceOwners'
+import { jsxTags } from '../../shared/testing/jsxContracts'
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -45,7 +48,12 @@ describe('the re-index bar reports only progress it can compute', () => {
   it('falls back to the indeterminate wave, not a fabricated fill', () => {
     const code = read('features/settings/ModelsPanel.tsx')
     expect(code, 'the no-total branch renders the indeterminate wave').toMatch(/<WavyProgress width=\{\d+\} \/>/)
-    expect(code, 'the wave must not carry a value').not.toMatch(/<WavyProgress[^>]*\bvalue=/)
+    const branches = nodes(code, node => ts.isConditionalExpression(node) && node.condition.getText() === 'reindex.total > 0' && jsxTags(node.whenFalse.getText(), ['WavyProgress']).length > 0) as ts.ConditionalExpression[]
+    expect(branches, 'the re-index progress fallback has one exact owner').toHaveLength(1)
+    const waves = jsxTags(branches[0].whenFalse.getText(), ['WavyProgress'])
+    expect(waves).toHaveLength(1)
+    expect(waves[0].attributes.has('value')).toBe(false)
+    expect(branches[0].whenTrue.getText()).toContain('reindex.done / reindex.total')
   })
 
   it("never pins the fill to a literal percentage", () => {

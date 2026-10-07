@@ -1,3 +1,5 @@
+import { queryRegistration } from '../../shared/testing/sourceOwners'
+import { jsxTags } from '../../shared/testing/jsxContracts'
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -37,7 +39,14 @@ describe('a settings panel whose gating read fails says so', () => {
   })
 
   it('the decorating reads KEEP their fallbacks — this is not a no-catch sweep', () => {
-    expect(codeOf('NotificationsPanel.tsx'), 'the rules matrix decorates').toMatch(/api\.notificationRules\(\)\.catch\(\(\) => null\)/)
+    const notifications = codeOf('NotificationsPanel.tsx')
+    expect(queryRegistration(notifications, "'settings:notification-rules'")).toContain('() => api.notificationRules()')
+    expect(queryRegistration(notifications, "'settings:notification-rules'")).not.toContain('.catch(')
+    const ruleError = jsxTags(notifications, ['LoadError']).filter(tag => tag.attributes.get('what') === '"notification rules"')
+    expect(ruleError).toHaveLength(1)
+    expect(ruleError[0].attributes.get('error')).toBe('{rulesErr}')
+    expect(notifications).toContain('{!rulesErr && rules && <NotificationRulesMatrix')
+    expect(notifications).toContain('if (!s && loadErr)')
     expect(codeOf('UpdatesPanel.tsx'), 'the changelog decorates').toMatch(/api\.changelog\(\)\.catch\(\(\) => ''\)/)
     expect(codeOf('VoicePanel.tsx'), 'the readiness chip decorates').toMatch(/api\.modelsActive\(\)\.catch\(\(\) =>/)
   })

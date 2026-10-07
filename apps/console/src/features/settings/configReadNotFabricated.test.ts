@@ -1,3 +1,5 @@
+import ts from 'typescript'
+import { nodes, apiCalls } from '../../shared/testing/sourceOwners'
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -88,11 +90,43 @@ describe('a config panel does not present fabricated values as saved state', () 
 
   it('the census is reproducible, and the rest of the population is stated not swept', () => {
     const files = ['ChatPanel', 'DurabilityPanel', 'PacksPanel', 'AgentDefaultsPanel', 'settingsWidgets']
-    for (const f of files) expect(read(`pages/settings/${f}.tsx`).length, `${f} must be readable`).toBeGreaterThan(500)
-    const stillSubstituting = files
-      .map((f) => (codeOf(`pages/settings/${f}.tsx`).match(/\.catch\(\(\)\s*=>\s*(\[\]|null|undefined|\{\}|\(\{\}|'')/g) ?? []).length)
-      .reduce((a, b) => a + b, 0)
-    expect(stillSubstituting, 'the decorating fallbacks in these five files, measured')
-      .toBeGreaterThanOrEqual(33)
+    for (const f of files) expect(read(`features/settings/${f}.tsx`).length, `${f} must be readable`).toBeGreaterThan(500)
+    const decorative: Record<string, string[]> = {
+      ChatPanel: ['dashboardConfig', 'sessionTemplates', 'autoArchiveSessions'],
+      DurabilityPanel: ['durabilityStatus', 'durabilityArchive'],
+      PacksPanel: [],
+      AgentDefaultsPanel: ['agents'],
+      settingsWidgets: ['securityStats', 'secrets', 'memoryStats', 'usageTotals', 'modelsActive', 'modelsTelemetry', 'agentRuntimes', 'settingsProviders', 'dashboardConfig', 'notificationSettings', 'updateCheck', 'durabilityStatus', 'durabilityArchive', 'auditVerify', 'logLevel', 'modelsActive', 'useCaseSettings', 'useCaseSettings', 'devices', 'channelTrust', 'toolsSavings', 'agents'],
+    }
+    let gatingReads = 0
+    for (const file of files) {
+      const source = codeOf(`features/settings/${file}.tsx`)
+      const fallbacks: string[] = []
+      for (const call of nodes(source, node => ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'catch') as ts.CallExpression[]) {
+        const handler = call.arguments[0]
+        if (!handler || !ts.isArrowFunction(handler) || handler.parameters.length) continue
+        const defaults = [handler.body, ...nodes(handler.body.getText(), node => ts.isCallExpression(node) && ['setItems', 'setPreview'].includes(node.expression.getText())).flatMap(node => [...(node as ts.CallExpression).arguments])]
+        if (!defaults.some(value => /^(?:null|''|\[\]|\(\{\}|\{\})/.test(value.getText()))) continue
+        const chain = (call.expression as ts.PropertyAccessExpression).expression.getText()
+        const reads = nodes(chain, node => ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.expression.getText() === 'api') as ts.CallExpression[]
+        expect(reads, `${file} fallback resolves one real API owner`).toHaveLength(1)
+        const method = (reads[0].expression as ts.PropertyAccessExpression).name.text
+        expect(method, 'gating configuration must not be replaced by empty defaults').not.toBe('gideonConfig')
+        fallbacks.push(method)
+      }
+      expect(fallbacks.sort(), `${file} current decorating population is explicit; review new fallbacks`).toEqual([...decorative[file]].sort())
+      for (const read of apiCalls(source, 'gideonConfig')) {
+        gatingReads++
+        let current: ts.Node = read
+        while (current.parent && (ts.isPropertyAccessExpression(current.parent) || ts.isCallExpression(current.parent) && current.parent.expression === current)) {
+          current = current.parent
+          if (ts.isPropertyAccessExpression(current)) expect(current.name.text, `${file} config rejection must reach its query`).not.toBe('catch')
+        }
+      }
+    }
+    expect(gatingReads, 'the four real config-panel readers remain in the census').toBeGreaterThanOrEqual(4)
+    expect(decorative.ChatPanel).toContain('sessionTemplates')
+    expect(decorative.DurabilityPanel).toContain('durabilityStatus')
+    expect(decorative.settingsWidgets).toContain('modelsTelemetry')
   })
 })

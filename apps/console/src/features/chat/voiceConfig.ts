@@ -9,13 +9,14 @@ export interface VoiceLoopConfig {
   duplex_mute_enabled: boolean
 }
 const KEY = 'chat:voice-live-config'
-export function useVoiceConfig(): { voiceCfg: VoiceLoopConfig; speakReplies: boolean } {
-  const { data } = useQuery(KEY, async () => {
+export function useVoiceConfig(): { voiceCfg: VoiceLoopConfig; speakReplies: boolean; error: unknown } {
+  const { data, error } = useQuery(KEY, async () => {
     const [cfg, tts] = await Promise.all([api.gideonConfig(), api.useCaseSettings('tts')])
     return { ...(cfg.voice as VoiceLoopConfig), speak_replies: !!tts.enabled && !!tts.auto_speak }
   }, { persist: false })
   useLiveLane(KEY, message => refreshKinds(message).includes('voice'))
   return {
+    error,
     voiceCfg: {
       confirmation_phrases: data?.confirmation_phrases?.length ? data.confirmation_phrases : DEFAULT_PHRASES.confirmation,
       exit_phrases: data?.exit_phrases?.length ? data.exit_phrases : DEFAULT_PHRASES.exit,

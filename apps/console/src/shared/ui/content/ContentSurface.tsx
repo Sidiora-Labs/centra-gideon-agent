@@ -119,7 +119,7 @@ export const ContentSurface = forwardRef<ContentSurfaceHandle, ContentSurfacePro
     {state.baseError && <div role="alert" data-type="body-s" className="border-b border-error/30 bg-error/10 px-m py-2 text-error">{state.baseError}</div>}
     {state.baseMissing && <div role="alert" data-type="body-s" className="flex items-center justify-between gap-2 border-b border-warning/30 bg-warning/10 px-m py-2 text-on-surface">
       <span>This saved draft has no matching version. Refresh and rebase it before saving.</span>
-      {readCurrent && <button type="button" onClick={() => void state.rebaseMissing()} disabled={saving} className="rounded-md border border-outline/50 px-2 py-1 font-medium hover:bg-surface-high">Refresh and rebase draft</button>}
+      {readCurrent && <button type="button" onClick={() => void state.rebaseMissing()} disabled={saving} aria-busy={saving || undefined} className="rounded-md border border-outline/50 px-2 py-1 font-medium hover:bg-surface-high">Refresh and rebase draft</button>}
     </div>}
     {banner}
     <div className="min-h-0 flex-1 overflow-hidden">
