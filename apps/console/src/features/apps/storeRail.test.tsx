@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { artGradient, artStops, artHash } from './appArt'
+import { managesApps } from '../../app/shell/navigationModel'
 
 
 const SRC = join(process.cwd(), "src")
@@ -88,9 +89,13 @@ beforeEach(() => { vi.resetModules(); sessionStorage.clear(); mockApi() })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 describe('the rail is rendered by the page a user reaches', () => {
-  it('#/apps is routed to AppsSection, the component every test below mounts', () => {
+  it('#/apps management views are routed to AppsSection, the component every Store test below mounts', () => {
     const app = readFileSync(join(SRC, 'app/shell/App.tsx'), 'utf8')
-    expect(app, "the shell's own route table").toMatch(/case 'apps': return <AppsSection/)
+    expect(managesApps('', { view: 'store' })).toBe(true)
+    expect(managesApps('', { view: 'library' })).toBe(true)
+    expect(managesApps('', {})).toBe(false)
+    expect(app, "the management component resolves to the actual native page").toMatch(/const AppsSection = lazyRoute\('apps\/manage', \(\) => import\('\.\.\/\.\.\/features\/apps\/AppsSection'\)/)
+    expect(app, "the shell's own management route").toMatch(/if \(route === 'apps' && managesApps\(props\.sub \?\? '', props\.query\)\) return <AppsSection/)
   })
 
   it('AppsSection renders the rail in the Store view — and NOT in the Library view', async () => {

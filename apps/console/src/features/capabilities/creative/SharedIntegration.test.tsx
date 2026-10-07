@@ -36,5 +36,5 @@ it('mounts recurring commissions with the exact shared route', async () => {
   const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ items: [] })))
   render(<Page apiRoot="/api/capabilities/creative/ingredients" />)
   expect(await screen.findByRole('heading', { name: 'Commissions' })).toBeInTheDocument()
-  await waitFor(() => expect(fetcher).toHaveBeenCalledWith('/api/capabilities/creative/commissions'))
+  await waitFor(() => expect(fetcher).toHaveBeenCalledWith('/api/capabilities/creative/commissions', { headers: { 'X-Session-Key': 'dashboard:ui', 'X-Gideon-API-Version': '1' } }))
 })

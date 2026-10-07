@@ -7,10 +7,14 @@ import { api, ApiError } from '../../shared/data/api'
 describe('AppHostPage error split', () => {
   it('404 → "isn\'t installed" EmptyState with a Store action, no alert', async () => {
     vi.spyOn(api, 'app').mockRejectedValueOnce(new ApiError("app 'ghost' not installed", 404))
-    render(<AppHostPage sub="ghost" navigate={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText(/isn’t installed/)).toBeTruthy())
+    const navigate = vi.fn()
+    render(<AppHostPage sub="ghost" navigate={navigate} />)
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'App no longer installed' })).toBeTruthy())
+    expect(screen.getByText('Install it from the Store to open it here.')).toBeTruthy()
     expect(screen.getByRole('button', { name: /open the store/i })).toBeTruthy()
     expect(screen.queryByRole('alert')).toBeNull()
+    screen.getByRole('button', { name: /open the store/i }).click()
+    expect(navigate).toHaveBeenCalledWith('apps?view=store')
   })
 
   it('the Store action routes to the store view of the Apps page', async () => {
