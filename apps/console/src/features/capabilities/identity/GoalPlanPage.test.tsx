@@ -9,28 +9,42 @@ import GoalPlanPage from './GoalPlanPage'
 let server: ChildProcess
 let endpoint = ''
 let directory = ''
+const originalFetch = globalThis.fetch
 const root = resolve(process.cwd(), '../..')
 beforeAll(async () => {
   directory = await mkdtemp(resolve(tmpdir(), 'gideon-stories-ui-'))
-  server = spawn('/tmp/gideon-runtime-venv/bin/python', [
+  server = spawn(process.env.GIDEON_TEST_PYTHON || resolve(root, '.venv/bin/python'), [
     resolve(root, 'checks/runtime/capabilities/identity/goal_plans_ui_server.py'), directory,
-  ], { env: { ...process.env, PYTHONPATH: resolve(root, 'runtime') } })
-  endpoint = await new Promise<string>((resolveEndpoint, reject) => {
+  ], { env: { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: directory } })
+  const ready = await new Promise<{ endpoint: string; token: string }>((resolveEndpoint, reject) => {
     let output = ''
     let errors = ''
     const timer = setTimeout(() => reject(new Error('HTTP server startup timed out: ' + errors)), 10000)
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
-      const line = output.split('\n').find(value => value.startsWith('http://'))
-      if (line) { clearTimeout(timer); resolveEndpoint(line.trim()) }
+      const line = output.split('\n').find(value => value.startsWith('{"endpoint":'))
+      if (line) { clearTimeout(timer); resolveEndpoint(JSON.parse(line)) }
     })
     server.once('error', error => { clearTimeout(timer); reject(error) })
     server.once('exit', code => { clearTimeout(timer); reject(new Error('HTTP server exited ' + code + ': ' + errors)) })
   })
+  endpoint = ready.endpoint
+  const origin = new URL(endpoint).origin
+  const refused = await originalFetch(endpoint)
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const url = input instanceof Request ? input.url : String(input)
+    const headers = new Headers(input instanceof Request ? input.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+    return originalFetch(input, { ...init, headers })
+  }
 })
 afterEach(() => { cleanup(); window.location.hash = '' })
 afterAll(async () => {
+  globalThis.fetch = originalFetch
   if (server && server.exitCode === null) {
     await new Promise<void>(resolveExit => { server.once('exit', () => resolveExit()); server.kill('SIGTERM') })
   }

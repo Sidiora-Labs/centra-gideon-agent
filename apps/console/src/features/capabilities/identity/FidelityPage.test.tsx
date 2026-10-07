@@ -10,28 +10,42 @@ import userEvent from '@testing-library/user-event'
 let server: ChildProcess
 let endpoint = ''
 let directory = ''
+const originalFetch = globalThis.fetch
 const root = resolve(process.cwd(), '../..')
 beforeAll(async () => {
   directory = await mkdtemp(resolve(tmpdir(), 'gideon-stories-ui-'))
-  server = spawn('/tmp/gideon-runtime-venv/bin/python', [
+  server = spawn(process.env.GIDEON_TEST_PYTHON || resolve(root, '.venv/bin/python'), [
     resolve(root, 'checks/runtime/capabilities/identity/fidelity_ui_server.py'), resolve(directory, 'stories.sqlite3'),
-  ], { env: { ...process.env, PYTHONPATH: resolve(root, 'runtime') } })
-  endpoint = await new Promise<string>((resolveEndpoint, reject) => {
+  ], { env: { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: directory } })
+  const ready = await new Promise<{ endpoint: string; token: string }>((resolveEndpoint, reject) => {
     let output = ''
     let errors = ''
     const timer = setTimeout(() => reject(new Error('HTTP server startup timed out: ' + errors)), 10000)
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
-      const line = output.split('\n').find(value => value.startsWith('http://'))
-      if (line) { clearTimeout(timer); resolveEndpoint(line.trim()) }
+      const line = output.split('\n').find(value => value.startsWith('{"endpoint":'))
+      if (line) { clearTimeout(timer); resolveEndpoint(JSON.parse(line)) }
     })
     server.once('error', error => { clearTimeout(timer); reject(error) })
     server.once('exit', code => { clearTimeout(timer); reject(new Error('HTTP server exited ' + code + ': ' + errors)) })
   })
+  endpoint = ready.endpoint
+  const origin = new URL(endpoint).origin
+  const refused = await originalFetch(endpoint)
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const url = input instanceof Request ? input.url : String(input)
+    const headers = new Headers(input instanceof Request ? input.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+    return originalFetch(input, { ...init, headers })
+  }
 })
 afterEach(() => { cleanup(); window.location.hash = '' })
 afterAll(async () => {
+  globalThis.fetch = originalFetch
   if (server && server.exitCode === null) {
     await new Promise<void>(resolveExit => { server.once('exit', () => resolveExit()); server.kill('SIGTERM') })
   }
@@ -69,7 +83,7 @@ test('source-linked case and observation persist through the actual HTTP applica
   expect(runs[0].source_snapshot[0].text).toBe('Curiosity and honesty matter.')
   fireEvent.change(screen.getByLabelText('Expected text'), { target: { value: 'honesty' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save case' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Save case' })).toBeEnabled())
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save case' })).toHaveAttribute('data-visual-state', 'ready'))
   fireEvent.change(screen.getByLabelText('Supplied answer'), { target: { value: 'Only curiosity.' } })
   fireEvent.click(screen.getByRole('button', { name: 'Check supplied observation' }))
   await screen.findByText('Supplied observation · completed · Literal rules failed')
