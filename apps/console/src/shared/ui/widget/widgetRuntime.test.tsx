@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { useRef } from 'react'
 import { parseWidgetBlocks, findGenUiBlock, widgetlessText } from './blocks'
 import { buildReactSrcdoc, buildSelfContainedSrcdoc, buildSrcdoc, EDIT_MODE_SCRIPT_SOURCE, HOST_SCRIPT_SOURCE } from './widgetSrcdoc'
@@ -86,8 +86,8 @@ describe('iframe document envelope', () => {
       expect(source).not.toMatch(/parent\.(?:document|localStorage|sessionStorage)/)
       expect(source).not.toMatch(/document\.cookie/)
     }
-    const dashboardPolicy = readFileSync(join(process.cwd(), 'runtime/gideon/interfaces/dashboard/server.py'), 'utf8')
-    const artifactPolicy = readFileSync(join(process.cwd(), 'runtime/gideon/workspace/artifacts/deploy.py'), 'utf8')
+    const dashboardPolicy = readFileSync(join(resolve(process.cwd(), '../..'), 'runtime/gideon/interfaces/dashboard/server.py'), 'utf8')
+    const artifactPolicy = readFileSync(join(resolve(process.cwd(), '../..'), 'runtime/gideon/workspace/artifacts/deploy.py'), 'utf8')
     expect(dashboardPolicy).not.toMatch(/https:\/\/(?:cdn\.tailwindcss\.com|cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com)/)
     expect(artifactPolicy).not.toMatch(/https:\/\/(?:cdn\.tailwindcss\.com|cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com)/)
     expect(widget).toContain('Offline widget')

@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
 
 
-const REPO = join(import.meta.dirname, "../../../../..")
+const REPO = resolve(process.cwd(), '../..')
 
 const read = (p: string) => readFileSync(join(REPO, p), 'utf8')
 
@@ -15,19 +16,27 @@ function capIn(source: string, marker: string): number | null {
 }
 
 describe('both suggestion surfaces show the same amount of the same list', () => {
-  const widget = read('web/src/pages/dashboard/widgets/Suggestions.tsx')
-  const chat = read('web/src/pages/ChatPage.tsx')
-  const py = read('runtime/gideon/cognition/suggestions.py')
+  const widget = read('apps/console/src/features/dashboard/widgets/Suggestions.tsx')
+  const chat = read('apps/console/src/features/ChatPage.tsx')
 
   const dashCap = capIn(widget, 'items.slice')
   const chatCap = capIn(chat, 'api.suggestions()')
-  const parserCap = (() => {
-    const at = py.indexOf('def _parse_suggestions')
-    if (at < 0) return null
-    const body = py.slice(at, py.indexOf('\ndef ', at + 1))
-    const m = /\]\[:(\d+)\]/.exec(body)
-    return m ? Number(m[1]) : null
-  })()
+  const producer = JSON.parse(execFileSync(process.env.GIDEON_TEST_PYTHON || resolve(REPO, '.venv/bin/python'), ['-c', [
+    'import ast,json,sys',
+    'from pathlib import Path',
+    'tree=ast.parse(Path(sys.argv[1]).read_text())',
+    'wrapper=next(node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name=="_parse_suggestions")',
+    'call=wrapper.body[0].value',
+    'assert isinstance(call,ast.Call) and isinstance(call.func,ast.Attribute) and call.func.attr=="parse"',
+    'assert isinstance(call.func.value,ast.Call) and call.func.value.func.id=="_SuggestionResponse"',
+    'response=next(node for node in tree.body if isinstance(node,ast.ClassDef) and node.name=="_SuggestionResponse")',
+    'parser=next(node for node in response.body if isinstance(node,ast.FunctionDef) and node.name=="parse")',
+    'caps=[node.value.slice.upper.value for node in ast.walk(parser) if isinstance(node,ast.Return) and isinstance(node.value,ast.Subscript) and isinstance(node.value.value,ast.Name) and node.value.value.id=="accepted"]',
+    'assert len(caps)==1 and isinstance(caps[0],int)',
+    'fallback=next(node.value for node in tree.body if isinstance(node,ast.Assign) and any(isinstance(target,ast.Name) and target.id=="_FALLBACK_SUGGESTIONS" for target in node.targets))',
+    'print(json.dumps({"cap":caps[0],"fallbackCount":len(ast.literal_eval(fallback))}))',
+  ].join('\n'), join(REPO, 'runtime/gideon/cognition/suggestions.py')], { encoding: 'utf8' })) as { cap: number; fallbackCount: number }
+  const parserCap = producer.cap
 
   it('the three numbers were all found (vacuity floor)', () => {
     expect(dashCap, "the dashboard widget's slice(0, N) was not found").not.toBeNull()
@@ -59,9 +68,7 @@ describe('both suggestion surfaces show the same amount of the same list', () =>
   })
 
   it("the shipped fallback list fits — it is what a brand-new install always sees", () => {
-    const block = py.slice(py.indexOf('_FALLBACK_SUGGESTIONS = ['))
-    const list = block.slice(0, block.indexOf(']'))
-    const n = (list.match(/^\s*"/gm) || []).length
+    const n = producer.fallbackCount
     expect(n, 'the fallback list was not parsed — this assertion is vacuous').toBeGreaterThan(0)
     expect(
       dashCap,

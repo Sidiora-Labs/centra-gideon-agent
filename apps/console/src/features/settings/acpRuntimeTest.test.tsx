@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const source = readFileSync(new URL('./AgentDefaultsPanel.tsx', import.meta.url), 'utf8')
+const source = readFileSync(join(process.cwd(), 'src/features/settings/AgentDefaultsPanel.tsx'), 'utf8')
 
 describe('ACP runtime Test action wiring', () => {
   it('calls the explicit provider test endpoint and waits to display its result', () => {

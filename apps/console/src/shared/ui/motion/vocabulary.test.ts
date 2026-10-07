@@ -1,6 +1,7 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import ts from 'typescript'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -24,9 +25,11 @@ const code = (text: string) => text
   .join('\n')
 
 function motionImports(text: string): string[] | null {
-  const m = text.match(/import\s*\{([^}]*)\}\s*from\s*'\.\.\/\.\.\/theme\/motion'/)
-  if (!m) return null
-  return m[1].split(',').map((s) => s.trim()).filter(Boolean)
+  const file = ts.createSourceFile('motion.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const declaration = file.statements.find(statement => ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier) && statement.moduleSpecifier.text === '../../theme/motion')
+  if (!declaration || !ts.isImportDeclaration(declaration)) return null
+  const bindings = declaration.importClause?.namedBindings
+  return bindings && ts.isNamedImports(bindings) ? bindings.elements.map(binding => binding.propertyName?.text ?? binding.name.text) : []
 }
 
 describe('the four primitives own no timing of their own', () => {
@@ -46,14 +49,14 @@ describe('the four primitives own no timing of their own', () => {
   })
 
   it('none reaches past it for a preset, a curve or a length', () => {
-    const AMPLITUDE_ONLY = ['expr', 'exprHeavy']
+    const AMPLITUDE_ONLY = ['expr', 'exprHeavy', 'useReducedMotion']
     for (const name of MEMBERS) {
       const named = motionImports(source(name))
       if (named === null) continue
-      expect(named.sort(), `${name} imports timing from design/motion`)
+      expect(named.sort(), `${name} imports native motion timing outside the family`)
         .toEqual(named.filter((n) => AMPLITUDE_ONLY.includes(n)).sort())
     }
-    expect(motionImports(source('Disintegrate.tsx'))).toEqual(['expr', 'exprHeavy'])
+    expect(motionImports(source('Disintegrate.tsx'))).toEqual(['expr', 'exprHeavy', 'useReducedMotion'])
   })
 
   it('none writes a stiffness, a raw duration or a raw bezier', () => {
@@ -140,7 +143,7 @@ describe('the family has exactly one tween and one fade', () => {
   })
 
   it('the fade IS the app fade — no length invented for "something is fading"', () => {
-    expect(familyFade()).toBe(spring.effects)
+    expect(familyFade()).toEqual(spring.effects)
   })
 })
 
