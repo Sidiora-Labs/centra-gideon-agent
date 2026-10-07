@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { act, render, within } from '@testing-library/react'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 
@@ -21,11 +23,33 @@ const payload = (over: Over = {}) => ({
   builtin: BUILTIN, user: [], baseline: VERIFIED, user_additions: 0, ...over,
 })
 
+// Revisioned editor inputs come from the installed configuration producer.
+function configurationDocument(user: string[]) {
+  const home = mkdtempSync(join(tmpdir(), 'gideon-security-baseline-'))
+  try {
+    return JSON.parse(execFileSync(process.env.GIDEON_TEST_PYTHON || join(process.cwd(), '../../.venv/bin/python'), ['-c', `
+import json, sys
+from gideon.core.config import AppConfig
+from gideon.core.config.document import redact_configuration
+from gideon.stale_write import revision_of
+from gideon.core.outside_home import place_rows
+config = AppConfig.load()
+document = redact_configuration(config.to_dict())
+document['security']['denied_commands'] = json.loads(sys.stdin.read())
+paths = ('denied_commands', 'egress', 'outside_home')
+print(json.dumps({'configuration': {**document, 'revisions': {'security.' + name: revision_of(document['security'][name]) for name in paths}}, 'places': place_rows()}))
+`], { input: JSON.stringify(user), encoding: 'utf8', env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: join(process.cwd(), '../../runtime') } }))
+  } finally { rmSync(home, { recursive: true, force: true }) }
+}
+
 async function mount(opts: { denied?: Over | 'reject'; stats?: 'reject' } = {}) {
   vi.resetModules()
   sessionStorage.clear()
+  const config = configurationDocument(opts.denied === 'reject' ? [] : opts.denied?.user ?? [])
   vi.doMock('../../shared/data/api', () => ({
     api: {
+      gideonConfig: () => Promise.resolve(config.configuration),
+      securityOutsideHome: () => Promise.resolve({ places: config.places }),
       securityStats: () => opts.stats === 'reject'
         ? Promise.reject(new Error('probe-induced 500 on /api/security/stats'))
         : Promise.resolve({
@@ -126,7 +150,7 @@ describe('the baseline is read-only in the UI', () => {
 
   it('no write path addresses the baseline at all', async () => {
     const src = readFileSync(PANEL, 'utf8')
-    expect(src).toContain('api.setUserDeniedCommands(next)')
+    expect(src).toContain('api.setUserDeniedCommands(next, revision, confirmed)')
     expect(src, 'nothing here may write the baseline').not.toMatch(/set\w*Baseline|baseline:\s*\[/)
   })
 })
