@@ -38,6 +38,9 @@ const ENVELOPES: Record<string, unknown> = {}
 function resetEnvelopes() {
   for (const k of Object.keys(ENVELOPES)) delete ENVELOPES[k]
   Object.assign(ENVELOPES, {
+    localInferenceWaits: { waits: [] },
+    workflowRuns: { runs: [] },
+    toolsIndex: { tools: [], load_failures: [] },
     dashboardConfig: { user_name: 'Ada' },
     saveDashboardConfig: { ok: true },
     agents: { agents: [] },
@@ -56,7 +59,10 @@ function resetEnvelopes() {
 vi.mock('../../shared/data/api', async (orig) => {
   const real = await orig<typeof import('../../shared/data/api')>()
   const stub = new Proxy({}, {
-    get: (_t, prop: string) => (..._args: unknown[]) => {
+    get: (_t, prop: string) => (...args: unknown[]) => {
+      if (prop === 'saveDashboardConfig') {
+        ENVELOPES.dashboardConfig = { ...(ENVELOPES.dashboardConfig as object), ...(args[0] as object) }
+      }
       calls.push(prop)
       const v = prop in ENVELOPES ? ENVELOPES[prop] : []
       return v === REJECT ? Promise.reject(new Error('stubbed failure')) : Promise.resolve(v)
@@ -107,6 +113,7 @@ async function atStop(id: string) {
   await waitFor(() => expect(tour()).toHaveAttribute('data-tour-step', id), {
     timeout: STOP_BUDGET_MS,
   })
+  await waitFor(() => expect(tour()).toHaveAttribute('data-tour-anchored', 'true'), { timeout: STOP_BUDGET_MS })
   return screen.getByRole('dialog')
 }
 
@@ -128,21 +135,21 @@ describe('the done screen launches it, and the app is what it runs on', () => {
     renderApp()
     await user.click(await reachDoneScreen(user))
 
-    await waitFor(() => expect(railLinks()).toContain('Chat'))
+    await waitFor(() => expect(railLinks()).toContain('New conversation'))
     const d = await atStop('rail')
     expect(d).toHaveAttribute('aria-modal', 'true')
     expect(d).toHaveAttribute('data-tour-anchored', 'true')
     expect(d.getAttribute('aria-label')).toBe('Gideon tour — step 1 of 5: The sidebar is the whole app')
   })
 
-  it('"Start using" finishes WITHOUT the tour — it is offered, never imposed', async () => {
+  it('"Start a conversation" finishes WITHOUT the tour — it is offered, never imposed', async () => {
     firstRun()
     const user = userEvent.setup()
     renderApp()
     await reachDoneScreen(user)
-    await user.click(screen.getByRole('button', { name: /Start using/ }))
+    await user.click(screen.getByRole('button', { name: /Start a conversation/ }))
 
-    await waitFor(() => expect(railLinks()).toContain('Chat'))
+    await waitFor(() => expect(railLinks()).toContain('New conversation'))
     expect(tour()).toBeNull()
     expect(consumeProductTourRequest()).toBe(false)
   })
@@ -152,14 +159,14 @@ describe('it walks all five stops, over the real surfaces', () => {
   it('rail → chat → inbox → approvals → settings, every anchor resolved', async () => {
     const user = userEvent.setup()
     renderApp()
-    await waitFor(() => expect(railLinks()).toContain('Chat'))
+    await waitFor(() => expect(railLinks()).toContain('New conversation'))
     act(() => { requestProductTour() })
 
     const walked: string[] = []
     for (const stop of PRODUCT_TOUR_STOPS) {
       const d = await atStop(stop.id)
       walked.push(stop.id)
-      await waitFor(() => expect(d).toHaveAttribute('data-tour-anchored', 'true'), {
+      await waitFor(() => expect(tour()).toHaveAttribute('data-tour-anchored', 'true'), {
         timeout: STOP_BUDGET_MS,
       })
       expect(d.getAttribute('aria-label')).toContain(stop.title)
@@ -175,7 +182,7 @@ describe('it walks all five stops, over the real surfaces', () => {
   it('the settings stop keeps focus even though that surface autofocuses its own search', async () => {
     const user = userEvent.setup()
     renderApp()
-    await waitFor(() => expect(railLinks()).toContain('Chat'))
+    await waitFor(() => expect(railLinks()).toContain('New conversation'))
     act(() => { requestProductTour() })
 
     await atStop('rail')
@@ -210,7 +217,7 @@ describe('Escape exits anywhere, and what is left behind is a working app', () =
   it('quitting mid-tour leaves every surface reachable', async () => {
     const user = userEvent.setup()
     renderApp()
-    await waitFor(() => expect(railLinks()).toContain('Chat'))
+    await waitFor(() => expect(railLinks()).toContain('New conversation'))
     act(() => { requestProductTour() })
 
     await atStop('rail')
@@ -222,7 +229,7 @@ describe('Escape exits anywhere, and what is left behind is a working app', () =
     await user.keyboard('{Escape}')
     await waitFor(() => expect(tour()).toBeNull())
 
-    await user.click(within(rail()).getByRole('button', { name: 'Chat' }))
+    await user.click(within(rail()).getByRole('button', { name: 'New conversation' }))
     await waitFor(() => expect(document.querySelector('[data-tour="chat"]')).not.toBeNull(), {
       timeout: STOP_BUDGET_MS,
     })
@@ -231,7 +238,7 @@ describe('Escape exits anywhere, and what is left behind is a working app', () =
   it('the X and a click on the overlay are the pointer twins of Escape', async () => {
     const user = userEvent.setup()
     renderApp()
-    await waitFor(() => expect(railLinks()).toContain('Chat'))
+    await waitFor(() => expect(railLinks()).toContain('New conversation'))
 
     act(() => { requestProductTour() })
     await atStop('rail')
@@ -249,7 +256,7 @@ describe('nothing about the tour is stored, and nothing is reported', () => {
   it('walking every stop asks the gateway for nothing and writes no key', async () => {
     const user = userEvent.setup()
     renderApp()
-    await waitFor(() => expect(railLinks()).toContain('Chat'))
+    await waitFor(() => expect(railLinks()).toContain('New conversation'))
     expect(calls.length).toBeGreaterThan(0)
 
     const before = calls.length
@@ -286,7 +293,7 @@ describe("OU-5's auto-pin model behaves identically with the tour present", () =
     setNavMode('starter')
     const user = userEvent.setup()
     renderApp()
-    await waitFor(() => expect(railLinks()).toContain('Chat'))
+    await waitFor(() => expect(railLinks()).toContain('New conversation'))
     const before = readNavDisclosure()
 
     act(() => { requestProductTour() })

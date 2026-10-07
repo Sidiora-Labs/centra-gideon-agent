@@ -10,6 +10,7 @@ vi.mock('../../shared/data/api', () => ({
   api: {
     saveOnboardingState: (...a: unknown[]) => saveOnboardingState(...a),
     onboarding: () => onboarding(),
+    modelProviders: () => Promise.resolve([]),
     themes: () => new Promise(() => {}),
     theme: () => new Promise(() => {}),
     gideonConfig: () => new Promise(() => {}),
@@ -58,6 +59,7 @@ beforeEach(() => {
     }),
   })
   localStorage.clear()
+  sessionStorage.clear()
   clearOnboardingExit()
   saveOnboardingState.mockResolvedValue({ ok: true, state: {} })
   onboarding.mockResolvedValue({ needs_model: true, has_model_provider: false, has_chat_binding: false })
@@ -71,12 +73,12 @@ afterEach(() => {
 async function reachDoneScreen() {
   render(<AppearanceProvider><Onboarding /></AppearanceProvider>)
   await waitFor(() => expect(onboarding).toHaveBeenCalled())
-  fireEvent.change(screen.getByPlaceholderText('Your name'), { target: { value: 'Ada Lovelace' } })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Your name' }), { target: { value: 'Ada Lovelace' } })
   fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
   fireEvent.click(await screen.findByRole('button', { name: 'stub-skip-import' }))
   fireEvent.click(await screen.findByRole('button', { name: 'stub-skip' }))
   fireEvent.click(await screen.findByRole('button', { name: 'stub-skip-try' }))
-  await screen.findByRole('button', { name: /Start using/ })
+  await screen.findByRole('button', { name: /Start a conversation/ })
 }
 
 describe('the done screen points at the Inbox with a link that can leave the flow', () => {
@@ -103,13 +105,13 @@ describe('the done screen unlock switch is the ONE nav-disclosure setting', () =
   it('writes expert mode when it is on at finish', async () => {
     await reachDoneScreen()
     fireEvent.click(screen.getByRole('switch', { name: 'Show every surface' }))
-    fireEvent.click(screen.getByRole('button', { name: /Start using/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Start a conversation/ }))
     await waitFor(() => expect(readNavDisclosure().mode).toBe('expert'))
   })
 
   it('leaves the starter rail when it is off at finish', async () => {
     await reachDoneScreen()
-    fireEvent.click(screen.getByRole('button', { name: /Start using/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Start a conversation/ }))
     await waitFor(() => expect(readNavDisclosure().mode).toBe('starter'))
   })
 

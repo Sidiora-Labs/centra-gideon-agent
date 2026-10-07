@@ -14,6 +14,7 @@ vi.mock('../../shared/data/api', () => ({
     onboarding: () => onboarding(),
     gideonConfig: () => gideonConfig(),
     setAutoUpdate: (...a: unknown[]) => setAutoUpdate(...a),
+    modelProviders: () => Promise.resolve([]),
     themes: () => new Promise(() => {}),
     theme: () => new Promise(() => {}),
   },
@@ -58,6 +59,7 @@ beforeEach(() => {
     }),
   })
   localStorage.clear()
+  sessionStorage.clear()
   clearOnboardingExit()
   saveOnboardingState.mockResolvedValue({ ok: true, state: {} })
   onboarding.mockResolvedValue({ needs_model: true, has_model_provider: false, has_chat_binding: false })
@@ -72,12 +74,12 @@ afterEach(() => {
 async function reachDoneScreen() {
   render(<AppearanceProvider><Onboarding /></AppearanceProvider>)
   await waitFor(() => expect(onboarding).toHaveBeenCalled())
-  fireEvent.change(screen.getByPlaceholderText('Your name'), { target: { value: 'Ada Lovelace' } })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Your name' }), { target: { value: 'Ada Lovelace' } })
   fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
   fireEvent.click(await screen.findByRole('button', { name: 'stub-skip-import' }))
   fireEvent.click(await screen.findByRole('button', { name: 'stub-skip' }))
   fireEvent.click(await screen.findByRole('button', { name: 'stub-skip-try' }))
-  await screen.findByRole('button', { name: /Start using/ })
+  await screen.findByRole('button', { name: /Start a conversation/ })
 }
 
 describe('the done screen tells what the product does on its own', () => {
@@ -109,7 +111,7 @@ describe('the done screen tells what the product does on its own', () => {
     await reachDoneScreen()
     await screen.findByText(/sources configured for this gateway/)
     fireEvent.click(screen.getByRole('button', { name: 'Review Store sources' }))
-    expect(peekOnboardingExit()).toBe('apps')
+    expect(peekOnboardingExit()).toBe('apps/manage')
   })
 
   it('stays quiet about a source a pre-provisioned opt-out never got', async () => {
