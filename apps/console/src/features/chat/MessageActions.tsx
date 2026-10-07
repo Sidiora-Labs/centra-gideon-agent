@@ -1,6 +1,7 @@
+import { Button } from "../../shared/ui/Button"
+import { SquareIconButton } from "../../shared/ui/SquareIconButton"
 import { useState } from 'react'
 import { Copy, Check, RotateCcw, GitBranch, Volume2, Square, Pencil, ChevronLeft, ChevronRight, Rewind } from 'lucide-react'
-import { unavailableWhen } from '../../shared/ui/unavailable'
 import { clockTime, fullStamp, isoStamp } from '../../shared/data/epoch'
 import { copyText } from '../../app/shell/clipboard'
 
@@ -54,17 +55,17 @@ function VariantSwitcher({ count, idx, onSwitch }: { count: number; idx: number;
   const arrow = 'inline-flex h-8 w-6 items-center justify-center rounded-md transition-colors hover:bg-surface-high hover:text-on-surface aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-on-surface-low aria-disabled:cursor-default'
   return (
     <div className="inline-flex items-center gap-0.5 rounded-md pr-1 text-on-surface-low" title={`Answer ${idx + 1} of ${count}`}>
-      <button type="button" onClick={() => !atStart && onSwitch(idx - 1)}
-        aria-label="Previous answer" className={arrow}
-        {...unavailableWhen(atStart, 'Already at the first answer', { title: 'Previous answer' })}>
+      <SquareIconButton  onClick={() => !atStart && onSwitch(idx - 1)}
+        label="Previous answer" className={arrow}
+        disabled={atStart} disabledReason="Already at the first answer">
         <ChevronLeft size={14} />
-      </button>
+      </SquareIconButton>
       <span data-type="caption" className="min-w-[2.1rem] select-none text-center tabular-nums" aria-live="polite">{idx + 1}/{count}</span>
-      <button type="button" onClick={() => !atEnd && onSwitch(idx + 1)}
-        aria-label="Next answer" className={arrow}
-        {...unavailableWhen(atEnd, 'Already at the last answer', { title: 'Next answer' })}>
+      <SquareIconButton  onClick={() => !atEnd && onSwitch(idx + 1)}
+        label="Next answer" className={arrow}
+        disabled={atEnd} disabledReason="Already at the last answer">
         <ChevronRight size={14} />
-      </button>
+      </SquareIconButton>
     </div>
   )
 }
@@ -87,11 +88,11 @@ export function UserActions({ text, canFork = true, canRewind = false, ts, onEdi
 
 function ActBtn({ icon: Icon, label, onClick, done, active }: { icon: typeof Copy; label: string; onClick: () => void; done?: boolean; active?: boolean }) {
   return (
-    <button type="button" onClick={onClick} title={label} aria-label={label}
+    <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={onClick} title={label} ariaLabel={label}
       data-type="caption"
       className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-on-surface-low transition-colors hover:bg-surface-high hover:text-on-surface"
       style={done ? { color: 'var(--color-ok)' } : active ? { color: 'var(--color-primary)' } : undefined}>
       <Icon size={14} className={active ? 'fill-current' : ''} />
-    </button>
+    </Button>
   )
 }

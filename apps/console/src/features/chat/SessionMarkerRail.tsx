@@ -1,3 +1,6 @@
+import { Button } from "../../shared/ui/Button"
+import { SquareIconButton } from "../../shared/ui/SquareIconButton"
+import { IconButton } from "../../shared/ui/IconButton"
 import { useCallback, useEffect, useRef, useState, useMemo, type KeyboardEvent, type RefObject } from 'react'
 import { prefersReducedMotion } from '../../shared/theme/motion'
 import { FocusScope } from '../../shared/ui/focusNavigation'
@@ -176,11 +179,11 @@ export function SessionMarkerRail({
         </div>
       </aside>
       <div className="flex shrink-0 justify-end px-3 py-2 md:hidden" data-slot="session-map-mobile-toolbar">
-        <button ref={drawerOpener} type="button" aria-label="Open session map" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}
+        <Button variant="ghost" size="xs" shape="squircle" ref={drawerOpener} type="button" ariaLabel="Open session map" ariaExpanded={drawerOpen} onClick={() => setDrawerOpen(true)}
           className="relative inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-pill px-3 border border-outline-variant/50 bg-surface/95 text-on-surface-var shadow-md backdrop-blur-md md:hidden">
           <ListTree size={18} aria-hidden="true" />
           <span>Session map</span>
-        </button>
+        </Button>
       </div>
       {drawerOpen && (
         <div className="fixed inset-0 z-[var(--z-content)] md:hidden">
@@ -189,10 +192,8 @@ export function SessionMarkerRail({
             className="absolute inset-y-0 right-0 flex w-72 max-w-[85vw] flex-col border-l border-outline-variant bg-surface p-l shadow-xl">
             <header className="mb-l flex items-center justify-between gap-s">
               <h2 data-type="title-l">Session map</h2>
-              <button type="button" aria-label="Close session map" onClick={() => setDrawerOpen(false)}
-                className="inline-flex size-11 items-center justify-center rounded-pill text-on-surface-var hover:bg-surface-high">
-                <X size={18} aria-hidden="true" />
-              </button>
+              <IconButton label="Close session map" onClick={() => setDrawerOpen(false)}
+                className="inline-flex size-11 items-center justify-center rounded-pill text-on-surface-var hover:bg-surface-high" icon={X} size={44} iconSize={18} />
             </header>
             <div className="mb-l min-w-0 shrink-0 [&_[role=search]]:static [&_[role=search]]:w-full"><SearchControl open query={query} source={searchSource} results={results}
               onToggle={() => { setQuery(''); clearHighlight() }}
@@ -278,10 +279,8 @@ function SearchControl({ open, query, source, results, onToggle, onQuery, onSele
   onSelect: (index: number, entryIndex: number) => void
 }) {
   return <div className="relative">
-    <button type="button" aria-label="Search session map" aria-expanded={open} onClick={onToggle}
-      className="inline-flex size-8 items-center justify-center rounded-pill border border-outline-variant/50 bg-surface/95 text-on-surface-var shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-      {open ? <X size={14} aria-hidden="true" /> : <Search size={14} aria-hidden="true" />}
-    </button>
+    <SquareIconButton label="Search session map" ariaExpanded={open} onClick={onToggle}
+      className="inline-flex size-8 items-center justify-center rounded-pill border border-outline-variant/50 bg-surface/95 text-on-surface-var shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" icon={open ? X : Search} iconSize={14} />
     {open && <div role="search" aria-label="Search session map" data-search-origin={source} className="absolute right-10 top-0 w-72 rounded-xl border border-outline-variant bg-surface p-2 shadow-lg">
       <input type="search" autoFocus value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Search this session" aria-label="Search this session"
         className="h-9 w-full rounded-lg border border-outline-variant bg-surface-container px-3 text-sm text-on-surface outline-none focus:border-primary" />
@@ -299,8 +298,6 @@ function SearchControl({ open, query, source, results, onToggle, onQuery, onSele
 }
 
 function ReturnToNewest({ onClick }: { onClick: () => void }) {
-  return <button type="button" aria-label="Return to newest message" onClick={onClick}
-    className="inline-flex size-11 items-center justify-center rounded-pill border border-outline-variant/50 bg-surface/95 text-on-surface-var shadow-md backdrop-blur-md transition-colors hover:bg-surface-high hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-    <ArrowDown size={16} aria-hidden="true" />
-  </button>
+  return <IconButton  label="Return to newest message" onClick={onClick}
+    className="inline-flex size-11 items-center justify-center rounded-pill border border-outline-variant/50 bg-surface/95 text-on-surface-var shadow-md backdrop-blur-md transition-colors hover:bg-surface-high hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" icon={ArrowDown} size={44} iconSize={16} />
 }

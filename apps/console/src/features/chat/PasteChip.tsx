@@ -1,3 +1,4 @@
+import { Button } from "../../shared/ui/Button"
 import { useState } from 'react'
 import { Clipboard, FileText } from 'lucide-react'
 import { Modal } from '../../shared/ui/Modal'
@@ -12,10 +13,10 @@ function PlainUserText({ text, onFileClick }: { text: string; onFileClick?: (pat
     <span className="whitespace-pre-wrap break-words">
       {splitFileRefs(text).map((part, i) =>
         part.kind === 'file' ? (
-          <button key={i} type="button" onClick={() => onFileClick(part.value)} title={`Open ${part.value}`}
+          <Button variant="ghost" size="xs" shape="squircle" key={i} type="button" onClick={() => onFileClick(part.value)} title={`Open ${part.value}`}
             className="mx-0.5 inline-flex items-center gap-1 rounded bg-surface-high px-1 align-baseline text-[0.92em] text-primary-emphasis transition-colors hover:bg-surface-highest">
             <FileText size={11} className="shrink-0" />{part.value.split('/').pop()}
-          </button>
+          </Button>
         ) : (
           <span key={i}>{part.value}</span>
         ),
@@ -28,11 +29,11 @@ export function PasteChip({ paste }: { paste: TurnPaste }) {
   const [open, setOpen] = useState(false)
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} title={`View paste #${paste.seq} (${paste.lines} lines)`}
+      <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => setOpen(true)} title={`View paste #${paste.seq} (${paste.lines} lines)`}
         className="mx-0.5 inline-flex items-center gap-1 rounded-md bg-surface-high px-1.5 py-0.5 align-baseline text-[0.85em] text-primary-emphasis transition-colors hover:bg-surface-highest">
         <Clipboard size={11} className="shrink-0" /> Paste #{paste.seq}
         <span className="text-on-surface-low">· {paste.lines}L</span>
-      </button>
+      </Button>
       {open && (
         <Modal title={`Paste #${paste.seq} · ${paste.lines} lines`} icon={<Clipboard size={18} className="text-primary" />} onClose={() => setOpen(false)}>
           <pre data-type="body-s" className="overflow-auto whitespace-pre-wrap rounded-md bg-surface-low px-m py-s font-mono text-on-surface-var leading-relaxed">{paste.content}</pre>

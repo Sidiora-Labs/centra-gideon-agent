@@ -1,3 +1,4 @@
+import { Button } from "../../shared/ui/Button"
 import { useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
 import { ChevronRight, Loader2, Check, Zap, Maximize2, Lightbulb, AlertTriangle } from 'lucide-react'
@@ -99,10 +100,10 @@ function ToolCardDetails({ seg }: { seg: ToolSegment }) {
             showing a projection{seg.originalLength ? ` of ${seg.originalLength.toLocaleString()} chars` : ''}
           </span>
           {seg.rawRef && (
-            <button type="button" onClick={() => requestToolResultFull(seg.rawRef!, seg.tool)}
+            <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => requestToolResultFull(seg.rawRef!, seg.tool)}
               className="inline-flex items-center gap-1 rounded-pill bg-surface-high px-2 py-0.5 text-on-surface-var transition-colors hover:bg-surface-highest hover:text-on-surface">
               <Maximize2 size={11} /> Show full result
-            </button>
+            </Button>
           )}
         </div>
       )}

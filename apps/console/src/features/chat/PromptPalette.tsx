@@ -149,9 +149,9 @@ function FillIn({ prompt, onBack, onInsert, onSend }: {
           e.preventDefault(); void finalize(!!onSend)
         }
       }}>
-      <button type="button" onClick={onBack} data-type="body-s" className="inline-flex items-center gap-1 self-start text-on-surface-low hover:text-on-surface">
+      <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={onBack} data-type="body-s" className="inline-flex items-center gap-1 self-start text-on-surface-low hover:text-on-surface">
         <ChevronLeft size={14} /> All prompts
-      </button>
+      </Button>
       {prompt.description && <p data-type="body-s" className="text-on-surface-var">{prompt.description}</p>}
 
       <div className="flex flex-col gap-2">

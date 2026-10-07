@@ -1,3 +1,4 @@
+import { QuietButton } from "../../shared/ui/QuietButton"
 import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Brain, ChevronRight, Gauge, Sparkles, type LucideIcon } from 'lucide-react'
@@ -29,8 +30,7 @@ export function ContextLedger({ fed, learned, learnedOrigin, stats }: { fed?: st
     : 'What fed this turn · what was learned'
   return (
     <div className="mt-2 mb-1">
-      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
-        data-type="caption"
+      <QuietButton  onClick={() => setOpen((v) => !v)} ariaExpanded={open}
         className="flex items-center gap-1.5 rounded-pill text-on-surface-low/80 transition-colors hover:text-on-surface-low"
         title={open ? 'Hide what fed this turn and what was learned' : collapsedTitle}>
         <motion.span animate={{ rotate: open ? 90 : 0 }} transition={spring.spatialFast} className="shrink-0 opacity-60">
@@ -39,7 +39,7 @@ export function ContextLedger({ fed, learned, learnedOrigin, stats }: { fed?: st
         <Brain size={11} className="shrink-0 opacity-70" />
         <span>{summary}</span>
         {!open && learned && <Sparkles size={11} className="shrink-0 text-primary/80" />}
-      </button>
+      </QuietButton>
       <AnimatePresence initial={false}>
         {open && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}

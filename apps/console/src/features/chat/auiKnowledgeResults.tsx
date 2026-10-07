@@ -1,3 +1,4 @@
+import { Button } from "../../shared/ui/Button"
 import { useState } from 'react'
 import { api, type KnowledgeContextCard, type KnowledgeContextResult, type KnowledgeItem, type ResearchReport, type SemanticEntry } from '../../shared/data/api'
 import { paper } from '../../shared/vendor/assistant-ui/elements/surfaces'
@@ -106,7 +107,7 @@ export function KnowledgeImage({ item, onOpen }: { item: KnowledgeItem; onOpen?:
   return <figure data-slot="image-generation" className={`${paper} rounded-xl p-2`}>
     <img src={src} alt={item.title || 'Knowledge image'} loading="lazy" className="max-h-72 max-w-full rounded-lg object-contain" />
     <figcaption className="mt-1 text-xs text-on-surface-low">
-      {onOpen ? <button type="button" onClick={() => onOpen(item.id)} className="underline">{item.title || 'Open image'}</button>
+      {onOpen ? <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => onOpen(item.id)} className="underline">{item.title || 'Open image'}</Button>
         : item.title || 'Image'}
     </figcaption>
   </figure>
@@ -122,7 +123,7 @@ export function KnowledgeImageGallery({ items, onOpen }: { items: readonly Knowl
 
 export function KnowledgeDocumentReference({ item, onOpen }: { item: KnowledgeItem; onOpen?: KnowledgeOpen }) {
   return <article data-slot="document-reference" className={`${paper} rounded-xl p-3`}>
-    {onOpen ? <button type="button" onClick={() => onOpen(item.id)} className="font-medium underline">{item.title || item.id}</button>
+    {onOpen ? <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => onOpen(item.id)} className="font-medium underline">{item.title || item.id}</Button>
       : <strong>{item.title || item.id}</strong>}
     {item.summary && <p className="mt-1 text-sm">{item.summary}</p>}
     {item.provider && <small className="text-on-surface-low">Source: {item.provider}</small>}
@@ -143,7 +144,7 @@ export function KnowledgeResearchReport({ report, onRun }: { report: ResearchRep
     <p className="text-sm">{report.prompt}</p>
     <p className="text-xs text-on-surface-low">Last run: {report.last_run_ts == null ? 'Never' : new Date(report.last_run_ts * 1000).toLocaleString()} · {report.last_status || 'No status'}</p>
     {report.last_error && <p role="alert">{report.last_error}</p>}
-    {onRun && <button type="button" onClick={() => onRun(report.id)} className="mt-2 underline">Run report</button>}
+    {onRun && <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => onRun(report.id)} className="mt-2 underline">Run report</Button>}
   </article>
 }
 
@@ -156,7 +157,7 @@ export function KnowledgeRelationMap({ item, onOpen }: { item: KnowledgeItem; on
         {relation.relation_type && <span> · {relation.relation_type}</span>}
       </li>)}
     </ul>
-    {onOpen && <button type="button" onClick={() => onOpen(item.id)} className="mt-2 underline">Open knowledge graph</button>}
+    {onOpen && <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => onOpen(item.id)} className="mt-2 underline">Open knowledge graph</Button>}
   </section>
 }
 

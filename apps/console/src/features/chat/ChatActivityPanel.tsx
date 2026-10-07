@@ -1,5 +1,5 @@
+import { QuietButton } from "../../shared/ui/QuietButton"
 import { useEffect, useRef, useState } from 'react'
-import { unavailableWhen } from '../../shared/ui/unavailable'
 import { fvs } from '../../shared/theme/fontWeight'
 import { motion } from 'framer-motion'
 import { ListTree, FileText, Link2, ExternalLink, MessagesSquare, ArrowUp, Loader2, Bot, Check, AlertTriangle, OctagonX } from 'lucide-react'
@@ -163,10 +163,9 @@ function SubagentRow({ sub, index = 0 }: { sub: SubagentCard; index?: number }) 
       {sub.memoryReceipt && <p data-type="caption" className="mt-1.5 text-on-surface-low">{memoryReceiptLabel(sub.memoryReceipt)}</p>}
       {sub.done && !failed && sub.result && (
         <div className="mt-1.5">
-          <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
-            data-type="caption" className="text-on-surface-low hover:text-on-surface-var transition-colors">
+          <QuietButton  onClick={() => setOpen((o) => !o)} ariaExpanded={open} className="text-on-surface-low hover:text-on-surface-var transition-colors">
             {open ? 'Hide result' : 'Show result'}
-          </button>
+          </QuietButton>
           {open && (
             <div data-type="caption" className="mt-1 max-h-60 overflow-y-auto rounded-md bg-surface/60 px-2 py-1.5 [&_*:first-child]:mt-0 [&_*:last-child]:mb-0">
               <Markdown>{sub.result}</Markdown>
@@ -209,12 +208,12 @@ function SideChat({ side }: { side: SidePanelData }) {
           <textarea value={q} onChange={(e) => setQ(e.target.value)} rows={1} placeholder="Ask the side…"
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask() } }}
             data-type="body-s" className="max-h-24 min-h-0 flex-1 resize-none bg-transparent text-on-surface outline-none placeholder:text-on-surface-low" />
-          <button type="button" onClick={ask} aria-label="Ask side"
-            {...unavailableWhen(!q.trim(), 'Type a question first', { busy: side.busy })}
+          <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={ask} ariaLabel="Ask side"
+            disabled={!q.trim()} disabledReason="Type a question first" loading={side.busy}
             className="grid size-7 shrink-0 place-items-center rounded-full disabled:opacity-40 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed"
             style={{ background: 'var(--color-primary)', color: 'var(--color-on-primary)' }}>
-            {side.busy ? <Loader2 size={13} className="animate-spin" /> : <ArrowUp size={14} />}
-          </button>
+            <ArrowUp size={14} />
+          </Button>
         </div>
       </div>
     </div>

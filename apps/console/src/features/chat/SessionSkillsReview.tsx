@@ -1,3 +1,5 @@
+import { IconButton } from "../../shared/ui/IconButton"
+import { QuietButton } from "../../shared/ui/QuietButton"
 import { LoadError } from '../../shared/ui/ListScaffold'
 import { useEffect, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
@@ -28,16 +30,15 @@ export function SessionSkillsReview({ sessionKey, agent, refreshKey }: {
 
   return (
     <>
-      <button
-        type="button"
+      <QuietButton
+
         onClick={() => setOpen(true)}
-        data-type="caption"
         className="inline-flex items-center gap-1.5 rounded-pill bg-surface-container px-3 h-7 text-on-surface-low hover:text-on-surface transition-colors"
         title="Review skills taught this session"
       >
         <GraduationCap size={14} style={{ color: 'var(--color-primary)' }} />
         {drafts.length} session skill{drafts.length === 1 ? '' : 's'} to review
-      </button>
+      </QuietButton>
       {open && (
         <SessionSkillsModal
           sessionKey={sessionKey}
@@ -134,7 +135,7 @@ function DraftCard({ sessionKey, agent, draft, onChanged }: {
         <div className="mb-2">
           <div className="flex items-center gap-1.5">
             <span data-type="title-m" className="text-on-surface" style={fvs(500)}>{title}</span>
-            <button type="button" onClick={() => setEditing(true)} className="text-on-surface-low hover:text-on-surface" title="Edit"><Pencil size={12} /></button>
+            <IconButton onClick={() => setEditing(true)} className="text-on-surface-low hover:text-on-surface" label="Edit" icon={Pencil} size={20} iconSize={12} />
           </div>
           <p data-type="caption" className="mt-0.5 line-clamp-3 whitespace-pre-wrap text-on-surface-low">{body}</p>
         </div>

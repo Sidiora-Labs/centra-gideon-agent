@@ -1,3 +1,4 @@
+import { Button } from "../../shared/ui/Button"
 import { useState, type ReactNode } from 'react'
 import { MessagePair } from '../../shared/vendor/assistant-ui/elements/message-pair'
 import { DaySeparator, type DatedMessage } from '../../shared/vendor/assistant-ui/elements/day-separator'
@@ -79,11 +80,11 @@ export function ConversationHistoryView({ turns, labels }: { turns: readonly Cha
   const hasText = records.some(Boolean)
   return <section aria-label={copy.history} className="flex min-w-0 flex-col gap-3">
     <div role="group" aria-label={copy.view} className="grid grid-cols-3 gap-1 rounded-lg bg-surface-container p-1">
-      {(['pairs', 'days', 'speakers'] as const).map((option) => <button key={option} type="button"
-        aria-pressed={view === option} onClick={() => setView(option)}
+      {(['pairs', 'days', 'speakers'] as const).map((option) => <Button variant="ghost" size="xs" shape="squircle" key={option} type="button"
+        ariaPressed={view === option} onClick={() => setView(option)}
         className="min-h-10 rounded-md px-2 text-xs text-on-surface transition-colors hover:bg-surface-high aria-pressed:bg-surface-high">
         {copy[option]}
-      </button>)}
+      </Button>)}
     </div>
     {!hasText ? <p className="text-sm text-on-surface-low">{copy.empty}</p>
       : view === 'pairs' ? <div className="flex flex-col gap-4">{pairs(turns, records, copy)}</div>

@@ -104,7 +104,7 @@ export function SessionWorkspace({ sessionKey, pane, onPane, turns, activity, on
           <GripVertical size={11} aria-hidden="true" className="cursor-grab opacity-50" /><Icon size={13} aria-hidden="true" />{PANE_LABELS[item]}
         </button>
       })}
-      <button type="button" aria-pressed={!!secondary} onClick={toggleSplit} className="rounded-md px-s py-xs text-xs text-primary hover:bg-surface-high">{secondary ? 'One pane' : 'Split panes'}</button>
+      <Button variant="ghost" size="xs" shape="squircle" type="button" ariaPressed={!!secondary} onClick={toggleSplit} className="rounded-md px-s py-xs text-xs text-primary hover:bg-surface-high">{secondary ? 'One pane' : 'Split panes'}</Button>
     </div>
     <div className="flex min-h-0 flex-1 flex-col">
       <section role="tabpanel" aria-label={PANE_LABELS[active]} className="min-h-0 overflow-y-auto" style={{ flex: secondary ? `0 0 ${split}%` : '1 1 auto' }}>
@@ -153,14 +153,14 @@ function RunChanges({ runId, onOpenFile }: { runId: string; onOpenFile: (path: s
     return () => { live = false }
   }, [runId, open])
   return <div className="px-s pb-s">
-    <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="text-xs text-primary hover:underline">{open ? 'Hide files & diff' : 'Show files & diff'}</button>
+    <Button variant="ghost" size="xs" shape="squircle" type="button" ariaExpanded={open} onClick={() => setOpen((value) => !value)} className="text-xs text-primary hover:underline">{open ? 'Hide files & diff' : 'Show files & diff'}</Button>
     {open && <div className="mt-s rounded-lg border border-outline-variant/50 p-s">
       {error ? <p role="alert" className="text-xs text-danger">{error}</p>
         : !workspace || !review ? <p role="status" className="text-xs text-on-surface-low">Loading files and diff…</p>
           : <>
             {workspace.workspace.changed.length ? <ul className="mb-s space-y-xs">{workspace.workspace.changed.map((file) => <li key={file.path}>
-              <button type="button" onClick={() => onOpenFile(file.path.startsWith('/') ? file.path : `${workspace.workspace.path}/${file.path}`)}
-                className="w-full truncate text-left text-xs text-on-surface-var hover:text-primary" title={file.path}>{file.status} · {file.path}</button>
+              <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => onOpenFile(file.path.startsWith('/') ? file.path : `${workspace.workspace.path}/${file.path}`)}
+                className="w-full truncate text-left text-xs text-on-surface-var hover:text-primary" title={file.path}>{file.status} · {file.path}</Button>
             </li>)}</ul> : <p className="mb-s text-xs text-on-surface-low">No changed files recorded for this run.</p>}
             {review.diff ? <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words bg-surface-low p-s text-[0.6875rem] text-on-surface-var">{review.diff}{review.diff_truncated ? '\n… Diff truncated; open the full run for more.' : ''}</pre>
               : <p className="text-xs text-on-surface-low">No diff available.</p>}

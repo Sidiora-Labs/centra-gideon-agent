@@ -175,11 +175,11 @@ function RunProgressCard({ refObj }: { refObj: WorkflowRunRef }) {
 
       {vm && vm.totalCount > 0 && (
         <div>
-          <button type="button" aria-expanded={graphOpen} onClick={() => setGraphOpen((open) => !open)}
+          <Button variant="ghost" size="xs" shape="squircle" type="button" ariaExpanded={graphOpen} onClick={() => setGraphOpen((open) => !open)}
             className="inline-flex items-center gap-xs text-xs text-primary hover:underline">
             <ChevronDown size={13} className={graphOpen ? '' : '-rotate-90'} />
             {graphOpen ? 'Hide run graph' : 'Inspect run graph'}
-          </button>
+          </Button>
           {graphOpen && dag && <div role="region" aria-label="Workflow nodes" className="mt-s max-h-72 overflow-auto rounded-lg border border-outline-variant/50 bg-surface-low p-s">
             <div style={{ width: dag.width, minWidth: '100%' }}><DagView nodes={dag.nodes} edges={dag.edges} width={dag.width} height={dag.height} onNodeClick={setSelectedNode} /></div>
             {selectedNode && <div className="mt-s border-t border-outline-variant/50 pt-s text-xs text-on-surface-var">

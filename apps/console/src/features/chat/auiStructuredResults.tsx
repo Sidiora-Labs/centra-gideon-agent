@@ -1,3 +1,4 @@
+import { Button } from "../../shared/ui/Button"
 import type { Artifact, ExperimentCampaign, TaskGraphData, WorkflowIntrospection, WorkflowRunStats, WorkflowTimelineRow } from '../../shared/data/api'
 import { paper } from '../../shared/vendor/assistant-ui/elements/surfaces'
 import { DataTable } from '../../shared/vendor/assistant-ui/elements/data-table'
@@ -49,7 +50,7 @@ export function StructuredArtifactTable({ artifact, onOpen, showTitle = true }: 
   return <section aria-label={`Data table from ${artifact.name}`} className="min-w-0 max-w-full space-y-2">
     {(showTitle || onOpen) && <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
       {showTitle && <strong className="min-w-0 break-words [overflow-wrap:anywhere]">{artifact.name}</strong>}
-      {onOpen && <button type="button" onClick={() => onOpen(artifact.slug)} className="underline">Open artifact</button>}
+      {onOpen && <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => onOpen(artifact.slug)} className="underline">Open artifact</Button>}
     </div>}
     <DataTable rows={rows} columns={columns.map(key => ({ key, label: key }))} className="min-w-0 max-w-full" />
   </section>

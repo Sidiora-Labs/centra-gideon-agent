@@ -1,3 +1,4 @@
+import { IconButton } from "../../shared/ui/IconButton"
 import { useEffect, useMemo, useState, type ComponentProps, type ReactNode, type Ref } from 'react'
 import { Button } from '../../shared/ui/Button'
 import { X } from 'lucide-react'
@@ -50,7 +51,7 @@ export function ThreadConversationSearch({ turns, nodeOf, initialQuery = '', onC
     if (event.key === 'Enter') { event.preventDefault(); step(event.shiftKey ? -1 : 1) }
   }}>
     <ConversationSearch query={query} hits={hits} activeIndex={current} onQueryChange={(value) => { setQuery(value.slice(0, MAX_CONVERSATION_SEARCH_QUERY)); setActive(0) }} onStep={step}/>
-    <button type="button" aria-label="Close find" onClick={onClose} className="grid size-8 shrink-0 place-items-center rounded-full bg-surface-high"><X size={15}/></button>
+    <IconButton  label="Close find" onClick={onClose} className="grid size-8 shrink-0 place-items-center rounded-full bg-surface-high" icon={X} size={32} iconSize={15} />
   </div>
 }
 
@@ -102,8 +103,8 @@ export function ThreadPeekViews({ turns, streamingText, busy = false, renderAssi
   const timeline = view === 'timeline' && !live && turns.length > 0
   return <>
     {turns.length > 0 && <div role="group" aria-label={labels?.group ?? 'Conversation view'} className="flex gap-1 px-1 pb-2">
-      <button type="button" aria-pressed={!timeline} onClick={() => setView('preview')}
-        className="min-h-9 rounded-pill px-3 text-xs text-on-surface-var aria-pressed:bg-surface-high aria-pressed:text-on-surface">{labels?.preview ?? 'Preview'}</button>
+      <Button variant="ghost" size="xs" shape="squircle" type="button" ariaPressed={!timeline} onClick={() => setView('preview')}
+        className="min-h-9 rounded-pill px-3 text-xs text-on-surface-var aria-pressed:bg-surface-high aria-pressed:text-on-surface">{labels?.preview ?? 'Preview'}</Button>
       <Button size="sm" variant="ghost" ariaPressed={timeline} disabled={live}
         disabledReason="Wait for the current response to finish before opening the timeline."
         onClick={() => { if (!live && turns.length > 0) setView('timeline') }}
@@ -190,15 +191,15 @@ export function ThreadSharedSnapshots({ shares, selected, detail, busy, error, o
 }) {
   return <div className="flex max-h-[70vh] min-w-[min(90vw,32rem)] flex-col gap-m overflow-y-auto p-l">
     <p className="text-sm text-on-surface-low">Copies are redacted, read-only, and available only to the owner of this workspace.</p>
-    <button type="button" disabled={busy} onClick={onCreate} className="self-start rounded-pill bg-primary px-4 py-2 text-sm text-on-primary disabled:opacity-50">Create private copy</button>
+    <Button variant="ghost" size="xs" shape="squircle" type="button" disabled={busy} loading={busy} loadingLabel="Creating private copy…" onClick={onCreate} className="self-start rounded-pill bg-primary px-4 py-2 text-sm text-on-primary disabled:opacity-50">Create private copy</Button>
     {error && <p role="alert" className="text-sm text-error">{error}</p>}
     {shares.length === 0 ? <p className="text-sm text-on-surface-low">No private copies yet.</p> : <div className="flex flex-col gap-s" role="list" aria-label="Private conversation copies">
       {shares.map((share) => <div key={share.slug} role="listitem" className="rounded-lg border border-outline-variant/40 p-s">
-        <button type="button" aria-pressed={selected === share.slug} onClick={() => onSelect(share.slug)} className="w-full truncate text-left text-sm font-medium">{share.name}</button>
+        <Button variant="ghost" size="xs" shape="squircle" type="button" ariaPressed={selected === share.slug} onClick={() => onSelect(share.slug)} className="w-full truncate text-left text-sm font-medium">{share.name}</Button>
         <div className="mt-1 flex flex-wrap gap-s text-xs">
-          <button type="button" onClick={() => onOpen(share)}>Open read-only copy</button>
-          <button type="button" onClick={() => onCopy(share)}>Copy private link</button>
-          <button type="button" disabled={busy} onClick={() => onRevoke(share)} className="text-error disabled:opacity-50">Revoke copy</button>
+          <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => onOpen(share)}>Open read-only copy</Button>
+          <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => onCopy(share)}>Copy private link</Button>
+          <Button variant="ghost" size="xs" shape="squircle" type="button" disabled={busy} loading={busy} loadingLabel="Revoking private copy…" onClick={() => onRevoke(share)} className="text-error disabled:opacity-50">Revoke copy</Button>
         </div>
       </div>)}
     </div>}

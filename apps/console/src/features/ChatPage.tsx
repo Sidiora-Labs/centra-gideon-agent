@@ -281,11 +281,11 @@ function ChatHistorySidePanelBody({ navigate, onOpen }: { navigate: (p: string) 
         </>
       )}
       { }
-      <button type="button" onClick={() => navigate('chat/history')}
+      <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => navigate('chat/history')}
         className="mt-1 flex items-center justify-center gap-1.5 rounded-md border border-outline-variant/40 px-2 py-2 text-on-surface-var text-[0.8125rem] transition-colors hover:bg-surface-high hover:text-on-surface"
         style={fvs(470)}>
         View all chats <ArrowRight size={13} className="shrink-0" />
-      </button>
+      </Button>
     </div>
   )
 }
@@ -2470,11 +2470,11 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
               {
 }
               <IconButton icon={ArrowLeft} label="Back to chat history" size={40} onClick={() => navigate('chat/history')} />
-              <button type="button" onClick={beginRename} title="Rename chat"
+              <QuietButton  onClick={beginRename} title="Rename chat"
                 className="group inline-flex items-center gap-1.5 min-w-0 max-w-[420px] text-on-surface hover:text-on-surface-var transition-colors">
                 <span data-type="title-l" className="truncate">{sessionTitle({ key: sessionRef.current ?? '', title })}</span>
                 <Pencil size={13} className="shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity" />
-              </button>
+              </QuietButton>
               {
 }
               {sessionRef.current && (
@@ -2488,10 +2488,10 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
               {
 }
               {projectName && (
-                <button type="button" onClick={() => navigate(`projects/${projectId}`)}
+                <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => navigate(`projects/${projectId}`)}
                   className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-surface-high px-2 py-0.5 text-[0.75rem] text-on-surface-var hover:text-on-surface" title={`Scoped to project: ${projectName}`}>
                   <FolderKanban size={12} className="text-primary" /> {projectName}
-                </button>
+                </Button>
               )}
               {
 }
@@ -2743,7 +2743,7 @@ function TurnAttachments({ paths, onOpenFile, imageDelivery, imageDeliveryReason
   return (
     <div className="mt-1.5 flex flex-wrap justify-end gap-1.5">
       {paths.map((p) => (
-        <button key={p} type="button" onClick={() => setPeek(p)} title={`Preview ${base(p)}`}
+        <Button variant="ghost" size="xs" shape="squircle" key={p} type="button" onClick={() => setPeek(p)} title={`Preview ${base(p)}`}
           className="inline-flex items-center gap-1.5 rounded-pill border border-outline-variant/50 bg-surface-container px-2.5 py-1 text-[0.75rem] text-on-surface-var transition-colors hover:bg-surface-high hover:text-on-surface">
           <Paperclip size={11} className="shrink-0 text-on-surface-low" />
           <span className="flex min-w-0 flex-col text-left"><span className="max-w-[200px] truncate">{base(p)}</span>
@@ -2752,7 +2752,7 @@ function TurnAttachments({ paths, onOpenFile, imageDelivery, imageDeliveryReason
                 : imageDelivery?.[p] === 'text' ? 'Sent as extracted text'
                   : imageDelivery?.[p] === 'unread' ? 'Image was not read' : 'Image delivery not recorded')}
             </span>}</span>
-        </button>
+        </Button>
       ))}
       {peek && <AttachmentPeekModal path={peek} name={base(peek)} onOpenFile={onOpenFile} onClose={() => setPeek(null)} />}
     </div>
@@ -2973,9 +2973,9 @@ function PasteCards({ blocks, onRemove }: { blocks: PasteBlock[]; onRemove: (seq
         {blocks.map((b) => (
           <div key={b.id} className="group flex items-center gap-2 rounded-lg border border-outline-variant/50 bg-surface-container px-2.5 py-1.5">
             <Clipboard size={13} className="shrink-0 text-primary" />
-            <button type="button" onClick={() => setPreview(b)} className="text-left text-on-surface text-[0.8125rem] hover:underline">
+            <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => setPreview(b)} className="text-left text-on-surface text-[0.8125rem] hover:underline">
               Paste #{b.seq} <span className="text-on-surface-low">· {b.lines} line{b.lines === 1 ? '' : 's'}</span>
-            </button>
+            </Button>
             <IconButton icon={X} label={`Remove paste #${b.seq}`} onClick={() => onRemove(b.seq)} size={20} iconSize={13}
               tone="danger" className="shrink-0" />
           </div>
@@ -3307,7 +3307,7 @@ function AgentWork({ stepCount, toolNames, children }: { stepCount: number; tool
     : ''
   return (
     <div className="mb-1.5">
-      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+      <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => setOpen((v) => !v)} ariaExpanded={open}
         className="group/work flex w-full items-center gap-1.5 rounded-md py-1 text-left text-on-surface-low/85 text-[0.75rem] transition-colors hover:text-on-surface-low">
         <motion.span animate={{ rotate: open ? 90 : 0 }} transition={spring.spatialFast} className="shrink-0 opacity-60">
           <ChevronRight size={12} />
@@ -3317,7 +3317,7 @@ function AgentWork({ stepCount, toolNames, children }: { stepCount: number; tool
           {open ? 'Hide work' : `Worked through ${stepCount} ${stepCount === 1 ? 'step' : 'steps'}`}
         </span>
         {!open && summary && <span className="min-w-0 truncate text-on-surface-low/60">· {summary}</span>}
-      </button>
+      </Button>
       <AnimatePresence initial={false}>
         {open && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
@@ -3696,14 +3696,14 @@ function ChatHistoryPage({ navigate, query, setQuery }: { navigate: (p: string) 
               )
             }
             return (
-              <button type="button"
+              <Button variant="ghost" size="xs" shape="squircle" type="button"
                 onClick={(e) => { e.stopPropagation(); navigate(`${s.origin === 'code' ? 'code' : 'loops'}/${s.source_id}`) }}
                 title={`From ${kind} “${label}” — open its cockpit`}
                 className={`${chip} hover:brightness-125 cursor-pointer`}
                 style={tint}>
                 {glyph}
                 {label}
-              </button>
+              </Button>
             )
           })()}
           {(s.tags ?? []).map((tid) => tagById[tid] && (
@@ -3836,11 +3836,11 @@ function ChatHistoryPage({ navigate, query, setQuery }: { navigate: (p: string) 
                 {tags.map((t) => {
                   const on = tagFilter.has(t.id)
                   return (
-                    <button key={t.id} type="button" aria-pressed={on} onClick={() => { const nx = new Set(tagFilter); nx.has(t.id) ? nx.delete(t.id) : nx.add(t.id); setTagFilter(nx) }}
+                    <Button variant="ghost" size="xs" shape="squircle" key={t.id} type="button" ariaPressed={on} onClick={() => { const nx = new Set(tagFilter); nx.has(t.id) ? nx.delete(t.id) : nx.add(t.id); setTagFilter(nx) }}
                       className="inline-flex items-center gap-1 rounded-pill px-2 h-7 text-[0.75rem] transition-colors"
                       style={on ? { background: `color-mix(in srgb, ${t.color || 'var(--color-primary)'} 22%, transparent)`, color: t.color || 'var(--color-primary)' } : { background: 'var(--color-surface-high)', color: 'var(--color-on-surface-var)' }}>
                       <TagIcon size={11} /> {t.name}
-                    </button>
+                    </Button>
                   )
                 })}
                 {tagFilter.size > 0 && <Button variant="ghost" size="xs" onClick={() => setTagFilter(new Set())} className="h-6 px-1 text-[0.75rem] text-on-surface-low">Clear</Button>}
