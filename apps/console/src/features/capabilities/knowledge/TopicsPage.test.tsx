@@ -16,7 +16,7 @@ beforeAll(async () => {
   })
   let errors = ''
   child.stderr?.on('data', chunk => { errors += String(chunk) })
-  const origin = await new Promise<string>((done, fail) => {
+  const started = await new Promise<{ port: number; token: string }>((done, fail) => {
     let buffer = ''
     const timeout = setTimeout(() => fail(new Error(errors || 'Capture application startup timed out')), 15000)
     child.on('exit', code => { clearTimeout(timeout); fail(new Error(`Capture application exited ${code}: ${errors}`)) })
@@ -24,11 +24,22 @@ beforeAll(async () => {
       buffer += String(chunk)
       for (const line of buffer.split('\n')) {
         if (!line.startsWith('{"port":')) continue
-        try { const { port } = JSON.parse(line); clearTimeout(timeout); done(`http://127.0.0.1:${port}`) } catch { /* Wait for complete address. */ }
+        try { const ready = JSON.parse(line); clearTimeout(timeout); done(ready) } catch { /* Wait for complete address. */ }
       }
     })
   })
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  const origin = `http://127.0.0.1:${started.port}`
+  const refused = await originalFetch(origin + '/api/capabilities/knowledge/topics')
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const target = typeof input === 'string' && input.startsWith('/') ? origin + input : input
+    const url = target instanceof Request ? target.url : String(target)
+    const headers = new Headers(target instanceof Request ? target.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${started.token}`)
+    return originalFetch(target, { ...init, headers })
+  }
 }, 20000)
 afterEach(cleanup)
 afterAll(async () => {
